@@ -124,7 +124,7 @@ export const WorkspaceLauncher = ({
     const panel = popoverRef.current
     if (!anchor) return
 
-    const panelWidth = panel?.offsetWidth || Math.min(680, window.innerWidth - 24)
+    const panelWidth = panel?.offsetWidth || Math.min(540, window.innerWidth - 24)
     const gap = 8
     let left = anchor.left
     if (left + panelWidth > window.innerWidth - 12) {
@@ -370,7 +370,11 @@ export const WorkspaceLauncher = ({
               >
                 <span className="nx-theme-dot" data-theme={theme.id} />
                 <strong>{theme.label}</strong>
-                {activeThemeId === theme.id ? <Icon name="check" /> : null}
+                {activeThemeId === theme.id ? (
+                  <span className="nx-wsl-menu-row__check" aria-hidden>
+                    <Icon name="check" size={14} />
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -385,7 +389,11 @@ export const WorkspaceLauncher = ({
               >
                 <span className="nx-accent-dot" data-accent={accent.id} />
                 <strong>{accent.label}</strong>
-                {activeAccentId === accent.id ? <Icon name="check" /> : null}
+                {activeAccentId === accent.id ? (
+                  <span className="nx-wsl-menu-row__check" aria-hidden>
+                    <Icon name="check" size={14} />
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -397,15 +405,15 @@ export const WorkspaceLauncher = ({
       <div className="nx-wsl-panel__section">
         <h4>Administration</h4>
         <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}>
-          <Icon name="check" />
+          <Icon name="check" size={14} />
           <strong>Save Current Layout</strong>
         </button>
         <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onResetLayout())}>
-          <Icon name="refresh-cw" />
+          <Icon name="refresh-cw" size={14} />
           <strong>Reset Layout</strong>
         </button>
         <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}>
-          <Icon name="settings" />
+          <Icon name="settings" size={14} />
           <strong>Workspace Settings</strong>
         </button>
       </div>

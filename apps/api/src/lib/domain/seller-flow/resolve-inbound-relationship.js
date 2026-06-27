@@ -326,15 +326,28 @@ export function resolveInboundRelationship({
     ownership_confirmed,
   });
 
-  const human_review_required =
-    referral_detected ||
-    referral_candidates.ambiguous ||
-    referrals.length > 1 ||
-    relationship_claim === "spouse_co_owner" ||
-    (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) && relationship_claim !== "ownership_confirmed") ||
-    canonical_intent === "unclear";
+  const referred_automatic_send_candidate =
+    referral_detected &&
+    !referral_candidates.ambiguous &&
+    referrals.length === 1 &&
+    Boolean(primary_referral?.phone_e164) &&
+    !primary_referral?.malformed &&
+    primary_referral?.dedupe_status !== "already_known" &&
+    !SAFETY_PRIORITY_INTENTS.has(classifier_intent);
+
+  const human_review_required = referred_automatic_send_candidate
+    ? false
+    : (
+      referral_detected ||
+      referral_candidates.ambiguous ||
+      referrals.length > 1 ||
+      relationship_claim === "spouse_co_owner" ||
+      (PROPERTY_SCOPED_CLAIMS.has(relationship_claim) && relationship_claim !== "ownership_confirmed") ||
+      canonical_intent === "unclear"
+    );
 
   const automatic_send_allowed = false;
+  const referred_automatic_send_allowed = referred_automatic_send_candidate;
 
   const referred_contact_proposed_stage = referral_detected
     ? "ownership_confirmation"
@@ -389,6 +402,7 @@ export function resolveInboundRelationship({
     safety_status: suppression.safety_status,
     human_review_required,
     automatic_send_allowed,
+    referred_automatic_send_allowed,
     ownership_confirmed,
     universal_stage: ownership_confirmed ? "offer_interest" : null,
     is_property_scoped: PROPERTY_SCOPED_CLAIMS.has(relationship_claim),

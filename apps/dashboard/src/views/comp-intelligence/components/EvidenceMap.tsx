@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { CompTransactionEvidence } from '../../../domain/comp-intelligence/v3-types'
+import { classifyComp } from '../utils/comp-display'
 import { fmtK, isValidCoord, makeRadiusGeoJson } from '../utils/mapGeo'
 
 export type MapPinTone =
@@ -29,21 +30,35 @@ interface Props {
   onStyleError?: () => void
   fitBoundsToken?: number
   recenterToken?: number
+  accentColor?: string
+  mapStyle?: 'STREET' | 'SATELLITE' | 'HYBRID'
 }
 
 const DARK_MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '')
+  const bigint = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16)
+  const r = (bigint >> 16) & 255
+  const g = (bigint >> 8) & 255
+  const b = bigint & 255
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
 function pinTone(row: CompTransactionEvidence): MapPinTone {
-  if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE') return 'degraded'
+  const c = classifyComp(row)
+  if (c.isExcluded || c.authority === 'REJECTED') return 'rejected'
   if (row.package_probability != null && row.package_probability > 0.5) return 'package'
-  if (row.qualification_status === 'REJECTED' || row.qualification_status === 'QUARANTINED') return 'rejected'
+  if (c.quality === 'STRONG') return 'pricing'
+  if (c.quality === 'USABLE') return 'pricing'
+  if (c.quality === 'WEAK') return 'review'
+  if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE') return 'degraded'
   if (row.pricing_eligibility) {
     if (/retail|arv/i.test(row.evidence_role || '') || /RETAIL/i.test(row.routed_universe || '')) return 'retail'
-    if (/institutional|demand/i.test(row.evidence_role || '') && !row.pricing_eligibility) return 'demand'
     return 'pricing'
   }
   if (row.demand_eligibility) return 'demand'
-  if (/review/i.test(row.qualification_status)) return 'review'
+  if (/review/i.test(row.qualification_status || '')) return 'review'
   if (row.source_lineage?.identity_unresolved) return 'context'
   return 'context'
 }
@@ -97,6 +112,8 @@ export function EvidenceMap({
   onStyleError,
   fitBoundsToken = 0,
   recenterToken = 0,
+  accentColor = '#3b82f6',
+  mapStyle = 'STREET',
 }: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
   const mapInstanceRef = useRef<maplibregl.Map | null>(null)
@@ -119,7 +136,7 @@ export function EvidenceMap({
   const canMountMap = hasSubjectPin || evidence.some((row) =>
     isValidCoord(row.geography.latitude, row.geography.longitude),
   )
-  const mapBootKey = `${subjectLat ?? 'na'}:${subjectLng ?? 'na'}`
+  const mapBootKey = `${subjectLat ?? 'na'}:${subjectLng ?? 'na'}:${mapStyle}`
 
   const fitAllBounds = useCallback((animate = true) => {
     const map = mapInstanceRef.current
@@ -150,9 +167,12 @@ export function EvidenceMap({
     evidenceSigRef.current = ''
     const [centerLng, centerLat] = computeMapCenter(subjectLat, subjectLng, evidence)
 
+    const styleUrl = mapStyle === 'STREET'
+      ? 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+      : DARK_MAP_STYLE
     const map = new maplibregl.Map({
       container,
-      style: DARK_MAP_STYLE,
+      style: styleUrl,
       center: [centerLng, centerLat],
       zoom: hasSubjectPin ? 14 : 12,
       attributionControl: false,
@@ -174,9 +194,24 @@ export function EvidenceMap({
           .setLngLat([subjectLng!, subjectLat!])
           .addTo(map)
 
-        map.addSource('ci-radius', { type: 'geojson', data: makeRadiusGeoJson([subjectLng!, subjectLat!], radiusMiles) })
-        map.addLayer({ id: 'ci-radius-fill', type: 'fill', source: 'ci-radius', paint: { 'fill-color': 'rgba(59,130,246,0.05)' } })
-        map.addLayer({ id: 'ci-radius-line', type: 'line', source: 'ci-radius', paint: { 'line-color': 'rgba(59,130,246,0.45)', 'line-width': 1.5, 'line-dasharray': [4, 3] } })
+        const radiusSourceData = makeRadiusGeoJson([subjectLng!, subjectLat!], radiusMiles)
+        map.addSource('ci-radius', { type: 'geojson', data: radiusSourceData })
+
+        // Translucent fill + visible stroke. Uses accent. Low opacity for dark, higher contrast for light via caller.
+        const fill = hexToRgba(accentColor, 0.08)
+        const line = hexToRgba(accentColor, 0.65)
+        map.addLayer({
+          id: 'ci-radius-fill',
+          type: 'fill',
+          source: 'ci-radius',
+          paint: { 'fill-color': fill, 'fill-opacity': 0.9 },
+        })
+        map.addLayer({
+          id: 'ci-radius-line',
+          type: 'line',
+          source: 'ci-radius',
+          paint: { 'line-color': line, 'line-width': 2.0, 'line-opacity': 0.95 },
+        })
       }
       setMapReady(true)
       requestAnimationFrame(() => map.resize())
@@ -208,7 +243,29 @@ export function EvidenceMap({
     if (!map || !mapReady || !hasSubjectPin) return
     const source = map.getSource('ci-radius') as maplibregl.GeoJSONSource | undefined
     source?.setData(makeRadiusGeoJson([subjectLng!, subjectLat!], radiusMiles))
-  }, [radiusMiles, mapReady, hasSubjectPin, subjectLat, subjectLng])
+
+    // Re-apply accent-aware styling immediately on radius or accent change
+    try {
+      const fill = hexToRgba(accentColor, loading ? 0.12 : 0.08)
+      const line = hexToRgba(accentColor, loading ? 0.85 : 0.65)
+      if (map.getLayer('ci-radius-fill')) {
+        map.setPaintProperty('ci-radius-fill', 'fill-color', fill)
+      }
+      if (map.getLayer('ci-radius-line')) {
+        map.setPaintProperty('ci-radius-line', 'line-color', line)
+        // Subtle pulse effect via dash only during loading
+        if (loading) {
+          map.setPaintProperty('ci-radius-line', 'line-dasharray', [2, 2])
+          map.setPaintProperty('ci-radius-line', 'line-width', 2.5)
+        } else {
+          map.setPaintProperty('ci-radius-line', 'line-dasharray', undefined as unknown as number[])
+          map.setPaintProperty('ci-radius-line', 'line-width', 2.0)
+        }
+      }
+    } catch {
+      // layer may not exist in some reloads; safe no-op
+    }
+  }, [radiusMiles, mapReady, hasSubjectPin, subjectLat, subjectLng, accentColor, loading])
 
   useEffect(() => {
     const el = subjectMarkerRef.current?.getElement()
@@ -245,11 +302,27 @@ export function EvidenceMap({
       }
 
       const tone = pinTone(row)
+      const c = classifyComp(row)
+      const priceLabel = fmtK(row.sale_price)
       const el = document.createElement('button')
       el.type = 'button'
-      el.className = `ci-comp-pin ci-comp-pin--${tone}`
-      el.setAttribute('aria-label', `${row.address ?? 'Comp'}: ${fmtK(row.sale_price)}`)
-      el.innerHTML = `<span>${row.sale_price ? fmtK(row.sale_price) : tone === 'package' ? 'PKG' : '—'}</span>`
+      const cls = [
+        'ci-comp-pin',
+        `ci-comp-pin--${tone}`,
+        c.quality === 'STRONG' ? 'is-strong' : '',
+        c.quality === 'USABLE' ? 'is-usable' : '',
+        c.quality === 'WEAK' ? 'is-review' : '',
+        c.isExcluded ? 'is-excluded' : '',
+        c.authority === 'PRELIMINARY_RECOVERED' ? 'is-prelim' : '',
+      ].filter(Boolean).join(' ')
+      el.className = cls
+      el.setAttribute('aria-label', `${row.address ?? 'Comp'}: ${priceLabel}`)
+      el.innerHTML = `<span class="ci-pin-price">${priceLabel}</span>`
+      if (c.authority !== 'OFFICIAL_V3') {
+        const dot = document.createElement('i')
+        dot.className = 'ci-pin-prelim-dot'
+        el.appendChild(dot)
+      }
       el.addEventListener('mouseenter', () => onHoverRef.current(id))
       el.addEventListener('mouseleave', () => onHoverRef.current(null))
       el.addEventListener('click', (event) => {
@@ -281,13 +354,23 @@ export function EvidenceMap({
       const el = entry.marker.getElement()
       if (!el) continue
       const tone = pinTone(entry.row)
-      el.className = [
+      const c = classifyComp(entry.row)
+      const base = [
         'ci-comp-pin',
         `ci-comp-pin--${tone}`,
+        c.quality === 'STRONG' ? 'is-strong' : '',
+        c.quality === 'USABLE' ? 'is-usable' : '',
+        c.quality === 'WEAK' ? 'is-review' : '',
+        c.isExcluded ? 'is-excluded' : '',
+        c.authority === 'PRELIMINARY_RECOVERED' ? 'is-prelim' : '',
         selectedId === id ? 'is-selected' : '',
         hoveredId === id ? 'is-hovered' : '',
         entry.row.package_probability != null && entry.row.package_probability > 0.5 ? 'is-package' : '',
-      ].filter(Boolean).join(' ')
+      ].filter(Boolean)
+      el.className = base.join(' ')
+      // Selected state: scale + ring via class (CSS handles transition)
+      if (selectedId === id) el.setAttribute('data-selected', 'true')
+      else el.removeAttribute('data-selected')
     }
   }, [selectedId, hoveredId])
 

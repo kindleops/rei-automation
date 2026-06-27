@@ -4,6 +4,15 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+function isHandledTerminalProviderEvent(event = {}) {
+  const message = String(
+    event.exception?.values?.[0]?.value ||
+      event.message ||
+      ""
+  );
+  return /21610|blacklist rule|textgrid_21610_blacklist|recipient opted out/i.test(message);
+}
+
 Sentry.init({
   dsn: "https://f9f5b267a5d7f2dd7687a10192bd85dc@o4511241028239360.ingest.us.sentry.io/4511241296871424",
 
@@ -16,4 +25,9 @@ Sentry.init({
   // Enable sending user PII (Personally Identifiable Information)
   // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
   sendDefaultPii: true,
+
+  beforeSend(event) {
+    if (isHandledTerminalProviderEvent(event)) return null;
+    return event;
+  },
 });

@@ -128,7 +128,7 @@ export async function GET(request) {
         prospect_id: resolved_prospect_id,
         master_owner_id: resolved_master_owner_id,
         latest_message_id: latest_message_id || null,
-      }, { offset: 0, limit: 50 }, {
+      }, { offset: 0, limit: 50, fetchAll: true }, {
         latestPreviewSource: 'canonical_inbox_threads',
       })
       console.log('[HYDRATION] Messages fetched successfully', messagesPayload.rows.length)

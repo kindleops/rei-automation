@@ -7,7 +7,8 @@ import type { CommandResult } from '../../../domain/command-center/command.types
 import type { ActiveOverlay } from '../../../domain/inbox/inbox-layout-state'
 import type { NexusGlobalThemeId } from '../../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../../domain/inbox/view-layout'
-import { buildInboxNotifications, NexusNotificationCenter, type NexusNotification } from './NexusNotificationCenter'
+import { useNotificationIntelligence } from '../../../domain/notifications/useNotificationIntelligence'
+import { LeadCommandNotificationBell, LeadCommandNotificationCenter } from '../../notifications/LeadCommandNotificationCenter'
 import type { AutonomousEngineModel } from '../autonomy-engine'
 import { InboxKpiOrb } from './InboxKpiOrb'
 import { QueueCommandCenter, type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
@@ -110,9 +111,6 @@ const toAvailability = (statusLabel?: string): WorkspaceAvailability | undefined
 }
 
 export const NexusTopBar = ({
-  onSelectSearchResult,
-  selectedThread,
-  notificationCount,
   queueProcessorHealth,
   queueControlDiagnostics,
   queueProcessorHealthLoading,
@@ -130,7 +128,6 @@ export const NexusTopBar = ({
   onRetryFailed,
   onReconcileDelivery,
   onCancelStaleFollowUps,
-  autonomyModel,
   activeWorkspaceKey,
   activeWorkspaceLabel = 'Deal Desk',
   contextSubtitle,
@@ -242,8 +239,8 @@ export const NexusTopBar = ({
         : processorStatus === 'critical' ? 'alert'
           : 'activity'
 
-  const notifications = buildInboxNotifications({ unreadCount: notificationCount, selectedThread, queueProcessorHealth, autonomyModel })
-  const unreadNotifications = notifications.filter((item) => item.status !== 'read').length
+  const { unreadCount: intelligenceUnreadCount } = useNotificationIntelligence()
+  const unreadNotifications = intelligenceUnreadCount
   const topSearchItems = useMemo(
     () => topSearchGroups.flatMap((group) => group.items),
     [topSearchGroups],
@@ -254,11 +251,6 @@ export const NexusTopBar = ({
   }, [topSearchQuery, topSearchGroups])
 
   const showSearchPopover = searchOpen && (topSearchLoading || topSearchItems.length > 0 || topSearchQuery.trim().length >= 2)
-
-  const handleNotificationAction = (notification: NexusNotification) => {
-    if (notification.related_thread_id) onSelectSearchResult(notification.related_thread_id)
-    onCloseOverlay()
-  }
 
   const handleSearchSubmit = (result: CommandResult | undefined) => {
     if (!result) return
@@ -613,23 +605,14 @@ export const NexusTopBar = ({
           </button>
         </div>
 
-        <div className="nx-notification-control">
-          <button
-            type="button"
-            className={cls('nx-notification-button', unreadNotifications > 0 && 'has-alerts', activeOverlay === 'notifications' && 'is-active')}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              if (activeOverlay === 'notifications') onCloseOverlay()
-              else openOverlayExclusive('notifications')
-            }}
-            aria-expanded={activeOverlay === 'notifications'}
-            title="Notifications"
-          >
-            <Icon name="bell" />
-            {unreadNotifications > 0 && <span>{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}
-          </button>
-        </div>
+        <LeadCommandNotificationBell
+          unreadCount={unreadNotifications}
+          active={activeOverlay === 'notifications'}
+          onClick={() => {
+            if (activeOverlay === 'notifications') onCloseOverlay()
+            else openOverlayExclusive('notifications')
+          }}
+        />
 
         <div className="nx-notification-control">
           <button
@@ -665,11 +648,10 @@ export const NexusTopBar = ({
         </div>
       </div>
 
-      <NexusNotificationCenter
+      <LeadCommandNotificationCenter
         open={activeOverlay === 'notifications'}
-        notifications={notifications}
         onClose={onCloseOverlay}
-        onOpenRecord={handleNotificationAction}
+        anchorTop={58}
       />
     </header>
   )

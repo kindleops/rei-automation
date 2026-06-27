@@ -38,6 +38,7 @@ import {
   getThreadMessagesPageForThread,
   getThreadMessagesForThread,
   getConversationThreadIdForThread,
+  buildThreadContextFromThread,
   getThreadContext,
   queueReplyFromInbox,
   scheduleReplyFromInbox,
@@ -50,12 +51,13 @@ import {
   toThreadMessage,
 } from '../../lib/data/inboxData'
 import { getDealContextByProperty, getDealContextByThread, normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
+
 import { fetchQueueModel, type QueueModel } from '../../lib/data/queueData'
 import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData'
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { subscribeToInboxRealtime } from '../../lib/data/realtime'
-import { getQueueControlSettings, updateQueueControlSettings, callBackend, getBackendHealth } from '../../lib/api/backendClient'
+import { getQueueControlSettings, updateQueueControlSettings, callBackend, getBackendHealth, fetchPropertyParticipants } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
@@ -67,6 +69,8 @@ import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
+import { PropertyParticipantRail } from './components/PropertyParticipantRail'
+import type { PropertyParticipant, PropertyParticipantGraph } from './utils/participantLabels'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
 import { QueuePage } from '../../views/queue/QueuePage'
@@ -153,6 +157,7 @@ import {
   getInboxViewCounts,
   getSavedPresetConfig,
   isSuppressedThread,
+  resolveThreadPrimaryName,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
   type InboxSavedFilterPreset,
@@ -196,6 +201,10 @@ import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings,
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
 const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.default })))
+// DEV-ONLY: Comp Intelligence V4 rebuild, mounted behind a toggle. Enable with
+// localStorage 'nx.comp.v4' = '1'. Never active in production builds.
+const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
+const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && typeof window !== 'undefined' && window.localStorage.getItem('nx.comp.v4') === '1'
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
@@ -613,6 +622,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [commandMapMarket, setCommandMapMarket] = useState('')
 
   const [threadContext, setThreadContext] = useState<ThreadContext | null>(null)
+  const [propertyParticipants, setPropertyParticipants] = useState<PropertyParticipant[]>([])
+  const [propertyParticipantsLoading, setPropertyParticipantsLoading] = useState(false)
+  const [selectedParticipant, setSelectedParticipant] = useState<PropertyParticipant | null>(null)
   const [threadIntelligence, setThreadIntelligence] = useState<ThreadIntelligenceRecord | null>(null)
   const [dealContext, setDealContext] = useState<DealContext | null>(null)
   const [queueProcessorHealth, setQueueProcessorHealth] = useState<QueueProcessorHealth | null>(null)
@@ -644,7 +656,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }))
   const [dossierFull, setDossierFull] = useState(false)
   const [optimisticPatches, setOptimisticPatches] = useState<Record<string, Partial<InboxWorkflowThread>>>({})
-  const hasLoadedInitialInboxRef = useRef(false)
+
 
   // Tracks whether the live inbox has resolved at least once — gates heavy background queries.
   const heavyQueriesStartedRef = useRef(false)
@@ -879,7 +891,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   )
 
   const serverFilterOptions: ApplyInboxFiltersOptions = useMemo(() => ({
-    skipViewFilter: false,
+    // Rows are already bucket-scoped by useInboxData / inbox/live — do not re-bucket client-side.
+    skipViewFilter: true,
     skipStageFilter: false,
     skipAdvancedFilter: hasActiveAdvancedFilters(advancedFilters),
   }), [advancedFilters])
@@ -1720,15 +1733,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   }, [selectedWorkspaceViews])
 
-  useEffect(() => {
-    if (hasLoadedInitialInboxRef.current) return
-    hasLoadedInitialInboxRef.current = true
-    setVisibleThreadCount(1000)
-    void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
-  }, [currentInboxQuery, refreshInbox])
-
-
-
   const prevSelectedIdRef = useRef<string | null>(null)
 
   // This effect fires ONLY when the thread key (string) changes — NOT on every inbox refresh.
@@ -1775,134 +1779,100 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setHasOlderMessages(false)
     setOlderMessagesLoading(false)
     setContextLoading(true)
+    setThreadContext(buildThreadContextFromThread(thread))
     setThreadIntelligence((thread ?? null) as unknown as ThreadIntelligenceRecord | null)
 
     if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0 })
 
     let cancelled = false
     const controller = new AbortController()
-    const hydrationPromise = getThreadHydrationForThread(thread, controller.signal)
     const contextPromise = getThreadContext(thread, controller.signal).catch((err: unknown) => {
       console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
       return null as unknown as ThreadContext
     })
 
-    // ── Messages: fire immediately, commit as soon as done ──────────────────
-    console.log('[MESSAGES_FETCH_START]', selectedKeyForEffect)
-    hydrationPromise.then((hydration) => {
-      if (cancelled) return
-      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
-      if (activeConversationId !== selectedKeyForEffect) return
-      const durationMs = Math.round(performance.now() - fetchStartTs)
-      const messages = hydration.messages
-      const diagnostics = (hydration.diagnostics as Record<string, unknown> | undefined) ?? {}
-      const integrityBlocked = Boolean(diagnostics.integrity_blocked)
-      const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+    const isStillSelected = () => {
+      const activeConversationId = selectedRef.current
+        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
+        : null
+      return !cancelled && activeConversationId === selectedKeyForEffect
+    }
 
-      console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, messages.length, `${durationMs}ms`)
-      if (durationMs > 1500) {
-        console.log('[MESSAGES_FETCH_SLOW]', selectedKeyForEffect, {
-          durationMs,
-          endpoint: '/api/cockpit/inbox/thread-messages',
-          status: 'completed',
-        })
-      }
-      let resolvedMessages = integrityBlocked ? [] : messages
-      if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
-        resolvedMessages = cachedMessages
-        if (DEV) console.warn('[InboxPage] preserving cached messages after fetch failure', { threadKey: cacheKey, cached: cachedMessages.length })
-      }
-      if (messages.length > 0 && !integrityBlocked) {
-        messageCacheRef.current[cacheKey] = messages
-      } else if (resolvedMessages.length === 0 && DEV) {
-        console.warn('[InboxPage] message hydration returned 0 rows', {
-          threadKey: cacheKey,
-          integrityBlocked,
-          fetchFailed,
-          ownerId: thread.ownerId,
-          propertyId: thread.propertyId,
-          phoneNumber: thread.phoneNumber,
-          cachedMessages: cachedMessages.length,
-        })
-      }
-      setMessageFetchDegraded(fetchFailed)
-      console.log('[MESSAGES_COMMIT]', selectedKeyForEffect, resolvedMessages.length)
-      setSelectedMessages(resolvedMessages)
-      setHasOlderMessages(Boolean(hydration.pagination?.hasMore))
-      setMessagesLoading(false)
-      if (hydration.dealContext) {
-        setDealContext(hydration.dealContext)
-      }
-      setThreadIntelligence({
-        ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
-        ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
+    // ── Messages: direct thread-messages fetch (no hydration waterfall) ─────
+    console.log('[MESSAGES_FETCH_START]', selectedKeyForEffect)
+    void getThreadMessagesPageForThread(thread, { signal: controller.signal, maxMessages: 50 })
+      .then((page) => {
+        if (!isStillSelected()) return
+        const durationMs = Math.round(performance.now() - fetchStartTs)
+        const diagnostics = (page.diagnostics as Record<string, unknown> | undefined) ?? {}
+        const integrityBlocked = Boolean(diagnostics.integrity_blocked)
+        const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+        let resolvedMessages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
+        if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
+          resolvedMessages = cachedMessages
+        }
+        if (page.messages.length > 0 && !integrityBlocked) {
+          messageCacheRef.current[cacheKey] = page.messages
+        }
+        console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, resolvedMessages.length, `${durationMs}ms`)
+        setMessageFetchDegraded(fetchFailed)
+        setSelectedMessages(resolvedMessages)
+        setHasOlderMessages(page.pagination.hasMore)
+        setMessagesLoading(false)
+        const deliveredByBody = new Set(
+          resolvedMessages
+            .filter((message) => message.direction === 'outbound' && String(message.deliveryStatus || '').toLowerCase() === 'delivered')
+            .map((message) => String(message.body || '').trim().toLowerCase()),
+        )
+        if (deliveredByBody.size > 0) {
+          setPendingMessagesByThread((current) => {
+            const currentThreadPending = current[thread.id] ?? []
+            const unresolved = currentThreadPending.filter((pending) => !deliveredByBody.has(String(pending.body || '').trim().toLowerCase()))
+            if (unresolved.length === currentThreadPending.length) return current
+            return { ...current, [thread.id]: unresolved }
+          })
+        }
+      })
+      .catch((err) => {
+        if (cancelled) {
+          console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
+        } else {
+          console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
+          setMessageFetchDegraded(true)
+          setSelectedMessages(cachedMessages)
+          setHasOlderMessages(false)
+          setMessagesLoading(false)
+        }
       })
 
-      const deliveredByBody = new Set(
-        messages
-          .filter((message) => message.direction === 'outbound' && String(message.deliveryStatus || '').toLowerCase() === 'delivered')
-          .map((message) => String(message.body || '').trim().toLowerCase()),
-      )
-      if (deliveredByBody.size > 0) {
-        setPendingMessagesByThread((current) => {
-          const currentThreadPending = current[thread.id] ?? []
-          const unresolved = currentThreadPending.filter((pending) => !deliveredByBody.has(String(pending.body || '').trim().toLowerCase()))
-          if (unresolved.length === currentThreadPending.length) return current
-          return { ...current, [thread.id]: unresolved }
-        })
-      }
-    }).catch((err) => {
-      if (cancelled) {
-        console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
-      } else {
-        console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
-        setMessageFetchDegraded(true)
-        setSelectedMessages(cachedMessages)
-        setHasOlderMessages(false)
-        setMessagesLoading(false)
-      }
-    })
-
-    // ── Context + hydration: fetch together, never block row fallback/messages ────
-    const threadKeyForCtx = thread.threadKey || thread.id
-    console.log('[THREAD_CONTEXT_START]', { threadKey: threadKeyForCtx, propertyId: thread.propertyId, prospectId: thread.prospectId, ownerId: thread.ownerId })
-    Promise.allSettled([contextPromise, hydrationPromise]).then((results) => {
-      if (cancelled) return
-      const activeConversationId = selectedRef.current ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id) : null
-      if (activeConversationId !== selectedKeyForEffect) return
-      const context = results[0].status === 'fulfilled' ? results[0].value : null
-      const hydration = results[1].status === 'fulfilled' ? results[1].value : null
-      setThreadContext(context)
-      if (hydration?.intelligence) {
+    // ── Deal intelligence / dossier enrichment (background, non-blocking) ─
+    void getThreadHydrationForThread(thread, controller.signal)
+      .then((hydration) => {
+        if (!isStillSelected()) return
+        if (hydration.dealContext) {
+          setDealContext(hydration.dealContext)
+          dealContextCacheRef.current[cacheKey] = hydration.dealContext
+        }
         setThreadIntelligence({
           ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
           ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
         })
-      }
-      if (hydration?.dealContext) {
-        const dc = hydration.dealContext
-        console.log('[THREAD_CONTEXT_DONE]', {
-          threadKey: threadKeyForCtx,
-          propertyId: dc.propertyId,
-          prospectId: dc.prospectId,
-          masterOwnerId: dc.masterOwnerId,
-          coordsResolved: Boolean(dc.latitude && dc.longitude),
-          intelligenceResolved: Boolean(dc.valuation?.id || dc.buyerMatch?.id),
-        })
-        setDealContext(dc)
-        console.log('[THREAD_CONTEXT_COMMIT]', threadKeyForCtx)
-      } else {
-        console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
-        setDealContext(fallbackDealContext)
-      }
+        setContextLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) setContextLoading(false)
+      })
+
+    // ── Background Supabase context enrichment (does not gate composer) ────
+    void contextPromise.then((context) => {
+      if (cancelled || !context) return
+      const activeConversationId = selectedRef.current
+        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
+        : null
+      if (activeConversationId !== selectedKeyForEffect) return
+      setThreadContext(context)
     }).catch((err: unknown) => {
-      if (!cancelled) {
-        console.warn('[ENRICHMENT_BATCH_ERROR_ISOLATED]', threadKeyForCtx, err)
-        console.log('[THREAD_CONTEXT_FALLBACK_FROM_ROW]', threadKeyForCtx)
-        setDealContext(fallbackDealContext)
-      }
-    }).finally(() => {
-      if (!cancelled) setContextLoading(false)
+      if (!cancelled && DEV) console.warn('[ENRICHMENT_CONTEXT_BG_ERROR]', cacheKey, err)
     })
 
     return () => {
@@ -1929,7 +1899,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (health.ok && (health.data?.status === 'ok' || health.data?.ok === true)) {
         setMessageFetchDegraded(false)
         setMessageRefetchKey((key) => key + 1)
-        void refreshInbox()
         return
       }
       schedule()
@@ -1940,7 +1909,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [messageFetchDegraded, refreshInbox, selectedKeyForEffect])
+  }, [messageFetchDegraded, selectedKeyForEffect])
 
   const handleLoadOlderMessages = useCallback(async () => {
     const thread = selectedRef.current
@@ -2753,33 +2722,30 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [queueCommandMode, queueCommandCaps, queueProcessorHealth])
 
   useEffect(() => {
+    if (!selectedWorkspaceViews.includes('queue')) return
     let active = true
 
     const runFeederSilently = async () => {
       if (!active) return
       const { mode, caps, health } = autopilotStateRef.current
       if (mode !== 'assisted' && mode !== 'automatic') return
-      
+
       const targetCount = Math.max(50, caps.sends_per_run * 2)
       const currentActive = (health?.queuedCount ?? 0) + (health?.scheduledCount ?? 0)
-      
+
       if (currentActive < targetCount) {
-        try {
-          await callBackend('/api/cockpit/queue/queue-more', {
-            method: 'POST',
-            body: JSON.stringify({
-              candidate_source: 'v_sms_ready_contacts',
-              target_count: targetCount,
-              scan_limit: 1000,
-              respect_contact_window: true,
-              only_first_touch: true,
-              mode: mode,
-            }),
-          })
-          void refreshQueueHealth()
-        } catch (error) {
-          if (DEV) console.warn('[Autopilot] Feeder run failed', error)
-        }
+        const result = await callBackend('/api/cockpit/queue/queue-more', {
+          method: 'POST',
+          body: JSON.stringify({
+            candidate_source: 'v_sms_ready_contacts',
+            target_count: targetCount,
+            scan_limit: 1000,
+            respect_contact_window: true,
+            only_first_touch: true,
+            mode: mode,
+          }),
+        })
+        if (result.ok || result.status === 423) void refreshQueueHealth()
       }
     }
 
@@ -2788,43 +2754,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const { mode, caps } = autopilotStateRef.current
       if (mode !== 'automatic') return
 
-      try {
-        await callBackend('/api/cockpit/queue/run', {
-          method: 'POST',
-          body: JSON.stringify({
-            caps: caps,
-            mode: mode,
-          }),
-        })
-        void refreshQueueHealth()
-      } catch (error) {
-        if (DEV) console.warn('[Autopilot] Queue runner failed', error)
-      }
+      const result = await callBackend('/api/cockpit/queue/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          caps: caps,
+          mode: mode,
+        }),
+      })
+      if (result.ok || result.status === 423) void refreshQueueHealth()
     }
 
     const feederInterval = window.setInterval(() => { void runFeederSilently() }, 2 * 60 * 1000)
     const runnerInterval = window.setInterval(() => { void runQueueSilently() }, 60 * 1000)
 
-    // Deferred to avoid competing with initial thread message fetch
-    const initialTimeout = window.setTimeout(() => {
-      if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(() => {
-          void runFeederSilently()
-          void runQueueSilently()
-        }, { timeout: 30000 })
-      } else {
-        void runFeederSilently()
-        void runQueueSilently()
-      }
-    }, 20000)
-
     return () => {
       active = false
       window.clearInterval(feederInterval)
       window.clearInterval(runnerInterval)
-      window.clearTimeout(initialTimeout)
     }
-  }, [DEV, refreshQueueHealth])
+  }, [refreshQueueHealth, selectedWorkspaceViews])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2986,8 +2934,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       optimistic = { inboxStatus: 'waiting' }
       // Additional logic to focus composer could go here
     } else if (action === 'refetch') {
-      // Re-trigger message hydration for the selected thread (e.g. after a failed hydration).
       setMessageRefetchKey((k) => k + 1)
+      void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
       return
     } else if (action === 'open_map') {
       setSelectedWorkspaceViews(['command_map'])
@@ -3183,6 +3131,89 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       })
     }
   }, [setActiveContext, threads, viewFilter])
+
+  const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
+    const phone = String(participant.canonical_e164 ?? '').trim()
+    if (!phone) return
+    setSelectedParticipant(participant)
+    const match = threads.find((thread) => {
+      const candidates = [
+        thread.canonicalE164,
+        thread.bestPhone,
+        thread.sellerPhone,
+        thread.threadKey,
+        thread.id,
+      ].map((value) => String(value ?? '').trim()).filter(Boolean)
+      return candidates.includes(phone)
+    })
+    if (match) {
+      handleSelect(match.id)
+      return
+    }
+    setActiveContext({
+      ...activeContext,
+      threadKey: phone,
+      propertyId: participant.property_id || activeContext.propertyId,
+      sourceView: activeContext.sourceView ?? 'inbox',
+    }, { preserveCurrentViews: true })
+    setSelectedThreadKey(phone)
+    setSelectedId(phone)
+  }, [activeContext, handleSelect, setActiveContext, threads])
+
+  useEffect(() => {
+    const propertyId = selected?.propertyId || effectiveActiveContext.propertyId
+    const selectedPhone = selected?.canonicalE164 || selected?.bestPhone || selected?.sellerPhone || selected?.threadKey
+    if (!propertyId) {
+      setPropertyParticipants([])
+      setSelectedParticipant(null)
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+    setPropertyParticipantsLoading(true)
+    const fallbackParticipant = selected ? {
+      participant_id: `${propertyId}:${selectedPhone || selected.id}`,
+      property_id: propertyId,
+      canonical_e164: selectedPhone || selected.canonicalE164 || selected.bestPhone || null,
+      display_name: resolveThreadPrimaryName(selected) || selected.subject || null,
+      relationship_to_property: String((selected as unknown as Record<string, unknown>).contact_identity_class || 'respondent'),
+    } satisfies PropertyParticipant : null
+
+    void fetchPropertyParticipants(propertyId, selectedPhone || null, controller.signal)
+      .then((res) => {
+        if (cancelled) return
+        if (!res.ok) {
+          setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+          setSelectedParticipant(fallbackParticipant)
+          return
+        }
+        const payload = (res.data ?? {}) as PropertyParticipantGraph
+        const participants = Array.isArray(payload.participants) && payload.participants.length > 0
+          ? payload.participants
+          : (fallbackParticipant ? [fallbackParticipant] : [])
+        setPropertyParticipants(participants)
+        const current = participants.find((row) => String(row.canonical_e164 ?? '').trim() === String(selectedPhone ?? '').trim())
+          || payload.selected_participant
+          || participants[0]
+          || fallbackParticipant
+        setSelectedParticipant(current)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+          setSelectedParticipant(fallbackParticipant)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPropertyParticipantsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [effectiveActiveContext.propertyId, selectedKeyForEffect, selected?.propertyId])
 
   const handleUniversalEntityContextChange = useCallback((next: UniversalEntityContext, options?: { pushHistory?: boolean }) => {
     publishingUniversalRef.current = true
@@ -4127,6 +4158,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onLoadOlder={handleLoadOlderMessages}
       />
 
+      <PropertyParticipantRail
+        participants={propertyParticipants}
+        selectedPhone={selectedParticipant?.canonical_e164 || selected?.canonicalE164 || selected?.bestPhone || selected?.sellerPhone || null}
+        loading={propertyParticipantsLoading}
+        onSelectParticipant={handleParticipantSelect}
+      />
+
       <Composer
         draftText={draftText}
         onSend={handleSend}
@@ -4431,13 +4469,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
-          <CompIntelligenceWorkspace
-            thread={workspaceThread}
-            dealContext={canonicalSelectedContext}
-            paused={heavyLoadPaused}
-            paneWidth={paneWidth}
-            layoutMode={layoutMode}
-          />
+          {COMP_V4_ENABLED ? (
+            <CompIntelligenceV4Workspace
+              dealContext={canonicalSelectedContext}
+              paused={heavyLoadPaused}
+              paneWidth={paneWidth}
+            />
+          ) : (
+            <CompIntelligenceWorkspace
+              thread={workspaceThread}
+              dealContext={canonicalSelectedContext}
+              paused={heavyLoadPaused}
+              paneWidth={paneWidth}
+              layoutMode={layoutMode}
+            />
+          )}
           </WorkspaceSuspense>
         </section>
       )

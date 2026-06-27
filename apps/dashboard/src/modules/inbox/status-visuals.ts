@@ -440,10 +440,29 @@ export const resolveThreadStatus = (thread: { inboxStatus?: string; status?: str
   return 'waiting'
 }
 
-export const resolveThreadStage = (thread: { conversationStage?: string; threadWorkflowStage?: string }): ThreadStage => {
-  const s = String(thread.conversationStage || thread.threadWorkflowStage || '').toLowerCase()
-  if (s.includes('ownership') || s.includes('stage_1') || s.includes('s1')) return 's1_ownership'
-  if (s.includes('interest') || s.includes('consider') || s.includes('stage_2') || s.includes('s2')) return 's2_interest'
+export const resolveThreadStage = (thread: {
+  conversationStage?: string
+  threadWorkflowStage?: string
+  universal_stage?: string
+  universalStage?: string
+  seller_stage?: string
+  sellerStage?: string
+  granular_stage?: string
+  granularStage?: string
+}): ThreadStage => {
+  const s = String(
+    thread.conversationStage
+    || thread.threadWorkflowStage
+    || thread.universal_stage
+    || thread.universalStage
+    || thread.seller_stage
+    || thread.sellerStage
+    || thread.granular_stage
+    || thread.granularStage
+    || '',
+  ).toLowerCase()
+  if (s.includes('ownership') || s.includes('stage_1') || s === 's1' || s.includes('s1_')) return 's1_ownership'
+  if (s.includes('interest') || s.includes('consider') || s.includes('stage_2') || s === 's2' || s.includes('s2_')) return 's2_interest'
   if (s.includes('pric') || s.includes('stage_3') || s.includes('s3')) return 's3_pricing'
   if (s.includes('condition') || s.includes('detail') || s.includes('stage_4') || s.includes('s4')) return 's4_condition'
   if (s.includes('offer') || s.includes('stage_5') || s.includes('s5')) return 's5_offer'

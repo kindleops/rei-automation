@@ -1,0 +1,1207 @@
+/* ============================================================================
+   Comp Intelligence V4 — structural visual system (Checkpoint 1)
+   Institutional, dense, theme-aware. Consumes the app's --nx-* tokens and
+   layers local --civ4-* vars so Dark / Light / Red Ops all read correctly.
+   The full cinematic visual pass lands in Checkpoint 5.
+   ========================================================================== */
+
+.civ4-root {
+  --civ4-bg: #090d13;
+  --civ4-panel: rgba(255, 255, 255, 0.028);
+  --civ4-panel-strong: rgba(255, 255, 255, 0.055);
+  --civ4-line: var(--nx-glass-divider, rgba(255, 255, 255, 0.09));
+  --civ4-border: var(--nx-glass-border, rgba(255, 255, 255, 0.13));
+  --civ4-text: var(--nx-glass-text-strong, #eef2f8);
+  --civ4-text-2: var(--nx-glass-text, #c4cedb);
+  --civ4-muted: var(--nx-glass-muted, #8a96a7);
+  --civ4-faint: var(--nx-glass-faint, #6a7585);
+  --civ4-accent: var(--nx-accent, #38d0f0);
+  --civ4-accent-soft: var(--nx-glass-accent-soft, rgba(56, 208, 240, 0.14));
+  --civ4-accent-border: var(--nx-glass-accent-border, rgba(56, 208, 240, 0.4));
+  --civ4-qualified: var(--nx-glass-success, #34d399);
+  --civ4-review: var(--nx-glass-warning, #fbbf24);
+  --civ4-excluded: var(--nx-glass-danger, #f87171);
+  --civ4-radius: 12px;
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--civ4-bg);
+  color: var(--civ4-text);
+  font-feature-settings: 'tnum' 1, 'cv01' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-nexus-theme='light'] .civ4-root {
+  --civ4-bg: #eef1f6;
+  --civ4-panel: rgba(12, 22, 40, 0.035);
+  --civ4-panel-strong: rgba(12, 22, 40, 0.06);
+  --civ4-line: rgba(12, 22, 40, 0.1);
+  --civ4-border: rgba(12, 22, 40, 0.16);
+  --civ4-text: #0e141d;
+  --civ4-text-2: #33414f;
+  --civ4-muted: #5c6979;
+  --civ4-faint: #818d9c;
+}
+
+[data-nexus-theme='red_ops'] .civ4-root {
+  --civ4-bg: #120505;
+  --civ4-panel: rgba(255, 80, 80, 0.045);
+  --civ4-panel-strong: rgba(255, 80, 80, 0.08);
+  --civ4-line: rgba(255, 120, 120, 0.16);
+  --civ4-border: rgba(255, 120, 120, 0.22);
+  --civ4-text: #ffe9e9;
+  --civ4-text-2: #f3c9c9;
+  --civ4-muted: #c98e8e;
+  --civ4-accent: var(--nx-accent, #ff4d4d);
+}
+
+/* ── controls ─────────────────────────────────────────────────────────── */
+.civ4-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--civ4-line);
+  background: var(--civ4-panel);
+  flex-wrap: wrap;
+}
+.civ4-control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.civ4-control--right {
+  margin-left: auto;
+  align-items: flex-end;
+  flex-direction: row;
+  gap: 10px;
+}
+.civ4-control__label {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--civ4-muted);
+}
+.civ4-select {
+  appearance: none;
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  color: var(--civ4-text);
+  border-radius: 8px;
+  padding: 6px 26px 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.civ4-segment {
+  display: inline-flex;
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+}
+.civ4-segment__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--civ4-text-2);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.civ4-segment__btn:hover {
+  color: var(--civ4-text);
+}
+.civ4-segment__btn.is-active {
+  background: var(--civ4-accent-soft);
+  color: var(--civ4-accent);
+  box-shadow: inset 0 0 0 1px var(--civ4-accent-border);
+}
+.civ4-segment__count {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(127, 127, 127, 0.18);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.civ4-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--civ4-border);
+  border-top-color: var(--civ4-accent);
+  animation: civ4-spin 0.7s linear infinite;
+}
+@keyframes civ4-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── panes ────────────────────────────────────────────────────────────── */
+.civ4-panes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.civ4-pane {
+  min-height: 0;
+  min-width: 0;
+}
+.civ4-pane--map {
+  flex: 0 0 54%;
+  position: relative;
+  border-right: 1px solid var(--civ4-line);
+}
+.civ4-pane--intel {
+  flex: 1 1 46%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── map ──────────────────────────────────────────────────────────────── */
+.civ4-map {
+  position: absolute;
+  inset: 0;
+}
+.civ4-map__canvas {
+  position: absolute;
+  inset: 0;
+}
+.civ4-map__controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 5;
+}
+.civ4-mapbtn {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--civ4-border);
+  background: rgba(10, 14, 20, 0.72);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+[data-nexus-theme='light'] .civ4-mapbtn {
+  background: rgba(255, 255, 255, 0.86);
+  color: #10151d;
+}
+.civ4-mapbtn:hover {
+  border-color: var(--civ4-accent-border);
+  color: var(--civ4-accent);
+}
+.civ4-map__legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: rgba(10, 14, 20, 0.72);
+  border: 1px solid var(--civ4-border);
+  backdrop-filter: blur(8px);
+  font-size: 11px;
+  color: #d7deea;
+  z-index: 5;
+}
+[data-nexus-theme='light'] .civ4-map__legend {
+  background: rgba(255, 255, 255, 0.86);
+  color: #33414f;
+}
+.civ4-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.civ4-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.civ4-dot--subject {
+  background: var(--civ4-accent);
+}
+.civ4-dot--qualified {
+  background: var(--civ4-qualified);
+}
+.civ4-dot--review {
+  background: var(--civ4-review);
+}
+.civ4-dot--excluded {
+  background: var(--civ4-excluded);
+}
+
+/* map markers */
+.civ4-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.civ4-marker__price {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--marker-color, #34d399);
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  border-radius: 7px;
+  padding: 2px 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+.civ4-marker.is-hovered {
+  transform: scale(1.08);
+  z-index: 10;
+}
+.civ4-marker.is-selected .civ4-marker__price {
+  outline: 2px solid var(--nx-accent, #38d0f0);
+  outline-offset: 2px;
+  z-index: 20;
+}
+.civ4-marker--subject .civ4-marker__star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 16px;
+  color: #fff;
+  background: var(--nx-accent, #38d0f0);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 4px rgba(56, 208, 240, 0.25), 0 3px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* ── subject sticky header ────────────────────────────────────────────── */
+.civ4-subject {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--civ4-line);
+  background: var(--civ4-bg);
+}
+.civ4-subject__thumb {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 10px;
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--civ4-muted);
+}
+.civ4-subject__body {
+  flex: 1;
+  min-width: 0;
+}
+.civ4-subject__topline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.civ4-subject__address {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.civ4-subject__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+}
+.civ4-fact {
+  display: inline-flex;
+  flex-direction: column;
+}
+.civ4-fact__label {
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--civ4-faint);
+}
+.civ4-fact__value {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--civ4-text-2);
+}
+.civ4-fact--accent .civ4-fact__value {
+  color: var(--civ4-accent);
+}
+.civ4-subject__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.civ4-subject__metarow {
+  display: flex;
+  gap: 6px;
+}
+.civ4-chip {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--civ4-text-2);
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.civ4-chip--qualified {
+  color: var(--civ4-qualified);
+  border-color: color-mix(in srgb, var(--civ4-qualified) 40%, transparent);
+}
+
+/* ── intel scroll body ────────────────────────────────────────────────── */
+.civ4-intel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── decision ribbon ──────────────────────────────────────────────────── */
+.civ4-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--civ4-radius);
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+}
+.civ4-ribbon--muted {
+  gap: 10px;
+}
+.civ4-ribbon__mode {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--civ4-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.civ4-ribbon__note {
+  font-size: 12.5px;
+  color: var(--civ4-muted);
+}
+.civ4-ribbon__cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.civ4-ribbon__cell {
+  display: flex;
+  flex-direction: column;
+}
+.civ4-ribbon__label {
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--civ4-faint);
+}
+.civ4-ribbon__value {
+  font-size: 15px;
+  font-weight: 700;
+}
+.civ4-ribbon__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── market summary ───────────────────────────────────────────────────── */
+.civ4-summary {
+  border-radius: var(--civ4-radius);
+  background: var(--civ4-panel);
+  border: 1px solid var(--civ4-line);
+  overflow: hidden;
+}
+.civ4-summary__counts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.civ4-count {
+  padding: 12px 14px;
+  border-right: 1px solid var(--civ4-line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.civ4-count:last-child {
+  border-right: 0;
+}
+.civ4-count__value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+.civ4-count__label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-muted);
+}
+.civ4-count--qualified .civ4-count__value {
+  color: var(--civ4-qualified);
+}
+.civ4-count--review .civ4-count__value {
+  color: var(--civ4-review);
+}
+.civ4-count--excluded .civ4-count__value {
+  color: var(--civ4-excluded);
+}
+.civ4-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--civ4-line);
+}
+.civ4-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.civ4-stat__label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-faint);
+}
+.civ4-stat__value {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ── evidence list ────────────────────────────────────────────────────── */
+.civ4-list__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.civ4-list__title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-text-2);
+}
+.civ4-list__count {
+  font-size: 11px;
+  color: var(--civ4-muted);
+}
+.civ4-list__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── comp card ────────────────────────────────────────────────────────── */
+.civ4-card {
+  display: flex;
+  gap: 12px;
+  padding: 11px;
+  border-radius: var(--civ4-radius);
+  background: var(--civ4-panel);
+  border: 1px solid var(--civ4-line);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.06s;
+}
+.civ4-card:hover,
+.civ4-card.is-hovered {
+  background: var(--civ4-panel-strong);
+  border-color: var(--civ4-border);
+}
+.civ4-card.is-selected {
+  border-color: var(--civ4-accent-border);
+  box-shadow: inset 0 0 0 1px var(--civ4-accent-border), 0 0 0 3px var(--civ4-accent-soft);
+}
+.civ4-card--qualified {
+  border-left: 3px solid var(--civ4-qualified);
+}
+.civ4-card--review {
+  border-left: 3px solid var(--civ4-review);
+}
+.civ4-card--excluded {
+  border-left: 3px solid var(--civ4-excluded);
+}
+.civ4-card__media {
+  width: 76px;
+  height: 76px;
+  flex: 0 0 76px;
+  border-radius: 9px;
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: var(--civ4-faint);
+}
+.civ4-card__main {
+  flex: 1;
+  min-width: 0;
+}
+.civ4-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.civ4-card__price {
+  font-size: 17px;
+  font-weight: 800;
+}
+.civ4-statebadge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.civ4-statebadge--qualified {
+  color: var(--civ4-qualified);
+  background: color-mix(in srgb, var(--civ4-qualified) 16%, transparent);
+}
+.civ4-statebadge--review {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 16%, transparent);
+}
+.civ4-statebadge--excluded {
+  color: var(--civ4-excluded);
+  background: color-mix(in srgb, var(--civ4-excluded) 16%, transparent);
+}
+.civ4-card__address {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--civ4-text);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.civ4-card__subline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--civ4-muted);
+  margin-top: 3px;
+}
+.civ4-dotsep {
+  opacity: 0.5;
+}
+.civ4-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+.civ4-cardfact {
+  display: inline-flex;
+  flex-direction: column;
+}
+.civ4-cardfact__label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-faint);
+}
+.civ4-cardfact__value {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--civ4-text-2);
+}
+.civ4-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.civ4-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--civ4-text-2);
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.civ4-tag--buyer {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.4);
+}
+.civ4-tag--reason {
+  color: var(--civ4-excluded);
+  border-color: color-mix(in srgb, var(--civ4-excluded) 40%, transparent);
+}
+.civ4-card__actions {
+  display: flex;
+  align-items: flex-start;
+}
+
+/* ── buttons / pills ──────────────────────────────────────────────────── */
+.civ4-btn {
+  border-radius: 8px;
+  border: 1px solid var(--civ4-border);
+  background: var(--civ4-panel-strong);
+  color: var(--civ4-text);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+}
+.civ4-btn:hover {
+  border-color: var(--civ4-accent-border);
+  color: var(--civ4-accent);
+}
+.civ4-btn--ghost {
+  background: transparent;
+}
+.civ4-btn--mini {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+.civ4-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.civ4-pill--warn {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 16%, transparent);
+}
+
+/* ── empty / blank / skeleton ─────────────────────────────────────────── */
+.civ4-empty,
+.civ4-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--civ4-muted);
+}
+.civ4-blank {
+  height: 100%;
+}
+.civ4-empty__glyph {
+  font-size: 28px;
+  opacity: 0.5;
+}
+.civ4-empty__title,
+.civ4-blank__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--civ4-text-2);
+}
+.civ4-empty__hint,
+.civ4-blank__hint {
+  font-size: 12px;
+}
+.civ4-skeleton {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.civ4-skeleton__controls {
+  height: 56px;
+  border-bottom: 1px solid var(--civ4-line);
+  background: var(--civ4-panel);
+}
+.civ4-skeleton__panes {
+  flex: 1;
+  display: flex;
+}
+.civ4-skeleton__map {
+  flex: 0 0 54%;
+  background: var(--civ4-panel);
+  border-right: 1px solid var(--civ4-line);
+}
+.civ4-skeleton__intel {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.civ4-skeleton__subject,
+.civ4-skeleton__row,
+.civ4-skeleton__card {
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--civ4-panel), var(--civ4-panel-strong), var(--civ4-panel));
+  background-size: 200% 100%;
+  animation: civ4-shimmer 1.3s infinite;
+}
+.civ4-skeleton__subject {
+  height: 64px;
+}
+.civ4-skeleton__row {
+  height: 88px;
+}
+.civ4-skeleton__card {
+  height: 104px;
+}
+@keyframes civ4-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ── dossier drawer ───────────────────────────────────────────────────── */
+.civ4-drawer__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 7, 11, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s;
+  z-index: 30;
+}
+.civ4-drawer__scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.civ4-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 82%);
+  background: var(--civ4-bg);
+  border-left: 1px solid var(--civ4-accent-border);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.45);
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+}
+.civ4-drawer.is-open {
+  transform: translateX(0);
+}
+.civ4-drawer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--civ4-line);
+}
+.civ4-drawer__price {
+  font-size: 24px;
+  font-weight: 800;
+}
+.civ4-drawer__address {
+  font-size: 14px;
+  font-weight: 650;
+  margin-top: 2px;
+}
+.civ4-drawer__subline {
+  font-size: 12px;
+  color: var(--civ4-muted);
+  margin-top: 3px;
+}
+.civ4-drawer__close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--civ4-border);
+  background: var(--civ4-panel-strong);
+  color: var(--civ4-text);
+  cursor: pointer;
+}
+.civ4-drawer__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.civ4-dsection__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--civ4-muted);
+  margin: 0 0 8px;
+}
+.civ4-dsection__pending {
+  font-size: 11.5px;
+  color: var(--civ4-faint);
+  font-style: italic;
+  margin: 6px 0 0;
+}
+.civ4-verdict {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+.civ4-verdict--qualified {
+  color: var(--civ4-qualified);
+  background: color-mix(in srgb, var(--civ4-qualified) 16%, transparent);
+}
+.civ4-verdict--review {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 16%, transparent);
+}
+.civ4-verdict--excluded {
+  color: var(--civ4-excluded);
+  background: color-mix(in srgb, var(--civ4-excluded) 16%, transparent);
+}
+.civ4-reasonlist {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--civ4-text-2);
+}
+.civ4-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.civ4-matrix th {
+  text-align: left;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-faint);
+  padding: 0 8px 6px 0;
+  border-bottom: 1px solid var(--civ4-line);
+}
+.civ4-matrix td {
+  padding: 7px 8px 7px 0;
+  border-bottom: 1px solid var(--civ4-line);
+  color: var(--civ4-text-2);
+}
+.civ4-assess {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.civ4-assess--exact {
+  color: var(--civ4-qualified);
+  background: color-mix(in srgb, var(--civ4-qualified) 14%, transparent);
+}
+.civ4-assess--close {
+  color: var(--civ4-accent);
+  background: var(--civ4-accent-soft);
+}
+.civ4-assess--material {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 14%, transparent);
+}
+.civ4-assess--unknown {
+  color: var(--civ4-faint);
+  background: var(--civ4-panel-strong);
+}
+.civ4-deflist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin: 0;
+}
+.civ4-def dt {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--civ4-faint);
+}
+.civ4-def dd {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 1px 0 0;
+}
+
+/* ── responsive pane widths ───────────────────────────────────────────── */
+.civ4-root.is-width-75 .civ4-pane--map {
+  flex-basis: 50%;
+}
+.civ4-root.is-width-50 .civ4-panes {
+  flex-direction: column;
+}
+.civ4-root.is-width-50 .civ4-pane--map {
+  flex: 0 0 40%;
+  border-right: 0;
+  border-bottom: 1px solid var(--civ4-line);
+}
+.civ4-root.is-width-25 .civ4-pane--map {
+  display: none;
+}
+.civ4-root.is-width-25 .civ4-controls {
+  gap: 10px;
+}
+.civ4-root.is-width-25 .civ4-subject__meta {
+  display: none;
+}
+
+/* ============================================================================
+   Qualification-integrity pass — media, 5-state model, chips, dossier basis
+   ========================================================================== */
+
+/* ── property media ───────────────────────────────────────────────────── */
+.civ4-media {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--civ4-panel-strong);
+  border: 1px solid var(--civ4-border);
+  flex-shrink: 0;
+}
+.civ4-media__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.civ4-media__fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: var(--civ4-faint);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--civ4-panel),
+    var(--civ4-panel) 8px,
+    var(--civ4-panel-strong) 8px,
+    var(--civ4-panel-strong) 16px
+  );
+}
+.civ4-media__attr {
+  position: absolute;
+  bottom: 3px;
+  right: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+/* card media column */
+.civ4-card__media {
+  width: 168px;
+  height: auto;
+  min-height: 132px;
+  align-self: stretch;
+}
+.civ4-card.is-selected .civ4-card__media {
+  width: 196px;
+}
+
+/* subject hero media */
+.civ4-subject__media {
+  width: 132px;
+  height: 80px;
+  flex: 0 0 132px;
+}
+
+/* dossier media */
+.civ4-drawer__media {
+  width: 100%;
+  height: 220px;
+}
+
+/* ── 5-state colors (candidate=blue, demand=purple) ───────────────────── */
+.civ4-card--candidate {
+  border-left: 3px solid #60a5fa;
+}
+.civ4-card--demand_only {
+  border-left: 3px solid #a78bfa;
+}
+.civ4-statebadge--candidate {
+  color: #60a5fa;
+  background: color-mix(in srgb, #60a5fa 16%, transparent);
+}
+.civ4-statebadge--demand_only {
+  color: #a78bfa;
+  background: color-mix(in srgb, #a78bfa 16%, transparent);
+}
+.civ4-count--candidate .civ4-count__value {
+  color: #60a5fa;
+}
+.civ4-count--demand .civ4-count__value {
+  color: #a78bfa;
+}
+.civ4-verdict--candidate {
+  color: #60a5fa;
+  background: color-mix(in srgb, #60a5fa 16%, transparent);
+}
+.civ4-verdict--demand_only {
+  color: #a78bfa;
+  background: color-mix(in srgb, #a78bfa 16%, transparent);
+}
+.civ4-verdict__reason {
+  font-size: 12.5px;
+  color: var(--civ4-text-2);
+  margin-top: 7px;
+}
+
+/* counts grid now 6-up */
+.civ4-summary__counts {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+/* ── comparison chips ─────────────────────────────────────────────────── */
+.civ4-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.civ4-chip2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+}
+.civ4-chip2__k {
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+.civ4-chip2--exact {
+  color: var(--civ4-qualified);
+  background: color-mix(in srgb, var(--civ4-qualified) 13%, transparent);
+}
+.civ4-chip2--close {
+  color: #60a5fa;
+  background: color-mix(in srgb, #60a5fa 13%, transparent);
+}
+.civ4-chip2--review {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 13%, transparent);
+}
+.civ4-chip2--bad {
+  color: var(--civ4-excluded);
+  background: color-mix(in srgb, var(--civ4-excluded) 13%, transparent);
+}
+.civ4-chip2--unknown {
+  color: var(--civ4-faint);
+  background: var(--civ4-panel-strong);
+}
+
+/* ── card reason line ─────────────────────────────────────────────────── */
+.civ4-card__reason {
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: var(--civ4-panel-strong);
+  color: var(--civ4-text-2);
+}
+.civ4-card__reason--excluded {
+  color: var(--civ4-excluded);
+  background: color-mix(in srgb, var(--civ4-excluded) 11%, transparent);
+}
+.civ4-card__reason--review {
+  color: var(--civ4-review);
+  background: color-mix(in srgb, var(--civ4-review) 11%, transparent);
+}
+.civ4-card__reason--demand_only {
+  color: #a78bfa;
+  background: color-mix(in srgb, #a78bfa 11%, transparent);
+}
+
+/* ── transaction tag tones ────────────────────────────────────────────── */
+.civ4-tag--institutional {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.4);
+}
+.civ4-tag--demand {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.4);
+}
+.civ4-tag--neutral {
+  color: var(--civ4-text-2);
+}
+
+/* ── summary: no-qualified + context ──────────────────────────────────── */
+.civ4-summary__noqual {
+  padding: 14px;
+  border-top: 1px solid var(--civ4-line);
+  background: color-mix(in srgb, var(--civ4-review) 8%, transparent);
+}
+.civ4-summary__noqualtitle {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--civ4-review);
+}
+.civ4-summary__noqualhint {
+  font-size: 12px;
+  color: var(--civ4-muted);
+  margin-top: 3px;
+  max-width: 60ch;
+}
+.civ4-summary__context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--civ4-line);
+}
+.civ4-stat--strong .civ4-stat__value {
+  color: var(--civ4-accent);
+  font-size: 15px;
+}
+
+/* responsive: smaller media on narrow panes */
+.civ4-root.is-width-25 .civ4-card__media {
+  width: 120px;
+  min-height: 110px;
+}

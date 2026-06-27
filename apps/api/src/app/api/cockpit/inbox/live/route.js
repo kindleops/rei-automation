@@ -8,11 +8,19 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const BACKEND_GRACE_PERIOD = 500;
-const TIMEOUT_MS_BY_MODE = {
-  initial_boot: 5_000 - BACKEND_GRACE_PERIOD,
-  manual_bucket_switch: 5_000 - BACKEND_GRACE_PERIOD,
-  auto_refresh: 5_000 - BACKEND_GRACE_PERIOD,
+const PROD_TIMEOUT_MS_BY_MODE = {
+  initial_boot: 8_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 8_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 8_000 - BACKEND_GRACE_PERIOD,
 }
+const DEV_TIMEOUT_MS_BY_MODE = {
+  initial_boot: 45_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 20_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 15_000 - BACKEND_GRACE_PERIOD,
+}
+const isLocalDevRuntime = () =>
+  process.env.NODE_ENV !== 'production' && process.env.VERCEL_ENV !== 'production'
+const TIMEOUT_MS_BY_MODE = isLocalDevRuntime() ? DEV_TIMEOUT_MS_BY_MODE : PROD_TIMEOUT_MS_BY_MODE
 const INITIAL_BOOT_DEFAULT_LIMIT = 25
 
 export async function GET(request) {

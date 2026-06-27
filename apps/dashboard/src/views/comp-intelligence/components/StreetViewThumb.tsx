@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 
-type ThumbSize = 'subject' | 'row' | 'popover' | 'card'
+type ThumbSize = 'subject' | 'row' | 'popover' | 'card' | 'hero' | 'preview'
 
 interface Props {
   address?: string | null
@@ -12,10 +12,12 @@ interface Props {
 }
 
 const DIMS: Record<ThumbSize, string> = {
+  hero: '800x450',
   subject: '400x260',
+  card: '340x220',
   row: '160x110',
+  preview: '320x100',
   popover: '360x200',
-  card: '200x130',
 }
 
 export function StreetViewThumb({

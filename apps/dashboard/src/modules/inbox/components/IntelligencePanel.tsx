@@ -300,14 +300,14 @@ function useDossierModel(thread: WorkflowThread, dealContext: DealContext | null
       canonicalE164: dealContext?.identity?.canonical_e164 || thread.canonicalE164,
 
       // Prospect
-      prospectName: pros.full_name || thread.prospect_full_name || thread.displayName,
+      prospectName: pros.full_name || pros.name || thread.prospect_full_name || thread.displayName,
       prospectFirstName: pros.first_name || thread.firstName,
       age: pros.age || (thread as any).calculated_age || (thread as any).prospect_age,
       maritalStatus: pros.marital_status || (thread as any).marital_status,
       gender: pros.gender || (thread as any).gender,
       language: pros.language || pros.language_preference || thread.language_preference || thread.contactLanguage,
       education: pros.education_model || (thread as any).education_model,
-      income: pros.est_household_income || (thread as any).est_household_income,
+      income: pros.est_household_income || pros.household_income || (thread as any).est_household_income,
       netWorth: pros.net_asset_value || (thread as any).net_asset_value,
       buyingPower: pros.buying_power || (thread as any).buying_power,
       occupation: pros.occupation || (thread as any).occupation,
@@ -317,7 +317,20 @@ function useDossierModel(thread: WorkflowThread, dealContext: DealContext | null
       prospectBestEmail: pros.prospect_best_email || thread.prospect_best_email || (thread as any).best_email_1,
       smsEligible: pros.sms_eligible ?? (thread as any).sms_eligible,
       emailEligible: pros.email_eligible ?? (thread as any).email_eligible,
-      motivationScore: pros.motivation_score || thread.motivationScore || thread.priorityScore,
+      motivationScore: pros.motivation_score
+        || (thread as any).motivation_score
+        || (thread as any).structured_motivation_score
+        || thread.motivationScore
+        || thread.priorityScore,
+      dealStrengthScore: (thread as any).deal_strength_score
+        || (thread as any).dealStrengthScore
+        || acq.deal_strength_score
+        || prop.deal_strength_score,
+      distressScore: (thread as any).tag_distress_score
+        || (thread as any).distress_score
+        || (thread as any).tagDistressScore
+        || prop.tag_distress_score
+        || acq.distress_score,
       urgencyScore: pros.urgency_score || thread.urgency_score,
       financialPressureScore: pros.financial_pressure_score || (thread as any).financial_pressure_score,
       contactConfidence: pros.prospect_contact_score || thread.prospect_contact_score || thread.prospect_phone_score,
@@ -353,13 +366,13 @@ function useDossierModel(thread: WorkflowThread, dealContext: DealContext | null
       rehabLevel: prop.rehab_level || (thread as any).rehab_level,
 
       // Owner
-      ownerName: own.full_name || thread.ownerDisplayName || thread.ownerName,
+      ownerName: own.full_name || own.display_name || thread.ownerDisplayName || thread.ownerName,
       ownerType: own.owner_type || thread.ownerType || thread.owner_type_guess,
       mailingAddress: own.primary_owner_address || thread.primary_owner_address,
       absentee: own.absentee_owner || thread.isAbsentee,
       ownerOccupied: own.owner_occupied || thread.isOwnerOccupied,
       ownershipYears: own.ownership_years || thread.ownership_years,
-      portfolioCount: own.portfolio_property_count || thread.property_count,
+      portfolioCount: own.portfolio_property_count || own.property_count || thread.property_count,
       portfolioUnits: own.portfolio_total_units || thread.portfolio_total_units,
       portfolioValue: own.portfolio_total_value || thread.portfolio_total_value,
       portfolioEquity: own.portfolio_total_equity || thread.portfolio_total_equity,
@@ -386,7 +399,10 @@ function useDossierModel(thread: WorkflowThread, dealContext: DealContext | null
 
       // Acquisition
       strategy: acq.strategy_label || acq.recommended_strategy || (thread as any).best_strategy,
-      acquisitionScore: acq.acquisition_score || (thread as any).aos_score,
+      acquisitionScore: acq.acquisition_score
+        || (thread as any).final_acquisition_score
+        || thread.finalAcquisitionScore
+        || (thread as any).aos_score,
       suggestedOffer: acq.suggested_offer || (thread as any).recommended_cash_offer,
       acquisitionConfidence: acq.confidence_score || (thread as any).confidence,
       riskFlags: acq.risk_flags || [],
@@ -4333,12 +4349,25 @@ const MediumDealWorkspace = ({
 
   // ── IDENTITY ──────────────────────────────────────────────
   const address = snapshot.fullAddress || thread.displayAddress || thread.propertyAddress || thread.subject || 'Property Unknown'
-  const sellerName = snapshot.ownerDisplayName || snapshot.ownerName || thread.ownerDisplayName || thread.ownerName || thread.prospect_full_name || thread.displayName || 'Unknown Seller'
+  const sellerName = dossier.ownerName || snapshot.ownerDisplayName || snapshot.ownerName || thread.ownerDisplayName || thread.ownerName || dossier.prospectName || thread.prospect_full_name || thread.displayName || 'Unknown Seller'
   const stage = getSellerStageVisual(thread.conversationStage)
   const status = getStatusVisual(thread.inboxStatus)
 
   // ── SCORE RING ────────────────────────────────────────────
-  const score = percentFromScore(thread.finalAcquisitionScore || (thread as any).ai_score || thread.motivationScore, 42)
+  const acquisitionScoreRaw = asNum(
+    dossier.acquisitionScore
+    || thread.finalAcquisitionScore
+    || (thread as any).final_acquisition_score
+    || (thread as any).ai_score,
+  )
+  const dealStrengthScoreRaw = asNum(dossier.dealStrengthScore || (thread as any).deal_strength_score)
+  const distressScoreRaw = asNum(dossier.distressScore || (thread as any).tag_distress_score || (thread as any).distress_score)
+  const motivationScoreRaw = asNum(
+    dossier.motivationScore
+    || (thread as any).motivation_score
+    || thread.motivationScore,
+  )
+  const score = percentFromScore(acquisitionScoreRaw || dealStrengthScoreRaw || motivationScoreRaw, acquisitionScoreRaw ? acquisitionScoreRaw : 42)
   const heatColor = score >= 80 ? 'red' : score >= 60 ? 'orange' : score >= 40 ? 'amber' : 'blue'
   const RING_R = 30
   const RING_C = 2 * Math.PI * RING_R
@@ -4385,7 +4414,7 @@ const MediumDealWorkspace = ({
 
   // ── PROSPECT ─────────────────────────────────────────────
   const financialPressureScore = asNum(thread.financial_pressure_score) || 0
-  const motivationScore = percentFromScore(thread.motivationScore, 48)
+  const motivationScore = percentFromScore(motivationScoreRaw || thread.motivationScore, 48)
   const contactQuality = asNum(thread.contactability_score || thread.prospect_contact_score) || 0
   const ownerYears = asNum((thread as any).ownership_years || snapshot.ownershipYears) || 0
   const householdIncome = asNum(thread.est_household_income || snapshot.householdIncome)
@@ -4609,11 +4638,17 @@ const MediumDealWorkspace = ({
   const marketTempTone = demand >= 70 ? 'red' : demand >= 45 ? 'amber' : 'blue'
   const aiConfidence = Math.round(clamp(confidence * 0.7 + (motivationScore > 0 ? motivationScore * 0.3 : 21), 20, 95))
   const acqScore = Math.round(clamp(
-    (equity >= 60 ? 30 : equity >= 30 ? 15 : 5) +
-    (offer > 0 && value > 0 ? Math.min((offer / value) * 40, 35) : 10) +
-    (repairs < 15000 ? 20 : repairs < 40000 ? 12 : repairs < 80000 ? 5 : 0) +
-    (demand >= 60 ? 15 : 8)
-  , 0, 100))
+    acquisitionScoreRaw > 0
+      ? acquisitionScoreRaw
+      : (
+        (equity >= 60 ? 30 : equity >= 30 ? 15 : 5) +
+        (offer > 0 && value > 0 ? Math.min((offer / value) * 40, 35) : 10) +
+        (repairs < 15000 ? 20 : repairs < 40000 ? 12 : repairs < 80000 ? 5 : 0) +
+        (demand >= 60 ? 15 : 8)
+      ),
+    0,
+    100,
+  ))
   const acqGrade = acqScore >= 88 ? 'A+' : acqScore >= 78 ? 'A' : acqScore >= 65 ? 'B+' : acqScore >= 52 ? 'B' : acqScore >= 38 ? 'C' : 'D'
   const acqGradeTone = acqScore >= 88 ? 'is-a-plus' : acqScore >= 78 ? 'is-a' : acqScore >= 65 ? 'is-b-plus' : acqScore >= 52 ? 'is-b' : acqScore >= 38 ? 'is-c' : 'is-d'
   const acqGradeChips: { label: string; tone: string }[] = ([
@@ -4732,8 +4767,35 @@ const MediumDealWorkspace = ({
         </div>
       </div>
 
+      <div className="nx-medium-score-grid" aria-label="Acquisition intelligence scores">
+        <div className="nx-medium-score-tile">
+          <span className="nx-medium-score-tile__k">Acquisition</span>
+          <strong className={cls('nx-medium-score-tile__v', acquisitionScoreRaw > 0 && 'is-live')}>
+            {acquisitionScoreRaw > 0 ? Math.round(acquisitionScoreRaw) : '—'}
+          </strong>
+        </div>
+        <div className="nx-medium-score-tile">
+          <span className="nx-medium-score-tile__k">Deal Strength</span>
+          <strong className={cls('nx-medium-score-tile__v', dealStrengthScoreRaw > 0 && 'is-live')}>
+            {dealStrengthScoreRaw > 0 ? Math.round(dealStrengthScoreRaw) : '—'}
+          </strong>
+        </div>
+        <div className="nx-medium-score-tile">
+          <span className="nx-medium-score-tile__k">Motivation</span>
+          <strong className={cls('nx-medium-score-tile__v', motivationScoreRaw > 0 && 'is-live')}>
+            {motivationScoreRaw > 0 ? Math.round(motivationScoreRaw) : '—'}
+          </strong>
+        </div>
+        <div className="nx-medium-score-tile">
+          <span className="nx-medium-score-tile__k">Distress</span>
+          <strong className={cls('nx-medium-score-tile__v', distressScoreRaw > 0 && 'is-live')}>
+            {distressScoreRaw > 0 ? Math.round(distressScoreRaw) : '—'}
+          </strong>
+        </div>
+      </div>
+
       {/* ── DEAL INTELLIGENCE (NEW) ────────────────────── */}
-      <DealIntelligenceCard thread={thread} onOpenComps={onOpenComps || (() => undefined)} />
+      <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps || (() => undefined)} />
 
       {/* ── 2. STREET VIEW — CINEMATIC INTELLIGENCE VIEWPORT ── */}
       <div className="nx-medium-map-frame">

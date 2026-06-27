@@ -23,42 +23,29 @@ export function SelectedCompPreview({ row, onClose, onViewFull }: Props) {
   const ppsf = pricePerSqft(row)
 
   return (
-    <div className="ci-detail-popover ci-selected-comp-preview" role="dialog" aria-label="Selected comp preview">
-      <div className="ci-detail-popover__img">
+    <div className="ci-map-comp-preview" role="dialog" aria-label="Selected comp preview">
+      <button type="button" className="ci-map-comp-preview__close" onClick={onClose} aria-label="Close">×</button>
+      <div className="ci-map-comp-preview__media">
         <StreetViewThumb
           address={row.address}
           lat={row.geography.latitude}
           lng={row.geography.longitude}
-          size="popover"
+          size="preview"
         />
       </div>
-      <div className="ci-detail-popover__head">
-        <div>
-          <strong className="ci-detail-popover__price tabular-nums">{fmtCurrency(row.sale_price)}</strong>
-          <span className="ci-detail-popover__addr">{row.address ?? 'Address unknown'}</span>
+      <div className="ci-map-comp-preview__body">
+        <div className="ci-map-comp-preview__price tabular-nums">{fmtCurrency(row.sale_price)}</div>
+        <div className="ci-map-comp-preview__addr">{row.address ?? 'Address unknown'}</div>
+        <div className="ci-map-comp-preview__facts">
+          <span>{fmtDate(row.sale_date)}</span>
+          <span>{row.geography.distance_miles != null ? `${row.geography.distance_miles.toFixed(2)} mi` : '—'}</span>
+          <span>{row.bedrooms ?? '—'} bd / {row.bathrooms ?? '—'} ba</span>
+          <span>{row.square_feet ? `${fmtNum(row.square_feet)} sf` : '—'}</span>
+          <span>{fmtPpsf(ppsf)}</span>
+          <span>{quality} · {match}</span>
         </div>
-        <button type="button" className="ci-popover__close" onClick={onClose} aria-label="Close">✕</button>
+        <button type="button" className="ci-map-comp-preview__cta" onClick={onViewFull}>View Full Comp</button>
       </div>
-      <div className="ci-detail-popover__body">
-        <PreviewRow label="Sold date" value={fmtDate(row.sale_date)} />
-        <PreviewRow label="Distance" value={row.geography.distance_miles != null ? `${row.geography.distance_miles.toFixed(2)} mi` : '—'} />
-        <PreviewRow label="Beds / baths" value={`${row.bedrooms ?? '—'} / ${row.bathrooms ?? '—'}`} />
-        <PreviewRow label="Square feet" value={row.square_feet ? fmtNum(row.square_feet) : '—'} />
-        <PreviewRow label="Price / sqft" value={fmtPpsf(ppsf)} />
-        <PreviewRow label="Match quality" value={`${quality} · ${match}`} />
-      </div>
-      <div className="ci-detail-popover__actions">
-        <button type="button" className="ci-pop-action is-primary" onClick={onViewFull}>View full comp</button>
-      </div>
-    </div>
-  )
-}
-
-function PreviewRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="ci-detail-popover__row">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   )
 }

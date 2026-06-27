@@ -9,6 +9,27 @@ function clean(value) {
   return String(value ?? '').trim()
 }
 
+const PLACEHOLDER_VALUES = new Set([
+  '',
+  'unknown',
+  'unknown seller',
+  'unknown owner',
+  'n/a',
+  'na',
+  'none',
+  'null',
+])
+
+function firstReal(...values) {
+  for (const value of values) {
+    const text = clean(value)
+    if (!text) continue
+    if (PLACEHOLDER_VALUES.has(text.toLowerCase())) continue
+    return text
+  }
+  return null
+}
+
 function lower(value) {
   return clean(value).toLowerCase()
 }
@@ -365,33 +386,72 @@ async function _getDealContextFallback(thread_key, supabase) {
 
     if (!state.thread_key && !msg.id) return null
 
+    const property_id = clean(state.property_id || msg.property_id)
+    const master_owner_id = clean(state.master_owner_id || msg.master_owner_id)
+    let prospect_id = clean(state.prospect_id || msg.prospect_id)
+
+    const [propertyRes, ownerRes, prospectRes] = await Promise.all([
+      property_id
+        ? supabase.from('properties').select('property_id,property_address_full,market,property_type,estimated_value,equity_amount,equity_percent,master_owner_id,prospect_id,latitude,longitude').eq('property_id', property_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      master_owner_id
+        ? supabase.from('master_owners').select('master_owner_id,display_name,owner_type_guess,priority_score,financial_pressure_score,contactability_score,portfolio_total_value,portfolio_total_equity,property_count,portfolio_total_units,primary_owner_address,best_phone_1,best_email_1,seller_tags_text').eq('master_owner_id', master_owner_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      prospect_id
+        ? supabase.from('prospects').select('prospect_id,full_name,first_name,occupation_group,est_household_income,net_asset_value,buying_power,person_flags_text,best_phone,best_email,contact_score_final,phone_score_final,gender,marital_status,education_model,language_preference').eq('prospect_id', prospect_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ])
+
+    const property = propertyRes.data || null
+    const masterOwner = ownerRes.data || null
+    let prospect = prospectRes.data || null
+
+    if (!prospect_id && master_owner_id) {
+      const { data: linkedProspect } = await supabase
+        .from('prospects')
+        .select('prospect_id,full_name,first_name,occupation_group,est_household_income,net_asset_value,buying_power,person_flags_text,best_phone,best_email,contact_score_final,phone_score_final,gender,marital_status,education_model,language_preference')
+        .eq('master_owner_id', master_owner_id)
+        .limit(1)
+        .maybeSingle()
+      if (linkedProspect) {
+        prospect = linkedProspect
+        prospect_id = clean(linkedProspect.prospect_id)
+      }
+    }
+
+    const owner_name = firstReal(
+      state.seller_display_name,
+      state.owner_name,
+      masterOwner?.display_name,
+      prospect?.full_name,
+    )
+
     // Build a synthetic partial row matching the shape normalizeDealContext expects
     const partialRow = {
       deal_context_id: state.id || msg.id || thread_key,
-      context_type: state.property_id ? 'property' : 'unlinked_thread',
+      context_type: property_id ? 'property' : 'unlinked_thread',
       thread_key,
-      property_id: state.property_id || msg.property_id || null,
-      master_owner_id: state.master_owner_id || msg.master_owner_id || null,
-      prospect_id: state.prospect_id || msg.prospect_id || null,
+      property_id: property_id || clean(property?.property_id) || null,
+      master_owner_id: master_owner_id || clean(property?.master_owner_id) || null,
+      prospect_id: prospect_id || clean(property?.prospect_id) || null,
       canonical_e164: state.canonical_e164 || state.best_phone || null,
       // Status/Stage from deal_thread_state
       universal_status: state.universal_status || state.status || 'unknown',
       universal_stage: state.universal_stage || state.stage || 'unknown',
       inbox_bucket: state.inbox_bucket || 'all_messages',
       // Display fields
-      owner_name: state.seller_display_name || state.owner_name || null,
-      property_address_full: state.property_address_full || state.property_address || null,
-      market: state.market || null,
+      owner_name,
+      property_address_full: state.property_address_full || state.property_address || property?.property_address_full || null,
+      market: state.market || property?.market || null,
       latest_message_body: state.latest_message_body || null,
       latest_message_direction: state.latest_message_direction || msg.direction || null,
       latest_activity_at: state.latest_activity_at || state.latest_message_at || msg.created_at || null,
       latest_message_at: state.latest_message_at || msg.created_at || null,
-      latitude: state.latitude || null,
-      longitude: state.longitude || null,
-      // Nested data blobs (empty — will degrade gracefully)
-      property_data: null,
-      master_owner_data: null,
-      prospect_data: null,
+      latitude: state.latitude || property?.latitude || null,
+      longitude: state.longitude || property?.longitude || null,
+      property_data: property,
+      master_owner_data: masterOwner,
+      prospect_data: prospect,
       phone_data: null,
       thread_state_data: state,
       _partial: true,

@@ -1,0 +1,99 @@
+- generic [ref=e7]:
+  - generic: Comp Intelligence
+  - main [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic "NEXUS Dashboard" [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e16]:
+              - generic [ref=e17]: NEXUS
+              - strong [ref=e18]: Deal Desk
+              - generic [ref=e19]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e20]:
+            - img [ref=e26] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e29] [cursor=pointer]':
+              - strong [ref=e30]:
+                - img [ref=e31]
+            - button "Queue & System Status · Unknown" [ref=e34] [cursor=pointer]:
+              - img [ref=e36]
+        - generic [ref=e39]:
+          - img [ref=e40]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e43]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e44]: CMD+K
+        - generic [ref=e45]:
+          - button "99+" [ref=e47] [cursor=pointer]:
+            - img [ref=e48]
+            - generic [ref=e50]: 99+
+          - button "Live Activity" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "Notifications" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+          - button "RK" [ref=e61] [cursor=pointer]:
+            - generic [ref=e62]: RK
+      - generic [ref=e65]:
+        - status [ref=e68]:
+          - strong [ref=e69]: Subject coordinates unresolved
+          - paragraph [ref=e70]: Exact parcel coordinates are required for spatial evidence. Decision intelligence remains available in the right panel.
+          - paragraph [ref=e71]: V3 decision unavailable — no comp evidence recovered
+        - generic [ref=e72]:
+          - region "Subject property" [ref=e73]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: SUBJECT PROPERTY
+              - heading "5502 Cottonwood Rd, Memphis, Tn 38115" [level=2] [ref=e77]
+              - generic [ref=e129]: TN, 38115
+              - generic [ref=e78]:
+                - generic [ref=e130]:
+                  - generic [ref=e131]: Type
+                  - strong [ref=e132]: single_family
+                - generic [ref=e79]:
+                  - generic [ref=e80]: Sq Ft
+                  - strong [ref=e81]: Unknown
+              - generic [ref=e82]:
+                - generic [ref=e83]: 1 mi radius
+                - generic [ref=e84]: 12 mo lookback
+                - generic [ref=e85]: 0 comps
+                - generic [ref=e86]: market_search_only (18)
+          - region "Preliminary Comp Market" [ref=e87]:
+            - heading "Preliminary Comp Market" [level=3] [ref=e89]
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - generic [ref=e92]: Comps Found
+                - strong [ref=e93]: "0"
+              - generic [ref=e94]:
+                - generic [ref=e95]: Median Sale
+                - strong [ref=e96]: —
+              - generic [ref=e97]:
+                - generic [ref=e98]: Sale Range
+                - strong [ref=e99]: —
+              - generic [ref=e100]:
+                - generic [ref=e101]: Median $/Sq Ft
+                - strong [ref=e102]: —
+              - generic [ref=e103]:
+                - generic [ref=e104]: Closest Comp
+                - strong [ref=e105]: —
+              - generic [ref=e106]:
+                - generic [ref=e107]: Newest Sale
+                - strong [ref=e108]: —
+          - note [ref=e109]: Preliminary comps are shown for review and are not part of an official underwriting decision.
+          - group "Comp quality filters" [ref=e110]:
+            - button "All 0" [disabled] [pressed] [ref=e111]
+            - button "Strong 0" [disabled] [ref=e112]
+            - button "Usable 0" [disabled] [ref=e113]
+            - button "Review 0" [disabled] [ref=e114]
+            - button "Excluded 0" [disabled] [ref=e115]
+          - region "Comparable properties" [ref=e116]:
+            - generic [ref=e117]:
+              - heading "Comparable Properties" [level=3] [ref=e118]
+              - generic [ref=e119]: 0 of 0
+            - generic [ref=e120]:
+              - strong [ref=e121]: No matching comps in this filter
+              - paragraph [ref=e122]: Showing 0 total results. Select another filter or expand radius.
+          - region "Official underwriting status" [ref=e123]:
+            - paragraph [ref=e124]: Official underwriting is temporarily unavailable. Comp research remains available.
+          - button "Advanced Model Details ▸" [ref=e126] [cursor=pointer]:
+            - text: Advanced Model Details
+            - generic [ref=e127]: ▸
+  - button "NEXUS Copilot" [ref=e128] [cursor=pointer]:
+    - generic: Standing by

@@ -27,7 +27,22 @@ export function fmtCurrency(n: number | null | undefined) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 }
 
+export function formatMarkerPrice(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return '—'
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) {
+    const m = abs / 1_000_000
+    return m >= 10 ? `$${Math.round(m)}M` : `$${m.toFixed(1)}M`
+  }
+  if (abs >= 100_000) {
+    const k = Math.round(abs / 1000)
+    return `$${k}K`
+  }
+  const k = Math.round(abs / 1000)
+  return k > 0 ? `$${k}K` : '$0'
+}
+
+// Back-compat alias used in map
 export function fmtK(n: number | null | undefined) {
-  if (n == null || !Number.isFinite(n)) return 'SOLD'
-  return `$${Math.round(n / 1000)}k`
+  return formatMarkerPrice(n)
 }

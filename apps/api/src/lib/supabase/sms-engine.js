@@ -2083,8 +2083,23 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     });
   }
 
+  const AUTOPILOT_REPLY_STALE_GRACE_MS = 6 * 60 * 60 * 1000;
+
+  function shouldPreserveAutopilotReplyRow(row = {}) {
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    if (clean(metadata.action_type) !== "autopilot_inbound_reply") return false;
+    const status = lower(row.queue_status);
+    if (!["queued", "scheduled", "pending"].includes(status)) return false;
+    const created_ts = toTimestamp(row.created_at) ?? toTimestamp(row.updated_at);
+    if (created_ts === null) return false;
+    return Date.now() - created_ts < AUTOPILOT_REPLY_STALE_GRACE_MS;
+  }
+
   let brake_held_rows = 0;
   for (const row of stale_rows) {
+    if (shouldPreserveAutopilotReplyRow(row)) {
+      continue;
+    }
     const status = lower(row.queue_status);
     const has_send_evidence = Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at);
     const campaignStatus = campaignStatusById.get(rowCampaignId(row)) || null;

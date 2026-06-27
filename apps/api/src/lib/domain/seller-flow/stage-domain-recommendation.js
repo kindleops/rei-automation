@@ -181,9 +181,13 @@ function buildRecommendationFromEngine({
   }
 
   if (relationship_policy.blocked) {
-    recommendation.recommended_action = "referral_review";
-    recommendation.recommended_human_review = true;
-    recommendation.recommended_safety_disposition = "review";
+    recommendation.recommended_action = relationship.referred_automatic_send_allowed
+      ? "referral_auto_outreach"
+      : "referral_review";
+    recommendation.recommended_human_review = !relationship.referred_automatic_send_allowed;
+    recommendation.recommended_safety_disposition = relationship.referred_automatic_send_allowed
+      ? "allowed"
+      : "review";
   }
 
   return recommendation;

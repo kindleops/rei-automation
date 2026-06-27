@@ -4,6 +4,7 @@
 
 import { supabase } from "@/lib/supabase/client.js";
 import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
+import { normalizePhone } from "@/lib/utils/phones.js";
 import { warn } from "@/lib/logging/logger.js";
 
 const SEND_QUEUE_PAIR_LIMIT = 50;
@@ -22,6 +23,33 @@ const DEPRIORITIZED_SOURCES = new Set(["inbox", "leadcommand_inbox"]);
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+/** Build phone variants so pair lookup matches E.164 (+1…) and legacy 10-digit rows. */
+function phonePairLookupVariants(value) {
+  const digits = clean(value).replace(/\D/g, "");
+  if (!digits) return [];
+
+  const ten_digit =
+    digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits.length === 10 ? digits : null;
+  const e164 = normalizePhone(value) || (ten_digit ? `+1${ten_digit}` : "");
+  const eleven_digit = ten_digit ? `1${ten_digit}` : digits.length === 11 ? digits : null;
+
+  return [...new Set([e164, ten_digit, eleven_digit, digits].filter(Boolean))];
+}
+
+async function queryOutboundPairRows(db, table, filters, limit) {
+  const [to_values, from_values] = filters;
+  const { data, error } = await db
+    .from(table)
+    .select("*")
+    .in("to_phone_number", to_values)
+    .in("from_phone_number", from_values)
+    .order("sent_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  return { data, error };
 }
 
 function lower(value) {
@@ -98,15 +126,21 @@ function isDeprioritizedSource(row = {}) {
   return DEPRIORITIZED_SOURCES.has(lower(resolveQueueSource(row)));
 }
 
+const SUCCESSFUL_OUTBOUND_QUEUE_STATUSES = new Set(["sent", "delivered"]);
+
 function isValidSentContextualQueueRow(row = {}) {
-  return lower(row.queue_status) === "sent" && hasValue(row.sent_at) && hasUsableContext(row);
+  return (
+    SUCCESSFUL_OUTBOUND_QUEUE_STATUSES.has(lower(row.queue_status)) &&
+    hasValue(row.sent_at) &&
+    hasUsableContext(row)
+  );
 }
 
 function isSkippedContextCandidate(row = {}) {
   const status = lower(row.queue_status);
   return (
     DEPRIORITIZED_QUEUE_STATUSES.has(status) ||
-    status !== "sent" ||
+    !SUCCESSFUL_OUTBOUND_QUEUE_STATUSES.has(status) ||
     !hasValue(row.sent_at) ||
     !hasUsableContext(row) ||
     isDeprioritizedSource(row)
@@ -159,6 +193,7 @@ function buildSendQueueMatchContext(row = {}, match = {}) {
   const matched_queue_id = row.id || null;
   const conversation_brain_id = resolveConversationBrainId(row);
   const textgrid_number_id = resolveTextgridNumberId(row);
+  const row_meta = metadata(row);
 
   return {
     ids: {
@@ -168,6 +203,15 @@ function buildSendQueueMatchContext(row = {}, match = {}) {
       template_id: row.template_id || null,
       textgrid_number_id: textgrid_number_id || null,
       conversation_brain_id: conversation_brain_id || null,
+    },
+    summary: {
+      seller_first_name: pickFirst(row.seller_first_name, row_meta.seller_first_name) || null,
+      owner_name: pickFirst(row.seller_display_name, row_meta.seller_display_name) || null,
+      property_address: pickFirst(row.property_address, row_meta.property_address) || null,
+      market: pickFirst(row.market, row_meta.market) || null,
+      campaign_id: pickFirst(row.campaign_id, row_meta.campaign_id) || null,
+      inbound_to: row.from_phone_number || null,
+      textgrid_number: row.from_phone_number || null,
     },
     recent: {
       last_outbound_message: clean(row.message_body || row.message_text) || null,
@@ -269,16 +313,17 @@ export async function findRecentOutboundContextPair(inbound_from, inbound_to, op
     };
   }
 
+  const outbound_to_variants = phonePairLookupVariants(from_e164);
+  const outbound_from_variants = phonePairLookupVariants(to_e164);
+
   // Step 1: Try send_queue. Inbound From/To reverses outbound To/From.
   try {
-    const { data: sq_rows, error: sq_error } = await db
-      .from("send_queue")
-      .select("*")
-      .eq("to_phone_number", from_e164)
-      .eq("from_phone_number", to_e164)
-      .order("sent_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false })
-      .limit(SEND_QUEUE_PAIR_LIMIT);
+    const { data: sq_rows, error: sq_error } = await queryOutboundPairRows(
+      db,
+      "send_queue",
+      [outbound_to_variants, outbound_from_variants],
+      SEND_QUEUE_PAIR_LIMIT
+    );
 
     if (sq_error) {
       warn("context.fallback_pair_send_queue_error", {
@@ -322,8 +367,8 @@ export async function findRecentOutboundContextPair(inbound_from, inbound_to, op
       .from("message_events")
       .select("*")
       .eq("direction", "outbound")
-      .eq("to_phone_number", from_e164)
-      .eq("from_phone_number", to_e164)
+      .in("to_phone_number", outbound_to_variants)
+      .in("from_phone_number", outbound_from_variants)
       .order("sent_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(1);

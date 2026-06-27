@@ -28,6 +28,7 @@ import {
   persistInboundIntelligenceSnapshot,
   persistSellerContactReferral,
 } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
+import { executeReferralAutomation } from "@/lib/domain/seller-flow/execute-referral-automation.js";
 import {
   autoReplyModeAllowsDiagnostics,
   autoReplyModeAllowsQueue,
@@ -65,6 +66,7 @@ import {
   updateInboundAutopilotQueue,
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { logInboundMessageEvent as logSupabaseInboundMessageEvent } from "@/lib/supabase/sms-engine.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { getSystemFlags, getSystemValue } from "@/lib/system-control.js";
 
@@ -92,6 +94,7 @@ const defaultDeps = {
   runInboundIntelligencePhase,
   persistInboundIntelligenceSnapshot,
   persistSellerContactReferral,
+  executeReferralAutomation,
   scheduleFollowUp,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
@@ -111,6 +114,7 @@ const defaultDeps = {
   findInboundAutopilotQueue,
   updateInboundAutopilotQueue,
   getSupabaseClient: getDefaultSupabaseClient,
+  logInboundMessageEventSupabase: logSupabaseInboundMessageEvent,
   getSystemFlags,
   getSystemValue,
   info,
@@ -633,6 +637,30 @@ function buildInboundIdempotencyKey(extracted = {}) {
   );
 }
 
+async function resolveSupabaseInboundMessageEventId(provider_message_sid) {
+  const sid = clean(provider_message_sid);
+  if (!sid) return null;
+
+  const supabase = runtimeDeps.getSupabaseClient?.();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("message_events")
+    .select("id")
+    .eq("provider_message_sid", sid)
+    .maybeSingle();
+
+  if (error) {
+    safeWarn("textgrid.inbound_supabase_event_lookup_failed", {
+      provider_message_sid: sid,
+      error: error?.message || "unknown",
+    });
+    return null;
+  }
+
+  return data?.id || null;
+}
+
 // Logger guards — prevent any logger throw from escaping handler segments.
 function safeInfo(event, meta = {}) {
   try { runtimeDeps.info(event, meta); } catch {}
@@ -785,6 +813,10 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   const { auto_reply_enabled: system_auto_reply_enabled, followup_enabled: system_followup_enabled } =
     await runtimeDeps.getSystemFlags(["auto_reply_enabled", "followup_enabled"]);
   const system_auto_reply_mode = await runtimeDeps.getSystemValue("auto_reply_mode");
+  const podio_sync_enabled = asBoolean(
+    await runtimeDeps.getSystemValue("podio_sync_enabled"),
+    false
+  );
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
     ? { mode: "disabled", source: "queue_emergency_stop" }
@@ -942,34 +974,12 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     // ── SEGMENT: brain_lookup ───────────────────────────────────────────────
     let context;
     try {
-      const fallback_overridden =
-        runtimeDeps.loadContextWithFallback !== defaultDeps.loadContextWithFallback;
-
-      if (fallback_overridden) {
-        context = await runtimeDeps.loadContextWithFallback({
-          inbound_from,
-          inbound_to,
-          create_brain_if_missing: true,
-        });
-      } else {
-        context = await runtimeDeps.loadContext({
-          inbound_from,
-          create_brain_if_missing: true,
-        });
-
-        if (
-          !context?.found &&
-          clean(context?.reason || "phone_not_found").toLowerCase() === "phone_not_found"
-        ) {
-          context = await runtimeDeps.loadContextWithFallback({
-            inbound_from,
-            inbound_to,
-            create_brain_if_missing: true,
-            primary_context: context,
-            loadContextImpl: runtimeDeps.loadContext,
-          });
-        }
-      }
+      context = await runtimeDeps.loadContextWithFallback({
+        inbound_from,
+        inbound_to,
+        create_brain_if_missing: podio_sync_enabled,
+        loadContextImpl: runtimeDeps.loadContext,
+      });
     } catch (err) {
       return failStepAndReturn("textgrid_inbound_failed_brain_lookup", err);
     }
@@ -1098,32 +1108,39 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         ? runtimeDeps.buildOfferStageMetadata(offer_stage_ai_result)
         : {};
 
-      const inbound_event = await runtimeDeps.logInboundMessageEvent({
-        brain_item,
-        conversation_item_id: brain_id,
-        master_owner_id,
-        prospect_id,
-        property_id,
-        market_id,
-        phone_item_id,
-        inbound_number_item_id,
-        sms_agent_id,
-        property_address,
-        message_body,
-        provider_message_id: extracted.message_id,
-        raw_carrier_status: extracted.status || "received",
-        received_at: extracted.received_at || payload?.http_received_at || new Date().toISOString(),
-        processed_by: "Manual Sender",
-        source_app: "External API",
-        trigger_name: "textgrid-inbound",
-        inbound_from,
-        inbound_to,
-        prior_message_id,
-        response_to_message_id,
-        stage_before,
-        metadata: { ...inbound_context_match_metadata, ...offer_ai_metadata },
-      });
-      inbound_message_event_id = inbound_event?.item_id || null;
+      if (podio_sync_enabled) {
+        const inbound_event = await runtimeDeps.logInboundMessageEvent({
+          brain_item,
+          conversation_item_id: brain_id,
+          master_owner_id,
+          prospect_id,
+          property_id,
+          market_id,
+          phone_item_id,
+          inbound_number_item_id,
+          sms_agent_id,
+          property_address,
+          message_body,
+          provider_message_id: extracted.message_id,
+          raw_carrier_status: extracted.status || "received",
+          received_at: extracted.received_at || payload?.http_received_at || new Date().toISOString(),
+          processed_by: "Manual Sender",
+          source_app: "External API",
+          trigger_name: "textgrid-inbound",
+          inbound_from,
+          inbound_to,
+          prior_message_id,
+          response_to_message_id,
+          stage_before,
+          metadata: { ...inbound_context_match_metadata, ...offer_ai_metadata },
+        });
+        inbound_message_event_id = inbound_event?.item_id || null;
+      } else {
+        inbound_message_event_id =
+          (await resolveSupabaseInboundMessageEventId(extracted.message_id)) ||
+          extracted.message_id ||
+          null;
+      }
       message_event_enriched = true;
     } catch (err) {
       emitInboundTrace("TEXTGRID_INBOUND_MESSAGE_EVENT_CREATE_ERROR", {
@@ -1327,25 +1344,27 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     // Write brain activity, master-owner timestamps, and stage/language/profile
     // updates in parallel.
     try {
-      await runtimeDeps.updateMasterOwnerAfterInbound({
-        master_owner_id,
-        received_at: new Date().toISOString(),
-      });
-
-      if (brain_id) {
-        await runtimeDeps.updateBrainAfterInbound({
-          brain_id,
-          message_body,
-          follow_up_trigger_state:
-            deterministic_state?.follow_up_trigger_state || "AI Running",
-          deterministic_state,
-          extra_fields: {
-            "master-owner": master_owner_id || undefined,
-            prospect: prospect_id || undefined,
-            ...(property_id ? { properties: [property_id] } : {}),
-            ...(sms_agent_id ? { "sms-agent": sms_agent_id } : {}),
-          },
+      if (podio_sync_enabled) {
+        await runtimeDeps.updateMasterOwnerAfterInbound({
+          master_owner_id,
+          received_at: new Date().toISOString(),
         });
+
+        if (brain_id) {
+          await runtimeDeps.updateBrainAfterInbound({
+            brain_id,
+            message_body,
+            follow_up_trigger_state:
+              deterministic_state?.follow_up_trigger_state || "AI Running",
+            deterministic_state,
+            extra_fields: {
+              "master-owner": master_owner_id || undefined,
+              prospect: prospect_id || undefined,
+              ...(property_id ? { properties: [property_id] } : {}),
+              ...(sms_agent_id ? { "sms-agent": sms_agent_id } : {}),
+            },
+          });
+        }
       }
     } catch (err) {
       return failStepAndReturn("textgrid_inbound_failed_prospect_resolution", err);
@@ -1357,13 +1376,15 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
 
     // ── SEGMENT: market_resolution ────────────────────────────────────────
     // Fetch the latest open offer to determine offer-progression vs. creation.
-    let existing_offer;
+    let existing_offer = null;
     try {
-      existing_offer = await runtimeDeps.findLatestOpenOffer({
-        prospect_id,
-        master_owner_id,
-        property_id,
-      });
+      if (podio_sync_enabled) {
+        existing_offer = await runtimeDeps.findLatestOpenOffer({
+          prospect_id,
+          master_owner_id,
+          property_id,
+        });
+      }
     } catch (err) {
       return failStepAndReturn("textgrid_inbound_failed_market_resolution", err);
     }
@@ -1389,64 +1410,72 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         "manual_review",
       ].includes(offer_route);
 
-      maybe_offer_progress = existing_offer
-        ? await runtimeDeps.maybeProgressOfferStatus({
-            offer_item_id: existing_offer.item_id,
-            message: message_body,
-            classification,
-            notes: message_body,
-          })
-        : { ok: true, updated: false, reason: "no_existing_open_offer" };
+      if (podio_sync_enabled) {
+        maybe_offer_progress = existing_offer
+          ? await runtimeDeps.maybeProgressOfferStatus({
+              offer_item_id: existing_offer.item_id,
+              message: message_body,
+              classification,
+              notes: message_body,
+            })
+          : { ok: true, updated: false, reason: "no_existing_open_offer" };
 
-      initial_offer = maybe_offer_progress?.updated
-        ? {
-            ok: true,
-            created: false,
-            reason: "existing_offer_progressed",
-            existing_offer_item_id: existing_offer?.item_id || null,
-            progress: maybe_offer_progress,
-          }
-        : defer_immediate_offer_create
+        initial_offer = maybe_offer_progress?.updated
           ? {
               ok: true,
               created: false,
-              reason: `offer_route_${offer_route}_deferred`,
+              reason: "existing_offer_progressed",
+              existing_offer_item_id: existing_offer?.item_id || null,
+              progress: maybe_offer_progress,
             }
-        : await runtimeDeps.maybeCreateOfferFromContext({
+          : defer_immediate_offer_create
+            ? {
+                ok: true,
+                created: false,
+                reason: `offer_route_${offer_route}_deferred`,
+              }
+          : await runtimeDeps.maybeCreateOfferFromContext({
+              context,
+              classification,
+              route,
+              message: message_body,
+              notes: message_body,
+              created_by: "Inbound Offer Engine",
+            });
+
+        underwriting_transfer = offer_route === "underwriting"
+          ? await runtimeDeps.transferDealToUnderwriting({
+              owner: context.items?.master_owner_item || null,
+              property: context.items?.property_item || null,
+              prospect: context.items?.prospect_item || null,
+              phone: context.items?.phone_item || null,
+              sellerMessage: message_body,
+              routeReason: offer_routing?.reason || offer_routing?.meta?.underwriting_reason || "offer_route_underwriting",
+              dealStrategy: route?.deal_strategy || context.summary?.deal_strategy || null,
+              sourceMessageEventId: inbound_message_event_id,
+            })
+          : null;
+      } else {
+        maybe_offer_progress = { ok: true, updated: false, reason: "podio_sync_disabled" };
+        initial_offer = { ok: true, created: false, reason: "podio_sync_disabled" };
+        underwriting_transfer = null;
+      }
+
+      underwriting = podio_sync_enabled
+        ? await runtimeDeps.maybeUpsertUnderwritingFromInbound({
             context,
             classification,
             route,
             message: message_body,
+            offer_item_id:
+              initial_offer?.offer?.offer_item_id ||
+              initial_offer?.existing_offer_item_id ||
+              existing_offer?.item_id ||
+              null,
+            source_channel: "SMS",
             notes: message_body,
-            created_by: "Inbound Offer Engine",
-          });
-
-      underwriting_transfer = offer_route === "underwriting"
-        ? await runtimeDeps.transferDealToUnderwriting({
-            owner: context.items?.master_owner_item || null,
-            property: context.items?.property_item || null,
-            prospect: context.items?.prospect_item || null,
-            phone: context.items?.phone_item || null,
-            sellerMessage: message_body,
-            routeReason: offer_routing?.reason || offer_routing?.meta?.underwriting_reason || "offer_route_underwriting",
-            dealStrategy: route?.deal_strategy || context.summary?.deal_strategy || null,
-            sourceMessageEventId: inbound_message_event_id,
           })
-        : null;
-
-      underwriting = await runtimeDeps.maybeUpsertUnderwritingFromInbound({
-        context,
-        classification,
-        route,
-        message: message_body,
-        offer_item_id:
-          initial_offer?.offer?.offer_item_id ||
-          initial_offer?.existing_offer_item_id ||
-          existing_offer?.item_id ||
-          null,
-        source_channel: "SMS",
-        notes: message_body,
-      });
+        : { ok: true, skipped: true, reason: "podio_sync_disabled" };
 
       const legacy_auto_reply_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
         inbound_event: { item_id: inbound_message_event_id, provider_message_id: extracted.message_id, from: inbound_from, to: inbound_to },
@@ -1506,11 +1535,27 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           dry_run: Boolean(dry_run),
         });
         if (intelligence_snapshot?.referral_detected) {
-          await runtimeDeps.persistSellerContactReferral({
+          const referral_persist = await runtimeDeps.persistSellerContactReferral({
             supabaseClient: runtimeDeps.getSupabaseClient?.(),
             referral: intelligence_snapshot.referral,
             dry_run: Boolean(dry_run),
           });
+          if (
+            intelligence_snapshot?.referral?.referred_automatic_send_allowed
+            || intelligence_snapshot?.referred_automatic_send_allowed
+          ) {
+            await runtimeDeps.executeReferralAutomation({
+              supabaseClient: runtimeDeps.getSupabaseClient?.(),
+              relationship: intelligence_snapshot.referral,
+              context,
+              inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
+              inboundEventId: inbound_message_event_id || extracted.message_id,
+              referralId: referral_persist?.referral_id || null,
+              execution_allowed,
+              auto_reply_mode: auto_reply_mode_final,
+              dry_run: Boolean(dry_run),
+            });
+          }
         }
       } catch (persistErr) {
         safeWarn("textgrid.inbound_intelligence_persist_failed", {
@@ -1756,7 +1801,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         }
       }
 
-      if (shouldCreateBrainForInbound({ brain_id, seller_stage_reply, context, route })) {
+      if (podio_sync_enabled && shouldCreateBrainForInbound({ brain_id, seller_stage_reply, context, route })) {
         brain_item = await runtimeDeps.createBrain({
           master_owner_id,
           prospect_id,
@@ -1795,7 +1840,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         }
       }
 
-      if (seller_stage_reply?.brain_stage && brain_id) {
+      if (podio_sync_enabled && seller_stage_reply?.brain_stage && brain_id) {
         await runtimeDeps.updateBrainStage({ brain_id, stage: seller_stage_reply.brain_stage });
       }
 
@@ -1805,14 +1850,16 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         ? { ok: true, queued: false, reason: "system_control_disabled" }
         : auto_reply_plan?.should_queue_reply
         ? { ok: true, queued: false, reason: "suppressed_by_auto_reply_plan" }
-        : await runtimeDeps.maybeQueueUnderwritingFollowUp({
-            inbound_from,
-            underwriting,
-            classification,
-            route,
-            context,
-            message: message_body,
-          });
+        : podio_sync_enabled
+          ? await runtimeDeps.maybeQueueUnderwritingFollowUp({
+              inbound_from,
+              underwriting,
+              classification,
+              route,
+              context,
+              message: message_body,
+            })
+          : { ok: true, queued: false, reason: "podio_sync_disabled" };
 
       const underwriting_offer_ready =
         underwriting?.strategy?.auto_offer_ready === true ||
@@ -1820,6 +1867,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         underwriting_follow_up?.offer_ready === true;
 
       maybe_offer =
+        !podio_sync_enabled ||
         defer_immediate_offer_create ||
         initial_offer?.created ||
         initial_offer?.existing_offer_item_id ||
@@ -1846,34 +1894,38 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         existing_offer?.item_id ||
         null;
 
-      contract = await runtimeDeps.maybeCreateContractFromAcceptedOffer({
-        offer_item: existing_offer || null,
-        offer_item_id: active_offer_item_id,
-        offer_progress: maybe_offer_progress,
-        context,
-        route,
-        underwriting,
-        notes: message_body,
-        source_message: message_body,
-        auto_send: false,
-        dry_run: false,
-      });
+      contract = podio_sync_enabled
+        ? await runtimeDeps.maybeCreateContractFromAcceptedOffer({
+            offer_item: existing_offer || null,
+            offer_item_id: active_offer_item_id,
+            offer_progress: maybe_offer_progress,
+            context,
+            route,
+            underwriting,
+            notes: message_body,
+            source_message: message_body,
+            auto_send: false,
+            dry_run: false,
+          })
+        : null;
 
-      pipeline = await runtimeDeps.syncPipelineState({
-        create_if_missing: shouldCreatePipelineForInbound({
-          seller_stage_reply,
-          route,
-          active_offer_item_id,
-          contract_item_id: contract?.contract_item_id || null,
-        }),
-        property_id,
-        master_owner_id,
-        prospect_id,
-        conversation_item_id: brain_id,
-        offer_item_id: active_offer_item_id,
-        contract_item_id: contract?.contract_item_id || null,
-        notes: `Inbound SMS processed${route?.stage ? ` at stage ${route.stage}` : ""}.`,
-      });
+      pipeline = podio_sync_enabled
+        ? await runtimeDeps.syncPipelineState({
+            create_if_missing: shouldCreatePipelineForInbound({
+              seller_stage_reply,
+              route,
+              active_offer_item_id,
+              contract_item_id: contract?.contract_item_id || null,
+            }),
+            property_id,
+            master_owner_id,
+            prospect_id,
+            conversation_item_id: brain_id,
+            offer_item_id: active_offer_item_id,
+            contract_item_id: contract?.contract_item_id || null,
+            notes: `Inbound SMS processed${route?.stage ? ` at stage ${route.stage}` : ""}.`,
+          })
+        : null;
 
       if (inbound_message_event_id) {
         const suggested_reply_preview = seller_stage_reply?.rendered_text || "";
@@ -1950,31 +2002,32 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           classification?.detected_intent ||
           "unclear";
 
-        await runtimeDeps.logInboundMessageEvent({
-          record_item_id: inbound_message_event_id,
-          brain_item,
-          conversation_item_id: brain_id,
-          master_owner_id,
-          prospect_id,
-          property_id,
-          market_id,
-          phone_item_id,
-          inbound_number_item_id,
-          sms_agent_id,
-          property_address,
-          message_body,
-          provider_message_id: extracted.message_id,
-          raw_carrier_status: extracted.status || "received",
-          received_at:
-            extracted.received_at ||
-            payload?.http_received_at ||
-            new Date().toISOString(),
-          processed_by: "Manual Sender",
-          source_app: "External API",
-          trigger_name: "textgrid-inbound",
-          inbound_from,
-          inbound_to,
-          prior_message_id,
+        if (podio_sync_enabled) {
+          await runtimeDeps.logInboundMessageEvent({
+            record_item_id: inbound_message_event_id,
+            brain_item,
+            conversation_item_id: brain_id,
+            master_owner_id,
+            prospect_id,
+            property_id,
+            market_id,
+            phone_item_id,
+            inbound_number_item_id,
+            sms_agent_id,
+            property_address,
+            message_body,
+            provider_message_id: extracted.message_id,
+            raw_carrier_status: extracted.status || "received",
+            received_at:
+              extracted.received_at ||
+              payload?.http_received_at ||
+              new Date().toISOString(),
+            processed_by: "Manual Sender",
+            source_app: "External API",
+            trigger_name: "textgrid-inbound",
+            inbound_from,
+            inbound_to,
+            prior_message_id,
           response_to_message_id,
           stage_before,
           current_stage: intelligence_patch.current_stage || route?.stage || null,
@@ -2080,6 +2133,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             second_pass_authoritative: true,
           },
         });
+        }
         try {
           const supabase_payload = {
             message_id: extracted.message_id,
@@ -2354,6 +2408,71 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       safeWarn("textgrid.inbound_automation_emit_failed", {
         message_id: extracted.message_id,
         error: automation_error?.message || "automation_emit_failed",
+      });
+    }
+
+    try {
+      const { emitNotificationFromBusinessEvent } = await import(
+        "@/lib/domain/notifications/notification-emitter.js"
+      );
+      const thread_key =
+        intelligence_snapshot?.source_thread_key ||
+        context?.thread_key ||
+        inbound_from ||
+        null;
+      const detected_intent =
+        intelligence_snapshot?.canonical_intent ||
+        classification?.primary_intent ||
+        classification?.detected_intent ||
+        classification?.inbound_intent ||
+        null;
+      const compliance_flag = clean(classification?.compliance_flag).toLowerCase();
+      const lead_temperature = clean(
+        classification?.lead_temperature ||
+          intelligence_snapshot?.metadata?.lead_temperature
+      ).toLowerCase();
+
+      let inbox_event_type = "inbox_message_received";
+      if (compliance_flag.includes("opt_out") || compliance_flag.includes("stop")) {
+        inbox_event_type = "inbox_opt_out_received";
+      } else if (compliance_flag.includes("wrong_number")) {
+        inbox_event_type = "inbox_wrong_number";
+      } else if (lead_temperature === "hot" || detected_intent === "hot_lead") {
+        inbox_event_type = "inbox_hot_lead";
+      } else if (detected_intent === "asking_price" || detected_intent === "price_captured") {
+        inbox_event_type = "inbox_price_captured";
+      } else if (detected_intent === "ownership_confirmed") {
+        inbox_event_type = "inbox_ownership_confirmed";
+      } else if (detected_intent === "needs_call" || detected_intent === "call_request") {
+        inbox_event_type = "inbox_needs_call";
+      } else if (
+        runtimeDeps.isNegativeReply?.(message_body) ||
+        detected_intent === "negative" ||
+        classification?.sentiment === "negative"
+      ) {
+        inbox_event_type = "inbox_negative_sentiment";
+      }
+
+      await emitNotificationFromBusinessEvent({
+        eventType: inbox_event_type,
+        propertyId: property_id || null,
+        participantId: thread_key,
+        sourceEntityType: "thread",
+        sourceEntityId: thread_key,
+        titleVars: { thread_key: thread_key || "thread" },
+        description: clean(message_body).slice(0, 240) || null,
+        metrics: {
+          intent: detected_intent,
+          lead_temperature,
+          compliance_flag: compliance_flag || null,
+          provider_message_sid: clean(extracted.message_id) || null,
+        },
+        group: inbox_event_type === "inbox_message_received",
+      });
+    } catch (notification_error) {
+      safeWarn("textgrid.inbound_notification_emit_failed", {
+        message_id: extracted.message_id,
+        error: notification_error?.message || "notification_emit_failed",
       });
     }
 

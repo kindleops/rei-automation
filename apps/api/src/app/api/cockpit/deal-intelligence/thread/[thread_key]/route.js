@@ -36,23 +36,28 @@ async function handleRequest(request, params, isPost = false) {
   const canonical_e164 = url.searchParams.get('canonical_e164') || payload.canonical_e164
   const prospect_id = url.searchParams.get('prospect_id') || payload.prospect_id
   const master_owner_id = url.searchParams.get('master_owner_id') || payload.master_owner_id
+  const summaryOnly = ['1', 'true', 'yes'].includes(String(
+    url.searchParams.get('summary') || url.searchParams.get('summary_only') || payload.summary || '',
+  ).trim().toLowerCase())
 
   try {
     const cacheKey = [
       'deal-dossier',
+      summaryOnly ? 'summary' : 'full',
       thread_key,
       property_id || '',
       prospect_id || '',
       master_owner_id || '',
       canonical_e164 || '',
     ].join(':')
-    const dossier = await readThroughCache(cacheKey, 8_000, () => getUniversalDealDossier({
+    const dossier = await readThroughCache(cacheKey, summaryOnly ? 15_000 : 8_000, () => getUniversalDealDossier({
       thread_key,
       property_id,
       prospect_id,
       master_owner_id,
       canonical_e164,
       debug,
+      summary_only: summaryOnly,
     }))
 
     return NextResponse.json(

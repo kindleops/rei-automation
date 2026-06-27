@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 
 import { FullscreenAppShell } from '../shared/FullscreenAppShell'
 import { InboxView } from '../views/inbox/InboxView'
@@ -155,6 +155,22 @@ const workflowStudioRoute = defineRoute<null>({
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
+// DEV-ONLY: standalone Comp Intelligence V4 harness for deterministic, real-data
+// review of any property by id/theme/pane. Never registered in production builds.
+const CompIntelligenceV4Harness = lazy(
+  () => import('../views/comp-intelligence-v4/CompIntelligenceV4Harness'),
+)
+const devCompIntelligenceV4Route = defineRoute<null>({
+  path: '/dev/comp-v4',
+  title: 'NEXUS | Comp Intelligence V4 (dev)',
+  loader: async () => null,
+  render: () => (
+    <Suspense fallback={null}>
+      <CompIntelligenceV4Harness />
+    </Suspense>
+  ),
+})
+
 const entityGraphRoute = defineRoute<null>({
   path: '/entity-graph',
   title: 'NEXUS | Entity Graph',
@@ -235,6 +251,7 @@ const routes = [
   entityGraphOrganizationRoute,
   entityGraphMarketRoute,
   entityGraphZipRoute,
+  ...(import.meta.env.DEV ? [devCompIntelligenceV4Route] : []),
 ]
 
 const legacyRouteAliases: Record<string, string> = {

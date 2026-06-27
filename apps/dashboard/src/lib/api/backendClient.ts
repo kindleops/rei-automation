@@ -194,8 +194,10 @@ const GET_CACHE_TTL_MS: Record<string, number> = {
   '/api/cockpit/queue/status': 8_000,
   '/api/cockpit/queue/page': 6_000,
   '/api/cockpit/queue/processor-health': 10_000,
-  '/api/cockpit/inbox/counts': 250,
-  '/api/cockpit/inbox/live': 250,
+  '/api/cockpit/inbox/counts': 60_000,
+  '/api/cockpit/inbox/live': 2_000,
+  '/api/cockpit/notifications': 30_000,
+  '/api/cockpit/notifications/preferences': 120_000,
   '/api/cockpit/templates/list': 60_000,
   '/api/cockpit/dev/runtime-identity': 300_000,
 }
@@ -338,6 +340,19 @@ async function executeBackendRequest<T>(
   })
 
   if (!response.ok) {
+    if (response.status === 423) {
+      const b = (body as Record<string, unknown>) ?? {}
+      return {
+        ok: true,
+        status: 423,
+        data: {
+          ...b,
+          coordination_state: true,
+          locked: true,
+        } as T,
+      }
+    }
+
     if (parseError && (bodyText.includes('<!DOCTYPE') || bodyText.includes('<html'))) {
       const nextMessage = bodyText.match(/"message":"((?:\\.|[^"\\])*)"/)?.[1]?.replace(/\\u003c/g, '<').replace(/\\n/g, '\n')
       const hint = nextMessage
@@ -762,6 +777,16 @@ export function fetchInboxThreadHydration(
   signal?: AbortSignal,
 ): Promise<BackendResult<unknown>> {
   return callBackend(`/api/cockpit/inbox/thread-hydration?${queryString}`, { signal })
+}
+
+export function fetchPropertyParticipants(
+  propertyId: string,
+  selectedPhone?: string | null,
+  signal?: AbortSignal,
+): Promise<BackendResult<unknown>> {
+  const params = new URLSearchParams({ property_id: propertyId })
+  if (selectedPhone) params.set('selected_phone', selectedPhone)
+  return callBackend(`/api/cockpit/inbox/property-participants?${params.toString()}`, { signal })
 }
 
 export function fetchDealContextList(

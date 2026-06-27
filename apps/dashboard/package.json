@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync:sounds": "mkdir -p public/sounds && cp ../../sounds/*.mp3 public/sounds/",
+    "predev": "npm run sync:sounds",
     "dev": "vite",
+    "prebuild": "npm run sync:sounds",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

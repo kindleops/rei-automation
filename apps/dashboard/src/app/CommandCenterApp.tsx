@@ -1,10 +1,12 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { pushRoutePath, replaceRoutePath, useRoutePath } from './router'
 import { resolveRoute } from './routes'
 import { useCommandGrammar, type CommandBinding } from '../shared/command-grammar'
 import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../shared/copilot'
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
-import { NotificationToasts, NotificationCenter } from '../shared/NotificationToast'
+import { NotificationToasts } from '../shared/NotificationToast'
+import { NotificationIntelligenceProvider, useNotificationIntelligence } from '../domain/notifications/useNotificationIntelligence'
+import { LeadCommandNotificationBell, LeadCommandNotificationCenter } from '../modules/notifications/LeadCommandNotificationCenter'
 import { playSound } from '../shared/sounds'
 import { ErrorBoundary } from '../shared/ErrorBoundary'
 import { DevRuntimeDiagnostics } from '../components/dev/DevRuntimeDiagnostics'
@@ -144,6 +146,34 @@ const canonicalizeRoutePath = (target?: string) => {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
+const GlobalNotificationShell = ({ children, routePath }: { children: ReactNode; routePath: string }) => {
+  const [notifCenterOpen, setNotifCenterOpen] = useState(false)
+  const { unreadCount } = useNotificationIntelligence()
+  const showGlobalBell = routePath !== '/inbox'
+
+  return (
+    <>
+      {children}
+      {showGlobalBell ? (
+        <div className="nx-os-notif-bell">
+          <LeadCommandNotificationBell
+            unreadCount={unreadCount}
+            active={notifCenterOpen}
+            onClick={() => setNotifCenterOpen((open) => !open)}
+          />
+        </div>
+      ) : null}
+      {showGlobalBell ? (
+        <LeadCommandNotificationCenter
+          open={notifCenterOpen}
+          onClose={() => setNotifCenterOpen(false)}
+          anchorTop={48}
+        />
+      ) : null}
+    </>
+  )
+}
+
 export const CommandCenterApp = () => {
   const path = useRoutePath()
   const route = resolveRoute(path)
@@ -160,8 +190,6 @@ export const CommandCenterApp = () => {
   const [copilotOpen, setCopilotOpen] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
   const [briefingDigest, setBriefingDigest] = useState<BriefingDigest | null>(null)
-  const [notifCenterOpen, setNotifCenterOpen] = useState(false)
-
   const commandContext = useMemo<GlobalCommandSearchContext>(() => ({
     ...commandContextOverrides,
     routePath: route.path,
@@ -539,59 +567,58 @@ export const CommandCenterApp = () => {
   // ── Ready State — Command-First Layout ─────────────────────────────────
 
   return (
-    <div className="nx-os">
-      {route.path !== '/map' && activeNav && (
-        <div className="nx-room-label">
-          <span className="nx-room-label__name">{activeNav.room}</span>
+    <NotificationIntelligenceProvider>
+      <GlobalNotificationShell routePath={route.path}>
+        <div className="nx-os">
+          {route.path !== '/map' && activeNav && (
+            <div className="nx-room-label">
+              <span className="nx-room-label__name">{activeNav.room}</span>
+            </div>
+          )}
+
+          <main className="nx-stage">
+            <ErrorBoundary label={route.title} resetKey={route.path}>
+              {route.render(routeState.data)}
+            </ErrorBoundary>
+          </main>
+
+          <GlobalCommandOverlay
+            open={cmdOpen}
+            initialQuery={cmdInitialQuery}
+            context={commandContext}
+            onClose={closeCmd}
+            onExecute={executeGlobalCommand}
+          />
+
+          {grammarState.pending && (
+            <div className="nx-grammar-hint">
+              <kbd>{grammarState.pending}</kbd>
+              <span>waiting for next key…</span>
+            </div>
+          )}
+
+          <NotificationToasts />
+
+          <CopilotShell
+            open={copilotOpen}
+            context={copilotContext}
+            onClose={() => setCopilotOpen(false)}
+            onToggle={() => setCopilotOpen((previous) => {
+              if (!previous) playSound('copilot-wake')
+              return !previous
+            })}
+            onAction={handleCopilotAction}
+          />
+
+          <BriefingPanel
+            open={briefingOpen}
+            digest={briefingDigest}
+            onClose={() => setBriefingOpen(false)}
+          />
+
+          <DevRuntimeDiagnostics />
         </div>
-      )}
-
-      <main className="nx-stage">
-        <ErrorBoundary label={route.title} resetKey={route.path}>
-          {route.render(routeState.data)}
-        </ErrorBoundary>
-      </main>
-
-      <GlobalCommandOverlay
-        open={cmdOpen}
-        initialQuery={cmdInitialQuery}
-        context={commandContext}
-        onClose={closeCmd}
-        onExecute={executeGlobalCommand}
-      />
-
-      {grammarState.pending && (
-        <div className="nx-grammar-hint">
-          <kbd>{grammarState.pending}</kbd>
-          <span>waiting for next key…</span>
-        </div>
-      )}
-
-      <NotificationToasts />
-
-      <CopilotShell
-        open={copilotOpen}
-        context={copilotContext}
-        onClose={() => setCopilotOpen(false)}
-        onToggle={() => setCopilotOpen((previous) => {
-          if (!previous) playSound('copilot-wake')
-          return !previous
-        })}
-        onAction={handleCopilotAction}
-      />
-
-      <BriefingPanel
-        open={briefingOpen}
-        digest={briefingDigest}
-        onClose={() => setBriefingOpen(false)}
-      />
-
-      <NotificationCenter
-        open={notifCenterOpen}
-        onClose={() => setNotifCenterOpen(false)}
-      />
-
-      <DevRuntimeDiagnostics />
-    </div>
+      </GlobalNotificationShell>
+    </NotificationIntelligenceProvider>
   )
 }

@@ -1,5 +1,6 @@
 import {
   isFailedDeliveryStatus,
+  isOutboundLastWithoutReply,
   resolveOutboundReplyState,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 
@@ -333,6 +334,27 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
       workflowRow: existingState,
     });
     return outboundState.inbox_bucket;
+  }
+
+  const lastInboundAt =
+    messageEvent.received_at ||
+    existingState.last_inbound_at ||
+    existingState.latest_message_at;
+  const lastOutboundAt = existingState.last_outbound_at || existingState.lastOutboundAt;
+  const hasOutboundAfterInbound = !isOutboundLastWithoutReply({ lastOutboundAt, lastInboundAt });
+  const pendingQueue = Number(existingState.pending_queue_count || 0) > 0;
+  const blockedQueue = Number(existingState.blocked_queue_count || 0) > 0;
+  const autoReplyQueued = pendingQueue || blockedQueue || ["queued", "scheduled", "approval", "processing"].includes(
+    lower(existingState.queue_status || ""),
+  );
+  const handled = existingState.is_read === true || existingState.is_actioned === true;
+  const terminallySuppressed =
+    existingState.is_suppressed === true ||
+    lower(existingState.disposition) === "suppressed" ||
+    lower(existingState.suppression_status) === "suppressed";
+
+  if (hasOutboundAfterInbound || autoReplyQueued || handled || terminallySuppressed) {
+    return null;
   }
 
   if (PRIORITY_INTENTS.includes(primary) || PRIORITY_OBJECTIONS.includes(objection)) {

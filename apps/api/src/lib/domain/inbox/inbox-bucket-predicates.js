@@ -30,15 +30,19 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       return bucket === "priority";
     case "new_replies":
       if (["dead", "suppressed"].includes(bucket)) return false;
+      if (normalizeDirection(thread.latest_message_direction || thread.direction) !== "inbound") return false;
+      if (Number(thread.pending_queue_count || 0) > 0) return false;
+      if (!isOutboundLastWithoutReply({
+        lastOutboundAt: thread.last_outbound_at || thread.lastOutboundAt,
+        lastInboundAt: thread.last_inbound_at || thread.lastInboundAt || thread.latest_message_at,
+      })) return false;
       if (bucket === "new_replies") return true;
       {
-        if (normalizeDirection(thread.latest_message_direction || thread.direction) !== "inbound") return false;
         const inMs = parseTimestampMs(thread.last_inbound_at || thread.latest_message_at);
         if (!inMs) return false;
-        const within = (nowMs - inMs) <= WAITING_REPLY_WINDOW_MS;
         const notReadOrActioned = thread.is_read !== true && !thread.is_actioned;
-        const notTerminal = !thread.opt_out && !thread.wrong_number && !thread.not_interested;
-        return within && notReadOrActioned && notTerminal;
+        const notTerminal = !thread.opt_out && !thread.wrong_number && !thread.not_interested && thread.is_suppressed !== true;
+        return notReadOrActioned && notTerminal;
       }
     case "needs_review":
       return bucket === "needs_review" || thread.needs_review === true;

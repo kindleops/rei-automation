@@ -1740,6 +1740,15 @@ export async function executeInboundAutomationDecision({
     use_case_template: selected_use_case,
     character_count: rendered_message_text.length,
     thread_key: clean(threadKey) || normalized_to_phone,
+    seller_first_name:
+      clean(context?.summary?.seller_first_name) ||
+      clean(context?.summary?.owner_first_name) ||
+      null,
+    seller_display_name:
+      clean(context?.summary?.owner_name) ||
+      clean(context?.summary?.seller_display_name) ||
+      null,
+    campaign_id: clean(context?.summary?.campaign_id) || null,
     template_source: "sms_templates",
     rendered_message: rendered_message_text,
     priority: base_decision.route_hint === "soft_followup" ? "medium" : "normal",

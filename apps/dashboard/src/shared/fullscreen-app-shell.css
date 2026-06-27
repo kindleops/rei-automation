@@ -143,6 +143,7 @@
 .nx-fullscreen-app-shell .ecc,
 .nx-fullscreen-app-shell .wfs2,
 .nx-fullscreen-app-shell .aic-workspace,
+.nx-fullscreen-app-shell .closing-desk-view,
 .nx-fullscreen-app-shell .nx-inbox-table-view,
 .nx-fullscreen-app-shell .nx-chat-container,
 .nx-fullscreen-app-shell .nx-sidebar-rebuilt {
@@ -162,7 +163,8 @@
 .nx-fullscreen-app-shell.is-view-calendar .nx-workspace-surface--calendar,
 .nx-fullscreen-app-shell.is-view-campaigns .nx-workspace-surface--campaigns,
 .nx-fullscreen-app-shell.is-view-email .nx-workspace-surface--campaigns,
-.nx-fullscreen-app-shell.is-view-workflow_studio .nx-workspace-surface--workflow-studio {
+.nx-fullscreen-app-shell.is-view-workflow_studio .nx-workspace-surface--workflow-studio,
+.nx-fullscreen-app-shell.is-view-closing_desk .nx-workspace-surface--closing-desk {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -170,6 +172,19 @@
   height: 100%;
   overflow: hidden;
   padding: 0;
+}
+
+/* Comp Intelligence workspace: map + property panel side-by-side */
+.nx-fullscreen-app-shell.is-view-comp_intelligence [data-comp-intelligence="true"].ci-workspace {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  overflow: hidden;
 }
 
 /* Command map fills the shell edge-to-edge — no rounded card chrome or parent bleed */

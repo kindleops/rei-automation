@@ -272,7 +272,7 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       ? fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100)
       : Promise.resolve({ data: apiOwners }),
     needsTextgridFetch
-      ? supabase.from('textgrid_numbers').select('number,phone_number,market,sender_market,status,state,paused,is_paused,active,is_active')
+      ? supabase.from('textgrid_numbers').select('id,phone_number,friendly_name,market,state,is_active,daily_cap')
       : Promise.resolve({ data: apiTextgridNumbers, error: null }),
   ])
 

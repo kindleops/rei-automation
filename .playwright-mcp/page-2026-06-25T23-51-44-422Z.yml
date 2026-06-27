@@ -1,0 +1,116 @@
+- generic [ref=e3]:
+  - generic: Comp Intelligence
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e62]:
+        - status [ref=e65]:
+          - strong [ref=e66]: Subject coordinates unresolved
+          - paragraph [ref=e67]: Exact parcel coordinates are required for spatial evidence. Decision intelligence remains available in the right panel.
+        - generic [ref=e68]:
+          - banner [ref=e69]:
+            - generic [ref=e70]:
+              - heading "Subject property" [level=1] [ref=e71]
+              - generic [ref=e72]:
+                - generic [ref=e73]: Lane unresolved
+                - generic [ref=e74]: Lane confidence —
+            - generic [ref=e75]:
+              - generic [ref=e76]: Loading
+              - generic [ref=e77]: —
+              - generic [ref=e78]: Confidence —
+              - generic [ref=e79]: Universe —
+              - generic [ref=e80]: ESS —
+              - generic [ref=e81]: Basis —
+              - generic [ref=e82]: — / —
+              - generic [ref=e83]: Live Authorization Off
+              - generic [ref=e84]: Loading
+          - tablist "Intelligence sections" [ref=e85]:
+            - tab "Decision" [selected] [ref=e86] [cursor=pointer]
+            - tab "Valuation Universes" [ref=e87] [cursor=pointer]
+            - tab "Transaction Evidence" [ref=e88] [cursor=pointer]
+            - tab "Strategies" [ref=e89] [cursor=pointer]
+            - tab "Model Health" [ref=e90] [cursor=pointer]
+            - tab "Analyst Lab" [ref=e91] [cursor=pointer]
+          - tabpanel [ref=e92]:
+            - region "Decision overview" [ref=e93]:
+              - generic [ref=e94]:
+                - article [ref=e95]:
+                  - generic [ref=e96]: Market Value Unavailable
+                  - generic [ref=e97]: —
+                  - generic [ref=e98]: UNAVAILABLE
+                - article [ref=e99]:
+                  - generic [ref=e100]: Conservative Buyer Exit
+                  - generic [ref=e101]: —
+                - article [ref=e102]:
+                  - generic [ref=e103]: Offer Unavailable
+                  - generic [ref=e104]: —
+                - article [ref=e105]:
+                  - generic [ref=e106]: Primary Strategy
+                  - generic [ref=e107]: —
+                  - generic [ref=e108]: "Backup: —"
+              - generic [ref=e109]:
+                - generic [ref=e110]:
+                  - generic [ref=e111]: Evidence depth
+                  - generic [ref=e112]: — clean / ESS —
+                - generic [ref=e113]:
+                  - generic [ref=e114]: Model disagreement
+                  - text: —
+                - generic [ref=e115]:
+                  - generic [ref=e116]: Anomaly status
+                  - text: Clear
+                - generic [ref=e117]:
+                  - generic [ref=e118]: Largest blocker
+                  - text: —
+            - region "Offer bridge" [ref=e119]:
+              - generic [ref=e120]:
+                - article [ref=e121]:
+                  - heading "Scenario" [level=4] [ref=e122]
+                  - text: —
+                - article [ref=e123]:
+                  - heading "Underwritten Shadow" [level=4] [ref=e124]
+                  - text: —
+                - article [ref=e125]:
+                  - heading "Live Authorized" [level=4] [ref=e126]
+                  - text: —Disabled
+            - region "Top transaction evidence" [ref=e127]:
+              - generic [ref=e128]:
+                - heading "Transaction Evidence" [level=3] [ref=e129]
+                - generic [ref=e130]: 0 records · 0 mapped
+              - paragraph [ref=e131]: No transaction evidence matches current filters.
+  - button "NEXUS Copilot" [ref=e132] [cursor=pointer]:
+    - generic: Standing by
+  - alert [ref=e133]:
+    - strong [ref=e134]: Could not verify which API build is running
+    - generic [ref=e135]: Dashboard dbf21fda7579 (main)
+    - generic [ref=e136]: API unreachable (n/a)
+    - generic [ref=e137]: Connection same-origin proxy
+    - generic [ref=e138]: "Fix: stop both servers, then run npm run dev:all from the repo root."

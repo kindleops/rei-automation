@@ -78,6 +78,18 @@ export interface NexusSettings {
   soundNotification: boolean
   soundQueueIssue: boolean
   soundContractMilestone: boolean
+  soundPositiveOutcome: boolean
+  soundSellerReply: boolean
+  soundCampaignActivity: boolean
+  soundOfferContract: boolean
+  soundWarningAlert: boolean
+  soundCriticalSystem: boolean
+  soundPositiveOutcomeVolume: number
+  soundSellerReplyVolume: number
+  soundCampaignActivityVolume: number
+  soundOfferContractVolume: number
+  soundWarningAlertVolume: number
+  soundCriticalSystemVolume: number
 
   // UI
   densityMode: DensityMode
@@ -124,6 +136,11 @@ export interface NexusSettings {
   notificationToastDuration: number  // ms, 3000–10000
   notificationSoundEnabled: boolean
   notificationMaxVisible: number     // 1–6
+  notificationQuietHoursEnabled: boolean
+  notificationQuietHoursStart: string
+  notificationQuietHoursEnd: string
+  notificationDomainMutes: Record<string, boolean>
+  notificationMasterMuted: boolean
 
   // Keyboard
   keyboardShortcutsEnabled: boolean
@@ -183,6 +200,18 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   soundNotification: true,
   soundQueueIssue: true,
   soundContractMilestone: true,
+  soundPositiveOutcome: true,
+  soundSellerReply: true,
+  soundCampaignActivity: true,
+  soundOfferContract: true,
+  soundWarningAlert: true,
+  soundCriticalSystem: true,
+  soundPositiveOutcomeVolume: 0.55,
+  soundSellerReplyVolume: 0.5,
+  soundCampaignActivityVolume: 0.45,
+  soundOfferContractVolume: 0.5,
+  soundWarningAlertVolume: 0.6,
+  soundCriticalSystemVolume: 0.7,
   densityMode: 'comfortable',
   showBlades: true,
   timelineDensity: 30,
@@ -216,6 +245,11 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   notificationToastDuration: 5000,
   notificationSoundEnabled: true,
   notificationMaxVisible: 4,
+  notificationQuietHoursEnabled: false,
+  notificationQuietHoursStart: '22:00',
+  notificationQuietHoursEnd: '07:00',
+  notificationDomainMutes: {},
+  notificationMasterMuted: false,
   keyboardShortcutsEnabled: true,
 
   // Operator personalization

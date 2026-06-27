@@ -5,7 +5,7 @@ import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
-import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
+import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName } from '../inbox-ui-helpers'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
@@ -463,7 +463,7 @@ export const ChatThread = ({
     </div>
   )
 
-  const ownerName = resolveThreadPrimaryName(thread)
+  const ownerName = resolveThreadOwnerName(thread)
   const phoneNumber = fallback(thread.phoneNumber || thread.canonicalE164, '')
   const propertyAddress = resolveThreadAddressLine(thread)
   const market = resolveThreadMarketBadge(thread)

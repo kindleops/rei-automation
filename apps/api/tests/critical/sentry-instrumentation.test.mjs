@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 import {
   captureRouteException,
   addSentryBreadcrumb,
+  shouldCaptureRouteException,
   __setSentryDeps,
   __resetSentryDeps,
 } from "@/lib/monitoring/sentry.js";
@@ -183,6 +184,29 @@ test("captureRouteException: does not throw when called with no options", () => 
       captureRouteException(new Error("bare call"));
     });
     assert.equal(mock.calls.captureException.length, 1);
+  } finally {
+    __resetSentryDeps();
+  }
+});
+
+test("captureRouteException: skips handled TextGrid 21610 blacklist failures", () => {
+  const mock = makeMockSentry();
+  __setSentryDeps({ sentry: mock });
+
+  try {
+    const error = new Error(
+      'TextGrid HTTP failure: {"status":"400","code":"21610","message":"The message From/To pair violates a blacklist rule."}'
+    );
+    error.name = "TextGridError";
+
+    assert.equal(shouldCaptureRouteException(error), false);
+    captureRouteException(error, {
+      route: "internal/queue/run",
+      subsystem: "queue_runner",
+    });
+
+    assert.equal(mock.calls.captureException.length, 0);
+    assert.equal(mock.calls.addBreadcrumb.length, 1);
   } finally {
     __resetSentryDeps();
   }

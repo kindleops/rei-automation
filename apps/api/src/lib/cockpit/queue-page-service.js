@@ -53,6 +53,49 @@ async function bucketCount(opts, values) {
   return Number(res.count || 0)
 }
 
+async function fetchRangeCounts(opts = {}) {
+  const dateBasis = ['created_at', 'scheduled_for', 'updated_at'].includes(opts.dateBasis)
+    ? opts.dateBasis
+    : 'created_at'
+  const market = opts.market && opts.market !== 'all' ? clean(opts.market) : null
+  const sender = opts.sender && opts.sender !== 'all' ? clean(opts.sender) : null
+
+  const { data, error } = await supabase.rpc('cockpit_queue_page_range_counts', {
+    p_date_basis: dateBasis,
+    p_date_from: opts.dateFrom || null,
+    p_date_to: opts.dateTo || null,
+    p_market: market,
+    p_sender: sender,
+  })
+
+  if (!error && data && typeof data === 'object') {
+    return {
+      scheduled: Number(data.scheduled ?? 0),
+      queued: Number(data.queued ?? 0),
+      sending: Number(data.sending ?? 0),
+      sent: Number(data.sent ?? 0),
+      delivered: Number(data.delivered ?? 0),
+      failed: Number(data.failed ?? 0),
+      blocked: Number(data.blocked ?? 0),
+      approval: Number(data.approval ?? 0),
+      optOuts: Number(data.optOuts ?? 0),
+      total: Number(data.total ?? 0),
+    }
+  }
+
+  const [scheduled, queued, sending, sent, delivered, failed, blocked, approval] = await Promise.all([
+    bucketCount(opts, STATUS_BUCKET_VALUES.scheduled),
+    bucketCount(opts, STATUS_BUCKET_VALUES.queued),
+    bucketCount(opts, STATUS_BUCKET_VALUES.sending),
+    bucketCount(opts, STATUS_BUCKET_VALUES.sent),
+    bucketCount(opts, STATUS_BUCKET_VALUES.delivered),
+    bucketCount(opts, STATUS_BUCKET_VALUES.failed),
+    bucketCount(opts, STATUS_BUCKET_VALUES.blocked),
+    bucketCount(opts, STATUS_BUCKET_VALUES.approval),
+  ])
+  return { scheduled, queued, sending, sent, delivered, failed, blocked, approval, optOuts: 0, total: 0 }
+}
+
 function queuePageCacheKey(opts = {}) {
   return [
     'cockpit:queue-page',
@@ -83,18 +126,11 @@ async function loadQueuePage(opts = {}) {
   )
   if (statusValues) tableQuery = tableQuery.in('queue_status', statusValues)
 
-  const [queueResult, scheduled, queued, sending, sent, delivered, failed, blocked, approval] = await Promise.all([
+  const [queueResult, rangeCounts] = await Promise.all([
     tableQuery
       .order(dateBasis, { ascending: false, nullsFirst: false })
       .range(page * pageSize, page * pageSize + pageSize - 1),
-    bucketCount(opts, STATUS_BUCKET_VALUES.scheduled),
-    bucketCount(opts, STATUS_BUCKET_VALUES.queued),
-    bucketCount(opts, STATUS_BUCKET_VALUES.sending),
-    bucketCount(opts, STATUS_BUCKET_VALUES.sent),
-    bucketCount(opts, STATUS_BUCKET_VALUES.delivered),
-    bucketCount(opts, STATUS_BUCKET_VALUES.failed),
-    bucketCount(opts, STATUS_BUCKET_VALUES.blocked),
-    bucketCount(opts, STATUS_BUCKET_VALUES.approval),
+    fetchRangeCounts(opts),
   ])
   timer.mark('supabase_queries')
 
@@ -122,8 +158,17 @@ async function loadQueuePage(opts = {}) {
     if (clean(md.prospect_id)) ids.push(clean(md.prospect_id))
     return ids.filter(Boolean)
   }))]
+  const campaignIds = [...new Set(rows.flatMap((row) => {
+    const ids = []
+    const md = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    const targetSnapshot = md.target_snapshot && typeof md.target_snapshot === 'object' ? md.target_snapshot : {}
+    if (clean(row.campaign_id)) ids.push(clean(row.campaign_id))
+    if (clean(md.campaign_id)) ids.push(clean(md.campaign_id))
+    if (clean(targetSnapshot.campaign_id)) ids.push(clean(targetSnapshot.campaign_id))
+    return ids.filter(Boolean)
+  }))]
 
-  const [propertiesResult, ownersResult, prospectsResult] = await Promise.all([
+  const [propertiesResult, ownersResult, prospectsResult, campaignsResult, textgridResult] = await Promise.all([
     propertyIds.length
       ? supabase
         .from('properties')
@@ -142,11 +187,22 @@ async function loadQueuePage(opts = {}) {
         .select(PROSPECT_SELECT)
         .in('prospect_id', prospectIds.slice(0, 100))
       : Promise.resolve({ data: [], error: null }),
+    campaignIds.length
+      ? supabase
+        .from('campaigns')
+        .select('id,name,status')
+        .in('id', campaignIds.slice(0, 100))
+      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from('textgrid_numbers')
+      .select('id,phone_number,friendly_name,market,state,is_active,daily_cap'),
   ])
 
   const properties = propertiesResult.error ? [] : (propertiesResult.data || [])
   const owners = ownersResult.error ? [] : (ownersResult.data || [])
   const prospects = prospectsResult.error ? [] : (prospectsResult.data || [])
+  const campaigns = campaignsResult.error ? [] : (campaignsResult.data || [])
+  const textgridNumbers = textgridResult.error ? [] : (textgridResult.data || [])
   timer.mark('enrichment')
 
   const response = {
@@ -154,15 +210,16 @@ async function loadQueuePage(opts = {}) {
     properties,
     owners,
     prospects,
+    campaigns,
+    textgridNumbers,
     totalCount,
     currentPage: page,
     pageSize,
     totalPages,
     hasMore: page < totalPages - 1,
     rangeCounts: {
-      scheduled, queued, sending, sent, delivered, failed, blocked, approval,
-      optOuts: 0,
-      total: totalCount,
+      ...rangeCounts,
+      total: rangeCounts.total > 0 ? rangeCounts.total : totalCount,
     },
     fetchOptions: opts,
     queryMs: timer.summary().totalMs,

@@ -20,6 +20,21 @@ export const fmtDate = (value: string | null | undefined) => {
 
 export type CompQuality = 'strong' | 'usable' | 'weak' | 'excluded' | 'preliminary' | 'official'
 
+export type EvidenceAuthority =
+  | 'OFFICIAL_V3'
+  | 'PRELIMINARY_RECOVERED'
+  | 'REVIEW_REQUIRED'
+  | 'REJECTED'
+
+export type MatchQuality = 'STRONG' | 'USABLE' | 'WEAK' | 'UNRATED'
+
+export interface CompClassification {
+  authority: EvidenceAuthority
+  quality: MatchQuality
+  score: number | null
+  isExcluded: boolean
+}
+
 export function humanizeSourcePath(path: string | null | undefined): string {
   if (!path) return '—'
   if (path === 'DIRECT_RPC' || path === 'direct_rpc') return 'Public records'
@@ -35,15 +50,62 @@ export function humanizeEvidenceRole(role: string | null | undefined): string | 
   return role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** One canonical adapter for authority vs match quality separation. */
+export function classifyComp(row: CompTransactionEvidence): CompClassification {
+  const score = row.similarity ?? row.qualification_score ?? null
+  const qualStatus = (row.qualification_status || '').toUpperCase()
+  const isExplicitReject = qualStatus === 'REJECTED' || qualStatus === 'QUARANTINED'
+
+  let authority: EvidenceAuthority
+  if (isExplicitReject) {
+    authority = 'REJECTED'
+  } else if (row.evidence_authority === 'AUTHORITATIVE_V3') {
+    authority = 'OFFICIAL_V3'
+  } else if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE' || /recovered|degraded|prelim|evidence/i.test(row.evidence_role || '')) {
+    authority = 'PRELIMINARY_RECOVERED'
+  } else if (qualStatus === 'REVIEW' || qualStatus === 'REVIEW_REQUIRED') {
+    authority = 'REVIEW_REQUIRED'
+  } else {
+    authority = 'PRELIMINARY_RECOVERED'
+  }
+
+  let quality: MatchQuality
+  const label = (row.comp_match_label || '').toLowerCase()
+  if (isExplicitReject) {
+    quality = 'UNRATED'
+  } else if (label.includes('elite') || label.includes('strong')) {
+    quality = 'STRONG'
+  } else if (label.includes('usable')) {
+    quality = 'USABLE'
+  } else if (label.includes('weak') || label.includes('review')) {
+    quality = 'WEAK'
+  } else if (score != null) {
+    if (score >= 80) quality = 'STRONG'
+    else if (score >= 65) quality = 'USABLE'
+    else if (score >= 45) quality = 'WEAK'
+    else quality = 'UNRATED'
+  } else if (row.pricing_eligibility) {
+    quality = 'USABLE'
+  } else {
+    quality = 'UNRATED'
+  }
+
+  return {
+    authority,
+    quality,
+    score,
+    isExcluded: authority === 'REJECTED',
+  }
+}
+
 export function compQuality(row: CompTransactionEvidence): CompQuality {
-  if (row.evidence_authority === 'DEGRADED_NON_AUTHORITATIVE') return 'preliminary'
-  if (row.qualification_status === 'REJECTED' || row.qualification_status === 'QUARANTINED') return 'excluded'
-  if (row.evidence_authority === 'AUTHORITATIVE_V3' && row.pricing_eligibility) return 'official'
-  const score = row.similarity ?? row.qualification_score ?? 0
-  if (score >= 80) return 'strong'
-  if (score >= 65) return 'usable'
-  if (score >= 45) return 'weak'
-  if (row.pricing_eligibility) return 'usable'
+  const c = classifyComp(row)
+  if (c.isExcluded) return 'excluded'
+  if (c.authority === 'OFFICIAL_V3') return 'official'
+  if (c.authority === 'PRELIMINARY_RECOVERED' && c.quality !== 'STRONG' && c.quality !== 'USABLE') return 'preliminary'
+  if (c.quality === 'STRONG') return 'strong'
+  if (c.quality === 'USABLE') return 'usable'
+  if (c.quality === 'WEAK') return 'weak'
   return 'preliminary'
 }
 
@@ -68,6 +130,47 @@ export function compMatchLabel(row: CompTransactionEvidence): string {
   if (score >= 70) return 'Usable match'
   if (score >= 55) return 'Weak match'
   return 'Low similarity'
+}
+
+export type CompFilterKey = 'all' | 'strong' | 'usable' | 'review' | 'excluded'
+
+export function getMatchTierForFilter(c: CompClassification): CompFilterKey {
+  if (c.isExcluded) return 'excluded'
+  if (c.quality === 'STRONG') return 'strong'
+  if (c.quality === 'USABLE') return 'usable'
+  // WEAK and REVIEW_REQUIRED map to Review filter bucket
+  return 'review'
+}
+
+export function getFilterLabel(key: CompFilterKey): string {
+  switch (key) {
+    case 'all': return 'All'
+    case 'strong': return 'Strong'
+    case 'usable': return 'Usable'
+    case 'review': return 'Review'
+    case 'excluded': return 'Excluded'
+    default: return key
+  }
+}
+
+export function getAuthorityBadge(authority: EvidenceAuthority): string {
+  switch (authority) {
+    case 'OFFICIAL_V3': return 'V3 Official'
+    case 'PRELIMINARY_RECOVERED': return 'Recovered'
+    case 'REVIEW_REQUIRED': return 'Review'
+    case 'REJECTED': return 'Excluded'
+    default: return 'Evidence'
+  }
+}
+
+export function getQualityLabel(quality: MatchQuality): string {
+  switch (quality) {
+    case 'STRONG': return 'Strong Match'
+    case 'USABLE': return 'Usable Match'
+    case 'WEAK': return 'Review'
+    case 'UNRATED': return 'Unrated'
+    default: return 'Match'
+  }
 }
 
 export function pricePerSqft(row: CompTransactionEvidence): number | null {

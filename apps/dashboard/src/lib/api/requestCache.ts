@@ -32,7 +32,10 @@ export async function cachedGetRequest<T>(
   }
 
   const prior = inflightControllers.get(key)
-  if (prior) prior.abort()
+  if (prior?.signal.aborted === false) {
+    const priorEntry = cache.get(key)
+    if (priorEntry?.promise) return priorEntry.promise as Promise<T>
+  }
 
   const controller = new AbortController()
   inflightControllers.set(key, controller)

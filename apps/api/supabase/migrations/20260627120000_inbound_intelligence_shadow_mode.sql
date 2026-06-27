@@ -1,0 +1,299 @@
+-- Inbound intelligence shadow audit schema + seller_contact_referrals + property_participant_graph
+-- ── inbound_intelligence_audit (immutable decision log) ─────────────────────
+CREATE TABLE IF NOT EXISTS public.inbound_intelligence_audit (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_event_id text NOT NULL,
+  provider_message_sid text,
+  source_thread_key text,
+  property_id text,
+  canonical_intent text NOT NULL,
+  universal_stage text,
+  granular_stage text,
+  safety_status text NOT NULL DEFAULT 'review',
+  identity_class text,
+  relationship_outcome text,
+  relationship_claim text,
+  suppression_scope text NOT NULL DEFAULT 'none',
+  suppression_property_id text,
+  invalidate_phone_globally boolean NOT NULL DEFAULT false,
+  invalidate_person_globally boolean NOT NULL DEFAULT false,
+  execution_blocked_reason text,
+  human_review_status text,
+  human_review_required boolean NOT NULL DEFAULT false,
+  referral_detected boolean NOT NULL DEFAULT false,
+  automatic_send_allowed boolean NOT NULL DEFAULT false,
+  decision_version text NOT NULL,
+  replay_version text NOT NULL DEFAULT 'shadow_v3',
+  canonical_decision jsonb NOT NULL DEFAULT '{}'::jsonb,
+  legacy_decision jsonb,
+  shadow_stage_engine jsonb,
+  shadow_comparison jsonb,
+  follow_up_recommendation jsonb,
+  selected_template jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT inbound_intelligence_audit_source_event_unique UNIQUE (source_event_id),
+  CONSTRAINT inbound_intelligence_audit_suppression_scope_check
+    CHECK (suppression_scope IN ('none', 'property', 'phone', 'global', 'incident')),
+  CONSTRAINT inbound_intelligence_audit_e164_thread_check
+    CHECK (source_thread_key IS NULL OR source_thread_key ~ '^\+[1-9]\d{6,14}$')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_intelligence_audit_provider_sid
+  ON public.inbound_intelligence_audit (provider_message_sid)
+  WHERE provider_message_sid IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_intelligence_audit_provider_event
+  ON public.inbound_intelligence_audit (provider_message_sid, source_event_id)
+  WHERE provider_message_sid IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_thread
+  ON public.inbound_intelligence_audit (source_thread_key, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_property
+  ON public.inbound_intelligence_audit (property_id, created_at DESC)
+  WHERE property_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_created_at
+  ON public.inbound_intelligence_audit (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inbound_intelligence_audit_intent
+  ON public.inbound_intelligence_audit (canonical_intent, created_at DESC);
+
+COMMENT ON TABLE public.inbound_intelligence_audit IS
+  'Immutable inbound intelligence audit log. Rows are append-only; updates limited to service-role replay metadata.';
+
+-- ── seller_contact_referrals (mutable review workflow) ────────────────────
+CREATE TABLE IF NOT EXISTS public.seller_contact_referrals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_event_id text NOT NULL,
+  provider_message_sid text,
+  source_thread_key text NOT NULL,
+  source_contact_phone text NOT NULL,
+  property_id text NOT NULL,
+  master_owner_id text,
+  referred_name text,
+  referred_phone_e164 text,
+  relationship_claim text,
+  confidence numeric(4,3),
+  extraction_method text NOT NULL,
+  dedupe_status text NOT NULL DEFAULT 'pending_review',
+  proposed_prospect_id text,
+  proposed_phone_id text,
+  review_status text NOT NULL DEFAULT 'pending_review',
+  review_notes text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  reviewed_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT seller_contact_referrals_review_status_check
+    CHECK (review_status IN ('pending_review', 'approved', 'rejected', 'applied')),
+  CONSTRAINT seller_contact_referrals_dedupe_status_check
+    CHECK (dedupe_status IN ('pending_review', 'new_or_unknown', 'already_known', 'malformed_phone', 'duplicate')),
+  CONSTRAINT seller_contact_referrals_e164_phone_check
+    CHECK (referred_phone_e164 IS NULL OR referred_phone_e164 ~ '^\+[1-9]\d{6,14}$'),
+  CONSTRAINT seller_contact_referrals_e164_source_check
+    CHECK (source_contact_phone ~ '^\+[1-9]\d{6,14}$')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_contact_referrals_event_phone_property
+  ON public.seller_contact_referrals (source_event_id, referred_phone_e164, property_id)
+  WHERE referred_phone_e164 IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_contact_referrals_event_name_property
+  ON public.seller_contact_referrals (source_event_id, referred_name, property_id)
+  WHERE referred_phone_e164 IS NULL AND referred_name IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_property
+  ON public.seller_contact_referrals (property_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_phone
+  ON public.seller_contact_referrals (referred_phone_e164, created_at DESC)
+  WHERE referred_phone_e164 IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_source_event
+  ON public.seller_contact_referrals (source_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_review_status
+  ON public.seller_contact_referrals (review_status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_seller_contact_referrals_created_at
+  ON public.seller_contact_referrals (created_at DESC);
+
+-- ── Read-only participant projection (not identity source of truth) ───────
+CREATE OR REPLACE VIEW public.property_participant_graph AS
+SELECT
+  md5(
+    concat_ws(
+      ':',
+      me.property_id,
+      COALESCE(ph.canonical_e164, me.from_phone_number, me.thread_key),
+      COALESCE(me.master_owner_id, ''),
+      COALESCE(me.prospect_id, '')
+    )
+  ) AS participant_id,
+  me.property_id,
+  me.master_owner_id,
+  me.prospect_id,
+  ph.phone_id::text AS phone_id,
+  COALESCE(ph.canonical_e164, me.from_phone_number, me.thread_key) AS canonical_e164,
+  COALESCE(
+    scr.referred_name,
+    mo.display_name,
+    ph.phone_owner
+  ) AS display_name,
+  CASE
+    WHEN scr.id IS NOT NULL THEN 'referred_possible_owner'
+    WHEN me.metadata->>'identity_class' = 'referral_source' THEN 'referral_source'
+    WHEN me.metadata->>'identity_class' = 'respondent_non_owner' THEN 'respondent_non_owner'
+    WHEN me.metadata->>'identity_class' = 'authorized_spouse' THEN 'authorized_spouse'
+    WHEN me.metadata->>'identity_class' = 'confirmed_owner' THEN 'master_owner'
+    WHEN me.metadata->>'identity_class' = 'probable_owner' THEN 'probable_owner'
+    WHEN me.metadata->>'identity_class' = 'wrong_number'
+      AND COALESCE(me.metadata->>'suppression_scope', 'none') IN ('phone', 'global')
+      THEN 'wrong_number'
+    ELSE COALESCE(me.metadata->>'identity_class', 'respondent')
+  END AS relationship_to_property,
+  COALESCE(me.metadata->>'identity_class', 'unknown') AS identity_class,
+  CASE
+    WHEN me.metadata->>'identity_class' = 'confirmed_owner' THEN 0.95
+    WHEN me.metadata->>'identity_class' = 'probable_owner' THEN 0.75
+    ELSE NULL
+  END AS ownership_confidence,
+  COALESCE(me.metadata->>'contact_source', 'inbound_sms') AS contact_source,
+  scr.source_event_id AS referral_source_event_id,
+  scr.source_thread_key AS referral_source_thread_key,
+  COALESCE(ph.activity_status, 'active') AS contact_status,
+  CASE
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') = 'property' THEN 'property_suppressed'
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') IN ('phone', 'global') THEN 'suppressed'
+    WHEN ph.activity_status IN ('wrong_number', 'opt_out') THEN 'suppressed'
+    ELSE 'active'
+  END AS suppression_status,
+  COALESCE(me.metadata->>'suppression_scope', 'none') AS suppression_scope,
+  COALESCE(me.metadata->>'suppression_property_id', me.property_id) AS suppression_property_id,
+  COALESCE(me.metadata->'inbound_intelligence'->>'universal_stage', me.metadata->>'conversation_stage') AS universal_stage,
+  COALESCE(me.metadata->'inbound_intelligence'->>'granular_stage', me.metadata->>'seller_stage') AS granular_stage,
+  me.received_at AS last_message_at,
+  0::integer AS unread_count,
+  CASE
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') = 'property' THEN true
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') IN ('phone', 'global') THEN false
+    WHEN ph.activity_status IN ('wrong_number', 'opt_out') THEN false
+    ELSE true
+  END AS safe_to_contact,
+  CASE
+    WHEN me.metadata->>'execution_blocked_reason' IS NOT NULL THEN me.metadata->>'execution_blocked_reason'
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') = 'property'
+      THEN 'property_scoped_non_owner'
+    WHEN COALESCE(me.metadata->>'suppression_scope', 'none') IN ('phone', 'global')
+      THEN 'globally_suppressed'
+    ELSE NULL
+  END AS safe_to_contact_reason,
+  false AS is_current_participant,
+  (me.metadata->>'identity_class' = 'confirmed_owner') AS is_primary_owner_record,
+  (scr.id IS NOT NULL) AS is_referred_contact
+FROM public.message_events me
+LEFT JOIN public.phones ph
+  ON ph.canonical_e164 = COALESCE(me.from_phone_number, me.thread_key)
+LEFT JOIN public.master_owners mo
+  ON mo.master_owner_id = me.master_owner_id
+LEFT JOIN public.seller_contact_referrals scr
+  ON scr.referred_phone_e164 = COALESCE(ph.canonical_e164, me.from_phone_number, me.thread_key)
+ AND scr.property_id = me.property_id
+ AND scr.review_status = 'pending_review'
+WHERE me.direction = 'inbound'
+  AND me.property_id IS NOT NULL;
+
+COMMENT ON VIEW public.property_participant_graph IS
+  'Read-only participant projection for inbox UI. Projects message_events + reviewed referrals; not an identity source of truth. '
+  'Query pattern: property_id filter + last_message_at DESC per participant. '
+  'Indexes: idx on message_events(property_id), phones(canonical_e164), seller_contact_referrals(property_id). '
+  'Materialization threshold: only introduce property_participant_graph_mv if p95 inbox load exceeds 500ms '
+  'with >5k participants/property; refresh strategy would be REFRESH MATERIALIZED VIEW CONCURRENTLY on '
+  'message_events insert + referral review_status change. Until benchmarked, keep this view-only projection.';
+
+-- ── RLS ───────────────────────────────────────────────────────────────────
+-- Preferred access model:
+--   * service_role: writes audit/referral records and replay metadata
+--   * dashboard: reads via authenticated server APIs (no direct client SELECT on audit)
+--   * anon: denied on all sensitive tables
+--   * referral review mutations: narrow authenticated API + immutable audit event (not direct client UPDATE)
+ALTER TABLE public.inbound_intelligence_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.seller_contact_referrals ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service_role_all_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "deny_authenticated_write_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (false);
+
+CREATE POLICY "deny_authenticated_update_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR UPDATE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_authenticated_delete_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR DELETE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_authenticated_select_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR SELECT
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "service_role_all_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "deny_authenticated_select_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR SELECT
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_authenticated_update_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR UPDATE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_authenticated_insert_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (false);
+
+CREATE POLICY "deny_authenticated_delete_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR DELETE
+  TO authenticated
+  USING (false);
+
+CREATE POLICY "deny_anon_all_inbound_intelligence_audit"
+  ON public.inbound_intelligence_audit
+  FOR ALL
+  TO anon
+  USING (false)
+  WITH CHECK (false);
+
+CREATE POLICY "deny_anon_all_seller_contact_referrals"
+  ON public.seller_contact_referrals
+  FOR ALL
+  TO anon
+  USING (false)
+  WITH CHECK (false);

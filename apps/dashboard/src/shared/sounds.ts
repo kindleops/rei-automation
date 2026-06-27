@@ -1,14 +1,16 @@
 /**
  * NEXUS Sound Design System
  *
- * Premium micro-feedback audio using the Web Audio API.
- * Zero external audio files — all sounds are synthesized for instant playback.
- *
- * Each sound is a short (40–400ms) layered oscillator composition that
- * produces tactile, premium operator-grade audio cues.
+ * Operator notifications use bundled MP3 assets from /sounds when mapped.
+ * UI + ambient cues still use synthesized Web Audio compositions as fallback.
  */
 
 import { loadSettings } from './settings'
+import {
+  SOUND_EVENT_ASSET_MAP,
+  SOUND_ASSET_URLS,
+  type SoundAssetId,
+} from './sound-assets'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,12 @@ export type SoundEvent =
   | 'notification'
   | 'queue-issue'
   | 'contract-milestone'
+  | 'positive-outcome'
+  | 'seller-reply'
+  | 'campaign-activity'
+  | 'offer-contract'
+  | 'warning-alert'
+  | 'critical-system'
   | 'ui-tap'
   | 'ui-confirm'
   | 'ui-error'
@@ -61,6 +69,12 @@ export const SOUND_LIBRARY: SoundDefinition[] = [
   { id: 'notification',        label: 'Notification',          category: 'System',         settingsKey: 'soundNotification' },
   { id: 'queue-issue',         label: 'Queue Issue',           category: 'Alerts',         settingsKey: 'soundQueueIssue' },
   { id: 'contract-milestone',  label: 'Contract Milestone',    category: 'Deals',          settingsKey: 'soundContractMilestone' },
+  { id: 'positive-outcome',    label: 'Positive Outcome',      category: 'Notifications',  settingsKey: 'soundPositiveOutcome' },
+  { id: 'seller-reply',        label: 'Seller Reply',          category: 'Notifications',  settingsKey: 'soundSellerReply' },
+  { id: 'campaign-activity',   label: 'Campaign Activity',     category: 'Notifications',  settingsKey: 'soundCampaignActivity' },
+  { id: 'offer-contract',      label: 'Offer & Contract',      category: 'Notifications',  settingsKey: 'soundOfferContract' },
+  { id: 'warning-alert',       label: 'Warning Alert',         category: 'Notifications',  settingsKey: 'soundWarningAlert' },
+  { id: 'critical-system',     label: 'Critical System',       category: 'Notifications',  settingsKey: 'soundCriticalSystem' },
   { id: 'ui-tap',              label: 'Glass Tap',             category: 'Interface',      settingsKey: null },
   { id: 'ui-confirm',          label: 'Soft Confirm',          category: 'Interface',      settingsKey: null },
   { id: 'ui-error',            label: 'Muted Error',           category: 'Interface',      settingsKey: null },
@@ -217,6 +231,43 @@ const compositions: Record<SoundEvent, SoundComposer> = {
     playTone(ctx, g, 1047, 'sine', 0.08, 0.16, 0.008, 0.06, 0.20)
   },
 
+  // Notifications — subtle premium intelligence cues
+  'positive-outcome': (ctx, g) => {
+    playTone(ctx, g, 620, 'sine', 0, 0.22, 0.006, 0.08, 0.28, 680)
+    playTone(ctx, g, 930, 'sine', 0.05, 0.18, 0.006, 0.06, 0.18, 980)
+    playTone(ctx, g, 1240, 'triangle', 0.10, 0.14, 0.005, 0.05, 0.08)
+  },
+
+  'seller-reply': (ctx, g) => {
+    playTone(ctx, g, 920, 'sine', 0, 0.16, 0.004, 0.06, 0.26, 980)
+    playTone(ctx, g, 1380, 'sine', 0.04, 0.12, 0.004, 0.05, 0.14, 1440)
+    playTone(ctx, g, 2070, 'sine', 0.08, 0.08, 0.003, 0.03, 0.05)
+  },
+
+  'campaign-activity': (ctx, g) => {
+    playTone(ctx, g, 520, 'triangle', 0, 0.10, 0.003, 0.04, 0.20)
+    playTone(ctx, g, 780, 'triangle', 0.06, 0.10, 0.003, 0.04, 0.16)
+    playTone(ctx, g, 1040, 'sine', 0.12, 0.10, 0.004, 0.04, 0.10)
+  },
+
+  'offer-contract': (ctx, g) => {
+    playTone(ctx, g, 700, 'sine', 0, 0.20, 0.008, 0.08, 0.26, 740)
+    playTone(ctx, g, 980, 'sine', 0.07, 0.16, 0.008, 0.06, 0.18, 1020)
+    playTone(ctx, g, 1470, 'triangle', 0.12, 0.12, 0.005, 0.04, 0.07)
+  },
+
+  'warning-alert': (ctx, g) => {
+    playTone(ctx, g, 420, 'triangle', 0, 0.12, 0.003, 0.05, 0.22)
+    playTone(ctx, g, 560, 'triangle', 0.08, 0.12, 0.003, 0.05, 0.18)
+    playTone(ctx, g, 840, 'sine', 0.04, 0.14, 0.004, 0.05, 0.08, 880)
+  },
+
+  'critical-system': (ctx, g) => {
+    playTone(ctx, g, 280, 'sawtooth', 0, 0.10, 0.002, 0.04, 0.24, 240)
+    playTone(ctx, g, 420, 'sawtooth', 0.06, 0.14, 0.002, 0.05, 0.26, 360)
+    playTone(ctx, g, 700, 'square', 0.02, 0.08, 0.001, 0.03, 0.12)
+  },
+
   // UI — glass tap with sparkle
   'ui-tap': (ctx, g) => {
     playTone(ctx, g, 2400, 'sine', 0, 0.05, 0.001, 0.015, 0.10, 2600)
@@ -314,7 +365,68 @@ const compositions: Record<SoundEvent, SoundComposer> = {
   },
 }
 
+// ── MP3 asset playback ────────────────────────────────────────────────────
+
+const _audioCache = new Map<string, HTMLAudioElement>()
+
+function getAudioElement(url: string): HTMLAudioElement {
+  const cached = _audioCache.get(url)
+  if (cached) return cached
+  const audio = new Audio(url)
+  audio.preload = 'auto'
+  _audioCache.set(url, audio)
+  return audio
+}
+
+/**
+ * Play a bundled MP3 operator sound asset.
+ */
+export function playSoundAsset(assetId: SoundAssetId, volume = 1): void {
+  if (typeof window === 'undefined') return
+  const url = SOUND_ASSET_URLS[assetId]
+  if (!url) return
+
+  const audio = getAudioElement(url)
+  const clamped = Math.min(1, Math.max(0, volume))
+  audio.volume = clamped
+  audio.currentTime = 0
+  void audio.play().catch(() => {
+    // Browser autoplay policies may block until user gesture — ignore quietly.
+  })
+}
+
+export function previewSoundAsset(assetId: SoundAssetId, volume = 0.6): void {
+  playSoundAsset(assetId, volume)
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
+
+function shouldPlaySoundEvent(event: SoundEvent): boolean {
+  const settings = loadSettings()
+  if (!settings.soundEnabled) return false
+
+  const def = SOUND_LIBRARY.find((s) => s.id === event)
+  if (def?.settingsKey) {
+    const key = def.settingsKey as keyof typeof settings
+    if (settings[key] === false) return false
+  }
+
+  return true
+}
+
+function renderSound(event: SoundEvent, volume: number): void {
+  const asset = SOUND_EVENT_ASSET_MAP[event]
+  if (asset) {
+    playSoundAsset(asset, volume)
+    return
+  }
+
+  const ctx = getAudioContext()
+  const masterGain = createGain(ctx, volume)
+  const composer = compositions[event]
+  if (!composer) return
+  composer(ctx, masterGain)
+}
 
 /**
  * Play a sound event if enabled in settings.
@@ -322,20 +434,18 @@ const compositions: Record<SoundEvent, SoundComposer> = {
  * or the specific event category is turned off.
  */
 export function playSound(event: SoundEvent): void {
+  if (!shouldPlaySoundEvent(event)) return
   const settings = loadSettings()
-  if (!settings.soundEnabled) return
+  renderSound(event, settings.soundVolume)
+}
 
-  // Check per-event toggle
-  const def = SOUND_LIBRARY.find((s) => s.id === event)
-  if (def?.settingsKey) {
-    const key = def.settingsKey as keyof typeof settings
-    if (settings[key] === false) return
-  }
-
-  const ctx = getAudioContext()
-  const masterGain = createGain(ctx, settings.soundVolume)
-  const composer = compositions[event]
-  composer(ctx, masterGain)
+/**
+ * Play a sound at an explicit volume multiplier (0–1), still respecting
+ * global sound enable + per-event toggles.
+ */
+export function playSoundAtVolume(event: SoundEvent, volume: number): void {
+  if (!shouldPlaySoundEvent(event)) return
+  renderSound(event, Math.min(1, Math.max(0, volume)))
 }
 
 /**
@@ -343,8 +453,12 @@ export function playSound(event: SoundEvent): void {
  * Used in Settings to audition sounds.
  */
 export function previewSound(event: SoundEvent): void {
-  const ctx = getAudioContext()
-  const masterGain = createGain(ctx, 0.6)
-  const composer = compositions[event]
-  composer(ctx, masterGain)
+  renderSound(event, 0.6)
+}
+
+/**
+ * Preview a sound at an explicit volume, ignoring per-event toggles.
+ */
+export function previewSoundAtVolume(event: SoundEvent, volume: number): void {
+  renderSound(event, Math.min(1, Math.max(0, volume)))
 }

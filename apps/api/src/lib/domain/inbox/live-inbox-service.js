@@ -36,8 +36,10 @@ import {
 } from "@/lib/domain/inbox/contact-identity.js";
 import {
   CANONICAL_INBOX_ROW_SELECT_FIELDS,
+  INBOX_THREAD_SUMMARY_SELECT_FIELDS,
   CANONICAL_INBOX_COUNT_KEYS,
   buildEnrichmentCoverageDiagnostics,
+  compactInboxThreadSummaryRow,
 } from "@/lib/domain/inbox/canonical-inbox-row-contract.js";
 import { normalizeLatestMessageDirection } from "./latest-message-presentation.js";
 
@@ -65,9 +67,11 @@ const BOOT_FAST_THREAD_FIELDS = [
   "outbound_count",
   "last_inbound_at",
   "last_outbound_at",
+  "last_intent",
   "is_read",
   "is_suppressed",
   "disposition",
+  "automation_lane",
   "updated_at",
 ].join(",");
 const DEFAULT_LIMIT = 100;
@@ -269,7 +273,7 @@ const THREAD_SOURCE_CONFIGS = [
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns() {
-      return CANONICAL_INBOX_ROW_SELECT_FIELDS;
+      return INBOX_THREAD_SUMMARY_SELECT_FIELDS;
     },
     searchColumns: [
       "thread_key",
@@ -287,7 +291,7 @@ const THREAD_SOURCE_CONFIGS = [
     directionColumn: "latest_message_direction",
     countFallbackFields: PRIMARY_COUNT_FALLBACK_FIELDS,
     getSelectColumns() {
-      return CANONICAL_INBOX_ROW_SELECT_FIELDS;
+      return INBOX_THREAD_SUMMARY_SELECT_FIELDS;
     },
     searchColumns: [
       "thread_key",
@@ -725,7 +729,9 @@ function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
 }
 
 function threadMatchesFilter(thread = {}, filter = "all") {
-  return threadMatchesBucketFilter(thread, filter);
+  const normalizedFilter = normalizeLiveFilter(filter);
+  if (!normalizedFilter || normalizedFilter === "all") return true;
+  return threadMatchesInboxTab(thread, normalizedFilter);
 }
 
 function threadMatchesSearch(thread = {}, query = "") {
@@ -755,6 +761,8 @@ function sortThreads(rows = []) {
 }
 
 function normalizeCanonicalThreadKey(row = {}) {
+  const conversationId = buildConversationThreadId(row);
+  if (conversationId) return conversationId;
   return (
     clean(row.canonical_thread_key) ||
     clean(row.thread_key) ||
@@ -1667,6 +1675,81 @@ const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   "updated_at",
 ].join(",");
 
+function sortAuthoritativeInboxRows(rows = []) {
+  return [...rows].sort((left, right) => {
+    const leftAt = clean(left.latest_message_at);
+    const rightAt = clean(right.latest_message_at);
+    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
+    return clean(right.thread_key).localeCompare(clean(left.thread_key));
+  });
+}
+
+function paginateAuthoritativeInboxRows(rows = [], { limit, cursorKeyset, offset } = {}) {
+  let working = sortAuthoritativeInboxRows(rows);
+
+  if (cursorKeyset?.latest_message_at && cursorKeyset?.thread_key) {
+    const cursorAt = clean(cursorKeyset.latest_message_at);
+    const cursorKey = clean(cursorKeyset.thread_key);
+    working = working.filter((row) => {
+      const rowAt = clean(row.latest_message_at);
+      const rowKey = clean(row.thread_key);
+      if (rowAt < cursorAt) return true;
+      if (rowAt > cursorAt) return false;
+      return rowKey < cursorKey;
+    });
+  } else if (offset > 0) {
+    working = working.slice(offset);
+  }
+
+  const hasMore = working.length > limit;
+  const page = hasMore ? working.slice(0, limit) : working;
+  return { page, hasMore };
+}
+
+async function fetchAuthoritativeInboxRowsByThreadKeys(supabase, threadKeys = [], params = {}) {
+  const uniqueKeys = [...new Set(threadKeys.map((key) => clean(key)).filter(Boolean))];
+  if (!uniqueKeys.length) return [];
+
+  const CHUNK_SIZE = 200;
+  const rows = [];
+  const q = clean(params.q).toLowerCase();
+
+  for (let offset = 0; offset < uniqueKeys.length; offset += CHUNK_SIZE) {
+    const chunk = uniqueKeys.slice(offset, offset + CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from("inbox_thread_state")
+      .select(AUTHORITATIVE_INBOX_THREAD_FIELDS)
+      .in("thread_key", chunk);
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+
+  if (!q) return rows;
+
+  return rows.filter((row) => {
+    const haystack = [
+      row.thread_key,
+      row.seller_phone,
+      row.latest_message_body,
+    ].map((value) => clean(value).toLowerCase()).join(" ");
+    return haystack.includes(q);
+  });
+}
+
+function mapAuthoritativeInboxRow(row = {}) {
+  return {
+    ...row,
+    latest_message_direction: row.latest_direction,
+    direction: row.latest_direction,
+    detected_intent: row.last_intent,
+    reply_intent: row.last_intent,
+    inbox_category: row.inbox_bucket,
+    automation_lane: row.automation_lane,
+    conversation_stage: row.seller_stage || row.conversation_stage || null,
+    universal_stage: row.seller_stage || row.universal_stage || null,
+  };
+}
+
 async function queryAuthoritativeInboxThreads(params = {}, {
   supabase = defaultSupabase,
   limit,
@@ -1677,86 +1760,24 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   const normalizedFilter = normalizeLiveFilter(filter);
   if (normalizedFilter === "all") return null;
 
-  let query = supabase
-    .from("inbox_thread_state")
-    .select(AUTHORITATIVE_INBOX_THREAD_FIELDS);
-
-  switch (normalizedFilter) {
-    case "priority":
-      query = query.eq("inbox_bucket", "priority");
-      break;
-    case "new_replies":
-      query = query.eq("inbox_bucket", "new_replies");
-      break;
-    case "needs_review":
-      query = query.eq("inbox_bucket", "needs_review");
-      break;
-    case "follow_up":
-      query = query.eq("inbox_bucket", "follow_up");
-      break;
-    case "cold":
-      query = query.eq("automation_lane", "cold_reactivation");
-      break;
-    case "dead":
-      query = query.eq("inbox_bucket", "dead");
-      break;
-    case "suppressed":
-      query = query.eq("inbox_bucket", "suppressed");
-      break;
-    case "waiting":
-      query = query.eq("inbox_bucket", "waiting");
-      break;
-    case "active":
-      if (typeof query.in === "function") {
-        query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
-      }
-      break;
-    case "unlinked":
-      if (typeof query.is === "function") query = query.is("property_id", null);
-      break;
-    default:
-      return null;
+  const threadKeys = await fetchAuthoritativeThreadKeysForFilter(supabase, normalizedFilter);
+  if (!threadKeys?.length) {
+    return {
+      data: [],
+      count: 0,
+      error: null,
+      sourceConfig: THREAD_SOURCE_CONFIGS[0],
+    };
   }
 
-  if (params.q && typeof query.or === "function") {
-    const qStr = `%${clean(params.q)}%`;
-    query = query.or(`thread_key.ilike.${qStr},seller_phone.ilike.${qStr},latest_message_body.ilike.${qStr}`);
-  }
-
-  if (typeof query.order === "function") {
-    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
-    query = query.order("thread_key", { ascending: false });
-  }
-
-  if (cursorKeyset && typeof query.or === "function") {
-    query = query.or(
-      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`
-    );
-    if (typeof query.limit === "function") query = query.limit(limit + 1);
-  } else if (offset > 0 && typeof query.range === "function") {
-    query = query.range(offset, offset + limit);
-  } else if (typeof query.range === "function") {
-    query = query.range(0, limit);
-  } else if (typeof query.limit === "function") {
-    query = query.limit(limit + 1);
-  }
-
-  const result = await query;
-  if (result.error) throw result.error;
-
-  const rows = (result.data || []).map((row) => ({
-    ...row,
-    latest_message_direction: row.latest_direction,
-    direction: row.latest_direction,
-    detected_intent: row.last_intent,
-    reply_intent: row.last_intent,
-    inbox_category: row.inbox_bucket,
-    automation_lane: row.automation_lane,
-  }));
+  const rawRows = await fetchAuthoritativeInboxRowsByThreadKeys(supabase, threadKeys, params);
+  const { page, hasMore } = paginateAuthoritativeInboxRows(rawRows, { limit, cursorKeyset, offset });
+  const rows = page.map(mapAuthoritativeInboxRow);
 
   return {
     data: rows,
     count: rows.length,
+    hasMore,
     error: null,
     sourceConfig: THREAD_SOURCE_CONFIGS[0],
   };
@@ -1862,7 +1883,15 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
       cursorKeyset,
       offset,
     });
-    if (authoritativeResult) return authoritativeResult;
+    if (authoritativeResult?.data?.length > 0) {
+      return authoritativeResult;
+    }
+    if (authoritativeResult && normalizeLiveFilter(filter) !== "all") {
+      console.warn("[INBOX_AUTHORITATIVE_EMPTY_FALLBACK]", {
+        filter: normalizeLiveFilter(filter),
+        timeoutMode,
+      });
+    }
   }
 
   const resolvedPreferredSource = advancedActive && shouldPreferEnrichedSource(advancedFilters)
@@ -2208,7 +2237,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   });
   const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
-  const bucketByThreadKey = (initialBootMode || fastBucketMode)
+  const bucketByThreadKey = initialBootMode
     ? new Map()
     : await fetchInboxBucketsByThreadKeys(
       supabase,
@@ -2219,11 +2248,16 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     if (initialBootMode) return normalized;
     const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
     const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
-    if (!authoritativeBucket) return normalized;
+    const effectiveBucket = authoritativeBucket
+      || resolveEffectiveInboxBucket(normalized)
+      || normalized.inbox_bucket
+      || normalized.inbox_category
+      || null;
+    if (!effectiveBucket) return normalized;
     return {
       ...normalized,
-      inbox_bucket: authoritativeBucket,
-      inbox_category: authoritativeBucket,
+      inbox_bucket: effectiveBucket,
+      inbox_category: effectiveBucket,
     };
   });
   const postFiltered = sortThreads(rows)
@@ -2300,13 +2334,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
+  const skipLinkedContextHydration = initialBootMode || fastBucketMode || options.listOnly === true;
   try {
-    finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
-    finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
-    if (!initialBootMode) {
+    if (!skipLinkedContextHydration) {
+      finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
+      finalRows = await bulkHydrateInboxThreadLinkedContext(finalRows, supabase);
       finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
     }
     finalRows = finalRows.map((row) => normalizeThreadRow(row, params));
+    finalRows = finalRows.map((row) => compactInboxThreadSummaryRow(row));
     linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
   } catch (error) {
     linkedContextHydrationMs = elapsedMs(linkedContextHydrationStartedAt);
@@ -2315,7 +2351,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const deliveryHydrationStartedAt = nowMs();
   let deliveryHydrationMs = 0;
-  if (!skipDelivery) {
+  if (!skipDelivery && !skipLinkedContextHydration) {
     finalRows = await hydrateVisibleThreadDelivery(finalRows, supabase);
     deliveryHydrationMs = elapsedMs(deliveryHydrationStartedAt);
   }
@@ -2374,7 +2410,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   return {
     threads: finalRows,
-    messages: finalRows,
+    messages: [],
     counts: liveCounts,
     diagnostics,
     source: sourceConfig.name,
@@ -2845,12 +2881,34 @@ function auditThreadIdentity({ lookup = {}, rows = [], conversationThreadId = nu
       explicit_thread_ids: explicitThreadIds.length,
     },
   };
-  audit.integrity_blocked =
-    distinctProspectIds.length > 1 ||
-    distinctPropertyIds.length > 1 ||
-    distinctOwnerIds.length > 1 ||
-    explicitThreadIds.length > 1;
+  const propertyScoped = Boolean(
+    clean(lookup.propertyId) && clean(lookup.masterOwnerId || lookup.ownerId),
+  );
+  audit.integrity_blocked = propertyScoped
+    ? (distinctPropertyIds.length > 1 || distinctOwnerIds.length > 1)
+    : (
+      distinctProspectIds.length > 1 ||
+      distinctPropertyIds.length > 1 ||
+      distinctOwnerIds.length > 1
+    );
   return audit;
+}
+
+function filterMessageRowsForLookupScope(rows = [], lookup = {}) {
+  const propertyId = clean(lookup.propertyId);
+  const masterOwnerId = clean(lookup.masterOwnerId || lookup.ownerId);
+  const prospectId = clean(lookup.prospectId);
+  if (!propertyId && !masterOwnerId && !prospectId) return rows;
+
+  return rows.filter((row) => {
+    const rowPropertyId = clean(row.property_id || row.final_property_id);
+    const rowOwnerId = clean(row.master_owner_id || row.owner_id || row.final_master_owner_id);
+    const rowProspectId = clean(row.prospect_id || row.final_prospect_id);
+    if (propertyId && rowPropertyId && rowPropertyId !== propertyId) return false;
+    if (masterOwnerId && rowOwnerId && rowOwnerId !== masterOwnerId) return false;
+    if (prospectId && rowProspectId && rowProspectId !== prospectId) return false;
+    return true;
+  });
 }
 
 function applyPhoneAnyFilter(query, normalizedPhone) {
@@ -3420,11 +3478,9 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     };
   }
 
-  const CANONICAL_INDEXED_STRATEGIES = [
-    "latest_message_id_exact",
-    "conversation_thread_id",
-    "thread_key=canonical_e164",
-  ];
+  const CANONICAL_INDEXED_STRATEGIES = fetchAll
+    ? ["conversation_thread_id", "latest_message_id_exact"]
+    : ["latest_message_id_exact", "conversation_thread_id"];
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
   const runStrategy = async (strategy) => {
@@ -3451,12 +3507,12 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     }
     if (result.rows.length > 0) {
       strategyResults.push(result);
-      diagnostics.lookup_strategy_used = strategy.name;
-      if (strategyName !== "latest_message_id_exact") break;
+      diagnostics.lookup_strategy_used = diagnostics.lookup_strategy_used || strategy.name;
+      if (!fetchAll && strategyName !== "latest_message_id_exact") break;
     }
   }
 
-  if (mergedCount() < fetchLimit) {
+  if (mergedCount() < fetchLimit && fetchAll) {
     const secondaryStrategies = strategies.filter(
       (strategy) => !CANONICAL_INDEXED_STRATEGIES.includes(strategy.name),
     );
@@ -3521,9 +3577,12 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     }
   }
 
-  const mergedRows = dedupeRowsByMessageId(strategyResults.flatMap((result) => result.rows))
-    .map((row) => normalizeMessageRow(row))
-    .sort(compareMessagesNewestFirst);
+  const mergedRows = filterMessageRowsForLookupScope(
+    dedupeRowsByMessageId(strategyResults.flatMap((result) => result.rows))
+      .map((row) => normalizeMessageRow(row))
+      .sort(compareMessagesNewestFirst),
+    lookup,
+  );
   const pagedRows = mergedRows
     .slice(safeOffset, safeOffset + safeLimit)
     .sort(compareMessagesOldestFirst);

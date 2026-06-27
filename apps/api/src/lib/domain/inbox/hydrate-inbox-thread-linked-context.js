@@ -185,6 +185,7 @@ export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
   const finalAcquisitionScore = resolvePriorityScore({ property, masterOwner });
   const buildingCondition = firstReal(property?.building_condition, property?.condition);
   const conversationStage = firstReal(
+    row.seller_stage,
     dealContext?.universal_stage,
     row.conversation_stage,
     row.universal_stage,
@@ -215,11 +216,48 @@ export function mergeLinkedContextIntoThreadRow(row = {}, maps = {}) {
     equity_percent: equityPercent ?? row.equity_percent ?? null,
     equity_amount: equityAmount ?? row.equity_amount ?? null,
     final_acquisition_score: finalAcquisitionScore ?? row.final_acquisition_score ?? null,
+    deal_strength_score: parseNumber(property?.deal_strength_score) ?? row.deal_strength_score ?? null,
+    tag_distress_score: parseNumber(property?.tag_distress_score) ?? row.tag_distress_score ?? null,
+    distress_score: parseNumber(property?.tag_distress_score) ?? row.distress_score ?? row.tag_distress_score ?? null,
+    motivation_score: parseNumber(property?.structured_motivation_score)
+      ?? parseNumber(property?.motivation_score)
+      ?? row.motivation_score
+      ?? null,
+    property_flags_text: firstReal(property?.property_flags_text, row.property_flags_text) || row.property_flags_text || null,
     priority_score: parseNumber(masterOwner?.priority_score) ?? row.priority_score ?? null,
     building_condition: buildingCondition || null,
     conversation_stage: conversationStage || row.conversation_stage || null,
     universal_stage: conversationStage || row.universal_stage || null,
     current_stage: conversationStage || row.current_stage || null,
+    prospect_data: prospect || row.prospect_data || null,
+    master_owner_data: masterOwner || row.master_owner_data || null,
+    property_data: property || row.property_data || null,
+    prospect_best_phone: firstReal(
+      row.prospect_best_phone,
+      prospect?.best_phone,
+      masterOwner?.best_phone_1,
+    ),
+    prospect_best_email: firstReal(
+      row.prospect_best_email,
+      prospect?.best_email,
+      masterOwner?.best_email_1,
+    ),
+    prospect_contact_score: parseNumber(prospect?.contact_score_final) ?? row.prospect_contact_score ?? null,
+    prospect_phone_score: parseNumber(prospect?.phone_score_final) ?? row.prospect_phone_score ?? null,
+    est_household_income: firstReal(row.est_household_income, prospect?.est_household_income),
+    net_asset_value: firstReal(row.net_asset_value, prospect?.net_asset_value),
+    occupation_group: firstReal(row.occupation_group, prospect?.occupation_group),
+    gender: firstReal(row.gender, prospect?.gender),
+    marital_status: firstReal(row.marital_status, prospect?.marital_status),
+    education_model: firstReal(row.education_model, prospect?.education_model),
+    owner_type_guess: firstReal(row.owner_type_guess, masterOwner?.owner_type_guess),
+    primary_owner_address: firstReal(row.primary_owner_address, masterOwner?.primary_owner_address),
+    portfolio_total_value: parseNumber(masterOwner?.portfolio_total_value) ?? row.portfolio_total_value ?? null,
+    portfolio_total_equity: parseNumber(masterOwner?.portfolio_total_equity) ?? row.portfolio_total_equity ?? null,
+    property_count: parseNumber(masterOwner?.property_count) ?? row.property_count ?? null,
+    portfolio_total_units: parseNumber(masterOwner?.portfolio_total_units) ?? row.portfolio_total_units ?? null,
+    financial_pressure_score: parseNumber(masterOwner?.financial_pressure_score) ?? row.financial_pressure_score ?? null,
+    best_language: firstReal(row.best_language, masterOwner?.best_language, prospect?.language_preference),
   };
 
   return {
@@ -247,19 +285,67 @@ const PROPERTY_SELECT = [
   "equity_amount",
   "building_condition",
   "final_acquisition_score",
+  "deal_strength_score",
+  "tag_distress_score",
+  "structured_motivation_score",
+  "property_flags_text",
+  "tax_delinquent",
+  "active_lien",
 ].join(",");
 
 const MASTER_OWNER_SELECT = [
   "master_owner_id",
   "display_name",
+  "owner_type_guess",
   "priority_score",
+  "priority_tier",
+  "urgency_score",
+  "financial_pressure_score",
+  "contactability_score",
+  "best_contact_window",
+  "portfolio_total_value",
+  "portfolio_total_equity",
+  "portfolio_total_loan_balance",
+  "property_count",
+  "portfolio_total_units",
+  "tax_delinquent_count",
+  "active_lien_count",
+  "seller_tags_text",
+  "primary_owner_address",
+  "best_language",
+  "routing_market",
+  "routing_timezone",
+  "best_phone_1",
+  "best_phone_2",
+  "best_phone_3",
+  "best_email_1",
+  "best_email_2",
 ].join(",");
 
 const PROSPECT_SELECT = [
   "prospect_id",
+  "master_owner_id",
   "full_name",
   "first_name",
   "owner_display_name",
+  "person_flags_text",
+  "matching_flags",
+  "occupation_group",
+  "est_household_income",
+  "net_asset_value",
+  "buying_power",
+  "contact_score_final",
+  "phone_score_final",
+  "best_phone",
+  "best_email",
+  "language_preference",
+  "gender",
+  "marital_status",
+  "education_model",
+  "mob",
+  "likely_owner",
+  "likely_renting",
+  "email_score_final",
 ].join(",");
 
 const DEAL_CONTEXT_SELECT = [
@@ -283,7 +369,15 @@ async function safeInQuery(supabase, table, select, column, values = []) {
   for (let offset = 0; offset < unique.length; offset += chunkSize) {
     const chunk = unique.slice(offset, offset + chunkSize);
     const { data, error } = await supabase.from(table).select(select).in(column, chunk);
-    if (error) throw error;
+    if (error) {
+      console.warn("[INBOX_LINKED_CONTEXT_QUERY_FAILED]", {
+        table,
+        column,
+        message: error.message,
+        code: error.code || null,
+      });
+      return rows;
+    }
     rows.push(...(data || []));
   }
 
@@ -378,14 +472,6 @@ export async function bulkHydrateInboxThreadLinkedContext(rows = [], supabase) {
     if (threadKey) threadKeys.push(threadKey);
   }
 
-  const dealContexts = await safeInQuery(
-    supabase,
-    "deal_context_index",
-    DEAL_CONTEXT_SELECT,
-    "thread_key",
-    threadKeys,
-  );
-
   const propertyIds = [];
   const masterOwnerIds = [];
   const prospectIds = [];
@@ -398,6 +484,15 @@ export async function bulkHydrateInboxThreadLinkedContext(rows = [], supabase) {
     if (masterOwnerId) masterOwnerIds.push(masterOwnerId);
     if (prospectId) prospectIds.push(prospectId);
   }
+
+  const dealContexts = await safeInQuery(
+    supabase,
+    "deal_context_index",
+    DEAL_CONTEXT_SELECT,
+    "thread_key",
+    threadKeys,
+  );
+
   for (const ctx of dealContexts) {
     const propertyId = clean(ctx.property_id);
     const masterOwnerId = clean(ctx.master_owner_id);

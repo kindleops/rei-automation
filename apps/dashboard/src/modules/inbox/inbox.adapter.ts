@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
-import { inboxReducer, EMPTY_INBOX_STORE_STATE } from './inbox-store'
+import { inboxReducer, EMPTY_INBOX_STORE_STATE, type InboxStoreAction } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
 import { formatRelativeTime } from '../../shared/formatters'
 import { buildConversationThreadIdFromRecord, fetchInboxModel, type InboxFetchOptions, type InboxSourceMode } from '../../lib/data/inboxData'
@@ -56,6 +56,23 @@ const writeCachedViewCounts = (counts: Record<string, number>) => {
 }
 
 const DEFAULT_BOOT_BUCKET_KEY = 'all_messages'
+const COUNTS_REFRESH_DEBOUNCE_MS = 350
+
+const refreshAuthoritativeViewCounts = (
+  dispatch: React.Dispatch<InboxStoreAction>,
+) => {
+  void backendClient.fetchInboxCounts().then((res) => {
+    if (!res.ok) return
+    const payload = (res.data ?? {}) as Record<string, unknown>
+    const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as
+      | Record<string, unknown>
+      | undefined
+    if (!rawCounts || Object.keys(rawCounts).length === 0) return
+    const counts = mapAuthoritativeCounts(rawCounts)
+    dispatch({ type: 'SET_VIEW_COUNTS', counts })
+    writeCachedViewCounts(counts)
+  }).catch(() => {})
+}
 
 const readCachedBootRows = (bucketKey: string = DEFAULT_BOOT_BUCKET_KEY): InboxThread[] => {
   if (typeof localStorage === 'undefined') return []
@@ -123,8 +140,9 @@ const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConne
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
   initial_boot: 20_000,
-  manual_bucket_switch: 8_000,
-  auto_refresh: 8_000,
+  // Must stay >= API manual_bucket_switch budget so category tabs don't time out while all_threads succeeds.
+  manual_bucket_switch: 20_000,
+  auto_refresh: 12_000,
 }
 
 const DEFAULT_LIVE_INBOX_TIMEOUT_MODE: InboxTimeoutMode = 'manual_bucket_switch'
@@ -409,7 +427,20 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
 export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   const lastAt = t.lastMessageIso || new Date().toISOString()
   const inboxStatus = (t.threadWorkflowStatus || (t.status === 'unread' ? 'new_reply' : 'waiting')) as InboxStatus
-  const conversationStage = (t.threadWorkflowStage || 'ownership_check') as SellerStage
+  const row = t as InboxThread & {
+    universal_stage?: string
+    universalStage?: string
+    seller_stage?: string
+    sellerStage?: string
+  }
+  const conversationStage = (
+    row.universal_stage
+    || row.universalStage
+    || row.seller_stage
+    || row.sellerStage
+    || t.threadWorkflowStage
+    || 'ownership_check'
+  ) as SellerStage
 
   return {
     ...t,
@@ -805,6 +836,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const abortByBucketRef = useRef<Record<string, AbortController>>({})
   const latestRequestIdByBucketRef = useRef<Record<string, string>>({})
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const countsRefreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastRefreshAtRef = useRef<string | null>(null)
   const realtimeBatchRef = useRef<{ tables: Set<string>; threadKeys: Set<string>; eventCount: number }>({
     tables: new Set(), threadKeys: new Set(), eventCount: 0,
@@ -1202,9 +1234,17 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   // ── Realtime subscription + polling heartbeat ─────────────────────────────
 
   useEffect(() => {
+    refreshAuthoritativeViewCounts(dispatch)
+    const countsInterval = window.setInterval(() => {
+      refreshAuthoritativeViewCounts(dispatch)
+    }, 60_000)
+    return () => window.clearInterval(countsInterval)
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
 
-    void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot' })
+    void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot', limit: 25 })
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
 
@@ -1379,6 +1419,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         realtimeBatchRef.current.tables.add(table)
         if (threadKey) realtimeBatchRef.current.threadKeys.add(threadKey)
         realtimeBatchRef.current.eventCount += 1
+        if (countsRefreshDebounceRef.current) clearTimeout(countsRefreshDebounceRef.current)
+        countsRefreshDebounceRef.current = setTimeout(() => {
+          refreshAuthoritativeViewCounts(dispatch)
+        }, COUNTS_REFRESH_DEBOUNCE_MS)
         if (!patchApplied && isDev) {
           console.log('[INBOX_REALTIME_PATCH_SKIPPED]', {
             table,
@@ -1450,6 +1494,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       cancelled = true
       Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (countsRefreshDebounceRef.current) clearTimeout(countsRefreshDebounceRef.current)
       window.clearInterval(pollInterval)
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('online', handleOnline)

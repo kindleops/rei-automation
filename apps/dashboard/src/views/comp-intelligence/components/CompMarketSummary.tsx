@@ -7,36 +7,49 @@ interface Props {
 
 export function CompMarketSummary({ summary }: Props) {
   const title = summary.isPreliminary ? 'Preliminary Comp Market' : 'Comp Market Summary'
+  const range = summary.lowSale != null && summary.highSale != null
+    ? `${fmtCurrency(summary.lowSale)} – ${fmtCurrency(summary.highSale)}`
+    : '—'
 
   return (
     <section className="ci-market-summary" aria-label={title}>
       <header className="ci-market-summary__head">
         <h3>{title}</h3>
-        {summary.isPreliminary && (
-          <span className="ci-market-summary__badge">Raw comp statistics · not official valuation</span>
-        )}
       </header>
       <div className="ci-market-summary__grid">
-        <Stat label="Comps found" value={String(summary.count)} />
-        <Stat label="Closest sale" value={summary.closestSale ? fmtCurrency(summary.closestSale.sale_price) : '—'} sub={summary.closestSale?.geography.distance_miles != null ? `${summary.closestSale.geography.distance_miles.toFixed(2)} mi` : undefined} />
-        <Stat label="Newest sale" value={summary.newestSale ? fmtDate(summary.newestSale.sale_date) : '—'} />
-        <Stat label="Low sale" value={fmtCurrency(summary.lowSale)} />
-        <Stat label="Median sale" value={fmtCurrency(summary.medianSale)} highlight />
-        <Stat label="High sale" value={fmtCurrency(summary.highSale)} />
-        <Stat label="Median PPSF" value={fmtPpsf(summary.medianPpsf)} />
-        <Stat label="Search radius" value={`${summary.radiusMiles} mi`} />
-        <Stat label="Date range" value={`${summary.monthsBack} months`} />
+        <Pill label="Comps Found" value={String(summary.count)} />
+        <Pill label="Median Sale" value={fmtCurrency(summary.medianSale)} highlight />
+        <Pill label="Sale Range" value={range} />
+        <Pill label="Median $/Sq Ft" value={fmtPpsf(summary.medianPpsf)} />
+        <Pill
+          label="Closest Comp"
+          value={summary.closestSale ? fmtCurrency(summary.closestSale.sale_price) : '—'}
+          sub={summary.closestSale?.geography.distance_miles != null
+            ? `${summary.closestSale.geography.distance_miles.toFixed(2)} mi`
+            : undefined}
+        />
+        <Pill label="Newest Sale" value={summary.newestSale ? fmtDate(summary.newestSale.sale_date) : '—'} />
       </div>
     </section>
   )
 }
 
-function Stat({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: boolean }) {
+function Pill({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string
+  value: string
+  sub?: string
+  highlight?: boolean
+}) {
   return (
-    <div className={`ci-market-stat${highlight ? ' is-highlight' : ''}`}>
-      <span className="ci-market-stat__label">{label}</span>
-      <strong className="ci-market-stat__value tabular-nums">{value}</strong>
-      {sub && <span className="ci-market-stat__sub">{sub}</span>}
+    <div className={`ci-market-pill${highlight ? ' is-highlight' : ''}`}>
+      <span className="ci-market-pill__label">{label}</span>
+      <strong className="ci-market-pill__value tabular-nums">{value}</strong>
+      {sub && <span className="ci-market-pill__sub">{sub}</span>}
     </div>
   )
 }

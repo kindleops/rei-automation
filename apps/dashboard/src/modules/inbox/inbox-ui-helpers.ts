@@ -1,5 +1,7 @@
 import {
   resolveInboxSellerName,
+  resolveInboxProspectName,
+  resolveInboxOwnerName,
   resolveInboxPropertyAddress,
   type ThreadContext,
   type ThreadMessage,
@@ -343,7 +345,18 @@ const getField = (thread: InboxWorkflowThread, key: string): unknown => {
   return row[key] ?? row[key.charAt(0).toUpperCase() + key.slice(1)] ?? row[key.toLowerCase()]
 }
 
+/** Per-phone prospect headline for inbox sidebar rows. */
 export const resolveThreadPrimaryName = (thread: InboxWorkflowThread): string => {
+  return resolveInboxProspectName(thread as unknown as Record<string, unknown>)
+}
+
+/** Master owner headline for property conversation container. */
+export const resolveThreadOwnerName = (thread: InboxWorkflowThread): string => {
+  return resolveInboxOwnerName(thread as unknown as Record<string, unknown>)
+}
+
+/** @deprecated Use resolveThreadPrimaryName (prospect) or resolveThreadOwnerName (master owner). */
+export const resolveThreadSellerName = (thread: InboxWorkflowThread): string => {
   return resolveInboxSellerName(thread as unknown as Record<string, unknown>)
 }
 

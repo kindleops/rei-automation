@@ -283,10 +283,120 @@ function isTextGridNumber(phone: string | null | undefined): boolean {
   return TEXTGRID_NUMBERS.has(p)
 }
 
+const asDelimitedText = (value: unknown): string => {
+  if (Array.isArray(value)) return value.map((item) => asString(item).trim()).filter(Boolean).join(', ')
+  return asString(value, '').trim()
+}
+
+function canonicalizeDossierProspect(prospect: AnyRecord = {}): AnyRecord {
+  const flags = asDelimitedText(prospect.person_flags_text || prospect.person_flags || prospect.matching_flags)
+  return {
+    ...prospect,
+    full_name: firstString(prospect.full_name, prospect.name, prospect.display_name),
+    first_name: firstString(prospect.first_name, prospect.firstName),
+    est_household_income: firstString(prospect.est_household_income, prospect.household_income),
+    net_asset_value: firstPresent(prospect.net_asset_value, prospect.net_worth),
+    prospect_best_phone: firstString(prospect.prospect_best_phone, prospect.best_phone, prospect.phone),
+    prospect_best_email: firstString(prospect.prospect_best_email, prospect.best_email, prospect.email),
+    prospect_contact_score: firstNumber(prospect.prospect_contact_score, prospect.contact_score_final, prospect.contact_score),
+    prospect_phone_score: firstNumber(prospect.prospect_phone_score, prospect.phone_score_final, prospect.phone_score),
+    motivation_score: firstNumber(prospect.motivation_score, prospect.thread_priority),
+    person_flags_text: flags || prospect.person_flags_text,
+    language: firstString(prospect.language, prospect.language_preference),
+    education_model: firstString(prospect.education_model, prospect.education),
+    occupation_group: firstString(prospect.occupation_group, prospect.occupation),
+    age: firstNumber(prospect.age, prospect.calculated_age, prospect.prospect_age),
+  }
+}
+
+function canonicalizeDossierMasterOwner(owner: AnyRecord = {}): AnyRecord {
+  return {
+    ...owner,
+    full_name: firstString(owner.full_name, owner.display_name, owner.name),
+    owner_type: firstString(owner.owner_type, owner.owner_type_guess),
+    primary_owner_address: firstString(owner.primary_owner_address, owner.mailing_address),
+    portfolio_property_count: firstNumber(owner.portfolio_property_count, owner.property_count),
+    portfolio_total_value: firstNumber(owner.portfolio_total_value, owner.portfolio_value),
+    portfolio_total_equity: firstNumber(owner.portfolio_total_equity, owner.portfolio_equity),
+    portfolio_total_units: firstNumber(owner.portfolio_total_units, owner.total_units),
+    portfolio_total_loan_balance: firstNumber(owner.portfolio_total_loan_balance, owner.portfolio_loan_balance),
+    best_phone: firstString(owner.best_phone, owner.best_phone_1),
+    best_email: firstString(owner.best_email, owner.best_email_1),
+    phone_score: firstNumber(owner.phone_score, owner.contactability_score),
+    financial_pressure_score: firstNumber(owner.financial_pressure_score),
+    priority_score: firstNumber(owner.priority_score),
+    seller_tags_text: asDelimitedText(owner.seller_tags_text || owner.seller_tags) || owner.seller_tags_text,
+    absentee_owner: owner.absentee_owner ?? /absentee/i.test(String(owner.owner_type || owner.owner_type_guess || '')),
+  }
+}
+
+function canonicalizeDossierProperty(property: AnyRecord = {}): AnyRecord {
+  return {
+    ...property,
+    full_address: firstString(property.full_address, property.address, property.property_address_full),
+    city: firstString(property.city, property.property_address_city),
+    state: firstString(property.state, property.property_address_state),
+    zip: firstString(property.zip, property.property_address_zip, property.property_zip),
+    estimated_value: firstNumber(property.estimated_value, property.value),
+    estimated_arv: firstNumber(property.estimated_arv, property.arv),
+    equity_amount: firstNumber(property.equity_amount),
+    equity_percent: firstNumber(property.equity_percent, property.equity_percentage),
+    building_square_feet: firstNumber(property.building_square_feet, property.square_feet, property.sqft),
+    total_bedrooms: firstNumber(property.total_bedrooms, property.bedrooms, property.beds),
+    total_baths: firstNumber(property.total_baths, property.bathrooms, property.baths),
+    units_count: firstNumber(property.units_count, property.units),
+    estimated_repair_cost: firstNumber(property.estimated_repair_cost, property.repair_estimate),
+    deal_strength_score: firstNumber(property.deal_strength_score),
+    tag_distress_score: firstNumber(property.tag_distress_score, property.distress_score),
+    structured_motivation_score: firstNumber(property.structured_motivation_score, property.motivation_score),
+    property_flags_text: asDelimitedText(property.property_flags_text || property.property_flags) || property.property_flags_text,
+  }
+}
+
+export function prepareUniversalDossierForNormalize(row: AnyRecord): AnyRecord {
+  if (!row?.identity) return row
+  const conversation = asRecord(row.conversation || row.conversation_intelligence)
+  const dealStatus = asRecord(row.deal_status || row.decision_snapshot)
+  const valuation = asRecord(row.valuation || row.property_snapshot || row.decision_snapshot)
+  const buyerMatch = asRecord(row.buyer_match || row.buyer_matches)
+  const acquisitionDecision = asRecord(row.acquisition_decision || row.decision_snapshot)
+  const primaryPhone = asRecord(row.primary_phone || row.phone)
+  const property = canonicalizeDossierProperty(asRecord(row.property))
+  const prospect = canonicalizeDossierProspect({
+    ...asRecord(row.prospect),
+    prospect_best_phone: asRecord(row.prospect).prospect_best_phone || primaryPhone.number || primaryPhone.canonical_e164,
+    phone_carrier: asRecord(row.prospect).phone_carrier || primaryPhone.carrier,
+    prospect_phone_score: asRecord(row.prospect).prospect_phone_score || primaryPhone.phone_score,
+    prospect_contact_score: asRecord(row.prospect).prospect_contact_score || primaryPhone.contact_score,
+    sms_eligible: asRecord(row.prospect).sms_eligible ?? primaryPhone.sms_eligible,
+  })
+  const masterOwner = canonicalizeDossierMasterOwner({
+    ...asRecord(row.master_owner),
+    best_phone: asRecord(row.master_owner).best_phone || primaryPhone.number || primaryPhone.canonical_e164,
+  })
+
+  return {
+    ...row,
+    property,
+    prospect,
+    master_owner: masterOwner,
+    conversation,
+    deal_status: dealStatus,
+    valuation,
+    buyer_match: buyerMatch,
+    acquisition_decision: acquisitionDecision,
+    primary_phone: primaryPhone,
+    census: asRecord(row.census),
+    compliance: asRecord(row.compliance),
+    freshness: asRecord(row.freshness),
+  }
+}
+
 export function normalizeDealContext(row: AnyRecord): DealContext {
+  const prepared = prepareUniversalDossierForNormalize(row)
   // If this is already a DealDossier structure from the new service
-  if (row.identity && row.property && row.prospect) {
-    const dossier = row as unknown as DealDossier
+  if (prepared.identity && prepared.property && prepared.prospect) {
+    const dossier = prepared as unknown as DealDossier
     const prop = dossier.property
     const pros = dossier.prospect
     const own = dossier.master_owner
@@ -326,13 +436,13 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
       acquisitionDecision: dossier.acquisition_decision,
       compliance: dossier.compliance,
 
-      ownerName: own.full_name || pros.full_name || 'Unknown',
-      owner_name: own.full_name || pros.full_name || 'Unknown',
-      display_name: own.full_name || pros.full_name || 'Unknown',
-      displayName: own.full_name || pros.full_name || 'Unknown',
-      firstName: pros.first_name || '',
-      fullName: pros.full_name || own.full_name || '',
-      sellerDisplayName: own.full_name || pros.full_name || '',
+      ownerName: firstString(own.full_name, pros.full_name, conv.seller_display_name) || 'Unknown',
+      owner_name: firstString(own.full_name, pros.full_name, conv.seller_display_name) || 'Unknown',
+      display_name: firstString(own.full_name, pros.full_name, conv.seller_display_name) || 'Unknown',
+      displayName: firstString(own.full_name, pros.full_name, conv.seller_display_name) || 'Unknown',
+      firstName: firstString(pros.first_name, typeof pros.full_name === 'string' ? pros.full_name.split(' ')[0] : undefined) || '',
+      fullName: firstString(pros.full_name, own.full_name) || '',
+      sellerDisplayName: firstString(own.full_name, pros.full_name) || '',
       propertyAddress: prop.full_address || '',
       property_address_full: prop.full_address || '',
       market: prop.market || '',
@@ -356,8 +466,8 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
 
       sellerPhone: dossier.identity.canonical_e164 || '',
       seller_phone: dossier.identity.canonical_e164 || '',
-      bestPhone: pros.prospect_best_phone || dossier.identity.canonical_e164 || '',
-      best_phone: pros.prospect_best_phone || dossier.identity.canonical_e164 || '',
+      bestPhone: firstString(pros.prospect_best_phone, own.best_phone, dossier.primary_phone?.canonical_e164, dossier.identity.canonical_e164) || '',
+      best_phone: firstString(pros.prospect_best_phone, own.best_phone, dossier.primary_phone?.canonical_e164, dossier.identity.canonical_e164) || '',
 
       prospect_name: pros.full_name || '',
       full_name: pros.full_name || '',
@@ -731,10 +841,32 @@ export function normalizeDealContext(row: AnyRecord): DealContext {
     cash_offer: firstNumber(row.cash_offer, property.cash_offer, 0),
     estimatedRepairCost: firstNumber(row.estimated_repair_cost, valuation.repair_estimate, 0),
     estimated_repair_cost: firstNumber(row.estimated_repair_cost, valuation.repair_estimate, 0),
-    finalAcquisitionScore: firstNumber(row.final_acquisition_score, 0),
-    final_acquisition_score: firstNumber(row.final_acquisition_score, 0),
-    priorityScore: firstNumber(row.priority_score, 0),
-    priority_score: firstNumber(row.priority_score, 0),
+    finalAcquisitionScore: firstNumber(
+      row.final_acquisition_score,
+      row.finalAcquisitionScore,
+      property.final_acquisition_score,
+      acquisitionDecision.acquisition_score,
+      0,
+    ),
+    final_acquisition_score: firstNumber(
+      row.final_acquisition_score,
+      row.finalAcquisitionScore,
+      property.final_acquisition_score,
+      acquisitionDecision.acquisition_score,
+      0,
+    ),
+    deal_strength_score: firstNumber(row.deal_strength_score, property.deal_strength_score, acquisitionDecision.deal_strength_score, 0),
+    tag_distress_score: firstNumber(row.tag_distress_score, property.tag_distress_score, acquisitionDecision.distress_score, 0),
+    distress_score: firstNumber(row.distress_score, row.tag_distress_score, property.tag_distress_score, acquisitionDecision.distress_score, 0),
+    motivation_score: firstNumber(
+      row.motivation_score,
+      row.structured_motivation_score,
+      prospect.motivation_score,
+      property.structured_motivation_score,
+      0,
+    ),
+    priorityScore: firstNumber(row.priority_score, masterOwner.priority_score, 0),
+    priority_score: firstNumber(row.priority_score, masterOwner.priority_score, 0),
     propertyTags: asStringArray(row.podio_tags, property.podio_tags),
     sellerTags: asStringArray(row.seller_tags_text, prospect.seller_tags_text),
     lat: firstCoordinate(row.latitude, row.lat, property.latitude, property.lat, propertyRaw.latitude, propertyRaw.lat) ?? 0,

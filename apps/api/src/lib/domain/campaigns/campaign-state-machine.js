@@ -70,6 +70,36 @@ const TRANSITIONS = Object.freeze({
   archived: ['draft'],
 })
 
+const CAMPAIGN_STATUS_NOTIFICATION_MAP = Object.freeze({
+  scheduled: 'campaign_scheduled',
+  active: 'campaign_activated',
+  paused: 'campaign_paused',
+  completed: 'campaign_completed',
+  failed: 'campaign_failed',
+  archived: 'campaign_archived',
+})
+
+async function emitCampaignStatusNotification(campaignId, campaign, toStatus) {
+  const eventType = CAMPAIGN_STATUS_NOTIFICATION_MAP[String(toStatus ?? '').trim().toLowerCase()]
+  if (!eventType) return
+  const { emitNotificationFromBusinessEvent } = await import(
+    '@/lib/domain/notifications/notification-emitter.js'
+  )
+  await emitNotificationFromBusinessEvent({
+    eventType,
+    campaignId,
+    sourceEntityType: 'campaign',
+    sourceEntityId: campaignId,
+    titleVars: {
+      campaign_name: campaign?.name || campaignId,
+    },
+    metrics: {
+      status: toStatus,
+      from: campaign?.last_transition_from ?? null,
+    },
+  })
+}
+
 export const CAMPAIGN_LIFECYCLE_SELECT = [
   'id',
   'status',
@@ -220,13 +250,15 @@ export async function transitionCampaignStatus(supabase, campaignId, toStatus, o
 
   if (!error) {
     const campaign = Array.isArray(data) ? data[0] : data
-    return {
+    const result = {
       ok: true,
       campaign: campaign || null,
       to,
       from: campaign?.last_transition_from ?? from,
       raw_from: rawFrom,
     }
+    emitCampaignStatusNotification(campaignId, campaign, to).catch(() => {})
+    return result
   }
 
   const errMsg = `${error.message || ''}`
@@ -384,5 +416,7 @@ async function transitionCampaignStatusFallback(supabase, campaignId, to, { reas
     return { ok: false, error: error.message || 'transition_failed', from, to }
   }
   if (!data) return { ok: false, error: 'transition_conflict', from, to }
-  return { ok: true, campaign: data, from, to, degraded: true }
+  const result = { ok: true, campaign: data, from, to, degraded: true }
+  emitCampaignStatusNotification(campaignId, data, to).catch(() => {})
+  return result
 }

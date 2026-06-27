@@ -14,6 +14,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { sendSystemErrorAlert } from "@/lib/alerts/discord.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Dependency injection (for tests)
@@ -38,6 +39,21 @@ export function __resetSentryDeps() {
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns false for expected terminal provider outcomes (e.g. TextGrid 21610
+ * blacklist) that are already finalized in queue state and should not page Sentry.
+ */
+export function shouldCaptureRouteException(error) {
+  if (!error) return false;
+
+  const classified = classifyTextGridProviderError(error);
+  if (classified.compliance_related && classified.sentry_level === "warning") {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Capture an exception with standard route/subsystem tags.
  *
  * @param {Error | unknown} error
@@ -47,6 +63,15 @@ export function __resetSentryDeps() {
  * @param {object} [opts.context]    Non-secret context key/values attached to the Sentry event
  */
 export function captureRouteException(error, { route, subsystem, context } = {}) {
+  if (!shouldCaptureRouteException(error)) {
+    addSentryBreadcrumb("route_exception", "handled_terminal_provider_outcome_skipped", {
+      route: route || null,
+      subsystem: subsystem || null,
+      error_message: String(error?.message || error).slice(0, 240),
+    });
+    return;
+  }
+
   // Guard: Sentry may not be initialized in test environments without an init call.
   if (typeof runtimeDeps.sentry.withScope !== "function") return;
 

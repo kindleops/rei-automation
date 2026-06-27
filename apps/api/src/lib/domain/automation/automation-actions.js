@@ -637,6 +637,29 @@ async function createAlert({ db, event, action, params, dry_run } = {}) {
   if (isMissingTargetError(result?.error)) {
     return skippedMissingTarget("ops_notifications", result.error, { intended_row: row });
   }
+
+  // Mirror into canonical notification_events (non-blocking).
+  try {
+    const { emitNotificationFromBusinessEvent } = await import(
+      "@/lib/domain/notifications/notification-emitter.js"
+    );
+    await emitNotificationFromBusinessEvent({
+      eventType: "intelligence_automation_alert",
+      severity: clean(params.severity) === "critical" ? "critical" : "warning",
+      description: row.message,
+      titleVars: { pattern_name: clean(params.title) || row.title },
+      metrics: row.metrics,
+      recommendation: { recommended_action: row.recommended_action },
+      campaignId: row.campaign_key || null,
+      sourceEntityType: "automation",
+      sourceEntityId: notification_key,
+      propertyId: event.property_id || null,
+      participantId: buildThreadKey(event, params),
+    });
+  } catch {
+    /* notification intelligence mirror is non-fatal */
+  }
+
   return {
     ok: !result?.error,
     notification: result?.data || row,

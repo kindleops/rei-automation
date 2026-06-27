@@ -36,8 +36,11 @@ export async function GET(request, { params }) {
   const property_id = searchParams.get('property_id')
   const master_owner_id = searchParams.get('master_owner_id') || searchParams.get('owner_id')
   const latest_message_id = searchParams.get('latest_message_id') || searchParams.get('latestMessageId') || searchParams.get('latest_message_event_id') || searchParams.get('latestMessageEventId')
-  const offset = Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
-  const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '50', 10) || 50))
+  const fetchAll = ['1', 'true', 'yes'].includes(String(searchParams.get('fetch_all') || searchParams.get('fetchAll') || '').trim().toLowerCase())
+  const offset = fetchAll ? 0 : Math.max(0, Number.parseInt(searchParams.get('offset') || '0', 10) || 0)
+  const limit = fetchAll
+    ? 2000
+    : Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '50', 10) || 50))
 
   if (!thread_key) {
     return NextResponse.json({ ok: false, error: 'missing_thread_key' }, { status: 400, headers: cors })
@@ -57,7 +60,7 @@ export async function GET(request, { params }) {
       property_id,
       master_owner_id,
       latest_message_id,
-    }, { offset, limit })
+    }, { offset, limit, fetchAll })
 
     const nextOffset = offset + rows.length
 
@@ -65,14 +68,15 @@ export async function GET(request, { params }) {
       offset,
       limit,
       total,
-      has_more: nextOffset < total,
-      next_offset: nextOffset < total ? nextOffset : null,
+      has_more: fetchAll ? false : nextOffset < total,
+      next_offset: fetchAll ? null : (nextOffset < total ? nextOffset : null),
     }
 
     return NextResponse.json(
       {
         ok: true,
         action: 'thread-messages',
+        fetch_all: fetchAll,
         thread_key,
         conversation_thread_id: conversationThreadId || conversation_thread_id || diagnostics?.conversation_thread_id || null,
         integrity_blocked: integrityBlocked === true,

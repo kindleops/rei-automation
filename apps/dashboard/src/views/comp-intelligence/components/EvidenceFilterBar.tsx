@@ -1,10 +1,19 @@
-import type { EvidenceFilters } from '../hooks/useCompEvidenceFilters'
+// Legacy filter bar (not used by current CompIntelligenceWorkspace; kept for reference)
+// Define local shape to avoid conflict with new EvidenceFilters in the hook.
 import { hasBuyerIdentityData, hasInstitutionalData } from '../adapters/compDecisionProjection'
 import type { CompTransactionEvidence } from '../../../domain/comp-intelligence/v3-types'
 
+interface LegacyEvidenceFilters {
+  universe?: string | null
+  status: 'all' | 'accepted' | 'review' | 'rejected'
+  buyerArchetype?: string | null
+  packageOnly: boolean
+  singleAssetOnly: boolean
+}
+
 interface Props {
-  filters: EvidenceFilters
-  setFilters: (next: EvidenceFilters) => void
+  filters: LegacyEvidenceFilters
+  setFilters: (next: LegacyEvidenceFilters) => void
   evidence: CompTransactionEvidence[]
 }
 
@@ -27,7 +36,7 @@ export function EvidenceFilterBar({ filters, setFilters, evidence }: Props) {
       <select
         aria-label="Status filter"
         value={filters.status}
-        onChange={(e) => setFilters({ ...filters, status: e.target.value as EvidenceFilters['status'] })}
+        onChange={(e) => setFilters({ ...filters, status: e.target.value as LegacyEvidenceFilters['status'] })}
       >
         <option value="all">All status</option>
         <option value="accepted">Accepted</option>

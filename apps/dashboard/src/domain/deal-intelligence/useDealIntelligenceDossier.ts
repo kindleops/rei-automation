@@ -59,8 +59,9 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
     if (thread.masterOwnerId) qs.set('master_owner_id', thread.masterOwnerId)
 
+    qs.set('summary', '1')
     const path = `/api/cockpit/deal-intelligence/thread/${encodeURIComponent(thread.threadKey)}`
-    const url = qs.toString() ? `${base}${path}?${qs.toString()}` : `${base}${path}`
+    const url = `${base}${path}?${qs.toString()}`
 
     try {
       const res = await fetch(url, {

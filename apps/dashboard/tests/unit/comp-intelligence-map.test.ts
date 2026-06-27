@@ -93,11 +93,11 @@ test('workspace preserves property-first split classes', async () => {
     path.join(process.cwd(), 'src/views/comp-intelligence/CompIntelligenceWorkspace.tsx'),
     'utf8',
   )
-  assert.match(source, /ci-workspace--property-first/)
   assert.match(source, /ci-workspace__map-col/)
-  assert.match(source, /ci-panel--property/)
+  assert.match(source, /className="ci-panel"/)
   assert.match(source, /SubjectPropertyCard/)
   assert.match(source, /PropertyCompCard/)
+  assert.equal(source.includes('ci-tabs--secondary'), false)
   assert.equal(source.includes('Overview'), false)
   assert.equal(source.includes('Strategies'), false)
 })

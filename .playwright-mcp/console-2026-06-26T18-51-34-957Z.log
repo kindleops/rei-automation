@@ -1,0 +1,170 @@
+[    2048ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:17232
+[    2540ms] [LOG] [dashboard boot] live inbox fetch started {options: Object, filterKey: all_messages, timeoutMode: initial_boot, timeoutMs: 20000} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:248
+[    2541ms] [LOG] [VIEW_MODEL_LOAD_START] {viewModel: inbox_threads_view, startedAt: 2499.600000000093, view: all_messages, filter: all, limit: 25} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:26
+[    2541ms] [LOG] [INBOX_API_REQUEST] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, filter: all, timeoutMode: initial_boot, refreshReason: initial_boot} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1423
+[    2543ms] [LOG] [BACKEND_API] Local dev detected. Will use relative paths via proxy. @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:17
+[    2546ms] [LOG] [useInboxData] realtime subscriptions active @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:1387
+[    2550ms] [LOG] [SMOOTH_THREAD_SELECT] {key: ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981, refetch: false} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1718
+[    2552ms] [LOG] [MESSAGES_FETCH_START] ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981 @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1730
+[    2553ms] [LOG] [THREAD_CONTEXT_START] {threadKey: +19012812981, propertyId: 2124443109, prospectId: pros0_e96b2c69bde82ca0a59edf87, ownerId: undefined} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1806
+[    2573ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, startedAt: 2531.600000000093, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    2573ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    2574ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, startedAt: 2533.1999999997206, transport: backend, url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    2575ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, path: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    2983ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/api/cockpit/inbox/thread-messages?thread_key=ct%3Aproperty%3A2124443109%7Cowner%3Amo_36f0a8b60d4ea762081338c9%7Cphone%3A%2B19012812981&fetch_all=1&conversation_thread_id=ct%3Aproperty%3A2124443109%7Cowner%3Amo_36f0a8b60d4ea762081338c9%7Cphone%3A%2B19012812981&legacy_thread_key=%2B19012812981&normalized_phone=%2B19012812981&canonical_e164=%2B19012812981&best_phone=%2B19012812981&phone_e164=%2B19012812981&property_id=2124443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87:0
+[    3039ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_connection_state, durationMs: 0, source: dashboard_connection_state, connectionState: live, reason: subscribe_status} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:63
+[    3040ms] [LOG] [INBOX_REALTIME_STATUS] {status: SUBSCRIBED, normalizedStatus: connected, connectionState: live, fallbackMode: realtime} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:1367
+[    3060ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/api/cockpit/inbox/live?filter=all&direction=all&cursor=0&limit=25&map=0&timeout_mode=initial_boot&refresh_reason=initial_boot:0
+[    3079ms] [LOG] [BACKEND_API_RESPONSE] {status: 404, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 507} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[    3080ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, durationMs: 508, transport: backend, status: 404, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3083ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, startedAt: 3041.899999999907, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    3083ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    3104ms] [LOG] [BACKEND_API_RESPONSE] {status: 404, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 530} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[    3104ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, durationMs: 530, transport: backend, status: 404, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3105ms] [LOG] [INBOX_API_RESPONSE] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…out_mode=initial_boot&refresh_reason=initial_boot, status: 502, ok: false, responseBodyCount: 0, responseBodyPath: null} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1433
+[    3106ms] [WARNING] [Inbox] /api/cockpit/inbox/live failed - preserving previous data Error: Live inbox API failed (502): [404] Backend returned an HTML error page instead of JSON. Check that the API server is running locally or set VITE_BACKEND_API_URL.
+    at fetchLiveInbox (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1443:9)
+    at async loadDashboardViewModel (http://localhost:5173/src/lib/data/dashboardDataLayer.ts:33:18)
+    at async getInboxRowsForView (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1795:15)
+    at async fetchInboxModel (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2300:16)
+    at async withTimeout (http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:140:10)
+    at async loadInbox (http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:264:18)
+    at async http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:788:18 @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1806
+[    3107ms] [WARNING] [VIEW_MODEL_LOAD_DONE] {name: inbox_threads_view, durationMs: 567, viewModel: inbox_threads_view, ok: false, error: Live inbox API failed (502): [404] Backend returne…r is running locally or set VITE_BACKEND_API_URL.} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:40
+[    3108ms] [WARNING] [Inbox] fetchInboxModel core failure Error: Live inbox API failed (502): [404] Backend returned an HTML error page instead of JSON. Check that the API server is running locally or set VITE_BACKEND_API_URL.
+    at fetchLiveInbox (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1443:9)
+    at async loadDashboardViewModel (http://localhost:5173/src/lib/data/dashboardDataLayer.ts:33:18)
+    at async getInboxRowsForView (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1795:15)
+    at async fetchInboxModel (http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2300:16)
+    at async withTimeout (http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:140:10)
+    at async loadInbox (http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:264:18)
+    at async http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:788:18 @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2306
+[    3109ms] [ERROR] [NEXUS] Inbox live load failed. {filterKey: all_messages, error: Error: Live inbox API failed (502): [404] Backend returned an HTML error page instead of JSON. Chec…} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:342
+[    3109ms] [WARNING] [INBOX_DEGRADED_ROWS_COMMITTED] {bucketKey: all_messages, rowCount: 25, dataMode: fallback_error, liveFetchError: Live inbox API failed (502): [404] Backend returne…r is running locally or set VITE_BACKEND_API_URL.} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:854
+[    3109ms] [LOG] [INBOX_COUNTS_APPROXIMATE_APPLIED] {bucketKey: all_messages, counts_source: visible_rows_approximate, count_preserved_reason: fallback_thread_source_visible_rows_approximate} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:926
+[    3110ms] [LOG] [useInboxData] refresh complete {bucketKey: all_messages, rowCount: 25, totalCount: 25, dataMode: fallback_error} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:986
+[    3323ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/api/cockpit/inbox/thread-messages?thread_key=ct%3Aproperty%3A2124443109%7Cowner%3Amo_36f0a8b60d4ea762081338c9%7Cphone%3A%2B19012812981&offset=0&limit=50&conversation_thread_id=ct%3Aproperty%3A2124443109%7Cowner%3Amo_36f0a8b60d4ea762081338c9%7Cphone%3A%2B19012812981&legacy_thread_key=%2B19012812981&normalized_phone=%2B19012812981&canonical_e164=%2B19012812981&best_phone=%2B19012812981&phone_e164=%2B19012812981&property_id=2124443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87:0
+[    3326ms] [LOG] [BACKEND_API_RESPONSE] {status: 404, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 243} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[    3326ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, durationMs: 243, transport: backend, status: 404, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3326ms] [LOG] [HYDRATION_PHASE_DONE] {name: messages, durationMs: 775, phase: messages, threadKey: ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981, messages: 0} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:50
+[    3327ms] [LOG] [MESSAGES_FETCH_DONE] ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981 0 777ms @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1740
+[    3327ms] [WARNING] [InboxPage] message hydration returned 0 rows {threadKey: ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981, integrityBlocked: false, fetchFailed: true, ownerId: undefined, propertyId: 2124443109} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1759
+[    3328ms] [LOG] [MESSAGES_COMMIT] ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981 0 @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1770
+[    3411ms] [LOG] [THREAD_CONTEXT_DONE] {threadKey: +19012812981, propertyId: 2124443109, prospectId: pros0_e96b2c69bde82ca0a59edf87, masterOwnerId: null, coordsResolved: false} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1827
+[    3412ms] [LOG] [THREAD_CONTEXT_COMMIT] +19012812981 @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1836
+[    3489ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981, startedAt: 3448.2999999998137, transport: backend, url: /api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    3489ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981, path: /api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    3490ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/properties/4243EDECATURMESA/comp-inte…?radius=1&monthsBack=12&thread_key=%2B19012812981, startedAt: 3449.399999999907, transport: backend, url: /api/cockpit/properties/4243EDECATURMESA/comp-inte…?radius=1&monthsBack=12&thread_key=%2B19012812981, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    3491ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/properties/4243EDECATURMESA/comp-inte…?radius=1&monthsBack=12&thread_key=%2B19012812981, path: /api/cockpit/properties/4243EDECATURMESA/comp-inte…?radius=1&monthsBack=12&thread_key=%2B19012812981, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    3712ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981:0
+[    3721ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/api/cockpit/properties/4243EDECATURMESA/comp-intelligence?radius=1&monthsBack=12&thread_key=%2B19012812981:0
+[    3725ms] [LOG] [BACKEND_API_RESPONSE] {status: 404, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 236} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[    3725ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/properties/4243EDECATURMESA/subject?thread_key=%2B19012812981, durationMs: 236, transport: backend, status: 404, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3732ms] [LOG] [BACKEND_API_RESPONSE] {status: 404, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 241} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[    3732ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/properties/4243EDECATURMESA/comp-inte…?radius=1&monthsBack=12&thread_key=%2B19012812981, durationMs: 241, transport: backend, status: 404, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[    3892ms] [ERROR] Failed to load resource: the server responded with a status of 400 () @ https://lcppdrmrdfblstpcbgpf.supabase.co/rest/v1/v_recent_sold_comps?select=*&limit=100&market=eq.Memphis%2C+TN&sale_date=gte.2025-06-26&order=sale_date.desc:0
+[    3893ms] [ERROR] Failed to load market comps {code: 42703, details: null, hint: null, message: column v_recent_sold_comps.market does not exist} @ http://localhost:5173/src/lib/data/commandMapData.ts:313
+[    4849ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/health, startedAt: 4807.799999999814, transport: backend, url: /api/cockpit/health, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    4849ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/health, path: /api/cockpit/health, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    7195ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/control, startedAt: 7153.899999999907, transport: backend, url: /api/cockpit/queue/control, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    7195ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/control, path: /api/cockpit/queue/control, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    7196ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/processor-health, startedAt: 7155, transport: backend, url: /api/cockpit/queue/processor-health, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    7196ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/processor-health, path: /api/cockpit/queue/processor-health, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    9196ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/templates/list?limit=800&includeInactive=true, startedAt: 9155.399999999907, transport: backend, url: /api/cockpit/templates/list?limit=800&includeInactive=true, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    9197ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/templates/list?limit=800&includeInactive=true, path: /api/cockpit/templates/list?limit=800&includeInactive=true, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[    9198ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, startedAt: 9156.899999999907, transport: backend, url: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[    9198ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, path: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[   13195ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 8346} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   13195ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/health, durationMs: 8346, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   13196ms] [LOG] [dashboard boot] live inbox fetch started {options: Object, filterKey: all_messages, timeoutMode: manual_bucket_switch, timeoutMs: 8000} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:248
+[   13196ms] [LOG] [VIEW_MODEL_LOAD_START] {viewModel: inbox_threads_view, startedAt: 13154.899999999907, view: all_messages, filter: all, limit: 100} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:26
+[   13196ms] [LOG] [INBOX_API_REQUEST] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, filter: all, timeoutMode: manual_bucket_switch, refreshReason: null} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1423
+[   13197ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, startedAt: 13155.600000000093, transport: backend, url: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[   13197ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, path: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[   13203ms] [LOG] [SMOOTH_THREAD_SELECT] {key: ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981, refetch: true} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1718
+[   13204ms] [LOG] [MESSAGES_FETCH_START] ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981 @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1730
+[   13204ms] [LOG] [THREAD_CONTEXT_START] {threadKey: +19012812981, propertyId: 2124443109, prospectId: pros0_e96b2c69bde82ca0a59edf87, ownerId: undefined} @ http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:1806
+[   13210ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, startedAt: 13168.899999999907, transport: backend, url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[   13210ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, path: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[   13671ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 6475} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   13671ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/processor-health, durationMs: 6476, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   13709ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 500, bodyCountPath: total, durationMs: 4512} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   13709ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/templates/list?limit=800&includeInactive=true, durationMs: 4513, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   13709ms] [LOG] [templateData] sms_templates schema sample keys [id, template_id, is_active, use_case, stage_code, language, template_body, updated_at] @ http://localhost:5173/src/lib/data/templateData.ts?t=1782499321627:138
+[   14085ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 6890} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   14085ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/control, durationMs: 6890, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   14382ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 25, bodyCountPath: items, durationMs: 5184} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   14382ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/queue/page?page=0&pageSize=25&status=all&dateBasis=created_at, durationMs: 5184, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   14492ms] [ERROR] Failed to load resource: the server responded with a status of 400 () @ https://lcppdrmrdfblstpcbgpf.supabase.co/rest/v1/textgrid_numbers?select=number%2Cphone_number%2Cmarket%2Csender_market%2Cstatus%2Cstate%2Cpaused%2Cis_paused%2Cactive%2Cis_active:0
+[   14827ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: 100, bodyCountPath: threads, durationMs: 1631} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   14828ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, durationMs: 1631, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   14828ms] [LOG] [INBOX_API_RESPONSE] {url: /api/cockpit/inbox/live?filter=all&direction=all&c…limit=100&map=0&timeout_mode=manual_bucket_switch, status: 200, ok: true, responseBodyCount: 100, responseBodyPath: threads} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1433
+[   14861ms] [LOG] [VIEW_MODEL_LOAD_DONE] {name: inbox_threads_view, durationMs: 1665, viewModel: inbox_threads_view, ok: true, view: all_messages} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:33
+[   14886ms] [LOG] [CACHE_COMMIT_DONE] {name: dashboard_threads, durationMs: 25, source: getInboxRowsForView, rows: 100, threads: 100} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:63
+[   14886ms] [LOG] [HYDRATION_PHASE_DONE] {name: thread_shell, durationMs: 1690, phase: thread_shell, view: all_messages, rows: 100} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:50
+[   14886ms] [LOG] [Inbox] live inbox success {threads: 100, counts: Object} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1842
+[   14886ms] [LOG] [Inbox] source endpoint /api/cockpit/inbox/live @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1851
+[   14886ms] [LOG] [Inbox] raw sample {thread_key: +19012812981, canonical_thread_key: +19012812981, canonical_e164: +19012812981, seller_phone: +19012812981, display_phone: +19012812981} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1852
+[   14886ms] [LOG] [Inbox] normalized sample {thread_key: +19012812981, canonical_thread_key: +19012812981, canonical_e164: +19012812981, seller_phone: +19012812981, display_phone: +19012812981} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1853
+[   14887ms] [LOG] [Inbox] visible fields {ownerName: Anthony Polk & Wesley Arije, propertyAddress: 5502 Cottonwood Rd, Memphis, Tn 38115, latestMessageBody: STOP, status: new_replies, stage: not_contacted} @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:1855
+[   14887ms] [LOG] [InboxTiming] live_fetch_ms: 1691ms @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2302
+[   14887ms] [LOG] [InboxTiming] lightweight_normalize_ms: 0ms (built-in) @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2303
+[   14887ms] [LOG] [fetchInboxModel] using counts embedded in live response @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2380
+[   14887ms] [LOG] [InboxTiming] total_fetch_model_ms: 1692ms @ http://localhost:5173/src/lib/data/inboxData.ts?t=1782499321627:2397
+[   14888ms] [LOG] [dashboard boot] live inbox fetch success {filterKey: all_messages, count: 100} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:319
+[   14889ms] [LOG] [useInboxData] refresh complete {bucketKey: all_messages, rowCount: 100, totalCount: 0, dataMode: live} @ http://localhost:5173/src/modules/inbox/inbox.adapter.ts?t=1782499321627:986
+[   14889ms] [LOG] [DATA_LAYER_QUERY_START] {name: /api/cockpit/inbox/counts, startedAt: 14847.799999999814, transport: backend, url: /api/cockpit/inbox/counts, method: GET} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:14
+[   14889ms] [LOG] [BACKEND_API_CALL] {url: /api/cockpit/inbox/counts, path: /api/cockpit/inbox/counts, method: GET} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:190
+[   15064ms] ReferenceError: nextLookback is not defined
+    at MapCommandRail (http://localhost:5173/src/views/comp-intelligence/components/MapCommandRail.tsx?t=1782499676102:98:73)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:9632:19)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:12362:12)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:13089:41)
+    at HTMLUnknownElement.callCallback (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3142:11)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3162:14)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3201:32)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15990:5)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15568:12)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15517:36)
+[   15205ms] ReferenceError: nextLookback is not defined
+    at MapCommandRail (http://localhost:5173/src/views/comp-intelligence/components/MapCommandRail.tsx?t=1782499676102:98:73)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:9632:19)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:12362:12)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:13089:41)
+    at HTMLUnknownElement.callCallback (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3142:11)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3162:14)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:3201:32)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15990:5)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15568:12)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:15517:36)
+[   15210ms] [ERROR] The above error occurred in the <MapCommandRail> component:
+
+    at MapCommandRail (http://localhost:5173/src/views/comp-intelligence/components/MapCommandRail.tsx?t=1782499676102:11:34)
+    at div
+    at div
+    at CompIntelligenceWorkspace (http://localhost:5173/src/views/comp-intelligence/CompIntelligenceWorkspace.tsx?t=1782499742200:33:45)
+    at Suspense
+    at WorkspaceSuspense (http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:93:30)
+    at section
+    at div
+    at div
+    at WatchlistProvider (http://localhost:5173/src/lib/watchlistContext.tsx:15:37)
+    at InboxPage (http://localhost:5173/src/modules/inbox/InboxPage.tsx?t=1782499742200:536:48)
+    at InboxView
+    at ErrorBoundary (http://localhost:5173/src/shared/ErrorBoundary.tsx:4:8)
+    at main
+    at div
+    at CommandCenterApp (http://localhost:5173/src/app/CommandCenterApp.tsx?t=1782499742200:184:15)
+    at RequireAuth (http://localhost:5173/src/components/auth/RequireAuth.tsx:7:31)
+    at AuthProvider (http://localhost:5173/src/components/auth/AuthProvider.tsx:16:32)
+    at App
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/react-dom-D2bPC4jN.js?v=601e9e7c:11718
+[   15211ms] [ERROR] [DASHBOARD_ROUTE_RENDER_ERROR] {label: NEXUS | Comp Intelligence, resetKey: /comp-intelligence, message: nextLookback is not defined, componentStack: 
+    at MapCommandRail (http://localhost:5173/src/…omponents/auth/AuthProvider.tsx:16:32)
+    at App} @ http://localhost:5173/src/shared/ErrorBoundary.tsx:9
+[   15219ms] [WARNING] [BACKEND_API_RESPONSE] {status: null, ok: false, bodyCount: null, bodyCountPath: null, durationMs: 2009} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:208
+[   15219ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/thread-messages?thread_key=ct%3…443109&prospect_id=pros0_e96b2c69bde82ca0a59edf87, durationMs: 2009, transport: backend, status: null, ok: false} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22
+[   15219ms] [LOG] [HYDRATION_PHASE_DONE] {name: messages, durationMs: 2016, phase: messages, threadKey: ct:property:2124443109|owner:mo_36f0a8b60d4ea762081338c9|phone:+19012812981, messages: 0} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:50
+[   16756ms] [LOG] [BACKEND_API_RESPONSE] {status: 200, ok: true, bodyCount: null, bodyCountPath: null, durationMs: 1867} @ http://localhost:5173/src/lib/api/backendClient.ts?t=1782499321627:245
+[   16756ms] [LOG] [DATA_LAYER_QUERY_DONE] {name: /api/cockpit/inbox/counts, durationMs: 1867, transport: backend, status: 200, ok: true} @ http://localhost:5173/src/lib/data/dashboardDataLayer.ts:22

@@ -74,19 +74,19 @@ export function listValuationUniverses(projection: CompIntelligenceDecisionProje
   if (!raw) return []
   return Object.entries(raw).map(([universe, data]) => ({
     universe,
-    available: Boolean((data as CompValuationUniverse).available ?? (data as Record<string, unknown>).mid != null),
-    classification: (data as CompValuationUniverse).classification ?? 'UNAVAILABLE',
-    low: (data as CompValuationUniverse).low ?? null,
-    mid: (data as CompValuationUniverse).mid ?? null,
-    high: (data as CompValuationUniverse).high ?? null,
-    independent_transaction_count: (data as CompValuationUniverse).independent_transaction_count ?? null,
-    effective_sample_size: (data as CompValuationUniverse).effective_sample_size ?? null,
-    confidence: (data as CompValuationUniverse).confidence ?? null,
-    dispersion: (data as CompValuationUniverse).dispersion ?? null,
-    source_composition: (data as CompValuationUniverse).source_composition ?? null,
-    pricing_vs_context: (data as CompValuationUniverse).pricing_vs_context ?? null,
-    rejection_count: (data as CompValuationUniverse).rejection_count ?? null,
-    unavailable_reason: (data as CompValuationUniverse).unavailable_reason ?? null,
+    available: Boolean((data as unknown as CompValuationUniverse).available ?? (data as unknown as Record<string, unknown>).mid != null),
+    classification: (data as unknown as CompValuationUniverse).classification ?? 'UNAVAILABLE',
+    low: (data as unknown as CompValuationUniverse).low ?? null,
+    mid: (data as unknown as CompValuationUniverse).mid ?? null,
+    high: (data as unknown as CompValuationUniverse).high ?? null,
+    independent_transaction_count: (data as unknown as CompValuationUniverse).independent_transaction_count ?? null,
+    effective_sample_size: (data as unknown as CompValuationUniverse).effective_sample_size ?? null,
+    confidence: (data as unknown as CompValuationUniverse).confidence ?? null,
+    dispersion: (data as unknown as CompValuationUniverse).dispersion ?? null,
+    source_composition: (data as unknown as CompValuationUniverse).source_composition ?? null,
+    pricing_vs_context: (data as unknown as CompValuationUniverse).pricing_vs_context ?? null,
+    rejection_count: (data as unknown as CompValuationUniverse).rejection_count ?? null,
+    unavailable_reason: (data as unknown as CompValuationUniverse).unavailable_reason ?? null,
   }))
 }
 

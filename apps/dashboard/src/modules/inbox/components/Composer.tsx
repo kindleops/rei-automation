@@ -14,6 +14,7 @@ import {
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
+
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 

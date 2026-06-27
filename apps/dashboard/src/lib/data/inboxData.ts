@@ -19,7 +19,7 @@ import {
   type AnyRecord,
 } from './shared'
 import { emitNotification } from '../../shared/NotificationToast'
-import { normalizeDealContext, type DealContext } from './dealContext'
+import { getDealContextByThread, normalizeDealContext, type DealContext } from './dealContext'
 import { commitDashboardMessages, commitDashboardThreads } from './dashboardEntityStore'
 import { dataLayerNow, loadDashboardViewModel, logHydrationPhaseDone } from './dashboardDataLayer'
 
@@ -482,6 +482,96 @@ export const resolveInboxSellerNameWithSource = (row: Record<string, unknown>): 
 
 export const resolveInboxSellerName = (row: Record<string, unknown>): string => 
   resolveInboxSellerNameWithSource(row).value
+
+/** Prospect / respondent name for per-phone child threads (sidebar row headline). */
+export const resolveInboxProspectNameWithSource = (row: Record<string, unknown>): { value: string; source: string } => {
+  const firstName = asString(row.first_name || row.firstName || row.prospect_first_name || row.prospectFirstName || row.seller_first_name || row.sellerFirstName)
+  const lastName = asString(row.last_name || row.lastName || row.prospect_last_name || row.prospectLastName || row.seller_last_name || row.sellerLastName)
+  const prospectName = firstName && lastName ? `${firstName} ${lastName}` : firstName || null
+
+  let meta: Record<string, unknown> = (row.metadata || row.meta || {}) as Record<string, unknown>
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta) as Record<string, unknown> } catch { meta = {} }
+  }
+
+  const candidates: Array<{ val: unknown; source: string }> = [
+    { val: row.prospect_full_name || row.prospectFullName || row.prospect_name || row.prospectName, source: 'prospect_full_name' },
+    { val: prospectName, source: 'prospect_names' },
+    { val: row.prospect_cnam || row.prospectCnam, source: 'prospect_cnam' },
+    { val: row.contact_name || row.contactName, source: 'contact_name' },
+    { val: row.seller_display_name || row.sellerDisplayName, source: 'seller_display_name' },
+    { val: row.seller_name || row.sellerName, source: 'seller_name' },
+    { val: meta.prospect_name || meta.contact_name || meta.seller_name, source: 'metadata_prospect' },
+  ]
+
+  for (const candidate of candidates) {
+    const text = asString(candidate.val, '').trim()
+    if (text && !isRawE164(text) && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'unknown seller') {
+      return { value: text, source: candidate.source }
+    }
+  }
+
+  const phoneRaw = asString(row.phoneNumber || row.phoneNumberId || row.canonicalE164 || row.canonical_e164 || row.seller_phone || row.phone || row.prospect_phone || row.best_phone, '').trim()
+  if (phoneRaw) {
+    return { value: formatDisplayPhone(phoneRaw), source: 'phone_fallback' }
+  }
+
+  return { value: 'Unknown Contact', source: 'none' }
+}
+
+export const resolveInboxProspectName = (row: Record<string, unknown>): string =>
+  resolveInboxProspectNameWithSource(row).value
+
+/** Master / property owner name for the property conversation container header. */
+export const resolveInboxOwnerNameWithSource = (row: Record<string, unknown>): { value: string; source: string } => {
+  const ownerFirstName = asString(row.owner_first_name || row.ownerFirstName || row.master_owner_first_name || row.masterOwnerFirstName)
+  const ownerLastName = asString(row.owner_last_name || row.ownerLastName || row.master_owner_last_name || row.masterOwnerLastName)
+
+  let meta: Record<string, unknown> = (row.metadata || row.meta || {}) as Record<string, unknown>
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta) as Record<string, unknown> } catch { meta = {} }
+  }
+
+  const candidates: Array<{ val: unknown; source: string }> = [
+    { val: row.owner_name || row.ownerName, source: 'master_owner_name' },
+    { val: row.primary_owner_name || row.primaryOwnerName, source: 'primary_owner_name' },
+    { val: row.property_owner_name || row.propertyOwnerName, source: 'property_owner_name' },
+    { val: row.owner_display_name || row.ownerDisplayName, source: 'owner_display_name' },
+    { val: ownerFirstName && ownerLastName ? `${ownerFirstName} ${ownerLastName}` : ownerFirstName || null, source: 'owner_names' },
+    { val: meta.owner_name || meta.ownerName || meta.property_owner_name, source: 'metadata_owner' },
+  ]
+
+  for (const candidate of candidates) {
+    const text = asString(candidate.val, '').trim()
+    if (text && !isRawE164(text) && text.toLowerCase() !== 'unknown' && text.toLowerCase() !== 'unknown owner') {
+      return { value: text, source: candidate.source }
+    }
+  }
+
+  const prospectFallback = resolveInboxProspectNameWithSource(row)
+  if (prospectFallback.source !== 'none') {
+    return { value: prospectFallback.value, source: `fallback_${prospectFallback.source}` }
+  }
+
+  const sellerName = asString(row.seller_display_name || row.sellerDisplayName || row.seller_name || row.sellerName, '').trim()
+  if (sellerName && !isRawE164(sellerName) && sellerName.toLowerCase() !== 'unknown' && sellerName.toLowerCase() !== 'unknown seller') {
+    return { value: sellerName, source: 'seller_display_name_fallback' }
+  }
+
+  const phoneRaw = asString(
+    row.phoneNumber || row.phoneNumberId || row.canonicalE164 || row.canonical_e164
+    || row.seller_phone || row.phone || row.best_phone,
+    '',
+  ).trim()
+  if (phoneRaw) {
+    return { value: formatDisplayPhone(phoneRaw), source: 'phone_fallback' }
+  }
+
+  return { value: 'Unknown Owner', source: 'none' }
+}
+
+export const resolveInboxOwnerName = (row: Record<string, unknown>): string =>
+  resolveInboxOwnerNameWithSource(row).value
 
 export const resolveInboxPropertyAddressWithSource = (row: Record<string, unknown>): { value: string; source: string } => {
   const street = asString(row.property_address_street || row.street || row.address_line_1 || row.property_street)
@@ -2324,7 +2414,8 @@ export const getInboxThreads = async (
     const bestPhone = sellerPhone
     const displayPhone = sellerPhone ? formatDisplayPhone(sellerPhone) : ''
     
-    const ownerDisplayName = resolveInboxSellerName(row as Record<string, unknown>)
+    const ownerDisplayName = resolveInboxOwnerName(row as Record<string, unknown>)
+    const prospectDisplayName = resolveInboxProspectName(row as Record<string, unknown>)
 
     // Fallback address order:
     // 1. property_address_full
@@ -2348,7 +2439,16 @@ export const getInboxThreads = async (
     // nexus_inbox_threads_v uses ui_intent; older views use detected_intent
     const detectedIntent = normalizeStatus(row.latest_intent ?? row.ui_intent ?? row.detected_intent ?? '')
     // Stage: stage (nexus view) || queue_stage || detected_intent
-    const threadStage = normalizeStatus(row.conversation_stage ?? row.seller_stage ?? row.stage ?? row.queue_stage ?? row.detected_intent ?? row.inbox_category ?? 'ownership_check')
+    const threadStage = normalizeStatus(
+      row.universal_stage
+      ?? row.conversation_stage
+      ?? row.seller_stage
+      ?? row.stage
+      ?? row.queue_stage
+      ?? row.detected_intent
+      ?? row.inbox_category
+      ?? 'ownership_check',
+    )
     const isDnc = asBoolean(row.is_suppressed || row.is_dnc || row.has_opt_out, false) || category === 'dnc_opt_out'
     const isAutomated = category === 'automated' || automationState.includes('auto')
     
@@ -2387,6 +2487,14 @@ export const getInboxThreads = async (
       marketName: marketLabel,
       ownerName: ownerDisplayName,
       ownerDisplayName,
+      prospectName: prospectDisplayName,
+      prospectFullName: asString(row.prospect_full_name ?? row.prospect_name, prospectDisplayName),
+      matching_flags: asString(row.matching_flags ?? row.person_flags_text, '') || undefined,
+      person_flags_text: asString(row.person_flags_text ?? row.matching_flags, '') || undefined,
+      universal_stage: asString(row.universal_stage, '') || undefined,
+      universalStage: asString(row.universal_stage, '') || undefined,
+      seller_stage: asString(row.seller_stage, '') || undefined,
+      sellerStage: asString(row.seller_stage, '') || undefined,
       sellerName: asString(row.seller_name ?? row.owner_name ?? ownerDisplayName, ''),
       subject: address,
       preview: latestBody,
@@ -2433,12 +2541,21 @@ export const getInboxThreads = async (
       estimatedRepairCost: asNumber(row.estimated_repair_cost, 0),
       estimatedValue: row.estimated_value ?? null,
       finalAcquisitionScore: finalAcquisitionScore || null,
+      final_acquisition_score: finalAcquisitionScore || null,
+      deal_strength_score: asNumber(row.deal_strength_score, 0) || undefined,
+      dealStrengthScore: asNumber(row.deal_strength_score, 0) || undefined,
+      tag_distress_score: asNumber(row.tag_distress_score, 0) || undefined,
+      tagDistressScore: asNumber(row.tag_distress_score, 0) || undefined,
+      distress_score: asNumber(row.distress_score ?? row.tag_distress_score, 0) || undefined,
+      property_flags_text: asString(row.property_flags_text, '') || undefined,
+      propertyFlagsText: asString(row.property_flags_text, '') || undefined,
       priorityScore: asNumber(row.priority_score, 0) || undefined,
       unitCount: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
       units_count: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
       building_condition: asString(row.building_condition ?? row.condition, '') || undefined,
       buildingCondition: asString(row.building_condition ?? row.condition, '') || undefined,
-      motivationScore: asNumber(row.priority_score, 0),
+      motivationScore: asNumber(row.motivation_score ?? row.structured_motivation_score ?? row.priority_score, 0) || undefined,
+      motivation_score: asNumber(row.motivation_score ?? row.structured_motivation_score ?? row.priority_score, 0) || undefined,
       ownerType: asString(row.owner_type, '') || undefined,
       contactLanguage: asString(row.language_preference, '') || undefined,
       lat: asNumber(row.latitude, 0) || undefined,
@@ -3281,7 +3398,7 @@ export const getThreadMessagesPageForThread = async (
     if (lookup.phone) params.set('phone', lookup.phone)
     if (lookup.bestPhone) params.set('best_phone', lookup.bestPhone)
     if (lookup.sellerPhone) params.set('seller_phone', lookup.sellerPhone)
-    if (lookup.latestMessageId) {
+    if (lookup.latestMessageId && !options.fetchAll) {
       params.set('latest_message_id', lookup.latestMessageId)
       params.set('latestMessageId', lookup.latestMessageId)
     }
@@ -3300,7 +3417,12 @@ export const getThreadMessagesPageForThread = async (
     if (result.ok) {
       const payload = (result.data ?? {}) as AnyRecord
       const integrityBlocked = Boolean(payload.integrity_blocked || payload.integrityBlocked || (payload.diagnostics as AnyRecord | undefined)?.integrity_blocked)
-      if (integrityBlocked) {
+      const rawMessagesEarly = (
+        payload.messages ??
+        ((payload.diagnostics as AnyRecord | undefined)?.messages) ??
+        []
+      ) as AnyRecord[]
+      if (integrityBlocked && rawMessagesEarly.length === 0) {
         return emptyThreadMessagePage(offset, limit, asRecord(payload.diagnostics))
       }
       const diagnostics = (payload.diagnostics ?? {}) as AnyRecord
@@ -3410,6 +3532,80 @@ export const getThreadMessagesForThread = async (
   return page.messages
 }
 
+const buildThreadHydrationQueryParams = (
+  thread: InboxThread | InboxWorkflowThread,
+  lookup: ThreadLookupIdentity,
+): URLSearchParams => {
+  const threadRecord = thread as unknown as AnyRecord
+  const params = new URLSearchParams()
+  if (lookup.selectedThreadKey) params.set('thread_key', lookup.selectedThreadKey)
+  if (lookup.conversationThreadId) params.set('conversation_thread_id', lookup.conversationThreadId)
+  if (lookup.legacyThreadKey) params.set('legacy_thread_key', lookup.legacyThreadKey)
+  if (lookup.normalizedPhone) params.set('normalized_phone', lookup.normalizedPhone)
+  if (lookup.canonicalE164) params.set('canonical_e164', lookup.canonicalE164)
+  if (lookup.phone) params.set('phone', lookup.phone)
+  if (lookup.bestPhone) params.set('best_phone', lookup.bestPhone)
+  if (lookup.sellerPhone) params.set('seller_phone', lookup.sellerPhone)
+  const propertyId = asString(threadRecord.propertyId ?? threadRecord.property_id, '')
+  const prospectId = asString(threadRecord.prospectId ?? threadRecord.prospect_id, '')
+  const masterOwnerId = asString(threadRecord.ownerId ?? threadRecord.master_owner_id ?? threadRecord.masterOwnerId, '')
+  if (propertyId) params.set('property_id', propertyId)
+  if (prospectId) params.set('prospect_id', prospectId)
+  if (masterOwnerId) {
+    params.set('master_owner_id', masterOwnerId)
+    params.set('owner_id', masterOwnerId)
+  }
+  return params
+}
+
+const buildIntelligenceFromHydration = (
+  threadRecord: AnyRecord,
+  payload: AnyRecord,
+  dossier: AnyRecord,
+): ThreadIntelligenceRecord => {
+  const thread = asRecord(payload.thread)
+  const prospect = asRecord(dossier.prospect || payload.prospect)
+  const owner = asRecord(dossier.master_owner || payload.master_owner || payload.owner)
+  const property = asRecord(dossier.property || payload.property)
+  const dossierPhone = asRecord(dossier.phone)
+  return {
+    ...(threadRecord as ThreadIntelligenceRecord),
+    ...(thread as ThreadIntelligenceRecord),
+    ...(dossier as ThreadIntelligenceRecord),
+    prospect_data: prospect,
+    master_owner_data: owner,
+    property_data: property,
+    valuation_data: dossier.valuation || payload.valuation || {},
+    buyer_match_data: dossier.buyer_match || dossier.buyer_matches || payload.buyer_match || {},
+    acquisition_decision_data: dossier.acquisition_decision || dossier.decision_snapshot || {},
+    thread_state_data: dossier.conversation || dossier.conversation_intelligence || {},
+    prospect_full_name: asString(prospect.full_name || prospect.name || thread.prospect_full_name, ''),
+    owner_display_name: asString(owner.full_name || owner.display_name || thread.owner_display_name, ''),
+    owner_name: asString(owner.full_name || owner.display_name || thread.owner_name, ''),
+    property_address_full: asString(property.full_address || property.address || thread.property_address_full, ''),
+    market: asString(property.market || thread.market, ''),
+    estimated_value: asNumber(property.estimated_value ?? property.value ?? thread.estimated_value, 0),
+    prospect_best_phone: asString(prospect.prospect_best_phone || prospect.best_phone || dossierPhone.number, ''),
+    prospect_best_email: asString(prospect.prospect_best_email || prospect.best_email, ''),
+    prospect_contact_score: asNumber(prospect.prospect_contact_score ?? prospect.contact_score_final, 0),
+    prospect_phone_score: asNumber(prospect.prospect_phone_score ?? prospect.phone_score_final, 0),
+    est_household_income: asString(prospect.est_household_income || prospect.household_income, ''),
+    net_asset_value: asString(prospect.net_asset_value, ''),
+    occupation_group: asString(prospect.occupation_group || prospect.occupation, ''),
+    gender: asString(prospect.gender, ''),
+    marital_status: asString(prospect.marital_status, ''),
+    education_model: asString(prospect.education_model || prospect.education, ''),
+    person_flags_text: asString(prospect.person_flags_text || (Array.isArray(prospect.person_flags) ? prospect.person_flags.join(', ') : ''), ''),
+    portfolio_total_value: asNumber(owner.portfolio_total_value ?? owner.portfolio_value, 0),
+    portfolio_total_equity: asNumber(owner.portfolio_total_equity ?? owner.portfolio_equity, 0),
+    property_count: asNumber(owner.portfolio_property_count ?? owner.property_count, 0),
+    portfolio_total_units: asNumber(owner.portfolio_total_units ?? owner.total_units, 0),
+    financial_pressure_score: asNumber(owner.financial_pressure_score, 0),
+    owner_type_guess: asString(owner.owner_type || owner.owner_type_guess, ''),
+    primary_owner_address: asString(owner.primary_owner_address || owner.mailing_address, ''),
+  }
+}
+
 export const getThreadHydrationForThread = async (
   thread: InboxThread | InboxWorkflowThread,
   signal?: AbortSignal,
@@ -3419,12 +3615,88 @@ export const getThreadHydrationForThread = async (
   const threadKey = lookup.selectedThreadKey
   const threadRecord = thread as unknown as AnyRecord
   const fallbackDealContext = normalizeDealContext(threadRecord)
+  const degradedParts: string[] = []
 
-  const page = await getAllThreadMessagesForThread(thread, { signal })
+  const hydrationParams = buildThreadHydrationQueryParams(thread, lookup)
+  const hydrationPromise = threadKey
+    ? backendClient.fetchInboxThreadHydration(hydrationParams.toString(), signal).catch((err) => {
+        if (!isAbortLikeError(err, signal)) {
+          if (DEV) console.warn('[getThreadHydrationForThread] thread-hydration failed; falling back', err)
+        }
+        return { ok: false as const, data: null, status: 0, error: 'HYDRATION_FAILED', message: String(err) }
+      })
+    : Promise.resolve({ ok: false as const, data: null, status: 0, error: 'MISSING_THREAD_KEY', message: 'missing thread key' })
+
+  const messagesPromise = getAllThreadMessagesForThread(thread, { signal })
+  const dealContextPromise = threadKey
+    ? getDealContextByThread(threadKey, signal).catch(() => null)
+    : Promise.resolve(null)
+
+  const [hydrationResult, page, enrichedDealContext] = await Promise.all([
+    hydrationPromise,
+    messagesPromise,
+    dealContextPromise,
+  ])
+
   const diagnostics = asRecord(page.diagnostics)
-  const integrityBlocked = Boolean(diagnostics.integrity_blocked || diagnostics.integrityBlocked)
-  const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
-  const messages = integrityBlocked ? [] : page.messages
+  let integrityBlocked = Boolean(diagnostics.integrity_blocked || diagnostics.integrityBlocked)
+  let fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+  let messages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
+  let pagination = page.pagination
+  let dossierDealContext: DealContext | null = null
+  let intelligence: ThreadIntelligenceRecord = threadRecord as ThreadIntelligenceRecord
+
+  if (hydrationResult.ok) {
+    const payload = asRecord(hydrationResult.data)
+    const hydrationDiagnostics = asRecord(payload.diagnostics)
+    const hydrationMessages = safeArray(payload.messages as AnyRecord[] | null | undefined)
+    if (hydrationMessages.length > 0) {
+      const mappedHydrationMessages = applyDeliveryStatusDisplay(
+        dedupeMessages(hydrationMessages.map(toThreadMessage)),
+      )
+      if (mappedHydrationMessages.length >= messages.length) {
+        messages = mappedHydrationMessages
+        integrityBlocked = Boolean(payload.integrity_blocked || hydrationDiagnostics.integrity_blocked)
+        fetchFailed = false
+        pagination = {
+          offset: 0,
+          limit: mappedHydrationMessages.length,
+          total: mappedHydrationMessages.length,
+          hasMore: false,
+          nextOffset: null,
+        }
+      }
+    }
+
+    const dossier = asRecord(payload.deal_context || payload.deal_intelligence)
+    if (dossier.identity) {
+      dossierDealContext = normalizeDealContext(dossier)
+      intelligence = buildIntelligenceFromHydration(threadRecord, payload, dossier)
+    } else if (DEV) {
+      console.warn('[getThreadHydrationForThread] hydration returned without dossier identity', { threadKey })
+      degradedParts.push('dossier')
+    }
+
+    Object.assign(diagnostics, hydrationDiagnostics, {
+      hydration_degraded: payload.degraded,
+      hydration_degraded_parts: payload.degradedParts,
+      hydration_source: hydrationDiagnostics.sourceUsed || 'thread-hydration',
+    })
+  } else {
+    degradedParts.push('dossier')
+  }
+
+  const mergedDealContext = dossierDealContext
+    ? normalizeDealContext(fillEmptyFields(
+      fillEmptyFields(fallbackDealContext as unknown as AnyRecord, dossierDealContext as unknown as AnyRecord),
+      (enrichedDealContext || {}) as unknown as AnyRecord,
+    ))
+    : enrichedDealContext
+      ? normalizeDealContext(fillEmptyFields(
+        fallbackDealContext as unknown as AnyRecord,
+        enrichedDealContext as unknown as AnyRecord,
+      ))
+      : fallbackDealContext
 
   if (!fetchFailed && messages.length > 0) {
     commitDashboardMessages(
@@ -3432,7 +3704,7 @@ export const getThreadHydrationForThread = async (
       messages as unknown as AnyRecord[],
       {
         phase: 'messages',
-        source: 'thread_messages',
+        source: dossierDealContext ? 'thread_hydration' : 'thread_messages',
         integrityBlocked,
         replace: true,
       },
@@ -3441,15 +3713,19 @@ export const getThreadHydrationForThread = async (
   logHydrationPhaseDone('messages', hydrationStartedAt, {
     threadKey,
     messages: messages.length,
+    dealContextEnriched: Boolean(dossierDealContext || enrichedDealContext),
+    dossierHydrated: Boolean(dossierDealContext),
   })
+
+  if (!dossierDealContext && !enrichedDealContext) degradedParts.push('deal_context')
 
   return {
     messages,
-    pagination: page.pagination,
-    dealContext: fallbackDealContext,
-    intelligence: threadRecord as ThreadIntelligenceRecord,
+    pagination,
+    dealContext: mergedDealContext,
+    intelligence,
     diagnostics,
-    degradedParts: [],
+    degradedParts: [...new Set(degradedParts)],
     raw: diagnostics,
   }
 }
@@ -3538,6 +3814,86 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread, signal?
 }
 
 
+/** Instant thread context from row fields — never blocks on Supabase lookups. */
+export const buildThreadContextFromThread = (thread: InboxThread): ThreadContext => {
+  const threadRecord = thread as unknown as AnyRecord
+  const propertyData = thread.property_data && typeof thread.property_data === 'object' ? thread.property_data as AnyRecord : {}
+  const ownerData = thread.master_owner_data && typeof thread.master_owner_data === 'object' ? thread.master_owner_data as AnyRecord : {}
+  const prospectData = thread.prospect_data && typeof thread.prospect_data === 'object' ? thread.prospect_data as AnyRecord : {}
+  const phoneData = thread.phone_data && typeof thread.phone_data === 'object' ? thread.phone_data as AnyRecord : {}
+  const emailData = thread.email_data && typeof thread.email_data === 'object' ? thread.email_data as AnyRecord : {}
+  const queueData = thread.queue_data && typeof thread.queue_data === 'object' ? thread.queue_data as AnyRecord : {}
+  const ownerId = asString(thread.ownerId || ownerData.id || ownerData.master_owner_id, '')
+  const propertyId = asString(thread.propertyId || propertyData.id || propertyData.property_id, '')
+  const ownerName = resolveInboxOwnerName(threadRecord)
+  const propertyAddress = resolveInboxPropertyAddress(threadRecord) || asString(thread.propertyAddress || thread.subject, 'Unknown Address')
+  const phone = asString(thread.phoneNumber || thread.sellerPhone || phoneData.phone_number || thread.canonicalE164, '') || null
+  const hasEmbedded =
+    Object.keys(propertyData).length > 0 ||
+    Object.keys(ownerData).length > 0 ||
+    Object.keys(prospectData).length > 0
+
+  return {
+    seller: ownerId || ownerName !== 'Unknown Owner'
+      ? {
+          id: ownerId,
+          name: ownerName,
+          market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
+        }
+      : null,
+    property: propertyId || propertyAddress
+      ? {
+          id: propertyId,
+          address: propertyAddress,
+          market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
+        }
+      : null,
+    phone,
+    contactStack: [
+      phone ? { type: 'phone', value: phone, status: 'known' } : null,
+      asString(emailData.email || emailData.email_address, '')
+        ? { type: 'email', value: asString(emailData.email || emailData.email_address, ''), status: 'known' }
+        : null,
+    ].filter(Boolean) as { type: string; value: string; status: string }[],
+    dealContext: {
+      stage: asString(
+        threadRecord.stage || threadRecord.universalStage || (thread as { conversationStage?: string }).conversationStage,
+        'unknown',
+      ),
+      nextAction: asString(threadRecord.nextSystemAction, ''),
+    },
+    aiContext: null,
+    queueContext: Object.keys(queueData).length > 0
+      ? {
+          items: [{
+            id: asString(queueData.id, ''),
+            status: asString(queueData.queue_status || queueData.status, ''),
+            scheduleAt: asIso(queueData.scheduled_for_utc ?? queueData.created_at),
+          }],
+        }
+      : null,
+    contextMatchQuality: hasEmbedded ? 'high' : 'medium',
+    contextDebug: {
+      resolvedPhoneTable: null,
+      resolvedMasterOwnerTable: null,
+      resolvedOwnerTable: null,
+      resolvedPropertyTable: null,
+      resolvedProspectTable: null,
+      matchedOwnerBy: hasEmbedded ? 'deal_context' : 'thread_row',
+      matchedProspectBy: hasEmbedded ? 'deal_context' : 'thread_row',
+      matchedPropertyBy: hasEmbedded ? 'deal_context' : 'thread_row',
+      matchedPhoneBy: hasEmbedded ? 'deal_context' : 'thread_row',
+      matchedPhoneRowId: asString(phoneData.id, '') || null,
+      matchedEmailBy: Object.keys(emailData).length > 0 ? 'deal_context' : null,
+      matchedAiBrainBy: null,
+      matchedQueueBy: Object.keys(queueData).length > 0 ? 'deal_context' : null,
+      bridgedMasterOwnerId: ownerId || null,
+      bridgedProspectId: asString(thread.prospectId || prospectData.id || prospectData.prospect_id, '') || null,
+      bridgedPropertyId: propertyId || null,
+    },
+  }
+}
+
 export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal): Promise<ThreadContext> => {
   const propertyData = thread.property_data && typeof thread.property_data === 'object' ? thread.property_data as AnyRecord : {}
   const ownerData = thread.master_owner_data && typeof thread.master_owner_data === 'object' ? thread.master_owner_data as AnyRecord : {}
@@ -3554,69 +3910,7 @@ export const getThreadContext = async (thread: InboxThread, signal?: AbortSignal
     Object.keys(queueData).length > 0
 
   if (hasDealContextBasics) {
-    return {
-      seller: thread.ownerId || thread.ownerName
-        ? {
-            id: asString(thread.ownerId || ownerData.id || ownerData.master_owner_id, ''),
-            name: asString(thread.ownerName || thread.ownerDisplayName || ownerData.display_name || ownerData.full_name, 'Unknown Owner'),
-            market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
-          }
-        : null,
-      property: thread.propertyId || thread.propertyAddress
-        ? {
-            id: asString(thread.propertyId || propertyData.id || propertyData.property_id, ''),
-            address: asString(thread.propertyAddress || thread.subject || propertyData.property_address_full, 'Unknown Address'),
-            market: asString(thread.market || propertyData.market || propertyData.market_name, ''),
-          }
-        : null,
-      phone: asString(thread.phoneNumber || thread.sellerPhone || phoneData.phone_number || thread.canonicalE164, '') || null,
-      contactStack: [
-        asString(phoneData.phone_number || thread.phoneNumber || thread.sellerPhone, '')
-          ? { type: 'phone', value: asString(phoneData.phone_number || thread.phoneNumber || thread.sellerPhone, ''), status: 'known' }
-          : null,
-        asString(emailData.email || emailData.email_address, '')
-          ? { type: 'email', value: asString(emailData.email || emailData.email_address, ''), status: 'known' }
-          : null,
-      ].filter(Boolean) as { type: string; value: string; status: string }[],
-      dealContext: {
-        stage: asString(
-          (thread as unknown as AnyRecord).stage ||
-          (thread as unknown as AnyRecord).universalStage ||
-          (thread as unknown as { conversationStage?: string }).conversationStage,
-          'unknown',
-        ),
-        nextAction: asString((thread as unknown as AnyRecord).nextSystemAction, ''),
-      },
-      aiContext: null,
-      queueContext: Object.keys(queueData).length > 0
-        ? {
-            items: [{
-              id: asString(queueData.id, ''),
-              status: asString(queueData.queue_status || queueData.status, ''),
-              scheduleAt: asIso(queueData.scheduled_for_utc ?? queueData.created_at),
-            }],
-          }
-        : null,
-      contextMatchQuality: 'high',
-      contextDebug: {
-        resolvedPhoneTable: null,
-        resolvedMasterOwnerTable: null,
-        resolvedOwnerTable: null,
-        resolvedPropertyTable: null,
-        resolvedProspectTable: null,
-        matchedOwnerBy: 'deal_context',
-        matchedProspectBy: 'deal_context',
-        matchedPropertyBy: 'deal_context',
-        matchedPhoneBy: 'deal_context',
-        matchedPhoneRowId: asString(phoneData.id, '') || null,
-        matchedEmailBy: Object.keys(emailData).length > 0 ? 'deal_context' : null,
-        matchedAiBrainBy: null,
-        matchedQueueBy: Object.keys(queueData).length > 0 ? 'deal_context' : null,
-        bridgedMasterOwnerId: asString(thread.ownerId || ownerData.id || ownerData.master_owner_id, '') || null,
-        bridgedProspectId: asString(thread.prospectId || prospectData.id || prospectData.prospect_id, '') || null,
-        bridgedPropertyId: asString(thread.propertyId || propertyData.id || propertyData.property_id, '') || null,
-      },
-    }
+    return buildThreadContextFromThread(thread)
   }
 
   const supabase = getSupabaseClient()

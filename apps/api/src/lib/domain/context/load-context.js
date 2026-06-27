@@ -176,13 +176,31 @@ async function _loadContextInner({
   });
 
   if (!brain_item && create_brain_if_missing) {
-    brain_item = await createBrain({
-      master_owner_id,
-      prospect_id,
-      property_id,
-      phone_item_id,
-      logger: log,
-    });
+    try {
+      brain_item = await createBrain({
+        master_owner_id,
+        prospect_id,
+        property_id,
+        phone_item_id,
+        logger: log,
+      });
+    } catch (brain_error) {
+      const podio_status =
+        brain_error?.status ??
+        brain_error?.response?.status ??
+        brain_error?.cause?.status ??
+        null;
+      warn("context.brain_create_failed", {
+        inbound_from: normalized_phone,
+        master_owner_id,
+        prospect_id,
+        property_id,
+        phone_item_id,
+        podio_status,
+        message: brain_error?.message || "unknown",
+      });
+      brain_item = null;
+    }
   }
 
   const brain_item_id = brain_item?.item_id ?? null;

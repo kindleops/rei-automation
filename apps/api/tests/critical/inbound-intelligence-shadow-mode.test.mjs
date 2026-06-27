@@ -145,7 +145,8 @@ test("Sharon event resolves non_owner_referral without global wrong-number seman
   assert.equal(relationship.referred_phone_e164, "+15617064622");
   assert.equal(relationship.referred_contact_proposed_stage, "ownership_confirmation");
   assert.equal(relationship.automatic_send_allowed, false);
-  assert.equal(relationship.human_review_required, true);
+  assert.equal(relationship.referred_automatic_send_allowed, true);
+  assert.equal(relationship.human_review_required, false);
   assert.equal(isGlobalSuppressionRelationship(relationship), false);
 
   const intelligence = await runInboundIntelligencePhase({
@@ -170,7 +171,8 @@ test("Sharon event resolves non_owner_referral without global wrong-number seman
   assert.equal(snap.identity_class, "respondent_non_owner");
   assert.notEqual(snap.identity_class, "wrong_number");
   assert.equal(snap.canonical_decision.should_suppress_contact, false);
-  assert.equal(snap.human_review_required, true);
+  assert.equal(snap.referred_automatic_send_allowed, true);
+  assert.equal(snap.human_review_required, false);
 
   const patch = buildIntelligenceMessageEventPatch(snap);
   assert.equal(patch.metadata.suppression_scope, "property");

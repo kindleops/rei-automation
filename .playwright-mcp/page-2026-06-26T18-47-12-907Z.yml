@@ -1,0 +1,37 @@
+- generic [ref=e3]:
+  - generic: Comp Intelligence
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e61]: Loading workspace…
+  - button "NEXUS Copilot" [ref=e62] [cursor=pointer]:
+    - generic: Standing by

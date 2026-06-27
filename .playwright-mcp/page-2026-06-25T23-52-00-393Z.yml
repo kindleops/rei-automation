@@ -1,0 +1,75 @@
+- generic [ref=e3]:
+  - generic: Comp Intelligence
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - generic "NEXUS Dashboard" [ref=e8]:
+            - img [ref=e10]
+            - generic [ref=e12]:
+              - generic [ref=e13]: NEXUS
+              - strong [ref=e14]: Deal Desk
+              - generic [ref=e15]: Inbox · Conversation · Deal Intelligence
+          - generic [ref=e16]:
+            - img [ref=e22] [cursor=pointer]
+            - 'button "Workspace: Deal Desk" [ref=e25] [cursor=pointer]':
+              - strong [ref=e26]:
+                - img [ref=e27]
+            - button "Queue & System Status · Unknown" [ref=e30] [cursor=pointer]:
+              - img [ref=e32]
+        - generic [ref=e35]:
+          - img [ref=e36]
+          - textbox "Search sellers, owners, properties, conversations, buyers, campaigns, and entities" [ref=e39]:
+            - /placeholder: Search sellers, buyers, addresses, locations, conversations...
+          - generic [ref=e40]: CMD+K
+        - generic [ref=e41]:
+          - button "99+" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - generic [ref=e46]: 99+
+          - button "Live Activity" [ref=e48] [cursor=pointer]:
+            - img [ref=e49]
+          - button "Notifications" [ref=e52] [cursor=pointer]:
+            - img [ref=e53]
+          - button "RK" [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: RK
+      - generic [ref=e62]:
+        - status [ref=e65]:
+          - strong [ref=e66]: Subject coordinates unresolved
+          - paragraph [ref=e67]: Exact parcel coordinates are required for spatial evidence. Decision intelligence remains available in the right panel.
+          - paragraph [ref=e139]: Exact parcel coordinates unavailable; market-level search only
+        - generic [ref=e68]:
+          - banner [ref=e69]:
+            - generic [ref=e70]:
+              - heading "4381 Sterling Forest Dr, Decatur, Ga 30034" [level=1] [ref=e140]
+              - generic [ref=e72]:
+                - generic [ref=e73]: Lane unresolved
+                - generic [ref=e74]: Lane confidence —
+            - generic [ref=e75]:
+              - generic [ref=e76]: EVIDENCE_ONLY_DEGRADED
+              - generic [ref=e77]: UNAVAILABLE
+              - generic [ref=e78]: Confidence 0%
+              - generic [ref=e79]: Universe —
+              - generic [ref=e80]: ESS —
+              - generic [ref=e81]: Basis —
+              - generic [ref=e82]: acquisition_decision_engine_v3 / degraded
+              - generic [ref=e83]: Live Authorization Off
+              - generic [ref=e84]: Evidence-only degraded
+          - alert [ref=e141]: V3 decision evidence unavailable — evidence-only degraded recovery
+          - status [ref=e142]: V3 decision evidence unavailable — evidence-only degraded recovery.
+          - tablist "Intelligence sections" [ref=e85]:
+            - tab "Decision" [ref=e86] [cursor=pointer]
+            - tab "Valuation Universes" [ref=e87] [cursor=pointer]
+            - tab "Transaction Evidence" [active] [selected] [ref=e88] [cursor=pointer]
+            - tab "Strategies" [ref=e89] [cursor=pointer]
+            - tab "Model Health" [ref=e90] [cursor=pointer]
+            - tab "Analyst Lab" [ref=e91] [cursor=pointer]
+          - tabpanel [ref=e92]:
+            - paragraph [ref=e143]: No transaction evidence matches current filters.
+  - button "NEXUS Copilot" [ref=e132] [cursor=pointer]:
+    - generic: Standing by
+  - alert [ref=e133]:
+    - strong [ref=e134]: API and dashboard are on different branches
+    - generic [ref=e135]: Dashboard dbf21fda7579 (main)
+    - generic [ref=e136]: API b395fd15c0df (seller-autopilot)
+    - generic [ref=e137]: Connection same-origin proxy
+    - generic [ref=e138]: "Fix: stop both servers, then run npm run dev:all from the repo root."

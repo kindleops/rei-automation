@@ -117,6 +117,17 @@ function logChildExit(name, child, code, signal) {
   console.error(`[dev:all] ${name} child exit diagnostics:`, JSON.stringify(entry))
 }
 
+async function stopStrayApiPorts() {
+  for (const port of [3001, 3002]) {
+    const pids = listPortPids(port)
+    if (!pids.length) continue
+    console.log(`[dev:all] Stopping stray API listener(s) on port ${port}: ${pids.join(', ')}`)
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
+    }
+  }
+}
+
 async function stopApiPortOnly() {
   const pids = listPortPids(API_PORT)
   if (!pids.length) return
@@ -223,6 +234,39 @@ async function waitForApiHealth() {
   return false
 }
 
+function buildOpsAuthHeaders() {
+  const headers = { accept: 'application/json' }
+  const opsSecret =
+    process.env.OPS_DASHBOARD_SECRET ||
+    process.env.VITE_OPS_DASHBOARD_SECRET ||
+    process.env.VITE_BACKEND_API_SECRET ||
+    ''
+  if (opsSecret) headers['x-ops-dashboard-secret'] = opsSecret
+  return headers
+}
+
+async function warmupApiRoutes() {
+  const headers = buildOpsAuthHeaders()
+  const warmups = [
+    `/api/cockpit/inbox/live?filter=all&direction=all&cursor=0&limit=25&map=0&timeout_mode=initial_boot&refresh_reason=dev_warmup`,
+    `/api/cockpit/inbox/counts`,
+    `/api/cockpit/dev/runtime-identity`,
+  ]
+  for (const routePath of warmups) {
+    const url = `http://127.0.0.1:${API_PORT}${routePath}`
+    try {
+      const response = await fetch(url, {
+        headers,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(90_000),
+      })
+      console.log(`[dev:all] Warmed ${routePath} -> ${response.status}`)
+    } catch (error) {
+      console.warn(`[dev:all] Warmup failed for ${routePath}:`, error?.message || error)
+    }
+  }
+}
+
 async function verifyDashboardDevRuntime() {
   const base = `http://127.0.0.1:${DASHBOARD_PORT}`
   const htmlResponse = await fetch(base, { cache: 'no-store', signal: AbortSignal.timeout(5000) })
@@ -267,11 +311,15 @@ function isDashboardPortListening() {
 }
 
 function spawnWorkspace(name, workspace, script, { detached = false } = {}) {
+  const childEnv = { ...process.env, NODE_ENV: 'development', FORCE_COLOR: '1' }
+  if (name === 'API') {
+    childEnv.PORT = String(API_PORT)
+  }
   const child = spawn('npm', ['--workspace', workspace, 'run', script], {
     cwd: ROOT,
     stdio: 'inherit',
     detached,
-    env: { ...process.env, NODE_ENV: 'development', FORCE_COLOR: '1' },
+    env: childEnv,
   })
 
   if (detached && child.pid) {
@@ -397,6 +445,7 @@ async function main() {
 
   acquireLock()
   await stopApiPortOnly()
+  await stopStrayApiPorts()
   await stopDashboardPortOnly()
 
   console.log(`[dev:all] Starting API and Dashboard (sha=${readGitSha()})...`)
@@ -408,6 +457,8 @@ async function main() {
     await shutdown(1)
   }
   console.log('[dev:all] API healthy')
+  console.log('[dev:all] Pre-warming inbox and cockpit routes...')
+  await warmupApiRoutes()
 
   await sleep(DASHBOARD_START_DELAY_MS)
   spawnDashboardVite()

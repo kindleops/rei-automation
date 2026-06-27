@@ -42,7 +42,11 @@ function makeMockSupabase({ send_queue = [], message_events = [] } = {}) {
             return chain;
           },
           eq(column, value) {
-            state.filters.push({ column, value });
+            state.filters.push({ column, value, op: "eq" });
+            return chain;
+          },
+          in(column, values) {
+            state.filters.push({ column, value: values, op: "in" });
             return chain;
           },
           order() {
@@ -51,7 +55,15 @@ function makeMockSupabase({ send_queue = [], message_events = [] } = {}) {
           limit(value) {
             state.limit = value;
             const rows = (tables[table] || []).filter((row) =>
-              state.filters.every(({ column, value }) => String(row[column] ?? "") === String(value))
+              state.filters.every(({ column, value, op }) => {
+                const cell = String(row[column] ?? "");
+                if (op === "in") {
+                  return (Array.isArray(value) ? value : [value]).some(
+                    (candidate) => String(candidate) === cell
+                  );
+                }
+                return cell === String(value);
+              })
             );
             return Promise.resolve({
               data: rows.slice(0, value),
@@ -156,13 +168,12 @@ test("findRecentOutboundContextPair: finds send_queue match", async () => {
   );
 
   assert.equal(calls[0].table, "send_queue");
-  assert.deepEqual(
-    calls[0].filters.map(({ column, value }) => [column, value]),
-    [
-      ["to_phone_number", normalized_from],
-      ["from_phone_number", normalized_to],
-    ]
-  );
+  assert.equal(calls[0].filters[0].column, "to_phone_number");
+  assert.equal(calls[0].filters[0].op, "in");
+  assert.ok(calls[0].filters[0].value.includes(normalized_from));
+  assert.equal(calls[0].filters[1].column, "from_phone_number");
+  assert.equal(calls[0].filters[1].op, "in");
+  assert.ok(calls[0].filters[1].value.includes(normalized_to));
   assert.equal(result.found, true);
   assert.equal(result.source, "recent_outbound_send_queue");
   assert.equal(result.context.ids.master_owner_id, "mo_123");
@@ -173,6 +184,39 @@ test("findRecentOutboundContextPair: finds send_queue match", async () => {
   assert.equal(result.context.queue_row_id, "sq_valid");
   assert.equal(result.context.match.match_strategy, "valid_sent_contextual_outbound");
   assert.equal(result.context.match.context_verified, true);
+});
+
+test("findRecentOutboundContextPair: matches E.164 send_queue phones", async () => {
+  const inbound_from = "+19545209109";
+  const inbound_to = "+17866052999";
+  const { client } = makeMockSupabase({
+    send_queue: [
+      {
+        id: "sq_miami",
+        queue_status: "delivered",
+        source: "campaign",
+        master_owner_id: "mo_4a61934b3746f59006a90394",
+        prospect_id: "prospect_miami",
+        property_id: "227820372",
+        template_id: "template_miami",
+        textgrid_number_id: "tg_miami",
+        message_body: "Hey Winnifred, hope all is well.",
+        to_phone_number: "+19545209109",
+        from_phone_number: "+17866052999",
+        sent_at: "2026-06-26T19:59:53.230Z",
+        created_at: "2026-06-26T19:48:35.091Z",
+      },
+    ],
+  });
+
+  const result = await findRecentOutboundContextPair(inbound_from, inbound_to, {
+    supabase: client,
+  });
+
+  assert.equal(result.found, true);
+  assert.equal(result.source, "recent_outbound_send_queue");
+  assert.equal(result.context.ids.master_owner_id, "mo_4a61934b3746f59006a90394");
+  assert.equal(result.context.queue_row_id, "sq_miami");
 });
 
 test("findRecentOutboundContextPair: valid sent contextual queue row wins over newer orphan", async () => {
@@ -359,7 +403,7 @@ test("loadContextWithFallback: copies outbound pair ids and verified match diagn
   assert.equal(result.fallback_match_data.skipped_newer_orphan_count, 1);
   assert.equal(result.fallback_match_data.match_strategy, "valid_sent_contextual_outbound");
   assert.equal(result.fallback_match_data.context_verified, true);
-  assert.deepEqual(result.lookup_sources_tried, ["phone", "fallback_outbound_pair"]);
+  assert.deepEqual(result.lookup_sources_tried, ["fallback_outbound_pair"]);
 });
 
 // ── Test 4: Phone number normalization in pair lookup ────────────────────────

@@ -5,6 +5,7 @@ import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone 
 import {
   resolveThreadAddressLine,
   resolveThreadMarketBadge,
+  resolveThreadOwnerName,
   resolveThreadPrimaryName,
   type InboxSavedFilterPreset,
   type InboxViewSelectValue,
@@ -17,6 +18,7 @@ import {
 } from '../../../domain/inbox/inbox-decisioning'
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
 import { isInboxDebugEnabled } from '../inbox.adapter'
+import { InboxStreetViewThumb } from './InboxStreetViewThumb'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -181,7 +183,23 @@ const readStringList = (thread: InboxWorkflowThread, ...keys: string[]) => {
   return []
 }
 
-const normalizeLabel = (value: string) => value.replace(/_/g, ' ').trim()
+const normalizeLabel = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim()
+
+const resolveContactMatchFlags = (thread: InboxWorkflowThread): string[] => {
+  const raw = readStringList(
+    thread,
+    'matching_flags',
+    'matchingFlags',
+    'person_flags_text',
+    'personFlagsText',
+    'contact_match_tags',
+    'contactMatchTags',
+  )
+  return raw
+    .map((flag) => normalizeLabel(flag))
+    .filter((flag) => flag && !/^contact$/i.test(flag))
+    .slice(0, 4)
+}
 
 const formatMoneyCompact = (value: number | null) => (value && value > 0 ? formatCurrency(value) : '—')
 
@@ -200,18 +218,66 @@ const formatEquityDisplay = (amount: number | null, percent: number | null): str
   return '—'
 }
 
-const PROPERTY_FLAG_ORDER = [
-  'Absentee',
-  'Probate',
+const DISTRESS_PROPERTY_FLAG_ORDER = [
   'Tax Delinquent',
-  'High Equity',
+  'Active Lien',
+  'Foreclosure',
   'Pre-Foreclosure',
-  'Vacant',
+  'Probate',
+  'Tired Landlord',
   'Senior Owner',
+  'Vacant',
+  'Absentee',
+  'Distressed',
+  'Heavily Dated',
   'Multifamily',
   'Land',
   'Commercial',
+  'High Equity',
 ] as const
+
+const MAX_SIDEBAR_PROPERTY_FLAGS = 3
+
+const parsePropertyFlagTokens = (thread: InboxWorkflowThread): string[] => {
+  const raw = readStringList(
+    thread,
+    'property_flags_text',
+    'propertyFlagsText',
+    'property_tags',
+    'propertyTags',
+    'podio_tags',
+    'seller_tags_text',
+    'sellerTags',
+  )
+  const tokens = new Set<string>()
+  for (const entry of raw) {
+    for (const part of entry.split(/[,;|]/)) {
+      const token = normalizeLabel(part)
+      if (token) tokens.add(token)
+    }
+  }
+  return Array.from(tokens)
+}
+
+const mapTagTokenToDistressFlag = (token: string): (typeof DISTRESS_PROPERTY_FLAG_ORDER)[number] | null => {
+  const hay = token.toLowerCase()
+  if (hay.includes('tax delinquent') || hay.includes('tax_delinquent') || hay === 'tax delinquent') return 'Tax Delinquent'
+  if (hay.includes('active lien') || hay.includes('lien')) return 'Active Lien'
+  if (hay.includes('pre-foreclosure') || hay.includes('pre foreclosure') || hay.includes('preforeclosure')) return 'Pre-Foreclosure'
+  if (hay.includes('foreclosure')) return 'Foreclosure'
+  if (hay.includes('probate')) return 'Probate'
+  if (hay.includes('tired landlord') || hay.includes('tired_landlord')) return 'Tired Landlord'
+  if (hay.includes('senior owner') || hay.includes('senior_owner') || (hay.includes('senior') && hay.includes('owner'))) return 'Senior Owner'
+  if (hay.includes('vacant')) return 'Vacant'
+  if (hay.includes('absentee')) return 'Absentee'
+  if (hay.includes('distress')) return 'Distressed'
+  if (hay.includes('heavily dated')) return 'Heavily Dated'
+  if (hay.includes('multifamily') || hay.includes('multi-family') || hay.includes('multi family')) return 'Multifamily'
+  if (hay === 'land' || hay.includes(' land')) return 'Land'
+  if (hay.includes('commercial')) return 'Commercial'
+  if (hay.includes('high equity') || hay.includes('high_equity')) return 'High Equity'
+  return null
+}
 
 const resolvePropertyFlags = (
   thread: InboxWorkflowThread,
@@ -226,18 +292,33 @@ const resolvePropertyFlags = (
   },
 ): string[] => {
   const flags = new Set<string>()
-  const tagHaystack = [...context.propertyTags, ...context.sellerTags, ...context.intelTags]
-    .join(' ')
-    .toLowerCase()
+  const tagHaystack = [
+    ...parsePropertyFlagTokens(thread),
+    ...context.propertyTags,
+    ...context.sellerTags,
+    ...context.intelTags,
+  ].join(' ').toLowerCase()
 
-  const addIf = (condition: boolean, label: (typeof PROPERTY_FLAG_ORDER)[number]) => {
+  const addIf = (condition: boolean, label: (typeof DISTRESS_PROPERTY_FLAG_ORDER)[number]) => {
     if (condition) flags.add(label)
   }
 
   addIf(
-    readBoolean(thread, 'absenteeOwner', 'absentee_owner', 'isAbsentee', 'is_absentee')
-      || Boolean((decision as { absentee_owner?: boolean }).absentee_owner),
-    'Absentee',
+    readBoolean(thread, 'taxDelinquent', 'tax_delinquent', 'property_tax_delinquent', 'isTaxDelinquent')
+      || Boolean((thread as { property_tax_delinquent?: boolean }).property_tax_delinquent),
+    'Tax Delinquent',
+  )
+  addIf(
+    readBoolean(thread, 'activeLien', 'active_lien', 'isActiveLien'),
+    'Active Lien',
+  )
+  addIf(
+    readBoolean(thread, 'preForeclosure', 'pre_foreclosure', 'isPreForeclosure', 'pre_foreclosure_flag'),
+    'Pre-Foreclosure',
+  )
+  addIf(
+    readBoolean(thread, 'foreclosure', 'isForeclosure', 'is_foreclosure', 'foreclosure_flag'),
+    'Foreclosure',
   )
   addIf(
     readBoolean(thread, 'probate', 'isProbate', 'is_probate')
@@ -245,9 +326,12 @@ const resolvePropertyFlags = (
     'Probate',
   )
   addIf(
-    readBoolean(thread, 'taxDelinquent', 'tax_delinquent', 'property_tax_delinquent', 'isTaxDelinquent')
-      || Boolean((thread as { property_tax_delinquent?: boolean }).property_tax_delinquent),
-    'Tax Delinquent',
+    readBoolean(thread, 'tiredLandlord', 'tired_landlord', 'isTiredLandlord'),
+    'Tired Landlord',
+  )
+  addIf(
+    readBoolean(thread, 'seniorOwner', 'senior_owner', 'isSeniorOwner', 'senior_owner_flag'),
+    'Senior Owner',
   )
   addIf(
     readBoolean(thread, 'vacant', 'isVacant', 'is_vacant')
@@ -255,42 +339,47 @@ const resolvePropertyFlags = (
     'Vacant',
   )
   addIf(
-    readBoolean(thread, 'highEquity', 'high_equity')
-      || Boolean((decision as { high_equity?: boolean }).high_equity)
-      || Boolean((thread as { highEquity?: boolean }).highEquity),
-    'High Equity',
-  )
-  addIf(
-    readBoolean(thread, 'preForeclosure', 'pre_foreclosure', 'isPreForeclosure', 'pre_foreclosure_flag'),
-    'Pre-Foreclosure',
-  )
-  addIf(
-    readBoolean(thread, 'seniorOwner', 'senior_owner', 'isSeniorOwner', 'senior_owner_flag'),
-    'Senior Owner',
+    readBoolean(thread, 'absenteeOwner', 'absentee_owner', 'isAbsentee', 'is_absentee')
+      || Boolean((decision as { absentee_owner?: boolean }).absentee_owner),
+    'Absentee',
   )
 
-  if (context.equityPercent != null && context.equityPercent >= 50) flags.add('High Equity')
+  for (const token of parsePropertyFlagTokens(thread)) {
+    const mapped = mapTagTokenToDistressFlag(token)
+    if (mapped) flags.add(mapped)
+  }
+
+  if (tagHaystack.includes('tax delinquent') || tagHaystack.includes('tax_delinquent')) flags.add('Tax Delinquent')
+  if (tagHaystack.includes('probate')) flags.add('Probate')
+  if (tagHaystack.includes('tired landlord') || tagHaystack.includes('tired_landlord')) flags.add('Tired Landlord')
+  if (tagHaystack.includes('pre-foreclosure') || tagHaystack.includes('pre foreclosure') || tagHaystack.includes('preforeclosure')) {
+    flags.add('Pre-Foreclosure')
+  } else if (tagHaystack.includes('foreclosure')) {
+    flags.add('Foreclosure')
+  }
+  if (tagHaystack.includes('senior owner') || tagHaystack.includes('senior_owner')) flags.add('Senior Owner')
+  if (tagHaystack.includes('vacant')) flags.add('Vacant')
+  if (tagHaystack.includes('absentee')) flags.add('Absentee')
+  if (tagHaystack.includes('distress')) flags.add('Distressed')
+
+  const distressCount = [...flags].filter((label) => label !== 'High Equity').length
+  if (distressCount === 0) {
+    addIf(
+      readBoolean(thread, 'highEquity', 'high_equity')
+        || Boolean((decision as { high_equity?: boolean }).high_equity)
+        || Boolean((thread as { highEquity?: boolean }).highEquity),
+      'High Equity',
+    )
+    if (context.equityPercent != null && context.equityPercent >= 50) flags.add('High Equity')
+    if (tagHaystack.includes('high equity')) flags.add('High Equity')
+  }
 
   const typeText = (context.propertyTypeLabel || context.propertyType || '').toLowerCase()
   if (typeText.includes('multi')) flags.add('Multifamily')
   if (typeText.includes('land')) flags.add('Land')
   if (typeText.includes('commercial')) flags.add('Commercial')
 
-  if (tagHaystack.includes('absentee')) flags.add('Absentee')
-  if (tagHaystack.includes('probate')) flags.add('Probate')
-  if (tagHaystack.includes('tax delinquent') || tagHaystack.includes('tax_delinquent')) flags.add('Tax Delinquent')
-  if (tagHaystack.includes('high equity')) flags.add('High Equity')
-  if (tagHaystack.includes('pre-foreclosure') || tagHaystack.includes('pre foreclosure') || tagHaystack.includes('preforeclosure')) {
-    flags.add('Pre-Foreclosure')
-  }
-  if (tagHaystack.includes('foreclosure')) flags.add('Pre-Foreclosure')
-  if (tagHaystack.includes('vacant')) flags.add('Vacant')
-  if (tagHaystack.includes('senior')) flags.add('Senior Owner')
-  if (tagHaystack.includes('multifamily') || tagHaystack.includes('multi-family')) flags.add('Multifamily')
-  if (tagHaystack.includes(' land ') || tagHaystack.endsWith(' land') || tagHaystack.startsWith('land ')) flags.add('Land')
-  if (tagHaystack.includes('commercial')) flags.add('Commercial')
-
-  return PROPERTY_FLAG_ORDER.filter((label) => flags.has(label))
+  return DISTRESS_PROPERTY_FLAG_ORDER.filter((label) => flags.has(label)).slice(0, MAX_SIDEBAR_PROPERTY_FLAGS)
 }
 
 const resolvePropertyTypeLabel = (propertyType: string): string => {
@@ -509,7 +598,7 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
 }
 
 const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecision) => {
-  const name = resolveThreadPrimaryName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Owner'
+  const name = resolveThreadOwnerName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Owner'
   const address = resolveThreadAddressLine(thread) || readString(thread, 'property_address_full', 'propertyAddressFull') || 'Property Unknown'
   const market = resolveThreadMarketBadge(thread) || 'Unknown Market'
   const propertyType = readString(thread, 'propertyType', 'property_type') || 'Unknown Type'
@@ -546,10 +635,6 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     readBoolean(thread, 'wrongNumber', 'wrong_number') && 'Wrong Number',
     readBoolean(thread, 'notInterested', 'not_interested') && 'Not Interested',
   ].filter(Boolean) as string[]
-  const contactStatus = contactIdentity
-    || contactFlags[0]
-    || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : 'Active')
-
   const timestamp = formatInboxThreadTimestamp(thread.lastMessageAt || (thread as any).lastMessageIso || thread.updatedAt)
   const isHot = (
     ['HOT', 'VERY_HOT', 'READY_TO_CLOSE'].includes(decision.lead_temperature) &&
@@ -581,18 +666,24 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     intelTags,
   })
 
+  const contactMatchFlags = resolveContactMatchFlags(thread)
+  const rowDisplayFlags = propertyFlags
+
+  const contactStatus = contactIdentity
+    || contactFlags[0]
+    || propertyFlags[0]
+    || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : null)
+
   const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection)
   const marketLine = market && market !== 'Unknown Market' ? market : '—'
   const metaParts: string[] = []
   if (propertyTypeLabel) metaParts.push(propertyTypeLabel)
   if (unitCount != null && unitCount > 1) metaParts.push(`${unitCount} Units`)
-  if (stageDisplay) metaParts.push(stageDisplay)
   const metaLine = metaParts.join(' · ') || '—'
   const contextParts: string[] = []
   if (marketLine !== '—') contextParts.push(marketLine)
   if (propertyTypeLabel) contextParts.push(propertyTypeLabel)
   if (unitCount != null && unitCount > 1) contextParts.push(`${unitCount} Units`)
-  if (stageDisplay) contextParts.push(stageDisplay)
   const contextLine = contextParts.join(' · ') || '—'
 
   // 2. Visual Category Logic (Inbound ONLY)
@@ -648,12 +739,18 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     metaLine,
     intelTags,
     propertyFlags,
+    contactMatchFlags,
+    rowDisplayFlags,
     deliveryReceipt,
     deliveryStatus: deliveryReceipt?.type === 'inbound'
       ? null
       : (deliveryReceipt?.type ?? null),
     visualCategory,
     buildingCondition,
+    propertyId: readString(thread, 'propertyId', 'property_id'),
+    latitude: readNumber(thread, 'latitude', 'lat'),
+    longitude: readNumber(thread, 'longitude', 'lng', 'lon'),
+    streetviewImage: readString(thread, 'streetviewImage', 'streetview_image'),
   }
 }
 
@@ -696,6 +793,10 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
     intelTags,
     deliveryStatus,
     visualCategory,
+    propertyId,
+    latitude,
+    longitude,
+    streetviewImage,
   } = getThreadVars(thread, decision)
   const isInbound = latestDirection === 'inbound'
   const isOutbound = latestDirection === 'outbound'
@@ -717,10 +818,27 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
         isOutbound && 'is-outbound',
         `is-category-${visualCategory}`
       )}
-      data-thread-id={thread.id} onClick={() => onSelect(thread.id)}
+      data-thread-id={thread.id}
+      data-property-id={propertyId || undefined}
+      onClick={() => onSelect(thread.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect(thread.id)
+        }
+      }}
     >
-      <div className="nx-thread-card-rebuilt__left">
-        <HoverActions selectedForBulk={selectedForBulk} onToggleBulk={onToggleBulk} threadId={thread.id} />
+      <div className="nx-thread-card-rebuilt__media" aria-hidden>
+        <InboxStreetViewThumb
+          address={address}
+          lat={latitude}
+          lng={longitude}
+          cachedImageUrl={streetviewImage}
+        />
+        <div className="nx-thread-card-rebuilt__media-veil" />
+        <div className="nx-thread-card-rebuilt__media-actions">
+          <HoverActions selectedForBulk={selectedForBulk} onToggleBulk={onToggleBulk} threadId={thread.id} />
+        </div>
       </div>
       <div className="nx-thread-card-rebuilt__main">
         <div className="nx-thread-card-rebuilt__header">
@@ -861,15 +979,14 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   onSelect: (id: string) => void
   inboxMode?: 'rail25' | 'review50' | 'ops75' | 'full100'
 }) => {
-  const isCompactRail = inboxMode === 'rail25'
-  const showPropertyFlags = inboxMode === 'review50' || inboxMode === 'ops75' || inboxMode === 'full100'
-  const showSideMetrics = !isCompactRail
+  const showPropertyFlags = true
+  const showSideMetrics = inboxMode !== 'rail25'
   const vars = getThreadVars(thread, decision)
   const {
     name, address, contextLine, latestMessageBody, latestDirection,
     estimatedValue, equityAmount, equityPercent,
     finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
-    propertyFlags,
+    rowDisplayFlags, propertyId, latitude, longitude, streetviewImage,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
@@ -879,8 +996,8 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
   const conditionDisplay = buildingCondition || '—'
   const showMetadata = contextLine && contextLine !== '—'
-  const flagMaxVisible = inboxMode === 'full100' ? 3 : inboxMode === 'ops75' ? 2 : 2
-  const flagDensity = inboxMode === 'full100' ? 'rich' : inboxMode === 'ops75' ? 'default' : 'compact'
+  const flagMaxVisible = 3
+  const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
 
   return (
     <div
@@ -896,28 +1013,38 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
         latestDirection === 'outbound' && 'is-outbound',
       )}
       data-thread-id={thread.id}
+      data-property-id={propertyId || undefined}
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
+      <div className="nx-row25__zone nx-row25__zone--media" aria-hidden>
+        <InboxStreetViewThumb
+          address={address}
+          lat={latitude}
+          lng={longitude}
+          cachedImageUrl={streetviewImage}
+          size="rail"
+        />
+        <div className="nx-row25__media-veil" />
+      </div>
       <div className="nx-row25__zone nx-row25__zone--conversation">
         <div className="nx-row25__head">
           <span className="nx-row25__name-wrap">
             {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
             <span className="nx-row25__name">{name}</span>
           </span>
+          <time className="nx-row25__time">{ageLabel}</time>
         </div>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
           {deliveryReceipt ? (
-            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={`${deliveryReceipt.label} ${ageLabel}`}>
+            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={deliveryReceipt.label}>
               <Icon name={deliveryReceipt.icon} />
               <span className="nx-row25__receipt-label">{deliveryReceipt.label}</span>
-              <span className="nx-row25__receipt-sep" aria-hidden="true">·</span>
-              <time className="nx-row25__receipt-time">{ageLabel}</time>
             </span>
           ) : (
-            <time className="nx-row25__receipt-time is-standalone">{ageLabel}</time>
+            <span className="nx-row25__receipt is-muted" aria-hidden="true" />
           )}
         </div>
         {showMetadata && (
@@ -925,30 +1052,8 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
             <span className="nx-row25__context-line">{contextLine}</span>
           </div>
         )}
-        {showPropertyFlags && (
-          <PropertyFlagBadges flags={propertyFlags} maxVisible={flagMaxVisible} density={flagDensity} />
-        )}
-        {isCompactRail && (
-          <div className="nx-row25__compact-metrics" aria-label="Value, priority, equity, and condition">
-            <div className="nx-row25__compact-metric-cell">
-              <span className="nx-row25__compact-metric-k">Value</span>
-              <span className="nx-row25__compact-metric-v">{valueDisplay}</span>
-            </div>
-            <div className="nx-row25__compact-metric-cell">
-              <span className="nx-row25__compact-metric-k">Priority</span>
-              <span className={cls('nx-row25__compact-metric-v', priorityScoreClass(finalAcquisitionScore))}>{scoreDisplay}</span>
-            </div>
-            <div className="nx-row25__compact-metric-cell">
-              <span className="nx-row25__compact-metric-k">Equity</span>
-              <span className="nx-row25__compact-metric-v">{equityDisplay}</span>
-            </div>
-            <div className={cls('nx-row25__compact-metric-cell', !buildingCondition && 'is-empty')}>
-              <span className="nx-row25__compact-metric-k">Condition</span>
-              <span className={cls('nx-row25__compact-metric-v', buildingCondition ? 'is-condition' : 'is-muted')}>
-                {conditionDisplay}
-              </span>
-            </div>
-          </div>
+        {showPropertyFlags && rowDisplayFlags.length > 0 && (
+          <PropertyFlagBadges flags={rowDisplayFlags} maxVisible={flagMaxVisible} density={flagDensity} />
         )}
       </div>
 
@@ -993,6 +1098,7 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
     name, address, market, propertyTypeLabel, unitCount, stageDisplay,
     latestMessageBody, latestDirection, estimatedValue, equityAmount, equityPercent,
     finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition, propertyFlags,
+    propertyId, latitude, longitude, streetviewImage,
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
@@ -1018,9 +1124,20 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
         latestDirection === 'outbound' && 'is-outbound',
       )}
       data-thread-id={thread.id}
+      data-property-id={propertyId || undefined}
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
+      <div className="nx-cc-row__col nx-cc-row__col--media" aria-hidden>
+        <InboxStreetViewThumb
+          address={address}
+          lat={latitude}
+          lng={longitude}
+          cachedImageUrl={streetviewImage}
+          size="row"
+        />
+        <div className="nx-cc-row__media-veil" />
+      </div>
       <div className="nx-cc-row__col nx-cc-row__col--seller">
         <div className="nx-cc-row__seller-head">
           {decision.unread && <span className="nx-cc-row__unread-dot" aria-hidden="true" />}
@@ -1436,6 +1553,7 @@ export const InboxSidebar = ({
         <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table')}>
           {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
             <div className="nx-cc-table__header" aria-hidden="true">
+              <span className="nx-cc-table__th nx-cc-table__th--media" />
               <span className="nx-cc-table__th nx-cc-table__th--seller">Seller / Property</span>
               <span className="nx-cc-table__th nx-cc-table__th--conversation">Latest Conversation</span>
               <span className="nx-cc-table__th nx-cc-table__th--market">Market / Type / Stage</span>

@@ -447,6 +447,46 @@ async function resolveIdentity({
     }
   }
 
+  if (resolved.property_id && !resolved.master_owner_id) {
+    const propertyRow = await queryMaybe(
+      'properties',
+      'master_owner_id, prospect_id',
+      { property_id: resolved.property_id },
+      abortSignal,
+    )
+    if (propertyRow) {
+      resolved.master_owner_id = resolved.master_owner_id || clean(propertyRow.master_owner_id)
+      resolved.prospect_id = resolved.prospect_id || clean(propertyRow.prospect_id)
+    }
+  }
+
+  if (resolved.master_owner_id && !resolved.prospect_id) {
+    let linkedProspectQuery = supabase
+      .from('prospects')
+      .select('prospect_id')
+      .eq('master_owner_id', resolved.master_owner_id)
+      .limit(1)
+    if (abortSignal) linkedProspectQuery = linkedProspectQuery.abortSignal(abortSignal)
+    const { data: linkedProspect } = await linkedProspectQuery.maybeSingle()
+    if (linkedProspect?.prospect_id) {
+      resolved.prospect_id = clean(linkedProspect.prospect_id)
+    }
+  }
+
+  if (resolved.canonical_e164 && (!resolved.property_id || !resolved.master_owner_id || !resolved.prospect_id)) {
+    const recentMessage = await queryMaybe(
+      'message_events',
+      'property_id, master_owner_id, prospect_id',
+      { thread_key: resolved.canonical_e164 },
+      abortSignal,
+    )
+    if (recentMessage) {
+      resolved.property_id = resolved.property_id || clean(recentMessage.property_id)
+      resolved.master_owner_id = resolved.master_owner_id || clean(recentMessage.master_owner_id)
+      resolved.prospect_id = resolved.prospect_id || clean(recentMessage.prospect_id)
+    }
+  }
+
   return resolved
 }
 
@@ -1007,6 +1047,7 @@ function normalizeProspect(prospectRow, hydrated, phoneRow) {
     status: 'available',
     prospect_id: clean(pick(prospectRow?.prospect_id, hydrated?.prospect_id)),
     name,
+    full_name: name,
     language: pick(hydrated?.best_language, prospectRow?.language_preference),
     age: num(pick(
       prospectRow?.calculated_age,
@@ -1045,6 +1086,7 @@ function normalizeOwner(ownerRow, hydrated) {
     status: 'available',
     master_owner_id: clean(pick(ownerRow?.master_owner_id, hydrated?.master_owner_id)),
     display_name: displayName,
+    full_name: displayName,
     owner_type: pick(ownerRow?.owner_type_guess, hydrated?.owner_type_guess),
     priority_score: num(pick(ownerRow?.priority_score, hydrated?.owner_priority_score)),
     priority_tier: pick(ownerRow?.priority_tier, hydrated?.owner_priority_tier),
@@ -1205,6 +1247,7 @@ export async function buildDealIntelligenceDossier({
   master_owner_id,
   canonical_e164,
   debug = false,
+  summary_only = false,
   abortSignal,
 }) {
   const hydrated = await queryHydratedThread({ thread_key, property_id }, abortSignal)
@@ -1257,7 +1300,7 @@ export async function buildDealIntelligenceDossier({
   const property = normalizeProperty(propertyRow, hydrated, location)
   const baseline_scores = buildBaselineScores(propertyRow, hydrated)
 
-  const censusRow = location.zip
+  const censusRow = !summary_only && location.zip
     ? await queryMaybe(
       'census_geo_metrics',
       'geo_level,geoid,name,median_household_income,total_population,total_households,total_housing_units,vacancy_rate,renter_rate,owner_occupancy_rate,median_year_built,acquisition_pressure_score',
@@ -1267,28 +1310,35 @@ export async function buildDealIntelligenceDossier({
     : null
 
   const propertySnapshot = buildPropertySnapshot(propertyRow, hydrated, property)
-  const propertyDetail = buildPropertyDetailGroups(propertyRow, hydrated, property)
+  const propertyDetail = summary_only ? null : buildPropertyDetailGroups(propertyRow, hydrated, property)
 
-  const [comps, buyerMarket, buyerMatches, activity] = await Promise.all([
-    fetchCompsSection(property, location, propertyRow, abortSignal),
-    fetchBuyerGeoRollup({
-      zip: location.zip,
-      county: location.county,
-      market: location.market,
-      state: location.state,
-      city: location.city,
-      normalized_asset_class: property.normalized_asset_class,
-      property_type: property.property_type,
-    }, abortSignal),
-    identity.property_id ? fetchBuyerMatches(identity.property_id, abortSignal) : { status: 'market_pool_only', label: 'Market Buyer Pool', matched_buyer_count: 0, matched_buyers: [] },
-    fetchActivityTimeline({
-      thread_key: identity.thread_key,
-      canonical_e164: identity.canonical_e164,
-      property_id: identity.property_id,
-      hydrated,
-      abortSignal,
-    }),
-  ])
+  const [comps, buyerMarket, buyerMatches, activity] = summary_only
+    ? [
+      { status: 'lazy', label: 'Open comps panel to load', records: [] },
+      { status: 'lazy', label: 'Buyer market loads on expand', geographic_level_used: null, data_freshness: null },
+      { status: 'lazy', label: 'Buyer matches load on expand', matched_buyer_count: 0, matched_buyers: [] },
+      { status: 'lazy', label: 'Activity loads on expand', events: [] },
+    ]
+    : await Promise.all([
+      fetchCompsSection(property, location, propertyRow, abortSignal),
+      fetchBuyerGeoRollup({
+        zip: location.zip,
+        county: location.county,
+        market: location.market,
+        state: location.state,
+        city: location.city,
+        normalized_asset_class: property.normalized_asset_class,
+        property_type: property.property_type,
+      }, abortSignal),
+      identity.property_id ? fetchBuyerMatches(identity.property_id, abortSignal) : { status: 'market_pool_only', label: 'Market Buyer Pool', matched_buyer_count: 0, matched_buyers: [] },
+      fetchActivityTimeline({
+        thread_key: identity.thread_key,
+        canonical_e164: identity.canonical_e164,
+        property_id: identity.property_id,
+        hydrated,
+        abortSignal,
+      }),
+    ])
 
   const acquisition = normalizeAcquisitionDecision(acquisitionRow)
   const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
@@ -1301,52 +1351,81 @@ export async function buildDealIntelligenceDossier({
   const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164, ownerRow, compliance)
   const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance)
 
-  const census = censusRow
+  const census = summary_only
+    ? { status: 'lazy', label: 'Census loads on expand' }
+    : (censusRow
+      ? {
+          status: 'available',
+          median_household_income: num(censusRow.median_household_income),
+          population: num(censusRow.total_population ?? censusRow.population),
+          households: num(censusRow.total_households ?? censusRow.households),
+          housing_units: num(censusRow.total_housing_units ?? censusRow.housing_units),
+          vacancy_rate: num(censusRow.vacancy_rate),
+          renter_rate: num(censusRow.renter_occupied_percent ?? censusRow.renter_rate),
+          owner_occupancy_rate: num(censusRow.owner_occupied_percent ?? censusRow.owner_occupancy_rate),
+          median_year_built: num(censusRow.median_year_built),
+          acquisition_pressure_score: num(censusRow.acquisition_pressure_score),
+        }
+      : { status: 'pending', label: 'Census enrichment pending' })
+
+  const multifamily = summary_only ? null : buildMultifamilyIntelligence(propertyRow, property, buyerMarket, comps)
+
+  const dossier = summary_only
     ? {
-        status: 'available',
-        median_household_income: num(censusRow.median_household_income),
-        population: num(censusRow.total_population ?? censusRow.population),
-        households: num(censusRow.total_households ?? censusRow.households),
-        housing_units: num(censusRow.total_housing_units ?? censusRow.housing_units),
-        vacancy_rate: num(censusRow.vacancy_rate),
-        renter_rate: num(censusRow.renter_occupied_percent ?? censusRow.renter_rate),
-        owner_occupancy_rate: num(censusRow.owner_occupied_percent ?? censusRow.owner_occupancy_rate),
-        median_year_built: num(censusRow.median_year_built),
-        acquisition_pressure_score: num(censusRow.acquisition_pressure_score),
+        summary_only: true,
+        identity,
+        location,
+        property: {
+          property_id: property.property_id,
+          full_address: property.full_address,
+          market: property.market,
+          estimated_value: property.estimated_value,
+          beds: property.beds,
+          baths: property.baths,
+          sqft: property.sqft,
+          property_type: property.property_type,
+        },
+        property_snapshot: propertySnapshot,
+        baseline_scores,
+        acquisition_decision: acquisition,
+        decision_snapshot: decisionSnapshot,
+        conversation_intelligence,
+        compliance,
+        freshness: {
+          property_current: Boolean(propertyRow || hydrated),
+          acquisition_computed_at: acquisition?.computed_at || null,
+          hydrated_at: hydrated?.updated_at || hydrated?.latest_message_at || null,
+        },
       }
-    : { status: 'pending', label: 'Census enrichment pending' }
-
-  const multifamily = buildMultifamilyIntelligence(propertyRow, property, buyerMarket, comps)
-
-  const dossier = {
-    identity,
-    location,
-    property,
-    property_snapshot: propertySnapshot,
-    property_detail: propertyDetail,
-    multifamily,
-    baseline_scores,
-    prospect,
-    master_owner: owner,
-    phone,
-    acquisition_decision: acquisition,
-    decision_snapshot: decisionSnapshot,
-    comps,
-    buyer_market: buyerMarket,
-    buyer_matches: buyerMatches,
-    census,
-    conversation_intelligence,
-    activity_timeline: activity,
-    compliance,
-    freshness: {
-      property_current: Boolean(propertyRow || hydrated),
-      acquisition_computed_at: acquisition?.computed_at || null,
-      buyer_market_freshness: buyerMarket?.data_freshness || null,
-      comps_freshness: comps?.freshness || null,
-      hydrated_at: hydrated?.updated_at || hydrated?.latest_message_at || null,
-    },
-    _metadata: DEAL_DOSSIER_SCHEMA,
-  }
+    : {
+        identity,
+        location,
+        property,
+        property_snapshot: propertySnapshot,
+        property_detail: propertyDetail,
+        multifamily,
+        baseline_scores,
+        prospect,
+        master_owner: owner,
+        phone,
+        acquisition_decision: acquisition,
+        decision_snapshot: decisionSnapshot,
+        comps,
+        buyer_market: buyerMarket,
+        buyer_matches: buyerMatches,
+        census,
+        conversation_intelligence,
+        activity_timeline: activity,
+        compliance,
+        freshness: {
+          property_current: Boolean(propertyRow || hydrated),
+          acquisition_computed_at: acquisition?.computed_at || null,
+          buyer_market_freshness: buyerMarket?.data_freshness || null,
+          comps_freshness: comps?.freshness || null,
+          hydrated_at: hydrated?.updated_at || hydrated?.latest_message_at || null,
+        },
+        _metadata: DEAL_DOSSIER_SCHEMA,
+      }
 
   if (debug) {
     dossier.raw_sources_debug = {

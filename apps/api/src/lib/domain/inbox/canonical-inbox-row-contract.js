@@ -3,8 +3,49 @@ function clean(value) {
 }
 
 /**
- * Canonical inbox row contract — single server-side field list for list, counts,
- * conversation header, Deal Intelligence, filtering, and sorting.
+ * Lightweight list-row contract — inbox/live summaries only (no dossier enrichment).
+ */
+export const INBOX_THREAD_SUMMARY_SELECT_FIELDS = [
+  "thread_key",
+  "canonical_thread_key",
+  "canonical_e164",
+  "seller_phone",
+  "display_phone",
+  "property_id",
+  "prospect_id",
+  "master_owner_id",
+  "owner_name",
+  "seller_display_name",
+  "property_address_full",
+  "property_address",
+  "latest_message_body",
+  "latest_message_at",
+  "latest_message_direction",
+  "latest_direction",
+  "inbox_bucket",
+  "conversation_stage",
+  "stage",
+  "status",
+  "universal_status",
+  "universal_stage",
+  "unread_count",
+  "is_read",
+  "is_suppressed",
+  "suppression_status",
+  "opt_out",
+  "wrong_number",
+  "not_interested",
+  "last_inbound_at",
+  "last_outbound_at",
+  "follow_up_at",
+  "pending_queue_count",
+  "queue_status",
+  "latest_delivery_status",
+  "updated_at",
+].join(",");
+
+/**
+ * Canonical inbox row contract — full enrichment for thread detail panels.
  */
 export const CANONICAL_INBOX_ROW_SELECT_FIELDS = [
   "thread_key",
@@ -113,6 +154,51 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   "waiting_on_seller",
   "automated",
 ];
+
+export function compactInboxThreadSummaryRow(row = {}) {
+  const preview = String(row.latest_message_body ?? row.preview ?? row.message_body ?? "").trim();
+  const truncated = preview.length > 140 ? `${preview.slice(0, 139)}…` : preview;
+  const conversationThreadId =
+    row.conversation_thread_id ||
+    row.conversationThreadId ||
+    row.id ||
+    row.canonical_thread_key ||
+    row.thread_key ||
+    null;
+  return {
+    id: conversationThreadId,
+    conversation_thread_id: conversationThreadId,
+    conversationThreadId,
+    thread_key: row.thread_key || row.canonical_thread_key || conversationThreadId,
+    canonical_thread_key: row.canonical_thread_key || row.thread_key || conversationThreadId,
+    canonical_e164: row.canonical_e164 || row.normalized_phone || null,
+    seller_phone: row.seller_phone || row.display_phone || row.best_phone || null,
+    property_id: row.property_id || null,
+    prospect_id: row.prospect_id || null,
+    participant_id: row.prospect_id || row.master_owner_id || null,
+    master_owner_id: row.master_owner_id || null,
+    display_name: row.owner_name || row.seller_display_name || row.owner_display_name || null,
+    owner_name: row.owner_name || row.seller_display_name || null,
+    property_address_full: row.property_address_full || row.property_address || null,
+    property_address: row.property_address || row.property_address_full || null,
+    latest_message_body: truncated,
+    preview: truncated,
+    latest_message_at: row.latest_message_at || row.latest_activity_at || null,
+    latest_activity_at: row.latest_activity_at || row.latest_message_at || null,
+    latest_message_direction: row.latest_message_direction || row.latest_direction || row.direction || null,
+    latest_direction: row.latest_message_direction || row.latest_direction || row.direction || null,
+    direction: row.latest_message_direction || row.latest_direction || row.direction || null,
+    inbox_bucket: row.inbox_bucket || row.inbox_category || null,
+    inbox_category: row.inbox_category || row.inbox_bucket || null,
+    conversation_stage: row.conversation_stage || row.stage || row.universal_stage || null,
+    stage: row.stage || row.conversation_stage || row.universal_stage || null,
+    status: row.status || row.universal_status || row.inbox_status || null,
+    unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : 0,
+    is_suppressed: row.is_suppressed === true || row.opt_out === true,
+    suppression_status: row.suppression_status || (row.is_suppressed ? "suppressed" : null),
+    opt_out: row.opt_out ?? false,
+  };
+}
 
 export function buildEnrichmentCoverageDiagnostics(row = {}) {
   return {

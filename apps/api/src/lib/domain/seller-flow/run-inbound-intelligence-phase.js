@@ -399,7 +399,9 @@ export async function runInboundIntelligencePhase({
     extracted_facts: semantic_layer.extracted_facts,
   });
 
-  const human_review_required = Boolean(recommendation_layer.recommended_human_review);
+  const human_review_required = relationship.referred_automatic_send_allowed
+    ? false
+    : Boolean(recommendation_layer.recommended_human_review);
 
   const intelligence_snapshot = {
     decision_version: INTELLIGENCE_DECISION_VERSION,
@@ -416,6 +418,7 @@ export async function runInboundIntelligencePhase({
     invalidate_person_globally: Boolean(relationship.invalidate_person_globally),
     referred_contact_proposed_stage: relationship.referred_contact_proposed_stage || null,
     automatic_send_allowed: Boolean(relationship.automatic_send_allowed),
+    referred_automatic_send_allowed: Boolean(relationship.referred_automatic_send_allowed),
     universal_stage: authoritative_universal_stage,
     granular_stage: authoritative_granular_stage,
     safety_status: recommendation_layer.recommended_safety_disposition || "review",

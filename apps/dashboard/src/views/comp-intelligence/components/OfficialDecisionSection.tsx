@@ -15,7 +15,7 @@ export function OfficialDecisionSection({
   if (!isAuthoritative || !projection) {
     return (
       <section className="ci-official-unavailable" aria-label="Official underwriting status">
-        <p>Official underwriting is temporarily unavailable. Comp evidence remains available for review.</p>
+        <p>Official underwriting is temporarily unavailable. Comp research remains available.</p>
       </section>
     )
   }

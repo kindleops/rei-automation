@@ -139,3 +139,98 @@ test('no hardcoded Google Maps API key in workspace source', async () => {
   )
   assert.equal(evidenceMap.includes('AIzaSy'), false)
 })
+
+import {
+  classifyComp,
+  getMatchTierForFilter,
+  type CompTransactionEvidence,
+} from '../../src/views/comp-intelligence/utils/comp-display'
+
+function makeMockComp(overrides: Partial<CompTransactionEvidence> = {}): CompTransactionEvidence {
+  return {
+    candidate_id: overrides.candidate_id ?? 'c1',
+    property_id: overrides.property_id ?? null,
+    address: '123 Test St',
+    sale_price: 300000,
+    sale_date: '2024-01-15',
+    qualification_score: overrides.qualification_score ?? 72,
+    similarity: overrides.similarity ?? null,
+    comp_match_label: overrides.comp_match_label ?? null,
+    qualification_status: overrides.qualification_status ?? 'ACCEPTED',
+    evidence_authority: overrides.evidence_authority ?? 'DEGRADED_NON_AUTHORITATIVE',
+    evidence_role: overrides.evidence_role ?? null,
+    pricing_eligibility: overrides.pricing_eligibility ?? true,
+    geography: { distance_miles: 0.8, latitude: 33.4, longitude: -112.0, zip: null, city: null, state: null },
+    square_feet: 1600,
+    bedrooms: 3,
+    bathrooms: 2,
+    year_built: 1995,
+    lot_square_feet: 6500,
+    buyer: null,
+    buyer_archetype: null,
+    transaction_channel: null,
+    source_lineage: { source_table: null, source_record_id: null, identity_unresolved: null, source_completeness: null, channel_reasons: [] },
+    rejection_review_reasons: [],
+    evidence_list_role: 'accepted',
+    ...overrides,
+  } as CompTransactionEvidence
+}
+
+test('classifyComp: normalizes Elite/Strong -> STRONG regardless of prelim authority', () => {
+  const elitePrelim = makeMockComp({ comp_match_label: 'Elite Match', similarity: 95, evidence_authority: 'DEGRADED_NON_AUTHORITATIVE' })
+  const c = classifyComp(elitePrelim)
+  assert.equal(c.quality, 'STRONG')
+  assert.equal(c.authority, 'PRELIMINARY_RECOVERED')
+  assert.equal(getMatchTierForFilter(c), 'strong')
+})
+
+test('classifyComp: Strong Match authoritative is OFFICIAL + STRONG', () => {
+  const strongV3 = makeMockComp({ comp_match_label: 'Strong Match', similarity: 84, evidence_authority: 'AUTHORITATIVE_V3' })
+  const c = classifyComp(strongV3)
+  assert.equal(c.quality, 'STRONG')
+  assert.equal(c.authority, 'OFFICIAL_V3')
+})
+
+test('classifyComp: 95 score under Strong filter', () => {
+  const high = makeMockComp({ similarity: 95, comp_match_label: 'Elite Match' })
+  assert.equal(getMatchTierForFilter(classifyComp(high)), 'strong')
+})
+
+test('classifyComp: weak/review maps to Review filter', () => {
+  const weak = makeMockComp({ comp_match_label: 'Weak Match', similarity: 48 })
+  const review = makeMockComp({ qualification_status: 'REVIEW', similarity: 60 })
+  assert.equal(getMatchTierForFilter(classifyComp(weak)), 'review')
+  assert.equal(getMatchTierForFilter(classifyComp(review)), 'review')
+})
+
+test('classifyComp: explicit exclusion -> REJECTED + excluded filter', () => {
+  const rej = makeMockComp({ qualification_status: 'REJECTED' })
+  const c = classifyComp(rej)
+  assert.equal(c.authority, 'REJECTED')
+  assert.equal(c.isExcluded, true)
+  assert.equal(getMatchTierForFilter(c), 'excluded')
+})
+
+test('filter counts: All / Strong / Usable / Review / Excluded are deterministic', () => {
+  const comps = [
+    makeMockComp({ candidate_id: 's1', comp_match_label: 'Strong Match', similarity: 87 }),
+    makeMockComp({ candidate_id: 'u1', comp_match_label: 'Usable Match', similarity: 71 }),
+    makeMockComp({ candidate_id: 'u2', similarity: 68 }),
+    makeMockComp({ candidate_id: 'w1', comp_match_label: 'Weak Match', similarity: 51 }),
+    makeMockComp({ candidate_id: 'r1', qualification_status: 'REVIEW' }),
+    makeMockComp({ candidate_id: 'e1', qualification_status: 'REJECTED' }),
+    makeMockComp({ candidate_id: 'p1', similarity: 92, evidence_authority: 'DEGRADED_NON_AUTHORITATIVE', comp_match_label: 'Elite Match' }),
+  ]
+  // simulate filter logic by manual counts using classify
+  const buckets = { all: 0, strong: 0, usable: 0, review: 0, excluded: 0 }
+  for (const r of comps) {
+    const tier = getMatchTierForFilter(classifyComp(r))
+    buckets.all++
+    buckets[tier]++
+  }
+  assert.equal(buckets.all, 7)
+  assert.equal(buckets.strong, 2) // s1 + p1
+  assert.equal(buckets.usable, 2) // u1 + u2
+  assert.equal(buckets.review, 2) // w1 + r1
+  assert.equal(buckets.excluded, 1)
+})

@@ -123,6 +123,14 @@ export function PropertyCompCard({
         <Metric label="Type" value={row.property_type ?? row.canonical_asset_lane ?? '—'} />
       </div>
 
+      {/* More contract fields to address blank data complaints */}
+      <div className="ci-ev-intel">
+        {row.buyer && <div className="ci-ev-buyer">Buyer: {row.buyer} {row.buyer_archetype ? `(${row.buyer_archetype})` : ''}</div>}
+        {row.transaction_channel && <div className="ci-ev-channel">Channel: {row.transaction_channel}</div>}
+        {row.source_lineage?.source_table && <div className="ci-ev-source">Source: {row.source_lineage.source_table}</div>}
+        {row.evidence_role && <div className="ci-ev-role">Role: {row.evidence_role}</div>}
+      </div>
+
       {/* Drawer handles full detail. Keep minimal actions. */}
       {expanded && (
         <div className="ci-ev-actions">

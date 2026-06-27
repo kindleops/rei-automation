@@ -130,11 +130,13 @@ export function resolveOutboundReplyState({
     };
   }
 
+  const followUpMs = parseTimestampMs(workflowRow.follow_up_at);
   const workflow = resolveWorkflowWaitingState({
     ...workflowRow,
     last_outbound_at: lastOutboundAt,
     last_inbound_at: lastInboundAt,
   }, now);
+
   if (workflow.is_waiting) {
     return {
       inbox_bucket: "waiting",
@@ -143,9 +145,26 @@ export function resolveOutboundReplyState({
     };
   }
 
+  if (followUpMs > 0 && followUpMs <= now) {
+    return {
+      inbox_bucket: "follow_up",
+      automation_lane: "active_conversation",
+      disposition: null,
+    };
+  }
+
+  const outboundMs = parseTimestampMs(lastOutboundAt);
+  if (outboundMs && (now - outboundMs) <= WAITING_REPLY_WINDOW_MS) {
+    return {
+      inbox_bucket: "waiting",
+      automation_lane: null,
+      disposition: null,
+    };
+  }
+
   return {
-    inbox_bucket: null,
-    automation_lane: null,
+    inbox_bucket: "follow_up",
+    automation_lane: "active_conversation",
     disposition: null,
   };
 }
