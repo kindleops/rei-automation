@@ -142,8 +142,6 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
     autoReplyMode: "live_limited",
     executionAllowed: true,
     dryRun: true,
-    skipNotifications: true,
-    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.ok, true);
@@ -155,9 +153,12 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
   assert.ok(result.execution.rendered_message_text);
   assert.equal(result.execution.queued, false);
   assert.equal(result.auto_reply_mode, "live_limited");
-  assert.ok((result.decision?.workflow_events || []).length > 0);
-  assert.ok((result.decision?.notification_events || []).length > 0);
-  assert.ok(result.intelligence_message_event_patch);
+  assert.equal(result.writes_suppressed, true);
+  assert.equal(result.side_effects?.notifications_dispatched, false);
+  assert.ok(result.side_effects?.workflow_events_count > 0);
+  assert.ok(result.side_effects?.notification_events_count > 0);
+  assert.ok(result.side_effects?.intelligence_message_event_patch);
+  assert.ok(result.side_effects?.universal_state_patch);
 });
 
 test("processSellerInboundMessage schedules follow-up for S1 not-for-sale without immediate queue", async () => {
@@ -191,11 +192,12 @@ test("processSellerInboundMessage schedules follow-up for S1 not-for-sale withou
     autoReplyMode: "live_limited",
     executionAllowed: true,
     dryRun: true,
-    skipNotifications: true,
-    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.writes_suppressed, true);
+  assert.equal(result.side_effects?.notifications_dispatched, false);
+  assert.ok(result.side_effects?.workflow_events_count > 0);
   assert.equal(result.contract.ownership_signal, "inferred");
   assert.equal(result.contract.interest_signal, "not_interested");
   assert.equal(result.execution.automation_decision.should_queue_reply, false);
@@ -242,8 +244,6 @@ test("processSellerInboundMessage is idempotent on duplicate queue suppression",
     autoReplyMode: "live_limited",
     executionAllowed: true,
     dryRun: true,
-    skipNotifications: true,
-    skipUniversalStatePatch: true,
   });
 
   assert.equal(result.idempotent.duplicate_suppressed, true);
@@ -287,10 +287,12 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
 
   const proof = await runSellerInboundProofCases({
     dryRun: true,
+    proofRun: true,
     autoReplyMode: "live_limited",
   });
 
   assert.equal(proof.ok, true);
+  assert.equal(proof.proof_run, true);
   assert.equal(proof.proof_count, 2);
 
   const yes_case = proof.proof_results.find((row) => row.proof_case === "ownership_confirmed_yes");
@@ -300,15 +302,18 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
   assert.equal(yes_case.normalized_intent, "ownership_confirmed");
   assert.equal(yes_case.decision.stage_after, "offer_interest");
   assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
-  assert.ok((yes_case.side_effects?.workflow_events || []).length > 0);
-  assert.ok((yes_case.side_effects?.notification_events || []).length > 0);
-  assert.equal(yes_case.side_effects?.notifications_dispatched, true);
-  assert.equal(yes_case.side_effects?.universal_state_dispatched, true);
+  assert.equal(yes_case.writes_suppressed, true);
+  assert.equal(yes_case.side_effects?.notifications_dispatched, false);
+  assert.ok(yes_case.side_effects?.workflow_events_count > 0);
+  assert.ok(yes_case.side_effects?.notification_events_count > 0);
+  assert.ok(yes_case.side_effects?.universal_state_patch);
 
   assert.ok(nfs_case);
   assert.equal(nfs_case.normalized_intent, "not_interested");
   assert.equal(nfs_case.execution.automation_decision.should_queue_reply, false);
-  assert.equal(nfs_case.follow_up.followup_created, true);
+  assert.equal(nfs_case.followup_scheduled, true);
+  assert.equal(nfs_case.writes_suppressed, true);
+  assert.equal(nfs_case.side_effects?.notifications_dispatched, false);
 });
 
 test("recovery worker reprocesses incomplete inbound rows through canonical orchestration", async () => {
@@ -372,6 +377,7 @@ test("recovery worker reprocesses incomplete inbound rows through canonical orch
   assert.equal(result.results[0].ok, true);
   assert.equal(result.results[0].normalized_intent, "ownership_confirmed");
   assert.equal(result.results[0].decision.stage_after, "offer_interest");
-  assert.ok((result.results[0].side_effects?.workflow_events || []).length > 0);
-  assert.ok((result.results[0].side_effects?.notification_events || []).length > 0);
+  assert.ok(result.results[0].side_effects?.workflow_events_count > 0);
+  assert.ok(result.results[0].side_effects?.notification_events_count > 0);
+  assert.equal(result.results[0].side_effects?.notifications_dispatched, false);
 });

@@ -83,6 +83,7 @@ export async function recoverUnprocessedInboundMessages({
       cases: proofCases,
       autoReplyMode,
       dryRun: true,
+      proofRun: true,
       supabaseClient: supabase,
     });
     return {

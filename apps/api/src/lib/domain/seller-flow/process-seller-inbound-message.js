@@ -22,6 +22,7 @@ import {
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -201,6 +202,7 @@ export async function processSellerInboundMessage({
     explicitExecutionAllowed != null
       ? Boolean(explicitExecutionAllowed)
       : Boolean(queue_permission.allowed);
+  const writes_suppressed = Boolean(dryRun || proofRun);
 
   let classification = providedClassification;
   if (!classification) {
@@ -280,14 +282,14 @@ export async function processSellerInboundMessage({
       intelligence_snapshot,
       provider_message_sid: providerMessageId,
       message_event_id: inboundEventId,
-      dry_run: Boolean(dryRun),
+      dry_run: writes_suppressed,
     });
 
     if (intelligence_snapshot?.referral_detected) {
       const referral_persist = await runtimeDeps.persistSellerContactReferral({
         supabaseClient: supabase,
         referral: intelligence_snapshot.referral,
-        dry_run: Boolean(dryRun),
+        dry_run: writes_suppressed,
       });
 
       if (
@@ -303,7 +305,7 @@ export async function processSellerInboundMessage({
           referralId: referral_persist?.referral_id || null,
           execution_allowed,
           auto_reply_mode: effective_auto_reply_mode,
-          dryRun: Boolean(dryRun),
+          dryRun: writes_suppressed,
         });
       }
     }
@@ -430,7 +432,7 @@ export async function processSellerInboundMessage({
           threadKey: threadKey || inboundFrom,
           patch,
           supabase,
-          dryRun: Boolean(dryRun),
+          dryRun: writes_suppressed,
           meta: {
             change_source: STATE_SOURCE_CODES.AUTOPILOT,
             source_view: "seller_inbound_orchestrator",
@@ -447,7 +449,8 @@ export async function processSellerInboundMessage({
     }
   }
 
-  if (!skipNotifications) {
+  const dispatch_side_effects = !skipNotifications && !writes_suppressed;
+  if (dispatch_side_effects) {
     await emitSellerNotifications({
       decision,
       contract,
@@ -487,6 +490,23 @@ export async function processSellerInboundMessage({
     block_reason: decision.block_reason,
   });
 
+  const intelligence_message_event_patch =
+    buildIntelligenceMessageEventPatch(intelligence_snapshot);
+
+  const side_effects = summarizeSellerInboundSideEffects(
+    {
+      decision,
+      intelligence_message_event_patch,
+      universal_state_patch,
+    },
+    {
+      writes_suppressed,
+      notifications_dispatched: dispatch_side_effects,
+      universal_state_dispatched:
+        !skipUniversalStatePatch && Boolean(universal_state_patch) && !writes_suppressed,
+    }
+  );
+
   return {
     ok: true,
     classification,
@@ -498,10 +518,13 @@ export async function processSellerInboundMessage({
     decision,
     seller_stage_reply,
     universal_state_patch,
+    side_effects,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
     queue_permission,
-    intelligence_message_event_patch: buildIntelligenceMessageEventPatch(intelligence_snapshot),
+    intelligence_message_event_patch,
+    proof_run: Boolean(proofRun),
+    writes_suppressed,
     idempotent: {
       duplicate_suppressed: Boolean(execution?.duplicate_suppressed),
       queue_row_id: execution?.queue_row_id || null,
