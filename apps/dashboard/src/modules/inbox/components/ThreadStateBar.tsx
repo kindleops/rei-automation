@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { IconName } from '../../../shared/icons'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
-import { updateThreadState } from '../../../lib/api/backendClient'
+import { patchLeadStateFromView, type LeadStateSourceView } from '../../../domain/lead-state/persistUniversalLeadState'
+import type { LifecycleStageCode } from '../../../domain/lead-state/universal-lead-state-registry'
+import { StageChangeConfirmModal } from './StageChangeConfirmModal'
 import {
   autopilotModeVisuals,
   resolveAutopilotMode,
@@ -217,15 +219,21 @@ export interface ThreadStateBarProps {
   thread: InboxWorkflowThread
   onRefetch?: (threadKey: string) => void
   disabled?: boolean
+  sourceView?: LeadStateSourceView
 }
 
-export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadStateBarProps) => {
+export const ThreadStateBar = ({ thread, onRefetch, disabled = false, sourceView = 'thread' }: ThreadStateBarProps) => {
   const threadKey = thread.threadKey || thread.id
 
   const status = useOptimisticField<ThreadStatus>(resolveThreadStatus(thread))
   const stage = useOptimisticField<ThreadStage>(resolveThreadStage(thread))
   const temperature = useOptimisticField<ThreadTemperature>(resolveThreadTemperature(thread))
   const autopilot = useOptimisticField<AutopilotMode>(resolveAutopilotMode(thread))
+
+  const [stageConfirm, setStageConfirm] = useState<{
+    open: boolean
+    next: ThreadStage | null
+  }>({ open: false, next: null })
 
   const prevKeyRef = useRef(thread.id)
   if (prevKeyRef.current !== thread.id) {
@@ -234,63 +242,94 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false }: ThreadSt
     stage.reset(resolveThreadStage(thread))
     temperature.reset(resolveThreadTemperature(thread))
     autopilot.reset(resolveAutopilotMode(thread))
+    setStageConfirm({ open: false, next: null })
   }
 
-  const persist = async (patch: Record<string, string>) => {
-    const result = await updateThreadState(threadKey, patch)
+  const persist = async (patch: Record<string, string>, executeNextAction = false) => {
+    const result = await patchLeadStateFromView(sourceView, threadKey, patch, {
+      execute_next_action: executeNextAction,
+    })
     if (result.ok) onRefetch?.(threadKey)
-    return result
+    return { ok: result.ok }
+  }
+
+  const handleStageChangeRequest = (next: ThreadStage) => {
+    if (next === stage.value) return
+    setStageConfirm({ open: true, next })
+  }
+
+  const handleStageCancel = () => {
+    setStageConfirm({ open: false, next: null })
+  }
+
+  const handleStageConfirm = async (executeNextAction: boolean) => {
+    const next = stageConfirm.next
+    if (!next) return
+    setStageConfirm({ open: false, next: null })
+    await stage.commit(next, () => persist({ lifecycle_stage: next }, executeNextAction))
   }
 
   const anyPending = status.pending || stage.pending || temperature.pending || autopilot.pending
 
   return (
-    <div className={cls('nx-conv-command-strip', anyPending && 'is-syncing')} aria-label="Universal thread controls">
-      <div className="nx-conv-command-strip__primary">
+    <>
+      <div className={cls('nx-conv-command-strip', anyPending && 'is-syncing')} aria-label="Universal thread controls">
+        <div className="nx-conv-command-strip__primary">
+          <GlassControl
+            label="Conversation status"
+            value={status.value}
+            options={STATUS_OPTIONS}
+            pending={status.pending}
+            error={status.error}
+            disabled={disabled}
+            className="nx-ctrl--status"
+            onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
+          />
+          <GlassControl
+            label="Acquisition stage"
+            value={stage.value}
+            options={STAGE_OPTIONS}
+            pending={stage.pending}
+            error={stage.error}
+            disabled={disabled}
+            className="nx-ctrl--stage"
+            onChange={handleStageChangeRequest}
+          />
+          <GlassControl
+            label="Lead temperature"
+            value={temperature.value}
+            options={TEMP_OPTIONS}
+            pending={temperature.pending}
+            error={temperature.error}
+            disabled={disabled}
+            className="nx-ctrl--temperature"
+            onChange={(next) => temperature.commit(next, () => persist({ lead_temperature: next }))}
+          />
+        </div>
+        <div className="nx-conv-command-strip__spacer" aria-hidden="true" />
         <GlassControl
-          label="Conversation status"
-          value={status.value}
-          options={STATUS_OPTIONS}
-          pending={status.pending}
-          error={status.error}
+          label="Automation state"
+          value={autopilot.value}
+          options={AUTO_OPTIONS}
+          pending={autopilot.pending}
+          error={autopilot.error}
           disabled={disabled}
-          className="nx-ctrl--status"
-          onChange={(next) => status.commit(next, () => persist({ operational_status: next, conversation_status: next }))}
-        />
-        <GlassControl
-          label="Acquisition stage"
-          value={stage.value}
-          options={STAGE_OPTIONS}
-          pending={stage.pending}
-          error={stage.error}
-          disabled={disabled}
-          className="nx-ctrl--stage"
-          onChange={(next) => stage.commit(next, () => persist({ lifecycle_stage: next, seller_stage: next }))}
-        />
-        <GlassControl
-          label="Lead temperature"
-          value={temperature.value}
-          options={TEMP_OPTIONS}
-          pending={temperature.pending}
-          error={temperature.error}
-          disabled={disabled}
-          className="nx-ctrl--temperature"
-          onChange={(next) => temperature.commit(next, () => persist({ lead_temperature: next, temperature: next }))}
+          className="nx-conv-auto-control"
+          compact
+          icon="zap"
+          onChange={(next) => autopilot.commit(next, () => persist({ autopilot_mode: next }))}
         />
       </div>
-      <div className="nx-conv-command-strip__spacer" aria-hidden="true" />
-      <GlassControl
-        label="Automation state"
-        value={autopilot.value}
-        options={AUTO_OPTIONS}
-        pending={autopilot.pending}
-        error={autopilot.error}
-        disabled={disabled}
-        className="nx-conv-auto-control"
-        compact
-        icon="zap"
-        onChange={(next) => autopilot.commit(next, () => persist({ autopilot_mode: next }))}
+
+      <StageChangeConfirmModal
+        open={stageConfirm.open}
+        fromStage={stage.value as LifecycleStageCode}
+        toStage={stageConfirm.next as LifecycleStageCode | null}
+        pending={stage.pending}
+        onCancel={handleStageCancel}
+        onChangeStageOnly={() => void handleStageConfirm(false)}
+        onChangeStageAndRunAction={() => void handleStageConfirm(true)}
       />
-    </div>
+    </>
   )
 }

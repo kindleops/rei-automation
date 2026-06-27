@@ -277,6 +277,7 @@ export function projectClosingCase(row: RawOpportunityRow): ClosingCase {
   return {
     identity: {
       closingCaseId,
+      primaryThreadKey: str(row.primary_thread_key),
       propertyId: str(row.primary_property_id),
       masterOwnerId: str(row.master_owner_id),
       prospectId: null,

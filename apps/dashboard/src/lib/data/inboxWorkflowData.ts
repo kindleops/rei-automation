@@ -4,6 +4,19 @@ import { getInboxThreads, getThreadMessagesForThread, normalizeMessageDirection 
 import { asBoolean, asIso, asString, getSupabaseErrorMessage, mapErrorMessage, normalizeStatus, safeArray, type AnyRecord } from './shared'
 import { logInboxActivity } from './inboxActivityData'
 import * as backendClient from '../api/backendClient'
+import {
+  archiveConversation,
+  patchLeadStateFromView,
+  persistUniversalLeadState,
+  pinThread as persistPinThread,
+  snoozeThread as persistSnoozeThread,
+  starThread as persistStarThread,
+  unpinThread as persistUnpinThread,
+  unstarThread as persistUnstarThread,
+  type UniversalLeadStateMutationResult,
+  type UniversalLeadStatePatch,
+} from '../../domain/lead-state/persistUniversalLeadState'
+import type { OperationalStatusCode } from '../../domain/lead-state/universal-lead-state-registry'
 
 const DEV = Boolean(import.meta.env?.DEV)
 const SENT_MESSAGES_PAGE_SIZE = 1000
@@ -128,10 +141,71 @@ export type InboxWorkflowThread = InboxThread & InboxThreadWorkflow
 
 export interface WorkflowMutationResult {
   ok: boolean
-  writeTarget: 'operator_thread_state' | 'none'
+  writeTarget: 'inbox_thread_state' | 'operator_thread_state' | 'none'
   errorMessage: string | null
   threadKey: string
   mutationPayload: AnyRecord | null
+}
+
+const INBOX_STATUS_TO_OPERATIONAL: Record<InboxStatus, OperationalStatusCode> = {
+  new_reply: 'new_reply',
+  needs_review: 'needs_review',
+  ai_draft_ready: 'needs_review',
+  queued: 'scheduled',
+  waiting: 'waiting_on_seller',
+  suppressed: 'paused',
+  closed: 'paused',
+}
+
+const toWorkflowResult = (result: UniversalLeadStateMutationResult): WorkflowMutationResult => ({
+  ok: result.ok,
+  writeTarget: result.ok ? 'inbox_thread_state' : 'none',
+  errorMessage: result.errorMessage,
+  threadKey: result.threadKey,
+  mutationPayload: result.mutationPayload,
+})
+
+const mapWorkflowPatchToCanonical = (
+  patch: Partial<Pick<InboxThreadWorkflow, 'inboxStatus' | 'conversationStage' | 'isArchived' | 'isRead' | 'isPinned' | 'isStarred' | 'isHidden' | 'isSuppressed' | 'priority'>> & { isHotLead?: boolean; automationState?: AutomationState },
+): UniversalLeadStatePatch => {
+  const canonical: UniversalLeadStatePatch = {}
+
+  if (patch.inboxStatus) {
+    canonical.operational_status = INBOX_STATUS_TO_OPERATIONAL[patch.inboxStatus] ?? patch.inboxStatus
+  }
+  if (patch.conversationStage) {
+    canonical.lifecycle_stage = patch.conversationStage
+  }
+  if (patch.isArchived != null) {
+    canonical.is_archived = patch.isArchived
+    canonical.archive_scope = patch.isArchived ? 'conversation' : null
+  }
+  if (patch.isRead != null) canonical.is_read = patch.isRead
+  if (patch.isPinned != null) canonical.is_pinned = patch.isPinned
+  if (patch.isStarred != null) canonical.is_starred = patch.isStarred
+  if (patch.priority) {
+    canonical.lead_temperature = patch.priority === 'urgent'
+      ? 'hot'
+      : patch.priority === 'high'
+        ? 'warm'
+        : patch.priority === 'low'
+          ? 'cold'
+          : 'unscored'
+  }
+  if (patch.isSuppressed != null) {
+    if (patch.isSuppressed) {
+      canonical.contactability_status = 'opted_out'
+      canonical.lifecycle_stage = 'closed'
+      canonical.operational_status = 'paused'
+    } else {
+      canonical.contactability_status = 'contactable'
+      canonical.operational_status = 'needs_review'
+    }
+  }
+  if (patch.automationState === 'paused') canonical.operational_status = 'paused'
+  if (patch.isHotLead) canonical.lead_temperature = 'hot'
+
+  return canonical
 }
 
 export interface SentMessageItem {
@@ -569,34 +643,9 @@ export const persistWorkflowPatch = async (
     })
   }
 
-  if (await tableExists('operator_thread_state')) {
-    const payload: AnyRecord = {}
-    if (patch.inboxStatus) payload['inbox_bucket'] = patch.inboxStatus === 'closed' ? 'all' : patch.inboxStatus
-    if (patch.conversationStage) {
-      payload['seller_stage'] = patch.conversationStage
-      payload['conversation_stage'] = patch.conversationStage
-    }
-    if (patch.priority) {
-      payload['lead_temperature'] = patch.priority === 'urgent' ? 'hot' : patch.priority === 'high' ? 'warm' : 'cold'
-    }
-    if (patch.isSuppressed != null) {
-      payload['suppression_status'] = patch.isSuppressed ? 'suppressed' : null
-    }
-
-    const result = await backendClient.updateThreadState(threadKey, payload)
-    if (result.ok) {
-      return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: payload }
-    }
-    return { ok: false, writeTarget: 'none', errorMessage: result.message, threadKey, mutationPayload: payload }
-  }
-
-  return {
-    ok: false,
-    writeTarget: 'none',
-    errorMessage: 'operator_thread_state table missing. Run the Inbox thread-state migration.',
-    threadKey,
-    mutationPayload: null,
-  }
+  const canonicalPatch = mapWorkflowPatchToCanonical(patch)
+  const result = await patchLeadStateFromView('inbox', threadKey, canonicalPatch)
+  return toWorkflowResult(result)
 }
 
 export const fetchInboxThreads = async (params: InboxThreadsQuery = {}): Promise<InboxWorkflowThread[]> => {
@@ -786,7 +835,7 @@ export const updateThreadPriority = async (thread: InboxThread, priority: InboxP
 }
 
 export const archiveThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  const result = await persistWorkflowPatch(thread, { isArchived: true, inboxStatus: 'closed' })
+  const result = toWorkflowResult(await archiveConversation(toThreadKey(thread), { source_view: 'inbox' }))
   if (result.ok) {
     void logInboxActivity({
       event_type: 'archive_thread',
@@ -805,34 +854,35 @@ export const unarchiveThread = async (thread: InboxThread): Promise<WorkflowMuta
   const lastIn = thread.lastInboundAt ? new Date(thread.lastInboundAt).getTime() : 0
   const lastOut = thread.lastOutboundAt ? new Date(thread.lastOutboundAt).getTime() : 0
   const needsResponse = lastIn > lastOut
-  return persistWorkflowPatch(thread, {
-    isArchived: false,
-    inboxStatus: needsResponse ? 'new_reply' : 'waiting',
-  })
+  return toWorkflowResult(await persistUniversalLeadState(toThreadKey(thread), {
+    is_archived: false,
+    archive_scope: null,
+    operational_status: needsResponse ? 'new_reply' : 'waiting_on_seller',
+  }, { source_view: 'inbox' }))
 }
 
 export const markThreadRead = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isRead: true })
+  return toWorkflowResult(await persistUniversalLeadState(toThreadKey(thread), { is_read: true }, { source_view: 'inbox' }))
 }
 
 export const markThreadUnread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isRead: false })
+  return toWorkflowResult(await persistUniversalLeadState(toThreadKey(thread), { is_read: false }, { source_view: 'inbox' }))
 }
 
 export const pinThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isPinned: true })
+  return toWorkflowResult(await persistPinThread(toThreadKey(thread), { source_view: 'inbox' }))
 }
 
 export const unpinThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isPinned: false })
+  return toWorkflowResult(await persistUnpinThread(toThreadKey(thread), { source_view: 'inbox' }))
 }
 
 export const starThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isStarred: true })
+  return toWorkflowResult(await persistStarThread(toThreadKey(thread), { source_view: 'inbox' }))
 }
 
 export const unstarThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { isStarred: false })
+  return toWorkflowResult(await persistUnstarThread(toThreadKey(thread), { source_view: 'inbox' }))
 }
 
 export const hideThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
@@ -866,7 +916,7 @@ export const approveQueueItem = async (queueId: string, thread: InboxThread): Pr
     undo_payload: null
   })
 
-  return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'queued' } }
+  return { ok: true, writeTarget: 'inbox_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'queued' } }
 }
 
 export const cancelQueueItem = async (queueId: string, thread: InboxThread): Promise<WorkflowMutationResult> => {
@@ -888,7 +938,7 @@ export const cancelQueueItem = async (queueId: string, thread: InboxThread): Pro
     undo_payload: null
   })
 
-  return { ok: true, writeTarget: 'operator_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'waiting' } }
+  return { ok: true, writeTarget: 'inbox_thread_state', errorMessage: null, threadKey, mutationPayload: { status: 'waiting' } }
 }
 export const unsuppressThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
   return persistWorkflowPatch(thread, { isSuppressed: false, inboxStatus: 'needs_review' })
@@ -899,7 +949,7 @@ export const markThreadHot = async (thread: InboxThread): Promise<WorkflowMutati
 }
 
 export const snoozeThread = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { inboxStatus: 'waiting' })
+  return toWorkflowResult(await persistSnoozeThread(toThreadKey(thread), undefined, { source_view: 'inbox' }))
 }
 
 export const pauseAutomation = async (thread: InboxThread): Promise<WorkflowMutationResult> => {

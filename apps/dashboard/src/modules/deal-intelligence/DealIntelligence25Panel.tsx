@@ -20,6 +20,7 @@ import {
   scoreTone,
 } from '../../domain/deal-intelligence/deal-intelligence-format'
 import { DealIntelligenceMedia, type MediaTab } from './DealIntelligenceMedia'
+import { UniversalLeadStateControls } from '../../domain/lead-state/UniversalLeadStateControls'
 import './deal-intelligence-25.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -283,7 +284,14 @@ export const DealIntelligence25Panel = ({
     [engineProgress],
   )
 
-  if (loading && !dossier) return <div className="nx-deal-compact-shell nx-di25-loading">Loading deal intelligence…</div>
+  if (loading) {
+    return (
+      <div className="nx-deal-compact-shell nx-di25-loading">
+        {fallbackAddress ? <p className="nx-di25-loading__address">{fallbackAddress}</p> : null}
+        <p>Loading deal intelligence…</p>
+      </div>
+    )
+  }
   if (error && !dossier) return <div className="nx-deal-compact-shell nx-di25-error">{error}</div>
 
   const compRecords = (comps?.records || []) as CompRecord[]
@@ -323,6 +331,32 @@ export const DealIntelligence25Panel = ({
           <button type="button" onClick={copyAddress}>{addrCopied ? 'Copied' : 'Copy Address'}</button>
         </div>
       </div>
+
+      {threadKey ? (
+        <section className="nx-di25-layer is-lead-state">
+          <header className="nx-di25-layer__head"><span>Canonical Lead State</span></header>
+          <UniversalLeadStateControls
+            thread={{
+              threadKey,
+              id: threadKey,
+              lifecycle_stage: convo?.lifecycle_stage,
+              operational_status: convo?.operational_status,
+              lead_temperature: convo?.lead_temperature,
+              disposition: convo?.disposition,
+              contactability_status: convo?.contactability_status,
+              next_action: convo?.next_action,
+              is_starred: convo?.is_starred,
+              is_pinned: convo?.is_pinned,
+              is_archived: convo?.is_archived,
+              snoozed_until: convo?.snoozed_until,
+              manual_stage_lock: convo?.manual_stage_lock,
+              manual_temperature_lock: convo?.manual_temperature_lock,
+            }}
+            sourceView="deal_intelligence"
+            compact
+          />
+        </section>
+      ) : null}
 
       <section className="nx-di25-identity">
         <h2>{address || 'Property unknown'}</h2>
@@ -364,7 +398,7 @@ export const DealIntelligence25Panel = ({
       <section className="nx-di25-layer is-baseline">
         <header className="nx-di25-layer__head"><span>Baseline Property Intelligence</span></header>
         <BaselineHero
-          acquisition={baseline?.acquisition_score}
+          acquisition={baseline?.acquisition_score ?? (engineAvailable ? Number(engine.aos_score) : null)}
           strength={baseline?.deal_strength_score}
           motivation={baseline?.motivation_score}
           distress={baseline?.distress_score}

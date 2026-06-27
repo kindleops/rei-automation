@@ -1,8 +1,9 @@
 import { processSendQueue } from "@/lib/domain/queue/process-send-queue.js";
 import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { queueOutboundMessage } from "@/lib/flows/queue-outbound-message.js";
-import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { checkThreadContactability } from "@/lib/domain/lead-state/check-thread-contactability.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -107,6 +108,36 @@ export async function buildAndSendNow(
           stage: "can_send_gate",
           status: 423,
           reason: gate.reason,
+        },
+        processed: null,
+      };
+    }
+  }
+
+  if (hasSupabaseConfig()) {
+    const supabase = deps.supabase || defaultSupabase;
+    try {
+      const contactability = await checkThreadContactability(supabase, phone);
+      if (contactability.blocks_send) {
+        return {
+          queued: {
+            ok: false,
+            stage: "contactability",
+            status: 423,
+            reason: "contactability_blocked",
+            contactability_status: contactability.contactability_status,
+          },
+          processed: null,
+        };
+      }
+    } catch (contactability_error) {
+      return {
+        queued: {
+          ok: false,
+          stage: "contactability",
+          status: 423,
+          reason: "contactability_check_unavailable",
+          message: contactability_error?.message || "contactability_check_unavailable",
         },
         processed: null,
       };

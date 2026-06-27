@@ -62,6 +62,21 @@ import {
 } from './map-theme-tokens'
 import { fetchMapProperties } from '../../lib/api/backendClient'
 import type { LocationResult } from '../../domain/command-center/command.types'
+import {
+  CONTACTABILITY_ORDER,
+  DISPOSITION_ORDER,
+  LIFECYCLE_STAGE_META,
+  LIFECYCLE_STAGE_ORDER,
+  LEAD_TEMPERATURE_META,
+  OPERATIONAL_STATUS_ORDER,
+  contactabilityBlocksSend,
+  normalizeContactability,
+  normalizeDisposition,
+  normalizeLeadTemperature,
+  normalizeLifecycleStage,
+  normalizeOperationalStatus,
+} from '../../domain/lead-state/universal-lead-state-registry'
+import { UniversalLeadStateControls } from '../../domain/lead-state/UniversalLeadStateControls'
 
 export type { MapStyleMode } from './commandMapThemes'
 
@@ -206,6 +221,10 @@ export type MapFilterState = {
   stage: string
   status: string
   leadTemperature: string
+  disposition: string
+  contactability: string
+  archiveOnly: boolean
+  snoozeOnly: boolean
   automationStatus: string
   messageDirection: string
   unreadOnly: boolean
@@ -254,6 +273,13 @@ type CommandMapPin = {
   unread: boolean
   conversation_stage: string
   conversation_status: string
+  lifecycle_stage: string
+  operational_status: string
+  disposition: string
+  contactability_status: string
+  is_archived: boolean
+  snoozed_until: string | null
+  stage_short_label: string
   inbox_bucket: string
   lead_temperature: string
   priority_score: number
@@ -825,153 +851,27 @@ const ringColorsForTheme = (styleMode: MapStyleMode) => {
   }
 }
 
-const stageColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): string => {
-  const tone =
-    styleMode === 'satellite' ? {
-      neutral: '#8fa4bc',
-      engaged: '#6b9fd4',
-      reply: '#8ec8f0',
-      positive: '#6db89a',
-      negotiating: '#a88fd4',
-      hot: '#e8b84a',
-      issue: '#e06060',
-      contract: '#7ec8d8',
-      offer: '#d4b86a',
-      overdue: '#e06060',
-    } : styleMode === 'red_ops' ? {
-      neutral: '#c8a3a0',
-      engaged: '#ff8b7d',
-      reply: '#ff6e66',
-      positive: '#ffb07a',
-      negotiating: '#ff7f93',
-      hot: '#ffd166',
-      issue: '#ff3b30',
-      contract: '#ff9f8a',
-      offer: '#ffba7a',
-      overdue: '#ff4d4d',
-    } : styleMode === 'executive' ? {
-      neutral: '#6e6555',
-      engaged: '#b8954a',
-      reply: '#d4b76a',
-      positive: '#c9a85c',
-      negotiating: '#a88850',
-      hot: '#f5de9c',
-      issue: '#d45a5a',
-      contract: '#dcc070',
-      offer: '#f0d080',
-      overdue: '#d45a5a',
-    } : styleMode === 'blueprint' ? {
-      neutral: '#7aa6b7',
-      engaged: '#56c9df',
-      reply: '#66e8f2',
-      positive: '#54e6cf',
-      negotiating: '#7dcff2',
-      hot: '#9be7f8',
-      issue: '#ff8c86',
-      contract: '#6ac9df',
-      offer: '#8de9f3',
-      overdue: '#ff9f99',
-    } : styleMode === 'light_street' ? {
-      neutral: '#64748b',
-      engaged: '#2563eb',
-      reply: '#0ea5e9',
-      positive: '#059669',
-      negotiating: '#7c3aed',
-      hot: '#ca8a04',
-      issue: '#dc2626',
-      contract: '#0f766e',
-      offer: '#0891b2',
-      overdue: '#dc2626',
-    } : styleMode === 'terrain' ? {
-      neutral: '#8a9a63',
-      engaged: '#5c8d4c',
-      reply: '#68a68e',
-      positive: '#74c365',
-      negotiating: '#8ea476',
-      hot: '#c8a85d',
-      issue: '#d66b5f',
-      contract: '#7fa46b',
-      offer: '#9db86f',
-      overdue: '#d95b53',
-    } : styleMode === 'monochrome' ? {
-      neutral: '#c0c8d2',
-      engaged: '#aeb8c6',
-      reply: '#d4dbe4',
-      positive: '#c8d2de',
-      negotiating: '#b8c2ce',
-      hot: '#e2e8f0',
-      issue: '#f08a8a',
-      contract: '#d7dee8',
-      offer: '#d0d8e2',
-      overdue: '#ef7f7f',
-    } : styleMode === 'night_vision' ? {
-      neutral: '#7bc7a2',
-      engaged: '#62e0b0',
-      reply: '#7cf7cf',
-      positive: '#72ffb2',
-      negotiating: '#98efc4',
-      hot: '#c8ff7a',
-      issue: '#ff7a7a',
-      contract: '#8dffc3',
-      offer: '#baff8f',
-      overdue: '#ff6767',
-    } : styleMode === 'matrix' ? {
-      neutral: '#5f9f7f',
-      engaged: '#00d88a',
-      reply: '#3cffb0',
-      positive: '#00ff88',
-      negotiating: '#7de8b6',
-      hot: '#c8ff4d',
-      issue: '#ff3b3b',
-      contract: '#00f79d',
-      offer: '#9fff69',
-      overdue: '#ff4747',
-    } : {
-      neutral: '#97a3b6',
-      engaged: '#3b82f6',
-      reply: '#38bdf8',
-      positive: '#22c55e',
-      negotiating: '#a855f7',
-      hot: '#eab308',
-      issue: '#ef4444',
-      contract: '#14b8a6',
-      offer: '#30d158',
-      overdue: '#ff453a',
-    }
-  if (pin.activity_state === 'queued') return '#5d6a7b'
-  if (pin.activity_state === 'sending' || pin.activity_state === 'sent') return tone.engaged
-  if (pin.activity_state === 'delivered') return tone.positive
-  if (pin.activity_state === 'failed' || pin.activity_state === 'opted_out' || pin.activity_state === 'queue_blocked') return tone.issue
-  if (pin.activity_state === 'replied') return tone.reply
-  if (pin.activity_state === 'overdue') return tone.overdue
-  if (pin.activity_state === 'due_now') return tone.hot
-  if (pin.activity_state === 'due_later_today') return tone.engaged
-  if (pin.activity_state === 'due_tomorrow') return tone.contract
-  if (pin.activity_state === 'stale_no_response') return tone.neutral
-  if (pin.suppression_status !== 'clear') return tone.issue
-  const stage = lower(pin.conversation_stage)
-  if (stage.includes('contract')) return tone.contract
-  if (stage.includes('offer_ready') || stage.includes('offer_sent') || stage.includes('offer')) return tone.offer
-  if (stage.includes('negotiat') || stage.includes('seller_counter')) return tone.negotiating
-  if (stage.includes('price_received')) return tone.negotiating
-  if (stage.includes('price_discussion') || stage.includes('underwriting')) return tone.negotiating
-  if (stage.includes('interest') || stage.includes('ownership')) return tone.reply
-  if (stage.includes('new')) return tone.neutral
-  return tone.neutral
+const temperaturePinColor = (pin: CommandMapPin): string => {
+  const temp = normalizeLeadTemperature(pin.lead_temperature)
+  return LEAD_TEMPERATURE_META[temp]?.color ?? '#94a3b8'
 }
+
+const stageBadgeColor = (pin: CommandMapPin): string => {
+  const stage = normalizeLifecycleStage(pin.lifecycle_stage || pin.conversation_stage)
+  return LIFECYCLE_STAGE_META[stage]?.color ?? '#97a3b6'
+}
+
+const pinNeedsWarning = (pin: CommandMapPin): boolean =>
+  normalizeOperationalStatus(pin.operational_status || pin.conversation_status) === 'needs_review'
+  || pin.inbox_bucket === 'needs_review'
+  || Boolean(pin.review_reason)
+  || contactabilityBlocksSend(pin.contactability_status)
 
 const glowStrength = (priorityScore: number): number => {
   if (priorityScore >= 90) return 1
   if (priorityScore >= 70) return 0.8
   if (priorityScore >= 40) return 0.52
   return 0.2
-}
-
-const badgeColor = (pin: CommandMapPin, styleMode: MapStyleMode = 'dark_ops'): string => {
-  if (pin.suppression_status !== 'clear') return stageColor({ ...pin, activity_state: 'failed' }, styleMode)
-  if (lower(pin.contract_status).includes('active')) return stageColor({ ...pin, activity_state: 'due_tomorrow' }, styleMode)
-  if (lower(pin.offer_status).includes('ready')) return stageColor({ ...pin, activity_state: 'delivered' }, styleMode)
-  return stageColor(pin, styleMode)
 }
 
 const pulseModeFor = (pin: CommandMapPin): PinFeatureProps['pulseMode'] => {
@@ -1532,8 +1432,27 @@ const buildMapPin = (thread: InboxWorkflowThread): { pin: CommandMapPin | null; 
     unread: decision.unread,
     conversation_stage: decision.conversation_stage,
     conversation_status: decision.conversation_status,
+    lifecycle_stage: normalizeLifecycleStage(
+      get(thread, 'lifecycle_stage', 'lifecycleStage', 'universal_stage', 'universalStage', 'conversationStage', 'seller_stage', 'sellerStage')
+        || decision.conversation_stage,
+    ),
+    operational_status: normalizeOperationalStatus(
+      get(thread, 'operational_status', 'operationalStatus', 'conversation_status', 'conversationStatus', 'inboxStatus', 'status')
+        || decision.conversation_status,
+    ),
+    disposition: normalizeDisposition(get(thread, 'disposition')),
+    contactability_status: normalizeContactability(
+      get(thread, 'contactability_status', 'contactabilityStatus', 'contactability'),
+    ),
+    is_archived: bool(get(thread, 'is_archived', 'isArchived', 'archived')) ?? false,
+    snoozed_until: text(get(thread, 'snoozed_until', 'snoozedUntil')) || null,
+    stage_short_label: LIFECYCLE_STAGE_META[normalizeLifecycleStage(
+      get(thread, 'lifecycle_stage', 'lifecycleStage', 'universal_stage', 'conversationStage', 'seller_stage') || decision.conversation_stage,
+    )]?.shortLabel ?? 'S?',
     inbox_bucket: decision.inbox_bucket,
-    lead_temperature: decision.lead_temperature,
+    lead_temperature: normalizeLeadTemperature(
+      get(thread, 'lead_temperature', 'leadTemperature', 'temperature') || decision.lead_temperature,
+    ),
     priority_score: decision.priority_score,
     automation_status: decision.automation_status,
     suppression_status: decision.suppression_status,
@@ -1740,9 +1659,31 @@ const toActivityPins = (pins: CommandMapPin[], activityMode: InboxMapActivityMod
 
 const matchesFilters = (pin: CommandMapPin, filters: MapFilterState): boolean => {
   if (filters.market && pin.market !== filters.market) return false
-  if (filters.stage && pin.conversation_stage !== filters.stage) return false
-  if (filters.status && pin.conversation_status !== filters.status) return false
-  if (filters.leadTemperature && pin.lead_temperature !== filters.leadTemperature) return false
+  if (filters.stage) {
+    const stage = normalizeLifecycleStage(pin.lifecycle_stage || pin.conversation_stage)
+    if (stage !== normalizeLifecycleStage(filters.stage)) return false
+  }
+  if (filters.status) {
+    const status = normalizeOperationalStatus(pin.operational_status || pin.conversation_status)
+    if (status !== normalizeOperationalStatus(filters.status)) return false
+  }
+  if (filters.leadTemperature) {
+    const temp = normalizeLeadTemperature(pin.lead_temperature)
+    if (temp !== normalizeLeadTemperature(filters.leadTemperature)) return false
+  }
+  if (filters.disposition) {
+    const disposition = normalizeDisposition(pin.disposition)
+    if (disposition !== normalizeDisposition(filters.disposition)) return false
+  }
+  if (filters.contactability) {
+    const contactability = normalizeContactability(pin.contactability_status)
+    if (contactability !== normalizeContactability(filters.contactability)) return false
+  }
+  if (filters.archiveOnly && !pin.is_archived) return false
+  if (filters.snoozeOnly) {
+    const snoozedUntil = pin.snoozed_until ? new Date(pin.snoozed_until).getTime() : 0
+    if (!Number.isFinite(snoozedUntil) || snoozedUntil <= Date.now()) return false
+  }
   if (filters.automationStatus && pin.automation_status !== filters.automationStatus) return false
   if (filters.messageDirection && pin.last_message_direction !== filters.messageDirection) return false
   if (filters.unreadOnly && !pin.unread) return false
@@ -1784,7 +1725,7 @@ const featureCollectionForPins = (
         featureType: 'pin',
         selected,
         focusOpacity,
-        stageColor: stageColor(pin, styleMode),
+        stageColor: temperaturePinColor(pin),
         pulseTier:
           pin.activity_mode === 'sends'
             ? (pin.activity_state === 'sending'
@@ -1806,10 +1747,10 @@ const featureCollectionForPins = (
         unreadRingColor: pin.unread && pin.last_message_direction === 'inbound' ? rings.unread : 'transparent',
         offerRingColor: lower(pin.offer_status).includes('ready') || lower(pin.offer_status).includes('sent') ? rings.offer : 'transparent',
         contractRingColor: lower(pin.contract_status).includes('active') ? rings.contract : 'transparent',
-        badgeColor: badgeColor(pin, styleMode),
+        badgeColor: stageBadgeColor(pin),
         pinCount: 1,
         lockState: pin.suppression_status !== 'clear' ? 1 : 0,
-        needsReviewBadge: pin.inbox_bucket === 'needs_review' ? 1 : 0,
+        needsReviewBadge: pinNeedsWarning(pin) ? 1 : 0,
         followUpDueBadge: pin.inbox_bucket === 'follow_up_due' || pin.activity_state === 'due_now' || pin.activity_state === 'due_later_today' || pin.activity_state === 'due_tomorrow' || pin.activity_state === 'overdue' ? 1 : 0,
         suppressedBadge: pin.suppression_status !== 'clear' ? 1 : 0,
         queueBlockedBadge: pin.activity_state === 'queue_blocked' ? 1 : 0,
@@ -3488,6 +3429,10 @@ const defaultFilters: MapFilterState = {
   stage: '',
   status: '',
   leadTemperature: '',
+  disposition: '',
+  contactability: '',
+  archiveOnly: false,
+  snoozeOnly: false,
   automationStatus: '',
   messageDirection: '',
   unreadOnly: false,
@@ -3652,23 +3597,19 @@ const DealIntelligenceSideSheet = ({
       return <EmptyTab title="Comp Analysis" sub="Select comp markers on the map to compare against this property." />
     }
     if (activeTab === 5) { // Actions
+      const threadKey = text(rec.thread_key || rec.threadKey || rec.conversation_id || rec.id)
       return (
         <div className="nx-deal-sheet__section">
-          <SectionLabel label="Actions" />
-          <div className="nx-deal-sheet__actions-grid">
-            <button type="button" className="nx-deal-sheet__action-btn nx-deal-sheet__action-btn--primary" disabled>
-              Open Inbox
-            </button>
-            <button type="button" className="nx-deal-sheet__action-btn" disabled>
-              Follow-Up
-            </button>
-            <button type="button" className="nx-deal-sheet__action-btn" disabled>
-              Make Offer
-            </button>
-            <button type="button" className="nx-deal-sheet__action-btn" disabled>
-              Add Note
-            </button>
-          </div>
+          <SectionLabel label="Universal Lead State" />
+          {threadKey ? (
+            <UniversalLeadStateControls
+              thread={t ?? rec}
+              sourceView="map"
+              compact
+            />
+          ) : (
+            <EmptyTab title="No thread context" sub="Select a mapped seller pin to edit canonical lead state." />
+          )}
         </div>
       )
     }
@@ -4401,6 +4342,10 @@ export function InboxCommandMap({
     if (filters.stage) count++
     if (filters.status) count++
     if (filters.leadTemperature) count++
+    if (filters.disposition) count++
+    if (filters.contactability) count++
+    if (filters.archiveOnly) count++
+    if (filters.snoozeOnly) count++
     if (filters.automationStatus) count++
     if (filters.propertyType) count++
     if (filters.unreadOnly) count++
@@ -8264,9 +8209,13 @@ export function InboxCommandMap({
   }, [dockTier, selectedPin?.conversation_id, visiblePins.length > 0, zoomedIn])
 
   const markets = Array.from(new Set(allPins.map((pin) => pin.market).filter(Boolean))).sort()
-  const stages = Array.from(new Set(allPins.map((pin) => pin.conversation_stage).filter(Boolean))).sort()
-  const statuses = Array.from(new Set(allPins.map((pin) => pin.conversation_status).filter(Boolean))).sort()
-  const temperatures = Array.from(new Set(allPins.map((pin) => pin.lead_temperature).filter(Boolean))).sort()
+  const stages = LIFECYCLE_STAGE_ORDER.filter((code) =>
+    allPins.some((pin) => normalizeLifecycleStage(pin.lifecycle_stage || pin.conversation_stage) === code),
+  )
+  const statuses = OPERATIONAL_STATUS_ORDER.filter((code) =>
+    allPins.some((pin) => normalizeOperationalStatus(pin.operational_status || pin.conversation_status) === code),
+  )
+  const temperatures = Array.from(new Set(allPins.map((pin) => normalizeLeadTemperature(pin.lead_temperature)).filter(Boolean))).sort()
   const automationStatuses = Array.from(new Set(allPins.map((pin) => pin.automation_status).filter(Boolean))).sort()
   const selectedUnmapped = useMemo(
     () => selectedHydratedThread ? buildMapPin(selectedHydratedThread).unmapped : null,
@@ -8635,13 +8584,17 @@ export function InboxCommandMap({
                         <span className="nx-icm__controls-label">Conversation</span>
                         <div className="nx-icm__filter-grid">
                           <select className="nx-icm__field" value={filters.market} onChange={(e) => setFilters((c) => ({ ...c, market: e.target.value }))}><option value="">All Markets</option>{markets.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.stage} onChange={(e) => setFilters((c) => ({ ...c, stage: e.target.value }))}><option value="">All Stages</option>{stages.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.stage} onChange={(e) => setFilters((c) => ({ ...c, stage: e.target.value }))}><option value="">All Stages</option>{stages.map((s) => <option key={s} value={s}>{LIFECYCLE_STAGE_META[s].shortLabel} {LIFECYCLE_STAGE_META[s].label}</option>)}</select>
                           <select className="nx-icm__field" value={filters.status} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))}><option value="">All Statuses</option>{statuses.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
                           <select className="nx-icm__field" value={filters.leadTemperature} onChange={(e) => setFilters((c) => ({ ...c, leadTemperature: e.target.value }))}><option value="">All Temps</option>{temperatures.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.disposition} onChange={(e) => setFilters((c) => ({ ...c, disposition: e.target.value }))}><option value="">All Dispositions</option>{DISPOSITION_ORDER.map((d) => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}</select>
+                          <select className="nx-icm__field" value={filters.contactability} onChange={(e) => setFilters((c) => ({ ...c, contactability: e.target.value }))}><option value="">All Contactability</option>{CONTACTABILITY_ORDER.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select>
                         </div>
                         <div className="nx-icm__layer-toggle-grid" style={{ marginTop: 6 }}>
                           <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.unreadOnly} onChange={(e) => setFilters((c) => ({ ...c, unreadOnly: e.target.checked }))} /><span>Unread</span></label>
                           <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.followUpDue} onChange={(e) => setFilters((c) => ({ ...c, followUpDue: e.target.checked }))} /><span>Follow-Up Due</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.archiveOnly} onChange={(e) => setFilters((c) => ({ ...c, archiveOnly: e.target.checked }))} /><span>Archived</span></label>
+                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.snoozeOnly} onChange={(e) => setFilters((c) => ({ ...c, snoozeOnly: e.target.checked }))} /><span>Snoozed</span></label>
                           <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Reply</span></label>
                           <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Inbound</span></label>
                         </div>

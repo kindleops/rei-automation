@@ -18,7 +18,9 @@ import {
   evaluateQueueCreationRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { checkThreadContactability } from "@/lib/domain/lead-state/check-thread-contactability.js";
 
 // ── New SMS engine modules ───────────────────────────────────────────────
 import { mapNextAction, ACTIONS } from "@/lib/sms/flow_map.js";
@@ -415,6 +417,35 @@ export async function queueOutboundMessage({
       inbound_from: normalized_inbound_from,
       context,
     };
+  }
+
+  if (hasSupabaseConfig()) {
+    const supabase = deps.supabase || deps.getSupabaseClient?.() || getDefaultSupabaseClient();
+    const thread_key = clean(context?.thread_key) || normalized_inbound_from;
+    try {
+      const contactability = await checkThreadContactability(supabase, thread_key);
+      if (contactability.blocks_send) {
+        warn("outbound.queue_message_contactability_blocked", {
+          inbound_from: resolved_inbound_from,
+          thread_key,
+          contactability_status: contactability.contactability_status,
+        });
+        return {
+          ok: false,
+          stage: "contactability",
+          reason: "contactability_blocked",
+          contactability_status: contactability.contactability_status,
+          inbound_from: normalized_inbound_from,
+          context,
+        };
+      }
+    } catch (contactability_error) {
+      warn("outbound.queue_message_contactability_check_failed", {
+        inbound_from: resolved_inbound_from,
+        thread_key,
+        error: contactability_error?.message || "contactability_check_failed",
+      });
+    }
   }
 
   const brain_item = context?.items?.brain_item || null;

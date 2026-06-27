@@ -1,9 +1,13 @@
 -- Universal lead state columns on inbox_thread_state + per-operator preferences + audit trail
+-- Production-safe: uses stage/status (not seller_stage/conversation_status), additive only.
 
 alter table public.inbox_thread_state
   add column if not exists lifecycle_stage text,
   add column if not exists operational_status text,
-  add column if not exists disposition text,
+  add column if not exists lead_temperature text,
+  add column if not exists temperature text,
+  add column if not exists seller_stage text,
+  add column if not exists conversation_status text,
   add column if not exists contactability_status text default 'contactable',
   add column if not exists stage_source text,
   add column if not exists status_source text,
@@ -18,17 +22,30 @@ alter table public.inbox_thread_state
   add column if not exists archive_reason text,
   add column if not exists paused_reason text,
   add column if not exists updated_by text,
-  add column if not exists is_starred boolean not null default false,
   add column if not exists legacy_stage text,
   add column if not exists legacy_status text,
   add column if not exists temperature_confidence numeric,
   add column if not exists temperature_reason text;
+
+-- disposition may already exist on production
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'inbox_thread_state' and column_name = 'disposition'
+  ) then
+    alter table public.inbox_thread_state add column disposition text;
+  end if;
+end $$;
 
 create index if not exists idx_inbox_thread_state_lifecycle_stage
   on public.inbox_thread_state (lifecycle_stage);
 
 create index if not exists idx_inbox_thread_state_operational_status
   on public.inbox_thread_state (operational_status);
+
+create index if not exists idx_inbox_thread_state_lead_temperature
+  on public.inbox_thread_state (lead_temperature);
 
 create index if not exists idx_inbox_thread_state_disposition
   on public.inbox_thread_state (disposition);
@@ -39,6 +56,10 @@ create index if not exists idx_inbox_thread_state_contactability
 create index if not exists idx_inbox_thread_state_snoozed_until
   on public.inbox_thread_state (snoozed_until)
   where snoozed_until is not null;
+
+create index if not exists idx_inbox_thread_state_archive_scope
+  on public.inbox_thread_state (archive_scope)
+  where archive_scope is not null;
 
 create table if not exists public.operator_entity_preferences (
   user_id text not null,
@@ -83,91 +104,129 @@ create index if not exists idx_universal_lead_state_events_property
   on public.universal_lead_state_events (property_id, created_at desc)
   where property_id is not null;
 
--- Safe backfill: preserve legacy values in legacy_* columns, derive canonical where possible
+-- RLS for new tables (mirror inbox_thread_state permissive policies)
+alter table public.operator_entity_preferences enable row level security;
+alter table public.universal_lead_state_events enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'operator_entity_preferences' and policyname = 'anon_manage_operator_entity_preferences') then
+    create policy anon_manage_operator_entity_preferences on public.operator_entity_preferences for all to anon using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'operator_entity_preferences' and policyname = 'authenticated_manage_operator_entity_preferences') then
+    create policy authenticated_manage_operator_entity_preferences on public.operator_entity_preferences for all to authenticated using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'operator_entity_preferences' and policyname = 'service_role_manage_operator_entity_preferences') then
+    create policy service_role_manage_operator_entity_preferences on public.operator_entity_preferences for all to service_role using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'universal_lead_state_events' and policyname = 'anon_manage_universal_lead_state_events') then
+    create policy anon_manage_universal_lead_state_events on public.universal_lead_state_events for all to anon using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'universal_lead_state_events' and policyname = 'authenticated_manage_universal_lead_state_events') then
+    create policy authenticated_manage_universal_lead_state_events on public.universal_lead_state_events for all to authenticated using (true) with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'universal_lead_state_events' and policyname = 'service_role_manage_universal_lead_state_events') then
+    create policy service_role_manage_universal_lead_state_events on public.universal_lead_state_events for all to service_role using (true) with check (true);
+  end if;
+end $$;
+
+grant all on public.operator_entity_preferences to anon, authenticated, service_role;
+grant all on public.universal_lead_state_events to anon, authenticated, service_role;
+
+-- Safe backfill: preserve legacy values, derive canonical where possible (no SMS, no lifecycle actions)
 update public.inbox_thread_state
 set
-  legacy_stage = coalesce(legacy_stage, seller_stage, stage),
-  legacy_status = coalesce(legacy_status, conversation_status, status);
+  legacy_stage = coalesce(nullif(legacy_stage, ''), nullif(stage, '')),
+  legacy_status = coalesce(nullif(legacy_status, ''), nullif(status, ''))
+where legacy_stage is null or legacy_status is null;
 
 update public.inbox_thread_state
-set lifecycle_stage = case lower(coalesce(seller_stage, stage, ''))
-  when 's1_ownership' then 'ownership_confirmation'
-  when 's2_interest' then 'offer_interest'
-  when 's3_pricing' then 'asking_price'
-  when 's4_condition' then 'property_condition'
-  when 's5_offer' then 'offer'
-  when 's6_negotiation' then 'offer'
-  when 's7_follow_up' then 'offer_interest'
-  when 's8_closing' then 'formal_contract'
+set lifecycle_stage = case lower(coalesce(nullif(stage, ''), ''))
   when 'ownership_check' then 'ownership_confirmation'
-  when 'interest_probe' then 'offer_interest'
+  when 'consider_selling' then 'offer_interest'
+  when 'needs_response' then 'offer_interest'
   when 'price_discovery' then 'asking_price'
-  when 'condition_details' then 'property_condition'
-  when 'offer_reveal' then 'offer'
-  when 'negotiation' then 'offer'
-  when 'contract_path' then 'formal_contract'
-  when 'contract_sent' then 'formal_contract'
-  when 'under_contract' then 'under_contract'
-  when 'closing' then 'prepared_to_close'
-  when 'closed' then 'closed'
+  when 'dead' then 'closed'
+  when 's1' then 'ownership_confirmation'
+  when 's2' then 'offer_interest'
   when 'ownership_confirmation' then 'ownership_confirmation'
   when 'offer_interest' then 'offer_interest'
   when 'asking_price' then 'asking_price'
   when 'property_condition' then 'property_condition'
   when 'offer' then 'offer'
   when 'formal_contract' then 'formal_contract'
+  when 'under_contract' then 'under_contract'
   when 'disposition' then 'disposition'
   when 'prepared_to_close' then 'prepared_to_close'
-  else coalesce(lifecycle_stage, 'ownership_confirmation')
+  when 'closed' then 'closed'
+  when 'waiting' then 'offer_interest'
+  else null
 end
-where lifecycle_stage is null;
+where lifecycle_stage is null
+  and manual_stage_lock = false;
+
+-- Ambiguous empty stage -> needs_review operational status (lifecycle left null for reconciliation)
+update public.inbox_thread_state
+set operational_status = 'needs_review'
+where lifecycle_stage is null
+  and coalesce(stage, '') = ''
+  and operational_status is null
+  and manual_override = false;
 
 update public.inbox_thread_state
-set operational_status = case lower(coalesce(conversation_status, status, ''))
+set operational_status = case lower(coalesce(nullif(status, ''), ''))
+  when 'read' then 'active_communication'
+  when 'active' then 'active_communication'
   when 'waiting' then 'waiting_on_seller'
-  when 'follow_up' then 'follow_up_due'
-  when 'offer_sent' then 'waiting_on_seller'
-  when 'contract_sent' then 'waiting_on_seller'
-  when 'under_contract' then 'active_communication'
-  when 'closed' then 'paused'
+  when 'unread' then 'new_reply'
+  when 'suppressed' then 'paused'
   when 'new_reply' then 'new_reply'
-  when 'active_communication' then 'active_communication'
+  when 'dead' then 'paused'
   when 'needs_review' then 'needs_review'
+  when 'not_contacted' then 'not_contacted'
+  when 'scheduled' then 'scheduled'
   when 'snoozed' then 'snoozed'
   when 'paused' then 'paused'
-  when 'scheduled' then 'scheduled'
+  when 'active_communication' then 'active_communication'
   when 'waiting_on_seller' then 'waiting_on_seller'
   when 'follow_up_due' then 'follow_up_due'
-  when 'not_contacted' then 'not_contacted'
-  else coalesce(operational_status, 'not_contacted')
+  else null
 end
-where operational_status is null;
+where operational_status is null
+  and manual_override = false;
 
 update public.inbox_thread_state
-set lead_temperature = case lower(coalesce(temperature, lead_temperature, ''))
-  when 'dead' then 'cold'
-  when 'warming' then 'warm'
-  when 'engaged' then 'warm'
-  when 'unknown' then 'unscored'
-  when 'cold' then 'cold'
-  when 'warm' then 'warm'
-  when 'hot' then 'hot'
-  when 'unscored' then 'unscored'
-  else coalesce(lead_temperature, 'unscored')
+set lead_temperature = case
+  when is_hot_lead = true then 'hot'
+  when lower(coalesce(priority, '')) = 'urgent' then 'hot'
+  when lower(coalesce(priority, '')) = 'high' then 'warm'
+  when lower(coalesce(stage, '')) = 'dead' or lower(coalesce(status, '')) = 'dead' then 'cold'
+  else 'unscored'
+end,
+temperature = case
+  when is_hot_lead = true then 'hot'
+  when lower(coalesce(priority, '')) = 'urgent' then 'hot'
+  when lower(coalesce(priority, '')) = 'high' then 'warm'
+  when lower(coalesce(stage, '')) = 'dead' or lower(coalesce(status, '')) = 'dead' then 'cold'
+  else 'unscored'
 end
-where lead_temperature is null or lead_temperature = '';
+where (lead_temperature is null or lead_temperature = '')
+  and manual_temperature_lock = false;
 
 update public.inbox_thread_state
-set disposition = case
-  when wrong_number = true then 'wrong_number'
-  when not_interested = true then 'not_interested'
-  else coalesce(disposition, 'none')
-end
+set disposition = coalesce(nullif(disposition, ''), 'none')
 where disposition is null;
 
 update public.inbox_thread_state
 set contactability_status = case
-  when opt_out = true or is_suppressed = true then 'opted_out'
+  when is_suppressed = true then 'opted_out'
   else coalesce(contactability_status, 'contactable')
 end
-where contactability_status is null;
+where contactability_status is null or contactability_status = '';
+
+-- Mirror canonical values into legacy-compatible columns for downstream readers
+update public.inbox_thread_state
+set
+  seller_stage = coalesce(seller_stage, lifecycle_stage, stage),
+  conversation_status = coalesce(conversation_status, operational_status, status)
+where seller_stage is null or conversation_status is null;

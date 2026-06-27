@@ -3,6 +3,7 @@ import { CLOSING_BOARD_COLUMNS } from '../../domain/closing-desk/closing-board'
 import { computeClosingSummary } from '../../domain/closing-desk/closing-summary'
 import { highestSeverityBlocker, isActivelyBlocking } from '../../domain/closing-desk/closing-issues'
 import { humanizeEnum } from './closing-desk-present'
+import { LIFECYCLE_STAGE_META, type LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
 
 const MS_PER_DAY = 86_400_000
 
@@ -23,6 +24,9 @@ export function daysRemaining(iso: string | null, now = Date.now()): number | nu
 }
 
 export function stageLabel(stage: string): string {
+  const code = stage as LifecycleStageCode
+  const meta = LIFECYCLE_STAGE_META[code]
+  if (meta) return `${meta.shortLabel} ${meta.label}`
   return humanizeEnum(stage) ?? stage
 }
 

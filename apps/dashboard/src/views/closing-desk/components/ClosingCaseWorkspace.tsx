@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import type { ClosingCase } from '../../../domain/closing-desk/closing-desk.types'
+import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
 import { boardColumnLabel } from '../../../domain/closing-desk/closing-board'
 import { buildCopilotReadout } from '../../../domain/closing-desk/closing-copilot'
 import { orderIssues } from '../../../domain/closing-desk/closing-issues'
@@ -53,6 +54,17 @@ export function ClosingCaseWorkspace({ closingCase: c, onClose }: ClosingCaseWor
   const blocker = primaryBlocker(c)
   const days = c.health.daysUntilClosing ?? daysRemaining(c.dates.scheduledClosingDate)
   const milestonePct = c.milestones.length > 0 ? Math.min(100, Math.round((c.milestones.length / 8) * 100)) : 0
+  const primaryThreadKey = c.identity.primaryThreadKey
+  const leadStateThread = useMemo(() => {
+    if (!primaryThreadKey) return null
+    return {
+      threadKey: primaryThreadKey,
+      thread_key: primaryThreadKey,
+      id: primaryThreadKey,
+      lifecycle_stage: c.universalStage,
+      next_action: c.health.nextRequiredAction,
+    }
+  }, [c.health.nextRequiredAction, c.universalStage, primaryThreadKey])
 
   const primaryInsight = copilot.insights.find((i) => i.kind === 'blocker') ?? copilot.insights.find((i) => i.kind === 'summary')
   const primaryRec = copilot.proposedActions[0]
@@ -190,6 +202,16 @@ export function ClosingCaseWorkspace({ closingCase: c, onClose }: ClosingCaseWor
           <p>{c.health.nextRequiredAction ?? 'None pending'}</p>
           <small>{c.health.responsibleParty ?? 'Unassigned'} · SLA {formatTimestamp(c.health.slaDeadline) ?? 'none'}</small>
         </div>
+
+        {leadStateThread ? (
+          <div className="cd-dossier__lead-state" data-testid="cd-lead-state">
+            <UniversalLeadStateControls
+              thread={leadStateThread}
+              sourceView="closing_desk"
+              compact
+            />
+          </div>
+        ) : null}
 
         {blocker ? (
           <div className="cd-dossier__blocker" data-sev={blocker.severity} data-testid="cd-primary-blocker">

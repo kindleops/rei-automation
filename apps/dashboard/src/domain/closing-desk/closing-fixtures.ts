@@ -132,6 +132,7 @@ function buildFixtureCase(seed: {
   const base: ClosingCase = {
     identity: {
       closingCaseId: seed.id,
+      primaryThreadKey: `phone:fixture-${seed.id}`,
       propertyId: `prop-${seed.id}`,
       masterOwnerId: `owner-${seed.id}`,
       prospectId: null,

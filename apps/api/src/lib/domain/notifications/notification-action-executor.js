@@ -335,6 +335,60 @@ export async function executeNotificationAction(notificationId, actionType, oper
       case 'inspect_thread':
         result = navigationPayload(notification, '/inbox')
         break
+      case 'star_thread':
+      case 'unstar_thread':
+      case 'pin_thread':
+      case 'unpin_thread':
+      case 'archive_conversation':
+      case 'archive_lead':
+      case 'restore_lead':
+      case 'snooze_thread': {
+        const threadKey = clean(notification.participant_id || notification.thread_key || notification.source_entity_id)
+        if (!threadKey) {
+          result = { ok: false, error: 'missing_thread_key', outcome: 'missing_entity' }
+          break
+        }
+        const { patchUniversalLeadState } = await import('@/lib/domain/lead-state/patch-universal-lead-state.js')
+        const patch = {}
+        if (action === 'star_thread') patch.is_starred = true
+        if (action === 'unstar_thread') patch.is_starred = false
+        if (action === 'pin_thread') patch.is_pinned = true
+        if (action === 'unpin_thread') patch.is_pinned = false
+        if (action === 'archive_conversation') {
+          patch.is_archived = true
+          patch.archive_scope = 'conversation'
+        }
+        if (action === 'archive_lead') {
+          patch.is_archived = true
+          patch.archive_scope = 'lead'
+          patch.paused_reason = 'archived_lead'
+        }
+        if (action === 'restore_lead') {
+          patch.is_archived = false
+          patch.archive_scope = null
+          patch.paused_reason = null
+        }
+        if (action === 'snooze_thread') {
+          const until = opts.snoozed_until || opts.until || new Date(Date.now() + 60 * 60 * 1000).toISOString()
+          patch.snoozed_until = until
+          patch.snooze_reason = clean(opts.reason) || 'notification_snooze'
+        }
+        const leadPatch = await patchUniversalLeadState({
+          threadKey,
+          patch,
+          supabase: db,
+          meta: {
+            operator_id: operator,
+            source_view: 'notification_action',
+            reason: `notification:${action}`,
+            change_source: 'manual',
+          },
+        })
+        result = leadPatch.ok
+          ? { ok: true, outcome: action, thread_key: threadKey, realtime_event: leadPatch.realtime_event }
+          : { ok: false, error: leadPatch.reason || 'lead_state_patch_failed', outcome: 'lead_state_patch_failed' }
+        break
+      }
       case 'inspect_market':
         result = inspectRoute('markets', notification)
         break

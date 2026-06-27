@@ -26,6 +26,13 @@ import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportuni
 import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
 import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
+import { patchUniversalLeadState } from '@/lib/domain/lead-state/patch-universal-lead-state.js';
+import {
+  normalizeLifecycleStage,
+  normalizeLeadTemperature,
+  normalizeOperationalStatus,
+  STATE_SOURCE_CODES,
+} from '@/lib/domain/lead-state/universal-lead-state-registry.js';
 
 const TABLE = 'acquisition_opportunities';
 const HISTORY_TABLE = 'acquisition_opportunity_history';
@@ -573,33 +580,55 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
   return { ok: true, opportunity: normalizeOpportunityRow(data), validation };
 }
 
+function mapOpportunityPatchToUniversalLeadState(patch = {}) {
+  const universalPatch = {};
+
+  if (patch.universal_stage) {
+    universalPatch.lifecycle_stage = normalizeLifecycleStage(
+      normalizeAcquisitionStageCode(patch.universal_stage),
+    );
+  }
+
+  if (patch.universal_status) {
+    universalPatch.operational_status = normalizeOperationalStatus(
+      normalizeUniversalStatusCode(patch.universal_status),
+    );
+  }
+
+  if (patch.lead_temperature) {
+    const temperature = normalizeUniversalTemperatureCode(patch.lead_temperature);
+    if (temperature !== UNIVERSAL_TEMPERATURE_CODES.UNKNOWN) {
+      universalPatch.lead_temperature = normalizeLeadTemperature(temperature);
+    }
+  }
+
+  return universalPatch;
+}
+
 async function syncThreadStateFromOpportunity(client, opportunity = {}, patch = {}) {
   const threadKey = clean(opportunity.primary_thread_key);
   if (!threadKey) return { ok: false, skipped: true, reason: 'missing_thread_key' };
 
-  const updates = {
-    updated_at: new Date().toISOString(),
-    updated_by: patch.actor || null,
-  };
-
-  if (patch.universal_stage) updates.universal_stage = normalizeAcquisitionStageCode(patch.universal_stage);
-  if (patch.universal_status) updates.universal_status = normalizeUniversalStatusCode(patch.universal_status);
-  if (patch.inbox_bucket) updates.inbox_bucket = clean(patch.inbox_bucket);
-  if (patch.lead_temperature) {
-    const temperature = normalizeUniversalTemperatureCode(patch.lead_temperature);
-    if (temperature !== UNIVERSAL_TEMPERATURE_CODES.UNKNOWN) {
-      updates.lead_temperature = temperature;
-    }
+  const universalPatch = mapOpportunityPatchToUniversalLeadState(patch);
+  if (!Object.keys(universalPatch).length) {
+    return { ok: false, skipped: true, reason: 'no_thread_updates' };
   }
 
-  if (Object.keys(updates).length <= 2) return { ok: false, skipped: true, reason: 'no_thread_updates' };
+  const changeSource = clean(patch.source).toLowerCase() === 'operator'
+    ? STATE_SOURCE_CODES.MANUAL
+    : STATE_SOURCE_CODES.SYSTEM;
 
-  const { error } = await client
-    .from(THREAD_STATE_TABLE)
-    .update(updates)
-    .eq('thread_key', threadKey);
-  if (error) throw error;
-  return { ok: true };
+  return patchUniversalLeadState({
+    threadKey,
+    patch: universalPatch,
+    supabase: client,
+    meta: {
+      change_source: changeSource,
+      source_view: 'opportunity_sync',
+      updated_by: patch.actor || null,
+      operator_id: patch.actor || null,
+    },
+  });
 }
 
 export async function transitionOpportunityStatus(id, input = {}, deps = {}) {

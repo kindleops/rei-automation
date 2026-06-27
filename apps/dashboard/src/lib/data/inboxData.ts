@@ -6,6 +6,8 @@ import type { SmsTemplate } from './templateData'
 import { resolveOutboundTextgridNumber } from './textgridRouting'
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 import * as backendClient from '../api/backendClient'
+import { persistUniversalLeadState } from '../../domain/lead-state/persistUniversalLeadState'
+import { normalizePatchToCanonical } from '../../domain/lead-state/universal-lead-state-registry'
 import {
   asBoolean,
   asIso,
@@ -4523,18 +4525,16 @@ const writeInboxThreadState = async (
   threadKey: string,
   patch: AnyRecord,
 ): Promise<InboxThreadStateMutationResult> => {
-  const now = new Date().toISOString()
+  const canonicalPatch = normalizePatchToCanonical(patch)
   const mutationPayload: AnyRecord = {
     thread_key: threadKey,
-    updated_at: now,
-    ...patch,
+    ...canonicalPatch,
   }
-  // This mutation must live in real-estate-automation. Dashboard is cockpit-only.
-  const result = await backendClient.updateThreadState(threadKey, mutationPayload)
+  const result = await persistUniversalLeadState(threadKey, canonicalPatch, { source_view: 'inbox' })
   if (result.ok) {
     return { ok: true, threadKey, mutationPayload, errorMessage: null }
   }
-  return { ok: false, threadKey, mutationPayload, errorMessage: result.message }
+  return { ok: false, threadKey, mutationPayload, errorMessage: result.errorMessage }
 }
 
 export const upsertInboxThreadState = async (thread: InboxThread): Promise<InboxThreadStateMutationResult> => {

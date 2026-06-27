@@ -16,7 +16,20 @@ import { SaleHistoryPanel } from './SaleHistoryPanel'
 import { SellerCommandPanel } from './SellerCommandPanel'
 import { ValuationPanel } from './ValuationPanel'
 import { CensusIntelligencePanel } from './CensusIntelligencePanel'
+import { UniversalLeadStateControls } from '../../domain/lead-state/UniversalLeadStateControls'
 import type { PropertyActionHandlers, PropertyIntelligenceContext, PropertyRecord } from './property.types'
+
+const resolvePropertyThreadKey = (context: PropertyIntelligenceContext): string => {
+  const phone = context.contacts.primaryPhone?.phoneNumber
+    || context.messages.find((m) => m.direction === 'inbound')?.fromPhoneNumber
+    || context.messages[0]?.toPhoneNumber
+    || context.messages[0]?.fromPhoneNumber
+    || ''
+  const digits = String(phone).replace(/\D/g, '')
+  if (!digits) return ''
+  const normalized = digits.length === 10 ? `+1${digits}` : digits.startsWith('1') && digits.length === 11 ? `+${digits}` : `+${digits}`
+  return normalized
+}
 
 interface PropertyDetailWorkspaceProps {
   property: PropertyRecord
@@ -36,9 +49,27 @@ export const PropertyDetailWorkspace = ({
   onBack,
   onCloseRaw,
   handlers,
-}: PropertyDetailWorkspaceProps) => (
+}: PropertyDetailWorkspaceProps) => {
+  const threadKey = resolvePropertyThreadKey(context)
+  const leadStateThread = threadKey
+    ? {
+        threadKey,
+        thread_key: threadKey,
+        property_id: property.propertyId ?? property.id,
+        lifecycle_stage: property.stage ?? null,
+        operational_status: property.status ?? null,
+        lead_temperature: property.priorityScore >= 80 ? 'hot' : property.priorityScore >= 55 ? 'warm' : 'unscored',
+      }
+    : null
+
+  return (
   <section className="pi-workspace" aria-label="Property intelligence workspace">
     <PropertyCommandHeader property={property} context={context} priorityMarked={priorityMarked} onBack={onBack} handlers={handlers} />
+    {leadStateThread ? (
+      <div className="pi-lead-state-controls">
+        <UniversalLeadStateControls thread={leadStateThread} sourceView="property_lists" compact />
+      </div>
+    ) : null}
     <main className="pi-workspace-grid">
       <section className="pi-workspace-left">
         <PropertyVisualIntelligence property={property} handlers={handlers} />
@@ -67,4 +98,5 @@ export const PropertyDetailWorkspace = ({
     </section>
     <RawRecordDrawer property={property} open={rawOpen} onClose={onCloseRaw} />
   </section>
-)
+  )
+}

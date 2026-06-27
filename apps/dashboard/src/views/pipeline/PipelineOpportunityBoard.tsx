@@ -25,6 +25,8 @@ import { PipelineCardDesigner } from './components/PipelineCardDesigner'
 import { PipelineSortBuilder } from './components/PipelineSortBuilder'
 import { PipelineFilterBuilder } from './components/PipelineFilterBuilder'
 import { PipelineViewManager } from './components/PipelineViewManager'
+import { StageChangeConfirmModal } from '../../modules/inbox/components/StageChangeConfirmModal'
+import { normalizeLifecycleStage, type LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
 import './pipeline-view.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -101,7 +103,7 @@ interface PipelineOpportunityBoardProps {
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
-  onMoveStage: (id: string, stageId: string, reason?: string) => Promise<void>
+  onMoveStage: (id: string, stageId: string, reason?: string, options?: { executeNextAction?: boolean }) => Promise<void>
   onMoveStatus: (id: string, statusId: string, reason?: string) => Promise<void>
   onMoveTemperature: (id: string, temperatureId: string, reason?: string) => Promise<void>
   onApplySavedView?: (view: PipelineSavedView) => void
@@ -158,6 +160,13 @@ export function PipelineOpportunityBoard({
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [dockOpen, setDockOpen] = useState(false)
   const [transitionError, setTransitionError] = useState<string | null>(null)
+  const [stageConfirm, setStageConfirm] = useState<{
+    cardId: string
+    stageId: string
+    fromStage: LifecycleStageCode
+    toStage: LifecycleStageCode
+  } | null>(null)
+  const [stageConfirmPending, setStageConfirmPending] = useState(false)
   const [cardDesignerOpen, setCardDesignerOpen] = useState(false)
   const [viewManagerOpen, setViewManagerOpen] = useState(false)
   const [groupOverrides, setGroupOverrides] = useState<Record<string, string>>({})
@@ -237,7 +246,11 @@ export function PipelineOpportunityBoard({
     setActiveStageId(displayStageModels[0]?.def.id ?? '')
   }, [activeStageId, displayStageModels])
 
-  const commitDrop = useCallback(async (cardId: string, stageId: string) => {
+  const commitDrop = useCallback(async (
+    cardId: string,
+    stageId: string,
+    options?: { executeNextAction?: boolean },
+  ) => {
     if (!cardId || !mutableView) return
 
     const card = visibleCards.find((c) => c.opp.id === cardId)
@@ -252,7 +265,7 @@ export function PipelineOpportunityBoard({
     try {
       setTransitionError(null)
       if (groupBy === 'stage') {
-        await onMoveStage(cardId, stageId)
+        await onMoveStage(cardId, stageId, 'pipeline_drag', options)
       } else if (groupBy === 'status') {
         await onMoveStatus(cardId, stageId)
       } else if (groupBy === 'temperature') {
@@ -273,13 +286,32 @@ export function PipelineOpportunityBoard({
     }
   }, [groupBy, groupOverrides, mutableView, onMoveStage, onMoveStatus, onMoveTemperature, resolveGroupKey, visibleCards])
 
+  const requestDrop = useCallback((cardId: string, stageId: string) => {
+    if (!cardId || !mutableView) return
+    const card = visibleCards.find((c) => c.opp.id === cardId)
+    if (!card) return
+    const currentKey = resolveGroupKey(card.opp)
+    if (currentKey === stageId) return
+
+    if (groupBy === 'stage') {
+      setStageConfirm({
+        cardId,
+        stageId,
+        fromStage: normalizeLifecycleStage(resolvePipelineStage(card.opp)),
+        toStage: normalizeLifecycleStage(stageId),
+      })
+      return
+    }
+    void commitDrop(cardId, stageId)
+  }, [commitDrop, groupBy, mutableView, resolveGroupKey, visibleCards])
+
   const handleDrop = useCallback(async (e: React.DragEvent, stageId: string) => {
     e.preventDefault()
     const cardId = e.dataTransfer.getData('text/plain')
     setDragCardId(null)
     setDragOverStage(null)
-    await commitDrop(cardId, stageId)
-  }, [commitDrop])
+    await requestDrop(cardId, stageId)
+  }, [requestDrop])
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string) => {
     if (!mutableView) return
@@ -321,7 +353,7 @@ export function PipelineOpportunityBoard({
         const el = document.elementFromPoint(e.clientX, e.clientY)
         const lane = el?.closest('[data-lane-id]') as HTMLElement | null
         const stageId = lane?.dataset.laneId
-        if (stageId) void commitDrop(drag.cardId, stageId)
+        if (stageId) void requestDrop(drag.cardId, stageId)
       }
       pointerDragRef.current = null
       setDragCardId(null)
@@ -333,7 +365,7 @@ export function PipelineOpportunityBoard({
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', onPointerUp)
     }
-  }, [commitDrop])
+  }, [requestDrop])
 
   const handleCardClick = useCallback((cardId: string) => {
     if (suppressClickRef.current) {
@@ -383,6 +415,34 @@ export function PipelineOpportunityBoard({
   const isOps = layoutMode === 'expanded'
   const isFull = layoutMode === 'full'
   const activeStage = displayStageModels.find((s) => s.def.id === activeStageId) ?? displayStageModels[0]
+
+  const stageConfirmModal = (
+    <StageChangeConfirmModal
+      open={Boolean(stageConfirm)}
+      fromStage={stageConfirm?.fromStage ?? null}
+      toStage={stageConfirm?.toStage ?? null}
+      pending={stageConfirmPending}
+      onCancel={() => setStageConfirm(null)}
+      onChangeStageOnly={() => {
+        if (!stageConfirm) return
+        setStageConfirmPending(true)
+        void commitDrop(stageConfirm.cardId, stageConfirm.stageId, { executeNextAction: false })
+          .finally(() => {
+            setStageConfirmPending(false)
+            setStageConfirm(null)
+          })
+      }}
+      onChangeStageAndRunAction={() => {
+        if (!stageConfirm) return
+        setStageConfirmPending(true)
+        void commitDrop(stageConfirm.cardId, stageConfirm.stageId, { executeNextAction: true })
+          .finally(() => {
+            setStageConfirmPending(false)
+            setStageConfirm(null)
+          })
+      }}
+    />
+  )
 
   const renderCard = (card: OppCard) => {
     return (
@@ -441,6 +501,7 @@ export function PipelineOpportunityBoard({
             <p className="plv-context-dock__action">{dockOpp.next_action || 'Review'}</p>
           </div>
         )}
+        {stageConfirmModal}
       </div>
     )
   }
@@ -476,6 +537,7 @@ export function PipelineOpportunityBoard({
             />
           </div>
         )}
+        {stageConfirmModal}
       </div>
     )
   }
@@ -660,6 +722,7 @@ export function PipelineOpportunityBoard({
           onSave={() => onCardDesignChange(activeCardDesign)}
         />
       )}
+      {stageConfirmModal}
     </div>
   )
 }

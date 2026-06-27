@@ -20,8 +20,8 @@ import {
   type DashboardConnectionState,
 } from '../../lib/data/dashboardDataLayer'
 
-const CACHE_KEY = 'leadcommand.liveInbox.lastGood'
-const CACHE_COUNTS_KEY = 'leadcommand.liveInbox.lastGoodCounts'
+const CACHE_KEY = 'leadcommand.liveInbox.lastGood.v2'
+const CACHE_COUNTS_KEY = 'leadcommand.liveInbox.lastGoodCounts.v2'
 type InboxTimeoutMode = NonNullable<InboxFetchOptions['_timeoutMode']>
 
 export const isInboxDebugEnabled = (): boolean =>
@@ -572,6 +572,10 @@ const normalizeRealtimeBucket = (value: unknown): string => {
 }
 
 const resolveRealtimeThreadKey = (row: Record<string, unknown>, table: string): string => {
+  if (table === 'operator_entity_preferences' && row.entity_type === 'thread') {
+    const entityId = String(row.entity_id ?? '').trim()
+    if (entityId) return entityId
+  }
   const conversationThreadId = String(row.conversation_thread_id ?? row.conversationThreadId ?? '').trim()
   if (conversationThreadId) return conversationThreadId
   const explicit = String(row.thread_key ?? row.threadKey ?? '').trim()
@@ -644,6 +648,66 @@ const resolveRealtimeBucketForRow = (row: Record<string, unknown>, table: string
   if (direction === 'inbound') return 'new_replies'
   if (direction === 'outbound') return 'follow_up'
   return 'cold'
+}
+
+const buildRealtimeLeadStatePatch = (row: Record<string, unknown>): Record<string, unknown> => {
+  const patch: Record<string, unknown> = {}
+  if (row.lifecycle_stage != null) {
+    patch.lifecycle_stage = row.lifecycle_stage
+    patch.lifecycleStage = row.lifecycle_stage
+    patch.conversationStage = row.lifecycle_stage
+    patch.seller_stage = row.seller_stage ?? row.lifecycle_stage
+  }
+  if (row.operational_status != null) {
+    patch.operational_status = row.operational_status
+    patch.operationalStatus = row.operational_status
+    patch.conversation_status = row.conversation_status ?? row.operational_status
+    patch.conversationStatus = row.conversation_status ?? row.operational_status
+    patch.inboxStatus = row.operational_status
+    patch.status = row.operational_status
+  }
+  if (row.lead_temperature != null) {
+    patch.lead_temperature = row.lead_temperature
+    patch.leadTemperature = row.lead_temperature
+    patch.temperature = row.temperature ?? row.lead_temperature
+  }
+  if (row.disposition != null) patch.disposition = row.disposition
+  if (row.contactability_status != null) {
+    patch.contactability_status = row.contactability_status
+    patch.contactabilityStatus = row.contactability_status
+  }
+  if (row.is_starred != null) patch.isStarred = row.is_starred
+  if (row.is_pinned != null) patch.isPinned = row.is_pinned
+  if (row.is_archived != null) {
+    patch.isArchived = row.is_archived
+    if (row.is_archived) patch.status = 'archived'
+  }
+  if (row.snoozed_until != null) patch.snoozedUntil = row.snoozed_until
+  if (row.next_action != null) {
+    patch.next_action = row.next_action
+    patch.nextAction = row.next_action
+  }
+  if (row.manual_stage_lock != null) patch.manual_stage_lock = row.manual_stage_lock
+  if (row.manual_temperature_lock != null) patch.manual_temperature_lock = row.manual_temperature_lock
+  return patch
+}
+
+const buildRealtimePreferencePatch = (row: Record<string, unknown>): Record<string, unknown> => {
+  const patch: Record<string, unknown> = {}
+  if (row.is_starred != null) patch.isStarred = row.is_starred
+  if (row.is_pinned != null) patch.isPinned = row.is_pinned
+  return patch
+}
+
+const buildRealtimeLeadStateEventPatch = (row: Record<string, unknown>): Record<string, unknown> => {
+  const field = String(row.field_name ?? '').trim()
+  if (!field) return {}
+  const value = row.new_value
+  if (value == null) return { [field]: null }
+  if (field === 'is_starred' || field === 'is_pinned' || field === 'is_archived' || field === 'manual_stage_lock' || field === 'manual_temperature_lock') {
+    return { [field]: String(value).toLowerCase() === 'true' }
+  }
+  return { [field]: value }
 }
 
 const buildRealtimeThreadPatch = (
@@ -1414,6 +1478,90 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
             })
             patchApplied = true
           }
+
+          if (table === 'inbox_thread_state' && payload.new) {
+            const row = payload.new as Record<string, unknown>
+            const patch = buildRealtimeLeadStatePatch(row)
+            if (Object.keys(patch).length > 0) {
+              const before = findStoredThread(threadKey)
+              const beforeBucket = rowBucket(before)
+              const merged = { ...(before ?? {}), ...patch }
+              const afterBucket = rowBucket(merged)
+              const countDeltas = buildRealtimeCountDeltas(before, merged)
+              console.log('[INBOX_REALTIME_EVENT_APPLIED]', {
+                realtime_event_applied: true,
+                table,
+                eventType: payload.eventType ?? null,
+                threadKey,
+                bucket_before: beforeBucket || null,
+                bucket_after: afterBucket || null,
+                countDeltas,
+              })
+              dispatch({
+                type: 'REALTIME_PATCH_THREAD',
+                threadKey,
+                patch,
+                targetBucketKey: afterBucket,
+                upsert: false,
+                countDeltas,
+              })
+              patchDashboardThread(threadKey, patch, {
+                source: 'realtime',
+                table,
+                eventType: payload.eventType ?? null,
+              })
+              logRealtimePatchApplied({
+                table,
+                eventType: payload.eventType ?? null,
+                threadKey,
+                patchKeys: Object.keys(patch),
+                countDeltas,
+              })
+              patchApplied = true
+            }
+          }
+
+          if (table === 'operator_entity_preferences' && payload.new) {
+            const row = payload.new as Record<string, unknown>
+            if (row.entity_type === 'thread') {
+              const patch = buildRealtimePreferencePatch(row)
+              if (Object.keys(patch).length > 0) {
+                dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch, upsert: false })
+                patchDashboardThread(threadKey, patch, {
+                  source: 'realtime',
+                  table,
+                  eventType: payload.eventType ?? null,
+                })
+                logRealtimePatchApplied({
+                  table,
+                  eventType: payload.eventType ?? null,
+                  threadKey,
+                  patchKeys: Object.keys(patch),
+                })
+                patchApplied = true
+              }
+            }
+          }
+
+          if (table === 'universal_lead_state_events' && payload.new) {
+            const row = payload.new as Record<string, unknown>
+            const patch = buildRealtimeLeadStateEventPatch(row)
+            if (Object.keys(patch).length > 0) {
+              dispatch({ type: 'REALTIME_PATCH_THREAD', threadKey, patch, upsert: false })
+              patchDashboardThread(threadKey, patch, {
+                source: 'realtime',
+                table,
+                eventType: payload.eventType ?? null,
+              })
+              logRealtimePatchApplied({
+                table,
+                eventType: payload.eventType ?? null,
+                threadKey,
+                patchKeys: Object.keys(patch),
+              })
+              patchApplied = true
+            }
+          }
         }
 
         realtimeBatchRef.current.tables.add(table)
@@ -1441,6 +1589,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'universal_lead_state_events' }, triggerRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_entity_preferences' }, triggerRefresh)
           .subscribe((status) => {
             if (cancelled) return
             const normalizedStatus: InboxRealtimeStatus =

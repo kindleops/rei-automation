@@ -177,8 +177,17 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     const archived = asBoolean(canonicalPatch.is_archived, false);
     rowPatch.is_archived = archived;
     rowPatch.archived_at = archived ? now : null;
-    if (canonicalPatch.archive_scope) rowPatch.archive_scope = clean(canonicalPatch.archive_scope);
-    if (canonicalPatch.archive_reason) rowPatch.archive_reason = clean(canonicalPatch.archive_reason);
+    if (!archived) {
+      rowPatch.archive_scope = null;
+      rowPatch.archive_reason = null;
+    }
+  }
+
+  if ('archive_scope' in canonicalPatch) {
+    rowPatch.archive_scope = clean(canonicalPatch.archive_scope) || null;
+  }
+  if ('archive_reason' in canonicalPatch) {
+    rowPatch.archive_reason = clean(canonicalPatch.archive_reason) || null;
   }
 
   if ('paused_reason' in canonicalPatch) rowPatch.paused_reason = clean(canonicalPatch.paused_reason) || null;

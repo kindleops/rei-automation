@@ -108,9 +108,88 @@ export const CONTACTABILITY_META: Record<ContactabilityCode, { label: string; co
   do_not_text: { label: 'Do Not Text', color: '#ff453a', blocksSend: true },
 }
 
+export const ARCHIVE_SCOPE_CODES = {
+  CONVERSATION: 'conversation',
+  LEAD: 'lead',
+} as const
+
+export const STATE_SOURCE_CODES = {
+  AI: 'ai',
+  MANUAL: 'manual',
+  SYSTEM: 'system',
+  AUTOPILOT: 'autopilot',
+} as const
+
+export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = [
+  'lifecycle_stage',
+  'operational_status',
+  'lead_temperature',
+  'disposition',
+  'contactability_status',
+  'stage_source',
+  'status_source',
+  'temperature_source',
+  'disposition_source',
+  'contactability_source',
+  'manual_stage_lock',
+  'manual_temperature_lock',
+  'snoozed_until',
+  'snooze_reason',
+  'archived_at',
+  'archive_scope',
+  'archive_reason',
+  'paused_reason',
+  'is_archived',
+  'is_read',
+  'is_pinned',
+  'is_starred',
+  'updated_by',
+] as const
+
+export const LEGACY_FIELD_ALIASES: Record<string, string> = {
+  seller_stage: 'lifecycle_stage',
+  conversation_status: 'operational_status',
+  temperature: 'lead_temperature',
+  stage: 'lifecycle_stage',
+  status: 'operational_status',
+}
+
 const normalizeKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s-/]+/g, '_')
 
 const STAGE_ALIASES: Record<string, LifecycleStageCode> = {
+  ownership_check: 'ownership_confirmation',
+  ownership_confirmed: 'offer_interest',
+  ownership: 'ownership_confirmation',
+  identity_question: 'ownership_confirmation',
+  interest_probe: 'offer_interest',
+  interest: 'offer_interest',
+  consider_selling: 'offer_interest',
+  seller_response: 'offer_interest',
+  interest_qualification: 'offer_interest',
+  pricing: 'asking_price',
+  price_discovery: 'asking_price',
+  asking_price: 'asking_price',
+  condition: 'property_condition',
+  condition_details: 'property_condition',
+  condition_collection: 'property_condition',
+  property_condition: 'property_condition',
+  offer_reveal: 'offer',
+  offer_sent: 'offer',
+  offer_pending: 'offer',
+  negotiation: 'offer',
+  offer_negotiation: 'offer',
+  contract_sent: 'formal_contract',
+  contract_path: 'formal_contract',
+  contract_requested: 'formal_contract',
+  formal_contract: 'formal_contract',
+  under_contract: 'under_contract',
+  disposition: 'disposition',
+  closing: 'prepared_to_close',
+  prepared_to_close: 'prepared_to_close',
+  title_closing: 'prepared_to_close',
+  closed: 'closed',
+  dead: 'closed',
+  follow_up: 'offer_interest',
   s1_ownership: 'ownership_confirmation',
   s2_interest: 'offer_interest',
   s3_pricing: 'asking_price',
@@ -119,43 +198,104 @@ const STAGE_ALIASES: Record<string, LifecycleStageCode> = {
   s6_negotiation: 'offer',
   s7_follow_up: 'offer_interest',
   s8_closing: 'formal_contract',
-  ownership_check: 'ownership_confirmation',
-  interest_probe: 'offer_interest',
-  price_discovery: 'asking_price',
-  condition_details: 'property_condition',
-  offer_reveal: 'offer',
-  negotiation: 'offer',
-  contract_path: 'formal_contract',
-  contract_sent: 'formal_contract',
-  closing: 'prepared_to_close',
+  waiting: 'offer_interest',
+  needs_response: 'offer_interest',
+  s1: 'ownership_confirmation',
+  s2: 'offer_interest',
 }
 
 const STATUS_ALIASES: Record<string, OperationalStatusCode> = {
+  open: 'not_contacted',
+  not_contacted: 'not_contacted',
+  scheduled: 'scheduled',
+  queued: 'scheduled',
+  new_reply: 'new_reply',
+  new_replies: 'new_reply',
+  needs_reply: 'new_reply',
+  active: 'active_communication',
+  active_communication: 'active_communication',
+  seller_replied: 'active_communication',
   waiting: 'waiting_on_seller',
+  waiting_on_seller: 'waiting_on_seller',
+  awaiting_response: 'waiting_on_seller',
   follow_up: 'follow_up_due',
+  follow_up_due: 'follow_up_due',
+  needs_review: 'needs_review',
+  manual_review: 'needs_review',
+  snoozed: 'snoozed',
+  paused: 'paused',
   offer_sent: 'waiting_on_seller',
   contract_sent: 'waiting_on_seller',
   under_contract: 'active_communication',
   closed: 'paused',
+  suppressed: 'paused',
+  read: 'active_communication',
+  unread: 'new_reply',
+  dead: 'paused',
 }
 
 const TEMP_ALIASES: Record<string, LeadTemperatureCode> = {
+  unscored: 'unscored',
   unknown: 'unscored',
+  cold: 'cold',
   warming: 'warm',
+  warm: 'warm',
   engaged: 'warm',
+  hot: 'hot',
   dead: 'cold',
   priority: 'hot',
 }
 
+const DISPOSITION_ALIASES: Record<string, DispositionCode> = {
+  interested: 'interested',
+  not_interested: 'not_interested',
+  wrong_person: 'wrong_person',
+  wrong_number: 'wrong_number',
+  referred: 'referred',
+  sold: 'sold',
+  duplicate: 'duplicate',
+  unqualified: 'unqualified',
+  no_response: 'no_response',
+  none: 'none',
+  null: 'none',
+  '': 'none',
+}
+
+const CONTACTABILITY_ALIASES: Record<string, ContactabilityCode> = {
+  contactable: 'contactable',
+  opted_out: 'opted_out',
+  opt_out: 'opted_out',
+  dnc: 'dnc',
+  do_not_contact: 'dnc',
+  provider_blacklisted: 'provider_blacklisted',
+  invalid_number: 'invalid_number',
+  do_not_text: 'do_not_text',
+  suppressed: 'opted_out',
+}
+
+const STAGE_INDEX = new Map(LIFECYCLE_STAGE_ORDER.map((code, index) => [code, index]))
+
 export const normalizeLifecycleStage = (value: unknown, fallback: LifecycleStageCode = 'ownership_confirmation'): LifecycleStageCode => {
   const key = normalizeKey(value)
-  if ((LIFECYCLE_STAGE_ORDER as readonly string[]).includes(key)) return key as LifecycleStageCode
+  if (!key) return fallback
+  if (STAGE_INDEX.has(key)) return key as LifecycleStageCode
   if (STAGE_ALIASES[key]) return STAGE_ALIASES[key]
+  if (key.includes('contract') && key.includes('under')) return 'under_contract'
+  if (key.includes('contract') || key.includes('closing')) return 'formal_contract'
+  if (key.includes('offer') || key.includes('negotiat')) return 'offer'
+  if (key.includes('condition') || key.includes('underwrit')) return 'property_condition'
+  if (key.includes('price') || key.includes('asking')) return 'asking_price'
+  if (key.includes('interest') || key.includes('consider')) return 'offer_interest'
+  if (key.includes('ownership')) return 'ownership_confirmation'
+  if (key.includes('disposition')) return 'disposition'
+  if (key.includes('prepared') || key.includes('clear_to_close')) return 'prepared_to_close'
+  if (key.includes('closed') || key.includes('dead')) return 'closed'
   return fallback
 }
 
 export const normalizeOperationalStatus = (value: unknown, fallback: OperationalStatusCode = 'not_contacted'): OperationalStatusCode => {
   const key = normalizeKey(value)
+  if (!key) return fallback
   if ((OPERATIONAL_STATUS_ORDER as readonly string[]).includes(key)) return key as OperationalStatusCode
   if (STATUS_ALIASES[key]) return STATUS_ALIASES[key]
   return fallback
@@ -163,9 +303,46 @@ export const normalizeOperationalStatus = (value: unknown, fallback: Operational
 
 export const normalizeLeadTemperature = (value: unknown, fallback: LeadTemperatureCode = 'unscored'): LeadTemperatureCode => {
   const key = normalizeKey(value)
+  if (!key) return fallback
   if ((LEAD_TEMPERATURE_ORDER as readonly string[]).includes(key)) return key as LeadTemperatureCode
   if (TEMP_ALIASES[key]) return TEMP_ALIASES[key]
   return fallback
+}
+
+export const normalizeDisposition = (value: unknown, fallback: DispositionCode = 'none'): DispositionCode => {
+  const key = normalizeKey(value)
+  if (!key) return fallback
+  if ((DISPOSITION_ORDER as readonly string[]).includes(key)) return key as DispositionCode
+  if (DISPOSITION_ALIASES[key]) return DISPOSITION_ALIASES[key]
+  return fallback
+}
+
+export const normalizeContactability = (value: unknown, fallback: ContactabilityCode = 'contactable'): ContactabilityCode => {
+  const key = normalizeKey(value)
+  if (!key) return fallback
+  if ((CONTACTABILITY_ORDER as readonly string[]).includes(key)) return key as ContactabilityCode
+  if (CONTACTABILITY_ALIASES[key]) return CONTACTABILITY_ALIASES[key]
+  return fallback
+}
+
+export const normalizePatchToCanonical = (patch: Record<string, unknown> = {}): Record<string, unknown> => {
+  const normalized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(patch || {})) {
+    const canonicalKey = LEGACY_FIELD_ALIASES[key] || key
+    if (
+      !UNIVERSAL_LEAD_STATE_PATCH_FIELDS.includes(canonicalKey as typeof UNIVERSAL_LEAD_STATE_PATCH_FIELDS[number])
+      && !['autopilot_mode', 'assigned_user', 'manual_review'].includes(canonicalKey)
+    ) {
+      continue
+    }
+    if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value)
+    else if (canonicalKey === 'operational_status') normalized.operational_status = normalizeOperationalStatus(value)
+    else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value)
+    else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value)
+    else if (canonicalKey === 'contactability_status') normalized.contactability_status = normalizeContactability(value)
+    else normalized[canonicalKey] = value
+  }
+  return normalized
 }
 
 export const contactabilityBlocksSend = (code: unknown): boolean => {

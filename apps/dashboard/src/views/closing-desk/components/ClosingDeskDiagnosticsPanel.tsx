@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CLOSING_BOARD_COLUMNS, LANE_GUIDANCE } from '../../../domain/closing-desk/closing-board'
+import { LIFECYCLE_STAGE_META, LIFECYCLE_STAGE_ORDER } from '../../../domain/lead-state/universal-lead-state-registry'
 
 export interface ClosingDeskDiagnosticsPanelProps {
   open: boolean
@@ -47,8 +48,17 @@ export function ClosingDeskDiagnosticsPanel({
         ) : (
           <div className="cd-diag-body cd-diag-lifecycle" data-testid="cd-lifecycle-reqs">
             <p className="cd-diag-lead">
-              Board lanes derive from universal stage, title/disposition/funding status, and active blockers — never from a stored column.
+              Closing Desk owns universal lifecycle stages S6–S10. Board lanes derive from stage, title/disposition/funding status, and active blockers — never from a stored column.
             </p>
+            <ol>
+              {LIFECYCLE_STAGE_ORDER.filter((code) => LIFECYCLE_STAGE_META[code].number >= 6).map((code) => (
+                <li key={code}>
+                  <strong>{LIFECYCLE_STAGE_META[code].shortLabel} {LIFECYCLE_STAGE_META[code].label}</strong>
+                  <span>Canonical registry stage used by Closing Desk projections and dossier state.</span>
+                </li>
+              ))}
+            </ol>
+            <p className="cd-diag-lead">Operator board lanes (derived):</p>
             <ol>
               {CLOSING_BOARD_COLUMNS.map((col) => (
                 <li key={col.id}>

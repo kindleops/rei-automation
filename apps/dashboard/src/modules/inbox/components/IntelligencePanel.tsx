@@ -44,6 +44,7 @@ import { WatchBell } from '../../../shared/WatchBell'
 import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../../lib/data/censusData'
 import type { CensusData } from '../../../lib/data/censusData'
 import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
+import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
 import '../../deal-intelligence/deal-intelligence-25.css'
 
 const formatMoney = formatCurrency
@@ -5980,9 +5981,20 @@ export const IntelligencePanel = ({
         </header>
       ) : null}
 
+      {layoutMode !== 'compact' && thread ? (
+        <div className="nx-intel-lead-state-strip">
+          <UniversalLeadStateControls thread={thread} sourceView="deal_intelligence" compact />
+        </div>
+      ) : null}
+
       <div className="nx-intel-scroll-body">
         {layoutMode === 'compact' ? (
           <DealIntelligence25Panel
+            key={[
+              thread.threadKey || thread.id,
+              dealContext?.identity?.property_id || thread.propertyId,
+              dealContext?.identity?.prospect_id || thread.prospectId,
+            ].filter(Boolean).join('|')}
             threadKey={thread.threadKey || thread.id}
             propertyId={dealContext?.identity?.property_id || thread.propertyId}
             prospectId={dealContext?.identity?.prospect_id || thread.prospectId}

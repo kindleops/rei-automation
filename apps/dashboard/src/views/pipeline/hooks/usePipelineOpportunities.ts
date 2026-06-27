@@ -8,6 +8,8 @@ import {
   transitionPipelineStatus,
   transitionPipelineTemperature,
 } from '../../../domain/pipeline/pipeline-opportunity-api'
+import { patchLeadStateFromView } from '../../../domain/lead-state/persistUniversalLeadState'
+import { normalizeLifecycleStage } from '../../../domain/lead-state/universal-lead-state-registry'
 import type {
   PipelineCardDesign,
   PipelineFilterGroup,
@@ -184,7 +186,12 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     setOpportunities((rows) => rows.map((r) => (r.id === id ? row : r)))
   }, [])
 
-  const moveStage = useCallback(async (id: string, toStage: string, reason?: string): Promise<void> => {
+  const moveStage = useCallback(async (
+    id: string,
+    toStage: string,
+    reason?: string,
+    options?: { executeNextAction?: boolean },
+  ): Promise<void> => {
     let snapshot: PipelineOpportunity | undefined
     setOpportunities((rows) => {
       snapshot = rows.find((r) => r.id === id)
@@ -197,7 +204,18 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
         idempotency_key: `ui-drag:${id}:${toStage}:${Date.now()}`,
       })
       if (!result.ok) throw new Error(result.message || result.error || 'stage_transition_failed')
-      if (result.opportunity) patchOpportunity(id, result.opportunity)
+      if (result.opportunity) {
+        patchOpportunity(id, result.opportunity)
+        const threadKey = String(result.opportunity.primary_thread_key ?? '').trim()
+        if (threadKey) {
+          await patchLeadStateFromView('pipeline', threadKey, {
+            lifecycle_stage: normalizeLifecycleStage(toStage),
+          }, {
+            reason: reason ?? 'pipeline_stage_drag',
+            execute_next_action: options?.executeNextAction === true,
+          })
+        }
+      }
     } catch (err) {
       if (snapshot) {
         setOpportunities((rows) => rows.map((r) => (r.id === id ? snapshot! : r)))

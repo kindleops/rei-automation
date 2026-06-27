@@ -66,6 +66,8 @@ import {
   updateInboundAutopilotQueue,
 } from "@/lib/discord/inbound-autopilot-queue.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { logInboundMessageEvent as logSupabaseInboundMessageEvent } from "@/lib/supabase/sms-engine.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { getSystemFlags, getSystemValue } from "@/lib/system-control.js";
@@ -1089,6 +1091,42 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
 
     if (inbound_debug_stage === "after_brain_lookup") {
       return { ok: true, stage: "after_brain_lookup", brain_id, master_owner_id };
+    }
+
+    try {
+      const supabase = runtimeDeps.getSupabaseClient?.();
+      if (supabase && inbound_from) {
+        const { data: thread_state } = await supabase
+          .from("inbox_thread_state")
+          .select("is_archived,archive_scope")
+          .eq("thread_key", inbound_from)
+          .maybeSingle();
+
+        if (
+          thread_state?.is_archived === true
+          && clean(thread_state.archive_scope).toLowerCase() === "conversation"
+        ) {
+          await patchUniversalLeadState({
+            threadKey: inbound_from,
+            patch: {
+              is_archived: false,
+              archive_scope: null,
+            },
+            supabase,
+            meta: {
+              change_source: STATE_SOURCE_CODES.SYSTEM,
+              source_view: "inbound_auto_unarchive",
+              reason: "inbound_message_received",
+            },
+          });
+        }
+      }
+    } catch (unarchive_error) {
+      safeWarn("textgrid.inbound_conversation_unarchive_failed", {
+        message_id: extracted.message_id,
+        inbound_from,
+        error: unarchive_error?.message || "conversation_unarchive_failed",
+      });
     }
 
     // ── SEGMENT: phone_resolution ────────────────────────────────────────

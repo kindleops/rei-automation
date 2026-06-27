@@ -361,6 +361,8 @@ export interface ClosingHealth {
 
 export interface ClosingIdentity {
   closingCaseId: string
+  /** Canonical seller thread for universal lead-state patches. */
+  primaryThreadKey: string | null
   propertyId: string | null
   masterOwnerId: string | null
   prospectId: string | null

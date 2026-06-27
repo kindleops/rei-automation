@@ -41,6 +41,8 @@ import {
   resolveWorkflowStudioMode,
   studioModeLabel,
 } from './workflow-studio-mode'
+import { applyUniversalContextToWorkflowStudio } from './workflow-studio-routing'
+import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -116,6 +118,8 @@ export const WorkflowStudioV2 = ({
   const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null)
 
   const selectedId = selected?.workflow.id ?? null
+  const studioContext = useMemo(() => applyUniversalContextToWorkflowStudio(), [])
+  const contextThreadKey = studioContext.thread_key ?? null
 
   const refreshList = useCallback(async () => {
     const model = await loadWorkflowStudio()
@@ -533,6 +537,16 @@ export const WorkflowStudioV2 = ({
           <span>{error || notice}</span>
         </div>
       )}
+
+      {contextThreadKey ? (
+        <div className="wfs2__lead-state-strip">
+          <UniversalLeadStateControls
+            thread={{ threadKey: contextThreadKey, id: contextThreadKey }}
+            sourceView="workflow_studio"
+            compact
+          />
+        </div>
+      ) : null}
 
       <div className="wfs2__body">
         {!prefs.focusMode && !prefs.leftRailCollapsed && (
