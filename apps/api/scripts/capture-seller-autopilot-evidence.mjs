@@ -351,7 +351,7 @@ async function main() {
 
   const buildCompletedInOutput = /Build Completed/i.test(deployOutput);
   const aliasedInOutput = new RegExp(
-    `Aliased:\\s*${PROD_ALIAS.replace("https://", "").replace(/\./g, "\\.")}`,
+    `Aliased:\\s*(https://)?${PROD_ALIAS.replace("https://", "").replace(/\./g, "\\.")}`,
     "i"
   ).test(deployOutput);
   const ready = buildCompletedInOutput && (aliasedInOutput || inspectMeta.ready);

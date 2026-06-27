@@ -34,14 +34,30 @@ function resolveCanonicalShouldQueueReply({
   intelligence_snapshot = null,
   decision = null,
   execution = null,
+  writes_suppressed = false,
 } = {}) {
+  const canonical_from_intelligence =
+    intelligence_snapshot?.canonical_decision?.should_queue_reply ?? null;
+  const canonical_from_decision =
+    decision?.immediate_next_action === "queue_auto_reply"
+      ? true
+      : decision?.immediate_next_action === "schedule_later_followup"
+        ? false
+        : null;
+  const shadow_execution =
+    Boolean(writes_suppressed || execution?.dry_run) &&
+    execution?.automation_decision?.should_queue_reply === false;
+
+  if (shadow_execution) {
+    if (canonical_from_intelligence != null) return Boolean(canonical_from_intelligence);
+    if (canonical_from_decision != null) return Boolean(canonical_from_decision);
+  }
+
   if (execution?.automation_decision?.should_queue_reply != null) {
     return Boolean(execution.automation_decision.should_queue_reply);
   }
-  if (intelligence_snapshot?.canonical_decision?.should_queue_reply != null) {
-    return Boolean(intelligence_snapshot.canonical_decision.should_queue_reply);
-  }
-  if (decision?.immediate_next_action === "queue_auto_reply") return true;
+  if (canonical_from_intelligence != null) return Boolean(canonical_from_intelligence);
+  if (canonical_from_decision != null) return Boolean(canonical_from_decision);
   return false;
 }
 
@@ -51,10 +67,14 @@ export function summarizeSellerInboundOrchestration(orchestration = {}, extras =
   const decision = orchestration.decision || null;
   const execution = orchestration.execution || null;
   const follow_up = orchestration.follow_up || null;
+  const writes_suppressed = Boolean(
+    extras.writes_suppressed ?? orchestration.writes_suppressed ?? false
+  );
   const canonical_should_queue_reply = resolveCanonicalShouldQueueReply({
     intelligence_snapshot,
     decision,
     execution,
+    writes_suppressed,
   });
   const side_effects =
     orchestration.side_effects ||
