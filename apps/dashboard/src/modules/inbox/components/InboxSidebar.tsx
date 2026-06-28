@@ -72,6 +72,8 @@ interface InboxSidebarProps {
   loading?: boolean
   realtimeStatus?: 'connected' | 'connecting' | 'disconnected' | 'error' | 'disabled'
   refreshMode?: 'realtime' | 'polling' | 'disabled'
+  listScrollOffset?: number
+  onListScrollOffsetChange?: (offset: number) => void
 }
 
 type BucketConfig = {
@@ -1232,6 +1234,8 @@ export const InboxSidebar = ({
   loading = false,
   realtimeStatus: _realtimeStatus = 'connecting',
   refreshMode: _refreshMode = 'realtime',
+  listScrollOffset = 0,
+  onListScrollOffsetChange,
 }: InboxSidebarProps) => {
   void _realtimeStatus
   void _refreshMode
@@ -1613,6 +1617,8 @@ export const InboxSidebar = ({
                 items={displayedActiveThreads}
                 rowHeight={virtualRowHeight}
                 className="nx-sidebar-rebuilt__virtual-list"
+                initialScrollOffset={listScrollOffset}
+                onScrollOffsetChange={onListScrollOffsetChange}
                 renderRow={(thread) => renderThreadRow(thread)}
               />
             ) : displayedActiveThreads.map((thread) => (

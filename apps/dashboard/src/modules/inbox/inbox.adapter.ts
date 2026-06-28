@@ -25,6 +25,7 @@ import {
   markApiBootResponse,
   markBucketSwitch,
   markFirstRowsPainted,
+  markInboxLiveRequest,
   publishInboxProof,
 } from '../../domain/inbox/inbox-proof-bridge'
 
@@ -965,6 +966,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     dispatch({ type: 'BUCKET_FETCH_START', bucketKey, requestId })
     adjustFetchInFlight(1)
+    markInboxLiveRequest()
     if (normalizedOptions._timeoutMode === 'initial_boot') markApiBootRequestStart()
     if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_START]', {
       bucketKey,

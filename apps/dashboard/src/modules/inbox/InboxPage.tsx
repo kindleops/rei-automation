@@ -200,6 +200,7 @@ import {
 } from '../../domain/inbox/optimistic-thread-patch'
 import {
   getInboxProof,
+  markDossierParallelStarted,
   markOptimisticPatch,
   markThreadSelectTelemetry,
   registerInboxProofDriveAction,
@@ -641,6 +642,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [tableSort, setTableSort] = useState<ConversationTableSort>('last_activity_desc')
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
+  const [sidebarListScrollOffset, setSidebarListScrollOffset] = useState(0)
   const [topSearchQuery, setTopSearchQuery] = useState('')
   const [buyerFilters, setBuyerFilters] = useState<BuyerMapFilters>(defaultBuyerMapFilters)
   const [selectedBuyerKey, setSelectedBuyerKey] = useState<string | null>(null)
@@ -1871,6 +1873,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           }
         },
         dossier: async (signal) => {
+          markDossierParallelStarted()
           const qs = new URLSearchParams()
           if (thread.propertyId) qs.set('property_id', thread.propertyId)
           if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
@@ -3153,9 +3156,36 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         ? (findThreadByRef(threads, threadId) ?? selectedRef.current)
         : selectedRef.current
       if (!target) return
+      if (action.startsWith('stage:')) {
+        void handleStageChange(action.slice(6) as SellerStage)
+        return
+      }
+      if (action.startsWith('status:')) {
+        void handleStatusChange(action.slice(7) as InboxStatus | 'sent_message')
+        return
+      }
+      if (action === 'snooze') {
+        const optimistic = buildOptimisticThreadPatch('snooze', target)
+        setOptimisticPatches((prev) => ({ ...prev, [target.id]: { ...prev[target.id], ...optimistic } }))
+        markOptimisticPatch('snooze', target.id, optimistic as Record<string, unknown>)
+        return
+      }
+      if (action === 'message_pending') {
+        const clientSendId = crypto.randomUUID()
+        const optimisticMessage = buildOptimisticOutboundMessage(target, 'proof outbound', clientSendId)
+        markOptimisticPatch('message_pending', target.id, {
+          body: optimisticMessage.body,
+          deliveryStatus: optimisticMessage.deliveryStatus,
+        })
+        setPendingMessagesByThread((current) => ({
+          ...current,
+          [target.id]: [...(current[target.id] ?? []), optimisticMessage],
+        }))
+        return
+      }
       void handleThreadAction(target, action)
     })
-  }, [handleThreadAction, threads])
+  }, [handleStageChange, handleStatusChange, handleThreadAction, threads])
 
   const handleToggleArchive = useCallback(() => {
     if (!selected) return
@@ -4326,6 +4356,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         refreshMode={data.refreshMode}
         densityMode={paneMode === 'single' || paneWidth === '75' || paneWidth === '100' ? 'full' : 'compact'}
         inboxMode={paneWidth === '25' ? 'rail25' : paneWidth === '50' ? 'review50' : paneWidth === '75' ? 'ops75' : 'full100'}
+        listScrollOffset={sidebarListScrollOffset}
+        onListScrollOffsetChange={setSidebarListScrollOffset}
       />
     </section>
   )
@@ -4838,6 +4870,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             refreshMode={data.refreshMode}
             densityMode="compact"
             inboxMode="review50"
+            listScrollOffset={sidebarListScrollOffset}
+            onListScrollOffsetChange={setSidebarListScrollOffset}
           />
         )}
 

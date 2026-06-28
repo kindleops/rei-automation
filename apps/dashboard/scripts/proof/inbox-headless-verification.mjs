@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Headless inbox UX verification — asserts window.__INBOX_PROOF__ telemetry from the
- * shipped client path (inbox.adapter + InboxPage), not fragile DOM timing alone.
+ * Headless inbox UX verification — asserts window.__INBOX_PROOF__ from shipped paths.
+ * Drives bucket switch, thread select (cached), scroll, and all optimistic actions.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,12 +13,16 @@ const DASHBOARD_ROOT = path.join(__dirname, '../..')
 const SCRATCH = process.env.SCRATCH || path.join(DASHBOARD_ROOT, 'proof/inbox')
 
 const TARGETS = {
-  api_boot_ms: 1000,
-  first_rows_paint_ms: 400,
+  shell_to_rows_ms: 1000,
   bucket_switch_ms: 500,
   cached_thread_apply_ms: 100,
   fetch_in_flight_max: 3,
+  inbox_live_requests_max: 8,
 }
+
+const REQUIRED_OPTIMISTIC_ACTIONS = [
+  'star', 'pin', 'snooze', 'stage_consider_selling', 'status_waiting', 'message_pending',
+]
 
 async function canRunPlaywright() {
   try {
@@ -50,15 +54,19 @@ async function readProof(page) {
       activeBucketKey: proof.activeBucketKey,
       apiBootResponseMs: proof.apiBootResponseMs,
       firstRowsPaintMs: proof.firstRowsPaintMs,
+      shellToRowsMs: proof.shellToRowsMs,
       lastBucketSwitchMs: proof.lastBucketSwitchMs,
       lastBucketFrom: proof.lastBucketFrom,
       lastBucketTo: proof.lastBucketTo,
-      lastThreadSelectMs: proof.lastThreadSelectMs,
       lastThreadSelectCacheHit: proof.lastThreadSelectCacheHit,
       lastThreadSelectCacheApplyMs: proof.lastThreadSelectCacheApplyMs,
       parallelFetchStarted: proof.parallelFetchStarted,
+      dossierParallelStarted: proof.dossierParallelStarted,
       lastOptimisticPatch: proof.lastOptimisticPatch,
+      optimisticPatches: proof.optimisticPatches ?? [],
       fetchInFlight: proof.fetchInFlight,
+      maxFetchInFlight: proof.maxFetchInFlight,
+      inboxLiveRequestCount: proof.inboxLiveRequestCount,
       scrollOffset: proof.scrollOffset,
       hasDriveAction: typeof proof.driveAction === 'function',
     }
@@ -75,6 +83,26 @@ async function waitForProof(page, predicate, timeoutMs = 12_000) {
   return readProof(page)
 }
 
+async function driveOptimisticSuite(page) {
+  const actions = [
+    ['star', (p) => p.lastOptimisticPatch?.action === 'star' || p.lastOptimisticPatch?.action === 'unstar'],
+    ['pin', (p) => p.optimisticPatches?.some((x) => x.action === 'pin' || x.action === 'unpin')],
+    ['snooze', (p) => p.optimisticPatches?.some((x) => x.action === 'snooze')],
+    ['stage:consider_selling', (p) => p.optimisticPatches?.some((x) => x.action === 'stage_consider_selling')],
+    ['status:waiting', (p) => p.optimisticPatches?.some((x) => x.action === 'status_waiting')],
+    ['message_pending', (p) => p.optimisticPatches?.some((x) => x.action === 'message_pending')],
+  ]
+  const driven = []
+  for (const [action, predicate] of actions) {
+    await page.evaluate((act) => {
+      window.__INBOX_PROOF__?.driveAction?.(act)
+    }, action)
+    const proof = await waitForProof(page, predicate, 2500)
+    driven.push({ action, ok: Boolean(proof && predicate(proof)) })
+  }
+  return driven
+}
+
 async function runOnce(dashUrl) {
   const consoleErrors = []
   const { chromium } = await import('@playwright/test')
@@ -89,6 +117,7 @@ async function runOnce(dashUrl) {
   })
   page.on('pageerror', (err) => consoleErrors.push(String(err)))
 
+  const navStarted = performance.now()
   const liveResponse = page.waitForResponse(
     (r) => r.url().includes('/api/cockpit/inbox/live') && r.status() === 200,
     { timeout: 15_000 },
@@ -97,10 +126,11 @@ async function runOnce(dashUrl) {
   await page.goto(dashUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await liveResponse
   await page.waitForSelector('[data-thread-id]', { timeout: 12_000 })
+  const firstRowDomMs = Math.round(performance.now() - navStarted)
 
   const bootProof = await waitForProof(
     page,
-    (p) => p.apiBootResponseMs != null && p.firstRowsPaintMs != null,
+    (p) => p.apiBootResponseMs != null && p.firstRowsPaintMs != null && p.shellToRowsMs != null,
     12_000,
   )
 
@@ -108,32 +138,56 @@ async function runOnce(dashUrl) {
     const el = document.querySelector('.nx-inbox-shell') || document.querySelector('.nx-premium-inbox') || document.querySelector('.nx-sidebar-rebuilt')
     const rect = el?.getBoundingClientRect() ?? { width: 0, height: 0 }
     const rowCount = document.querySelectorAll('[data-thread-id]').length
+    const firstRow = document.querySelector('[data-thread-id]')
+    const rowRect = firstRow?.getBoundingClientRect() ?? { width: 0, height: 0 }
     return {
       width: rect.width,
       height: rect.height,
       rowCount,
-      painted: rect.width > 200 && rect.height > 200 && rowCount > 0,
+      firstRowWidth: rowRect.width,
+      firstRowHeight: rowRect.height,
+      painted: rect.width > 200 && rect.height > 200 && rowCount > 0 && rowRect.height > 10,
     }
   })
 
   const bucketBtn = page.locator('.nx-cat-nav__item[data-category="new_replies"]').first()
+  const allBucketBtn = page.locator('.nx-cat-nav__item[data-category="all_messages"]').first()
   let bucketProof = bootProof
   let bucketChanged = false
   if (await bucketBtn.count()) {
+    if (bootProof?.activeBucketKey === 'new_replies' && await allBucketBtn.count()) {
+      await allBucketBtn.click()
+      await waitForProof(page, (p) => p.activeBucketKey === 'all_messages', 3000)
+    }
+    const bucketLive = page.waitForResponse(
+      (r) => r.url().includes('/api/cockpit/inbox/live') && r.url().includes('new_repl') && r.status() === 200,
+      { timeout: 8000 },
+    ).catch(() => null)
     await bucketBtn.click()
-    bucketProof = await waitForProof(
+    await bucketLive
+    const bucketSwitchProof = await waitForProof(
       page,
       (p) => p.lastBucketTo === 'new_replies' && p.lastBucketSwitchMs != null,
-      2000,
+      5000,
     ) ?? bucketProof
-    bucketChanged = bucketProof?.lastBucketTo === 'new_replies'
-    await page.waitForSelector('[data-thread-id]', { timeout: 500 }).catch(() => null)
+    bucketChanged = bucketSwitchProof?.lastBucketTo === 'new_replies' && bucketSwitchProof?.lastBucketSwitchMs != null
+    bucketProof = bucketSwitchProof
+    const rowAfterBucket = await page.locator('[data-thread-id]').count()
+    if (rowAfterBucket === 0 && await allBucketBtn.count()) {
+      await allBucketBtn.click()
+      await page.waitForSelector('[data-thread-id]', { timeout: 5000 })
+    } else {
+      await page.waitForSelector('[data-thread-id]', { timeout: 500 }).catch(() => null)
+    }
   }
 
   const firstRow = page.locator('[data-thread-id]').first()
   const firstThreadId = await firstRow.getAttribute('data-thread-id')
   let threadProof = bucketProof
   let threadSelect = null
+  let optimisticDriven = []
+  let parallelFetchObserved = 0
+  let dossierParallelObserved = false
   if (firstThreadId) {
     const messagesReady = page.waitForResponse(
       (r) => r.url().includes('/api/cockpit/inbox/thread-messages') && r.status() === 200,
@@ -144,9 +198,11 @@ async function runOnce(dashUrl) {
     await messagesReady
     threadProof = await waitForProof(
       page,
-      (p) => p.parallelFetchStarted != null && p.parallelFetchStarted >= 4,
+      (p) => p.parallelFetchStarted != null && p.parallelFetchStarted >= 4 && p.dossierParallelStarted === true,
       8000,
     ) ?? threadProof
+    parallelFetchObserved = threadProof?.parallelFetchStarted ?? 0
+    dossierParallelObserved = threadProof?.dossierParallelStarted === true
 
     await firstRow.click()
     const cachedProof = await waitForProof(
@@ -161,26 +217,17 @@ async function runOnce(dashUrl) {
       conversationPanel: document.querySelector('.nx-chat-thread, .nx-conversation-panel, .nx-workspace-surface--conversation, .nx-workspace-pane.is-view-thread') != null,
     }))
 
+    const rowCount = await page.locator('[data-thread-id]').count()
+    if (rowCount > 8) {
+      await page.locator('[data-thread-id]').nth(8).scrollIntoViewIfNeeded()
+      await page.waitForTimeout(250)
+    }
+    const scrollProof = await waitForProof(page, (p) => (p.scrollOffset ?? 0) > 0, 1500)
+    if (scrollProof) threadProof = scrollProof
+
     if (threadProof?.hasDriveAction) {
-      await page.evaluate(() => {
-        window.__INBOX_PROOF__?.driveAction?.('star')
-      })
-      let optimisticProof = await waitForProof(
-        page,
-        (p) => p.lastOptimisticPatch?.action === 'star',
-        2000,
-      )
-      if (!optimisticProof) {
-        await page.evaluate(() => {
-          window.__INBOX_PROOF__?.driveAction?.('unstar')
-        })
-        optimisticProof = await waitForProof(
-          page,
-          (p) => p.lastOptimisticPatch?.action === 'unstar',
-          2000,
-        )
-      }
-      if (optimisticProof) threadProof = optimisticProof
+      optimisticDriven = await driveOptimisticSuite(page)
+      threadProof = await readProof(page)
     }
   }
 
@@ -188,30 +235,36 @@ async function runOnce(dashUrl) {
   await browser.close()
 
   const proof = threadProof ?? bucketProof ?? bootProof
-  const shellToRowsMs = proof?.apiBootResponseMs != null && proof?.firstRowsPaintMs != null
-    ? proof.apiBootResponseMs + proof.firstRowsPaintMs
-    : null
+  const shellToRowsMs = proof?.shellToRowsMs
+    ?? ((proof?.apiBootResponseMs ?? 0) + (proof?.firstRowsPaintMs ?? 0))
+  const optimisticActions = new Set((proof?.optimisticPatches ?? []).map((p) => p.action))
 
   return {
     proof,
     painted,
+    firstRowDomMs,
+    shellToRowsMs,
     bucketChanged,
     threadSelect,
-    shellToRowsMs,
+    optimisticDriven,
+    optimisticActions: [...optimisticActions],
+    parallelFetchObserved,
+    dossierParallelObserved,
     console_errors: consoleErrors,
     meets_targets: {
       proof_bridge_present: proof != null,
-      api_boot_under_1s: proof?.apiBootResponseMs != null && proof.apiBootResponseMs <= TARGETS.api_boot_ms,
-      shell_and_rows_under_1s: shellToRowsMs != null && shellToRowsMs <= TARGETS.api_boot_ms,
-      bucket_switch_under_500ms: !bucketChanged || (proof?.lastBucketSwitchMs != null && proof.lastBucketSwitchMs <= TARGETS.bucket_switch_ms),
-      bucket_switch_telemetry: bucketChanged && proof?.lastBucketTo === 'new_replies',
+      shell_and_rows_under_1s: shellToRowsMs <= TARGETS.shell_to_rows_ms,
+      first_row_dom_under_1s: firstRowDomMs <= TARGETS.shell_to_rows_ms,
+      bucket_switch_under_500ms: !bucketChanged || (bucketProof?.lastBucketSwitchMs != null && bucketProof.lastBucketSwitchMs <= TARGETS.bucket_switch_ms),
+      bucket_switch_telemetry: bucketChanged,
       cached_thread_under_100ms: proof?.lastThreadSelectCacheHit === true
         && proof?.lastThreadSelectCacheApplyMs != null
         && proof.lastThreadSelectCacheApplyMs <= TARGETS.cached_thread_apply_ms,
-      parallel_fetch_on_select: (proof?.parallelFetchStarted ?? 0) >= 4,
-      optimistic_star_visible: proof?.lastOptimisticPatch?.action === 'star'
-        || proof?.lastOptimisticPatch?.action === 'unstar',
-      fetch_in_flight_bounded: (proof?.fetchInFlight ?? 0) <= TARGETS.fetch_in_flight_max,
+      parallel_dossier_fetch: dossierParallelObserved && parallelFetchObserved >= 4,
+      optimistic_actions_complete: REQUIRED_OPTIMISTIC_ACTIONS.every((a) => optimisticActions.has(a)),
+      scroll_offset_recorded: (proof?.scrollOffset ?? 0) > 0,
+      fetch_in_flight_bounded: (proof?.maxFetchInFlight ?? proof?.fetchInFlight ?? 0) <= TARGETS.fetch_in_flight_max,
+      inbox_live_requests_bounded: (proof?.inboxLiveRequestCount ?? 0) <= TARGETS.inbox_live_requests_max,
       zero_console_errors: consoleErrors.length === 0,
       substantial_paint: painted.painted === true,
       thread_select_visible: threadSelect?.selectedCard || threadSelect?.conversationPanel || false,
@@ -219,10 +272,11 @@ async function runOnce(dashUrl) {
   }
 }
 
-async function startViteIfNeeded(dashUrl, apiBase) {
-  if (process.env.INBOX_HEADLESS_URL) return null
+async function startViteIfNeeded(apiBase) {
+  if (process.env.INBOX_HEADLESS_URL) return { vite: null, dashUrl: process.env.INBOX_HEADLESS_URL }
   const dashPort = process.env.INBOX_HEADLESS_PORT || String(5180 + (process.pid % 40))
   const baseUrl = `http://127.0.0.1:${dashPort}`
+  const dashUrl = `${baseUrl}/inbox`
 
   const vite = spawn('npx', ['vite', '--port', dashPort, '--host', '127.0.0.1'], {
     cwd: DASHBOARD_ROOT,
@@ -231,7 +285,7 @@ async function startViteIfNeeded(dashUrl, apiBase) {
   })
   await waitForHttp(`${baseUrl}/`, 120_000)
   await new Promise((r) => setTimeout(r, 800))
-  return vite
+  return { vite, dashUrl }
 }
 
 async function main() {
@@ -248,10 +302,7 @@ async function main() {
   }
 
   const apiBase = process.env.BENCHMARK_API_BASE || 'http://localhost:3000'
-  const dashPort = process.env.INBOX_HEADLESS_PORT || String(5180 + (process.pid % 40))
-  const dashUrl = process.env.INBOX_HEADLESS_URL || `http://127.0.0.1:${dashPort}/inbox`
-
-  const vite = await startViteIfNeeded(dashUrl, apiBase)
+  const { vite, dashUrl } = await startViteIfNeeded(apiBase)
 
   const runs = []
   for (let i = 0; i < 2; i += 1) {
@@ -270,12 +321,13 @@ async function main() {
       && t.zero_console_errors
       && t.substantial_paint
       && t.thread_select_visible
-      && t.api_boot_under_1s
+      && t.shell_and_rows_under_1s
       && t.bucket_switch_telemetry
       && t.cached_thread_under_100ms
-      && t.optimistic_star_visible
-      && t.cached_thread_under_100ms
+      && t.parallel_dossier_fetch
+      && t.optimistic_actions_complete
       && t.fetch_in_flight_bounded
+      && t.inbox_live_requests_bounded
   })
 
   const results = {
@@ -283,11 +335,12 @@ async function main() {
     dashUrl,
     apiBase,
     targets: TARGETS,
+    required_optimistic_actions: REQUIRED_OPTIMISTIC_ACTIONS,
     runs,
     best,
     pass,
-    api_perf_cross_check: 'endpoint latency in inbox-perf.log; client path in inbox-thread-session-proof',
-    note: 'Assertions use window.__INBOX_PROOF__ from inbox.adapter and InboxPage',
+    api_perf_cross_check: 'endpoint latency in inbox-perf.log; orchestrator in inbox-thread-session-proof',
+    note: 'Assertions use window.__INBOX_PROOF__ telemetry from inbox.adapter + InboxPage shipped paths',
   }
 
   fs.writeFileSync(path.join(SCRATCH, 'inbox-headless.log'), JSON.stringify(results, null, 2))

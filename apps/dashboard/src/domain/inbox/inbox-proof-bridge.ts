@@ -12,12 +12,17 @@ export interface InboxProofTelemetry {
   lastBucketTo: string | null
   apiBootResponseMs: number | null
   firstRowsPaintMs: number | null
+  shellToRowsMs: number | null
   lastThreadSelectMs: number | null
   lastThreadSelectCacheHit: boolean | null
   lastThreadSelectCacheApplyMs: number | null
   lastOptimisticPatch: InboxProofOptimisticPatch | null
+  optimisticPatches: InboxProofOptimisticPatch[]
   fetchInFlight: number
+  maxFetchInFlight: number
+  inboxLiveRequestCount: number
   parallelFetchStarted: number | null
+  dossierParallelStarted: boolean
   scrollOffset: number | null
   driveAction: ((action: string, threadId?: string) => void) | null
 }
@@ -33,8 +38,12 @@ const EMPTY: InboxProofTelemetry = {
   lastThreadSelectCacheHit: null,
   lastThreadSelectCacheApplyMs: null,
   lastOptimisticPatch: null,
+  optimisticPatches: [],
   fetchInFlight: 0,
+  maxFetchInFlight: 0,
+  inboxLiveRequestCount: 0,
   parallelFetchStarted: null,
+  dossierParallelStarted: false,
   scrollOffset: null,
   driveAction: null,
 }
@@ -68,7 +77,13 @@ export function markApiBootRequestStart(): void {
 
 export function markApiBootResponse(): void {
   if (apiBootStartedAt == null) return
-  publishInboxProof({ apiBootResponseMs: Math.round(performance.now() - apiBootStartedAt) })
+  const apiBootResponseMs = Math.round(performance.now() - apiBootStartedAt)
+  publishInboxProof({
+    apiBootResponseMs,
+    shellToRowsMs: snapshot.firstRowsPaintMs != null
+      ? apiBootResponseMs + snapshot.firstRowsPaintMs
+      : null,
+  })
 }
 
 export function markFirstRowsPainted(): void {
@@ -76,7 +91,13 @@ export function markFirstRowsPainted(): void {
   const base = snapshot.apiBootResponseMs != null && apiBootStartedAt != null
     ? apiBootStartedAt + snapshot.apiBootResponseMs
     : performance.now()
-  publishInboxProof({ firstRowsPaintMs: Math.max(0, Math.round(performance.now() - base)) })
+  const firstRowsPaintMs = Math.max(0, Math.round(performance.now() - base))
+  publishInboxProof({
+    firstRowsPaintMs,
+    shellToRowsMs: snapshot.apiBootResponseMs != null
+      ? snapshot.apiBootResponseMs + firstRowsPaintMs
+      : firstRowsPaintMs,
+  })
 }
 
 export function markBucketSwitch(fromKey: string, toKey: string, ms: number): void {
@@ -103,18 +124,32 @@ export function markThreadSelectTelemetry(input: {
 }
 
 export function markOptimisticPatch(action: string, threadId: string, patch: Record<string, unknown>): void {
+  const entry: InboxProofOptimisticPatch = {
+    action,
+    threadId,
+    at: new Date().toISOString(),
+    patch,
+  }
   publishInboxProof({
-    lastOptimisticPatch: {
-      action,
-      threadId,
-      at: new Date().toISOString(),
-      patch,
-    },
+    lastOptimisticPatch: entry,
+    optimisticPatches: [...snapshot.optimisticPatches, entry].slice(-24),
   })
 }
 
 export function adjustFetchInFlight(delta: number): void {
-  publishInboxProof({ fetchInFlight: Math.max(0, snapshot.fetchInFlight + delta) })
+  const fetchInFlight = Math.max(0, snapshot.fetchInFlight + delta)
+  publishInboxProof({
+    fetchInFlight,
+    maxFetchInFlight: Math.max(snapshot.maxFetchInFlight, fetchInFlight),
+  })
+}
+
+export function markInboxLiveRequest(): void {
+  publishInboxProof({ inboxLiveRequestCount: snapshot.inboxLiveRequestCount + 1 })
+}
+
+export function markDossierParallelStarted(): void {
+  publishInboxProof({ dossierParallelStarted: true })
 }
 
 export function markListScrollOffset(offset: number): void {

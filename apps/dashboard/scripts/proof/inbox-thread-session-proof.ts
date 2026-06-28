@@ -168,11 +168,39 @@ async function main() {
     results.stale_reject_count = outcome.rejected.length
   })
 
-  await test('optimistic star patch visible in merged rows', () => {
-    const patch = buildOptimisticThreadPatch('star', thread)
-    const merged = mergeOptimisticPatches([thread], { [thread.id]: patch })
-    assert(merged[0].isStarred === true, 'star patch must merge')
-    results.optimistic_star_visible = merged[0].isStarred === true
+  await test('optimistic patches visible for all required actions', () => {
+    const actions: Array<{ action: Parameters<typeof buildOptimisticThreadPatch>[0]; key: string; check: (t: InboxWorkflowThread) => boolean }> = [
+      { action: 'star', key: 'star', check: (t) => t.isStarred === true },
+      { action: 'pin', key: 'pin', check: (t) => t.isPinned === true },
+      { action: 'snooze', key: 'snooze', check: (t) => t.inboxStatus === 'waiting' },
+      { action: { type: 'stage', stage: 'consider_selling' }, key: 'stage', check: (t) => t.conversationStage === 'consider_selling' },
+      { action: { type: 'status', status: 'waiting' }, key: 'status', check: (t) => t.inboxStatus === 'waiting' },
+      { action: 'archive', key: 'archive', check: (t) => t.isArchived === true },
+    ]
+    const applied: Record<string, boolean> = {}
+    for (const item of actions) {
+      const patch = buildOptimisticThreadPatch(item.action, thread)
+      const merged = mergeOptimisticPatches([thread], { [thread.id]: patch })
+      applied[item.key] = item.check(merged[0])
+      assert(applied[item.key], `${item.key} patch must merge`)
+    }
+    results.optimistic_actions = applied
+  })
+
+  await test('planThreadSelect mirrors handleSelect cache-first entry', () => {
+    const cacheKey = thread.threadKey!
+    const handleSelectPlan = planThreadSelect({
+      thread,
+      selectedKey: cacheKey,
+      conversationThreadId: cacheKey,
+      messageRefetchKey: 0,
+      messageCache: { [cacheKey]: [cachedMessage] },
+    })
+    assert(handleSelectPlan?.telemetry.cacheHit === true, 'handleSelect cache hit')
+    assert(handleSelectPlan?.immediate.selectedMessages.length === 1, 'immediate messages from cache')
+    assert(handleSelectPlan?.fetches.length === 4, 'parallel fetch plan')
+    results.handle_select_cache_hit = handleSelectPlan?.telemetry.cacheHit
+    results.handle_select_parallel_count = handleSelectPlan?.fetches.length
   })
 
   const summary = {
@@ -184,7 +212,10 @@ async function main() {
       cache_hit_under_100ms: Number(results.cache_hit_apply_ms) < 100,
       parallel_fetch_count_4: results.parallel_started === 4,
       stale_selection_rejected: Number(results.stale_reject_count) >= 1,
-      optimistic_star_visible: results.optimistic_star_visible === true,
+      optimistic_actions_all: results.optimistic_actions != null
+        && Object.values(results.optimistic_actions as Record<string, boolean>).every(Boolean),
+      handle_select_cache_hit: results.handle_select_cache_hit === true,
+      handle_select_parallel_count_4: results.handle_select_parallel_count === 4,
     },
   }
 
