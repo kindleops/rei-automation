@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { pushRoutePath } from '../../app/router'
+import { useBreakpoint } from '../mobile/useBreakpoint'
 import type {
   NotificationDomain,
   NotificationEvent,
@@ -79,6 +80,7 @@ const NotificationCard = ({
   onSnooze,
   onMuteSource,
   onRunAction,
+  mobileCompact = false,
 }: {
   item: NotificationEvent
   expanded: boolean
@@ -91,8 +93,12 @@ const NotificationCard = ({
   onSnooze: () => void
   onMuteSource: () => void
   onRunAction: (actionType: string) => void
+  mobileCompact?: boolean
 }) => {
   const isUnread = item.status === 'unread'
+  const [overflowOpen, setOverflowOpen] = useState(false)
+  const primaryAction = item.actions.find((action) => action.primary) ?? item.actions[0]
+  const secondaryActions = item.actions.filter((action) => action !== primaryAction)
 
   return (
     <article
@@ -149,22 +155,54 @@ const NotificationCard = ({
           </div>
         ) : null}
 
-        <div className="lcnc-card__actions">
-          {item.actions.slice(0, expanded ? 4 : 2).map((action) => (
+        <div className={cls('lcnc-card__actions', mobileCompact && 'is-mobile-compact')}>
+          {primaryAction ? (
             <button
-              key={`${item.id}-${action.type}`}
               type="button"
-              className={cls('lcnc-card__action-btn', action.primary && 'is-primary')}
-              onClick={() => onRunAction(action.type)}
+              className="lcnc-card__action-btn is-primary"
+              onClick={() => onRunAction(primaryAction.type)}
             >
-              {action.label}
+              {primaryAction.label}
             </button>
-          ))}
-          <button type="button" className="lcnc-card__action-btn" onClick={isUnread ? onMarkRead : onMarkUnread}>
-            {isUnread ? 'Mark read' : 'Mark unread'}
-          </button>
-          <button type="button" className="lcnc-card__action-btn" onClick={onSnooze}>Snooze 1h</button>
-          <button type="button" className="lcnc-card__action-btn" onClick={onMuteSource}>Mute source</button>
+          ) : (
+            <button type="button" className="lcnc-card__action-btn is-primary" onClick={onOpen}>
+              Open
+            </button>
+          )}
+          <div className="lcnc-card__overflow">
+            <button
+              type="button"
+              className="lcnc-card__overflow-trigger"
+              aria-label="More actions"
+              aria-expanded={overflowOpen}
+              onClick={() => setOverflowOpen((open) => !open)}
+            >
+              <Icon name="more" />
+            </button>
+            {overflowOpen ? (
+              <div className="lcnc-card__overflow-menu" role="menu">
+                {secondaryActions.map((action) => (
+                  <button
+                    key={`${item.id}-${action.type}`}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setOverflowOpen(false)
+                      onRunAction(action.type)
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); isUnread ? onMarkRead() : onMarkUnread() }}>
+                  {isUnread ? 'Mark read' : 'Mark unread'}
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); onSnooze() }}>Snooze 1h</button>
+                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); onMuteSource() }}>Mute source</button>
+                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); onDismiss() }}>Dismiss</button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>
@@ -191,11 +229,15 @@ export const LeadCommandNotificationCenter = ({
   open,
   onClose,
   anchorTop = 58,
+  mobileSheet = false,
 }: {
   open: boolean
   onClose: () => void
   anchorTop?: number
+  mobileSheet?: boolean
 }) => {
+  const { isMobile } = useBreakpoint()
+  const useSheetLayout = mobileSheet || isMobile
   const {
     notifications,
     unreadCount,
@@ -304,10 +346,17 @@ export const LeadCommandNotificationCenter = ({
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
-    <section
+    <>
+      {useSheetLayout ? (
+        <button type="button" className="nx-mobile-sheet-backdrop" aria-label="Close notifications" onClick={onClose} />
+      ) : null}
+      <section
       ref={panelRef}
-      className="lcnc-panel nx-notification-center nx-liquid-panel"
-      style={{ '--lcnc-anchor-top': `${anchorTop}px` } as React.CSSProperties}
+      className={cls(
+        'lcnc-panel nx-notification-center nx-liquid-panel',
+        useSheetLayout && 'is-mobile-sheet',
+      )}
+      style={useSheetLayout ? undefined : ({ '--lcnc-anchor-top': `${anchorTop}px` } as React.CSSProperties)}
       aria-label="LeadCommand notification center"
       role="dialog"
       aria-modal="true"
@@ -381,44 +430,46 @@ export const LeadCommandNotificationCenter = ({
             </button>
           </div>
 
-          <div className="lcnc-filters" role="group" aria-label="Severity filters">
-            <button
-              type="button"
-              className={cls('lcnc-filter-chip', severityFilter === 'all' && 'is-active')}
-              onClick={() => setSeverityFilter('all')}
-            >
-              All
-            </button>
-            {NOTIFICATION_SEVERITIES.map((severity) => (
+          <div className="lcnc-filter-rails">
+            <div className="lcnc-filters lcnc-filter-rail" role="group" aria-label="Severity filters">
               <button
-                key={severity}
                 type="button"
-                className={cls('lcnc-filter-chip', `is-severity-${severity}`, severityFilter === severity && 'is-active')}
-                onClick={() => setSeverityFilter((current) => current === severity ? 'all' : severity)}
+                className={cls('lcnc-filter-chip', severityFilter === 'all' && 'is-active')}
+                onClick={() => setSeverityFilter('all')}
               >
-                {SEVERITY_LABELS[severity]}
+                All
               </button>
-            ))}
-          </div>
+              {NOTIFICATION_SEVERITIES.map((severity) => (
+                <button
+                  key={severity}
+                  type="button"
+                  className={cls('lcnc-filter-chip', `is-severity-${severity}`, severityFilter === severity && 'is-active')}
+                  onClick={() => setSeverityFilter((current) => current === severity ? 'all' : severity)}
+                >
+                  {SEVERITY_LABELS[severity]}
+                </button>
+              ))}
+            </div>
 
-          <div className="lcnc-spaces" role="tablist" aria-label="Domain filters">
-            <button
-              type="button"
-              className={cls('lcnc-space-chip', domainFilter === 'all' && 'is-active')}
-              onClick={() => setDomainFilter('all')}
-            >
-              All domains
-            </button>
-            {NOTIFICATION_DOMAINS.map((domain) => (
+            <div className="lcnc-spaces lcnc-filter-rail" role="tablist" aria-label="Domain filters">
               <button
-                key={domain}
                 type="button"
-                className={cls('lcnc-space-chip', domainFilter === domain && 'is-active')}
-                onClick={() => setDomainFilter((current) => current === domain ? 'all' : domain)}
+                className={cls('lcnc-space-chip', domainFilter === 'all' && 'is-active')}
+                onClick={() => setDomainFilter('all')}
               >
-                {DOMAIN_LABELS[domain]}
+                All Domains
               </button>
-            ))}
+              {NOTIFICATION_DOMAINS.map((domain) => (
+                <button
+                  key={domain}
+                  type="button"
+                  className={cls('lcnc-space-chip', domainFilter === domain && 'is-active')}
+                  onClick={() => setDomainFilter((current) => current === domain ? 'all' : domain)}
+                >
+                  {domain === 'platform' ? 'System' : DOMAIN_LABELS[domain]}
+                </button>
+              ))}
+            </div>
           </div>
 
           {selectedIds.length > 0 ? (
@@ -443,6 +494,7 @@ export const LeadCommandNotificationCenter = ({
                       item={item}
                       expanded={expanded}
                       selected={selectedIds.includes(item.id)}
+                      mobileCompact={useSheetLayout}
                       onToggleSelect={() => toggleSelected(item.id)}
                       onOpen={() => void handleOpen(item)}
                       onDismiss={() => void patch(item.id, 'dismiss')}
@@ -475,7 +527,8 @@ export const LeadCommandNotificationCenter = ({
           </footer>
         </>
       )}
-    </section>,
+    </section>
+    </>,
     document.body,
   )
 }

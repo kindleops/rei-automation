@@ -814,13 +814,121 @@
   color: #0f172a;
 }
 
-@media (max-width: 480px) {
-  .lcnc-panel.nx-notification-center {
-    top: 0 !important;
+.lcnc-filter-rails {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.lcnc-filter-rail {
+  scroll-snap-type: x proximity;
+  flex-wrap: nowrap !important;
+  padding: 8px 12px !important;
+}
+
+.lcnc-filter-rail .lcnc-filter-chip,
+.lcnc-filter-rail .lcnc-space-chip {
+  flex-shrink: 0;
+  scroll-snap-align: start;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
+.lcnc-card__actions.is-mobile-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.lcnc-card__actions.is-mobile-compact .lcnc-card__action-btn.is-primary {
+  flex: 1;
+  min-height: 36px;
+}
+
+.lcnc-card__overflow {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.lcnc-card__overflow-trigger {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.lcnc-card__overflow-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 4;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 14, 22, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.lcnc-card__overflow-menu button {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lcnc-card__overflow-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .lcnc-panel.nx-notification-center.is-mobile-sheet {
+    top: auto !important;
     right: 0 !important;
     left: 0 !important;
+    bottom: calc(var(--nx-dock-height, 72px) + env(safe-area-inset-bottom, 0px)) !important;
     width: 100% !important;
-    border-radius: 0 0 16px 16px !important;
-    max-height: 82dvh !important;
+    max-width: 100% !important;
+    border-radius: 20px 20px 0 0 !important;
+    max-height: min(68vh, calc(100dvh - var(--nx-dock-height, 72px) - env(safe-area-inset-bottom, 0px) - 12px)) !important;
+    z-index: 149 !important;
+    animation: lcnc-sheet-in 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    transform-origin: bottom center !important;
+  }
+
+  @keyframes lcnc-sheet-in {
+    from { transform: translateY(16px); opacity: 0.75; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .lcnc-header {
+    padding: 12px 14px 10px !important;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .lcnc-subtitle {
+    display: none;
+  }
+
+  .lcnc-toolbar {
+    padding: 8px 12px !important;
   }
 }

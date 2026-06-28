@@ -19,6 +19,9 @@ import { useShellSurface } from '../../shell/useShellSurface'
 import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } from '../../shell/shell-types'
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
+import { MobileSearchOverlay } from '../../mobile/MobileSearchOverlay'
+import { MobileSheet } from '../../mobile/MobileSheet'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -345,8 +348,200 @@ export const NexusTopBar = ({
     return sum + item.count
   }, 0)
 
+  const resolveDockSurface = (): DockSurface => {
+    if (searchOpen) return 'search'
+    if (activeSurface === 'workspace') return 'workspace'
+    if (activeSurface === 'queue') return 'queue'
+    if (activeSurface === 'action-center') return 'tasks'
+    if (activeOverlay === 'activity') return 'activity'
+    if (activeOverlay === 'notifications') return 'notifications'
+    return null
+  }
+
+  const handleDockSurfaceChange = (surface: DockSurface) => {
+    if (surface === null) {
+      setSearchOpen(false)
+      setActiveSurface(null)
+      onCloseOverlay()
+      return
+    }
+    if (surface === 'search') {
+      onCloseOverlay()
+      setActiveSurface(null)
+      setSearchOpen(true)
+      return
+    }
+    if (surface === 'workspace') {
+      openExclusiveSurface('workspace')
+      return
+    }
+    if (surface === 'queue') {
+      openExclusiveSurface('queue')
+      return
+    }
+    if (surface === 'tasks') {
+      openExclusiveSurface('action-center')
+      return
+    }
+    if (surface === 'activity') {
+      if (activeOverlay === 'activity') onCloseOverlay()
+      else openOverlayExclusive('activity')
+      return
+    }
+    if (surface === 'notifications') {
+      if (activeOverlay === 'notifications') onCloseOverlay()
+      else openOverlayExclusive('notifications')
+    }
+  }
+
+  const workspaceLauncher = (
+    <WorkspaceLauncher
+      open={activeSurface === 'workspace'}
+      compact={isCompactMenu || isMobile}
+      anchorRef={workspaceTriggerRef}
+      onClose={() => closeAndRestoreFocus('workspace')}
+      activeWorkspaceKey={activeWorkspaceKey}
+      workspaceOptions={launcherWorkspaces}
+      viewOptions={launcherViews}
+      activeViewKeys={activeViewKeys}
+      activeViewWidths={activeViewWidths}
+      activeViewChips={activeViewChips}
+      activeViewKey={activeViewKey}
+      activeThemeId={activeThemeId}
+      activeAccentId={activeAccentId}
+      onSelectWorkspace={(key) => {
+        onSelectWorkspace?.(key)
+        closeAndRestoreFocus('workspace')
+      }}
+      onSelectView={(key) => onSelectView?.(key)}
+      onSelectViewWidth={(key, width) => onSelectViewWidth?.(key, width)}
+      onToggleActiveViewChip={onToggleActiveViewChip}
+      onSelectTheme={onSelectTheme}
+      onSelectAccent={onSelectAccent}
+      onSaveCurrentLayout={onSaveCurrentLayout}
+      onResetLayout={onResetLayout}
+      onWorkspaceSettings={onWorkspaceSettings}
+      profileInitials={profileInitials}
+      authReady={authReady}
+      authLoading={authLoading}
+      onProfile={onOpenDossier}
+      onSettings={onOpenSettings}
+      onThemeSettings={onOpenKpis}
+      onKeyboardShortcuts={onOpenKeys}
+      onDiagnostics={onOpenAi}
+      onSignOut={onSignOut}
+    />
+  )
+
+  const queuePanel = (
+    <QueueCommandCenter
+      health={queueProcessorHealth}
+      control={queueControlDiagnostics}
+      loading={queueProcessorHealthLoading}
+      mode={queueCommandMode}
+      caps={queueCommandCaps}
+      actionLoading={queueCommandActionLoading}
+      onModeChange={onQueueCommandModeChange}
+      onCapsChange={onQueueCommandCapsChange}
+      onRefresh={() => onRefreshQueueHealth?.()}
+      onRunSafeBatch={onRunSafeBatch}
+      onQueueMore={onQueueMore}
+      onRunQueueNow={onRunQueueNow}
+      onEmergencyPause={onEmergencyPause}
+      onReprocessPaused={onReprocessPaused}
+      onRetryFailed={onRetryFailed}
+      onReconcileDelivery={onReconcileDelivery}
+      onCancelStaleFollowUps={onCancelStaleFollowUps}
+      onClose={() => closeAndRestoreFocus('queue')}
+    />
+  )
+
+  if (isMobile) {
+    return (
+      <>
+        <span ref={workspaceTriggerRef} className="nx-sr-only" aria-hidden />
+        <span ref={queueTriggerRef} className="nx-sr-only" aria-hidden />
+        <span ref={actionTriggerRef} className="nx-sr-only" aria-hidden />
+
+        <MobileSearchOverlay
+          open={searchOpen}
+          query={topSearchQuery}
+          loading={topSearchLoading}
+          groups={topSearchGroups}
+          activeIndex={searchActiveIndex}
+          onQueryChange={onTopSearchQueryChange}
+          onActiveIndexChange={setSearchActiveIndex}
+          onSubmit={handleSearchSubmit}
+          onClose={() => {
+            setSearchOpen(false)
+            onTopSearchQueryChange('')
+          }}
+        />
+
+        <MobileCommandDock
+          activeSurface={resolveDockSurface()}
+          onSurfaceChange={handleDockSurfaceChange}
+          kpiControl={<InboxKpiOrb />}
+          workspaceActive={activeSurface === 'workspace'}
+          queueStatus={processorStatus}
+          searchActive={searchOpen}
+          tasksCount={actionCountTotal}
+          activityActive={activeOverlay === 'activity'}
+          notificationCount={unreadNotifications}
+          notificationsActive={activeOverlay === 'notifications'}
+        />
+
+        {workspaceLauncher}
+
+        <MobileSheet
+          open={activeSurface === 'queue'}
+          title="Queue Intelligence"
+          subtitle={processorHealthLabel}
+          height="half"
+          onClose={() => closeAndRestoreFocus('queue')}
+        >
+          {queuePanel}
+        </MobileSheet>
+
+        <MobileSheet
+          open={activeSurface === 'action-center'}
+          title="Tasks"
+          subtitle="Operator attention queue"
+          height="compact"
+          onClose={() => closeAndRestoreFocus('action-center')}
+        >
+          <div className="nx-action-center__list" role="menu">
+            {actionItems.filter((item) => !item.hidden).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                className="nx-action-center__row"
+                disabled={Boolean(item.unavailableReason) && item.count == null}
+                onClick={() => {
+                  if (item.unavailableReason && item.count == null) return
+                  item.onSelect()
+                  closeAndRestoreFocus('action-center')
+                }}
+              >
+                <span className="nx-action-center__label">{item.label}</span>
+                {typeof item.count === 'number' ? <b className="nx-action-center__count">{item.count}</b> : null}
+              </button>
+            ))}
+          </div>
+        </MobileSheet>
+
+        <LeadCommandNotificationCenter
+          open={activeOverlay === 'notifications'}
+          onClose={onCloseOverlay}
+          mobileSheet
+        />
+      </>
+    )
+  }
+
   return (
-    <header className={cls('nx-topbar nx-topbar--nexus-shell', isMobile && 'is-mobile-shell', isMobile && searchOpen && 'is-search-expanded')}>
+    <header className="nx-topbar nx-topbar--nexus-shell">
       {/* Zone 1: Workspace identity */}
       <div className="nx-topbar__left nx-topbar-shell-left nx-mobile-command-row">
         {!isMobile ? (

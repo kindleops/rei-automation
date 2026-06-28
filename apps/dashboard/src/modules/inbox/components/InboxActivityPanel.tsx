@@ -1,19 +1,22 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { formatRelativeTime } from '../../../shared/formatters'
 import { fetchInboxActivity, undoInboxActivity, type InboxActivityEvent, type ActivityEventType } from '../../../lib/data/inboxActivityData'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { MobileSheet } from '../../mobile/MobileSheet'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-type ActivityCategory = 'All' | 'Queue' | 'SMS' | 'AI' | 'Map' | 'Offers' | 'Buyers' | 'Errors'
+type ActivityCategory = 'All' | 'Queue' | 'SMS' | 'AI' | 'Map' | 'Offers' | 'Buyers' | 'Errors' | 'Automation'
 
-const CATEGORIES: ActivityCategory[] = ['All', 'Queue', 'SMS', 'AI', 'Map', 'Offers', 'Buyers', 'Errors']
+const CATEGORIES: ActivityCategory[] = ['All', 'Queue', 'SMS', 'AI', 'Map', 'Offers', 'Buyers', 'Errors', 'Automation']
 
 const categoryOf = (type: ActivityEventType): ActivityCategory => {
   if (type === 'message_sent' || type === 'message_received' || type === 'message_failed') return 'SMS'
   if (type === 'ai_copilot_interaction') return 'AI'
   if (type === 'stage_change' || type === 'archive_thread' || type === 'unarchive_thread') return 'Queue'
+  if (type === 'note_added') return 'Automation'
   return 'Queue'
 }
 
@@ -48,6 +51,7 @@ const sourceLabelOf = (type: ActivityEventType): string => {
   const cat = categoryOf(type)
   if (cat === 'SMS') return 'SMS'
   if (cat === 'AI') return 'AI ENGINE'
+  if (cat === 'Automation') return 'AUTOMATION'
   return 'QUEUE'
 }
 
@@ -60,64 +64,40 @@ export const InboxActivityPanel = ({
   onClose: () => void
   onViewThread?: (threadKey: string) => void
 }) => {
-  const DEV = Boolean(import.meta.env.DEV)
+  const { isMobile } = useBreakpoint()
   const [activities, setActivities] = useState<InboxActivityEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>('All')
 
-  useEffect(() => {
-    if (DEV) console.log('[NexusPopover]', { name: 'ActivityLog', action: 'open', open: true })
-    return () => {
-      if (DEV) console.log('[NexusPopover]', { name: 'ActivityLog', action: 'close', open: false })
-    }
-  }, [DEV])
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const data = await fetchInboxActivity(threadKey)
+    setActivities(data)
+    setLoading(false)
+  }, [threadKey])
 
   useEffect(() => {
-    let cancelled = false
-    void fetchInboxActivity(threadKey).then((data) => {
-      if (!cancelled) {
-        setActivities(data)
-        setLoading(false)
-      }
-    })
-    return () => { cancelled = true }
-  }, [threadKey])
+    void refresh()
+    const interval = window.setInterval(() => { void refresh() }, 30_000)
+    return () => window.clearInterval(interval)
+  }, [refresh])
 
   const handleUndo = useCallback(async (id: string) => {
     const result = await undoInboxActivity(id)
-    if (result.ok) {
-      setLoading(true)
-      const data = await fetchInboxActivity(threadKey)
-      setActivities(data)
-      setLoading(false)
-    }
-  }, [threadKey])
+    if (result.ok) void refresh()
+  }, [refresh])
 
-  const filtered = activities.filter((item) => {
+  const filtered = useMemo(() => activities.filter((item) => {
     if (activeCategory === 'All') return true
     if (activeCategory === 'Errors') return severityOf(item.event_type) === 'critical'
     return categoryOf(item.event_type) === activeCategory
-  })
+  }), [activities, activeCategory])
 
-  const panel = (
-    <aside className="nx-activity-panel nx-liquid-panel" aria-label="Live activity log">
+  const sheetHeight = !loading && filtered.length === 0 ? 'compact' : filtered.length > 8 ? 'full' : 'half'
 
-      {/* ── Header ────────────────────────────────────────────────── */}
-      <header className="lac-header">
-        <div className="lac-header__identity">
-          <span className="lac-header__eyebrow">COMMAND SPACE</span>
-          <strong className="lac-header__title">Live Activity</strong>
-          <p className="lac-header__subtitle">
-            System heartbeat across queue, inbox, AI, map, offers, buyers, and automation.
-          </p>
-        </div>
-        <button type="button" className="lac-close" onClick={onClose} aria-label="Close activity log">
-          <Icon name="close" />
-        </button>
-      </header>
-
-      {/* ── Category filters ───────────────────────────────────────── */}
-      <div className="lac-filters" role="tablist" aria-label="Activity categories">
+  const body = (
+    <>
+      <div className="lac-filters lac-filter-rail" role="tablist" aria-label="Activity categories">
         {CATEGORIES.map((cat) => (
           <button
             key={cat}
@@ -132,17 +112,14 @@ export const InboxActivityPanel = ({
         ))}
       </div>
 
-      {/* ── Activity list ──────────────────────────────────────────── */}
       <div className="lac-list">
-        {loading && (
-          <p className="lac-empty">Loading activity...</p>
-        )}
+        {loading && <p className="lac-empty">Loading activity…</p>}
 
         {!loading && filtered.length === 0 && (
           <div className="lac-empty-state">
             <span className="lac-empty-state__icon">◎</span>
             <p className="lac-empty-state__text">
-              No live activity yet. Queue actions, replies, AI decisions, map events, and automation logs will appear here.
+              No live activity in this view yet. Queue sends, replies, AI decisions, and automation logs appear here in realtime.
             </p>
           </div>
         )}
@@ -162,30 +139,16 @@ export const InboxActivityPanel = ({
                   <strong className="lac-row__title">{item.title}</strong>
                   <time className="lac-row__time">{formatRelativeTime(item.created_at)}</time>
                 </div>
-                {item.description && (
-                  <p className="lac-row__detail">{item.description}</p>
-                )}
+                {item.description ? <p className="lac-row__detail">{item.description}</p> : null}
                 <div className="lac-row__footer">
                   <span className="lac-row__actor">{item.actor}</span>
                   <div className="lac-row__actions">
-                    {item.undo_payload && (
-                      <button
-                        type="button"
-                        className="lac-action-btn"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleUndo(item.id) }}
-                      >
-                        Undo
-                      </button>
-                    )}
-                    {onViewThread && (
-                      <button
-                        type="button"
-                        className="lac-action-btn"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewThread(item.thread_key) }}
-                      >
-                        View →
-                      </button>
-                    )}
+                    {item.undo_payload ? (
+                      <button type="button" className="lac-action-btn" onClick={() => void handleUndo(item.id)}>Undo</button>
+                    ) : null}
+                    {onViewThread ? (
+                      <button type="button" className="lac-action-btn" onClick={() => onViewThread(item.thread_key)}>View</button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -193,12 +156,41 @@ export const InboxActivityPanel = ({
           )
         })}
       </div>
+    </>
+  )
 
-      {/* ── Footer ────────────────────────────────────────────────── */}
+  if (isMobile) {
+    return (
+      <MobileSheet
+        open
+        title="Live Activity"
+        subtitle="Realtime operational heartbeat"
+        height={sheetHeight}
+        onClose={onClose}
+      >
+        <div className="nx-activity-panel nx-activity-panel--sheet">{body}</div>
+      </MobileSheet>
+    )
+  }
+
+  const panel = (
+    <aside className="nx-activity-panel nx-liquid-panel" aria-label="Live activity log">
+      <header className="lac-header">
+        <div className="lac-header__identity">
+          <span className="lac-header__eyebrow">COMMAND SPACE</span>
+          <strong className="lac-header__title">Live Activity</strong>
+          <p className="lac-header__subtitle">
+            System heartbeat across queue, inbox, AI, map, offers, buyers, and automation.
+          </p>
+        </div>
+        <button type="button" className="lac-close" onClick={onClose} aria-label="Close activity log">
+          <Icon name="close" />
+        </button>
+      </header>
+      {body}
       <footer className="lac-footer">
         <span>Press <kbd>⌘K</kbd> to act on activity</span>
       </footer>
-
     </aside>
   )
 
