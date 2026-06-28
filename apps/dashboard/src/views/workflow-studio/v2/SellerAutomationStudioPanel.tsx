@@ -17,6 +17,9 @@ import type {
 } from '../seller-automation.types'
 import { SELLER_AUTOMATION_WORKFLOW_ID } from '../seller-automation.types'
 
+const cls = (...tokens: Array<string | false | null | undefined>) =>
+  tokens.filter(Boolean).join(' ')
+
 const STATUS_CLASS: Record<SellerExecutionStatus, string> = {
   waiting: 'is-waiting',
   running: 'is-running',
@@ -331,6 +334,23 @@ export const SellerAutomationStudioPanel = ({
 
       {error && <div className="wfs2-seller-automation__error"><Icon name="alert" /> {error}</div>}
       {loading && <div className="wfs2-seller-automation__muted">Loading seller automation skeleton…</div>}
+
+      {steps.length > 0 ? (
+        <div className="wfs2-seller-automation__timeline" aria-label="Live execution timeline">
+          {steps.map((step) => (
+            <button
+              key={step.id}
+              type="button"
+              className={cls('wfs2-seller-automation__timeline-item', STATUS_CLASS[step.execution_status])}
+              onClick={() => void openInspector(step)}
+            >
+              <span className="wfs2-seller-automation__timeline-status">{step.execution_status}</span>
+              <strong>{step.action_key}</strong>
+              <em>{step.duration_ms != null ? `${step.duration_ms}ms` : step.started_at}</em>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="wfs2-seller-automation__layout">
         <div className="wfs2-seller-automation__canvas-wrap">

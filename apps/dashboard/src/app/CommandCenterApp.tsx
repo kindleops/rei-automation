@@ -28,6 +28,9 @@ import {
   resolveMobileNavTab,
   type MobileNavTab,
 } from '../modules/mobile/mobile-nav-routes'
+import { useMobileInboxBadge } from '../modules/mobile/useMobileInboxBadge'
+import { MobileCommandFab } from '../modules/mobile/MobileCommandFab'
+import { MobileSettingsSheet } from '../modules/mobile/MobileSettingsSheet'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -171,7 +174,9 @@ const GlobalNotificationShell = ({
   onOpenSearch: () => void
 }) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
+  const inboxUnreadBadge = useMobileInboxBadge()
   const showGlobalBell = routePath !== '/inbox' && !isMobile
   const mobileNavTab = resolveMobileNavTab(routePath)
 
@@ -187,10 +192,18 @@ const GlobalNotificationShell = ({
   const moreItems = useMemo(
     () => MOBILE_MORE_ROUTES.map((item) => ({
       ...item,
-      active: routePath === item.path,
+      active: item.path !== '__settings__' && routePath === item.path,
     })),
     [routePath],
   )
+
+  const handleMoreNavigate = useCallback((path: string) => {
+    if (path === '__settings__') {
+      setSettingsOpen(true)
+      return
+    }
+    pushRoutePath(path)
+  }, [])
 
   return (
     <>
@@ -215,6 +228,7 @@ const GlobalNotificationShell = ({
         <>
           <MobileBottomNav
             activeTab={moreSheetOpen ? 'more' : mobileNavTab}
+            inboxBadge={inboxUnreadBadge}
             notificationBadge={unreadCount}
             onNavigate={handleMobileNavigate}
           />
@@ -223,10 +237,14 @@ const GlobalNotificationShell = ({
             items={moreItems}
             notificationBadge={unreadCount}
             onClose={() => onMoreSheetChange(false)}
-            onNavigate={pushRoutePath}
+            onNavigate={handleMoreNavigate}
             onOpenSearch={onOpenSearch}
             onOpenNotifications={() => setNotifCenterOpen(true)}
           />
+          <MobileSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+          {routePath !== '/inbox' && routePath !== '/conversation' && routePath !== '/' ? (
+            <MobileCommandFab onOpenSearch={onOpenSearch} />
+          ) : null}
         </>
       ) : null}
     </>

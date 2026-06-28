@@ -93,6 +93,7 @@ import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import { MobileThreadHeader } from '../mobile/MobileThreadHeader'
+import { publishMobileInboxBadge } from '../mobile/mobile-inbox-bridge'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
@@ -634,6 +635,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     sourceMode,
     setSourceMode
   } = useInboxData({ paused: messagesLoading })
+  useEffect(() => {
+    publishMobileInboxBadge(data.unreadCount ?? 0)
+  }, [data.unreadCount])
   const { user, loading: authLoading, signOut } = useAuth()
   const { isMobile } = useBreakpoint()
   const DEV = Boolean(import.meta.env.DEV)

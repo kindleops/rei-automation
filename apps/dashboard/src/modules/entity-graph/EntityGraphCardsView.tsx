@@ -30,7 +30,7 @@ function primaryMetric(tab: EntityGraphTab, result: EntitySearchResult): string 
 
 export function EntityGraphCardsView({ tab, results, selectedEntity, compact, onSelect }: Props) {
   return (
-    <div className={`eg-card-grid${compact ? ' is-compact' : ''}`}>
+    <div className={`eg-card-grid eg-mobile-cards${compact ? ' is-compact' : ''}`}>
       {results.map((result) => {
         const d = result.details ?? {}
         const isSelected = resultMatchesSelection(result, selectedEntity)

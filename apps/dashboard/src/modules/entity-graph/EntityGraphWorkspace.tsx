@@ -36,6 +36,7 @@ import { EntityGraphHeader } from './EntityGraphHeader'
 import { EntityGraphInspector } from './EntityGraphInspector'
 import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
 import { EntityGraphTableView } from './EntityGraphTableView'
+import { useBreakpoint } from '../mobile/useBreakpoint'
 import './entity-graph.css'
 
 type LayoutMode = 'peek' | 'explorer' | 'workspace' | 'command'
@@ -82,6 +83,7 @@ export function EntityGraphWorkspace({
   onSelectThreadKey,
 }: EntityGraphWorkspaceProps) {
   const layoutMode = resolveLayoutMode(paneWidth)
+  const { isMobile } = useBreakpoint()
   const initialWorkspace = useMemo(() => readEntityGraphWorkspaceState(), [])
 
   const [activeTab, setActiveTab] = useState<EntityGraphTab>(initialWorkspace.tab)
@@ -380,7 +382,7 @@ export function EntityGraphWorkspace({
     [actionContext, matchedDossier?.threads?.length],
   )
 
-  const effectiveVisualMode: EntityGraphVisualMode = layoutMode === 'peek' ? 'cards' : visualMode
+  const effectiveVisualMode: EntityGraphVisualMode = isMobile || layoutMode === 'peek' ? 'cards' : visualMode
   const showGraphMain = effectiveVisualMode === 'graph'
   const showList = true
   const listCompact = showGraphMain

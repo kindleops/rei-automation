@@ -41,6 +41,7 @@ export const MOBILE_MORE_ROUTES: Array<{
   { path: '/closing-desk', label: 'Closing Desk', description: 'S6–S10 operations', icon: 'file-text' },
   { path: '/deal-intelligence', label: 'Deal Intelligence', description: 'Property dossier', icon: 'target' },
   { path: '/analytics', label: 'Analytics', description: 'KPI intelligence', icon: 'stats' },
+  { path: '__settings__', label: 'Settings', description: 'Theme & preferences', icon: 'settings' },
 ]
 
 export const MOBILE_TAB_ROUTES: Record<Exclude<MobileNavTab, 'more'>, string> = {

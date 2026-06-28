@@ -14,6 +14,12 @@ import App from './App.tsx'
 // Apply persisted theme+accent to <html> before React renders (prevents FOUC)
 applyThemeToDOM()
 
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}
+
 // StrictMode intentionally double-mounts in dev, which aborts inbox fetches on
 // the first mount and causes remount churn. Disabled during inbox stabilization.
 createRoot(document.getElementById('root')!).render(

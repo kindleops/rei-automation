@@ -2942,4 +2942,50 @@
   .wfs2-seller-automation__history ul {
     max-height: 200px;
   }
+
+  .wfs2-seller-automation__timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    max-height: 34vh;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--wfs2-border);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wfs2-seller-automation__timeline-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 48px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--wfs2-border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--wfs2-text);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .wfs2-seller-automation__timeline-item strong {
+    font-size: 0.74rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wfs2-seller-automation__timeline-status {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
+  }
+
+  .wfs2-seller-automation__timeline-item em {
+    font-size: 0.62rem;
+    font-style: normal;
+    color: var(--wfs2-muted);
+  }
 }

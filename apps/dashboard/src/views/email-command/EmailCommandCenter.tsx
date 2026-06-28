@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { Icon } from '../../shared/icons'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { useMobileKeyboardInset } from '../../modules/mobile/useMobileKeyboardInset'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
 import {
   getEmailOverview,
@@ -242,6 +244,8 @@ const FOLDERS: { id: InboxFolder; label: string }[] = [
 ]
 
 const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
+  const { isMobile } = useBreakpoint()
+  const keyboardInset = useMobileKeyboardInset(isMobile)
   const [folder, setFolder] = useState<InboxFolder>('all')
   const [threads, setThreads] = useState<EmailThread[]>([])
   const [activeThread, setActiveThread] = useState<EmailThreadDetail | null>(null)
@@ -267,8 +271,10 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
     return acc
   }, {} as any)
 
+  const showMobileBack = isMobile && Boolean(activeThread)
+
   return (
-    <div className={cls('ecc__inbox', activeThread && 'is-thread-open')}>
+    <div className={cls('ecc__inbox', activeThread && 'is-thread-open', isMobile && 'is-mobile')}>
       <div className="ecc__inbox-sidebar">
         <div className="ecc__folder-tabs">
           {FOLDERS.map((f) => (
@@ -323,7 +329,7 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
       ) : activeThread ? (
         <div className="ecc__thread-panel">
           <div className="ecc__thread-panel-header">
-            {['25', '50'].includes(paneWidth) && (
+            {(showMobileBack || ['25', '50'].includes(paneWidth)) && (
               <button
                 className="ecc__btn ecc__back-btn"
                 onClick={() => setActiveThread(null)}
@@ -404,7 +410,10 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
             </div>
           )}
 
-          <div className="ecc__reply-composer">
+          <div
+            className={cls('ecc__reply-composer', isMobile && keyboardInset > 0 && 'is-keyboard-open')}
+            style={isMobile && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}
+          >
             <textarea
               placeholder="Type a reply… (manual send backend not yet connected)"
               value={replyText}

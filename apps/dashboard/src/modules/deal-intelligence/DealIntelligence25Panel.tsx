@@ -32,6 +32,8 @@ import {
   normalizeDisposition,
 } from '../../domain/lead-state/universal-lead-state-registry'
 import './deal-intelligence-25.css'
+import { useBreakpoint } from '../mobile/useBreakpoint'
+import { MobileDealIntelligenceNav, type DealIntelligenceMobileSection } from '../mobile/MobileDealIntelligenceNav'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 const has = (v: unknown) => v !== null && v !== undefined && v !== ''
@@ -245,10 +247,13 @@ export const DealIntelligence25Panel = ({
     threadKey, propertyId, prospectId, masterOwnerId, canonicalE164,
   })
 
+  const { isMobile } = useBreakpoint()
+  const [mobileSection, setMobileSection] = useState<DealIntelligenceMobileSection>('overview')
   const [mediaTab, setMediaTab] = useState<MediaTab>('street')
   const [showAllComps, setShowAllComps] = useState(false)
   const [addrCopied, setAddrCopied] = useState(false)
   const [activityAsc, setActivityAsc] = useState(false)
+  const showDi = (section: DealIntelligenceMobileSection) => !isMobile || mobileSection === section
 
   const address = dossier?.property?.full_address || fallbackAddress || null
   const links = useMemo(() => buildPropertyExternalLinks(address), [address])
@@ -344,7 +349,12 @@ export const DealIntelligence25Panel = ({
   const contactabilityMeta = contactabilityCode ? CONTACTABILITY_META[contactabilityCode] : null
 
   return (
-    <div className={cls('nx-deal-compact-shell', engineRunning && 'is-engine-running')}>
+    <div className={cls('nx-deal-compact-shell', engineRunning && 'is-engine-running', isMobile && 'is-mobile-di')}>
+      {isMobile ? (
+        <MobileDealIntelligenceNav active={mobileSection} onChange={setMobileSection} />
+      ) : null}
+      {showDi('overview') ? (
+      <>
       <div className="nx-di25-media">
         <div className="nx-di25-media__tabs" role="tablist">
           <button type="button" role="tab" aria-selected={mediaTab === 'street'} className={cls('nx-di25-media__tab', mediaTab === 'street' && 'is-active')} onClick={() => setMediaTab('street')}>Street View</button>
@@ -396,7 +406,11 @@ export const DealIntelligence25Panel = ({
           </div>
         ) : null}
       </section>
+      </>
+      ) : null}
 
+      {showDi('property') ? (
+      <>
       <section className="nx-di25-layer">
         <header className="nx-di25-layer__head"><span>Property Snapshot</span></header>
         <div className="nx-di25-snap-grid">
@@ -416,7 +430,6 @@ export const DealIntelligence25Panel = ({
         ) : null}
         <EquityDebtBar equity={snap?.equity_amount} loan={snap?.total_loan_balance} />
       </section>
-
       <section className="nx-di25-layer is-baseline">
         <header className="nx-di25-layer__head"><span>Baseline Property Intelligence</span></header>
         <BaselineHero
@@ -426,7 +439,10 @@ export const DealIntelligence25Panel = ({
           distress={baseline?.distress_score}
         />
       </section>
+      </>
+      ) : null}
 
+      {showDi('deal') ? (
       <section className="nx-di25-layer is-engine">
         <header className="nx-di25-layer__head">
           <span>Full Acquisition Decision Engine</span>
@@ -525,8 +541,9 @@ export const DealIntelligence25Panel = ({
         ) : null}
         </div>
       </section>
+      ) : null}
 
-      {isMultifamily && dossier?.multifamily?.status === 'available' ? (
+      {showDi('property') && isMultifamily && dossier?.multifamily?.status === 'available' ? (
         <section className="nx-di25-layer">
           <header className="nx-di25-layer__head"><span>Multifamily Intelligence</span></header>
           <MetricGrid>
@@ -537,13 +554,16 @@ export const DealIntelligence25Panel = ({
         </section>
       ) : null}
 
+      {showDi('overview') ? (
       <section className="nx-di25-strip">
         <div><span>Buyer Market</span><strong>{buyerSignal}</strong></div>
         <div><span>Confidence</span><strong>{engineAvailable && engine.confidence != null ? fmtDiPct(Number(engine.confidence)) : '—'}</strong></div>
         <div><span>Comps</span><strong>{qual?.candidates_found != null ? `${qual.weighted_usable ?? 0} / ${qual.candidates_found}` : '—'}</strong></div>
         <div><span>Strategy</span><strong>{engineAvailable ? humanizeEnum(String(engine.best_strategy || '')) : 'Run Engine'}</strong></div>
       </section>
+      ) : null}
 
+      {showDi('comps') ? (
       <DetailSection title="Comparable Sales" defaultOpen>
         {comps?.label ? <p className="nx-di25-muted-note nx-di25-warning">{comps.label}</p> : null}
         {qual ? (
@@ -569,8 +589,9 @@ export const DealIntelligence25Panel = ({
           </button>
         ) : null}
       </DetailSection>
+      ) : null}
 
-      {convo?.status === 'available' ? (
+      {showDi('seller') && convo?.status === 'available' ? (
         <DetailSection title="Conversation Intelligence" defaultOpen>
           <MetricGrid>
             <FieldRow label="Reply Intent" value={humanizeEnum(String(convo.reply_intent || convo.latest_intent || ''))} />
@@ -606,6 +627,8 @@ export const DealIntelligence25Panel = ({
         </DetailSection>
       ) : null}
 
+      {showDi('seller') ? (
+      <>
       <DetailSection title="Master Owner">
         <MetricGrid>
           <FieldRow label="Owner" value={fmtDiText(owner?.display_name)} full />
@@ -615,7 +638,6 @@ export const DealIntelligence25Panel = ({
           <FieldRow label="Properties" value={owner?.property_count != null ? String(owner.property_count) : null} />
         </MetricGrid>
       </DetailSection>
-
       <DetailSection title="Prospect Intelligence">
         <MetricGrid>
           <FieldRow label="Name" value={fmtDiText(prospect?.name)} full />
@@ -640,7 +662,10 @@ export const DealIntelligence25Panel = ({
           <div className="nx-di25-flags">{personFlags.map((f) => <span key={f} className="nx-di25-flag">{f}</span>)}</div>
         ) : null}
       </DetailSection>
+      </>
+      ) : null}
 
+      {showDi('contact') ? (
       <DetailSection title="Phone Intelligence">
         {contactabilityMeta ? (
           <div
@@ -672,8 +697,9 @@ export const DealIntelligence25Panel = ({
           <FieldRow label="Suppressed" value={phone?.suppressed ? `Yes${phone?.suppression_reason ? ` · ${phone.suppression_reason}` : ''}` : phone?.suppressed === false ? 'No' : null} full />
         </MetricGrid>
       </DetailSection>
+      ) : null}
 
-      {dossier?.property_detail ? Object.entries(dossier.property_detail).map(([group, fields]) => (
+      {showDi('property') && dossier?.property_detail ? Object.entries(dossier.property_detail).map(([group, fields]) => (
         Object.keys(fields).length ? (
           <DetailSection key={group} title={group.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}>
             <MetricGrid>
@@ -690,6 +716,7 @@ export const DealIntelligence25Panel = ({
         ) : null
       )) : null}
 
+      {showDi('activity') ? (
       <DetailSection title="Activity Timeline">
         <button type="button" className="nx-di25-link-btn nx-di25-sort-btn" onClick={() => setActivityAsc((v) => !v)}>
           {activityAsc ? 'Oldest first' : 'Newest first'}
@@ -706,8 +733,9 @@ export const DealIntelligence25Panel = ({
           </div>
         ))}
       </DetailSection>
+      ) : null}
 
-      {dossier?.census?.status === 'pending' ? (
+      {showDi('property') && dossier?.census?.status === 'pending' ? (
         <DetailSection title="Census">
           <p className="nx-di25-muted-note">Census enrichment pending</p>
         </DetailSection>

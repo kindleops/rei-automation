@@ -630,20 +630,31 @@ function resolveBackendProxyTarget(env: Record<string, string>, mode: string): s
 
 const pwaManifestPlugin = (): Plugin => {
   const manifestPath = fileURLToPath(new URL('./manifest.webmanifest', import.meta.url))
+  const swPath = fileURLToPath(new URL('./sw.js', import.meta.url))
   const serveManifest = (_req: unknown, res: { setHeader: (k: string, v: string) => void; end: (b: string) => void }) => {
     res.setHeader('Content-Type', 'application/manifest+json')
     res.end(fs.readFileSync(manifestPath, 'utf8'))
+  }
+  const serveSw = (_req: unknown, res: { setHeader: (k: string, v: string) => void; end: (b: string) => void }) => {
+    res.setHeader('Content-Type', 'application/javascript')
+    res.end(fs.readFileSync(swPath, 'utf8'))
   }
   return {
     name: 'pwa-manifest',
     configureServer(server) {
       server.middlewares.use('/manifest.webmanifest', serveManifest)
+      server.middlewares.use('/sw.js', serveSw)
     },
     generateBundle() {
       this.emitFile({
         type: 'asset',
         fileName: 'manifest.webmanifest',
         source: fs.readFileSync(manifestPath, 'utf8'),
+      })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sw.js',
+        source: fs.readFileSync(swPath, 'utf8'),
       })
     },
   }

@@ -19,6 +19,8 @@ import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox
 import { isInboxDebugEnabled } from '../inbox.adapter'
 import { InboxStreetViewThumb } from './InboxStreetViewThumb'
 import { VirtualizedInboxList } from './VirtualizedInboxList'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { MobileSwipeThreadCard } from '../../mobile/MobileSwipeThreadCard'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -1226,7 +1228,7 @@ const _DealSnapshotPlaceholder = ({ thread, decision }: any) => {
 }
 
 export const InboxSidebar = ({
-  threads, selectedId, activeViewFilter, onSelect, savedPreset, onApplySavedPreset,
+  threads, selectedId, activeViewFilter, onSelect, onThreadAction, savedPreset, onApplySavedPreset,
   viewCounts, onOpenAdvancedFilters, activeFilterChips = [], activeFilterCount = 0,
   onRemoveFilterChip, onClearFilters, onRetryLoad, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
@@ -1239,6 +1241,7 @@ export const InboxSidebar = ({
 }: InboxSidebarProps) => {
   void _realtimeStatus
   void _refreshMode
+  const { isMobile } = useBreakpoint()
   const groupsRef = useRef<HTMLDivElement | null>(null)
   const catNavRef = useRef<HTMLDivElement | null>(null)
   // Stores scroll position before a Load More so it can be restored after new rows paint.
@@ -1552,8 +1555,9 @@ export const InboxSidebar = ({
   )
 
   // Must match min-heights in inbox-workspace-layout.css / inbox-elite-ui.css for each inboxMode.
-  const virtualRowHeight =
-    inboxMode === 'full100' ? 96
+  const virtualRowHeight = isMobile
+    ? 132
+    : inboxMode === 'full100' ? 96
     : inboxMode === 'rail25' ? 108
     : inboxMode === 'review50' ? 116
     : inboxMode === 'ops75' ? 124
@@ -1566,6 +1570,17 @@ export const InboxSidebar = ({
     const onThreadSelect = (id: string) => {
       console.log('[InboxUX] select thread', { threadKey: thread.threadKey || thread.id, activeFilter: activeViewFilter })
       onSelect(id)
+    }
+    if (isMobile) {
+      return (
+        <MobileSwipeThreadCard
+          thread={thread}
+          decision={decision}
+          selected={selectedId === thread.id}
+          onSelect={onThreadSelect}
+          onAction={onThreadAction}
+        />
+      )
     }
     if (inboxMode === 'full100') {
       return (
@@ -1586,13 +1601,13 @@ export const InboxSidebar = ({
         onSelect={onThreadSelect}
       />
     )
-  }, [activeViewFilter, decisionMap, inboxMode, onSelect, selectedId])
+  }, [activeViewFilter, decisionMap, inboxMode, isMobile, onSelect, onThreadAction, selectedId])
 
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
-        <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table', shouldVirtualizeList && 'is-virtualized')}>
-          {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
+        <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && !isMobile && 'nx-cc-table', isMobile && 'is-mobile-cards', shouldVirtualizeList && 'is-virtualized')}>
+          {inboxMode === 'full100' && !isMobile && displayedActiveThreads.length > 0 && (
             <div className="nx-cc-table__header" aria-hidden="true">
               <span className="nx-cc-table__th nx-cc-table__th--media" />
               <span className="nx-cc-table__th nx-cc-table__th--seller">Seller / Property</span>
