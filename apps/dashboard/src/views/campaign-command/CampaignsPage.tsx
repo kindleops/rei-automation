@@ -45,6 +45,7 @@ import type {
   SuppressionCheck,
   CampaignCommandState,
 } from './campaigns.types'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import './campaigns.css'
 import './campaign-command.css'
 
@@ -1320,6 +1321,7 @@ export const CampaignListPanel = ({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export const CampaignsPage = () => {
+  const { isMobile } = useBreakpoint()
   const [model, setModel] = useState<CampaignModel | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1485,7 +1487,7 @@ export const CampaignsPage = () => {
   }
 
   return (
-    <div className="ccc ccc--glass">
+    <div className={cls('ccc', 'ccc--glass', isMobile && 'is-mobile', isMobile && selectedCampaign && 'is-detail-open')}>
       {/* Header */}
       <div className="ccc__header">
         <div className="ccc__brand">

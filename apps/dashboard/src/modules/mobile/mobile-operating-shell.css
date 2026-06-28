@@ -491,15 +491,49 @@
   }
 
   /* Campaign command */
-  .cc-campaign-shell {
+  .ccc.is-mobile .ccc__body {
     flex-direction: column !important;
+    min-height: 0 !important;
   }
 
-  .cc-campaign-sidebar {
+  .ccc.is-mobile .ccc__list-panel {
     width: 100% !important;
-    max-height: 38vh !important;
+    max-height: none !important;
+    flex: 1 1 auto !important;
     border-right: none !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  }
+
+  .ccc.is-mobile.is-detail-open .ccc__list-panel {
+    display: none !important;
+  }
+
+  .ccc.is-mobile .ccc__detail-panel {
+    width: 100% !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+  }
+
+  .ccc.is-mobile:not(.is-detail-open) .ccc__detail-panel,
+  .ccc.is-mobile:not(.is-detail-open) .ccc__intel-rail {
+    display: none !important;
+  }
+
+  .ccc.is-mobile .ccc__intel-rail {
+    display: none !important;
+  }
+
+  .ccc.is-mobile .ccc__header-actions .ccc-btn {
+    min-height: 44px;
+  }
+
+  /* Map mobile dock */
+  .nx-icm.is-mobile-map .nx-icm__toolbar {
+    padding: 6px 8px !important;
+  }
+
+  .nx-icm.is-mobile-map.nx-icm--compact .nx-map-card,
+  .nx-icm.is-mobile-map.nx-icm--mini .nx-map-card {
+    bottom: var(--nx-mobile-nav-height) !important;
   }
 
   /* Email command */

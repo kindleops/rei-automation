@@ -11,6 +11,7 @@ import type { MapSourceMode } from '../../domain/inbox/inbox-layout-state'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
 import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { SellerIntelligenceCard } from './components/SellerIntelligenceCard'
 import {
   defaultBuyerMapFilters,
@@ -3943,7 +3944,14 @@ export function InboxCommandMap({
     soundFx: 'off',
     mapAtmosphere: 'clean',
   })
-  const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>('full')
+  const { isMobile } = useBreakpoint()
+  const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>(() => (
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'compact' : 'full'
+  ))
+
+  useEffect(() => {
+    if (isMobile && dockTier === 'full') setDockTier('compact')
+  }, [isMobile, dockTier])
   const [mapStyleMode, setMapStyleMode] = useState<MapStyleMode>(initialMapStyleMode)
   const [baseStyleLoading, setBaseStyleLoading] = useState(false)
   const [styleFallbackWarning, setStyleFallbackWarning] = useState<string | null>(null)
@@ -8301,6 +8309,7 @@ export function InboxCommandMap({
         isUltrawide && 'is-ultrawide',
         liveActivitySettings.displayMode === 'hidden' && 'is-live-activity-hidden',
         liveActivitySettings.displayMode === 'docked' && 'is-live-activity-docked',
+        isMobile && 'is-mobile-map',
       )}
     >
       {!commandMode && <div ref={controlsRef} className="nx-icm__toolbar">
