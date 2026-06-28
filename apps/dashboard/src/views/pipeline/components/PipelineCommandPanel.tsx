@@ -26,6 +26,7 @@ interface PipelineCommandPanelProps {
   hydrating?: boolean
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
   onRefreshEngine?: (id: string) => void | Promise<void>
+  onOpenSellerAutomation?: (opportunity: PipelineOpportunity) => void
 }
 
 const TABS: Array<{ id: PanelTab; label: string }> = [
@@ -121,6 +122,7 @@ export function PipelineCommandPanel({
   hydrating,
   onAction,
   onRefreshEngine,
+  onOpenSellerAutomation,
 }: PipelineCommandPanelProps) {
   const [tab, setTab] = useState<PanelTab>('overview')
   const engineRunId = opp.acquisition_engine_run_id
@@ -252,6 +254,11 @@ export function PipelineCommandPanel({
             <Row label="Queue" value={(opp.queue_state || 'not_queued').replace(/_/g, ' ')} />
             <Row label="Follow-Up" value={opp.next_follow_up_at ? formatRelativeTime(opp.next_follow_up_at) : (opp.next_action_due ? formatRelativeTime(opp.next_action_due) : 'None scheduled')} />
             <Row label="Follow-Up Reason" value={opp.follow_up_reason || '—'} />
+            {onOpenSellerAutomation && (
+              <button type="button" className="plv-action-btn" onClick={() => onOpenSellerAutomation(opp)}>
+                Open Live Automation
+              </button>
+            )}
             {opp.blocker && <p className="plv-command-panel__blocker">{opp.blocker}</p>}
           </>
         )}

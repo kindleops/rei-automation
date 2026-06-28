@@ -47,12 +47,27 @@ function VirtualizedInboxListInner<T>({
 
   useEffect(() => {
     if (!containerNode || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver((entries) => {
-      const nextHeight = Math.max(240, Math.floor(entries[0]?.contentRect.height ?? 0))
+
+    const resolveHeight = () => {
+      const self = Math.floor(containerNode.getBoundingClientRect().height)
+      const parent = Math.floor(containerNode.parentElement?.getBoundingClientRect().height ?? 0)
+      const scrollHost = containerNode.closest('.nx-sidebar-rebuilt__threads-scroll')
+      const host = Math.floor(scrollHost?.getBoundingClientRect().height ?? 0)
+      return Math.max(240, self, parent, host)
+    }
+
+    const applyHeight = () => {
+      const nextHeight = resolveHeight()
       setListHeight((current) => (current === nextHeight ? current : nextHeight))
-    })
+    }
+
+    const observer = new ResizeObserver(() => applyHeight())
     observer.observe(containerNode)
-    setListHeight(Math.max(240, Math.floor(containerNode.clientHeight || 480)))
+    if (containerNode.parentElement) observer.observe(containerNode.parentElement)
+    const scrollHost = containerNode.closest('.nx-sidebar-rebuilt__threads-scroll')
+    if (scrollHost) observer.observe(scrollHost)
+
+    applyHeight()
     return () => observer.disconnect()
   }, [containerNode])
 

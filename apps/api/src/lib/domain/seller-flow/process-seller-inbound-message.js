@@ -542,6 +542,32 @@ export async function processSellerInboundMessage({
     }
   );
 
+  let seller_automation_execution = null;
+  if (supabase && clean(threadKey || inboundFrom)) {
+    try {
+      const { recordSellerInboundExecutionTimeline } = await import(
+        "@/lib/domain/seller-automation/seller-automation-execution-service.js"
+      );
+      seller_automation_execution = await recordSellerInboundExecutionTimeline({
+        supabaseClient: supabase,
+        threadKey: threadKey || inboundFrom,
+        propertyId,
+        participantId: prospectId || ownerId,
+        inboundEventId,
+        decision,
+        contract,
+        execution: execution_view.execution,
+        followUp: execution_view.follow_up,
+      });
+    } catch (timeline_error) {
+      runtimeDeps.warn("[SELLER_AUTOMATION_TIMELINE_FAILED]", {
+        thread_key: threadKey,
+        inbound_event_id: inboundEventId,
+        error: timeline_error?.message || "timeline_failed",
+      });
+    }
+  }
+
   return {
     ok: true,
     classification,
@@ -569,6 +595,7 @@ export async function processSellerInboundMessage({
       duplicate_suppressed: Boolean(execution?.duplicate_suppressed),
       queue_row_id: execution?.queue_row_id || null,
     },
+    seller_automation_execution,
   };
 }
 

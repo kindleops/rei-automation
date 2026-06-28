@@ -16,6 +16,7 @@ export type EntityGraphRouteActionOptions = {
   onOpenThread?: (context: UniversalEntityContext) => void
   onOpenConversationDraft?: (context: UniversalEntityContext) => void
   onOpenDealIntelligence?: (context: UniversalEntityContext) => void
+  onOpenSellerAutomation?: (context: UniversalEntityContext) => void
   onOpenMap?: (context: UniversalEntityContext) => void
   onOpenCompIntelligence?: () => void
   onOpenBuyerMatch?: () => void
@@ -61,6 +62,14 @@ export function routeEntityGraphAction(
     syncContext()
     pushRoutePath('/deal-intelligence')
     return true
+  }
+
+  if (action === 'open_seller_automation' || action === 'open_workflow_studio') {
+    if (options.onOpenSellerAutomation) {
+      options.onOpenSellerAutomation(context)
+      return true
+    }
+    return false
   }
 
   if (action === 'show_on_map' || action === 'open_in_map') {

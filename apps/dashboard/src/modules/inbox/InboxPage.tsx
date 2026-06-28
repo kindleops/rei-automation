@@ -94,6 +94,7 @@ import { ThreadDebugModal } from './components/ThreadDebugModal'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
+import { openSellerAutomationStudioFromEntity } from '../../views/workflow-studio/v2/workflow-studio-routing'
 import {
   defaultBuyerMapFilters,
   useBuyerCommandData,
@@ -242,6 +243,10 @@ const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligen
 const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
 const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.comp.v4') !== '0')
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
+const BuyerMatchV4Workspace = lazy(() => import('./buyer-match-v4/BuyerMatchV4Workspace').then((m) => ({ default: m.BuyerMatchV4Workspace })))
+/** DEV: Buyer Match V4 is default in dev. Opt out with localStorage `nx.buyer.v4` = '0'. */
+const BUYER_MATCH_V4_ENABLED =
+  Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.buyer.v4') !== '0')
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
@@ -1789,6 +1794,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setWorkspaceWidthOverrides({})
     setSelectedWorkspaceViews(['deal_intelligence'])
   }, [threads])
+
+  const handleOpenSellerAutomation = useCallback((threadId?: string | null) => {
+    const match = threadId
+      ? threads.find((thread) => thread.id === threadId || (thread.threadKey || thread.id) === threadId)
+      : selectedRef.current
+    const thread = match || selectedRef.current
+    if (!thread) return
+    openSellerAutomationStudioFromEntity({
+      propertyId: thread.propertyId || canonicalSelectedContext?.identity?.property_id || null,
+      prospectId: thread.prospectId || canonicalSelectedContext?.identity?.prospect_id || null,
+      masterOwnerId: thread.masterOwnerId || canonicalSelectedContext?.identity?.master_owner_id || null,
+      threadKey: thread.threadKey || thread.id,
+      preservePath: true,
+    })
+    setWorkspaceWidthOverrides({})
+    setSelectedWorkspaceViews(['workflow_studio'])
+  }, [canonicalSelectedContext, threads])
 
   useEffect(() => {
     setLayoutState((current) => {
@@ -3502,6 +3524,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         else if (context.propertyId) setActiveContext({ propertyId: context.propertyId, ...activeInboxFromUniversalContext(context, 'list') }, { preserveCurrentViews: true })
         setSelectedWorkspaceViews(['deal_intelligence'])
       },
+      onOpenSellerAutomation: () => {
+        if (threadMatch) handleOpenSellerAutomation(threadMatch.id)
+        else {
+          openSellerAutomationStudioFromEntity({
+            propertyId: context.propertyId,
+            prospectId: context.prospectId,
+            masterOwnerId: context.masterOwnerId,
+            threadKey: context.threadKey,
+            preservePath: true,
+          })
+          setSelectedWorkspaceViews(['workflow_studio'])
+        }
+      },
       onOpenMap: () => setSelectedWorkspaceViews(['command_map']),
       onOpenCompIntelligence: () => setSelectedWorkspaceViews(['comp_intelligence']),
       onOpenBuyerMatch: () => setSelectedWorkspaceViews(['buyer_match']),
@@ -3509,7 +3544,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (!routed) {
       if (DEV) console.warn('[InboxPage] unhandled entity graph action', action)
     }
-  }, [focusWorkspaceView, handleOpenDealIntelligence, handleSelect, setActiveContext, threads])
+  }, [focusWorkspaceView, handleOpenDealIntelligence, handleOpenSellerAutomation, handleSelect, setActiveContext, threads])
 
   useEffect(() => {
     if (!selected) return
@@ -4518,6 +4553,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
           onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
           onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
+          onOpenSellerAutomation={() => handleOpenSellerAutomation(workspaceThread?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
           messages={displayedMessages}
           panelMode={
@@ -4554,6 +4590,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               handleFocusWorkspaceView('sms_thread')
             }}
             onOpenDealIntelligence={handleOpenDealIntelligence}
+            onOpenSellerAutomation={(opp) => {
+              openSellerAutomationStudioFromEntity({
+                propertyId: opp.primary_property_id,
+                prospectId: opp.prospect_id,
+                masterOwnerId: opp.master_owner_id,
+                threadKey: opp.primary_thread_key,
+                preservePath: true,
+              })
+              setSelectedWorkspaceViews(['workflow_studio'])
+            }}
             onAction={handleOperatorAction}
           />
         </WorkspaceSuspense>,
@@ -4629,8 +4675,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'buyer_match') {
       return (
-        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`, BUYER_MATCH_V4_ENABLED && 'is-buyer-match-v4')}>
           <WorkspaceSuspense>
+          {BUYER_MATCH_V4_ENABLED ? (
+            <BuyerMatchV4Workspace
+              paused={heavyLoadPaused}
+              dealContext={canonicalSelectedContext}
+              paneWidth={paneWidth}
+              onOpenFull={() => handleFocusWorkspaceView('buyer_match')}
+            />
+          ) : (
             <BuyerMatchWorkspace
               paused={heavyLoadPaused}
               dealContext={canonicalSelectedContext}
@@ -4654,6 +4708,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               paneWidth={paneWidth}
               apiBase="/api/cockpit"
             />
+          )}
           </WorkspaceSuspense>
         </section>
       )

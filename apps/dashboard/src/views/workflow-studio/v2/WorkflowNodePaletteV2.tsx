@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { DragEvent } from 'react'
 import type { IconName } from '../../../shared/icons'
 import { workflowNodeCategories, type WorkflowNodeLibraryItem } from '../WorkflowList'
+import { loadSellerAutomationRegistry } from '../sellerAutomation.adapter'
 import { listNodeTypes } from '../workflowStudio.adapter'
 import type { WorkflowNodeTypeSchema } from '../workflow.types'
 
@@ -56,9 +57,15 @@ interface WorkflowNodePaletteV2Props {
   onAddNode: (item: WorkflowNodeLibraryItem) => void
   disabled?: boolean
   offlineDemo?: boolean
+  sellerAutomationMode?: boolean
 }
 
-export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false }: WorkflowNodePaletteV2Props) => {
+export const WorkflowNodePaletteV2 = ({
+  onAddNode,
+  disabled,
+  offlineDemo = false,
+  sellerAutomationMode = false,
+}: WorkflowNodePaletteV2Props) => {
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [categories, setCategories] = useState<PaletteCategory[]>([])
@@ -68,7 +75,38 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
 
   useEffect(() => {
     let cancelled = false
-    void listNodeTypes(true)
+
+    const loadSellerRegistry = () => loadSellerAutomationRegistry()
+      .then((response) => {
+        if (cancelled) return
+        const grouped = response.categories
+        if (!grouped || !Object.keys(grouped).length) {
+          setLoadError('Seller automation registry returned empty.')
+          return
+        }
+        const next = Object.entries(grouped).map(([title, nodes]) => ({
+          title: titleCase(title),
+          items: nodes.map((node) => ({
+            label: node.display_name,
+            type: node.node_type,
+            icon: (['bolt', 'send', 'shield', 'clock', 'inbox', 'phone', 'user', 'bell'].includes(node.icon || '')
+              ? (node.icon as IconName)
+              : 'bolt'),
+            description: node.description,
+            category: node.category || title,
+          })),
+        }))
+        setCategories(next)
+        setCounts({
+          total: response.counts.total,
+          operator: response.counts.enabled,
+          internal: 0,
+        })
+        setSource('registry')
+        setLoadError('')
+      })
+
+    const loadWorkflowRegistry = () => listNodeTypes(true)
       .then((response) => {
         if (cancelled) return
         const grouped = response.categories
@@ -90,9 +128,11 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
         setSource('registry')
         setLoadError('')
       })
+
+    void (sellerAutomationMode ? loadSellerRegistry() : loadWorkflowRegistry())
       .catch((err) => {
         if (cancelled) return
-        if (offlineDemo) {
+        if (offlineDemo && !sellerAutomationMode) {
           setCategories(fallbackCategories())
           setSource('offline_demo')
           setLoadError('')
@@ -105,7 +145,7 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
     return () => {
       cancelled = true
     }
-  }, [offlineDemo])
+  }, [offlineDemo, sellerAutomationMode])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -140,7 +180,7 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
       <header className="wfs2-palette__header">
         <div>
           <span className="wfs2-palette__kicker">Node Library</span>
-          <strong>Drag or click to add</strong>
+          <strong>{sellerAutomationMode ? 'Seller-flow registry' : 'Drag or click to add'}</strong>
         </div>
         <span className="wfs2-palette__count">
           {source === 'registry'
@@ -151,7 +191,9 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
 
       <div className="wfs2-palette__source">
         {source === 'registry'
-          ? `Production registry (${counts.total} total)`
+          ? sellerAutomationMode
+            ? `Seller automation registry (${counts.total} actions)`
+            : `Production registry (${counts.total} total)`
           : source === 'offline_demo'
             ? 'Offline Demo catalog'
             : loadError || 'Registry unavailable'}
@@ -206,11 +248,11 @@ export const WorkflowNodePaletteV2 = ({ onAddNode, disabled, offlineDemo = false
                     <button
                       key={item.type}
                       type="button"
-                      className={`wfs2-palette__node is-${meta.tone}`}
-                      disabled={disabled}
-                      draggable={!disabled}
+                      className={`wfs2-palette__node is-${meta.tone}${sellerAutomationMode ? ' is-readonly' : ''}`}
+                      disabled={disabled || sellerAutomationMode}
+                      draggable={!disabled && !sellerAutomationMode}
                       onDragStart={(event) => handleDragStart(event, item)}
-                      onClick={() => onAddNode(item)}
+                      onClick={() => { if (!sellerAutomationMode) onAddNode(item) }}
                       title={item.description}
                     >
                       <span className="wfs2-palette__node-icon">{meta.icon}</span>

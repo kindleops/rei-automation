@@ -1551,7 +1551,13 @@ export const InboxSidebar = ({
     )
   )
 
-  const virtualRowHeight = inboxMode === 'full100' ? 96 : inboxMode === 'rail25' ? 56 : 72
+  // Must match min-heights in inbox-workspace-layout.css / inbox-elite-ui.css for each inboxMode.
+  const virtualRowHeight =
+    inboxMode === 'full100' ? 96
+    : inboxMode === 'rail25' ? 108
+    : inboxMode === 'review50' ? 116
+    : inboxMode === 'ops75' ? 124
+    : 108
   const shouldVirtualizeList = displayedActiveThreads.length >= 12
 
   const renderThreadRow = useCallback((thread: InboxWorkflowThread) => {

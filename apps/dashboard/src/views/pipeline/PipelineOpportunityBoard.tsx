@@ -102,6 +102,7 @@ interface PipelineOpportunityBoardProps {
   onRetryDetail?: () => void
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
+  onOpenSellerAutomation?: (opportunity: PipelineOpportunity) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
   onMoveStage: (id: string, stageId: string, reason?: string, options?: { executeNextAction?: boolean }) => Promise<void>
   onMoveStatus: (id: string, statusId: string, reason?: string) => Promise<void>
@@ -143,6 +144,7 @@ export function PipelineOpportunityBoard({
   onRetryDetail,
   onOpenCommandView,
   onOpenDealIntelligence: _onOpenDealIntelligence,
+  onOpenSellerAutomation,
   onAction,
   onMoveStage,
   onMoveStatus,
@@ -534,6 +536,7 @@ export function PipelineOpportunityBoard({
               onAction={onAction}
               onRetry={onRetryDetail}
               error={detailError}
+              onOpenSellerAutomation={onOpenSellerAutomation}
             />
           </div>
         )}
@@ -699,6 +702,7 @@ export function PipelineOpportunityBoard({
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
                 onClose={handleCloseInspector}
                 onAction={onAction}
+                onOpenSellerAutomation={onOpenSellerAutomation}
               />
             ) : (
               <div className="plv-detail-empty">

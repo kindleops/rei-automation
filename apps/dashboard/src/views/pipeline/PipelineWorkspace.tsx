@@ -31,6 +31,7 @@ interface PipelineWorkspaceProps {
   externalContext?: ActiveInboxContext
   onOpenCommandView: (threadId?: string | null) => void
   onOpenDealIntelligence: (threadId?: string | null) => void
+  onOpenSellerAutomation?: (opportunity: PipelineOpportunity) => void
   onAction: (id: string, action: string, payload?: Record<string, unknown>) => void | Promise<void>
 }
 
@@ -63,6 +64,7 @@ export function PipelineWorkspace({
   externalContext,
   onOpenCommandView,
   onOpenDealIntelligence,
+  onOpenSellerAutomation,
   onAction,
 }: PipelineWorkspaceProps) {
   const {
@@ -343,6 +345,7 @@ export function PipelineWorkspace({
       onClearSelection={handleClearSelection}
       onOpenCommandView={onOpenCommandView}
       onOpenDealIntelligence={onOpenDealIntelligence}
+      onOpenSellerAutomation={onOpenSellerAutomation}
       onAction={handleAction}
       onMoveStage={moveStage}
       onMoveStatus={moveStatus}

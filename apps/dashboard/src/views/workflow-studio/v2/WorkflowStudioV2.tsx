@@ -41,7 +41,11 @@ import {
   resolveWorkflowStudioMode,
   studioModeLabel,
 } from './workflow-studio-mode'
-import { applyUniversalContextToWorkflowStudio } from './workflow-studio-routing'
+import {
+  applyUniversalContextToWorkflowStudio,
+  useSellerAutomationStudioLocation,
+} from './workflow-studio-routing'
+import { SellerAutomationStudioPanel } from './SellerAutomationStudioPanel'
 import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
 import './workflow-studio-v2.css'
 
@@ -120,6 +124,11 @@ export const WorkflowStudioV2 = ({
   const selectedId = selected?.workflow.id ?? null
   const studioContext = useMemo(() => applyUniversalContextToWorkflowStudio(), [])
   const contextThreadKey = studioContext.thread_key ?? null
+  const { sellerAutomationMode, focus: sellerFocus } = useSellerAutomationStudioLocation()
+
+  useEffect(() => {
+    if (sellerAutomationMode) setRailSection('nodes')
+  }, [sellerAutomationMode])
 
   const refreshList = useCallback(async () => {
     const model = await loadWorkflowStudio()
@@ -592,6 +601,7 @@ export const WorkflowStudioV2 = ({
                   onAddNode={addNodeFromPalette}
                   disabled={busy || !selected || !graphMutable}
                   offlineDemo={offlineDemo}
+                  sellerAutomationMode={sellerAutomationMode}
                 />
               )}
             </div>
@@ -610,6 +620,18 @@ export const WorkflowStudioV2 = ({
         )}
 
         <div className="wfs2__canvas-host">
+          {sellerAutomationMode && (
+            <SellerAutomationStudioPanel
+              focus={{
+                propertyId: sellerFocus.propertyId,
+                participantId: sellerFocus.participantId,
+                threadId: sellerFocus.threadId ?? contextThreadKey,
+                executionId: sellerFocus.executionId,
+              }}
+              replayMode={sellerFocus.replayMode}
+            />
+          )}
+          {!sellerAutomationMode && (
           <WorkflowCanvasV2
             ref={canvasRef}
             detail={selected}
@@ -644,6 +666,7 @@ export const WorkflowStudioV2 = ({
               />
             )}
           />
+          )}
         </div>
 
         {!prefs.focusMode && !prefs.rightRailCollapsed && (

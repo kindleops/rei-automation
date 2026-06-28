@@ -1006,10 +1006,12 @@ export const WorkflowControl = ({
   thread,
   onStatusChange,
   onStageChange,
+  onOpenSellerAutomation,
 }: {
   thread: WorkflowThread
   onStatusChange: (status: InboxStatus | 'sent_message') => void
   onStageChange: (stage: SellerStage) => void
+  onOpenSellerAutomation?: () => void
 }) => {
   const [statusOpen, setStatusOpen] = useState(false)
   const [stageOpen, setStageOpen] = useState(false)
@@ -1076,6 +1078,13 @@ export const WorkflowControl = ({
         <div className="nx-workflow-control__row nx-workflow-next">
           <Icon name="spark" />
           <span>{thread.nextSystemAction}</span>
+        </div>
+      )}
+      {onOpenSellerAutomation && (
+        <div className="nx-workflow-control__row">
+          <button type="button" className="nx-intel-action-btn" onClick={onOpenSellerAutomation}>
+            <Icon name="bolt" /> Open Live Automation
+          </button>
         </div>
       )}
     </DossierCard>
@@ -2047,10 +2056,24 @@ export const ConversationPanel = ({ thread, messages }: { thread: WorkflowThread
   )
 }
 
-export const AutomationPanel = ({ thread }: { thread: WorkflowThread; intelligence: ThreadIntelligenceRecord | null }) => {
+export const AutomationPanel = ({
+  thread,
+  onOpenSellerAutomation,
+}: {
+  thread: WorkflowThread
+  intelligence: ThreadIntelligenceRecord | null
+  onOpenSellerAutomation?: () => void
+}) => {
   return (
     <div className="nx-intel-panel-grid">
       <PanelSection title="Automation Control" icon="bolt">
+        {onOpenSellerAutomation && (
+          <div className="nx-intel-panel-actions">
+            <button type="button" className="nx-intel-action-btn" onClick={onOpenSellerAutomation}>
+              <Icon name="bolt" /> Workflow Studio — Live Execution
+            </button>
+          </div>
+        )}
         <FieldGrid>
           <FieldTile label="Queue Health" value={thread.queueStatus || 'Healthy'} tone={thread.queueStatus === 'stuck' ? 'bad' : 'good'} />
           <FieldTile label="Automation Active" value={thread.automationState === 'active' ? 'Yes' : 'No'} tone={thread.automationState === 'active' ? 'good' : 'warn'} />
@@ -3726,12 +3749,14 @@ const CommandActionDock = ({
   onOpenComps,
   onOpenDossier,
   onOpenAi,
+  onOpenSellerAutomation,
   layoutMode = 'full',
 }: {
   onOpenMap: () => void
   onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
+  onOpenSellerAutomation?: () => void
   layoutMode?: ViewLayoutMode
 }) => (
   <div className={cls('nx-command-action-dock', layoutMode === 'expanded' && 'is-compact')}>
@@ -3756,6 +3781,9 @@ const CommandActionDock = ({
       <div>
         <button type="button" onClick={onOpenMap}>Open Map</button>
         <button type="button" onClick={onOpenDossier}>Open Dossier</button>
+        {onOpenSellerAutomation ? (
+          <button type="button" onClick={onOpenSellerAutomation}>Workflow Studio — Live</button>
+        ) : null}
         <button type="button" onClick={onOpenAi}>AI Assist</button>
       </div>
     </div>
@@ -5847,6 +5875,9 @@ const DealCommandDossier = ({
   onOpenComps,
   onOpenDossier,
   onOpenAi,
+  onOpenSellerAutomation,
+  onStatusChange,
+  onStageChange,
   dealContext,
 }: {
   thread: WorkflowThread
@@ -5859,6 +5890,9 @@ const DealCommandDossier = ({
   onOpenComps?: () => void
   onOpenDossier: () => void
   onOpenAi: () => void
+  onOpenSellerAutomation?: () => void
+  onStatusChange: (status: InboxStatus | 'sent_message') => void
+  onStageChange: (stage: SellerStage) => void
   dealContext?: DealContext | null
 }) => {
   return (
@@ -5875,6 +5909,12 @@ const DealCommandDossier = ({
         </div>
         <div className="nx-deal-command-dossier__decision">
           <DealDecisionStrip thread={thread} dealContext={dealContext} />
+          <WorkflowControl
+            thread={thread}
+            onStatusChange={onStatusChange}
+            onStageChange={onStageChange}
+            onOpenSellerAutomation={onOpenSellerAutomation}
+          />
         </div>
         <div className="nx-deal-command-dossier__comp">
           <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps || (() => undefined)} />
@@ -5898,7 +5938,14 @@ const DealCommandDossier = ({
       </div>
 
       <DealContextPayloadCard thread={thread} intelligence={intelligence} />
-      <CommandActionDock layoutMode={layoutMode} onOpenMap={onOpenMap} onOpenComps={onOpenComps} onOpenDossier={onOpenDossier} onOpenAi={onOpenAi} />
+      <CommandActionDock
+        layoutMode={layoutMode}
+        onOpenMap={onOpenMap}
+        onOpenComps={onOpenComps}
+        onOpenDossier={onOpenDossier}
+        onOpenAi={onOpenAi}
+        onOpenSellerAutomation={onOpenSellerAutomation}
+      />
     </div>
   )
 }
@@ -5916,6 +5963,7 @@ export interface IntelligencePanelProps {
   onOpenComps?: () => void
   onOpenDossier?: () => void
   onOpenAi?: () => void
+  onOpenSellerAutomation?: () => void
   onStatusChange: (status: InboxStatus | 'sent_message') => void
   onStageChange: (stage: SellerStage) => void
   messages: ThreadMessage[]
@@ -5934,14 +5982,13 @@ export const IntelligencePanel = ({
   onOpenComps = () => undefined,
   onOpenDossier = () => undefined,
   onOpenAi = () => undefined,
+  onOpenSellerAutomation = () => undefined,
   onStatusChange,
   onStageChange,
   messages,
 }: IntelligencePanelProps) => {
   void threadContext
   void isSuppressed
-  void onStatusChange
-  void onStageChange
 
   const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
@@ -6025,6 +6072,9 @@ export const IntelligencePanel = ({
             onOpenComps={onOpenComps}
             onOpenDossier={onOpenDossier}
             onOpenAi={onOpenAi}
+            onOpenSellerAutomation={onOpenSellerAutomation}
+            onStatusChange={onStatusChange}
+            onStageChange={onStageChange}
           />
         )}
       </div>

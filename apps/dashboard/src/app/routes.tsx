@@ -171,6 +171,20 @@ const devCompIntelligenceV4Route = defineRoute<null>({
   ),
 })
 
+const BuyerMatchV4Harness = lazy(
+  () => import('../modules/inbox/buyer-match-v4/BuyerMatchV4Harness'),
+)
+const devBuyerMatchV4Route = defineRoute<null>({
+  path: '/dev/buyer-match-v4',
+  title: 'NEXUS | Buyer Match V4 (dev)',
+  loader: async () => null,
+  render: () => (
+    <Suspense fallback={null}>
+      <BuyerMatchV4Harness />
+    </Suspense>
+  ),
+})
+
 const entityGraphRoute = defineRoute<null>({
   path: '/entity-graph',
   title: 'NEXUS | Entity Graph',
@@ -251,7 +265,7 @@ const routes = [
   entityGraphOrganizationRoute,
   entityGraphMarketRoute,
   entityGraphZipRoute,
-  ...(import.meta.env.DEV ? [devCompIntelligenceV4Route] : []),
+  ...(import.meta.env.DEV ? [devCompIntelligenceV4Route, devBuyerMatchV4Route] : []),
 ]
 
 const legacyRouteAliases: Record<string, string> = {

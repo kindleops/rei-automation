@@ -160,6 +160,8 @@
 }
 
 .nx-sidebar-rebuilt__threads-scroll {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
@@ -167,6 +169,26 @@
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.nx-sidebar-rebuilt__threads-scroll:has(.is-virtualized) {
+  overflow-y: hidden;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__threads.is-virtualized {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__virtual-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .nx-sidebar-rebuilt__load-more {
