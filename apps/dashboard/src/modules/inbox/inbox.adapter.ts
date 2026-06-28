@@ -19,6 +19,14 @@ import {
   logRealtimePatchApplied,
   type DashboardConnectionState,
 } from '../../lib/data/dashboardDataLayer'
+import {
+  adjustFetchInFlight,
+  markApiBootRequestStart,
+  markApiBootResponse,
+  markBucketSwitch,
+  markFirstRowsPainted,
+  publishInboxProof,
+} from '../../domain/inbox/inbox-proof-bridge'
 
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood.v2'
 const CACHE_COUNTS_KEY = 'leadcommand.liveInbox.lastGoodCounts.v2'
@@ -956,6 +964,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     latestRequestIdByBucketRef.current[bucketKey] = requestId
 
     dispatch({ type: 'BUCKET_FETCH_START', bucketKey, requestId })
+    adjustFetchInFlight(1)
+    if (normalizedOptions._timeoutMode === 'initial_boot') markApiBootRequestStart()
     if (isInboxDebugEnabled()) console.log('[INBOX_FETCH_START]', {
       bucketKey,
       requestId,
@@ -1173,6 +1183,17 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           dataMode: model.dataMode,
         })
       }
+      if (normalizedOptions._timeoutMode === 'initial_boot') {
+        markApiBootResponse()
+        if (model.threads.length > 0) {
+          if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => markFirstRowsPainted())
+          } else {
+            markFirstRowsPainted()
+          }
+        }
+      }
+      publishInboxProof({ activeBucketKey: bucketKey })
       if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
       return model
     } catch (err) {
@@ -1193,6 +1214,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       setError(err)
       if (isDev) console.error('[NEXUS] useInboxData load failed', err)
       return null
+    } finally {
+      adjustFetchInFlight(-1)
     }
   }, [])
 
@@ -1238,9 +1261,15 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       }
     }
 
+    const bucketSwitchFrom = stateRef.current.activeBucketKey
+    const bucketSwitchStartedAt = (!options._automatic && bucketKey !== bucketSwitchFrom)
+      ? performance.now()
+      : null
+
     // Switch bucket immediately — shows cached rows or empty, never other bucket's rows.
     if (!options._automatic && bucketKey !== stateRef.current.activeBucketKey) {
       dispatch({ type: 'SWITCH_BUCKET', bucketKey })
+      publishInboxProof({ activeBucketKey: bucketKey })
     }
 
     lastFetchRef.current = {
@@ -1269,10 +1298,17 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const query = requestOptions.filters?.query ?? ''
     const delay = query.trim() ? 250 : 0
-    if (delay === 0) return runLoad(requestOptions, 'refresh')
+    const finishBucketSwitch = (model: InboxModel | null) => {
+      if (bucketSwitchStartedAt != null && model) {
+        markBucketSwitch(bucketSwitchFrom, bucketKey, performance.now() - bucketSwitchStartedAt)
+      }
+      return model
+    }
+
+    if (delay === 0) return runLoad(requestOptions, 'refresh').then(finishBucketSwitch)
     return await new Promise<InboxModel | null>((resolve) => {
       debounceRef.current = setTimeout(() => {
-        void runLoad(requestOptions, 'refresh').then(resolve)
+        void runLoad(requestOptions, 'refresh').then(finishBucketSwitch).then(resolve)
       }, delay)
     })
   }, [runLoad, sourceMode, minRefreshMs])

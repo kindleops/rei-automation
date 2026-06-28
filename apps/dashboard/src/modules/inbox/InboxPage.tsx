@@ -57,7 +57,14 @@ import { fetchSmsTemplates, type SmsTemplate } from '../../lib/data/templateData
 import { fetchInboxActivity, logInboxActivity, type InboxActivityEvent } from '../../lib/data/inboxActivityData'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import { subscribeToInboxRealtime } from '../../lib/data/realtime'
-import { getQueueControlSettings, updateQueueControlSettings, callBackend, getBackendHealth, fetchPropertyParticipants } from '../../lib/api/backendClient'
+import {
+  getQueueControlSettings,
+  updateQueueControlSettings,
+  callBackend,
+  getBackendHealth,
+  fetchPropertyParticipants,
+  fetchDealIntelligenceDossier,
+} from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
@@ -181,10 +188,23 @@ import {
   type ViewWidthPercent,
 } from '../../domain/inbox/view-layout'
 import {
-  measureCachedThreadOpen,
-  readCachedThreadMessages,
-  resolveThreadMessageCacheKey,
-} from '../../domain/inbox/thread-selection-cache'
+  buildIsStillSelected,
+  executeThreadSelectFetches,
+  planThreadSelect,
+  resolveThreadCacheKey,
+} from '../../domain/inbox/thread-select-orchestrator'
+import {
+  buildOptimisticOutboundMessage,
+  buildOptimisticThreadPatch,
+  mergeOptimisticPatches,
+} from '../../domain/inbox/optimistic-thread-patch'
+import {
+  getInboxProof,
+  markOptimisticPatch,
+  markThreadSelectTelemetry,
+  registerInboxProofDriveAction,
+} from '../../domain/inbox/inbox-proof-bridge'
+
 import './inbox-premium.css'
 // inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
 import './inbox-polish.css'
@@ -231,12 +251,7 @@ function resolveMessageCacheKeyForThread(
   thread: InboxWorkflowThread | null | undefined,
   fallbackId = '',
 ): string {
-  if (!thread) return String(fallbackId || '').trim()
-  return resolveThreadMessageCacheKey({
-    conversationThreadId: getConversationThreadIdForThread(thread),
-    threadKey: thread.threadKey || thread.id,
-    id: thread.id,
-  })
+  return resolveThreadCacheKey(thread, fallbackId, thread ? getConversationThreadIdForThread(thread) : null)
 }
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -710,9 +725,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [initialWorkspaceView])
 
   const rawThreads = useMemo(() => (data.threads ?? []).map(toWorkflowThread), [data.threads])
-  const threads = useMemo(() => {
-    return rawThreads.map(t => optimisticPatches[t.id] ? { ...t, ...optimisticPatches[t.id] } : t)
-  }, [rawThreads, optimisticPatches])
+  const threads = useMemo(
+    () => mergeOptimisticPatches(rawThreads, optimisticPatches),
+    [rawThreads, optimisticPatches],
+  )
 
   // O(1) lookups — replaces threads.find() in the hot selected-thread path
   const threadById = useMemo(
@@ -1780,129 +1796,180 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
 
-    const cacheKey = selectedKeyForEffect
-    // When messageRefetchKey > 0 this is an explicit user-triggered retry — drop the cache so
-    // we don't serve the previous 0-row result while waiting for the fresh fetch.
-    if (messageRefetchKey > 0) delete messageCacheRef.current[cacheKey]
-    const cachedMessages = readCachedThreadMessages(messageCacheRef.current, cacheKey) ?? []
-    const fallbackDealContext = normalizeDealContext(thread as unknown as Record<string, unknown>)
+    const plan = planThreadSelect({
+      thread,
+      selectedKey: selectedKeyForEffect,
+      conversationThreadId: getConversationThreadIdForThread(thread),
+      messageRefetchKey,
+      messageCache: messageCacheRef.current,
+      dealContextFallback: normalizeDealContext(thread as unknown as Record<string, unknown>),
+      threadContextSeed: buildThreadContextFromThread(thread),
+      intelligenceSeed: (thread ?? null) as unknown as ThreadIntelligenceRecord,
+    })
+    if (!plan) return
+
+    if (plan.clearMessageCache) delete messageCacheRef.current[plan.cacheKey]
+    const cachedMessages = [...plan.immediate.cachedMessages]
+    const cacheKey = plan.cacheKey
     prevSelectedIdRef.current = thread.id
-    const fetchStartTs = performance.now()
+    const selectStarted = performance.now()
 
     setThreadTranslations({})
     setThreadViewMode('original')
     setDetectedThreadLanguage(null)
-    setDealContext(fallbackDealContext)
-    if (cachedMessages.length > 0) {
-      setSelectedMessages(cachedMessages)
-      setMessagesLoading(false)
-    } else {
-      setSelectedMessages([])
-      setMessagesLoading(true)
-    }
+    setDealContext(plan.immediate.dealContextFallback)
+    setSelectedMessages(plan.immediate.selectedMessages)
+    setMessagesLoading(plan.immediate.messagesLoading)
     setHasOlderMessages(false)
     setOlderMessagesLoading(false)
-    setContextLoading(true)
-    setThreadContext(buildThreadContextFromThread(thread))
-    setThreadIntelligence((thread ?? null) as unknown as ThreadIntelligenceRecord | null)
+    setContextLoading(plan.immediate.contextLoading)
+    setThreadContext(plan.immediate.threadContextSeed)
+    setThreadIntelligence(plan.immediate.intelligenceSeed)
 
-    if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0 })
+    if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0, cacheHit: plan.telemetry.cacheHit })
 
     let cancelled = false
     const controller = new AbortController()
-    const contextPromise = getThreadContext(thread, controller.signal).catch((err: unknown) => {
-      console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
-      return null as unknown as ThreadContext
-    })
+    const isStillSelected = buildIsStillSelected(
+      selectedKeyForEffect,
+      () => {
+        const active = selectedRef.current
+        if (!active) return null
+        return resolveMessageCacheKeyForThread(active)
+      },
+      () => cancelled,
+    )
 
-    const isStillSelected = () => {
-      const activeConversationId = selectedRef.current
-        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
-        : null
-      return !cancelled && activeConversationId === selectedKeyForEffect
-    }
-
-    // ── Messages: direct thread-messages fetch (no hydration waterfall) ─────
-    console.log('[MESSAGES_FETCH_START]', selectedKeyForEffect)
-    void getThreadMessagesPageForThread(thread, { signal: controller.signal, maxMessages: 50 })
-      .then((page) => {
-        if (!isStillSelected()) return
-        const durationMs = Math.round(performance.now() - fetchStartTs)
-        const diagnostics = (page.diagnostics as Record<string, unknown> | undefined) ?? {}
-        const integrityBlocked = Boolean(diagnostics.integrity_blocked)
-        const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
-        let resolvedMessages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
-        if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
-          resolvedMessages = cachedMessages
-        }
-        if (page.messages.length > 0 && !integrityBlocked) {
-          messageCacheRef.current[cacheKey] = page.messages
-        }
-        console.log('[MESSAGES_FETCH_DONE]', selectedKeyForEffect, resolvedMessages.length, `${durationMs}ms`)
-        setMessageFetchDegraded(fetchFailed)
-        setSelectedMessages(resolvedMessages)
-        setHasOlderMessages(page.pagination.hasMore)
-        setMessagesLoading(false)
-        const deliveredByBody = new Set(
-          resolvedMessages
-            .filter((message) => message.direction === 'outbound' && String(message.deliveryStatus || '').toLowerCase() === 'delivered')
-            .map((message) => String(message.body || '').trim().toLowerCase()),
-        )
-        if (deliveredByBody.size > 0) {
-          setPendingMessagesByThread((current) => {
-            const currentThreadPending = current[thread.id] ?? []
-            const unresolved = currentThreadPending.filter((pending) => !deliveredByBody.has(String(pending.body || '').trim().toLowerCase()))
-            if (unresolved.length === currentThreadPending.length) return current
-            return { ...current, [thread.id]: unresolved }
+    void executeThreadSelectFetches(
+      plan,
+      {
+        messages: async (signal) => {
+          const page = await getThreadMessagesPageForThread(thread, { signal, maxMessages: 50 })
+          const diagnostics = (page.diagnostics as Record<string, unknown> | undefined) ?? {}
+          const integrityBlocked = Boolean(diagnostics.integrity_blocked)
+          const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+          let resolvedMessages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
+          if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
+            resolvedMessages = [...cachedMessages]
+          }
+          return {
+            kind: 'messages' as const,
+            messages: resolvedMessages,
+            hasMore: page.pagination.hasMore,
+            fetchFailed,
+            integrityBlocked,
+          }
+        },
+        hydration: async (signal) => {
+          const hydration = await getThreadHydrationForThread(thread, signal, { skipMessages: true, skipDossier: true })
+          return {
+            kind: 'hydration' as const,
+            messages: hydration.messages,
+            hasMore: hydration.pagination.hasMore,
+            dealContext: hydration.dealContext,
+            intelligence: hydration.intelligence as ThreadIntelligenceRecord | null,
+          }
+        },
+        dossier: async (signal) => {
+          const qs = new URLSearchParams()
+          if (thread.propertyId) qs.set('property_id', thread.propertyId)
+          if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
+          if (thread.masterOwnerId) qs.set('master_owner_id', thread.masterOwnerId)
+          if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
+          const threadKey = thread.threadKey || thread.id
+          const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
+          if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }
+          const payload = result.data as { ok?: boolean; data?: Record<string, unknown> }
+          const data = payload?.data
+          return {
+            kind: 'dossier' as const,
+            dealContext: data ? normalizeDealContext(data) : null,
+            intelligence: data as ThreadIntelligenceRecord | null,
+          }
+        },
+        thread_context: async (signal) => {
+          const context = await getThreadContext(thread, signal).catch((err: unknown) => {
+            console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
+            return null
           })
-        }
-      })
-      .catch((err) => {
-        if (cancelled) {
-          console.warn('[MESSAGES_ABORT]', selectedKeyForEffect)
-        } else {
-          console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
-          setMessageFetchDegraded(true)
-          setSelectedMessages(cachedMessages)
-          setHasOlderMessages(false)
+          return { kind: 'thread_context' as const, context }
+        },
+      },
+      isStillSelected,
+      controller.signal,
+      {
+        onMessages: (result) => {
+          if (result.messages.length > 0 && !result.integrityBlocked) {
+            messageCacheRef.current[cacheKey] = result.messages
+          }
+          setMessageFetchDegraded(Boolean(result.fetchFailed))
+          setSelectedMessages(result.messages)
+          setHasOlderMessages(result.hasMore)
           setMessagesLoading(false)
-        }
+          const deliveredByBody = new Set(
+            result.messages
+              .filter((message) => message.direction === 'outbound' && String(message.deliveryStatus || '').toLowerCase() === 'delivered')
+              .map((message) => String(message.body || '').trim().toLowerCase()),
+          )
+          if (deliveredByBody.size > 0) {
+            setPendingMessagesByThread((current) => {
+              const currentThreadPending = current[thread.id] ?? []
+              const unresolved = currentThreadPending.filter((pending) => !deliveredByBody.has(String(pending.body || '').trim().toLowerCase()))
+              if (unresolved.length === currentThreadPending.length) return current
+              return { ...current, [thread.id]: unresolved }
+            })
+          }
+        },
+        onHydration: (result) => {
+          if (result.messages.length > 0) {
+            messageCacheRef.current[cacheKey] = result.messages
+            setSelectedMessages((current) => (current.length > 0 ? current : result.messages))
+            setHasOlderMessages(result.hasMore)
+            setMessagesLoading(false)
+          }
+          if (result.dealContext) {
+            setDealContext(result.dealContext)
+            dealContextCacheRef.current[cacheKey] = result.dealContext
+          }
+          if (result.intelligence) {
+            setThreadIntelligence({
+              ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+              ...result.intelligence,
+            })
+          }
+          setContextLoading(false)
+        },
+        onDossier: (result) => {
+          if (result.dealContext) {
+            setDealContext(result.dealContext)
+            dealContextCacheRef.current[cacheKey] = result.dealContext
+          }
+          if (result.intelligence) {
+            setThreadIntelligence((current) => ({ ...(current ?? {}), ...result.intelligence }))
+          }
+          setContextLoading(false)
+        },
+        onThreadContext: (result) => {
+          if (result.context) setThreadContext(result.context)
+        },
+      },
+    ).then(({ parallelStarted }) => {
+      const prior = getInboxProof()
+      markThreadSelectTelemetry({
+        cacheHit: plan.telemetry.cacheHit || prior.lastThreadSelectCacheHit === true,
+        cacheApplyMs: plan.telemetry.cacheHit
+          ? plan.telemetry.cacheApplyMs
+          : (prior.lastThreadSelectCacheApplyMs ?? plan.telemetry.cacheApplyMs),
+        selectMs: performance.now() - selectStarted,
+        parallelFetchStarted: parallelStarted,
       })
-
-    // ── Deal intelligence / dossier enrichment (background, non-blocking) ─
-    void getThreadHydrationForThread(thread, controller.signal, { skipMessages: true, skipDossier: true })
-      .then((hydration) => {
-        if (!isStillSelected()) return
-        if (hydration.messages.length > 0) {
-          messageCacheRef.current[cacheKey] = hydration.messages
-          setSelectedMessages((current) => (current.length > 0 ? current : hydration.messages))
-          setHasOlderMessages(hydration.pagination.hasMore)
-          setMessagesLoading(false)
-        }
-        if (hydration.dealContext) {
-          setDealContext(hydration.dealContext)
-          dealContextCacheRef.current[cacheKey] = hydration.dealContext
-        }
-        setThreadIntelligence({
-          ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
-          ...((hydration.intelligence ?? {}) as ThreadIntelligenceRecord),
-        })
-        setContextLoading(false)
-      })
-      .catch(() => {
-        if (!cancelled) setContextLoading(false)
-      })
-
-    // ── Background Supabase context enrichment (does not gate composer) ────
-    void contextPromise.then((context) => {
-      if (cancelled || !context) return
-      const activeConversationId = selectedRef.current
-        ? (getConversationThreadIdForThread(selectedRef.current) || selectedRef.current.threadKey || selectedRef.current.id)
-        : null
-      if (activeConversationId !== selectedKeyForEffect) return
-      setThreadContext(context)
-    }).catch((err: unknown) => {
-      if (!cancelled && DEV) console.warn('[ENRICHMENT_CONTEXT_BG_ERROR]', cacheKey, err)
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error('[MESSAGES_FETCH_ERROR]', selectedKeyForEffect, err)
+        setMessageFetchDegraded(true)
+        setSelectedMessages(cachedMessages)
+        setMessagesLoading(false)
+      }
     })
 
     return () => {
@@ -2914,25 +2981,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     let label = ''
     let mutation = async () => ({ ok: true, threadKey: thread.id })
-    let optimistic: Partial<InboxWorkflowThread> = {}
+    let optimisticAction: Parameters<typeof buildOptimisticThreadPatch>[0] | null = null
 
     if (action.startsWith('approve_queue:')) {
       const queueId = action.split(':')[1]
       label = 'Draft Approved'
       mutation = () => approveQueueItem(queueId!, thread)
-      optimistic = { inboxStatus: 'queued' }
+      optimisticAction = 'approve_queue'
     } else if (action.startsWith('cancel_queue:')) {
       const queueId = action.split(':')[1]
       label = 'Draft Cancelled'
       mutation = () => cancelQueueItem(queueId!, thread)
-      optimistic = { inboxStatus: 'waiting' }
+      optimisticAction = 'cancel_queue'
     } else if (action.startsWith('edit_queue:')) {
       const queueId = action.split(':')[1]
-      // For editing, we could cancel and load text into composer
-      // For now, we'll just treat it as a cancel + focus
       label = 'Opening Editor...'
       mutation = () => cancelQueueItem(queueId!, thread)
-      optimistic = { inboxStatus: 'waiting' }
+      optimisticAction = 'edit_queue'
       // Additional logic to focus composer could go here
     } else if (action === 'refetch') {
       setMessageRefetchKey((k) => k + 1)
@@ -2952,49 +3017,52 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         case 'archive':
           label = 'Thread Archived'
           mutation = () => archiveThread(thread)
-          optimistic = { isArchived: true, inboxStatus: 'closed' }
+          optimisticAction = 'archive'
           break
         case 'unarchive':
           label = 'Thread Restored'
           mutation = () => unarchiveThread(thread)
-          optimistic = { isArchived: false, inboxStatus: 'needs_review' }
+          optimisticAction = 'unarchive'
           break
         case 'star':
           label = 'Thread Starred'
           mutation = () => starThread(thread)
-          optimistic = { isStarred: true }
+          optimisticAction = 'star'
           break
         case 'unstar':
           label = 'Star Removed'
           mutation = () => unstarThread(thread)
-          optimistic = { isStarred: false }
+          optimisticAction = 'unstar'
           break
         case 'pin':
           label = 'Thread Pinned'
           mutation = () => pinThread(thread)
-          optimistic = { isPinned: true }
+          optimisticAction = 'pin'
           break
         case 'unpin':
           label = 'Pin Removed'
           mutation = () => unpinThread(thread)
-          optimistic = { isPinned: false }
+          optimisticAction = 'unpin'
           break
         case 'read':
           label = 'Marked Read'
           mutation = () => markThreadRead(thread)
-          optimistic = { isRead: true, unread: false, unreadCount: 0, status: 'read', inboxStatus: 'closed' }
+          optimisticAction = 'read'
           break
         case 'unread':
           label = 'Marked Unread'
           mutation = () => markThreadUnread(thread)
-          optimistic = { isRead: false, unread: true, unreadCount: 1, status: 'unread', inboxStatus: 'new_reply' }
+          optimisticAction = 'unread'
           break
         default:
           return
       }
     }
 
+    if (!optimisticAction) return
+    const optimistic = buildOptimisticThreadPatch(optimisticAction, thread)
     setOptimisticPatches(prev => ({ ...prev, [thread.id]: { ...prev[thread.id], ...optimistic } }))
+    markOptimisticPatch(String(optimisticAction), thread.id, optimistic as Record<string, unknown>)
     
     if (DEV) {
       console.log(`[NexusInboxActionNoRefresh]`, {
@@ -3033,10 +3101,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
     if (!selected) return
     const actualStatus: InboxStatus = status === 'sent_message' ? 'waiting' : status
-    const extraPatch = status === 'sent_message'
-      ? { latestDirection: 'outbound' as const, lastDirection: 'outbound' as const, lastOutboundAt: new Date().toISOString() }
-      : {}
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], inboxStatus: actualStatus, ...extraPatch } }))
+    const optimistic = buildOptimisticThreadPatch({ type: 'status', status }, selected)
+    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
+    markOptimisticPatch(`status_${status}`, selected.id, optimistic as Record<string, unknown>)
     
     if (DEV) {
       console.log(`[NexusWorkflowStatus]`, {
@@ -3053,8 +3120,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleStageChange = useCallback(async (stage: SellerStage) => {
     if (!selected) return
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], conversationStage: stage } }))
-    
+    const optimistic = buildOptimisticThreadPatch({ type: 'stage', stage }, selected)
+    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
+    markOptimisticPatch(`stage_${stage}`, selected.id, optimistic as Record<string, unknown>)
+
     if (DEV) {
       console.log(`[NexusWorkflowStatus]`, {
         action: `stage_change_${stage}`,
@@ -3077,6 +3146,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (!selected) return
     handleThreadAction(selected, selected.isPinned ? 'unpin' : 'pin')
   }, [handleThreadAction, selected])
+
+  useEffect(() => {
+    registerInboxProofDriveAction((action, threadId) => {
+      const target = threadId
+        ? (findThreadByRef(threads, threadId) ?? selectedRef.current)
+        : selectedRef.current
+      if (!target) return
+      void handleThreadAction(target, action)
+    })
+  }, [handleThreadAction, threads])
 
   const handleToggleArchive = useCallback(() => {
     if (!selected) return
@@ -3103,13 +3182,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
-    const cacheKey = thread ? resolveMessageCacheKeyForThread(thread, id) : id
-    const cacheOpen = measureCachedThreadOpen(messageCacheRef.current, cacheKey)
-    const cachedMessages = readCachedThreadMessages(messageCacheRef.current, cacheKey) ?? []
-    if (DEV) console.log('[THREAD_CACHE_OPEN]', { cacheKey, ...cacheOpen })
-    if (cachedMessages.length > 0) {
-      setSelectedMessages(cachedMessages)
-      setMessagesLoading(false)
+    const selectPlan = thread ? planThreadSelect({
+      thread,
+      selectedKey: resolveMessageCacheKeyForThread(thread, id),
+      conversationThreadId: getConversationThreadIdForThread(thread),
+      messageRefetchKey: 0,
+      messageCache: messageCacheRef.current,
+    }) : null
+    if (selectPlan) {
+      if (DEV) console.log('[THREAD_CACHE_OPEN]', { cacheKey: selectPlan.cacheKey, ...selectPlan.telemetry })
+      setSelectedMessages(selectPlan.immediate.selectedMessages)
+      setMessagesLoading(selectPlan.immediate.messagesLoading)
+      markThreadSelectTelemetry({
+        cacheHit: selectPlan.telemetry.cacheHit,
+        cacheApplyMs: selectPlan.telemetry.cacheApplyMs,
+        selectMs: selectPlan.telemetry.cacheApplyMs,
+        parallelFetchStarted: 0,
+      })
     } else {
       setMessagesLoading(true)
     }
@@ -3567,16 +3656,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 // ... rest of switch
         await handleWorkflowMutation('Lead: HOT', () => markThreadHot(thread), { skipRefresh: true })
         break
-      case 'snooze':
-        setOptimisticPatches((prev) => ({
-          ...prev,
-          [thread.id]: {
-            ...prev[thread.id],
-            inboxStatus: 'waiting',
-            followUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          },
-        }))
+      case 'snooze': {
+        const optimistic = buildOptimisticThreadPatch('snooze', thread)
+        setOptimisticPatches((prev) => ({ ...prev, [thread.id]: { ...prev[thread.id], ...optimistic } }))
+        markOptimisticPatch('snooze', thread.id, optimistic as Record<string, unknown>)
         await handleWorkflowMutation('Thread: Snoozed', () => snoozeThread(thread), { skipRefresh: true })
+        break
+      }
         break
       case 'pause_automation':
         await handleWorkflowMutation('Automation: Paused', () => pauseAutomation(thread), { skipRefresh: true })
@@ -3647,31 +3733,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     const clientSendId = crypto.randomUUID()
-    const timestamp = new Date().toISOString()
-    const optimisticMessage: ThreadMessage = {
-      id: `pending-${selected.id}-${Date.now()}`,
-      direction: 'outbound',
-      body: text.trim(),
-      createdAt: timestamp,
-      timelineAt: timestamp,
-      deliveredAt: null,
-      deliveryStatus: 'sending',
-      fromNumber: '',
-      toNumber: selected.canonicalE164 || selected.phoneNumber || '',
-      ownerId: selected.ownerId || '',
-      prospectId: selected.prospectId || '',
-      propertyId: selected.propertyId || '',
-      phoneNumber: selected.phoneNumber || '',
-      canonicalE164: selected.canonicalE164 || '',
-      templateId: template?.templateId ?? template?.id ?? null,
-      templateName: template?.useCase ?? null,
-      agentId: null,
-      source: 'operator',
-      rawStatus: 'sending',
-      error: null,
-      metadata: { client_send_id: clientSendId },
-      developerMeta: { client_send_id: clientSendId },
-    }
+    const optimisticMessage = buildOptimisticOutboundMessage(selected, text, clientSendId, template)
+    markOptimisticPatch('message_pending', selected.id, { body: optimisticMessage.body, deliveryStatus: optimisticMessage.deliveryStatus })
 
     optimisticMessageMapRef.current.set(clientSendId, optimisticMessage.id)
     inFlightSendMapRef.current.add(clientSendId)

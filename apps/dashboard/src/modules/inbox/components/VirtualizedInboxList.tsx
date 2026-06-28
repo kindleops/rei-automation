@@ -1,5 +1,6 @@
-import { memo, useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
-import { List, type RowComponentProps } from 'react-window'
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { List, useListRef, type ListImperativeAPI, type RowComponentProps } from 'react-window'
+import { markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
 
 interface VirtualizedInboxListProps<T> {
   items: T[]
@@ -32,10 +33,14 @@ function VirtualizedInboxListInner<T>({
   rowHeight,
   className,
   overscanCount = 6,
+  initialScrollOffset = 0,
+  onScrollOffsetChange,
   renderRow,
 }: VirtualizedInboxListProps<T>) {
   const [containerNode, setContainerNode] = useState<HTMLDivElement | null>(null)
   const [listHeight, setListHeight] = useState(480)
+  const listRef = useListRef()
+  const lastOffsetRef = useRef(initialScrollOffset)
 
   useEffect(() => {
     if (!containerNode || typeof ResizeObserver === 'undefined') return
@@ -48,17 +53,34 @@ function VirtualizedInboxListInner<T>({
     return () => observer.disconnect()
   }, [containerNode])
 
+  useEffect(() => {
+    const api = listRef.current as ListImperativeAPI | null
+    if (!api || initialScrollOffset <= 0) return
+    api.scrollToRow({ index: Math.floor(initialScrollOffset / rowHeight), align: 'start', behavior: 'instant' })
+    lastOffsetRef.current = initialScrollOffset
+    onScrollOffsetChange?.(initialScrollOffset)
+    markListScrollOffset(initialScrollOffset)
+  }, [initialScrollOffset, listRef, onScrollOffsetChange, rowHeight])
+
   if (items.length === 0) return null
 
   return (
     <div ref={setContainerNode} className={className} style={{ flex: 1, minHeight: 0, height: '100%' }}>
       <List<InboxListRowProps<T>>
+        listRef={listRef}
         style={{ height: listHeight, width: '100%' }}
         rowCount={items.length}
         rowHeight={rowHeight}
         overscanCount={overscanCount}
         rowComponent={InboxListRow}
         rowProps={{ items, renderRow }}
+        onRowsRendered={({ startIndex }) => {
+          const offset = startIndex * rowHeight
+          if (offset === lastOffsetRef.current) return
+          lastOffsetRef.current = offset
+          onScrollOffsetChange?.(offset)
+          markListScrollOffset(offset)
+        }}
       />
     </div>
   )
