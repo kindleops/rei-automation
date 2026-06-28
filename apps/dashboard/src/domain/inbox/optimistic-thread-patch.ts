@@ -19,8 +19,8 @@ export type OptimisticThreadAction =
 
 export function buildOptimisticThreadPatch(
   action: OptimisticThreadAction,
-  thread: InboxWorkflowThread,
-  extra?: { queueId?: string },
+  _thread: InboxWorkflowThread,
+  _extra?: { queueId?: string },
 ): Partial<InboxWorkflowThread> {
   if (typeof action === 'object' && action.type === 'status') {
     const actualStatus: InboxStatus = action.status === 'sent_message' ? 'waiting' : action.status
@@ -57,10 +57,7 @@ export function buildOptimisticThreadPatch(
     case 'unread':
       return { isRead: false, unread: true, unreadCount: 1, status: 'unread', inboxStatus: 'new_reply' }
     case 'snooze':
-      return {
-        inboxStatus: 'waiting',
-        followUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      }
+      return { inboxStatus: 'waiting' }
     default:
       return {}
   }

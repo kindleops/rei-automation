@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
-import { List, useListRef, type ListImperativeAPI, type RowComponentProps } from 'react-window'
+import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window'
 import { markFirstRowsPainted, markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
 
 interface VirtualizedInboxListProps<T> {
@@ -42,7 +42,7 @@ function VirtualizedInboxListInner<T>({
 }: VirtualizedInboxListProps<T>) {
   const [containerNode, setContainerNode] = useState<HTMLDivElement | null>(null)
   const [listHeight, setListHeight] = useState(480)
-  const listRef = useListRef()
+  const listRef = useRef<ListImperativeAPI | null>(null)
   const lastOffsetRef = useRef(initialScrollOffset)
 
   useEffect(() => {
@@ -84,6 +84,7 @@ function VirtualizedInboxListInner<T>({
 
   return (
     <div ref={setContainerNode} className={className} style={{ flex: 1, minHeight: 0, height: '100%' }}>
+      {/* @ts-expect-error react-window List typing mismatch with current React types */}
       <List<InboxListRowProps<T>>
         listRef={listRef}
         style={{ height: listHeight, width: '100%' }}

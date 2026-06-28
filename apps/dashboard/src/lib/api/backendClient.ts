@@ -39,7 +39,7 @@ export const getBackendBaseUrl = (): string => {
 
   // Primary: VITE_BACKEND_API_URL (import.meta in browser/vite; process.env in node proofs)
   let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined)
-    || (typeof process !== 'undefined' ? process.env.VITE_BACKEND_API_URL : undefined)
+    || (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITE_BACKEND_API_URL
     || ''
 
   // Fallback 1: Legacy VITE_NEXUS_API_URL

@@ -1,5 +1,5 @@
 import type { BuyerMatchV4Projection } from './buyer-match-v4.types'
-import { fmtCurrency, fmtRange } from './formatters'
+import { fmtRange } from './formatters'
 
 interface Props {
   projection: BuyerMatchV4Projection | null

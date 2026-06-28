@@ -1,6 +1,6 @@
 import type { BuyerMatchSubjectContext, BuyerMatchV4Projection } from './buyer-match-v4.types'
 import { AcquisitionContextRibbon } from './AcquisitionContextRibbon'
-import { fmtCurrency, fmtRange, humanDataState, humanFallback } from './formatters'
+import { fmtRange, humanDataState, humanFallback } from './formatters'
 
 interface Props {
   subject: BuyerMatchSubjectContext

@@ -34,12 +34,10 @@ import { executeAutoReply } from '../../lib/data/inboxAutoReply'
 
 import {
   getQueueProcessorHealth,
-  getThreadHydrationForThread,
   getThreadMessagesPageForThread,
   getThreadMessagesForThread,
   getConversationThreadIdForThread,
   buildThreadContextFromThread,
-  getThreadContext,
   queueReplyFromInbox,
   scheduleReplyFromInbox,
   sendInboxMessageNow,
@@ -63,7 +61,6 @@ import {
   callBackend,
   getBackendHealth,
   fetchPropertyParticipants,
-  fetchDealIntelligenceDossier,
 } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
@@ -214,7 +211,6 @@ import {
   markOptimisticPatch,
   markSelectedPollTick,
   markThreadSelectTelemetry,
-  markUncachedMessagesMs,
   clearUncachedMessagesTelemetry,
   registerInboxProofDriveAction,
 } from '../../domain/inbox/inbox-proof-bridge'
@@ -1811,7 +1807,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     openSellerAutomationStudioFromEntity({
       propertyId: thread.propertyId || canonicalSelectedContext?.identity?.property_id || null,
       prospectId: thread.prospectId || canonicalSelectedContext?.identity?.prospect_id || null,
-      masterOwnerId: thread.masterOwnerId || canonicalSelectedContext?.identity?.master_owner_id || null,
+      masterOwnerId: thread.ownerId || canonicalSelectedContext?.identity?.master_owner_id || null,
       threadKey: thread.threadKey || thread.id,
       preservePath: true,
     })
@@ -3908,7 +3904,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             status: 'replied',
             inboxStatus: 'waiting',
             latestMessageBody: text.trim(),
-            latestMessageAt: timestamp,
+            latestMessageAt: optimisticMessage.createdAt,
             latestDirection: 'outbound',
             inboxCategory: 'follow_up'
           }

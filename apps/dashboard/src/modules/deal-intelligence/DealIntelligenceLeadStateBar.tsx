@@ -166,7 +166,7 @@ function GlassControl<T extends string>({
           : <span className="nx-conv-glass-btn__dot" style={{ background: dotColor }} />
         }
         <span className="nx-di25-glass-btn__label">{error ? 'Failed' : current?.visual.label}</span>
-        {lockActive ? <Icon name="lock" className="nx-di25-glass-btn__lock" aria-label="Manual lock active" /> : null}
+        {lockActive ? <Icon name="key" className="nx-di25-glass-btn__lock" aria-label="Manual lock active" /> : null}
         {!disabled && <span className="nx-conv-glass-btn__caret" aria-hidden="true">▾</span>}
       </button>
       {menu}
@@ -501,13 +501,13 @@ export function DealIntelligenceHeaderActions({ data, onPatched, disabled = fals
         <div className="nx-di25-more-menu" role="menu">
           {manualStageLock ? (
             <div className="nx-di25-more-menu__row">
-              <Icon name="lock" />
+              <Icon name="key" />
               <span>Manual stage lock active</span>
             </div>
           ) : null}
           {manualTemperatureLock ? (
             <div className="nx-di25-more-menu__row">
-              <Icon name="lock" />
+              <Icon name="key" />
               <span>Manual temperature lock active</span>
             </div>
           ) : null}
@@ -606,7 +606,7 @@ export function DealIntelligenceTemperatureBadge({
         disabled={disabled || pending}
         onClick={() => setOpen((v) => !v)}
       >
-        {manualTemperatureLock ? <Icon name="lock" className="nx-di25-temp-badge__lock" /> : null}
+        {manualTemperatureLock ? <Icon name="key" className="nx-di25-temp-badge__lock" /> : null}
         <span>{visual.label}</span>
       </button>
 

@@ -227,7 +227,6 @@ export async function executeThreadSelectFetches(
   signal: AbortSignal,
   callbacks: ThreadSelectExecutionCallbacks,
 ): Promise<{ parallelStarted: number; applied: string[]; rejected: string[] }> {
-  const startedAt = performance.now()
   const kinds = plan.fetches.map((f) => f.kind)
   const applied: string[] = []
   const rejected: string[] = []

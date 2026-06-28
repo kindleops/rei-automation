@@ -198,9 +198,17 @@ export default function CompIntelligenceV4Workspace(props: CompIntelligenceV4Wor
       </div>
 
       <CompDossierDrawer
-        open={search.dossierOpen}
+        target={
+          search.dossierOpen
+            ? search.selectedId
+              ? { kind: 'comp', id: search.selectedId }
+              : { kind: 'subject' }
+            : null
+        }
         subject={model.subject}
         evidence={selectedEvidence}
+        decision={model.decision}
+        search={model.search}
         onClose={search.closeDossier}
       />
     </div>

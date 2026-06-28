@@ -18,6 +18,8 @@ export type EvidenceTierFilter =
   | 'all'
 export type MapStyleMode = 'street' | 'satellite' | 'hybrid'
 
+export type DossierTarget = { kind: 'subject' } | { kind: 'comp'; id: string }
+
 export const RADIUS_OPTIONS = [0.25, 0.5, 1, 1.5, 3, 5] as const
 export const LOOKBACK_OPTIONS = [3, 6, 12, 18, 24, 36] as const
 

@@ -324,17 +324,18 @@ export const DealIntelligence25Panel = ({
   const relationshipFlags = parseFlagBadges(prospect?.relationship_flags || prospect?.matching_flags)
   const personFlags = parseFlagBadges(prospect?.person_flags)
 
+  const convoState = convo as Record<string, unknown> | null | undefined
   const leadStateData: DealIntelligenceLeadStateData | null = threadKey ? {
     threadKey,
-    lifecycle_stage: convo?.lifecycle_stage,
-    operational_status: convo?.operational_status,
-    lead_temperature: convo?.lead_temperature,
-    is_starred: convo?.is_starred,
-    is_pinned: convo?.is_pinned,
-    is_archived: convo?.is_archived,
-    snoozed_until: convo?.snoozed_until,
-    manual_stage_lock: convo?.manual_stage_lock,
-    manual_temperature_lock: convo?.manual_temperature_lock,
+    lifecycle_stage: convoState?.lifecycle_stage as string | null | undefined,
+    operational_status: convoState?.operational_status as string | null | undefined,
+    lead_temperature: convoState?.lead_temperature as string | null | undefined,
+    is_starred: convoState?.is_starred as boolean | null | undefined,
+    is_pinned: convoState?.is_pinned as boolean | null | undefined,
+    is_archived: convoState?.is_archived as boolean | null | undefined,
+    snoozed_until: convoState?.snoozed_until as string | null | undefined,
+    manual_stage_lock: convoState?.manual_stage_lock as boolean | null | undefined,
+    manual_temperature_lock: convoState?.manual_temperature_lock as boolean | null | undefined,
   } : null
 
   const dispositionCode = convo?.disposition ? normalizeDisposition(String(convo.disposition)) : null
@@ -386,8 +387,8 @@ export const DealIntelligence25Panel = ({
           {threadKey ? (
             <DealIntelligenceTemperatureBadge
               threadKey={threadKey}
-              temperature={convo?.lead_temperature}
-              manualTemperatureLock={convo?.manual_temperature_lock}
+              temperature={convoState?.lead_temperature as string | null | undefined}
+              manualTemperatureLock={convoState?.manual_temperature_lock as boolean | null | undefined}
               onPatched={() => void refresh()}
             />
           ) : null}

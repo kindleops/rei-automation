@@ -1323,8 +1323,8 @@ const KNOWN_OUR_NUMBERS: Set<string> = new Set(
   [
     viteEnv.VITE_TEXTGRID_FROM_NUMBER,
     viteEnv.VITE_TEXTGRID_NUMBER,
-    typeof process !== 'undefined' ? process.env.VITE_TEXTGRID_FROM_NUMBER : undefined,
-    typeof process !== 'undefined' ? process.env.VITE_TEXTGRID_NUMBER : undefined,
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITE_TEXTGRID_FROM_NUMBER,
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VITE_TEXTGRID_NUMBER,
   ]
     .filter(Boolean)
     .map(normalizePhone)

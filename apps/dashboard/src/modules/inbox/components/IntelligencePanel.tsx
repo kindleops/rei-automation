@@ -6023,18 +6023,28 @@ export const IntelligencePanel = ({
       ) : onCollapse ? (
         <header className="nx-intel-header is-compact-only">
           <DealIntelligenceHeaderActions
-            data={{
-              threadKey: thread.threadKey || thread.id,
-              lifecycle_stage: thread.lifecycle_stage ?? thread.lifecycleStage,
-              operational_status: thread.operational_status ?? thread.operationalStatus ?? thread.inboxStatus,
-              lead_temperature: thread.lead_temperature ?? thread.leadTemperature,
-              is_starred: thread.is_starred ?? thread.isStarred,
-              is_pinned: thread.is_pinned ?? thread.isPinned,
-              is_archived: thread.is_archived ?? thread.isArchived,
-              snoozed_until: thread.snoozed_until ?? thread.snoozedUntil,
-              manual_stage_lock: thread.manual_stage_lock ?? thread.manualStageLock,
-              manual_temperature_lock: thread.manual_temperature_lock ?? thread.manualTemperatureLock,
-            }}
+            data={(() => {
+              const extras = thread as unknown as Record<string, unknown>
+              return {
+                threadKey: thread.threadKey || thread.id,
+                lifecycle_stage: extras.lifecycle_stage as string | null | undefined
+                  ?? extras.lifecycleStage as string | null | undefined,
+                operational_status: extras.operational_status as string | null | undefined
+                  ?? extras.operationalStatus as string | null | undefined
+                  ?? thread.inboxStatus,
+                lead_temperature: thread.lead_temperature
+                  ?? extras.leadTemperature as string | null | undefined,
+                is_starred: extras.is_starred as boolean | null | undefined ?? thread.isStarred,
+                is_pinned: extras.is_pinned as boolean | null | undefined ?? thread.isPinned,
+                is_archived: extras.is_archived as boolean | null | undefined ?? thread.isArchived,
+                snoozed_until: extras.snoozed_until as string | null | undefined
+                  ?? extras.snoozedUntil as string | null | undefined,
+                manual_stage_lock: extras.manual_stage_lock as boolean | null | undefined
+                  ?? extras.manualStageLock as boolean | null | undefined,
+                manual_temperature_lock: extras.manual_temperature_lock as boolean | null | undefined
+                  ?? extras.manualTemperatureLock as boolean | null | undefined,
+              }
+            })()}
           />
           <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
             <Icon name="close" />

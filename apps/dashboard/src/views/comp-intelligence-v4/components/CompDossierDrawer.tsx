@@ -258,8 +258,8 @@ function SubjectDossier(props: {
             <Def label="Coordinate confidence" value={s.coordConfidence != null ? `${s.coordConfidence}` : '—'} />
             <Def label="Subject resolved" value={pctTriBool(s.isResolved)} />
             <Def label="Market fallback" value={pctTriBool(s.isMarketFallback)} />
-            <Def label="Search radius" value={`${search.effectiveRadiusMiles} mi`} />
-            <Def label="Lookback" value={`${search.effectiveLookbackMonths} mo`} />
+            <Def label="Search radius" value={`${search.radiusMiles} mi`} />
+            <Def label="Lookback" value={`${search.monthsBack} mo`} />
             <Def label="Data freshness" value={s.dataFreshness ?? '—'} />
           </dl>
         </section>

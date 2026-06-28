@@ -30,7 +30,7 @@ export function buildBuyerMatchSubjectContext(
 ): BuyerMatchSubjectContext {
   const ctx = dealContext ?? ({} as DealContext)
   const property = record(ctx.property)
-  const acquisition = record(ctx.acquisition_decision ?? ctx.acquisitionDecision)
+  const acquisition = record(ctx.acquisition_decision)
   const valuation = record(ctx.valuation)
   const v3Value = record(acquisition.value_contract ?? valuation.value_contract)
   const buyerExit = record(
@@ -42,7 +42,7 @@ export function buildBuyerMatchSubjectContext(
   const marketValueBlock = record(v3Value.qualified_market_value ?? v3Value.scenario_market_value)
 
   const coords = resolveCoordinatesFromContext({
-    dealContext: ctx as Record<string, unknown>,
+    dealContext: ctx as unknown as Record<string, unknown>,
     property,
     propertyRecord: property,
   })
@@ -83,10 +83,7 @@ export function buildBuyerMatchSubjectContext(
     propertySubtype: str(overrides.propertySubtype ?? property.property_subtype ?? property.property_type ?? ctx.property_type),
     units: num(overrides.units ?? property.units_count ?? property.units),
     buildingSquareFeet: num(
-      overrides.buildingSquareFeet ??
-        ctx.building_square_feet ??
-        ctx.square_feet ??
-        property.building_square_feet,
+      overrides.buildingSquareFeet ?? property.building_square_feet,
     ),
     lotSquareFeet: num(overrides.lotSquareFeet ?? property.lot_square_feet),
     yearBuilt: num(overrides.yearBuilt ?? property.year_built),

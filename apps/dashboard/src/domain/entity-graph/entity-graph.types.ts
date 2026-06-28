@@ -225,6 +225,8 @@ export type EntityGraphAction =
   | 'open_thread'
   | 'create_manual_draft'
   | 'open_deal_intelligence'
+  | 'open_seller_automation'
+  | 'open_workflow_studio'
   | 'open_comp_intelligence'
   | 'open_buyer_match'
   | 'show_on_map'
