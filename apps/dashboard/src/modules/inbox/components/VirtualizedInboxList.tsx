@@ -1,5 +1,7 @@
-import { memo, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { memo, useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window'
+
+const WindowedList = List as ComponentType<Record<string, unknown>>
 import { markFirstRowsPainted, markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
 
 interface VirtualizedInboxListProps<T> {
@@ -84,8 +86,7 @@ function VirtualizedInboxListInner<T>({
 
   return (
     <div ref={setContainerNode} className={className} style={{ flex: 1, minHeight: 0, height: '100%' }}>
-      {/* @ts-expect-error react-window List typing mismatch with current React types */}
-      <List<InboxListRowProps<T>>
+      <WindowedList
         listRef={listRef}
         style={{ height: listHeight, width: '100%' }}
         rowCount={items.length}
@@ -93,7 +94,7 @@ function VirtualizedInboxListInner<T>({
         overscanCount={overscanCount}
         rowComponent={InboxListRow}
         rowProps={{ items, renderRow }}
-        onRowsRendered={({ startIndex }) => {
+        onRowsRendered={({ startIndex }: { startIndex: number }) => {
           const offset = startIndex * rowHeight
           if (offset === lastOffsetRef.current) return
           lastOffsetRef.current = offset
