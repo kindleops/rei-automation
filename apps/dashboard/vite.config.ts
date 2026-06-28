@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -627,6 +628,27 @@ function resolveBackendProxyTarget(env: Record<string, string>, mode: string): s
   return configured
 }
 
+const pwaManifestPlugin = (): Plugin => {
+  const manifestPath = fileURLToPath(new URL('./manifest.webmanifest', import.meta.url))
+  const serveManifest = (_req: unknown, res: { setHeader: (k: string, v: string) => void; end: (b: string) => void }) => {
+    res.setHeader('Content-Type', 'application/manifest+json')
+    res.end(fs.readFileSync(manifestPath, 'utf8'))
+  }
+  return {
+    name: 'pwa-manifest',
+    configureServer(server) {
+      server.middlewares.use('/manifest.webmanifest', serveManifest)
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'manifest.webmanifest',
+        source: fs.readFileSync(manifestPath, 'utf8'),
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -641,7 +663,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
-    plugins: [react(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    plugins: [react(), pwaManifestPlugin(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {
       host: '0.0.0.0',
       port: 5173,

@@ -13,6 +13,8 @@ import {
 } from '../../../lib/data/templateData'
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { useMobileKeyboardInset } from '../../mobile/useMobileKeyboardInset'
 
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -105,6 +107,8 @@ export const Composer = ({
   autoTranslateDraft = false,
   layoutMode = 'full',
 }: ComposerProps) => {
+  const { isMobile } = useBreakpoint()
+  const keyboardInset = useMobileKeyboardInset(isMobile)
   const [localDraft, setLocalDraft] = useState(draftText)
   const [micState, setMicState] = useState<MicState>('idle')
   const [voiceUnsupported, setVoiceUnsupported] = useState(false)
@@ -567,7 +571,10 @@ export const Composer = ({
     : null
 
   return (
-    <div className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft')}>
+    <div
+      className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft', isMobile && keyboardInset > 0 && 'is-keyboard-open')}
+      style={isMobile && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}
+    >
       {polishPreview && (
         <div className="nx-polish-preview" role="region" aria-label="Operator polish preview">
           <div className="nx-polish-preview__label">Operator Polish Preview</div>

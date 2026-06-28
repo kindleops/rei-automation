@@ -19,6 +19,15 @@ import {
   type CommandResult,
   type GlobalCommandSearchContext,
 } from '../domain/command-center/command.types'
+import { useBreakpoint } from '../modules/mobile/useBreakpoint'
+import { MobileBottomNav } from '../modules/mobile/MobileBottomNav'
+import { MobileMoreSheet } from '../modules/mobile/MobileMoreSheet'
+import {
+  MOBILE_MORE_ROUTES,
+  MOBILE_TAB_ROUTES,
+  resolveMobileNavTab,
+  type MobileNavTab,
+} from '../modules/mobile/mobile-nav-routes'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -146,10 +155,42 @@ const canonicalizeRoutePath = (target?: string) => {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-const GlobalNotificationShell = ({ children, routePath }: { children: ReactNode; routePath: string }) => {
+const GlobalNotificationShell = ({
+  children,
+  routePath,
+  isMobile,
+  moreSheetOpen,
+  onMoreSheetChange,
+  onOpenSearch,
+}: {
+  children: ReactNode
+  routePath: string
+  isMobile: boolean
+  moreSheetOpen: boolean
+  onMoreSheetChange: (open: boolean) => void
+  onOpenSearch: () => void
+}) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
-  const showGlobalBell = routePath !== '/inbox'
+  const showGlobalBell = routePath !== '/inbox' && !isMobile
+  const mobileNavTab = resolveMobileNavTab(routePath)
+
+  const handleMobileNavigate = useCallback((tab: MobileNavTab) => {
+    if (tab === 'more') {
+      onMoreSheetChange(true)
+      return
+    }
+    onMoreSheetChange(false)
+    pushRoutePath(MOBILE_TAB_ROUTES[tab])
+  }, [onMoreSheetChange])
+
+  const moreItems = useMemo(
+    () => MOBILE_MORE_ROUTES.map((item) => ({
+      ...item,
+      active: routePath === item.path,
+    })),
+    [routePath],
+  )
 
   return (
     <>
@@ -163,12 +204,30 @@ const GlobalNotificationShell = ({ children, routePath }: { children: ReactNode;
           />
         </div>
       ) : null}
-      {showGlobalBell ? (
+      {(showGlobalBell || isMobile) ? (
         <LeadCommandNotificationCenter
           open={notifCenterOpen}
           onClose={() => setNotifCenterOpen(false)}
-          anchorTop={48}
+          anchorTop={isMobile ? 0 : 48}
         />
+      ) : null}
+      {isMobile ? (
+        <>
+          <MobileBottomNav
+            activeTab={moreSheetOpen ? 'more' : mobileNavTab}
+            notificationBadge={unreadCount}
+            onNavigate={handleMobileNavigate}
+          />
+          <MobileMoreSheet
+            open={moreSheetOpen}
+            items={moreItems}
+            notificationBadge={unreadCount}
+            onClose={() => onMoreSheetChange(false)}
+            onNavigate={pushRoutePath}
+            onOpenSearch={onOpenSearch}
+            onOpenNotifications={() => setNotifCenterOpen(true)}
+          />
+        </>
       ) : null}
     </>
   )
@@ -177,6 +236,8 @@ const GlobalNotificationShell = ({ children, routePath }: { children: ReactNode;
 export const CommandCenterApp = () => {
   const path = useRoutePath()
   const route = resolveRoute(path)
+  const { isMobile } = useBreakpoint()
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false)
 
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
@@ -208,6 +269,7 @@ export const CommandCenterApp = () => {
     if (prevPathRef.current !== route.path) {
       playSound('room-enter')
       prevPathRef.current = route.path
+      setMoreSheetOpen(false)
     }
   }, [route.path])
 
@@ -568,9 +630,15 @@ export const CommandCenterApp = () => {
 
   return (
     <NotificationIntelligenceProvider>
-      <GlobalNotificationShell routePath={route.path}>
-        <div className="nx-os">
-          {route.path !== '/map' && activeNav && (
+      <GlobalNotificationShell
+        routePath={route.path}
+        isMobile={isMobile}
+        moreSheetOpen={moreSheetOpen}
+        onMoreSheetChange={setMoreSheetOpen}
+        onOpenSearch={() => openCmd()}
+      >
+        <div className={`nx-os${isMobile ? ' is-mobile-os' : ''}`}>
+          {!isMobile && route.path !== '/map' && activeNav && (
             <div className="nx-room-label">
               <span className="nx-room-label__name">{activeNav.room}</span>
             </div>

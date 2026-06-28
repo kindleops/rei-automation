@@ -2896,3 +2896,50 @@
 .wfs2-palette__node.is-readonly .wfs2-palette__node-grip {
   display: none;
 }
+
+@media (max-width: 767px) {
+  .wfs2-root {
+    --wfs2-rail-width: 0px;
+  }
+
+  .wfs2-command-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .wfs2-canvas-stage {
+    min-height: 280px;
+  }
+
+  .wfs2-seller-automation__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .wfs2-seller-automation__header p {
+    font-size: 0.68rem;
+    word-break: break-all;
+  }
+
+  .wfs2-seller-automation__controls {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .wfs2-seller-automation__controls .wfs2__btn {
+    min-height: 44px;
+    font-size: 0.72rem;
+  }
+
+  .wfs2-seller-automation__rail {
+    border-top: 1px solid var(--wfs2-border);
+    padding-top: 8px;
+  }
+
+  .wfs2-seller-automation__history ul {
+    max-height: 200px;
+  }
+}

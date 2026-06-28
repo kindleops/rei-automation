@@ -1,0 +1,676 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   NEXUS MOBILE OPERATING SHELL
+   Bottom navigation, more sheet, safe areas, mobile inbox flow
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --nx-mobile-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767px) {
+  .nx-os.is-mobile-os {
+    --nx-mobile-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .nx-os.is-mobile-os .nx-stage {
+    padding-bottom: var(--nx-mobile-nav-height);
+  }
+
+  .nx-os.is-mobile-os .nx-room-label {
+    display: none;
+  }
+
+  .nx-os.is-mobile-os .nx-os-notif-bell {
+    display: none;
+  }
+
+  /* ── Bottom navigation ─────────────────────────────────────────────── */
+
+  .nx-mobile-bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 120;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-around;
+    gap: 2px;
+    height: var(--nx-mobile-nav-height);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(6, 8, 14, 0.94);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  }
+
+  .nx-mobile-bottom-nav__item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 44px;
+    min-width: 44px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: color 140ms ease, background 140ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nx-mobile-bottom-nav__item:active {
+    transform: scale(0.96);
+  }
+
+  .nx-mobile-bottom-nav__item.is-active {
+    color: var(--tone-primary, #5eead4);
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.08);
+  }
+
+  .nx-mobile-bottom-nav__icon-wrap {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+  }
+
+  .nx-mobile-bottom-nav__icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .nx-mobile-bottom-nav__label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+
+  .nx-mobile-bottom-nav__badge {
+    position: absolute;
+    top: -2px;
+    right: -6px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid rgba(6, 8, 14, 0.95);
+  }
+
+  /* ── More sheet ────────────────────────────────────────────────────── */
+
+  .nx-mobile-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 130;
+    border: none;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    cursor: pointer;
+  }
+
+  .nx-mobile-more-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--nx-mobile-nav-height);
+    z-index: 131;
+    max-height: min(72vh, 560px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 20px 20px 0 0;
+    background: rgba(10, 14, 22, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: none;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+    animation: nx-mobile-sheet-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+  }
+
+  @keyframes nx-mobile-sheet-in {
+    from { transform: translateY(100%); opacity: 0.6; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .nx-mobile-more-sheet__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .nx-mobile-more-sheet__header strong {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .nx-mobile-more-sheet__close {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+  }
+
+  .nx-mobile-more-sheet__quick {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .nx-mobile-more-sheet__quick-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .nx-mobile-more-sheet__badge {
+    margin-left: auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
+
+  .nx-mobile-more-sheet__grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 4px 12px 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nx-mobile-more-sheet__tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 88px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.9);
+    text-align: left;
+    cursor: pointer;
+    position: relative;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+
+  .nx-mobile-more-sheet__tile.is-active {
+    border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.35);
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.08);
+  }
+
+  .nx-mobile-more-sheet__tile-icon {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--tone-primary, #5eead4);
+  }
+
+  .nx-mobile-more-sheet__tile-label {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .nx-mobile-more-sheet__tile-desc {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.3;
+  }
+
+  .nx-mobile-more-sheet__tile-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+  }
+
+  /* ── Mobile inbox list/thread flow ───────────────────────────────────── */
+
+  .nx-inbox-shell.is-mobile-inbox .nx-mobile-panel-toggles {
+    display: flex !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-workspace-pane.is-view-sms_thread,
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-workspace-pane.is-view-deal_intelligence,
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-intelligence-panel {
+    display: none !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-workspace-pane.is-view-thread,
+  .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-mobile-panel-toggles {
+    display: none !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-workspace-pane.is-view-sms_thread {
+    flex: 1 1 auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .nx-mobile-thread-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    min-height: 48px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(6, 8, 14, 0.92);
+    backdrop-filter: blur(12px);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .nx-mobile-thread-header__back {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+  }
+
+  .nx-mobile-thread-header__identity {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nx-mobile-thread-header__name {
+    font-size: 15px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .nx-mobile-thread-header__address {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .nx-mobile-thread-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .nx-mobile-thread-header__action {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+  }
+
+  /* Map fullscreen on mobile */
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell.is-view-command_map,
+  .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-command_map {
+    padding-bottom: 0;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-command_map {
+    height: calc(100dvh - var(--nx-mobile-nav-height)) !important;
+  }
+
+  /* Pipeline compact on mobile */
+  .nx-workspace-pane.is-view-pipeline .plv-lanes {
+    display: none !important;
+  }
+
+  .nx-workspace-pane.is-view-pipeline .plv-stage-chips {
+    display: flex !important;
+  }
+
+  /* Composer keyboard safe area */
+  .nx-inbox-shell.is-mobile-inbox .nx-composer-bar,
+  .nx-inbox-shell.is-mobile-inbox .nx-composer,
+  .nx-inbox-shell.is-mobile-inbox .nx-reply-composer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-workspace-pane-surface--sms-thread {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Workspace split grid — single-pane mobile flow */
+  .nx-workspace-split-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    gap: 0 !important;
+  }
+
+  .nx-workspace-split-grid .nx-workspace-pane {
+    flex: 1 1 auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-workspace-split-grid .nx-workspace-pane.is-view-deal_intelligence {
+    display: none !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-workspace-split-grid .nx-workspace-pane.is-view-deal_intelligence {
+    display: flex !important;
+    position: fixed !important;
+    inset: 0 0 var(--nx-mobile-nav-height) 0 !important;
+    z-index: 180 !important;
+    background: rgba(6, 8, 14, 0.98) !important;
+  }
+
+  /* Entity graph — card list */
+  .nx-workspace-surface--entity-graph .eg-table-wrap {
+    display: none !important;
+  }
+
+  .nx-workspace-surface--entity-graph .eg-mobile-cards {
+    display: flex !important;
+  }
+
+  /* Deal intelligence mobile hierarchy */
+  .nx-di25-panel {
+    padding: 10px !important;
+  }
+
+  .nx-di25-hero {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .nx-di25-tabs {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nx-di25-tabs::-webkit-scrollbar { display: none; }
+
+  .nx-di25-tab {
+    flex-shrink: 0;
+    min-height: 44px;
+  }
+
+  /* Queue — operational cards */
+  .nx-premium-queue .nx-queue-table.is-dense {
+    display: none !important;
+  }
+
+  .nx-premium-queue .nx-queue-mobile-cards {
+    display: flex !important;
+  }
+
+  /* Campaign command */
+  .cc-campaign-shell {
+    flex-direction: column !important;
+  }
+
+  .cc-campaign-sidebar {
+    width: 100% !important;
+    max-height: 38vh !important;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  }
+
+  /* Email command */
+  .nx-email-command {
+    flex-direction: column !important;
+  }
+
+  .nx-email-command__sidebar {
+    width: 100% !important;
+    max-height: 42vh !important;
+    border-right: none !important;
+  }
+
+  /* Closing desk */
+  .cd-board {
+    flex-direction: column !important;
+  }
+
+  .cd-board__lanes {
+    display: none !important;
+  }
+
+  .cd-board__mobile-rail {
+    display: flex !important;
+  }
+
+  /* Map property sheet */
+  .cc-map__lead-card,
+  .cc-map__market-card,
+  .nx-command-map__property-sheet {
+    bottom: var(--nx-mobile-nav-height) !important;
+    max-height: 58vh !important;
+  }
+
+  /* Workflow studio */
+  .wfs2-root {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr !important;
+  }
+
+  .wfs2-left-rail,
+  .wfs2-right-rail {
+    display: none !important;
+  }
+
+  .wfs2-seller-automation__layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .wfs2-seller-automation__canvas-wrap {
+    max-height: 42vh !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wfs2-seller-automation__inspector {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: var(--nx-mobile-nav-height) !important;
+    width: 100% !important;
+    max-height: 72vh !important;
+    border-radius: 20px 20px 0 0 !important;
+  }
+
+  /* Property lists */
+  .nx-workspace-surface--list-compact .nx-conversation-table {
+    display: none !important;
+  }
+
+  .nx-workspace-surface--list-compact .nx-mobile-card-list {
+    display: flex !important;
+    padding: 8px 10px;
+    gap: 8px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Mobile thread cards */
+  .nx-mobile-thread-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.9);
+    text-align: left;
+    cursor: pointer;
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nx-mobile-thread-card.is-selected {
+    border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.35);
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.08);
+  }
+
+  .nx-mobile-thread-card.is-unread .nx-mobile-thread-card__name {
+    font-weight: 800;
+  }
+
+  .nx-mobile-thread-card__top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .nx-mobile-thread-card__name {
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nx-mobile-thread-card__time {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    flex-shrink: 0;
+  }
+
+  .nx-mobile-thread-card__address {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .nx-mobile-thread-card__preview {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.65);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .nx-mobile-thread-card__direction {
+    margin-right: 4px;
+    opacity: 0.6;
+  }
+
+  .nx-mobile-thread-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+  }
+
+  .nx-mobile-thread-card__chip {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: capitalize;
+  }
+
+  .nx-mobile-thread-card__chip.is-muted {
+    opacity: 0.75;
+  }
+
+  .nx-mobile-thread-card__flag,
+  .nx-mobile-thread-card__warn {
+    font-size: 12px;
+    margin-left: auto;
+  }
+}
+
+@media (min-width: 768px) {
+  .nx-mobile-bottom-nav,
+  .nx-mobile-more-sheet,
+  .nx-mobile-sheet-backdrop,
+  .nx-mobile-thread-header {
+    display: none !important;
+  }
+}

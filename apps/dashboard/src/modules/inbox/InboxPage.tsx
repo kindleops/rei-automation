@@ -91,6 +91,8 @@ import { AdvancedFiltersModal } from './components/AdvancedFiltersModal'
 import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
+import { useBreakpoint } from '../mobile/useBreakpoint'
+import { MobileThreadHeader } from '../mobile/MobileThreadHeader'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
@@ -633,6 +635,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSourceMode
   } = useInboxData({ paused: messagesLoading })
   const { user, loading: authLoading, signOut } = useAuth()
+  const { isMobile } = useBreakpoint()
   const DEV = Boolean(import.meta.env.DEV)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
@@ -3234,6 +3237,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setLayoutState((current) => ({ ...current, selectedThreadId: id }))
   }, [threads])
 
+  const handleMobileBack = useCallback(() => {
+    setSelectedId(null)
+    setSelectedThreadKey(null)
+    selectedThreadFallbackRef.current = null
+    setMobileIntelOpen(false)
+    setLayoutState((current) => ({ ...current, selectedThreadId: null }))
+  }, [])
+
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
@@ -4301,6 +4312,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         `is-layout-${layoutMode}`,
       )}
     >
+      {isMobile ? (
+        <MobileThreadHeader
+          thread={selected}
+          onBack={handleMobileBack}
+          onOpenIntelligence={() => handleOpenDealIntelligence(selected?.id ?? null)}
+          onOpenWorkflow={selected ? () => {
+            openSellerAutomationStudioFromEntity({
+              propertyId: selected.propertyId ?? undefined,
+              threadKey: selected.threadKey ?? selected.id,
+            })
+            handleFocusWorkspaceView('workflow_studio')
+          } : undefined}
+        />
+      ) : null}
       <ChatThread
         thread={selected}
         messages={displayedMessagesWithTranslation}
@@ -4437,10 +4462,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     paneMode: 'single' | 'multi' = 'single',
     paneWidth: ViewWidthPercent = '100',
   ) => {
-    const layoutMode = resolveLayoutModeForPane(
+    let layoutMode = resolveLayoutModeForPane(
       workspaceFlexBases[view] ?? Number(paneWidth),
       workspaceWidthOverrides[view] ?? paneWidth,
     )
+    if (isMobile) {
+      if (view === 'pipeline' || view === 'command_map') layoutMode = 'compact'
+      else if (view === 'deal_intelligence') layoutMode = 'medium'
+      else if (view === 'queue' || view === 'campaigns' || view === 'email') layoutMode = 'medium'
+      else if (view === 'workflow_studio') layoutMode = 'compact'
+    }
 
     if (view === 'thread') {
       return renderInboxRailPane(paneMode, paneWidth)
@@ -4891,7 +4922,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       ) : (
       <div
         ref={(node) => { if (node) markInboxShellReady() }}
-        className={cls('nx-inbox-shell', mobileSidebarOpen && 'm-sidebar-open', mobileIntelOpen && 'm-intel-open')}
+        className={cls(
+          'nx-inbox-shell',
+          isMobile && !useFullscreenShell && 'is-mobile-inbox',
+          isMobile && Boolean(selected) && 'm-thread-open',
+          mobileSidebarOpen && 'm-sidebar-open',
+          mobileIntelOpen && 'm-intel-open',
+        )}
         onClick={(e) => {
           const target = e.target as HTMLElement
           if (target.classList.contains('nx-inbox-shell')) {
@@ -4901,7 +4938,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }}
       >
         {/* Mobile panel toggle buttons */}
-        <div className="nx-mobile-panel-toggles" style={{ display: 'none' }}>
+        <div className="nx-mobile-panel-toggles nx-desktop-only">
           <button
             type="button"
             className="nx-mobile-panel-toggle"

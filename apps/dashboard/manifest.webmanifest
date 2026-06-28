@@ -1,0 +1,19 @@
+{
+  "name": "NEXUS Command Center",
+  "short_name": "NEXUS",
+  "description": "Wholesale acquisition command center for inbox, pipeline, map, and automation operations.",
+  "start_url": "/inbox",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#06080e",
+  "theme_color": "#06080e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

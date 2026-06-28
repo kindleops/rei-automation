@@ -5,6 +5,8 @@ import { formatInboxThreadTimestamp } from '../../../shared/formatters'
 import { resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import { buildConversationDecision, type ConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { MobileThreadCard } from '../../mobile/MobileThreadCard'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -79,6 +81,7 @@ export const InboxConversationTable = memo(({
   onDensityChange,
   onSelect,
 }: InboxConversationTableProps) => {
+  const { isMobile } = useBreakpoint()
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<LocalStatusFilter>('all')
   const [replyFilter, setReplyFilter] = useState<LocalReplyFilter>('all')
@@ -401,6 +404,20 @@ export const InboxConversationTable = memo(({
           </div>
         ))}
       </div>
+
+      {isMobile ? (
+        <div className="nx-mobile-card-list">
+          {rows.map((row) => (
+            <MobileThreadCard
+              key={row.thread.id}
+              thread={row.thread}
+              decision={row.decision}
+              selected={selectedId === row.thread.id}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <div className="nx-inbox-table-wrap">
         <table className="nx-inbox-table">
