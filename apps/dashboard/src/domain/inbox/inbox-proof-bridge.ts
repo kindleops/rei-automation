@@ -22,6 +22,8 @@ export interface InboxProofTelemetry {
   lastThreadSelectMs: number | null
   lastThreadSelectCacheHit: boolean | null
   lastThreadSelectCacheApplyMs: number | null
+  lastUncachedMessagesMs: number | null
+  firstRowDomMs: number | null
   lastOptimisticPatch: InboxProofOptimisticPatch | null
   optimisticPatches: InboxProofOptimisticPatch[]
   fetchInFlight: number
@@ -50,6 +52,8 @@ const EMPTY: InboxProofTelemetry = {
   lastThreadSelectMs: null,
   lastThreadSelectCacheHit: null,
   lastThreadSelectCacheApplyMs: null,
+  lastUncachedMessagesMs: null,
+  firstRowDomMs: null,
   lastOptimisticPatch: null,
   optimisticPatches: [],
   fetchInFlight: 0,
@@ -90,6 +94,13 @@ export function markInboxNavigationStart(): void {
   publishInboxProof({ navigationStartedAt: Math.round(started) })
 }
 
+export function markInboxShellReady(): void {
+  if (typeof performance === 'undefined') return
+  const entries = performance.getEntriesByName('inbox-shell-ready')
+  if (entries.length > 0) return
+  performance.mark('inbox-shell-ready')
+}
+
 export function markApiBootRequestStart(): void {
   apiBootStartedAt = performance.now()
   markInboxNavigationStart()
@@ -108,6 +119,23 @@ export function markApiBootResponse(): void {
 
 export function markFirstRowsPainted(): void {
   if (snapshot.firstRowsPaintMs != null) return
+  if (typeof performance !== 'undefined') {
+    performance.mark('inbox-first-row')
+  }
+  let firstRowDomMs: number | null = null
+  if (typeof performance !== 'undefined') {
+    try {
+      performance.measure('inbox-first-row-paint', 'inbox-shell-ready', 'inbox-first-row')
+      const entry = performance.getEntriesByName('inbox-first-row-paint').at(-1)
+      if (entry) firstRowDomMs = Math.max(0, Math.round(entry.duration))
+    } catch {
+      const shellMark = performance.getEntriesByName('inbox-shell-ready').at(-1)
+      const rowMark = performance.getEntriesByName('inbox-first-row').at(-1)
+      if (shellMark && rowMark) {
+        firstRowDomMs = Math.max(0, Math.round(rowMark.startTime - shellMark.startTime))
+      }
+    }
+  }
   const base = snapshot.apiBootResponseMs != null && apiBootStartedAt != null
     ? apiBootStartedAt + snapshot.apiBootResponseMs
     : performance.now()
@@ -116,14 +144,25 @@ export function markFirstRowsPainted(): void {
     ? snapshot.apiBootResponseMs + firstRowsPaintMs
     : firstRowsPaintMs
   const navBase = snapshot.navigationStartedAt
-  const firstRowVisibleMs = navBase != null
-    ? Math.max(0, Math.round(performance.now() - navBase))
-    : shellToRowsMs
+  const firstRowVisibleMs = firstRowDomMs != null
+    ? firstRowDomMs
+    : (navBase != null
+      ? Math.max(0, Math.round(performance.now() - navBase))
+      : shellToRowsMs)
   publishInboxProof({
     firstRowsPaintMs,
     shellToRowsMs,
     firstRowVisibleMs,
+    firstRowDomMs,
   })
+}
+
+export function markUncachedMessagesMs(ms: number): void {
+  publishInboxProof({ lastUncachedMessagesMs: Math.round(ms) })
+}
+
+export function clearUncachedMessagesTelemetry(): void {
+  publishInboxProof({ lastUncachedMessagesMs: null })
 }
 
 export function markBucketSwitch(fromKey: string, toKey: string, ms: number): void {

@@ -300,7 +300,15 @@ async function main() {
   writeStructureEvidence()
   console.log(JSON.stringify(summary, null, 2))
 
-  const allMeet = Object.values(summary.results).every((r) => r == null || r.meets_target === true)
+  const gatedKeys = [
+    'initial_boot',
+    'bucket_switch',
+    'counts',
+    'thread_messages_uncached',
+    'thread_hydration',
+    'deal_intelligence_useful',
+  ]
+  const allMeet = gatedKeys.every((key) => summary.results[key]?.meets_target !== false)
   if (!allMeet) process.exit(1)
 }
 

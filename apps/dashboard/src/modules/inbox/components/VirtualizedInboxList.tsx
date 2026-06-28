@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
 import { List, useListRef, type ListImperativeAPI, type RowComponentProps } from 'react-window'
-import { markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
+import { markFirstRowsPainted, markListScrollOffset } from '../../../domain/inbox/inbox-proof-bridge'
 
 interface VirtualizedInboxListProps<T> {
   items: T[]
@@ -24,6 +24,9 @@ function InboxListRow<T>({
   renderRow,
 }: RowComponentProps<InboxListRowProps<T>>): ReactElement | null {
   const item = items[index]
+  useEffect(() => {
+    if (index === 0) markFirstRowsPainted()
+  }, [index])
   if (!item) return null
   return <div style={style}>{renderRow(item, index, style)}</div>
 }

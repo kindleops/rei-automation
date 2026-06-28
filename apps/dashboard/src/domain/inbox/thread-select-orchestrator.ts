@@ -1,11 +1,20 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-import type { ThreadContext, ThreadIntelligenceRecord, ThreadMessage } from '../../lib/data/inboxData'
-import type { DealContext } from '../../lib/data/dealContext'
+import {
+  getThreadContext,
+  getThreadHydrationForThread,
+  getThreadMessagesPageForThread,
+  type ThreadContext,
+  type ThreadIntelligenceRecord,
+  type ThreadMessage,
+} from '../../lib/data/inboxData'
+import { normalizeDealContext, type DealContext } from '../../lib/data/dealContext'
+import { fetchDealIntelligenceDossier } from '../../lib/api/backendClient'
 import {
   measureCachedThreadOpen,
   readCachedThreadMessages,
   resolveThreadMessageCacheKey,
 } from './thread-selection-cache'
+import { markUncachedMessagesMs } from './inbox-proof-bridge'
 
 export type ThreadSelectFetchKind = 'messages' | 'hydration' | 'thread_context' | 'dossier' | 'participants'
 
@@ -140,6 +149,77 @@ export interface ThreadSelectExecutionCallbacks {
   onTelemetry?: (event: { phase: string; ms: number; stillSelected: boolean }) => void
 }
 
+export interface CreateThreadSelectHandlersOptions {
+  cachedMessages?: ThreadMessage[]
+  onDossierStart?: () => void
+  shouldMeasureUncached?: () => boolean
+}
+
+export function createThreadSelectHandlers(
+  thread: InboxWorkflowThread,
+  options: CreateThreadSelectHandlersOptions = {},
+): ThreadSelectFetchHandlers {
+  const cachedMessages = options.cachedMessages ?? []
+  const threadRecord = thread as unknown as Record<string, unknown>
+  const masterOwnerId = String(threadRecord.masterOwnerId ?? threadRecord.master_owner_id ?? '').trim()
+
+  return {
+    messages: async (signal) => {
+      const fetchStarted = performance.now()
+      const page = await getThreadMessagesPageForThread(thread, { signal, maxMessages: 50 })
+      if (options.shouldMeasureUncached?.()) {
+        markUncachedMessagesMs(Math.round(performance.now() - fetchStarted))
+      }
+      const diagnostics = (page.diagnostics as Record<string, unknown> | undefined) ?? {}
+      const integrityBlocked = Boolean(diagnostics.integrity_blocked)
+      const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
+      let resolvedMessages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
+      if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
+        resolvedMessages = [...cachedMessages]
+      }
+      return {
+        kind: 'messages' as const,
+        messages: resolvedMessages,
+        hasMore: page.pagination.hasMore,
+        fetchFailed,
+        integrityBlocked,
+      }
+    },
+    hydration: async (signal) => {
+      const hydration = await getThreadHydrationForThread(thread, signal, { skipMessages: true, skipDossier: true })
+      return {
+        kind: 'hydration' as const,
+        messages: hydration.messages,
+        hasMore: hydration.pagination.hasMore,
+        dealContext: hydration.dealContext,
+        intelligence: hydration.intelligence as ThreadIntelligenceRecord | null,
+      }
+    },
+    dossier: async (signal) => {
+      options.onDossierStart?.()
+      const qs = new URLSearchParams()
+      if (thread.propertyId) qs.set('property_id', thread.propertyId)
+      if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
+      if (masterOwnerId) qs.set('master_owner_id', masterOwnerId)
+      if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
+      const threadKey = thread.threadKey || thread.id
+      const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
+      if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }
+      const payload = result.data as { ok?: boolean; data?: Record<string, unknown> }
+      const data = payload?.data
+      return {
+        kind: 'dossier' as const,
+        dealContext: data ? normalizeDealContext(data) : null,
+        intelligence: data as ThreadIntelligenceRecord | null,
+      }
+    },
+    thread_context: async (signal) => {
+      const context = await getThreadContext(thread, signal).catch(() => null)
+      return { kind: 'thread_context' as const, context }
+    },
+  }
+}
+
 export async function executeThreadSelectFetches(
   plan: ThreadSelectPlan,
   handlers: ThreadSelectFetchHandlers,
@@ -152,13 +232,14 @@ export async function executeThreadSelectFetches(
   const applied: string[] = []
   const rejected: string[] = []
 
-  const runners = kinds.map(async (kind) => {
+  const runKind = async (kind: ThreadSelectFetchKind) => {
     const handler = handlers[kind]
     if (!handler) return
+    const kindStarted = performance.now()
     try {
       const result = await handler(signal)
       const still = isStillSelected()
-      callbacks.onTelemetry?.({ phase: kind, ms: Math.round(performance.now() - startedAt), stillSelected: still })
+      callbacks.onTelemetry?.({ phase: kind, ms: Math.round(performance.now() - kindStarted), stillSelected: still })
       if (!still) {
         rejected.push(kind)
         return
@@ -190,8 +271,14 @@ export async function executeThreadSelectFetches(
     } catch {
       if (!isStillSelected()) rejected.push(kind)
     }
-  })
+  }
 
-  await Promise.all(runners)
+  const otherKinds = kinds.filter((kind) => kind !== 'messages')
+  if (kinds.includes('messages')) {
+    await runKind('messages')
+  }
+  if (otherKinds.length > 0) {
+    await Promise.all(otherKinds.map((kind) => runKind(kind)))
+  }
   return { parallelStarted: kinds.length, applied, rejected }
 }

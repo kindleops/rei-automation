@@ -72,7 +72,7 @@ async function main() {
       const { error: updateError } = await supabase
         .from("inbox_thread_state")
         .update({
-          inbox_bucket: null,
+          inbox_bucket: "cold",
           automation_lane: "cold_reactivation",
           updated_at: new Date(now).toISOString(),
         })

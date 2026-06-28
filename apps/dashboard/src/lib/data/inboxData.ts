@@ -1316,10 +1316,15 @@ export interface SellerPhoneResult {
 }
 
 // Business numbers to exclude when direction is unknown (env-configured)
+const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env)
+  ? import.meta.env as Record<string, string | undefined>
+  : {}
 const KNOWN_OUR_NUMBERS: Set<string> = new Set(
   [
-    import.meta.env.VITE_TEXTGRID_FROM_NUMBER,
-    import.meta.env.VITE_TEXTGRID_NUMBER,
+    viteEnv.VITE_TEXTGRID_FROM_NUMBER,
+    viteEnv.VITE_TEXTGRID_NUMBER,
+    typeof process !== 'undefined' ? process.env.VITE_TEXTGRID_FROM_NUMBER : undefined,
+    typeof process !== 'undefined' ? process.env.VITE_TEXTGRID_NUMBER : undefined,
   ]
     .filter(Boolean)
     .map(normalizePhone)

@@ -20,13 +20,16 @@ import {
   type DashboardConnectionState,
 } from '../../lib/data/dashboardDataLayer'
 import {
+  createDegradedPollScheduler,
+  POLL_INTERVAL_DEGRADED_MS,
+} from '../../domain/inbox/inbox-poll-scheduler'
+import {
   adjustFetchInFlight,
   markApiBootRequestStart,
   markApiBootResponse,
   markBucketSwitch,
   markDegradedPollTick,
   markDuplicateLiveRequestBlocked,
-  markFirstRowsPainted,
   markInboxLiveRequest,
   publishInboxProof,
 } from '../../domain/inbox/inbox-proof-bridge'
@@ -1190,13 +1193,6 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       }
       if (normalizedOptions._timeoutMode === 'initial_boot') {
         markApiBootResponse()
-        if (model.threads.length > 0) {
-          if (typeof requestAnimationFrame === 'function') {
-            requestAnimationFrame(() => markFirstRowsPainted())
-          } else {
-            markFirstRowsPainted()
-          }
-        }
       }
       publishInboxProof({ activeBucketKey: bucketKey })
       if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
@@ -1348,20 +1344,20 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
 
-    const POLL_INTERVAL_DEGRADED_MS = 60_000
-    const pollInterval = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
-      const status = stateRef.current.realtimeStatus
-      const shouldPoll = status === 'error' || status === 'disconnected' || status === 'disabled'
-      if (!cancelled && shouldPoll) {
+    const degradedPollScheduler = createDegradedPollScheduler({
+      intervalMs: POLL_INTERVAL_DEGRADED_MS,
+      getRealtimeStatus: () => stateRef.current.realtimeStatus,
+      isCancelled: () => cancelled,
+      isDocumentHidden: () => typeof document !== 'undefined' && document.hidden,
+      onTick: () => {
         markDegradedPollTick()
         refreshAuthoritativeViewCounts(dispatch)
         void refresh({
           _automatic: true,
           _refreshReason: 'fallback_polling',
         })
-      }
-    }, POLL_INTERVAL_DEGRADED_MS)
+      },
+    })
 
     const handleOffline = () => {
       dispatch({ type: 'SET_REALTIME_STATUS', status: 'disconnected' })
@@ -1685,7 +1681,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       Object.values(abortByBucketRef.current).forEach((c) => c?.abort())
       if (debounceRef.current) clearTimeout(debounceRef.current)
       if (countsRefreshDebounceRef.current) clearTimeout(countsRefreshDebounceRef.current)
-      window.clearInterval(pollInterval)
+      degradedPollScheduler.stop()
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('online', handleOnline)
       if (channel) void getSupabaseClient().removeChannel(channel)

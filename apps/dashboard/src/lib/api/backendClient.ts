@@ -37,8 +37,10 @@ export const getBackendBaseUrl = (): string => {
     }
   }
 
-  // Primary: VITE_BACKEND_API_URL
-  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined) || ''
+  // Primary: VITE_BACKEND_API_URL (import.meta in browser/vite; process.env in node proofs)
+  let url = (import.meta.env.VITE_BACKEND_API_URL as string | undefined)
+    || (typeof process !== 'undefined' ? process.env.VITE_BACKEND_API_URL : undefined)
+    || ''
 
   // Fallback 1: Legacy VITE_NEXUS_API_URL
   if (!url) {
@@ -220,6 +222,39 @@ function getCacheTtlForPath(path: string): number | null {
   return null
 }
 
+let cachedSessionToken: string | null = null
+let cachedSessionExpiresAt = 0
+let sessionTokenPromise: Promise<string | null> | null = null
+const SESSION_TOKEN_CACHE_MS = 30_000
+
+async function resolveSessionToken(): Promise<string | null> {
+  const now = Date.now()
+  if (cachedSessionExpiresAt > now) return cachedSessionToken
+  const { secret } = getBackendApiSecretDebugSafe()
+  if (secret) {
+    cachedSessionToken = null
+    cachedSessionExpiresAt = now + SESSION_TOKEN_CACHE_MS
+    return null
+  }
+  if (!hasSupabaseEnv) return null
+  if (!sessionTokenPromise) {
+    sessionTokenPromise = (async () => {
+      try {
+        const { data } = await getSupabaseClient().auth.getSession()
+        return data.session?.access_token ?? null
+      } catch {
+        return null
+      } finally {
+        sessionTokenPromise = null
+      }
+    })()
+  }
+  const token = await sessionTokenPromise
+  cachedSessionToken = token
+  cachedSessionExpiresAt = Date.now() + SESSION_TOKEN_CACHE_MS
+  return token
+}
+
 async function executeBackendRequest<T>(
   path: string,
   options: RequestInit = {},
@@ -246,16 +281,9 @@ async function executeBackendRequest<T>(
     'x-ops-dashboard-secret': secret,
   }
 
-  // Attach Supabase session JWT for future API-side JWT validation.
-  try {
-    if (hasSupabaseEnv) {
-      const { data } = await getSupabaseClient().auth.getSession()
-      if (data.session?.access_token) {
-        headers['Authorization'] = `Bearer ${data.session.access_token}`
-      }
-    }
-  } catch {
-    // Auth client not available — ops secret alone is used.
+  const sessionToken = await resolveSessionToken()
+  if (sessionToken) {
+    headers.Authorization = `Bearer ${sessionToken}`
   }
 
   const url = `${base}${path}`
@@ -418,12 +446,14 @@ export async function callBackend<T = unknown>(
   const cacheKey = buildRequestCacheKey(path, method, bodyKey)
   const ttl = method === 'GET' ? getCacheTtlForPath(path) : null
 
-  if (ttl != null) {
+  // Abortable requests must not join cached/in-flight GETs — thread-select cancels
+  // superseded fetches and needs a fresh network round-trip for accurate timing.
+  if (ttl != null && !options.signal) {
     const cached = readCachedRequest<BackendResult<T>>(cacheKey)
     if (cached) return cached
     return cachedGetRequest(cacheKey, ttl, (signal) => executeBackendRequest<T>(path, {
       ...options,
-      signal: options.signal ?? signal,
+      signal,
     }))
   }
 

@@ -189,6 +189,7 @@ import {
 } from '../../domain/inbox/view-layout'
 import {
   buildIsStillSelected,
+  createThreadSelectHandlers,
   executeThreadSelectFetches,
   planThreadSelect,
   resolveThreadCacheKey,
@@ -199,12 +200,18 @@ import {
   mergeOptimisticPatches,
 } from '../../domain/inbox/optimistic-thread-patch'
 import {
+  createSelectedThreadPollScheduler,
+} from '../../domain/inbox/inbox-poll-scheduler'
+import {
   getInboxProof,
   markDossierParallelStarted,
   markInboxNavigationStart,
+  markInboxShellReady,
   markOptimisticPatch,
   markSelectedPollTick,
   markThreadSelectTelemetry,
+  markUncachedMessagesMs,
+  clearUncachedMessagesTelemetry,
   registerInboxProofDriveAction,
 } from '../../domain/inbox/inbox-proof-bridge'
 
@@ -1005,7 +1012,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
     const hasExternalContext = hasEntityAnchor(effectiveActiveContext)
     if (selectedId || hasExternalContext) return null
-    return filtered[0] ?? threads[0] ?? null
+    return null
   }, [effectiveActiveContext.masterOwnerId, effectiveActiveContext.opportunityId, effectiveActiveContext.propertyId, effectiveActiveContext.sellerId, effectiveActiveContext.threadKey, filtered, threads, selectedId, selectedThreadKey, threadById, threadByKey])
 
   // Keep ref in sync so message effect reads latest thread without it being a dep
@@ -1122,8 +1129,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
   }, [effectiveActiveContext, selected, threads])
 
-  // After bucket/category switch, always surface the first lead in the new bucket.
+  // After bucket/category switch, surface the first lead once the list is stable.
+  // Brief deferral keeps user-initiated row clicks ahead of boot dossier fetches.
   useEffect(() => {
+    if (typeof window !== 'undefined' && (window as Window & { __INBOX_PROOF_DISABLE_AUTO_SELECT__?: boolean }).__INBOX_PROOF_DISABLE_AUTO_SELECT__) {
+      return
+    }
     if (filtered.length === 0) return
     const selectedInBucket = selectedId
       ? filtered.some((thread) => thread.id === selectedId || (thread.threadKey || thread.id) === selectedThreadKey)
@@ -1131,9 +1142,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (selectedInBucket) return
     const first = filtered[0]
     if (!first) return
-    setSelectedId(first.id)
-    setSelectedThreadKey(getConversationThreadIdForThread(first) || first.threadKey || first.id)
-    setLayoutState((current) => ({ ...current, selectedThreadId: first.id }))
+    const timer = setTimeout(() => {
+      const active = selectedRef.current
+      const activeKey = active?.id || selectedThreadKey
+      const stillSelectedInBucket = activeKey
+        ? filtered.some((thread) => thread.id === activeKey || (thread.threadKey || thread.id) === activeKey)
+        : false
+      if (stillSelectedInBucket) return
+      setSelectedId(first.id)
+      setSelectedThreadKey(getConversationThreadIdForThread(first) || first.threadKey || first.id)
+      setLayoutState((current) => ({ ...current, selectedThreadId: first.id }))
+    }, 400)
+    return () => clearTimeout(timer)
   }, [filtered, selectedId, selectedThreadKey, viewFilter])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
@@ -1782,6 +1802,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [selectedWorkspaceViews])
 
   const prevSelectedIdRef = useRef<string | null>(null)
+  const selectNonceRef = useRef(0)
+  const pendingUncachedSelectRef = useRef<{ cacheKey: string; nonce: number } | null>(null)
 
   // This effect fires ONLY when the thread key (string) changes — NOT on every inbox refresh.
   // selectedRef.current always has the latest thread object without being in the dep array.
@@ -1848,65 +1870,34 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       () => cancelled,
     )
 
+    markThreadSelectTelemetry({
+      cacheHit: plan.telemetry.cacheHit,
+      cacheApplyMs: plan.telemetry.cacheApplyMs,
+      selectMs: plan.telemetry.cacheApplyMs,
+    })
+
     void executeThreadSelectFetches(
       plan,
-      {
-        messages: async (signal) => {
-          const page = await getThreadMessagesPageForThread(thread, { signal, maxMessages: 50 })
-          const diagnostics = (page.diagnostics as Record<string, unknown> | undefined) ?? {}
-          const integrityBlocked = Boolean(diagnostics.integrity_blocked)
-          const fetchFailed = Boolean(diagnostics.fetch_failed || diagnostics.network_unavailable)
-          let resolvedMessages = integrityBlocked && page.messages.length === 0 ? [] : page.messages
-          if (fetchFailed && resolvedMessages.length === 0 && cachedMessages.length > 0) {
-            resolvedMessages = [...cachedMessages]
-          }
-          return {
-            kind: 'messages' as const,
-            messages: resolvedMessages,
-            hasMore: page.pagination.hasMore,
-            fetchFailed,
-            integrityBlocked,
-          }
+      createThreadSelectHandlers(thread, {
+        cachedMessages,
+        onDossierStart: markDossierParallelStarted,
+        shouldMeasureUncached: () => {
+          const pending = pendingUncachedSelectRef.current
+          return Boolean(
+            pending
+            && pending.cacheKey === selectedKeyForEffect
+            && pending.nonce === selectNonceRef.current,
+          )
         },
-        hydration: async (signal) => {
-          const hydration = await getThreadHydrationForThread(thread, signal, { skipMessages: true, skipDossier: true })
-          return {
-            kind: 'hydration' as const,
-            messages: hydration.messages,
-            hasMore: hydration.pagination.hasMore,
-            dealContext: hydration.dealContext,
-            intelligence: hydration.intelligence as ThreadIntelligenceRecord | null,
-          }
-        },
-        dossier: async (signal) => {
-          markDossierParallelStarted()
-          const qs = new URLSearchParams()
-          if (thread.propertyId) qs.set('property_id', thread.propertyId)
-          if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
-          if (thread.masterOwnerId) qs.set('master_owner_id', thread.masterOwnerId)
-          if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
-          const threadKey = thread.threadKey || thread.id
-          const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
-          if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }
-          const payload = result.data as { ok?: boolean; data?: Record<string, unknown> }
-          const data = payload?.data
-          return {
-            kind: 'dossier' as const,
-            dealContext: data ? normalizeDealContext(data) : null,
-            intelligence: data as ThreadIntelligenceRecord | null,
-          }
-        },
-        thread_context: async (signal) => {
-          const context = await getThreadContext(thread, signal).catch((err: unknown) => {
-            console.warn('[ENRICHMENT_CONTEXT_ERROR_ISOLATED]', cacheKey, err)
-            return null
-          })
-          return { kind: 'thread_context' as const, context }
-        },
-      },
+      }),
       isStillSelected,
       controller.signal,
       {
+        onTelemetry: ({ phase }) => {
+          if (phase === 'messages' && pendingUncachedSelectRef.current?.cacheKey === selectedKeyForEffect) {
+            pendingUncachedSelectRef.current = null
+          }
+        },
         onMessages: (result) => {
           if (result.messages.length > 0 && !result.integrityBlocked) {
             messageCacheRef.current[cacheKey] = result.messages
@@ -2271,13 +2262,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         pollInFlight = false
       })
     }
-    const selectedMessagePollInterval = shouldPollSelectedThread
-      ? window.setInterval(pollSelectedMessages, 30_000)
+    const selectedPollScheduler = shouldPollSelectedThread
+      ? createSelectedThreadPollScheduler({
+        getConnectionState: () => data.connectionState ?? 'live',
+        isDocumentHidden: () => document.hidden,
+        isPollInFlight: () => pollInFlight,
+        onTick: pollSelectedMessages,
+      })
       : null
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer)
-      if (selectedMessagePollInterval != null) window.clearInterval(selectedMessagePollInterval)
+      selectedPollScheduler?.stop()
       pollController?.abort()
       void supabase.removeChannel(channel)
       inboxSubs.forEach((s) => { try { s.unsubscribe() } catch {} })
@@ -3222,26 +3218,29 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
-    const selectPlan = thread ? planThreadSelect({
-      thread,
-      selectedKey: resolveMessageCacheKeyForThread(thread, id),
-      conversationThreadId: getConversationThreadIdForThread(thread),
-      messageRefetchKey: 0,
-      messageCache: messageCacheRef.current,
-    }) : null
-    if (selectPlan) {
-      if (DEV) console.log('[THREAD_CACHE_OPEN]', { cacheKey: selectPlan.cacheKey, ...selectPlan.telemetry })
-      setSelectedMessages(selectPlan.immediate.selectedMessages)
-      setMessagesLoading(selectPlan.immediate.messagesLoading)
-      markThreadSelectTelemetry({
-        cacheHit: selectPlan.telemetry.cacheHit,
-        cacheApplyMs: selectPlan.telemetry.cacheApplyMs,
-        selectMs: selectPlan.telemetry.cacheApplyMs,
-      })
-    } else {
-      setMessagesLoading(true)
-    }
     if (thread) {
+      const uncachedKey = resolveMessageCacheKeyForThread(thread, id)
+      const nextNonce = selectNonceRef.current + 1
+      selectNonceRef.current = nextNonce
+      pendingUncachedSelectRef.current = { cacheKey: uncachedKey, nonce: nextNonce }
+      clearUncachedMessagesTelemetry()
+      const alreadySelected = selectedId === thread.id || selectedThreadKey === (thread.threadKey || thread.id)
+      if (alreadySelected) {
+        const replay = planThreadSelect({
+          thread,
+          selectedKey: resolveMessageCacheKeyForThread(thread, id),
+          conversationThreadId: getConversationThreadIdForThread(thread),
+          messageRefetchKey: 0,
+          messageCache: messageCacheRef.current,
+        })
+        if (replay) {
+          markThreadSelectTelemetry({
+            cacheHit: replay.telemetry.cacheHit,
+            cacheApplyMs: replay.telemetry.cacheApplyMs,
+            selectMs: replay.telemetry.cacheApplyMs,
+          })
+        }
+      }
       setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
       setSelectedId(thread.id)
       setSelectedThreadKey(thread.threadKey || thread.id)
@@ -3261,7 +3260,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         body: JSON.stringify({ thread_key: canonicalStateKey, patch: { is_read: true } }),
       })
     }
-  }, [setActiveContext, threads, viewFilter])
+  }, [setActiveContext, selectedId, selectedThreadKey, threads, viewFilter])
 
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
@@ -4836,6 +4835,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         </div>
       ) : (
       <div
+        ref={(node) => { if (node) markInboxShellReady() }}
         className={cls('nx-inbox-shell', mobileSidebarOpen && 'm-sidebar-open', mobileIntelOpen && 'm-intel-open')}
         onClick={(e) => {
           const target = e.target as HTMLElement
