@@ -180,6 +180,11 @@ import {
   resolveWorkspaceWidthLabels,
   type ViewWidthPercent,
 } from '../../domain/inbox/view-layout'
+import {
+  measureCachedThreadOpen,
+  readCachedThreadMessages,
+  resolveThreadMessageCacheKey,
+} from '../../domain/inbox/thread-selection-cache'
 import './inbox-premium.css'
 // inbox-rebuild-v2.css is merged into inbox-premium.css — do not re-import it
 import './inbox-polish.css'
@@ -207,10 +212,6 @@ const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligen
 const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
 const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.comp.v4') !== '0')
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
-const BuyerMatchV4Workspace = lazy(() => import('./buyer-match-v4/BuyerMatchV4Workspace').then((m) => ({ default: m.BuyerMatchV4Workspace })))
-/** DEV: Buyer Match V4 is default in dev. Opt out with localStorage `nx.buyer.v4` = '0'. */
-const BUYER_MATCH_V4_ENABLED =
-  Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.buyer.v4') !== '0')
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
@@ -225,6 +226,18 @@ const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
+
+function resolveMessageCacheKeyForThread(
+  thread: InboxWorkflowThread | null | undefined,
+  fallbackId = '',
+): string {
+  if (!thread) return String(fallbackId || '').trim()
+  return resolveThreadMessageCacheKey({
+    conversationThreadId: getConversationThreadIdForThread(thread),
+    threadKey: thread.threadKey || thread.id,
+    id: thread.id,
+  })
+}
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
   es: 'Spanish',
@@ -975,7 +988,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   selectedRef.current = selected
   // Stable string key — message effect deps on this so it only fires when the thread changes,
   // not on every inbox refresh that produces a new `selected` object reference
-  const selectedKeyForEffect = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || selected.id) : null
+  const selectedKeyForEffect = selected ? resolveMessageCacheKeyForThread(selected) : null
   // Snapshots for use in useMemo deps — avoids optional-chaining in dep arrays
   const selectedThreadKeySnapshot = selected ? (getConversationThreadIdForThread(selected) || selected.threadKey || null) : null
   const selectedIdSnapshot = selected?.id ?? null
@@ -1771,7 +1784,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // When messageRefetchKey > 0 this is an explicit user-triggered retry — drop the cache so
     // we don't serve the previous 0-row result while waiting for the fresh fetch.
     if (messageRefetchKey > 0) delete messageCacheRef.current[cacheKey]
-    const cachedMessages = messageCacheRef.current[cacheKey] ?? []
+    const cachedMessages = readCachedThreadMessages(messageCacheRef.current, cacheKey) ?? []
     const fallbackDealContext = normalizeDealContext(thread as unknown as Record<string, unknown>)
     prevSelectedIdRef.current = thread.id
     const fetchStartTs = performance.now()
@@ -3090,8 +3103,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
-    const cacheKey = thread ? (getConversationThreadIdForThread(thread) || thread.threadKey || thread.id) : id
-    const cachedMessages = cacheKey ? (messageCacheRef.current[cacheKey] ?? []) : []
+    const cacheKey = thread ? resolveMessageCacheKeyForThread(thread, id) : id
+    const cacheOpen = measureCachedThreadOpen(messageCacheRef.current, cacheKey)
+    const cachedMessages = readCachedThreadMessages(messageCacheRef.current, cacheKey) ?? []
+    if (DEV) console.log('[THREAD_CACHE_OPEN]', { cacheKey, ...cacheOpen })
     if (cachedMessages.length > 0) {
       setSelectedMessages(cachedMessages)
       setMessagesLoading(false)
@@ -3165,8 +3180,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     let cancelled = false
     const controller = new AbortController()
-    let deferTimer: ReturnType<typeof setTimeout> | null = null
-    let idleHandle: number | null = null
     setPropertyParticipantsLoading(true)
     const fallbackParticipant = selected ? {
       participant_id: `${propertyId}:${selectedPhone || selected.id}`,
@@ -3210,21 +3223,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         })
     }
 
-    deferTimer = window.setTimeout(() => {
-      if (typeof window.requestIdleCallback === 'function') {
-        idleHandle = window.requestIdleCallback(loadParticipants, { timeout: 4_000 })
-      } else {
-        loadParticipants()
-      }
-    }, 2_500)
+    loadParticipants()
 
     return () => {
       cancelled = true
       controller.abort()
-      if (deferTimer) window.clearTimeout(deferTimer)
-      if (idleHandle !== null && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleHandle)
-      }
     }
   }, [effectiveActiveContext.propertyId, selectedKeyForEffect, selected?.propertyId])
 
@@ -4517,16 +4520,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'buyer_match') {
       return (
-        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`, BUYER_MATCH_V4_ENABLED && 'is-buyer-match-v4')}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
-          {BUYER_MATCH_V4_ENABLED ? (
-            <BuyerMatchV4Workspace
-              paused={heavyLoadPaused}
-              dealContext={canonicalSelectedContext}
-              paneWidth={paneWidth}
-              onOpenFull={() => handleFocusWorkspaceView('buyer_match')}
-            />
-          ) : (
             <BuyerMatchWorkspace
               paused={heavyLoadPaused}
               dealContext={canonicalSelectedContext}
@@ -4550,7 +4545,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               paneWidth={paneWidth}
               apiBase="/api/cockpit"
             />
-          )}
           </WorkspaceSuspense>
         </section>
       )

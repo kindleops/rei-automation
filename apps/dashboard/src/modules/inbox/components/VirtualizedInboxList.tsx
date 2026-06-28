@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { FixedSizeList, type ListOnScrollProps } from 'react-window'
+import { memo, useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import { List, type RowComponentProps } from 'react-window'
 
 interface VirtualizedInboxListProps<T> {
   items: T[]
@@ -11,13 +11,27 @@ interface VirtualizedInboxListProps<T> {
   renderRow: (item: T, index: number, style: CSSProperties) => ReactNode
 }
 
+type InboxListRowProps<T> = {
+  items: T[]
+  renderRow: (item: T, index: number, style: CSSProperties) => ReactNode
+}
+
+function InboxListRow<T>({
+  index,
+  style,
+  items,
+  renderRow,
+}: RowComponentProps<InboxListRowProps<T>>): ReactElement | null {
+  const item = items[index]
+  if (!item) return null
+  return <div style={style}>{renderRow(item, index, style)}</div>
+}
+
 function VirtualizedInboxListInner<T>({
   items,
   rowHeight,
   className,
   overscanCount = 6,
-  initialScrollOffset = 0,
-  onScrollOffsetChange,
   renderRow,
 }: VirtualizedInboxListProps<T>) {
   const [containerNode, setContainerNode] = useState<HTMLDivElement | null>(null)
@@ -34,29 +48,18 @@ function VirtualizedInboxListInner<T>({
     return () => observer.disconnect()
   }, [containerNode])
 
-  const handleScroll = useCallback((props: ListOnScrollProps) => {
-    onScrollOffsetChange?.(props.scrollOffset)
-  }, [onScrollOffsetChange])
-
-  const Row = useCallback(({ index, style }: { index: number; style: CSSProperties }) => (
-    <div style={style}>{renderRow(items[index], index, style)}</div>
-  ), [items, renderRow])
-
   if (items.length === 0) return null
 
   return (
     <div ref={setContainerNode} className={className} style={{ flex: 1, minHeight: 0, height: '100%' }}>
-      <FixedSizeList
-        height={listHeight}
-        width="100%"
-        itemCount={items.length}
-        itemSize={rowHeight}
+      <List<InboxListRowProps<T>>
+        style={{ height: listHeight, width: '100%' }}
+        rowCount={items.length}
+        rowHeight={rowHeight}
         overscanCount={overscanCount}
-        initialScrollOffset={initialScrollOffset}
-        onScroll={handleScroll}
-      >
-        {Row}
-      </FixedSizeList>
+        rowComponent={InboxListRow}
+        rowProps={{ items, renderRow }}
+      />
     </div>
   )
 }

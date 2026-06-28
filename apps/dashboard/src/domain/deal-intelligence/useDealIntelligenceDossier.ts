@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
+import { fetchDealIntelligenceDossier, getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
 import type { DealIntelligenceDossier, EngineProgressStage } from './deal-intelligence.types'
 import { ENGINE_STAGE_DISPLAY_ORDER, ENGINE_STAGE_LABELS } from './deal-intelligence.types'
 
@@ -26,22 +26,56 @@ function resolvePropertyId(thread: ThreadIdentity | null | undefined, dossier: D
   )
 }
 
-export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undefined) {
-  const [dossier, setDossier] = useState<DealIntelligenceDossier | null>(null)
+function buildThreadIdentityKey(thread: ThreadIdentity | null | undefined): string {
+  if (!thread?.threadKey) return ''
+  return [
+    thread.threadKey,
+    thread.propertyId || '',
+    thread.prospectId || '',
+    thread.masterOwnerId || '',
+    thread.canonicalE164 || '',
+  ].join('|')
+}
+
+function isFullDossier(value: DealIntelligenceDossier | null | undefined): boolean {
+  if (!value || (value as { summary_only?: boolean }).summary_only) return false
+  return Boolean(
+    value.master_owner?.full_name
+    || value.prospect?.full_name
+    || (Array.isArray(value.comps?.records) && value.comps.records.length > 0),
+  )
+}
+
+export function useDealIntelligenceDossier(
+  thread: ThreadIdentity | null | undefined,
+  options: { seedDossier?: DealIntelligenceDossier | null; enabled?: boolean } = {},
+) {
+  const enabled = options.enabled !== false
+  const [dossier, setDossier] = useState<DealIntelligenceDossier | null>(options.seedDossier ?? null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [engineRunning, setEngineRunning] = useState(false)
   const [engineError, setEngineError] = useState<string | null>(null)
   const [engineProgress, setEngineProgress] = useState<EngineProgress[]>([])
   const requestIdRef = useRef(0)
-  const dossierRef = useRef<DealIntelligenceDossier | null>(null)
+  const dossierRef = useRef<DealIntelligenceDossier | null>(options.seedDossier ?? null)
+  const threadRef = useRef(thread)
+  const hasFetchedOnceRef = useRef(false)
+  threadRef.current = thread
 
   useEffect(() => {
     dossierRef.current = dossier
   }, [dossier])
 
-  const refresh = useCallback(async () => {
-    if (!thread?.threadKey) {
+  useEffect(() => {
+    if (!options.seedDossier) return
+    dossierRef.current = options.seedDossier
+    setDossier(options.seedDossier)
+  }, [options.seedDossier])
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const currentThread = threadRef.current
+    if (!currentThread?.threadKey) {
       setDossier(null)
       return
     }
@@ -50,54 +84,69 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     setLoading(true)
     setError(null)
 
-    const base = getBackendBaseUrl()
-    const secret = getBackendSecret()
     const qs = new URLSearchParams()
-    const propertyId = resolvePropertyId(thread, dossierRef.current)
+    const propertyId = resolvePropertyId(currentThread, null)
     if (propertyId) qs.set('property_id', propertyId)
-    if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
-    if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
-    if (thread.masterOwnerId) qs.set('master_owner_id', thread.masterOwnerId)
-
-    qs.set('summary', '1')
-    const path = `/api/cockpit/deal-intelligence/thread/${encodeURIComponent(thread.threadKey)}`
-    const url = `${base}${path}?${qs.toString()}`
+    if (currentThread.canonicalE164) qs.set('canonical_e164', currentThread.canonicalE164)
+    if (currentThread.prospectId) qs.set('prospect_id', currentThread.prospectId)
+    if (currentThread.masterOwnerId) qs.set('master_owner_id', currentThread.masterOwnerId)
 
     try {
-      const res = await fetch(url, {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-ops-dashboard-secret': secret,
-        },
-      })
-      if (!res.ok) throw new Error(`dossier_http_${res.status}`)
-      const payload = await res.json()
+      const result = await fetchDealIntelligenceDossier(currentThread.threadKey, qs.toString(), signal)
       if (requestId !== requestIdRef.current) return
+      if (!result.ok) throw new Error(`dossier_http_${result.status}`)
+      const payload = result.data as { ok?: boolean; data?: DealIntelligenceDossier; error?: string }
       if (payload?.ok && payload?.data) {
-        setDossier(payload.data as DealIntelligenceDossier)
+        setDossier(payload.data)
       } else {
         throw new Error(payload?.error || 'dossier_failed')
       }
     } catch (err: unknown) {
+      if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') return
       if (requestId !== requestIdRef.current) return
       setError(err instanceof Error ? err.message : 'dossier_failed')
       setDossier(null)
     } finally {
       if (requestId === requestIdRef.current) setLoading(false)
     }
-  }, [thread?.threadKey, thread?.propertyId, thread?.canonicalE164, thread?.prospectId, thread?.masterOwnerId])
+  }, [])
+
+  const identityKey = buildThreadIdentityKey(thread)
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    if (!enabled || !identityKey) {
+      setDossier(null)
+      setLoading(false)
+      return
+    }
+
+    if (isFullDossier(options.seedDossier)) {
+      return
+    }
+
+    dossierRef.current = null
+    setDossier(null)
+    setError(null)
+    setLoading(true)
+
+    const controller = new AbortController()
+    hasFetchedOnceRef.current = true
+    void refresh(controller.signal)
+
+    return () => {
+      controller.abort()
+      requestIdRef.current += 1
+    }
+  }, [enabled, identityKey, refresh])
 
   const runDecisionEngine = useCallback(async () => {
-    if (!thread?.threadKey) {
+    const currentThread = threadRef.current
+    if (!currentThread?.threadKey) {
       setEngineError('thread_key_required')
       return
     }
 
-    const propertyId = resolvePropertyId(thread, dossierRef.current)
+    const propertyId = resolvePropertyId(currentThread, dossierRef.current)
     if (!propertyId) {
       setEngineError('property_id_required')
       return
@@ -115,7 +164,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
 
     const base = getBackendBaseUrl()
     const secret = getBackendSecret()
-    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(thread.threadKey)}/run-engine?stream=true&property_id=${encodeURIComponent(propertyId)}`
+    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(currentThread.threadKey)}/run-engine?stream=true&property_id=${encodeURIComponent(propertyId)}`
 
     try {
       const res = await fetch(url, {
@@ -187,7 +236,7 @@ export function useDealIntelligenceDossier(thread: ThreadIdentity | null | undef
     } finally {
       setEngineRunning(false)
     }
-  }, [thread?.threadKey, thread?.propertyId, refresh])
+  }, [refresh])
 
   return {
     dossier,

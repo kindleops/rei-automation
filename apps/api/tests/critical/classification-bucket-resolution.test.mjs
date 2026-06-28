@@ -81,14 +81,16 @@ describe("Classification Bucket Resolution", () => {
     assert.strictEqual(status.universal_stage, "awaiting_response");
   });
 
-  it("resolves stale outbound message to null bucket for cold reactivation", () => {
+  it("resolves stale outbound message to cold bucket for cold reactivation", () => {
     const staleOutbound = "2026-01-01T00:00:00.000Z";
     const existingState = {
       last_outbound_at: staleOutbound,
       last_inbound_at: "2025-12-01T00:00:00.000Z",
     };
     const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound", sent_at: staleOutbound }, existingState);
-    assert.strictEqual(bucket, null);
+    const lane = resolveAutomationLaneFromClassification({}, { direction: "outbound", sent_at: staleOutbound }, existingState, bucket);
+    assert.strictEqual(bucket, "cold");
+    assert.strictEqual(lane, "cold_reactivation");
   });
 
   it("resolves property_correction to needs_review bucket and needs_review status", () => {

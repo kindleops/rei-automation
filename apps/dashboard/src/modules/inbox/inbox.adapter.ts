@@ -1298,31 +1298,25 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   // ── Realtime subscription + polling heartbeat ─────────────────────────────
 
   useEffect(() => {
-    refreshAuthoritativeViewCounts(dispatch)
-    const countsInterval = window.setInterval(() => {
-      refreshAuthoritativeViewCounts(dispatch)
-    }, 60_000)
-    return () => window.clearInterval(countsInterval)
-  }, [])
-
-  useEffect(() => {
     let cancelled = false
 
     void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot', limit: 25 })
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
 
-    const POLL_INTERVAL_MS = 15_000
+    const POLL_INTERVAL_DEGRADED_MS = 60_000
     const pollInterval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
       const status = stateRef.current.realtimeStatus
-      const shouldPoll = status === 'error' || status === 'disconnected' || status === 'disabled' || status === 'connecting'
+      const shouldPoll = status === 'error' || status === 'disconnected' || status === 'disabled'
       if (!cancelled && shouldPoll) {
+        refreshAuthoritativeViewCounts(dispatch)
         void refresh({
           _automatic: true,
           _refreshReason: 'fallback_polling',
         })
       }
-    }, POLL_INTERVAL_MS)
+    }, POLL_INTERVAL_DEGRADED_MS)
 
     const handleOffline = () => {
       dispatch({ type: 'SET_REALTIME_STATUS', status: 'disconnected' })

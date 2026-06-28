@@ -26,45 +26,10 @@ test("getUniversalDealDossier handles contact_threads object instead of array sa
   // Mock supabase query to return our specific command object
   const originalFrom = supabase.from;
   
-  t.mock.method(supabase, 'from', (table) => {
-    if (table === 'inbox_thread_state') {
-      return {
-        select: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({ data: { property_id: '123', prospect_id: '456', canonical_e164: '+14802257752' } })
-          })
-        })
-      };
-    }
-    
-    if (table === 'v_universal_lead_command') {
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({
-                  data: {
-                    thread_key: '+14802257752',
-                    property_id: '123',
-                    contact_threads: {
-                      threads: [
-                        { channel: 'phone', value: '+14802257752' }
-                      ],
-                      thread_count: 1
-                    }
-                  }
-                })
-              })
-            })
-          })
-        })
-      };
-    }
-    
+  const makeTerminal = (rows = []) => {
     const terminal = {
-      maybeSingle: async () => ({ data: null, error: null }),
-      single: async () => ({ data: null, error: null }),
+      maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+      single: async () => ({ data: rows[0] ?? null, error: null }),
       limit: () => terminal,
       order: () => terminal,
       lt: () => terminal,
@@ -74,11 +39,40 @@ test("getUniversalDealDossier handles contact_threads object instead of array sa
       or: () => terminal,
       abortSignal: () => terminal,
       then(resolve) {
-        return Promise.resolve({ data: [], error: null }).then(resolve);
+        return Promise.resolve({ data: rows, error: null }).then(resolve);
       },
     };
+    return terminal;
+  };
+
+  t.mock.method(supabase, 'from', (table) => {
+    if (table === 'inbox_thread_state') {
+      return {
+        select: () => makeTerminal([{
+          property_id: '123',
+          prospect_id: '456',
+          canonical_e164: '+14802257752',
+        }]),
+      };
+    }
+
+    if (table === 'v_universal_lead_command') {
+      return {
+        select: () => makeTerminal([{
+          thread_key: '+14802257752',
+          property_id: '123',
+          contact_threads: {
+            threads: [
+              { channel: 'phone', value: '+14802257752' },
+            ],
+            thread_count: 1,
+          },
+        }]),
+      };
+    }
+
     return {
-      select: () => terminal,
+      select: () => makeTerminal([]),
     };
   });
 

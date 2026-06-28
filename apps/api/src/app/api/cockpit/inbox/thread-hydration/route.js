@@ -11,6 +11,10 @@ function clean(value) {
   return String(value ?? '').trim()
 }
 
+function lower(value) {
+  return clean(value).toLowerCase()
+}
+
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
@@ -85,6 +89,8 @@ export async function GET(request) {
     const master_owner_id = clean(searchParams.get('master_owner_id') || searchParams.get('owner_id'))
     const latest_message_id = clean(searchParams.get('latest_message_id') || searchParams.get('latestMessageId'))
     const debug = searchParams.get('debug') === 'true'
+    const includeMessages = !['0', 'false', 'no'].includes(lower(searchParams.get('include_messages') || '1'))
+    const includeDossier = !['0', 'false', 'no'].includes(lower(searchParams.get('include_dossier') || '1'))
 
     const parsedIdentity = parseConversationThreadId(conversation_thread_id || thread_key)
     const effective_normalized_phone = normalized_phone || parsedIdentity.normalized_phone || canonical_e164 || phone_e164 || phone || best_phone || seller_phone || ''
@@ -111,98 +117,105 @@ export async function GET(request) {
     const resolved_master_owner_id = effective_master_owner_id || fallbackData.master_owner_id || ''
     const resolved_prospect_id = effective_prospect_id || fallbackData.prospect_id || ''
 
-    console.log('[HYDRATION] 2. Fetching Messages directly...')
+    console.log('[HYDRATION] 2. Fetching Messages directly...', { includeMessages })
     let messagesPayload = { rows: [], total: 0, diagnostics: {}, threadKey: target_thread_key || null }
-    try {
-      messagesPayload = await getThreadMessages({
-        selected_thread_key: target_thread_key,
-        conversation_thread_id,
-        legacy_thread_key,
-        normalized_phone: resolved_e164,
-        canonical_e164: resolved_e164,
-        phone_e164,
-        phone,
-        best_phone,
-        seller_phone,
-        property_id: resolved_property_id,
-        prospect_id: resolved_prospect_id,
-        master_owner_id: resolved_master_owner_id,
-        latest_message_id: latest_message_id || null,
-      }, { offset: 0, limit: 50, fetchAll: true }, {
-        latestPreviewSource: 'canonical_inbox_threads',
-      })
-      console.log('[HYDRATION] Messages fetched successfully', messagesPayload.rows.length)
-    } catch (error) {
-      console.error('[HYDRATION] [MESSAGES_ERROR]', error)
-      degradedParts.push('messages')
+    if (includeMessages) {
+      try {
+        messagesPayload = await getThreadMessages({
+          selected_thread_key: target_thread_key,
+          conversation_thread_id,
+          legacy_thread_key,
+          normalized_phone: resolved_e164,
+          canonical_e164: resolved_e164,
+          phone_e164,
+          phone,
+          best_phone,
+          seller_phone,
+          property_id: resolved_property_id,
+          prospect_id: resolved_prospect_id,
+          master_owner_id: resolved_master_owner_id,
+          latest_message_id: latest_message_id || null,
+        }, { offset: 0, limit: 50, fetchAll: true }, {
+          latestPreviewSource: 'canonical_inbox_threads',
+        })
+        console.log('[HYDRATION] Messages fetched successfully', messagesPayload.rows.length)
+      } catch (error) {
+        console.error('[HYDRATION] [MESSAGES_ERROR]', error)
+        degradedParts.push('messages')
+      }
     }
 
-    console.log('[HYDRATION] 3. Fetching Dossier with Timeout...')
+    console.log('[HYDRATION] 3. Fetching Dossier with Timeout...', { includeDossier })
     let dossier = null
     let dossierError = null
-    
-    try {
-      dossier = await withTimeout((signal) => getUniversalDealDossier({
+
+    const buildFallbackDossier = () => ({
+      identity: {
         thread_key: target_thread_key,
         property_id: resolved_property_id,
         prospect_id: resolved_prospect_id,
         master_owner_id: resolved_master_owner_id,
         canonical_e164: resolved_e164,
-        abortSignal: signal,
-        debug
-      }), 2500, 'universal_dossier_timeout')
-      
-      console.log('[HYDRATION] Dossier fetched successfully')
-      if (!dossier.identity.property_id) degradedParts.push('property_id_missing')
-    } catch (error) {
-      console.error('[HYDRATION] [DOSSIER_HYDRATION_ERROR]', error.message)
-      degradedParts.push('dossier')
-      dossierError = error?.message || 'Unknown error'
+      },
+      property: {
+        full_address: fallbackData.property_address_full,
+        address: fallbackData.property_address_full,
+        market: fallbackData.market,
+        property_type: fallbackData.property_type,
+        estimated_value: fallbackData.estimated_value,
+      },
+      prospect: {
+        full_name: fallbackData.owner_name,
+      },
+      master_owner: {
+        full_name: fallbackData.owner_name,
+      },
+      primary_phone: {
+        canonical_e164: fallbackData.canonical_e164,
+      },
+      conversation: {
+        latest_message_body: fallbackData.latest_message_body,
+        latest_message_at: fallbackData.latest_message_at,
+      },
+      compliance: {},
+      deal_status: {},
+      valuation: {
+        estimated_value: fallbackData.estimated_value,
+      },
+      raw_sources_debug: {
+        command_raw: {
+          thread_key: target_thread_key,
+          property_address_full: fallbackData.property_address_full,
+          owner_name: fallbackData.owner_name,
+          market: fallbackData.market,
+          property_type: fallbackData.property_type,
+          estimated_value: fallbackData.estimated_value,
+        },
+      },
+    })
 
-      dossier = {
-        identity: {
+    if (includeDossier) {
+      try {
+        dossier = await withTimeout((signal) => getUniversalDealDossier({
           thread_key: target_thread_key,
           property_id: resolved_property_id,
           prospect_id: resolved_prospect_id,
           master_owner_id: resolved_master_owner_id,
-          canonical_e164: resolved_e164
-        },
-        property: {
-          full_address: fallbackData.property_address_full,
-          address: fallbackData.property_address_full,
-          market: fallbackData.market,
-          property_type: fallbackData.property_type,
-          estimated_value: fallbackData.estimated_value
-        },
-        prospect: {
-          full_name: fallbackData.owner_name
-        },
-        master_owner: {
-          full_name: fallbackData.owner_name
-        },
-        primary_phone: {
-          canonical_e164: fallbackData.canonical_e164
-        },
-        conversation: {
-          latest_message_body: fallbackData.latest_message_body,
-          latest_message_at: fallbackData.latest_message_at
-        },
-        compliance: {},
-        deal_status: {},
-        valuation: {
-          estimated_value: fallbackData.estimated_value
-        },
-        raw_sources_debug: {
-          command_raw: {
-            thread_key: target_thread_key,
-            property_address_full: fallbackData.property_address_full,
-            owner_name: fallbackData.owner_name,
-            market: fallbackData.market,
-            property_type: fallbackData.property_type,
-            estimated_value: fallbackData.estimated_value
-          }
-        }
+          canonical_e164: resolved_e164,
+          abortSignal: signal,
+          debug,
+        }), 2500, 'universal_dossier_timeout')
+
+        console.log('[HYDRATION] Dossier fetched successfully')
+        if (!dossier.identity.property_id) degradedParts.push('property_id_missing')
+      } catch (error) {
+        console.error('[HYDRATION] [DOSSIER_HYDRATION_ERROR]', error.message)
+        degradedParts.push('dossier')
+        dossierError = error?.message || 'Unknown error'
+        dossier = buildFallbackDossier()
       }
+    } else {
+      dossier = buildFallbackDossier()
     }
 
     // 4. Map Dossier back to hydration response for compatibility

@@ -44,7 +44,7 @@ import { WatchBell } from '../../../shared/WatchBell'
 import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../../lib/data/censusData'
 import type { CensusData } from '../../../lib/data/censusData'
 import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
-import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
+import { DealIntelligenceHeaderActions } from '../../deal-intelligence/DealIntelligenceLeadStateBar'
 import '../../deal-intelligence/deal-intelligence-25.css'
 
 const formatMoney = formatCurrency
@@ -5975,16 +5975,24 @@ export const IntelligencePanel = ({
         </header>
       ) : onCollapse ? (
         <header className="nx-intel-header is-compact-only">
+          <DealIntelligenceHeaderActions
+            data={{
+              threadKey: thread.threadKey || thread.id,
+              lifecycle_stage: thread.lifecycle_stage ?? thread.lifecycleStage,
+              operational_status: thread.operational_status ?? thread.operationalStatus ?? thread.inboxStatus,
+              lead_temperature: thread.lead_temperature ?? thread.leadTemperature,
+              is_starred: thread.is_starred ?? thread.isStarred,
+              is_pinned: thread.is_pinned ?? thread.isPinned,
+              is_archived: thread.is_archived ?? thread.isArchived,
+              snoozed_until: thread.snoozed_until ?? thread.snoozedUntil,
+              manual_stage_lock: thread.manual_stage_lock ?? thread.manualStageLock,
+              manual_temperature_lock: thread.manual_temperature_lock ?? thread.manualTemperatureLock,
+            }}
+          />
           <button type="button" className="nx-intel-collapse" onClick={onCollapse} title="Collapse panel">
             <Icon name="close" />
           </button>
         </header>
-      ) : null}
-
-      {layoutMode !== 'compact' && thread ? (
-        <div className="nx-intel-lead-state-strip">
-          <UniversalLeadStateControls thread={thread} sourceView="deal_intelligence" compact />
-        </div>
       ) : null}
 
       <div className="nx-intel-scroll-body">

@@ -375,8 +375,14 @@ async function queryMaybe(table, select, filters = {}, abortSignal) {
     query = query.eq(key, value)
   }
   if (abortSignal) query = query.abortSignal(abortSignal)
-  const { data, error } = await query.maybeSingle()
-  if (!error) return data || null
+  // Never use maybeSingle() — duplicate rows (common on acquisition_scores, phones)
+  // must not 500 the dossier; take the first matching row.
+  query = query.limit(1)
+  const { data, error } = await query
+  if (!error) {
+    const row = Array.isArray(data) ? data[0] : data
+    return row || null
+  }
   if (/does not exist|column/i.test(error.message || '')) {
     console.warn(`[DEAL_INTEL_QUERY] ${table} select failed: ${error.message}`)
     return null
@@ -388,14 +394,20 @@ async function queryHydratedThread({ thread_key, property_id }, abortSignal) {
   if (thread_key) {
     let query = supabase.from('inbox_threads_hydrated').select('*').eq('thread_key', thread_key).limit(1)
     if (abortSignal) query = query.abortSignal(abortSignal)
-    const { data, error } = await query.maybeSingle()
-    if (!error && data) return data
+    const { data, error } = await query
+    if (!error) {
+      const row = Array.isArray(data) ? data[0] : data
+      if (row) return row
+    }
   }
   if (property_id) {
     let query = supabase.from('inbox_threads_hydrated').select('*').eq('property_id', property_id).limit(1)
     if (abortSignal) query = query.abortSignal(abortSignal)
-    const { data, error } = await query.maybeSingle()
-    if (!error && data) return data
+    const { data, error } = await query
+    if (!error) {
+      const row = Array.isArray(data) ? data[0] : data
+      if (row) return row
+    }
   }
   return null
 }
@@ -467,7 +479,8 @@ async function resolveIdentity({
       .eq('master_owner_id', resolved.master_owner_id)
       .limit(1)
     if (abortSignal) linkedProspectQuery = linkedProspectQuery.abortSignal(abortSignal)
-    const { data: linkedProspect } = await linkedProspectQuery.maybeSingle()
+    const { data: linkedProspectRows, error: linkedProspectError } = await linkedProspectQuery
+    const linkedProspect = linkedProspectError ? null : (Array.isArray(linkedProspectRows) ? linkedProspectRows[0] : linkedProspectRows)
     if (linkedProspect?.prospect_id) {
       resolved.prospect_id = clean(linkedProspect.prospect_id)
     }
@@ -519,35 +532,36 @@ async function fetchBuyerGeoRollup(subject, abortSignal) {
       .eq('normalized_asset_class', attempt.asset)
       .limit(1)
     if (abortSignal) query = query.abortSignal(abortSignal)
-    const { data, error } = await query.maybeSingle()
-    if (!error && data) {
-      const heat = num(data.buyer_heat_score) ?? num(data.investor_demand_score)
+    const { data, error } = await query
+    const rollupRow = error ? null : (Array.isArray(data) ? data[0] : data)
+    if (rollupRow) {
+      const heat = num(rollupRow.buyer_heat_score) ?? num(rollupRow.investor_demand_score)
       return {
         status: 'available',
         signal: buyerMarketSignal(heat),
-        timeframe: data.timeframe || data.rollup_window || '6mo',
+        timeframe: rollupRow.timeframe || rollupRow.rollup_window || '6mo',
         geographic_level_used: `${attempt.geo_level} · ${attempt.asset}`,
         geographic_key: attempt.geo_key,
         normalized_asset_class: attempt.asset,
         fallback_attempted: attempted,
-        purchase_count: num(data.purchase_count),
-        buyer_count: num(data.buyer_count),
-        corporate_buyer_count: num(data.corporate_buyer_count),
-        repeat_buyer_count: num(data.repeat_buyer_count),
-        avg_purchase_price: num(data.avg_purchase_price),
-        median_purchase_price: num(data.median_purchase_price),
-        ppsf: num(data.ppsf) ?? num(data.avg_ppsf),
-        ppu: num(data.ppu),
-        avg_units: num(data.avg_units),
-        liquidity_score: num(data.liquidity_score),
-        velocity_score: num(data.velocity_score),
-        investor_demand_score: num(data.investor_demand_score),
-        buyer_heat_score: num(data.buyer_heat_score),
-        dominant_buyer_type: data.dominant_buyer_type || null,
-        dominant_strategy: data.dominant_strategy || null,
-        top_buyers: Array.isArray(data.top_buyers) ? data.top_buyers : [],
-        price_bands: data.price_bands || null,
-        data_freshness: data.computed_at || data.updated_at || null,
+        purchase_count: num(rollupRow.purchase_count),
+        buyer_count: num(rollupRow.buyer_count),
+        corporate_buyer_count: num(rollupRow.corporate_buyer_count),
+        repeat_buyer_count: num(rollupRow.repeat_buyer_count),
+        avg_purchase_price: num(rollupRow.avg_purchase_price),
+        median_purchase_price: num(rollupRow.median_purchase_price),
+        ppsf: num(rollupRow.ppsf) ?? num(rollupRow.avg_ppsf),
+        ppu: num(rollupRow.ppu),
+        avg_units: num(rollupRow.avg_units),
+        liquidity_score: num(rollupRow.liquidity_score),
+        velocity_score: num(rollupRow.velocity_score),
+        investor_demand_score: num(rollupRow.investor_demand_score),
+        buyer_heat_score: num(rollupRow.buyer_heat_score),
+        dominant_buyer_type: rollupRow.dominant_buyer_type || null,
+        dominant_strategy: rollupRow.dominant_strategy || null,
+        top_buyers: Array.isArray(rollupRow.top_buyers) ? rollupRow.top_buyers : [],
+        price_bands: rollupRow.price_bands || null,
+        data_freshness: rollupRow.computed_at || rollupRow.updated_at || null,
         source: 'buyer_geo_rollups_v2',
       }
     }
@@ -705,7 +719,8 @@ async function fetchBuyerMatches(propertyId, abortSignal) {
     .order('created_at', { ascending: false })
     .limit(1)
   if (abortSignal) runQuery = runQuery.abortSignal(abortSignal)
-  const { data: run } = await runQuery.maybeSingle()
+  const { data: runRows, error: runError } = await runQuery
+  const run = runError ? null : (Array.isArray(runRows) ? runRows[0] : runRows)
 
   if (!run || !run.total_matches) {
     return {
@@ -950,12 +965,25 @@ function ageFromMob(mob) {
   return null
 }
 
-function buildBaselineScores(propertyRow, hydrated) {
+function buildBaselineScores(propertyRow, hydrated, acquisitionRow = null) {
   return {
-    acquisition_score: num(pick(propertyRow?.final_acquisition_score, hydrated?.final_acquisition_score)),
+    acquisition_score: num(pick(
+      propertyRow?.final_acquisition_score,
+      hydrated?.final_acquisition_score,
+      acquisitionRow?.aos_score,
+    )),
     deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
-    motivation_score: num(pick(propertyRow?.structured_motivation_score, hydrated?.priority_score, hydrated?.structured_motivation_score)),
-    distress_score: num(pick(propertyRow?.tag_distress_score, hydrated?.tag_distress_score)),
+    motivation_score: num(pick(
+      propertyRow?.structured_motivation_score,
+      hydrated?.priority_score,
+      hydrated?.structured_motivation_score,
+      acquisitionRow?.seller_financial_pressure_score,
+    )),
+    distress_score: num(pick(
+      propertyRow?.tag_distress_score,
+      hydrated?.tag_distress_score,
+      acquisitionRow?.forced_sale_pressure_score,
+    )),
     label: 'Baseline Property Intelligence',
   }
 }
@@ -1298,7 +1326,6 @@ export async function buildDealIntelligenceDossier({
   identity.full_address = location.full_address
 
   const property = normalizeProperty(propertyRow, hydrated, location)
-  const baseline_scores = buildBaselineScores(propertyRow, hydrated)
 
   const censusRow = !summary_only && location.zip
     ? await queryMaybe(
@@ -1341,6 +1368,7 @@ export async function buildDealIntelligenceDossier({
     ])
 
   const acquisition = normalizeAcquisitionDecision(acquisitionRow)
+  const baseline_scores = buildBaselineScores(propertyRow, hydrated, acquisitionRow)
   const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
   const prospect = normalizeProspect(prospectRow, hydrated, phoneRow)
   const owner = normalizeOwner(ownerRow, hydrated)

@@ -20,7 +20,17 @@ import {
   scoreTone,
 } from '../../domain/deal-intelligence/deal-intelligence-format'
 import { DealIntelligenceMedia, type MediaTab } from './DealIntelligenceMedia'
-import { UniversalLeadStateControls } from '../../domain/lead-state/UniversalLeadStateControls'
+import {
+  DealIntelligenceCommandRow,
+  DealIntelligenceTemperatureBadge,
+  type DealIntelligenceLeadStateData,
+} from './DealIntelligenceLeadStateBar'
+import {
+  CONTACTABILITY_META,
+  DISPOSITION_META,
+  normalizeContactability,
+  normalizeDisposition,
+} from '../../domain/lead-state/universal-lead-state-registry'
 import './deal-intelligence-25.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -231,7 +241,7 @@ export const DealIntelligence25Panel = ({
   canonicalE164?: string
   fallbackAddress?: string | null
 }) => {
-  const { dossier, loading, error, runDecisionEngine, engineRunning, engineError, engineProgress } = useDealIntelligenceDossier({
+  const { dossier, loading, error, refresh, runDecisionEngine, engineRunning, engineError, engineProgress } = useDealIntelligenceDossier({
     threadKey, propertyId, prospectId, masterOwnerId, canonicalE164,
   })
 
@@ -309,6 +319,30 @@ export const DealIntelligence25Panel = ({
   const relationshipFlags = parseFlagBadges(prospect?.relationship_flags || prospect?.matching_flags)
   const personFlags = parseFlagBadges(prospect?.person_flags)
 
+  const leadStateData: DealIntelligenceLeadStateData | null = threadKey ? {
+    threadKey,
+    lifecycle_stage: convo?.lifecycle_stage,
+    operational_status: convo?.operational_status,
+    lead_temperature: convo?.lead_temperature,
+    is_starred: convo?.is_starred,
+    is_pinned: convo?.is_pinned,
+    is_archived: convo?.is_archived,
+    snoozed_until: convo?.snoozed_until,
+    manual_stage_lock: convo?.manual_stage_lock,
+    manual_temperature_lock: convo?.manual_temperature_lock,
+  } : null
+
+  const dispositionCode = convo?.disposition ? normalizeDisposition(String(convo.disposition)) : null
+  const dispositionMeta = dispositionCode && dispositionCode !== 'none'
+    ? DISPOSITION_META[dispositionCode]
+    : null
+  const contactabilityCode = convo?.contactability_status
+    ? normalizeContactability(String(convo.contactability_status))
+    : phone?.contactability_status
+      ? normalizeContactability(String(phone.contactability_status))
+      : null
+  const contactabilityMeta = contactabilityCode ? CONTACTABILITY_META[contactabilityCode] : null
+
   return (
     <div className={cls('nx-deal-compact-shell', engineRunning && 'is-engine-running')}>
       <div className="nx-di25-media">
@@ -332,34 +366,22 @@ export const DealIntelligence25Panel = ({
         </div>
       </div>
 
-      {threadKey ? (
-        <section className="nx-di25-layer is-lead-state">
-          <header className="nx-di25-layer__head"><span>Canonical Lead State</span></header>
-          <UniversalLeadStateControls
-            thread={{
-              threadKey,
-              id: threadKey,
-              lifecycle_stage: convo?.lifecycle_stage,
-              operational_status: convo?.operational_status,
-              lead_temperature: convo?.lead_temperature,
-              disposition: convo?.disposition,
-              contactability_status: convo?.contactability_status,
-              next_action: convo?.next_action,
-              is_starred: convo?.is_starred,
-              is_pinned: convo?.is_pinned,
-              is_archived: convo?.is_archived,
-              snoozed_until: convo?.snoozed_until,
-              manual_stage_lock: convo?.manual_stage_lock,
-              manual_temperature_lock: convo?.manual_temperature_lock,
-            }}
-            sourceView="deal_intelligence"
-            compact
-          />
-        </section>
+      {leadStateData ? (
+        <DealIntelligenceCommandRow data={leadStateData} onPatched={() => void refresh()} />
       ) : null}
 
       <section className="nx-di25-identity">
-        <h2>{address || 'Property unknown'}</h2>
+        <div className="nx-di25-identity__head">
+          <h2>{address || 'Property unknown'}</h2>
+          {threadKey ? (
+            <DealIntelligenceTemperatureBadge
+              threadKey={threadKey}
+              temperature={convo?.lead_temperature}
+              manualTemperatureLock={convo?.manual_temperature_lock}
+              onPatched={() => void refresh()}
+            />
+          ) : null}
+        </div>
         <div className="nx-di25-identity__meta">
           {property?.market ? <span className="nx-di25-badge">{property.market}</span> : null}
           {property?.property_type ? <span className="nx-di25-badge is-type">{property.property_type}</span> : null}
@@ -552,8 +574,28 @@ export const DealIntelligence25Panel = ({
         <DetailSection title="Conversation Intelligence" defaultOpen>
           <MetricGrid>
             <FieldRow label="Reply Intent" value={humanizeEnum(String(convo.reply_intent || convo.latest_intent || ''))} />
-            <FieldRow label="Seller State" value={humanizeEnum(String(convo.seller_state || ''))} />
-            <FieldRow label="Lead Temperature" value={humanizeEnum(String(convo.lead_temperature || ''))} />
+            {(has(convo.seller_state) || dispositionMeta) ? (
+              <FieldRow
+                label="Seller State"
+                value={(
+                  <span className="nx-di25-seller-state">
+                    {has(convo.seller_state) ? humanizeEnum(String(convo.seller_state || '')) : '—'}
+                    {dispositionMeta ? (
+                      <span
+                        className="nx-di25-disposition-chip"
+                        style={{
+                          color: dispositionMeta.color,
+                          borderColor: `color-mix(in srgb, ${dispositionMeta.color} 36%, transparent)`,
+                          background: `color-mix(in srgb, ${dispositionMeta.color} 12%, transparent)`,
+                        }}
+                      >
+                        {dispositionMeta.label}
+                      </span>
+                    ) : null}
+                  </span>
+                )}
+              />
+            ) : null}
             <FieldRow label="Sentiment" value={humanizeEnum(String(convo.sentiment || ''))} />
             <FieldRow label="Language" value={fmtDiText(convo.language)} />
             <FieldRow label="Last Response" value={fmtDiDate(String(convo.last_seller_response_at || ''))} />
@@ -600,6 +642,19 @@ export const DealIntelligence25Panel = ({
       </DetailSection>
 
       <DetailSection title="Phone Intelligence">
+        {contactabilityMeta ? (
+          <div
+            className={cls('nx-di25-contactability', contactabilityMeta.blocksSend && 'is-blocked')}
+            style={{
+              color: contactabilityMeta.color,
+              borderColor: `color-mix(in srgb, ${contactabilityMeta.color} 40%, transparent)`,
+              background: `color-mix(in srgb, ${contactabilityMeta.color} ${contactabilityMeta.blocksSend ? '16' : '10'}%, transparent)`,
+            }}
+          >
+            <strong>{contactabilityMeta.label}</strong>
+            {contactabilityMeta.blocksSend ? <span>Outbound messaging blocked</span> : <span>Eligible for outreach</span>}
+          </div>
+        ) : null}
         <MetricGrid>
           <FieldRow label="Primary" value={fmtDiPhone(String(phone?.number || ''))} full />
           {(phone?.alternate_numbers as string[] | undefined)?.map((alt, i) => (

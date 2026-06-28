@@ -83,6 +83,7 @@ function makeSupabaseStub(rows = []) {
 }
 
 test("outbound sent → Waiting", () => {
+  const sentAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const existingState = {
     inbox_bucket: "new_replies",
     primary_intent: "who_is_this",
@@ -90,7 +91,7 @@ test("outbound sent → Waiting", () => {
   };
   const bucket = resolveInboxBucketFromClassification(
     {},
-    { direction: "outbound", sent_at: "2026-06-23T12:00:00.000Z" },
+    { direction: "outbound", sent_at: sentAt },
     existingState,
   );
   assert.equal(bucket, "waiting");
@@ -138,12 +139,15 @@ test("system failure after retry exhaustion → Needs Review", () => {
 });
 
 test("count/list equality for waiting bucket", async () => {
+  const recentOutboundAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const rows = [
     {
       thread_key: "+15550000001",
       canonical_thread_key: "+15550000001",
       canonical_e164: "+15550000001",
-      latest_message_at: "2026-06-23T10:00:00.000Z",
+      latest_message_at: recentOutboundAt,
+      last_outbound_at: recentOutboundAt,
+      last_inbound_at: null,
       latest_message_direction: "outbound",
       latest_message_body: "Following up",
       inbox_bucket: "waiting",
@@ -153,7 +157,9 @@ test("count/list equality for waiting bucket", async () => {
       thread_key: "+15550000002",
       canonical_thread_key: "+15550000002",
       canonical_e164: "+15550000002",
-      latest_message_at: "2026-06-23T09:00:00.000Z",
+      latest_message_at: recentOutboundAt,
+      last_outbound_at: recentOutboundAt,
+      last_inbound_at: null,
       latest_message_direction: "outbound",
       latest_message_body: "Checking in",
       inbox_bucket: "waiting",

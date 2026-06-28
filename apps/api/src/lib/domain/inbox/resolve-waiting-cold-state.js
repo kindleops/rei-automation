@@ -112,7 +112,7 @@ export function resolveOutboundReplyState({
   lastInboundAt,
   latestDeliveryStatus,
   now = Date.now(),
-  workflowRow = {},
+  workflowRow: _workflowRow = {},
 } = {}) {
   if (!isOutboundLastWithoutReply({ lastOutboundAt, lastInboundAt })) {
     return {
@@ -130,31 +130,16 @@ export function resolveOutboundReplyState({
     };
   }
 
-  const followUpMs = parseTimestampMs(workflowRow.follow_up_at);
-  const workflow = resolveWorkflowWaitingState({
-    ...workflowRow,
-    last_outbound_at: lastOutboundAt,
-    last_inbound_at: lastInboundAt,
-  }, now);
-
-  if (workflow.is_waiting) {
+  const outboundMs = parseTimestampMs(lastOutboundAt);
+  if (!outboundMs) {
     return {
-      inbox_bucket: "waiting",
+      inbox_bucket: null,
       automation_lane: null,
       disposition: null,
     };
   }
 
-  if (followUpMs > 0 && followUpMs <= now) {
-    return {
-      inbox_bucket: "follow_up",
-      automation_lane: "active_conversation",
-      disposition: null,
-    };
-  }
-
-  const outboundMs = parseTimestampMs(lastOutboundAt);
-  if (outboundMs && (now - outboundMs) <= WAITING_REPLY_WINDOW_MS) {
+  if ((now - outboundMs) <= WAITING_REPLY_WINDOW_MS) {
     return {
       inbox_bucket: "waiting",
       automation_lane: null,
@@ -163,8 +148,8 @@ export function resolveOutboundReplyState({
   }
 
   return {
-    inbox_bucket: "follow_up",
-    automation_lane: "active_conversation",
+    inbox_bucket: "cold",
+    automation_lane: "cold_reactivation",
     disposition: null,
   };
 }
@@ -181,7 +166,7 @@ export function shouldTransitionWaitingToCold({
     lastInboundAt,
     now,
   });
-  return coldState.automation_lane === "cold_reactivation";
+  return coldState.inbox_bucket === "cold" && coldState.automation_lane === "cold_reactivation";
 }
 
 export function buildColdTransitionPatch({
@@ -195,7 +180,7 @@ export function buildColdTransitionPatch({
   }
 
   return {
-    inbox_bucket: null,
+    inbox_bucket: "cold",
     automation_lane: "cold_reactivation",
     updated_at: new Date(now).toISOString(),
   };
