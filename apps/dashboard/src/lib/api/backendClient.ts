@@ -55,8 +55,12 @@ export const getBackendBaseUrl = (): string => {
     return cleanUrl
   }
 
-  // In production, never fall back to localhost — fail clearly if the env var is missing.
-  if (import.meta.env.PROD) {
+  // Production preview on localhost uses vite preview proxy — same-origin /api paths.
+  if (import.meta.env.PROD && isBrowser) {
+    const hostname = window.location.hostname
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return ''
+    }
     console.error('[BACKEND_API_URL_MISSING] VITE_BACKEND_API_URL must be set in production. Set it to https://real-estate-automation-three.vercel.app in your Vercel project env vars.')
     return ''
   }

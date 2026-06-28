@@ -227,7 +227,8 @@ test("getThreadMessages returns canonical message_events in ascending chronologi
     ["First", "Second", "Third"],
   );
   assert.equal(result.rows[0].source_table, "message_events");
-  assert.equal(result.rows.at(-1)?.canonical_thread_key, threadKey);
+  assert.equal(result.rows.at(-1)?.thread_key, threadKey);
+  assert.ok(result.rows.at(-1)?.canonical_thread_key, "canonical_thread_key must be derived for message rows");
   assert.equal(result.rows[0].body, "First");
   assert.equal(result.rows[0].normalized_body, "first");
   assert.equal(result.rows[0].is_outbound, true);

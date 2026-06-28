@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * Headless inbox UX verification — asserts window.__INBOX_PROOF__ from shipped paths.
- * Drives bucket switch, thread select (cached), scroll, and all optimistic actions.
+ * Uses production preview build for realistic first-paint timing.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { spawn, execSync } from 'node:child_process'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DASHBOARD_ROOT = path.join(__dirname, '../..')
@@ -14,10 +14,13 @@ const SCRATCH = process.env.SCRATCH || path.join(DASHBOARD_ROOT, 'proof/inbox')
 
 const TARGETS = {
   shell_to_rows_ms: 1000,
+  first_row_visible_ms: 1000,
   bucket_switch_ms: 500,
   cached_thread_apply_ms: 100,
   fetch_in_flight_max: 3,
   inbox_live_requests_max: 8,
+  parallel_fetch_min: 4,
+  parallel_network_min: 3,
 }
 
 const REQUIRED_OPTIMISTIC_ACTIONS = [
@@ -26,7 +29,6 @@ const REQUIRED_OPTIMISTIC_ACTIONS = [
 
 async function canRunPlaywright() {
   try {
-    const { execSync } = await import('node:child_process')
     execSync('npx playwright --version', { stdio: 'pipe', cwd: DASHBOARD_ROOT })
     return true
   } catch {
@@ -55,18 +57,23 @@ async function readProof(page) {
       apiBootResponseMs: proof.apiBootResponseMs,
       firstRowsPaintMs: proof.firstRowsPaintMs,
       shellToRowsMs: proof.shellToRowsMs,
+      firstRowVisibleMs: proof.firstRowVisibleMs,
       lastBucketSwitchMs: proof.lastBucketSwitchMs,
       lastBucketFrom: proof.lastBucketFrom,
       lastBucketTo: proof.lastBucketTo,
       lastThreadSelectCacheHit: proof.lastThreadSelectCacheHit,
       lastThreadSelectCacheApplyMs: proof.lastThreadSelectCacheApplyMs,
       parallelFetchStarted: proof.parallelFetchStarted,
+      maxParallelFetchStarted: proof.maxParallelFetchStarted,
       dossierParallelStarted: proof.dossierParallelStarted,
       lastOptimisticPatch: proof.lastOptimisticPatch,
       optimisticPatches: proof.optimisticPatches ?? [],
       fetchInFlight: proof.fetchInFlight,
       maxFetchInFlight: proof.maxFetchInFlight,
       inboxLiveRequestCount: proof.inboxLiveRequestCount,
+      degradedPollTicks: proof.degradedPollTicks,
+      selectedPollTicks: proof.selectedPollTicks,
+      duplicateLiveRequestBlocked: proof.duplicateLiveRequestBlocked,
       scrollOffset: proof.scrollOffset,
       hasDriveAction: typeof proof.driveAction === 'function',
     }
@@ -132,7 +139,7 @@ async function runOnce(dashUrl) {
 
   const bootProof = await waitForProof(
     page,
-    (p) => p.apiBootResponseMs != null && p.firstRowsPaintMs != null && p.shellToRowsMs != null,
+    (p) => p.apiBootResponseMs != null && p.firstRowsPaintMs != null && p.shellToRowsMs != null && p.firstRowVisibleMs != null,
     12_000,
   )
 
@@ -190,20 +197,23 @@ async function runOnce(dashUrl) {
   let optimisticDriven = []
   let parallelFetchObserved = 0
   let dossierParallelObserved = false
+  const parallelNetworkKinds = new Set()
   if (firstThreadId) {
-    const messagesReady = page.waitForResponse(
-      (r) => r.url().includes('/api/cockpit/inbox/thread-messages') && r.status() === 200,
-      { timeout: 8000 },
-    ).catch(() => null)
+    const parallelResponses = [
+      page.waitForResponse((r) => r.url().includes('/api/cockpit/inbox/thread-messages') && r.status() === 200, { timeout: 8000 }).then(() => parallelNetworkKinds.add('messages')).catch(() => null),
+      page.waitForResponse((r) => r.url().includes('/api/cockpit/inbox/thread-hydration') && r.status() === 200, { timeout: 8000 }).then(() => parallelNetworkKinds.add('hydration')).catch(() => null),
+      page.waitForResponse((r) => r.url().includes('/api/cockpit/deal-intelligence/thread/') && r.status() === 200, { timeout: 8000 }).then(() => parallelNetworkKinds.add('dossier')).catch(() => null),
+
+    ]
 
     await firstRow.click()
-    await messagesReady
+    await Promise.all(parallelResponses)
     threadProof = await waitForProof(
       page,
-      (p) => p.parallelFetchStarted != null && p.parallelFetchStarted >= 4 && p.dossierParallelStarted === true,
+      (p) => (p.maxParallelFetchStarted ?? 0) >= TARGETS.parallel_fetch_min && p.dossierParallelStarted === true,
       8000,
     ) ?? threadProof
-    parallelFetchObserved = threadProof?.parallelFetchStarted ?? 0
+    parallelFetchObserved = threadProof?.maxParallelFetchStarted ?? threadProof?.parallelFetchStarted ?? 0
     dossierParallelObserved = threadProof?.dossierParallelStarted === true
 
     await firstRow.click()
@@ -213,6 +223,10 @@ async function runOnce(dashUrl) {
       3000,
     )
     if (cachedProof) threadProof = cachedProof
+    parallelFetchObserved = Math.max(
+      parallelFetchObserved,
+      threadProof?.maxParallelFetchStarted ?? threadProof?.parallelFetchStarted ?? 0,
+    )
 
     threadSelect = await page.evaluate(() => ({
       selectedCard: document.querySelector('[data-thread-id].is-selected, .nx-row25.is-selected') != null,
@@ -239,24 +253,28 @@ async function runOnce(dashUrl) {
   const proof = threadProof ?? bucketProof ?? bootProof
   const shellToRowsMs = proof?.shellToRowsMs
     ?? ((proof?.apiBootResponseMs ?? 0) + (proof?.firstRowsPaintMs ?? 0))
+  const firstRowVisibleMs = proof?.firstRowVisibleMs ?? firstRowDomMs
   const optimisticActions = new Set((proof?.optimisticPatches ?? []).map((p) => p.action))
 
   return {
     proof,
     painted,
     firstRowDomMs,
+    firstRowVisibleMs,
     shellToRowsMs,
     bucketChanged,
     threadSelect,
     optimisticDriven,
     optimisticActions: [...optimisticActions],
     parallelFetchObserved,
+    parallelNetworkKinds: [...parallelNetworkKinds],
     dossierParallelObserved,
     console_errors: consoleErrors,
     meets_targets: {
       proof_bridge_present: proof != null,
       shell_and_rows_under_1s: shellToRowsMs <= TARGETS.shell_to_rows_ms,
-      first_row_dom_under_1s: firstRowDomMs <= TARGETS.shell_to_rows_ms,
+      first_row_visible_under_1s: firstRowVisibleMs <= TARGETS.first_row_visible_ms,
+      first_row_dom_under_1s: firstRowDomMs <= TARGETS.first_row_visible_ms,
       bucket_switch_under_500ms: bucketChanged
         && bucketProof?.lastBucketSwitchMs != null
         && bucketProof.lastBucketSwitchMs <= TARGETS.bucket_switch_ms,
@@ -264,11 +282,15 @@ async function runOnce(dashUrl) {
       cached_thread_under_100ms: proof?.lastThreadSelectCacheHit === true
         && proof?.lastThreadSelectCacheApplyMs != null
         && proof.lastThreadSelectCacheApplyMs <= TARGETS.cached_thread_apply_ms,
-      parallel_dossier_fetch: dossierParallelObserved && parallelFetchObserved >= 4,
+      parallel_dossier_fetch: dossierParallelObserved
+        && parallelFetchObserved >= TARGETS.parallel_fetch_min,
+      parallel_network_kinds: parallelNetworkKinds.size >= TARGETS.parallel_network_min,
       optimistic_actions_complete: REQUIRED_OPTIMISTIC_ACTIONS.every((a) => optimisticActions.has(a)),
       scroll_offset_recorded: (proof?.scrollOffset ?? 0) > 0,
       fetch_in_flight_bounded: (proof?.maxFetchInFlight ?? proof?.fetchInFlight ?? 0) <= TARGETS.fetch_in_flight_max,
       inbox_live_requests_bounded: (proof?.inboxLiveRequestCount ?? 0) <= TARGETS.inbox_live_requests_max,
+      no_degraded_poll_during_live: (proof?.degradedPollTicks ?? 0) === 0,
+      no_selected_poll_during_live: (proof?.selectedPollTicks ?? 0) === 0,
       zero_console_errors: consoleErrors.length === 0,
       substantial_paint: painted.painted === true,
       thread_select_visible: threadSelect?.selectedCard || threadSelect?.conversationPanel || false,
@@ -276,20 +298,34 @@ async function runOnce(dashUrl) {
   }
 }
 
-async function startViteIfNeeded(apiBase) {
-  if (process.env.INBOX_HEADLESS_URL) return { vite: null, dashUrl: process.env.INBOX_HEADLESS_URL }
+async function startPreviewIfNeeded(apiBase) {
+  if (process.env.INBOX_HEADLESS_URL) return { preview: null, dashUrl: process.env.INBOX_HEADLESS_URL, buildMode: 'external' }
+
   const dashPort = process.env.INBOX_HEADLESS_PORT || String(5180 + (process.pid % 40))
   const baseUrl = `http://127.0.0.1:${dashPort}`
   const dashUrl = `${baseUrl}/inbox`
+  const buildEnv = {
+    ...process.env,
+    VITE_BACKEND_API_URL: '',
+    VITE_DEV_PROXY_API_TARGET: apiBase,
+  }
 
-  const vite = spawn('npx', ['vite', '--port', dashPort, '--host', '127.0.0.1'], {
+  if (process.env.INBOX_HEADLESS_SKIP_BUILD !== '1') {
+    execSync('npx vite build', {
+      cwd: DASHBOARD_ROOT,
+      stdio: 'inherit',
+      env: { ...buildEnv, VITE_BACKEND_API_URL: '' },
+    })
+  }
+
+  const preview = spawn('npx', ['vite', 'preview', '--port', dashPort, '--host', '127.0.0.1'], {
     cwd: DASHBOARD_ROOT,
-    env: { ...process.env, VITE_BACKEND_API_URL: '', VITE_DEV_PROXY_API_TARGET: apiBase },
+    env: buildEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   await waitForHttp(`${baseUrl}/`, 120_000)
-  await new Promise((r) => setTimeout(r, 800))
-  return { vite, dashUrl }
+  await new Promise((r) => setTimeout(r, 400))
+  return { preview, dashUrl, buildMode: 'preview' }
 }
 
 async function main() {
@@ -306,7 +342,7 @@ async function main() {
   }
 
   const apiBase = process.env.BENCHMARK_API_BASE || 'http://localhost:3000'
-  const { vite, dashUrl } = await startViteIfNeeded(apiBase)
+  const { preview, dashUrl, buildMode } = await startPreviewIfNeeded(apiBase)
 
   for (let i = 0; i < 2; i += 1) {
     await runOnce(dashUrl)
@@ -318,8 +354,8 @@ async function main() {
   }
 
   const best = runs.reduce((a, b) => {
-    const aMs = a.shellToRowsMs ?? 9999
-    const bMs = b.shellToRowsMs ?? 9999
+    const aMs = a.firstRowVisibleMs ?? 9999
+    const bMs = b.firstRowVisibleMs ?? 9999
     return aMs <= bMs ? a : b
   })
 
@@ -330,6 +366,7 @@ async function main() {
       && t.substantial_paint
       && t.thread_select_visible
       && t.shell_and_rows_under_1s
+      && t.first_row_visible_under_1s
       && t.bucket_switch_under_500ms
       && t.bucket_switch_telemetry
       && t.cached_thread_under_100ms
@@ -337,25 +374,28 @@ async function main() {
       && t.optimistic_actions_complete
       && t.fetch_in_flight_bounded
       && t.inbox_live_requests_bounded
+      && t.no_degraded_poll_during_live
+      && t.no_selected_poll_during_live
   })
 
   const results = {
     at: new Date().toISOString(),
     dashUrl,
     apiBase,
+    buildMode,
     targets: TARGETS,
     required_optimistic_actions: REQUIRED_OPTIMISTIC_ACTIONS,
     runs,
     best,
     pass,
-    api_perf_cross_check: 'endpoint latency in inbox-perf.log; orchestrator in inbox-thread-session-proof',
-    note: 'Assertions use window.__INBOX_PROOF__ telemetry from inbox.adapter + InboxPage shipped paths',
+    api_perf_cross_check: 'endpoint latency in inbox-perf.log; client path in inbox-client-path.log',
+    note: 'Assertions use window.__INBOX_PROOF__ telemetry from inbox.adapter + InboxPage shipped paths (production preview)',
   }
 
   fs.writeFileSync(path.join(SCRATCH, 'inbox-headless.log'), JSON.stringify(results, null, 2))
   console.log(JSON.stringify(results, null, 2))
 
-  if (vite) vite.kill('SIGTERM')
+  if (preview) preview.kill('SIGTERM')
   if (!pass) process.exit(1)
 }
 

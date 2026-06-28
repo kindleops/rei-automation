@@ -24,6 +24,8 @@ import {
   markApiBootRequestStart,
   markApiBootResponse,
   markBucketSwitch,
+  markDegradedPollTick,
+  markDuplicateLiveRequestBlocked,
   markFirstRowsPainted,
   markInboxLiveRequest,
   publishInboxProof,
@@ -947,6 +949,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           requestedTimeoutMode: options._timeoutMode ?? null,
           requestedForce: options._force === true,
         })
+        markDuplicateLiveRequestBlocked()
         return null
       }
 
@@ -1351,6 +1354,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       const status = stateRef.current.realtimeStatus
       const shouldPoll = status === 'error' || status === 'disconnected' || status === 'disabled'
       if (!cancelled && shouldPoll) {
+        markDegradedPollTick()
         refreshAuthoritativeViewCounts(dispatch)
         void refresh({
           _automatic: true,

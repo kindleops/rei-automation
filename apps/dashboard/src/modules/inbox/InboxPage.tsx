@@ -201,7 +201,9 @@ import {
 import {
   getInboxProof,
   markDossierParallelStarted,
+  markInboxNavigationStart,
   markOptimisticPatch,
+  markSelectedPollTick,
   markThreadSelectTelemetry,
   registerInboxProofDriveAction,
 } from '../../domain/inbox/inbox-proof-bridge'
@@ -601,6 +603,10 @@ const queueModeFromControl = (diagnostics?: CampaignControlDiagnostics | null): 
 }
 
 export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace' }: InboxPageProps = {}) {
+  useEffect(() => {
+    markInboxNavigationStart()
+  }, [])
+
   const isRouteFullscreen = routeMode === 'fullscreen'
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [messageRefetchKey, setMessageRefetchKey] = useState(0)
@@ -2050,7 +2056,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const selectedOwnerId = selected.ownerId || ''
     const selectedPropertyId = selected.propertyId || ''
     const selectedProspectId = selected.prospectId || ''
-    const shouldPollSelectedThread = data.connectionState !== 'live'
+    const shouldPollSelectedThread = data.connectionState === 'offline'
+      || data.connectionState === 'degraded_polling'
     const supabase = getSupabaseClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     let pollController: AbortController | null = null
@@ -2239,6 +2246,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     const pollSelectedMessages = () => {
       if (!shouldPollSelectedThread || document.hidden || pollInFlight) return
+      markSelectedPollTick()
       pollInFlight = true
       pollController = new AbortController()
       getThreadMessagesForThread(selected, { signal: pollController.signal, maxMessages: 50 }).then((messages) => {
@@ -3229,7 +3237,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         cacheHit: selectPlan.telemetry.cacheHit,
         cacheApplyMs: selectPlan.telemetry.cacheApplyMs,
         selectMs: selectPlan.telemetry.cacheApplyMs,
-        parallelFetchStarted: 0,
       })
     } else {
       setMessagesLoading(true)

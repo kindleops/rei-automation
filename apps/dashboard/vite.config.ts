@@ -676,6 +676,35 @@ export default defineConfig(({ mode }) => {
         },
       }
     },
+    preview: {
+      proxy: {
+        '/api/cockpit': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/intel': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/ops': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/internal': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+        '/api/workflows': {
+          target: backendProxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+      },
+    },
     resolve: {
       alias: {
         tslib: tslibShim,

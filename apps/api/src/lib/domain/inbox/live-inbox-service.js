@@ -3575,9 +3575,15 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     };
   }
 
+  const indexedStrategyNames = ["conversation_thread_id", "latest_message_id_exact"];
+  if (clean(lookup.selectedThreadKey)) {
+    indexedStrategyNames.unshift("original_thread_key");
+  } else if (clean(lookup.legacyThreadKey)) {
+    indexedStrategyNames.unshift("legacy_thread_key");
+  }
   const CANONICAL_INDEXED_STRATEGIES = fetchAll
-    ? ["conversation_thread_id", "latest_message_id_exact"]
-    : ["conversation_thread_id", "latest_message_id_exact"];
+    ? indexedStrategyNames
+    : indexedStrategyNames;
   const strategyResults = [];
   const fetchLimit = safeOffset + safeLimit;
   const runStrategy = async (strategy) => {
@@ -3605,7 +3611,7 @@ export async function getThreadMessages(threadLookupInput, { offset = 0, limit =
     if (result.rows.length > 0) {
       strategyResults.push(result);
       diagnostics.lookup_strategy_used = diagnostics.lookup_strategy_used || strategy.name;
-      if (!fetchAll && strategyName === "conversation_thread_id") break;
+      if (!fetchAll && (strategyName === "conversation_thread_id" || strategyName === "original_thread_key" || strategyName === "legacy_thread_key")) break;
     }
   }
 
