@@ -29,6 +29,10 @@ const SEVERITY_LABELS: Record<NotificationSeverity, string> = {
   critical: 'Critical',
 }
 
+const MOBILE_DOMAIN_FILTERS: NotificationDomain[] = [
+  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform',
+]
+
 const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   campaigns: 'Campaigns',
   templates: 'Templates',
@@ -117,9 +121,11 @@ const NotificationCard = ({
 
       <div className="lcnc-card__inner">
         <div className="lcnc-card__top">
-          <label className="lcnc-card__select">
-            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label="Select notification" />
-          </label>
+          {!mobileCompact ? (
+            <label className="lcnc-card__select">
+              <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label="Select notification" />
+            </label>
+          ) : null}
           <span className="lcnc-card__icon-wrap">
             <Icon name={severityIcon(item.severity)} size={12} />
           </span>
@@ -131,9 +137,11 @@ const NotificationCard = ({
             {item.createdAt ? formatRelativeTime(item.createdAt) : 'Now'}
           </span>
           {isUnread ? <span className="lcnc-card__unread-dot" aria-label="Unread" /> : null}
-          <button type="button" className="lcnc-card__dismiss-btn" onClick={onDismiss} aria-label="Dismiss">
-            <Icon name="close" size={12} />
-          </button>
+          {!mobileCompact ? (
+            <button type="button" className="lcnc-card__dismiss-btn" onClick={onDismiss} aria-label="Dismiss">
+              <Icon name="close" size={12} />
+            </button>
+          ) : null}
         </div>
 
         <button type="button" className="lcnc-card__body-btn" onClick={onOpen}>
@@ -459,7 +467,7 @@ export const LeadCommandNotificationCenter = ({
               >
                 All Domains
               </button>
-              {NOTIFICATION_DOMAINS.map((domain) => (
+              {(useSheetLayout ? MOBILE_DOMAIN_FILTERS : NOTIFICATION_DOMAINS).map((domain) => (
                 <button
                   key={domain}
                   type="button"

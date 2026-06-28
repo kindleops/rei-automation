@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Icon } from '../../../shared/icons'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { CommandDrawer } from '../../shell/primitives/CommandDrawer'
+import { MobileSheet } from '../../mobile/MobileSheet'
 import { type OperationalKpi, type OpsMessageTypeSection, type OpsQueueHealthSection } from '../../../lib/data/inboxKpis'
 import { useOperationalKpis } from '../../../lib/data/operationalKpis'
 import { usePerformanceIntelligence, type TimeWindow } from '../../../lib/data/performanceIntelligence'
@@ -921,11 +922,19 @@ export const InboxKpiOrb = () => {
       </div>
 
       {useDrawerPanel ? (
-        <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
-          <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-            {dashboardBody}
-          </div>
-        </CommandDrawer>
+        isMobile ? (
+          <MobileSheet open={kpiPanelActive} title="KPI Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
+            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+              {dashboardBody}
+            </div>
+          </MobileSheet>
+        ) : (
+          <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
+            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+              {dashboardBody}
+            </div>
+          </CommandDrawer>
+        )
       ) : (
         typeof document !== 'undefined' && dashboardPopover
           ? createPortal(dashboardPopover, document.body)

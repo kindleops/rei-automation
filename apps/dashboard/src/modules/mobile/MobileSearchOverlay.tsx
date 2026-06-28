@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import type { CommandResult } from '../../domain/command-center/command.types'
+import { useMobileKeyboardInset } from './useMobileKeyboardInset'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -30,6 +31,7 @@ export const MobileSearchOverlay = ({
   onClose,
 }: MobileSearchOverlayProps) => {
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const keyboardInset = useMobileKeyboardInset(open)
   const items = groups.flatMap((group) => group.items)
   const showResults = open && (loading || items.length > 0 || query.trim().length >= 2)
 
@@ -54,7 +56,11 @@ export const MobileSearchOverlay = ({
   return createPortal(
     <>
       <button type="button" className="nx-mobile-search-backdrop" aria-label="Close search" onClick={onClose} />
-      <div className="nx-mobile-search-layer" role="search">
+      <div
+        className="nx-mobile-search-layer"
+        role="search"
+        style={keyboardInset > 0 ? { bottom: `calc(var(--nx-dock-height) + var(--nx-mobile-safe-bottom) + ${keyboardInset}px)` } : undefined}
+      >
         <div className="nx-mobile-search-layer__field nx-liquid-surface">
           <Icon name="search" />
           <input

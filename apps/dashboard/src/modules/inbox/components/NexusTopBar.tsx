@@ -430,6 +430,7 @@ export const NexusTopBar = ({
       onKeyboardShortcuts={onOpenKeys}
       onDiagnostics={onOpenAi}
       onSignOut={onSignOut}
+      onOpenNotifications={() => openOverlayExclusive('notifications')}
     />
   )
 
@@ -615,6 +616,7 @@ export const NexusTopBar = ({
               onKeyboardShortcuts={onOpenKeys}
               onDiagnostics={onOpenAi}
               onSignOut={onSignOut}
+              onOpenNotifications={() => openOverlayExclusive('notifications')}
             />
           </div>
 

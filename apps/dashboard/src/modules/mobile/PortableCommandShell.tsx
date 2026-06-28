@@ -8,11 +8,10 @@ import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotif
 import { getQueueProcessorHealth, type QueueProcessorHealth } from '../../lib/data/inboxData'
 import { InboxKpiOrb } from '../inbox/components/InboxKpiOrb'
 import { QueueCommandCenter, type QueueCommandMode, type QueueCommandCaps } from '../inbox/components/QueueCommandCenter'
-import { CommandDrawer } from '../shell/primitives/CommandDrawer'
 import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
-import { COMMAND_NAV_ROUTES } from './command-navigation-registry'
+import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from './command-navigation-registry'
 import { MobileCommandDock, type DockSurface } from './MobileCommandDock'
 import { MobileSheet } from './MobileSheet'
 
@@ -146,11 +145,11 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
         notificationsActive={notifOpen}
       />
 
-      <CommandDrawer
+      <MobileSheet
         open={activeSurface === 'workspace'}
-        title="Workspace"
+        title="Workspace Launcher"
+        height="full"
         onClose={() => closeAndRestoreFocus('workspace')}
-        fullWidth
       >
         <nav className="nx-portable-wsl-nav" aria-label="Workspace sections">
           {(['apps', 'appearance', 'account'] as const).map((section) => (
@@ -171,8 +170,13 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
               <button
                 key={item.path}
                 type="button"
-                className={cls('nx-wsl-menu-row', routePath === item.path && 'is-active')}
-                onClick={() => { pushRoutePath(item.path); closeAndRestoreFocus('workspace') }}
+                className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
+                onClick={() => {
+                  if (item.action === 'notifications') setNotifOpen(true)
+                  else if (item.action === 'settings') pushRoutePath('/analytics')
+                  else pushRoutePath(item.path)
+                  closeAndRestoreFocus('workspace')
+                }}
               >
                 <Icon name={item.icon} size={14} />
                 <strong>{item.label}</strong>
@@ -234,7 +238,7 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
             </button>
           </div>
         ) : null}
-      </CommandDrawer>
+      </MobileSheet>
 
       <MobileSheet
         open={activeSurface === 'queue'}

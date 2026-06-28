@@ -1,18 +1,21 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { pushRoutePath, useRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
-import { CommandDrawer } from './primitives/CommandDrawer'
+import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from '../mobile/command-navigation-registry'
+import { MobileSheet } from '../mobile/MobileSheet'
 import { FilterChip } from './primitives/FilterChip'
 import type { WorkspaceAvailability, WorkspaceLauncherItem } from './shell-types'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-type LauncherCategory = 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
+type LauncherCategory = 'applications' | 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
 
 const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
+  { id: 'applications', label: 'Applications' },
   { id: 'pinned', label: 'Pinned' },
   { id: 'workspaces', label: 'Workspaces' },
   { id: 'views', label: 'Views' },
@@ -98,6 +101,7 @@ export interface WorkspaceLauncherProps {
   onKeyboardShortcuts?: () => void
   onDiagnostics?: () => void
   onSignOut?: () => void
+  onOpenNotifications?: () => void
 }
 
 export const WorkspaceLauncher = ({
@@ -132,10 +136,12 @@ export const WorkspaceLauncher = ({
   onKeyboardShortcuts,
   onDiagnostics,
   onSignOut,
+  onOpenNotifications,
 }: WorkspaceLauncherProps) => {
+  const routePath = useRoutePath()
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
-  const [category, setCategory] = useState<LauncherCategory>('workspaces')
+  const [category, setCategory] = useState<LauncherCategory>('applications')
   const [query, setQuery] = useState('')
 
   const updatePopoverPosition = useCallback(() => {
@@ -313,7 +319,46 @@ export const WorkspaceLauncher = ({
     )
   }
 
+  const filteredApplications = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return COMMAND_NAV_ROUTES
+    return COMMAND_NAV_ROUTES.filter((item) =>
+      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
+    )
+  }, [query])
+
+  const handleApplicationSelect = (path: string, action?: typeof COMMAND_NAV_ROUTES[number]['action']) => {
+    if (action === 'settings') {
+      onSettings?.()
+    } else if (action === 'notifications') {
+      onOpenNotifications?.()
+    } else {
+      pushRoutePath(path)
+    }
+    onClose()
+  }
+
   const renderCategoryPanel = () => {
+    if (category === 'applications') {
+      return (
+        <div className="nx-wsl-panel__section">
+          <h4>Applications</h4>
+          {filteredApplications.map((item) => (
+            <button
+              key={item.path}
+              type="button"
+              className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
+              onClick={() => handleApplicationSelect(item.path, item.action)}
+            >
+              <Icon name={item.icon} size={14} />
+              <strong>{item.label}</strong>
+              {item.description ? <small>{item.description}</small> : null}
+            </button>
+          ))}
+        </div>
+      )
+    }
+
     if (category === 'pinned') {
       return (
         <div className="nx-wsl-panel__section">
@@ -529,9 +574,9 @@ export const WorkspaceLauncher = ({
 
   if (compact) {
     return (
-      <CommandDrawer open={open} title="Workspace Launcher" onClose={onClose} fullWidth>
+      <MobileSheet open={open} title="Workspace Launcher" height="full" onClose={onClose}>
         {launcherBody}
-      </CommandDrawer>
+      </MobileSheet>
     )
   }
 

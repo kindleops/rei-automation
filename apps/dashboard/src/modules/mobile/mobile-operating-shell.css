@@ -302,6 +302,25 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .nx-mobile-sheet__body .nx-wsl-root,
+  .nx-mobile-sheet__body .nx-wsl-body {
+    min-height: 0;
+  }
+
+  .nx-mobile-sheet__body .nx-wsl-nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .nx-mobile-sheet__body .nx-wsl-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nx-mobile-sheet__body .nx-wsl-nav__item {
+    flex-shrink: 0;
+  }
+
   /* Composer + content clearance above dock */
   .nx-inbox-shell.is-mobile-inbox,
   .nx-os.is-mobile-os .nx-stage {
@@ -313,6 +332,26 @@
   .nx-inbox-shell.is-mobile-inbox .nx-reply-composer {
     margin-bottom: 0 !important;
     padding-bottom: max(8px, var(--nx-mobile-safe-bottom)) !important;
+    position: sticky;
+    bottom: calc(var(--nx-dock-height) + var(--nx-mobile-safe-bottom));
+    z-index: 12;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__card {
+    padding: 10px 12px !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.25;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__meta-row {
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .nx-os.is-mobile-os .nx-copilot-orb--floating {
@@ -343,7 +382,6 @@
   /* Bottom nav removed — legacy selectors hidden */
   .nx-mobile-bottom-nav,
   .nx-mobile-more-sheet,
-  .nx-mobile-sheet-backdrop,
   .nx-mobile-command-fab,
   .nx-mobile-settings-sheet {
     display: none !important;
