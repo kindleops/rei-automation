@@ -51,8 +51,15 @@ const isOutboundLastWithoutReply = (lastOutboundAt: unknown, lastInboundAt: unkn
   return !inboundMs || inboundMs < outboundMs
 }
 
-export const isWaitingInboxState = (state: BucketClassification): boolean =>
-  state.bucket === 'waiting'
+export const isWaitingInboxState = (state: BucketClassification): boolean => {
+  if (state.bucket === 'waiting') return true
+  if (
+    state.bucket === 'follow_up'
+    && state.reasons.some((reason) => reason.includes('waiting_on_seller'))
+  ) return true
+  if (state.bucket === 'cold' && state.flags.latest_direction === 'outbound') return true
+  return false
+}
 
 const num = (v: unknown, fallback = 0): number => {
   const n = Number(String(v ?? '').replace(/[,$\s]/g, ''))
