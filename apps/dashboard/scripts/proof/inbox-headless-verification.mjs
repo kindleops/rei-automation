@@ -21,7 +21,7 @@ const TARGETS = {
 }
 
 const REQUIRED_OPTIMISTIC_ACTIONS = [
-  'star', 'pin', 'snooze', 'stage_consider_selling', 'status_waiting', 'message_pending',
+  'star', 'pin', 'archive', 'snooze', 'stage_consider_selling', 'status_waiting', 'message_pending',
 ]
 
 async function canRunPlaywright() {
@@ -87,6 +87,8 @@ async function driveOptimisticSuite(page) {
   const actions = [
     ['star', (p) => p.lastOptimisticPatch?.action === 'star' || p.lastOptimisticPatch?.action === 'unstar'],
     ['pin', (p) => p.optimisticPatches?.some((x) => x.action === 'pin' || x.action === 'unpin')],
+    ['archive', (p) => p.optimisticPatches?.some((x) => x.action === 'archive')],
+    ['unarchive', (p) => p.optimisticPatches?.some((x) => x.action === 'unarchive')],
     ['snooze', (p) => p.optimisticPatches?.some((x) => x.action === 'snooze')],
     ['stage:consider_selling', (p) => p.optimisticPatches?.some((x) => x.action === 'stage_consider_selling')],
     ['status:waiting', (p) => p.optimisticPatches?.some((x) => x.action === 'status_waiting')],
@@ -255,7 +257,9 @@ async function runOnce(dashUrl) {
       proof_bridge_present: proof != null,
       shell_and_rows_under_1s: shellToRowsMs <= TARGETS.shell_to_rows_ms,
       first_row_dom_under_1s: firstRowDomMs <= TARGETS.shell_to_rows_ms,
-      bucket_switch_under_500ms: !bucketChanged || (bucketProof?.lastBucketSwitchMs != null && bucketProof.lastBucketSwitchMs <= TARGETS.bucket_switch_ms),
+      bucket_switch_under_500ms: bucketChanged
+        && bucketProof?.lastBucketSwitchMs != null
+        && bucketProof.lastBucketSwitchMs <= TARGETS.bucket_switch_ms,
       bucket_switch_telemetry: bucketChanged,
       cached_thread_under_100ms: proof?.lastThreadSelectCacheHit === true
         && proof?.lastThreadSelectCacheApplyMs != null
@@ -304,6 +308,10 @@ async function main() {
   const apiBase = process.env.BENCHMARK_API_BASE || 'http://localhost:3000'
   const { vite, dashUrl } = await startViteIfNeeded(apiBase)
 
+  for (let i = 0; i < 2; i += 1) {
+    await runOnce(dashUrl)
+  }
+
   const runs = []
   for (let i = 0; i < 2; i += 1) {
     runs.push(await runOnce(dashUrl))
@@ -322,6 +330,7 @@ async function main() {
       && t.substantial_paint
       && t.thread_select_visible
       && t.shell_and_rows_under_1s
+      && t.bucket_switch_under_500ms
       && t.bucket_switch_telemetry
       && t.cached_thread_under_100ms
       && t.parallel_dossier_fetch

@@ -2274,12 +2274,13 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const supabase = deps.supabase || defaultSupabase;
   const timeoutMode = lower(params.timeout_mode || params.timeoutMode);
   const initialBootMode = timeoutMode === "initial_boot" || options.selectMode === "initial_boot_safe";
+  const initialBootSafeMode = options.selectMode === "initial_boot_safe";
   const fastBucketMode = timeoutMode === "manual_bucket_switch" || timeoutMode === "auto_refresh";
   const limit = int(params.limit, initialBootMode ? INITIAL_BOOT_DEFAULT_LIMIT : DEFAULT_LIMIT);
   const filter = normalizeLiveFilter(params.inbox_bucket || params.filter || "all");
   const wantsMap = bool(params.map);
-  const skipCounts = bool(params.skip_counts) || fastBucketMode || initialBootMode || deps.skipCounts === true || options.skipCounts === true;
-  const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootMode || options.skipDelivery === true;
+  const skipCounts = bool(params.skip_counts) || fastBucketMode || initialBootSafeMode || deps.skipCounts === true || options.skipCounts === true;
+  const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootSafeMode || options.skipDelivery === true;
   const skipLinkedContextHydration = initialBootMode || fastBucketMode || options.listOnly === true;
 
   let cursor = params.cursor || null;
@@ -2419,7 +2420,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
   const skipHeavyHydration = options.listOnly === true;
-  const fastListMode = initialBootMode || fastBucketMode;
+  const fastListMode = fastBucketMode || initialBootSafeMode;
   try {
     if (!skipLinkedContextHydration) {
       finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
@@ -2996,7 +2997,11 @@ function filterMessageRowsForLookupScope(rows = [], lookup = {}) {
     const rowPropertyId = clean(row.property_id || row.final_property_id);
     const rowOwnerId = clean(row.master_owner_id || row.owner_id || row.final_master_owner_id);
     const rowProspectId = clean(row.prospect_id || row.final_prospect_id);
-    if (propertyId && rowPropertyId && rowPropertyId !== propertyId) return false;
+    if (propertyId && rowPropertyId && rowPropertyId !== propertyId) {
+      if (lookupUsesExplicitPropertyScope(lookup)) return false;
+      if (masterOwnerId && rowOwnerId && rowOwnerId === masterOwnerId) return true;
+      return false;
+    }
     if (masterOwnerId && rowOwnerId && rowOwnerId !== masterOwnerId) return false;
     if (prospectId && rowProspectId && rowProspectId !== prospectId) return false;
     return true;

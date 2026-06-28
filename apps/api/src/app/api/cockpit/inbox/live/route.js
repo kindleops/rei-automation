@@ -52,9 +52,7 @@ export async function GET(request) {
       selectMode: 'canonical_row_contract',
     })
 
-    const liveOptions = timeoutMode === 'initial_boot'
-      ? { selectMode: 'initial_boot_safe', listOnly: true, skipCounts: true, skipDelivery: true }
-      : timeoutMode === 'manual_bucket_switch' || timeoutMode === 'auto_refresh'
+    const liveOptions = timeoutMode === 'manual_bucket_switch' || timeoutMode === 'auto_refresh'
       ? { listOnly: true, skipCounts: true, skipDelivery: true }
       : {}
 

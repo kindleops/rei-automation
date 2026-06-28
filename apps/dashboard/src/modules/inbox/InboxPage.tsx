@@ -2263,11 +2263,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         pollInFlight = false
       })
     }
-    const selectedMessagePollInterval = window.setInterval(pollSelectedMessages, 12_000)
+    const selectedMessagePollInterval = shouldPollSelectedThread
+      ? window.setInterval(pollSelectedMessages, 30_000)
+      : null
 
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer)
-      window.clearInterval(selectedMessagePollInterval)
+      if (selectedMessagePollInterval != null) window.clearInterval(selectedMessagePollInterval)
       pollController?.abort()
       void supabase.removeChannel(channel)
       inboxSubs.forEach((s) => { try { s.unsubscribe() } catch {} })
@@ -4191,6 +4193,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const workspaceBlocked = selectedWorkspacePreset.status !== 'ready'
 
   const isMultiView = renderViews.length > 1
+  const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
+    || (isMultiView
+      && renderViews.includes('thread')
+      && renderViews.includes('sms_thread')
+      && renderViews.includes('deal_intelligence'))
+  const isCustomMultiView = isMultiView && isDealDeskLayout
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
   const _isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
@@ -4708,6 +4716,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         useFullscreenShell && 'is-workspace-fullscreen',
         isCommandMapView && 'is-command-view-active',
         `is-workspace-${activeWorkspaceView}`,
+        isCustomMultiView && 'is-deal-desk-layout',
         isMultiView && 'is-multi-view-active',
       )}
     >

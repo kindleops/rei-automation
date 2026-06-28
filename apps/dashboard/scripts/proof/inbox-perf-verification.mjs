@@ -267,7 +267,9 @@ async function main() {
         cache_hit: clientCacheSim.cache_hit.cacheHit,
         message_count: clientCacheSim.cache_hit.messageCount,
         meets_target: clientCacheSim.meets_cached_target,
-        path: 'thread-selection-cache.measureCachedThreadOpen (same helper as InboxPage handleSelect)',
+        path: 'planThreadSelect + measureCachedThreadOpen (InboxPage handleSelect + thread-select effect)',
+        handle_select_orchestrator_parallel: 4,
+        headless_client_path: 'inbox-headless.log lastThreadSelectCacheApplyMs',
       } : null,
       thread_hydration: hydration ? {
         ms: hydration.best.ms,

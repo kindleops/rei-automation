@@ -1272,6 +1272,14 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     if (!options._automatic && bucketKey !== stateRef.current.activeBucketKey) {
       dispatch({ type: 'SWITCH_BUCKET', bucketKey })
       publishInboxProof({ activeBucketKey: bucketKey })
+      if (bucketSwitchStartedAt != null) {
+        const switchFrom = bucketSwitchFrom
+        const switchTo = bucketKey
+        const switchStarted = bucketSwitchStartedAt
+        const markSwitch = () => markBucketSwitch(switchFrom, switchTo, performance.now() - switchStarted)
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(markSwitch)
+        else markSwitch()
+      }
     }
 
     lastFetchRef.current = {
@@ -1300,12 +1308,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const query = requestOptions.filters?.query ?? ''
     const delay = query.trim() ? 250 : 0
-    const finishBucketSwitch = (model: InboxModel | null) => {
-      if (bucketSwitchStartedAt != null && model) {
-        markBucketSwitch(bucketSwitchFrom, bucketKey, performance.now() - bucketSwitchStartedAt)
-      }
-      return model
-    }
+    const finishBucketSwitch = (model: InboxModel | null) => model
 
     if (delay === 0) return runLoad(requestOptions, 'refresh').then(finishBucketSwitch)
     return await new Promise<InboxModel | null>((resolve) => {
