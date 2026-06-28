@@ -1,6 +1,8 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { CommandDrawer } from '../../shell/primitives/CommandDrawer'
 import { type OperationalKpi, type OpsMessageTypeSection, type OpsQueueHealthSection } from '../../../lib/data/inboxKpis'
 import { useOperationalKpis } from '../../../lib/data/operationalKpis'
 import { usePerformanceIntelligence, type TimeWindow } from '../../../lib/data/performanceIntelligence'
@@ -548,9 +550,11 @@ function PipelineSection({ kpis }: { kpis: KpiData }) {
 const HOVER_CLOSE_MS = 140
 
 export const InboxKpiOrb = () => {
+  const { isMobile } = useBreakpoint()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dashboardRef = useRef<HTMLDivElement | null>(null)
   const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isTouchUi, setIsTouchUi] = useState(false)
   const [dashboardPosition, setDashboardPosition] = useState<{ top: number; left: number } | null>(null)
   const [isOpen, setIsOpen]   = useState(false)
   const [isPinned, setIsPinned] = useState(false)
@@ -560,7 +564,16 @@ export const InboxKpiOrb = () => {
   )
   const [autoStage, setAutoStage] = useState<AutoStage>('s1')
 
+  useEffect(() => {
+    const media = window.matchMedia('(hover: none), (pointer: coarse)')
+    const apply = () => setIsTouchUi(media.matches)
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [])
+
   const kpiPanelActive = isOpen || isPinned
+  const useDrawerPanel = isMobile || isTouchUi
   const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
   const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
 
@@ -620,12 +633,12 @@ export const InboxKpiOrb = () => {
   }, [])
 
   useLayoutEffect(() => {
-    if (!kpiPanelActive) {
+    if (!kpiPanelActive || useDrawerPanel) {
       setDashboardPosition(null)
       return
     }
     updateDashboardPosition()
-  }, [kpiPanelActive, updateDashboardPosition, section, timeWindow])
+  }, [kpiPanelActive, useDrawerPanel, updateDashboardPosition, section, timeWindow])
 
   useEffect(() => {
     if (!kpiPanelActive) return
@@ -642,22 +655,37 @@ export const InboxKpiOrb = () => {
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current)
   }, [])
 
-  const dashboardPanel = kpiPanelActive && dashboardPosition ? (
-    <div
-      ref={dashboardRef}
-      className="nx-orb-dashboard nx-liquid-popover nx-shell-popover-portal"
-      style={{
-        position: 'fixed',
-        top: dashboardPosition.top,
-        left: dashboardPosition.left,
-        zIndex: 13000,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-      onMouseEnter={openPanel}
-      onMouseLeave={scheduleClose}
-    >
+  useEffect(() => {
+    if (!useDrawerPanel || !kpiPanelActive || isPinned) return
+    const handlePointer = (event: Event) => {
+      const target = event.target as Node
+      if (containerRef.current?.contains(target)) return
+      if (dashboardRef.current?.contains(target)) return
+      setIsOpen(false)
+    }
+    window.addEventListener('mousedown', handlePointer)
+    window.addEventListener('touchstart', handlePointer, { passive: true })
+    return () => {
+      window.removeEventListener('mousedown', handlePointer)
+      window.removeEventListener('touchstart', handlePointer)
+    }
+  }, [useDrawerPanel, kpiPanelActive, isPinned])
+
+  const closePanel = useCallback(() => {
+    setIsOpen(false)
+    setIsPinned(false)
+  }, [])
+
+  const handleOrbClick = useCallback(() => {
+    if (useDrawerPanel) {
+      setIsOpen((open) => !open)
+      return
+    }
+    setIsPinned((pinned) => !pinned)
+  }, [useDrawerPanel])
+
+  const dashboardBody = kpiPanelActive ? (
+    <>
           {/* Header */}
           <div
             className="nx-orb-dashboard__header"
@@ -836,6 +864,26 @@ export const InboxKpiOrb = () => {
               {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>
+    </>
+  ) : null
+
+  const dashboardPopover = !useDrawerPanel && dashboardPosition && dashboardBody ? (
+    <div
+      ref={dashboardRef}
+      className="nx-orb-dashboard nx-liquid-popover nx-shell-popover-portal"
+      style={{
+        position: 'fixed',
+        top: dashboardPosition.top,
+        left: dashboardPosition.left,
+        zIndex: 13000,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+      onMouseEnter={openPanel}
+      onMouseLeave={scheduleClose}
+    >
+      {dashboardBody}
     </div>
   ) : null
 
@@ -843,12 +891,22 @@ export const InboxKpiOrb = () => {
     <div
       ref={containerRef}
       className={cls('nx-kpi-orb-container', kpiPanelActive && 'is-open')}
-      onMouseEnter={openPanel}
-      onMouseLeave={scheduleClose}
+      onMouseEnter={useDrawerPanel ? undefined : openPanel}
+      onMouseLeave={useDrawerPanel ? undefined : scheduleClose}
     >
       <div
         className={cls('nx-kpi-orb', isPinned && 'is-pinned-active', isLive && 'is-live-pulsing', `is-${orbTone}`)}
-        onClick={() => setIsPinned(p => !p)}
+        onClick={handleOrbClick}
+        role="button"
+        tabIndex={0}
+        aria-expanded={kpiPanelActive}
+        aria-label="KPI Intelligence"
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            handleOrbClick()
+          }
+        }}
       >
         <div className="nx-kpi-orb__glow" />
         <div className="nx-kpi-orb__inner">
@@ -862,9 +920,17 @@ export const InboxKpiOrb = () => {
         </div>
       </div>
 
-      {typeof document !== 'undefined' && dashboardPanel
-        ? createPortal(dashboardPanel, document.body)
-        : null}
+      {useDrawerPanel ? (
+        <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
+          <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+            {dashboardBody}
+          </div>
+        </CommandDrawer>
+      ) : (
+        typeof document !== 'undefined' && dashboardPopover
+          ? createPortal(dashboardPopover, document.body)
+          : null
+      )}
     </div>
   )
 }

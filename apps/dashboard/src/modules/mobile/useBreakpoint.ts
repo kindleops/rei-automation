@@ -16,27 +16,48 @@ export function useBreakpoint(): {
   isPhone: boolean
   isTablet: boolean
   isDesktop: boolean
+  /** Portrait phone — compact single-panel mobile UX */
   isMobile: boolean
+  /** Phone in landscape — preserve command-center multi-panel layouts */
+  isLandscapeMobile: boolean
+  /** Desktop, tablet, or landscape phone */
+  isCommandCenterLayout: boolean
+  isPortrait: boolean
   width: number
+  height: number
 } {
-  const [width, setWidth] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth : 1280,
-  )
+  const [dims, setDims] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  }))
 
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth)
+    const onResize = () => setDims({ width: window.innerWidth, height: window.innerHeight })
     window.addEventListener('resize', onResize, { passive: true })
-    return () => window.removeEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize, { passive: true })
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+    }
   }, [])
 
+  const { width, height } = dims
   const breakpoint = resolveBreakpoint(width)
+  const isPortrait = height >= width
+  const isPhone = breakpoint === 'phone'
+  const isLandscapeMobile = isPhone && !isPortrait
+  const isMobile = isPhone && isPortrait
 
   return {
     breakpoint,
-    isPhone: breakpoint === 'phone',
+    isPhone,
     isTablet: breakpoint === 'tablet',
     isDesktop: breakpoint === 'desktop',
-    isMobile: breakpoint === 'phone',
+    isMobile,
+    isLandscapeMobile,
+    isCommandCenterLayout: !isMobile,
+    isPortrait,
     width,
+    height,
   }
 }

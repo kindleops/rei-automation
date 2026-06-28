@@ -10,7 +10,7 @@ import type { WorkspaceAvailability, WorkspaceLauncherItem } from './shell-types
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-type LauncherCategory = 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration'
+type LauncherCategory = 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
 
 const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'pinned', label: 'Pinned' },
@@ -18,6 +18,7 @@ const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'views', label: 'Views' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'administration', label: 'Administration' },
+  { id: 'account', label: 'Account' },
 ]
 
 const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
@@ -88,6 +89,15 @@ export interface WorkspaceLauncherProps {
   onSaveCurrentLayout?: () => void
   onResetLayout: () => void
   onWorkspaceSettings?: () => void
+  profileInitials?: string
+  authReady?: boolean
+  authLoading?: boolean
+  onProfile?: () => void
+  onSettings?: () => void
+  onThemeSettings?: () => void
+  onKeyboardShortcuts?: () => void
+  onDiagnostics?: () => void
+  onSignOut?: () => void
 }
 
 export const WorkspaceLauncher = ({
@@ -113,6 +123,15 @@ export const WorkspaceLauncher = ({
   onSaveCurrentLayout,
   onResetLayout,
   onWorkspaceSettings,
+  profileInitials = 'RK',
+  authReady = false,
+  authLoading = false,
+  onProfile,
+  onSettings,
+  onThemeSettings,
+  onKeyboardShortcuts,
+  onDiagnostics,
+  onSignOut,
 }: WorkspaceLauncherProps) => {
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
@@ -401,21 +420,79 @@ export const WorkspaceLauncher = ({
       )
     }
 
+    if (category === 'administration') {
+      return (
+        <div className="nx-wsl-panel__section">
+          <h4>Administration</h4>
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}>
+            <Icon name="check" size={14} />
+            <strong>Save Current Layout</strong>
+          </button>
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onResetLayout())}>
+            <Icon name="refresh-cw" size={14} />
+            <strong>Reset Layout</strong>
+          </button>
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}>
+            <Icon name="settings" size={14} />
+            <strong>Workspace Settings</strong>
+          </button>
+        </div>
+      )
+    }
+
     return (
       <div className="nx-wsl-panel__section">
-        <h4>Administration</h4>
-        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSaveCurrentLayout?.())}>
-          <Icon name="check" size={14} />
-          <strong>Save Current Layout</strong>
-        </button>
-        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onResetLayout())}>
-          <Icon name="refresh-cw" size={14} />
-          <strong>Reset Layout</strong>
-        </button>
-        <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onWorkspaceSettings?.())}>
-          <Icon name="settings" size={14} />
-          <strong>Workspace Settings</strong>
-        </button>
+        <header className="nx-wsl-account-header">
+          <span className="nx-profile-menu__avatar">{profileInitials}</span>
+          <div>
+            <strong>Operator</strong>
+            <small>Nexus command shell</small>
+          </div>
+        </header>
+        {onProfile ? (
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onProfile())}>
+            <Icon name="briefing" size={14} />
+            <strong>Profile</strong>
+          </button>
+        ) : null}
+        {onSettings ? (
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSettings())}>
+            <Icon name="settings" size={14} />
+            <strong>Preferences</strong>
+          </button>
+        ) : null}
+        {onThemeSettings ? (
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onThemeSettings())}>
+            <Icon name="stats" size={14} />
+            <strong>Theme Settings</strong>
+          </button>
+        ) : null}
+        {onKeyboardShortcuts ? (
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onKeyboardShortcuts())}>
+            <Icon name="key" size={14} />
+            <strong>Keyboard Shortcuts</strong>
+          </button>
+        ) : null}
+        {onDiagnostics ? (
+          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onDiagnostics())}>
+            <Icon name="activity" size={14} />
+            <strong>Diagnostics</strong>
+          </button>
+        ) : null}
+        {onSignOut ? (
+          <button
+            type="button"
+            className="nx-wsl-menu-row is-sign-out"
+            disabled={!authReady || authLoading}
+            onClick={() => {
+              if (!authReady || authLoading) return
+              selectAndClose(() => onSignOut())
+            }}
+          >
+            <Icon name="close" size={14} />
+            <strong>{authLoading ? 'Checking session…' : authReady ? 'Sign Out' : 'Sign Out unavailable'}</strong>
+          </button>
+        ) : null}
       </div>
     )
   }

@@ -18,6 +18,7 @@ import { WorkspaceLauncher } from '../../shell/WorkspaceLauncher'
 import { useShellSurface } from '../../shell/useShellSurface'
 import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } from '../../shell/shell-types'
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -173,6 +174,7 @@ export const NexusTopBar = ({
 }: NexusTopBarProps) => {
   const DEV = Boolean(import.meta.env.DEV)
   const DEBUG_INBOX = DEV && String(import.meta.env.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
+  const { isMobile } = useBreakpoint()
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -344,19 +346,21 @@ export const NexusTopBar = ({
   }, 0)
 
   return (
-    <header className="nx-topbar nx-topbar--nexus-shell">
+    <header className={cls('nx-topbar nx-topbar--nexus-shell', isMobile && 'is-mobile-shell', isMobile && searchOpen && 'is-search-expanded')}>
       {/* Zone 1: Workspace identity */}
-      <div className="nx-topbar__left nx-topbar-shell-left">
-        <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
-          <div className="nx-topbar__logo">
-            <Icon name="spark" />
+      <div className="nx-topbar__left nx-topbar-shell-left nx-mobile-command-row">
+        {!isMobile ? (
+          <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
+            <div className="nx-topbar__logo">
+              <Icon name="spark" />
+            </div>
+            <div className="nx-topbar-identity">
+              <span>NEXUS</span>
+              <strong>{activeWorkspaceLabel}</strong>
+              {contextSubtitle ? <small>{contextSubtitle}</small> : null}
+            </div>
           </div>
-          <div className="nx-topbar-identity">
-            <span>NEXUS</span>
-            <strong>{activeWorkspaceLabel}</strong>
-            {contextSubtitle ? <small>{contextSubtitle}</small> : null}
-          </div>
-        </div>
+        ) : null}
 
         {/* Zone 2: Operational controls */}
         <div className="nx-topbar-shell-zone nx-topbar-shell-zone--controls">
@@ -378,11 +382,12 @@ export const NexusTopBar = ({
               }}
             >
               <strong><Icon name="layout-split" /></strong>
+              {isMobile ? <span className="nx-topbar-workspace-label">{activeWorkspaceLabel}</span> : null}
             </button>
 
             <WorkspaceLauncher
               open={activeSurface === 'workspace'}
-              compact={isCompactMenu}
+              compact={isCompactMenu || isMobile}
               anchorRef={workspaceTriggerRef}
               onClose={() => closeAndRestoreFocus('workspace')}
               activeWorkspaceKey={activeWorkspaceKey}
@@ -406,6 +411,15 @@ export const NexusTopBar = ({
               onSaveCurrentLayout={onSaveCurrentLayout}
               onResetLayout={onResetLayout}
               onWorkspaceSettings={onWorkspaceSettings}
+              profileInitials={profileInitials}
+              authReady={authReady}
+              authLoading={authLoading}
+              onProfile={onOpenDossier}
+              onSettings={onOpenSettings}
+              onThemeSettings={onOpenKpis}
+              onKeyboardShortcuts={onOpenKeys}
+              onDiagnostics={onOpenAi}
+              onSignOut={onSignOut}
             />
           </div>
 
@@ -466,9 +480,22 @@ export const NexusTopBar = ({
       </div>
 
       {/* Zone 3: Global search */}
-      <div className="nx-topbar__center nx-topbar-shell-center">
-        <div className="nx-global-search">
-          <Icon name="search" />
+      <div className={cls('nx-topbar__center nx-topbar-shell-center', isMobile && 'nx-mobile-action-row')}>
+        {isMobile && !searchOpen ? (
+          <button
+            type="button"
+            className="nx-notification-button nx-mobile-search-toggle"
+            title="Universal search"
+            onClick={() => {
+              setSearchOpen(true)
+              window.requestAnimationFrame(() => searchInputRef.current?.focus())
+            }}
+          >
+            <Icon name="search" />
+          </button>
+        ) : null}
+        <div className={cls('nx-global-search', isMobile && !searchOpen && 'is-collapsed')}>
+          {!(isMobile && !searchOpen) ? <Icon name="search" /> : null}
           <input
             ref={searchInputRef}
             aria-label="Search sellers, owners, properties, conversations, buyers, campaigns, and entities"
@@ -509,7 +536,20 @@ export const NexusTopBar = ({
             onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
             placeholder="Search sellers, buyers, addresses, locations, conversations..."
           />
-          <kbd>CMD+K</kbd>
+          {!isMobile ? <kbd>CMD+K</kbd> : null}
+          {isMobile && searchOpen ? (
+            <button
+              type="button"
+              className="nx-mobile-search-close"
+              aria-label="Close search"
+              onClick={() => {
+                setSearchOpen(false)
+                onTopSearchQueryChange('')
+              }}
+            >
+              <Icon name="close" />
+            </button>
+          ) : null}
           {showSearchPopover ? (
             <div className="nx-search-results-popover nx-liquid-surface" role="listbox" aria-label="Universal search suggestions">
               <div className="nx-search-results-popover__header">
@@ -558,7 +598,7 @@ export const NexusTopBar = ({
       </div>
 
       {/* Zone 4: Operator controls */}
-      <div className="nx-topbar__actions nx-topbar-shell-zone nx-topbar-shell-zone--operators">
+      <div className={cls('nx-topbar__actions nx-topbar-shell-zone nx-topbar-shell-zone--operators', isMobile && 'nx-mobile-action-row')}>
         <div className="nx-notification-control">
           <button
             ref={actionTriggerRef}
@@ -614,38 +654,40 @@ export const NexusTopBar = ({
           }}
         />
 
-        <div className="nx-notification-control">
-          <button
-            ref={profileTriggerRef}
-            type="button"
-            className={cls('nx-avatar-menu nx-avatar-menu--compact', activeSurface === 'profile' && 'is-active')}
-            title="Profile menu"
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              openExclusiveSurface('profile')
-            }}
-            aria-expanded={activeSurface === 'profile'}
-          >
-            <span>{profileInitials}</span>
-          </button>
+        {!isMobile ? (
+          <div className="nx-notification-control">
+            <button
+              ref={profileTriggerRef}
+              type="button"
+              className={cls('nx-avatar-menu nx-avatar-menu--compact', activeSurface === 'profile' && 'is-active')}
+              title="Profile menu"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                openExclusiveSurface('profile')
+              }}
+              aria-expanded={activeSurface === 'profile'}
+            >
+              <span>{profileInitials}</span>
+            </button>
 
-          <ProfileMenu
-            open={activeSurface === 'profile'}
-            anchorRef={profileTriggerRef}
-            onClose={() => closeAndRestoreFocus('profile')}
-            initials={profileInitials}
-            authReady={authReady}
-            authLoading={authLoading}
-            onProfile={onOpenDossier}
-            onSettings={onOpenSettings}
-            onWorkspaceSettings={onWorkspaceSettings}
-            onThemeSettings={onOpenKpis}
-            onKeyboardShortcuts={onOpenKeys}
-            onDiagnostics={onOpenAi}
-            onSignOut={onSignOut}
-          />
-        </div>
+            <ProfileMenu
+              open={activeSurface === 'profile'}
+              anchorRef={profileTriggerRef}
+              onClose={() => closeAndRestoreFocus('profile')}
+              initials={profileInitials}
+              authReady={authReady}
+              authLoading={authLoading}
+              onProfile={onOpenDossier}
+              onSettings={onOpenSettings}
+              onWorkspaceSettings={onWorkspaceSettings}
+              onThemeSettings={onOpenKpis}
+              onKeyboardShortcuts={onOpenKeys}
+              onDiagnostics={onOpenAi}
+              onSignOut={onSignOut}
+            />
+          </div>
+        ) : null}
       </div>
 
       <LeadCommandNotificationCenter

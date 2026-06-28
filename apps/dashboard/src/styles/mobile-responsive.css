@@ -64,7 +64,7 @@
   .cc-map__lead-card,
   .cc-map__market-card {
     position: fixed !important;
-    bottom: 64px;       /* above bottom nav safe area */
+    bottom: env(safe-area-inset-bottom, 0px);
     left: 0;
     right: 0;
     width: 100% !important;

@@ -20,17 +20,8 @@ import {
   type GlobalCommandSearchContext,
 } from '../domain/command-center/command.types'
 import { useBreakpoint } from '../modules/mobile/useBreakpoint'
-import { MobileBottomNav } from '../modules/mobile/MobileBottomNav'
-import { MobileMoreSheet } from '../modules/mobile/MobileMoreSheet'
-import {
-  MOBILE_MORE_ROUTES,
-  MOBILE_TAB_ROUTES,
-  resolveMobileNavTab,
-  type MobileNavTab,
-} from '../modules/mobile/mobile-nav-routes'
-import { useMobileInboxBadge } from '../modules/mobile/useMobileInboxBadge'
-import { MobileCommandFab } from '../modules/mobile/MobileCommandFab'
-import { MobileSettingsSheet } from '../modules/mobile/MobileSettingsSheet'
+import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
+import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -162,51 +153,21 @@ const GlobalNotificationShell = ({
   children,
   routePath,
   isMobile,
-  moreSheetOpen,
-  onMoreSheetChange,
   onOpenSearch,
 }: {
   children: ReactNode
   routePath: string
   isMobile: boolean
-  moreSheetOpen: boolean
-  onMoreSheetChange: (open: boolean) => void
   onOpenSearch: () => void
 }) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
-  const inboxUnreadBadge = useMobileInboxBadge()
   const showGlobalBell = routePath !== '/inbox' && !isMobile
-  const mobileNavTab = resolveMobileNavTab(routePath)
-
-  const handleMobileNavigate = useCallback((tab: MobileNavTab) => {
-    if (tab === 'more') {
-      onMoreSheetChange(true)
-      return
-    }
-    onMoreSheetChange(false)
-    pushRoutePath(MOBILE_TAB_ROUTES[tab])
-  }, [onMoreSheetChange])
-
-  const moreItems = useMemo(
-    () => MOBILE_MORE_ROUTES.map((item) => ({
-      ...item,
-      active: item.path !== '__settings__' && routePath === item.path,
-    })),
-    [routePath],
-  )
-
-  const handleMoreNavigate = useCallback((path: string) => {
-    if (path === '__settings__') {
-      setSettingsOpen(true)
-      return
-    }
-    pushRoutePath(path)
-  }, [])
+  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
 
   return (
     <>
+      {showPortableShell ? <PortableCommandShell onOpenSearch={onOpenSearch} /> : null}
       {children}
       {showGlobalBell ? (
         <div className="nx-os-notif-bell">
@@ -217,35 +178,12 @@ const GlobalNotificationShell = ({
           />
         </div>
       ) : null}
-      {(showGlobalBell || isMobile) ? (
+      {showGlobalBell ? (
         <LeadCommandNotificationCenter
           open={notifCenterOpen}
           onClose={() => setNotifCenterOpen(false)}
-          anchorTop={isMobile ? 0 : 48}
+          anchorTop={48}
         />
-      ) : null}
-      {isMobile ? (
-        <>
-          <MobileBottomNav
-            activeTab={moreSheetOpen ? 'more' : mobileNavTab}
-            inboxBadge={inboxUnreadBadge}
-            notificationBadge={unreadCount}
-            onNavigate={handleMobileNavigate}
-          />
-          <MobileMoreSheet
-            open={moreSheetOpen}
-            items={moreItems}
-            notificationBadge={unreadCount}
-            onClose={() => onMoreSheetChange(false)}
-            onNavigate={handleMoreNavigate}
-            onOpenSearch={onOpenSearch}
-            onOpenNotifications={() => setNotifCenterOpen(true)}
-          />
-          <MobileSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-          {routePath !== '/inbox' && routePath !== '/conversation' && routePath !== '/' ? (
-            <MobileCommandFab onOpenSearch={onOpenSearch} />
-          ) : null}
-        </>
       ) : null}
     </>
   )
@@ -255,7 +193,6 @@ export const CommandCenterApp = () => {
   const path = useRoutePath()
   const route = resolveRoute(path)
   const { isMobile } = useBreakpoint()
-  const [moreSheetOpen, setMoreSheetOpen] = useState(false)
 
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
@@ -287,7 +224,6 @@ export const CommandCenterApp = () => {
     if (prevPathRef.current !== route.path) {
       playSound('room-enter')
       prevPathRef.current = route.path
-      setMoreSheetOpen(false)
     }
   }, [route.path])
 
@@ -651,8 +587,6 @@ export const CommandCenterApp = () => {
       <GlobalNotificationShell
         routePath={route.path}
         isMobile={isMobile}
-        moreSheetOpen={moreSheetOpen}
-        onMoreSheetChange={setMoreSheetOpen}
         onOpenSearch={() => openCmd()}
       >
         <div className={`nx-os${isMobile ? ' is-mobile-os' : ''}`}>

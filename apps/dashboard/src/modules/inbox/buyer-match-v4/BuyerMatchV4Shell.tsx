@@ -1,21 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { BuyerMatchPaneWidth, BuyerMatchSubjectContext, BuyerMatchV4Projection, BuyerMatchV4ShellState, BuyerMatchV4Tab } from './buyer-match-v4.types'
-import { INITIAL_SHELL_STATE } from './buyer-match-v4.types'
+import type {
+  BuyerMatchPaneWidth,
+  BuyerMatchSubjectContext,
+  BuyerMatchV4Projection,
+  BuyerMatchV4ShellState,
+  BuyerMatchV4Tab,
+} from './buyer-match-v4.types'
+import {
+  INITIAL_FILTER_STATE,
+  INITIAL_SHELL_STATE,
+  TAB_LAYOUT_COLUMNS,
+} from './buyer-match-v4.types'
 import { BuyerMarketRail } from './BuyerMarketRail'
 import { BuyerActivityMap } from './BuyerActivityMap'
-import { RankedBuyerPanel } from './RankedBuyerPanel'
 import { BuyerMatchCompactRail } from './BuyerMatchCompactRail'
+import { BuyerTabNav } from './BuyerTabNav'
+import { BuyerFiltersRail } from './BuyerFiltersRail'
+import { BuyerDirectory } from './BuyerDirectory'
+import { BuyerDossier } from './BuyerDossier'
+import { ActivityControlsRail } from './ActivityControlsRail'
+import { PurchaseFeed } from './PurchaseFeed'
+import { MarketIntelligenceRail } from './MarketIntelligenceRail'
+import { ShortlistPanel } from './ShortlistPanel'
+import { filterPurchaseEvents } from './buyerFilters'
 import { subjectContextKey } from './buildSubjectContext'
-
-const TABS: BuyerMatchV4Tab[] = ['MARKET', 'BUYERS', 'ACTIVITY', 'SHORTLIST']
 
 interface Props {
   subject: BuyerMatchSubjectContext
   projection: BuyerMatchV4Projection | null
   loading: boolean
   refreshing: boolean
+  error: string | null
+  timedOut: boolean
   paneWidth: BuyerMatchPaneWidth
   onOpenFull?: () => void
+  onRetry?: () => void
 }
 
 export function BuyerMatchV4Shell({
@@ -23,18 +42,19 @@ export function BuyerMatchV4Shell({
   projection,
   loading,
   refreshing,
+  error,
+  timedOut,
   paneWidth,
   onOpenFull,
+  onRetry,
 }: Props) {
   const [shellState, setShellState] = useState<BuyerMatchV4ShellState>(INITIAL_SHELL_STATE)
   const subjectKey = subjectContextKey(subject)
 
   useEffect(() => {
     setShellState((prev) => ({
-      ...prev,
-      selectedBuyerId: null,
-      selectedEventId: null,
-      shortlist: [],
+      ...INITIAL_SHELL_STATE,
+      activeTab: prev.activeTab,
     }))
   }, [subjectKey])
 
@@ -43,145 +63,247 @@ export function BuyerMatchV4Shell({
   }, [])
 
   const selectBuyer = useCallback((buyerId: string) => {
-    setShellState((s) => ({ ...s, selectedBuyerId: buyerId, activeTab: 'BUYERS' }))
+    setShellState((s) => ({
+      ...s,
+      selectedBuyerId: buyerId,
+    }))
   }, [])
 
   const selectEvent = useCallback((eventId: string, buyerId: string) => {
-    setShellState((s) => ({ ...s, selectedEventId: eventId, selectedBuyerId: buyerId }))
+    setShellState((s) => ({
+      ...s,
+      selectedEventId: eventId,
+      selectedBuyerId: buyerId,
+    }))
   }, [])
 
-  const toggleMap = useCallback(() => {
-    setShellState((s) => ({ ...s, mapVisible: !s.mapVisible }))
+  const toggleShortlist = useCallback((buyerId: string) => {
+    setShellState((s) => ({
+      ...s,
+      shortlistIds: s.shortlistIds.includes(buyerId)
+        ? s.shortlistIds.filter((id) => id !== buyerId)
+        : [...s.shortlistIds, buyerId],
+    }))
   }, [])
 
-  const nav = (
-    <nav className="bmv4-nav" aria-label="Buyer Match navigation">
-      {TABS.map((tab) => (
-        <button
-          key={tab}
-          type="button"
-          className={`bmv4-nav__tab${shellState.activeTab === tab ? ' is-active' : ''}`}
-          onClick={() => setTab(tab)}
-        >
-          {tab}
-          {tab === 'SHORTLIST' && <span className="bmv4-nav__count">0</span>}
-        </button>
-      ))}
-    </nav>
+  const selectedBuyer = useMemo(
+    () => projection?.rankedBuyers.find((b) => b.buyerId === shellState.selectedBuyerId) ?? null,
+    [projection?.rankedBuyers, shellState.selectedBuyerId],
   )
 
-  const shortlistPanel = (
-    <section className="bmv4-shortlist bmv4-shortlist--empty">
-      <h3>Shortlist</h3>
-      <p>No buyers shortlisted yet. Shortlist persistence arrives in a later phase.</p>
-    </section>
+  const shortlistedBuyers = useMemo(
+    () => (projection?.rankedBuyers ?? []).filter((b) => shellState.shortlistIds.includes(b.buyerId)),
+    [projection?.rankedBuyers, shellState.shortlistIds],
   )
 
-  const activityPanel = useMemo(
-    () => (
-      <BuyerActivityMap
-        projection={projection}
-        selectedBuyerId={shellState.selectedBuyerId}
-        selectedEventId={shellState.selectedEventId}
-        onSelectEvent={selectEvent}
-      />
+  const institutionalIds = useMemo(
+    () => new Set(
+      (projection?.rankedBuyers ?? [])
+        .filter((b) => b.institutionalStatus === 'VERIFIED_INSTITUTIONAL' || b.institutionalStatus === 'CORPORATE')
+        .map((b) => b.buyerId),
     ),
-    [projection, shellState.selectedBuyerId, shellState.selectedEventId, selectEvent],
+    [projection?.rankedBuyers],
+  )
+
+  const activityEvents = useMemo(() => {
+    const all = projection?.purchaseEvents ?? []
+    let filtered = filterPurchaseEvents(all, {
+      periodDays: shellState.activityFilters.periodDays,
+      institutionalBuyerIds: institutionalIds,
+      institutionalOnly: shellState.activityFilters.institutionalOnly,
+      radiusMiles: shellState.activityFilters.radiusMiles,
+    })
+    if (shellState.activityFilters.repeatOnly) {
+      const repeatIds = new Set(
+        (projection?.rankedBuyers ?? [])
+          .filter((b) => /repeat/i.test(b.buyerArchetype ?? ''))
+          .map((b) => b.buyerId),
+      )
+      filtered = filtered.filter((e) => repeatIds.has(e.buyerId))
+    }
+    return filtered.sort((a, b) => {
+      const at = a.purchaseDate ? new Date(a.purchaseDate).getTime() : 0
+      const bt = b.purchaseDate ? new Date(b.purchaseDate).getTime() : 0
+      return bt - at
+    })
+  }, [projection, shellState.activityFilters, institutionalIds])
+
+  const layout = TAB_LAYOUT_COLUMNS[shellState.activeTab]
+  const tabClass = `is-tab-${shellState.activeTab.toLowerCase()}`
+
+  const mapPanel = (
+    <BuyerActivityMap
+      projection={projection}
+      selectedBuyerId={shellState.selectedBuyerId}
+      selectedEventId={shellState.selectedEventId}
+      activityFilters={shellState.activeTab === 'ACTIVITY' ? shellState.activityFilters : undefined}
+      onSelectEvent={selectEvent}
+    />
   )
 
   if (paneWidth === '25') {
     return (
-      <div className="bmv4-shell is-pane-25">
-        <BuyerMatchCompactRail projection={projection} onOpenFull={onOpenFull ?? (() => {})} />
+      <div className={`bmv4-shell is-pane-25 ${tabClass}`}>
+        <BuyerMatchCompactRail
+          projection={projection}
+          shortlistCount={shellState.shortlistIds.length}
+          onOpenFull={onOpenFull ?? (() => {})}
+        />
       </div>
     )
   }
 
-  if (paneWidth === '50') {
+  if (paneWidth === '50' || paneWidth === '75') {
     return (
-      <div className="bmv4-shell is-pane-50">
-        <header className="bmv4-compact-header">
-          <div className="bmv4-compact-header__addr">{subject.canonicalAddress}</div>
-          {nav}
-          <button type="button" className={`bmv4-map-toggle${shellState.mapVisible ? ' is-active' : ''}`} onClick={toggleMap}>
-            {shellState.mapVisible ? 'Hide Activity Map' : 'Activity Map'}
-          </button>
-        </header>
-        {shellState.mapVisible && <div className="bmv4-shell__map-panel">{activityPanel}</div>}
-        <div className="bmv4-shell__main">
+      <div className={`bmv4-shell is-pane-${paneWidth} ${tabClass}`}>
+        <BuyerTabNav
+          activeTab={shellState.activeTab}
+          shortlistCount={shellState.shortlistIds.length}
+          onSelectTab={setTab}
+        />
+        <div className="bmv4-adaptive-body">
           {shellState.activeTab === 'MARKET' && (
-            <BuyerMarketRail subject={subject} projection={projection} loading={loading} refreshing={refreshing} compact />
+            <>
+              <BuyerMarketRail subject={subject} projection={projection} loading={loading} refreshing={refreshing} compact />
+              {mapPanel}
+            </>
           )}
           {shellState.activeTab === 'BUYERS' && (
-            <RankedBuyerPanel
+            <BuyerDirectory
               projection={projection}
               loading={loading}
+              timedOut={timedOut}
+              filters={shellState.filters}
               selectedBuyerId={shellState.selectedBuyerId}
-              gradeFilter={shellState.gradeFilter}
+              shortlistIds={shellState.shortlistIds}
               onSelectBuyer={selectBuyer}
-              onGradeFilter={(gradeFilter) => setShellState((s) => ({ ...s, gradeFilter }))}
+              onToggleShortlist={toggleShortlist}
+              onRetry={onRetry}
             />
           )}
-          {shellState.activeTab === 'ACTIVITY' && activityPanel}
-          {shellState.activeTab === 'SHORTLIST' && shortlistPanel}
-        </div>
-      </div>
-    )
-  }
-
-  if (paneWidth === '75') {
-    return (
-      <div className="bmv4-shell is-pane-75">
-        <header className="bmv4-compact-header is-sticky">
-          <BuyerMarketRail subject={subject} projection={projection} loading={loading} refreshing={refreshing} compact />
-        </header>
-        <div className="bmv4-shell__split">
-          <div className="bmv4-shell__map-col">{activityPanel}</div>
-          <div className="bmv4-shell__buyers-col">
-            {nav}
-            {shellState.activeTab === 'BUYERS' || shellState.activeTab === 'MARKET' ? (
-              <RankedBuyerPanel
-                projection={projection}
-                loading={loading}
-                selectedBuyerId={shellState.selectedBuyerId}
-                gradeFilter={shellState.gradeFilter}
-                onSelectBuyer={selectBuyer}
-                onGradeFilter={(gradeFilter) => setShellState((s) => ({ ...s, gradeFilter }))}
-              />
-            ) : shellState.activeTab === 'ACTIVITY' ? (
-              activityPanel
-            ) : (
-              shortlistPanel
-            )}
-          </div>
+          {shellState.activeTab === 'ACTIVITY' && mapPanel}
+          {shellState.activeTab === 'SHORTLIST' && (
+            <ShortlistPanel
+              shortlistedBuyers={shortlistedBuyers}
+              selectedBuyerId={shellState.selectedBuyerId}
+              events={projection?.purchaseEvents ?? []}
+              onSelectBuyer={selectBuyer}
+              onToggleShortlist={toggleShortlist}
+              onBrowseBuyers={() => setTab('BUYERS')}
+            />
+          )}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="bmv4-shell is-pane-100">
-      <BuyerMarketRail subject={subject} projection={projection} loading={loading} refreshing={refreshing} />
-      <div className="bmv4-shell__center">
-        {nav}
-        {shellState.activeTab === 'ACTIVITY' || shellState.activeTab === 'MARKET' ? activityPanel : null}
-        {shellState.activeTab === 'SHORTLIST' && shortlistPanel}
-      </div>
-      <div className="bmv4-shell__buyers">
-        {(shellState.activeTab === 'BUYERS' || shellState.activeTab === 'MARKET') && (
-          <RankedBuyerPanel
-            projection={projection}
-            loading={loading}
+    <div
+      className={`bmv4-shell is-pane-100 ${tabClass}`}
+      style={{
+        ['--bmv4-left' as string]: layout.left,
+        ['--bmv4-main' as string]: layout.main,
+        ['--bmv4-right' as string]: layout.right,
+      }}
+    >
+      <BuyerTabNav
+        activeTab={shellState.activeTab}
+        shortlistCount={shellState.shortlistIds.length}
+        onSelectTab={setTab}
+      />
+
+      {error && !projection && (
+        <div className="bmv4-banner-error">
+          {error}
+          {onRetry && <button type="button" className="bmv4-btn is-sm" onClick={onRetry}>Retry</button>}
+        </div>
+      )}
+
+      {shellState.activeTab === 'MARKET' && (
+        <>
+          <div className="bmv4-col-left"><BuyerMarketRail subject={subject} projection={projection} loading={loading} refreshing={refreshing} /></div>
+          <div className="bmv4-col-main">{mapPanel}</div>
+          <div className="bmv4-col-right">
+            <MarketIntelligenceRail
+              projection={projection}
+              selectedBuyerId={shellState.selectedBuyerId}
+              shortlistIds={shellState.shortlistIds}
+              onSelectBuyer={selectBuyer}
+              onToggleShortlist={toggleShortlist}
+              onViewAllBuyers={() => setTab('BUYERS')}
+            />
+          </div>
+        </>
+      )}
+
+      {shellState.activeTab === 'BUYERS' && (
+        <>
+          <div className="bmv4-col-left">
+            <BuyerFiltersRail
+              projection={projection}
+              filters={shellState.filters}
+              onChange={(patch) => setShellState((s) => ({ ...s, filters: { ...s.filters, ...patch } }))}
+              onClear={() => setShellState((s) => ({ ...s, filters: INITIAL_FILTER_STATE }))}
+            />
+          </div>
+          <div className="bmv4-col-main">
+            <BuyerDirectory
+              projection={projection}
+              loading={loading}
+              timedOut={timedOut}
+              filters={shellState.filters}
+              selectedBuyerId={shellState.selectedBuyerId}
+              shortlistIds={shellState.shortlistIds}
+              onSelectBuyer={selectBuyer}
+              onToggleShortlist={toggleShortlist}
+              onRetry={onRetry}
+            />
+          </div>
+          <div className="bmv4-col-right">
+            <BuyerDossier
+              buyer={selectedBuyer}
+              events={projection?.purchaseEvents ?? []}
+              shortlisted={shellState.shortlistIds.includes(shellState.selectedBuyerId ?? '')}
+              onToggleShortlist={() => shellState.selectedBuyerId && toggleShortlist(shellState.selectedBuyerId)}
+            />
+          </div>
+        </>
+      )}
+
+      {shellState.activeTab === 'ACTIVITY' && (
+        <>
+          <div className="bmv4-col-left">
+            <ActivityControlsRail
+              filters={shellState.activityFilters}
+              eventCount={activityEvents.length}
+              onChange={(patch) => setShellState((s) => ({ ...s, activityFilters: { ...s.activityFilters, ...patch } }))}
+            />
+          </div>
+          <div className="bmv4-col-main">{mapPanel}</div>
+          <div className="bmv4-col-right">
+            <PurchaseFeed
+              events={activityEvents}
+              buyers={projection?.rankedBuyers ?? []}
+              selectedEventId={shellState.selectedEventId}
+              selectedBuyerId={shellState.selectedBuyerId}
+              onSelectEvent={selectEvent}
+            />
+          </div>
+        </>
+      )}
+
+      {shellState.activeTab === 'SHORTLIST' && (
+        <div className="bmv4-col-full">
+          <ShortlistPanel
+            shortlistedBuyers={shortlistedBuyers}
             selectedBuyerId={shellState.selectedBuyerId}
-            gradeFilter={shellState.gradeFilter}
+            events={projection?.purchaseEvents ?? []}
             onSelectBuyer={selectBuyer}
-            onGradeFilter={(gradeFilter) => setShellState((s) => ({ ...s, gradeFilter }))}
+            onToggleShortlist={toggleShortlist}
+            onBrowseBuyers={() => setTab('BUYERS')}
           />
-        )}
-        {shellState.activeTab === 'BUYERS' && shellState.selectedBuyerId && (
-          <div className="bmv4-selected-note">Selected buyer — full dossier arrives in Phase 9.</div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
