@@ -29,7 +29,7 @@ export const MobileThreadCard = ({
   return (
     <button
       type="button"
-      className={cls('nx-mobile-thread-card', selected && 'is-selected', thread.isUnread && 'is-unread')}
+      className={cls('nx-mobile-thread-card', selected && 'is-selected', !thread.isRead && 'is-unread')}
       onClick={() => onSelect(thread.id)}
     >
       <div className="nx-mobile-thread-card__top">
