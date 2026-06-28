@@ -21,7 +21,7 @@ export const MobileThreadCard = ({
 }: MobileThreadCardProps) => {
   const name = resolveThreadPrimaryName(thread)
   const address = resolveThreadAddressLine(thread)
-  const preview = thread.latestMessageBody || thread.lastMessageBodyPreview || 'No messages yet'
+  const preview = String(thread.latestMessageBody || thread.preview || 'No messages yet').trim()
   const direction = decision.last_message_direction === 'outbound' ? '→' : '←'
   const ts = formatInboxThreadTimestamp(thread.lastMessageAt || thread.lastMessageIso)
   const time = ts.timeLabel || ts.fullLabel
