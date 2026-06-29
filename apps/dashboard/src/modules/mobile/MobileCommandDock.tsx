@@ -45,8 +45,10 @@ export const MobileCommandDock = ({
   }
 
   const dock = (
-    <nav className="nx-mobile-command-dock" aria-label="Command dock">
-      <div className="nx-mobile-command-dock__inner">
+    <nav className="nx-mobile-command-dock is-top-dock" aria-label="Mobile command menu">
+      <div className="nx-mobile-command-dock__inner nx-liquid-surface">
+        <span className="nx-mobile-command-dock__sheen" aria-hidden="true" />
+        <span className="nx-mobile-command-dock__rim" aria-hidden="true" />
         <div className="nx-mobile-command-dock__slot nx-mobile-command-dock__slot--kpi">
           {kpiControl}
         </div>

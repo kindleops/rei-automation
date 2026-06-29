@@ -59,7 +59,9 @@ export const MobileSearchOverlay = ({
       <div
         className="nx-mobile-search-layer"
         role="search"
-        style={keyboardInset > 0 ? { bottom: `calc(var(--nx-dock-height) + var(--nx-mobile-safe-bottom) + ${keyboardInset}px)` } : undefined}
+        style={keyboardInset > 0 ? {
+          maxHeight: `calc(100dvh - var(--nx-mobile-chrome-top, 72px) - ${keyboardInset}px - 8px)`,
+        } : undefined}
       >
         <div className="nx-mobile-search-layer__field nx-liquid-surface">
           <Icon name="search" />
