@@ -5,6 +5,9 @@ import { Icon } from '../../shared/icons'
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
+const DOCK_ICON = 15
+const DOCK_ICON_HUB = 16
+
 export type DockSurface =
   | 'kpi'
   | 'workspace'
@@ -28,6 +31,18 @@ export interface MobileCommandDockProps {
   notificationsActive?: boolean
 }
 
+const DockGlyph = ({
+  children,
+  hub = false,
+}: {
+  children: ReactNode
+  hub?: boolean
+}) => (
+  <span className={cls('nx-mobile-command-dock__glyph', hub && 'is-hub')} aria-hidden>
+    {children}
+  </span>
+)
+
 export const MobileCommandDock = ({
   activeSurface,
   onSurfaceChange,
@@ -43,6 +58,11 @@ export const MobileCommandDock = ({
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
   }
+
+  const queueIcon =
+    queueStatus === 'healthy' ? 'check'
+      : queueStatus === 'unknown' ? 'activity'
+        : 'alert'
 
   const dock = (
     <nav className="nx-mobile-command-dock is-top-dock" aria-label="Mobile command menu">
@@ -64,7 +84,9 @@ export const MobileCommandDock = ({
           aria-expanded={activeSurface === 'workspace'}
           onClick={() => toggle('workspace')}
         >
-          <Icon name="layout-split" />
+          <DockGlyph hub>
+            <Icon name="layout-split" size={DOCK_ICON_HUB} strokeWidth={1.55} />
+          </DockGlyph>
         </button>
 
         <button
@@ -79,10 +101,12 @@ export const MobileCommandDock = ({
           aria-expanded={activeSurface === 'queue'}
           onClick={() => toggle('queue')}
         >
-          <span className={cls('nx-queue-indicator', `is-${queueStatus}`)}>
-            <Icon name={queueStatus === 'healthy' ? 'check' : queueStatus === 'unknown' ? 'activity' : 'alert'} />
-            {queueStatus === 'healthy' ? <i className="nx-queue-indicator-dot" /> : null}
-          </span>
+          <DockGlyph>
+            <span className={cls('nx-mobile-command-dock__queue', `is-${queueStatus}`)}>
+              <Icon name={queueIcon} size={DOCK_ICON} strokeWidth={1.55} />
+              {queueStatus === 'healthy' ? <i className="nx-mobile-command-dock__queue-dot" /> : null}
+            </span>
+          </DockGlyph>
         </button>
 
         <button
@@ -95,7 +119,9 @@ export const MobileCommandDock = ({
           aria-expanded={searchActive || activeSurface === 'search'}
           onClick={() => toggle('search')}
         >
-          <Icon name="search" />
+          <DockGlyph>
+            <Icon name="search" size={DOCK_ICON} strokeWidth={1.55} />
+          </DockGlyph>
         </button>
 
         <button
@@ -105,7 +131,9 @@ export const MobileCommandDock = ({
           aria-expanded={activeSurface === 'tasks'}
           onClick={() => toggle('tasks')}
         >
-          <Icon name="check" />
+          <DockGlyph>
+            <Icon name="check" size={DOCK_ICON} strokeWidth={1.55} />
+          </DockGlyph>
           {tasksCount > 0 ? (
             <span className="nx-mobile-command-dock__badge">{tasksCount > 99 ? '99+' : tasksCount}</span>
           ) : null}
@@ -121,7 +149,9 @@ export const MobileCommandDock = ({
           aria-expanded={activityActive || activeSurface === 'activity'}
           onClick={() => toggle('activity')}
         >
-          <Icon name="activity" />
+          <DockGlyph>
+            <Icon name="activity" size={DOCK_ICON} strokeWidth={1.55} />
+          </DockGlyph>
         </button>
 
         <button
@@ -134,7 +164,9 @@ export const MobileCommandDock = ({
           aria-expanded={notificationsActive}
           onClick={() => toggle('notifications')}
         >
-          <Icon name="bell" />
+          <DockGlyph>
+            <Icon name="bell" size={DOCK_ICON} strokeWidth={1.55} />
+          </DockGlyph>
           {notificationCount > 0 ? (
             <span className="nx-mobile-command-dock__badge">{notificationCount > 99 ? '99+' : notificationCount}</span>
           ) : null}
