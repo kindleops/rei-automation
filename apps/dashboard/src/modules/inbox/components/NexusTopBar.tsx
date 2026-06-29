@@ -397,7 +397,8 @@ export const NexusTopBar = ({
   const workspaceLauncher = (
     <WorkspaceLauncher
       open={activeSurface === 'workspace'}
-      compact={isCompactMenu || isMobile}
+      mobileShell
+      compact={false}
       anchorRef={workspaceTriggerRef}
       onClose={() => closeAndRestoreFocus('workspace')}
       activeWorkspaceKey={activeWorkspaceKey}
@@ -583,7 +584,8 @@ export const NexusTopBar = ({
 
             <WorkspaceLauncher
               open={activeSurface === 'workspace'}
-              compact={isCompactMenu || isMobile}
+              mobileShell={false}
+              compact={isCompactMenu}
               anchorRef={workspaceTriggerRef}
               onClose={() => closeAndRestoreFocus('workspace')}
               activeWorkspaceKey={activeWorkspaceKey}

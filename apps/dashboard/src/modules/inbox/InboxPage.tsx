@@ -4938,7 +4938,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }}
       >
         {/* Mobile panel toggle buttons */}
-        <div className="nx-mobile-panel-toggles nx-desktop-only">
+        <div className="nx-mobile-panel-toggles nx-mobile-only">
           <button
             type="button"
             className="nx-mobile-panel-toggle"

@@ -7,6 +7,7 @@ import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
 import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from '../mobile/command-navigation-registry'
 import { MobileSheet } from '../mobile/MobileSheet'
+import { CommandDrawer } from './primitives/CommandDrawer'
 import { FilterChip } from './primitives/FilterChip'
 import type { WorkspaceAvailability, WorkspaceLauncherItem } from './shell-types'
 
@@ -14,7 +15,7 @@ const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filt
 
 type LauncherCategory = 'applications' | 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
 
-const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
+const MOBILE_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'applications', label: 'Applications' },
   { id: 'pinned', label: 'Pinned' },
   { id: 'workspaces', label: 'Workspaces' },
@@ -22,6 +23,14 @@ const CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'administration', label: 'Administration' },
   { id: 'account', label: 'Account' },
+]
+
+const DESKTOP_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
+  { id: 'pinned', label: 'Pinned' },
+  { id: 'workspaces', label: 'Workspaces' },
+  { id: 'views', label: 'Views' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'administration', label: 'Administration' },
 ]
 
 const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
@@ -72,6 +81,8 @@ const workspaceIcon = (key: string): Parameters<typeof Icon>[0]['name'] => {
 export interface WorkspaceLauncherProps {
   open: boolean
   compact: boolean
+  /** Portrait mobile shell — bottom sheet + Applications/Account tabs */
+  mobileShell?: boolean
   anchorRef: React.RefObject<HTMLElement | null>
   onClose: () => void
   activeWorkspaceKey?: string
@@ -107,6 +118,7 @@ export interface WorkspaceLauncherProps {
 export const WorkspaceLauncher = ({
   open,
   compact,
+  mobileShell = false,
   anchorRef,
   onClose,
   activeWorkspaceKey,
@@ -141,8 +153,16 @@ export const WorkspaceLauncher = ({
   const routePath = useRoutePath()
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
-  const [category, setCategory] = useState<LauncherCategory>('applications')
+  const categoryOptions = mobileShell ? MOBILE_CATEGORY_OPTIONS : DESKTOP_CATEGORY_OPTIONS
+  const [category, setCategory] = useState<LauncherCategory>(mobileShell ? 'applications' : 'workspaces')
   const [query, setQuery] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    if (!categoryOptions.some((item) => item.id === category)) {
+      setCategory(mobileShell ? 'applications' : 'workspaces')
+    }
+  }, [open, category, categoryOptions, mobileShell])
 
   const updatePopoverPosition = useCallback(() => {
     const anchor = anchorRef.current?.getBoundingClientRect()
@@ -162,16 +182,18 @@ export const WorkspaceLauncher = ({
     })
   }, [anchorRef])
 
+  const usePopover = !mobileShell && !compact
+
   useLayoutEffect(() => {
-    if (!open || compact) {
+    if (!open || !usePopover) {
       setPopoverPosition(null)
       return
     }
     updatePopoverPosition()
-  }, [open, compact, updatePopoverPosition, category, query])
+  }, [open, usePopover, updatePopoverPosition, category, query])
 
   useEffect(() => {
-    if (!open || compact) return
+    if (!open || !usePopover) return
     const handleViewportChange = () => updatePopoverPosition()
     window.addEventListener('resize', handleViewportChange)
     window.addEventListener('scroll', handleViewportChange, true)
@@ -179,10 +201,10 @@ export const WorkspaceLauncher = ({
       window.removeEventListener('resize', handleViewportChange)
       window.removeEventListener('scroll', handleViewportChange, true)
     }
-  }, [open, compact, updatePopoverPosition])
+  }, [open, usePopover, updatePopoverPosition])
 
   useEffect(() => {
-    if (!open || compact) return
+    if (!open || !usePopover) return
     const handlePointer = (event: MouseEvent) => {
       const target = event.target as Node
       if (popoverRef.current?.contains(target)) return
@@ -191,7 +213,7 @@ export const WorkspaceLauncher = ({
     }
     window.addEventListener('mousedown', handlePointer)
     return () => window.removeEventListener('mousedown', handlePointer)
-  }, [open, compact, onClose, anchorRef])
+  }, [open, usePopover, onClose, anchorRef])
 
   const pinnedWorkspaces = useMemo(
     () => workspaceOptions.filter((item) => item.pinned || item.key === activeWorkspaceKey).slice(0, 4),
@@ -339,7 +361,7 @@ export const WorkspaceLauncher = ({
   }
 
   const renderCategoryPanel = () => {
-    if (category === 'applications') {
+    if (category === 'applications' && mobileShell) {
       return (
         <div className="nx-wsl-panel__section">
           <h4>Applications</h4>
@@ -485,6 +507,8 @@ export const WorkspaceLauncher = ({
       )
     }
 
+    if (!mobileShell) return null
+
     return (
       <div className="nx-wsl-panel__section">
         <header className="nx-wsl-account-header">
@@ -556,7 +580,7 @@ export const WorkspaceLauncher = ({
       </div>
       <div className={cls('nx-wsl-body', compact && 'is-compact')}>
         <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
-          {CATEGORY_OPTIONS.map((item) => (
+          {categoryOptions.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -572,11 +596,19 @@ export const WorkspaceLauncher = ({
     </div>
   )
 
-  if (compact) {
+  if (mobileShell) {
     return (
       <MobileSheet open={open} title="Workspace Launcher" height="full" onClose={onClose}>
         {launcherBody}
       </MobileSheet>
+    )
+  }
+
+  if (compact) {
+    return (
+      <CommandDrawer open={open} title="Workspace Launcher" onClose={onClose} fullWidth>
+        {launcherBody}
+      </CommandDrawer>
     )
   }
 
