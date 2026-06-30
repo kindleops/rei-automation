@@ -61,13 +61,16 @@
   overflow: hidden;
 }
 
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-25 .nx-intelligence-panel .nx-intel-scroll-body,
 .nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-50 .nx-intelligence-panel .nx-intel-scroll-body,
 .nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-75 .nx-intelligence-panel .nx-intel-scroll-body,
 .nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-100 .nx-intelligence-panel .nx-intel-scroll-body {
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   min-height: 0;
+  max-height: 100%;
   flex: 1 1 auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-width-50 .nx-chat-container,

@@ -13,10 +13,15 @@ export type EngineProgressStage =
   | 'persisting_decision'
   | 'decision_ready'
 
+/** public.properties baseline columns — not engine AOS. */
 export interface BaselineScores {
+  /** final_acquisition_score */
   acquisition_score?: number | null
+  /** properties.deal_strength_score */
   deal_strength_score?: number | null
+  /** properties.structured_motivation_score */
   motivation_score?: number | null
+  /** properties.tag_distress_score */
   distress_score?: number | null
   label?: string
 }
@@ -60,20 +65,36 @@ export interface CompQualification {
 
 export interface CompRecord {
   id?: string
+  property_id?: string | null
+  latitude?: number | null
+  longitude?: number | null
   address?: string | null
   property_type?: string | null
   asset_class?: string | null
   sale_date?: string | null
+  recording_date?: string | null
   sale_price?: number | null
+  mls_sold_price?: number | null
   distance_miles?: number | null
   units?: number | null
   bedrooms?: number | null
   bathrooms?: number | null
   sqft?: number | null
+  avg_sqft_per_unit?: number | null
+  avg_beds_per_unit?: number | null
+  lot_sqft?: number | null
   year_built?: number | null
+  effective_year_built?: number | null
+  condition?: string | null
   construction_type?: string | null
   subdivision?: string | null
   school_district?: string | null
+  document_type?: string | null
+  buyer_name?: string | null
+  buyer_type?: 'individual' | 'corporate' | 'llc_corporate' | null
+  is_corporate_buyer?: boolean | null
+  is_mls_sale?: boolean | null
+  is_off_market?: boolean | null
   ppsf?: number | null
   ppu?: number | null
   similarity_score?: number | null
@@ -109,6 +130,10 @@ export interface DealIntelligenceProperty {
   satellite_url?: string | null
   latitude?: number | null
   longitude?: number | null
+  acquisition_score?: number | null
+  deal_strength_score?: number | null
+  motivation_score?: number | null
+  distress_score?: number | null
 }
 
 export interface DealIntelligenceDecisionSnapshot {
@@ -179,7 +204,12 @@ export interface DealIntelligenceDossier {
     weighted_comp_count?: number
     median_sale?: number | null
     median_ppsf?: number | null
+    avg_ppsf?: number | null
     median_ppu?: number | null
+    avg_ppu?: number | null
+    mls_sale_count?: number | null
+    off_market_count?: number | null
+    corporate_buyer_count?: number | null
     valuation_low?: number | null
     valuation_high?: number | null
     valuation_mid?: number | null

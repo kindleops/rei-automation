@@ -3,10 +3,11 @@ import { fmtRange, humanDataState } from './formatters'
 
 interface Props {
   projection: BuyerMatchV4Projection | null
+  shortlistCount?: number
   onOpenFull: () => void
 }
 
-export function BuyerMatchCompactRail({ projection, onOpenFull }: Props) {
+export function BuyerMatchCompactRail({ projection, shortlistCount = 0, onOpenFull }: Props) {
   const market = projection?.market
   const topThree = (projection?.rankedBuyers ?? []).slice(0, 3)
 
@@ -15,6 +16,7 @@ export function BuyerMatchCompactRail({ projection, onOpenFull }: Props) {
       <div className="bmv4-compact-rail__head">
         <span className="bmv4-eyebrow">Buyer Match</span>
         <span className="bmv4-compact-rail__state">{humanDataState(market?.dataState ?? 'NO_LOCAL_DATA')}</span>
+        {shortlistCount > 0 && <span className="bmv4-nav__count">{shortlistCount}</span>}
       </div>
       <div className="bmv4-compact-rail__stats">
         <div><span className="bmv4-tabular">{market?.verifiedBuyerCount ?? '—'}</span><label>Verified buyers</label></div>

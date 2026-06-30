@@ -1939,14 +1939,27 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     if (bootResult) return bootResult;
   }
 
-  if (!advancedActive && isFastBucket) {
-    const authoritativeResult = await queryAuthoritativeInboxThreads(params, {
-      supabase,
-      limit,
-      filter,
-      cursorKeyset,
-      offset,
-    });
+  // Bucket tabs must use canonical_inbox_threads so rows match All Messages enrichment
+  // (owner, address, flags, contact_identity_class). inbox_thread_state is bucket-fast
+  // but sparse and breaks inbox rows + composer when used for manual_bucket_switch.
+  const useAuthoritativeFastPath = false;
+  if (!advancedActive && isFastBucket && useAuthoritativeFastPath) {
+    let authoritativeResult = null;
+    try {
+      authoritativeResult = await queryAuthoritativeInboxThreads(params, {
+        supabase,
+        limit,
+        filter,
+        cursorKeyset,
+        offset,
+      });
+    } catch (error) {
+      console.warn("[INBOX_AUTHORITATIVE_QUERY_FAILED]", {
+        filter: normalizeLiveFilter(filter),
+        timeoutMode,
+        message: error?.message || String(error),
+      });
+    }
     if (authoritativeResult?.data?.length > 0) {
       return authoritativeResult;
     }
@@ -2345,8 +2358,12 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       inbox_category: effectiveBucket,
     };
   });
+  // Bucket-scoped queries already filter in SQL (authoritative inbox_thread_state or
+  // canonical_inbox_threads). Re-applying threadMatchesFilter drops valid rows when
+  // persisted inbox_bucket disagrees with live predicates (e.g. read new_replies).
+  const trustBucketQuery = filter !== "all";
   const postFiltered = sortThreads(rows)
-    .filter((row) => threadMatchesFilter(row, filter))
+    .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
 
   const hasMore = postFiltered.length > limit;

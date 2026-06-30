@@ -1,0 +1,244 @@
+[
+  {
+    "name": "01-market-command-center",
+    "params": "propertyId=2131309217&pane=100&tab=MARKET&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=MARKET&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/01-market-command-center.png",
+    "meta": {
+      "tab": "MARKET",
+      "rows": 0,
+      "markers": "200 markers · 216 geocoded"
+    }
+  },
+  {
+    "name": "02-buyers-best-match",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/02-buyers-best-match.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 24,
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "03-buyers-local-regional",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&mode=local_regional&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&mode=local_regional&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/03-buyers-local-regional.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 21,
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "04-buyers-institutional",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&mode=institutional&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&mode=institutional&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/04-buyers-institutional.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 2,
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "05-institutions-workspace",
+    "params": "propertyId=2131309217&pane=100&tab=INSTITUTIONS&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=INSTITUTIONS&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/05-institutions-workspace.png",
+    "meta": {
+      "tab": "INSTITUTIONS",
+      "rows": 0,
+      "summary": "2 verified institutional platforms"
+    }
+  },
+  {
+    "name": "06-entity-tree-expanded",
+    "params": "propertyId=2131309217&pane=100&tab=INSTITUTIONS&expandFirst=1&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=INSTITUTIONS&expandFirst=1&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/06-entity-tree-expanded.png",
+    "meta": {
+      "tab": "INSTITUTIONS",
+      "rows": 0,
+      "summary": "2 verified institutional platforms"
+    }
+  },
+  {
+    "name": "07-institutional-dossier",
+    "params": "propertyId=2131309217&pane=100&tab=INSTITUTIONS&selectFirst=institutional&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=INSTITUTIONS&selectFirst=institutional&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/07-institutional-dossier.png",
+    "meta": {
+      "tab": "INSTITUTIONS",
+      "rows": 0,
+      "dossier": "Texas Funding Corporation",
+      "summary": "2 verified institutional platforms"
+    }
+  },
+  {
+    "name": "08-local-buyer-dossier",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&mode=local_regional&selectFirst=1&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&mode=local_regional&selectFirst=1&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/08-local-buyer-dossier.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 21,
+      "dossier": "Dr Horton - Texas Ltd",
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "09-activity-windows",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&selectFirst=1&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&selectFirst=1&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/09-activity-windows.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 24,
+      "dossier": "Dr Horton - Texas Ltd",
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "10-single-asset-detail",
+    "params": "propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=single&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=single&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/10-single-asset-detail.png",
+    "meta": {
+      "tab": "PURCHASE ACTIVITY",
+      "rows": 0,
+      "markers": "34 markers · 34 geocoded"
+    }
+  },
+  {
+    "name": "11-package-detail",
+    "params": "propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=package&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=package&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/11-package-detail.png",
+    "meta": {
+      "tab": "PURCHASE ACTIVITY",
+      "rows": 0,
+      "markers": "4 markers · 4 geocoded"
+    }
+  },
+  {
+    "name": "12-purchase-activity-map",
+    "params": "propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/12-purchase-activity-map.png",
+    "meta": {
+      "tab": "PURCHASE ACTIVITY",
+      "rows": 0,
+      "markers": "38 markers · 38 geocoded"
+    }
+  },
+  {
+    "name": "13-purchase-activity-timeline",
+    "params": "propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/13-purchase-activity-timeline.png",
+    "meta": {
+      "tab": "PURCHASE ACTIVITY",
+      "rows": 0,
+      "markers": "38 markers · 38 geocoded"
+    }
+  },
+  {
+    "name": "14-government-classification",
+    "params": "propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=nonmarket&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=PURCHASE_ACTIVITY&filter=nonmarket&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/14-government-classification.png",
+    "meta": {
+      "tab": "PURCHASE ACTIVITY",
+      "rows": 0,
+      "markers": "23 markers · 23 geocoded"
+    }
+  },
+  {
+    "name": "15-unknown-identity-research",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&mode=research&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&mode=research&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/15-unknown-identity-research.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 0,
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "16-shortlist-mixed",
+    "params": "propertyId=2131309217&pane=100&tab=SHORTLIST&shortlistFirst=3&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=SHORTLIST&shortlistFirst=3&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/16-shortlist-mixed.png",
+    "meta": {
+      "tab": "SHORTLIST",
+      "rows": 0
+    }
+  },
+  {
+    "name": "17-light-mode",
+    "params": "propertyId=2131309217&pane=100&tab=BUYERS&theme=light",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=BUYERS&theme=light",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/17-light-mode.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 24,
+      "summary": "24 eligible · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "18-dark-mode",
+    "params": "propertyId=2131309217&pane=100&tab=MARKET&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=MARKET&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/18-dark-mode.png",
+    "meta": {
+      "tab": "MARKET",
+      "rows": 0,
+      "markers": "200 markers · 216 geocoded"
+    }
+  },
+  {
+    "name": "19-red-ops",
+    "params": "propertyId=2131309217&pane=100&tab=MARKET&theme=red-ops",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=100&tab=MARKET&theme=red-ops",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/19-red-ops.png",
+    "meta": {
+      "tab": "MARKET",
+      "rows": 0,
+      "markers": "200 markers · 216 geocoded"
+    }
+  },
+  {
+    "name": "20-pane-75",
+    "params": "propertyId=2131309217&pane=75&sim=75&tab=BUYERS&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=75&sim=75&tab=BUYERS&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/20-pane-75.png",
+    "meta": {
+      "tab": "BUYERS",
+      "rows": 24,
+      "summary": "24 eligible buyer families · 18 high fit · 21 local/regional · 2 institutional · 1 builders"
+    }
+  },
+  {
+    "name": "21-pane-50",
+    "params": "propertyId=2131309217&pane=50&sim=50&tab=MARKET&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=50&sim=50&tab=MARKET&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/21-pane-50.png",
+    "meta": {
+      "tab": "MARKET",
+      "rows": 0,
+      "markers": "200 markers · 216 geocoded"
+    }
+  },
+  {
+    "name": "22-pane-25-compact-rail",
+    "params": "propertyId=2131309217&pane=25&sim=25&theme=dark",
+    "url": "http://127.0.0.1:5173/dev/buyer-match-v4?propertyId=2131309217&pane=25&sim=25&theme=dark",
+    "file": "/Users/ryankindle/rei-automation/apps/dashboard/proof/buyer-match-v4/screenshots/22-pane-25-compact-rail.png",
+    "meta": {
+      "rows": 0
+    }
+  }
+]

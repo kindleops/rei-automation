@@ -200,9 +200,9 @@ export const Composer = ({
 
   useEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea || composerDisabled) return
+    if (!textarea || composerDisabled || isMobile) return
     textarea.focus({ preventScroll: true })
-  }, [thread?.id, composerDisabled])
+  }, [thread?.id, composerDisabled, isMobile])
 
   useEffect(() => {
     const trimmed = localDraft.trim()

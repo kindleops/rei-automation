@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
+import { buildPropertyExternalLinks, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
@@ -13,6 +15,82 @@ import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
+
+function MobileHeaderActionsMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) {
+      setMenuPos(null)
+      return
+    }
+    const update = () => {
+      const rect = btnRef.current?.getBoundingClientRect()
+      if (!rect) return
+      setMenuPos({ top: rect.bottom + 4, left: rect.left, minWidth: 156 })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (btnRef.current?.contains(target)) return
+      if (target.closest('[data-mobile-header-actions-menu]')) return
+      setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
+
+  const menu = open && menuPos && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="nx-conv-dropdown-portal nx-mobile-header-actions-portal"
+        role="menu"
+        data-mobile-header-actions-menu
+        style={{ top: menuPos.top, left: menuPos.left, minWidth: menuPos.minWidth }}
+        onClick={() => setOpen(false)}
+      >
+        {children}
+      </div>,
+      document.body,
+    )
+    : null
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={cls('nx-conv-back', 'nx-mobile-header-actions-trigger', open && 'is-open')}
+        aria-label="Thread actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="nx-conv-back__glyph" aria-hidden="true">
+          <Icon name="more" />
+        </span>
+      </button>
+      {menu}
+    </>
+  )
+}
 
 interface ChatThreadProps {
   thread: InboxWorkflowThread | null
@@ -38,6 +116,7 @@ interface ChatThreadProps {
   onLoadOlder?: () => void
   selectedParticipant?: PropertyParticipant | null
   masterOwnerHouseholdLabel?: string | null
+  onBack?: () => void
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -390,6 +469,7 @@ export const ChatThread = ({
   onLoadOlder,
   selectedParticipant = null,
   masterOwnerHouseholdLabel = null,
+  onBack,
 }: ChatThreadProps) => {
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -512,8 +592,28 @@ export const ChatThread = ({
   if (isSuppressed) propertyCells.push({ key: 'suppressed', label: 'Status', value: 'Suppressed', className: 'is-status' })
   if (backgroundLoading) propertyCells.push({ key: 'sync', label: 'Sync', value: 'Syncing…' })
 
-  const renderHeaderActions = (withLabels = false) => (
+  const externalLinks = buildPropertyExternalLinks(propertyAddress || null)
+  const zillowUrl = readString(thread, 'zillow_url', 'zillowUrl') || externalLinks.zillow
+  const streetLat = readNumber(thread, 'latitude', 'lat')
+  const streetLng = readNumber(thread, 'longitude', 'lng')
+  const streetViewThumbUrl = readString(thread, 'streetview_image', 'streetviewImage')
+    || buildStreetViewUrl(propertyAddress || null, streetLat, streetLng)
+  const streetViewLink = externalLinks.streetView || streetViewThumbUrl
+
+  const renderHeaderActions = (withLabels = false, includeZillow = false) => (
     <>
+      {includeZillow && zillowUrl ? (
+        <a
+          href={zillowUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="nx-chat-action-icon nx-chat-action-icon--link"
+          title="Open on Zillow"
+        >
+          <Icon name="external-link" />
+          {withLabels && <span>Zillow</span>}
+        </a>
+      ) : null}
       <button
         type="button"
         className={cls('nx-chat-action-icon', isStarred && 'is-active')}
@@ -559,7 +659,12 @@ export const ChatThread = ({
     <div className={cls('nx-chat-container', 'nx-conv-live', `is-layout-${layoutMode}`, atmosphereClass)}>
       <div className="nx-chat-atmosphere" aria-hidden="true" />
 
-      <header className={cls('nx-conv-header', temperatureClass)}>
+      <header className={cls(
+        'nx-conv-header',
+        temperatureClass,
+        onBack && 'has-mobile-back',
+        onBack && 'is-mobile-header',
+      )}>
         <div className="nx-conv-header__atmosphere" aria-hidden="true">
           <span className="nx-conv-header__liquid nx-conv-header__liquid--field" />
           <span className="nx-conv-header__liquid nx-conv-header__liquid--bloom" />
@@ -567,66 +672,103 @@ export const ChatThread = ({
         </div>
         <div className="nx-conv-header__glow" aria-hidden="true" />
 
-        <div className="nx-conv-layer-a">
-          <div className="nx-conv-layer-a__identity">
-            <h2 className="nx-conv-seller-name">{prospectName}</h2>
-            <div className="nx-conv-identity-row">
-              {phoneNumber && (
-                <span className="nx-conv-identity-phone">
-                  <Icon name="phone" />
-                  {phoneNumber}
+        {onBack ? (
+          <div className="nx-conv-mobile-hero">
+            <div className="nx-conv-mobile-controls">
+              <button
+                type="button"
+                className="nx-conv-back nx-conv-back--tl"
+                aria-label="Back to inbox"
+                onClick={onBack}
+              >
+                <span className="nx-conv-back__glyph" aria-hidden="true">
+                  <Icon name="chevron-left" />
                 </span>
-              )}
-              {selectedParticipant?.relationship_to_property ? (
-                <span className="nx-conv-identity-relationship">
-                  {selectedParticipant.relationship_to_property.replace(/_/g, ' ')}
-                </span>
+              </button>
+              <MobileHeaderActionsMenu>
+                {renderHeaderActions(true, true)}
+              </MobileHeaderActionsMenu>
+            </div>
+            {streetViewThumbUrl ? (
+              <a
+                className="nx-conv-mobile-streetview"
+                href={streetViewLink || streetViewThumbUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open street view"
+              >
+                <img src={streetViewThumbUrl} alt="" loading="lazy" decoding="async" />
+              </a>
+            ) : null}
+            <div className="nx-conv-mobile-identity">
+              <h2 className="nx-conv-seller-name nx-conv-seller-name--mobile">{prospectName}</h2>
+              {propertyAddress ? (
+                <p className="nx-conv-identity-address nx-conv-identity-address--mobile">{propertyAddress}</p>
               ) : null}
-              {cleanMarket && (
-                <span className="nx-conv-identity-market">
-                  <Icon name="pin" />
-                  {cleanMarket}
-                </span>
-              )}
-              {isRecovered && import.meta.env.DEV && (
-                <span className="nx-chat-recovered-badge" title="Recovered from local selection history fallback.">
-                  Recovered
-                </span>
-              )}
-              {import.meta.env.DEV && (
-                <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug thread">
-                  <Icon name="cpu" />
-                </button>
+            </div>
+          </div>
+        ) : (
+          <div className="nx-conv-layer-a">
+            <div className="nx-conv-layer-a__identity">
+              <h2 className="nx-conv-seller-name">{prospectName}</h2>
+              <div className="nx-conv-identity-row">
+                {phoneNumber && (
+                  <span className="nx-conv-identity-phone">
+                    <Icon name="phone" />
+                    {phoneNumber}
+                  </span>
+                )}
+                {selectedParticipant?.relationship_to_property ? (
+                  <span className="nx-conv-identity-relationship">
+                    {selectedParticipant.relationship_to_property.replace(/_/g, ' ')}
+                  </span>
+                ) : null}
+                {cleanMarket && (
+                  <span className="nx-conv-identity-market">
+                    <Icon name="pin" />
+                    {cleanMarket}
+                  </span>
+                )}
+                {isRecovered && import.meta.env.DEV && (
+                  <span className="nx-chat-recovered-badge" title="Recovered from local selection history fallback.">
+                    Recovered
+                  </span>
+                )}
+                {import.meta.env.DEV && (
+                  <button type="button" className="nx-debug-btn-mini" onClick={onOpenDebug} title="Debug thread">
+                    <Icon name="cpu" />
+                  </button>
+                )}
+              </div>
+              {householdLabel ? (
+                <div className="nx-conv-identity-household">{householdLabel}</div>
+              ) : null}
+              {propertyAddress && (
+                <div className="nx-conv-identity-address">{propertyAddress}</div>
               )}
             </div>
-            {householdLabel ? (
-              <div className="nx-conv-identity-household">{householdLabel}</div>
-            ) : null}
-            {propertyAddress && (
-              <div className="nx-conv-identity-address">{propertyAddress}</div>
+
+            {isCompact ? (
+              <details className="nx-chat-actions-disclosure">
+                <summary aria-label="Thread actions"><Icon name="more" /></summary>
+                <div className="nx-chat-actions-disclosure__menu">
+                  {renderHeaderActions(true)}
+                </div>
+              </details>
+            ) : (
+              <div className="nx-conv-layer-a__actions">
+                {renderHeaderActions(false)}
+              </div>
             )}
           </div>
-
-          {isCompact ? (
-            <details className="nx-chat-actions-disclosure">
-              <summary aria-label="Thread actions"><Icon name="more" /></summary>
-              <div className="nx-chat-actions-disclosure__menu">
-                {renderHeaderActions(true)}
-              </div>
-            </details>
-          ) : (
-            <div className="nx-conv-layer-a__actions">
-              {renderHeaderActions(false)}
-            </div>
-          )}
-        </div>
+        )}
 
         {propertyCells.length > 0 && (
-          <div className="nx-conv-layer-b">
+          <div className={cls('nx-conv-layer-b', onBack && 'nx-conv-layer-b--mobile')}>
             <div className="nx-conv-property-strip" aria-label="Property intelligence">
               {propertyCells.map((cell) => (
                 <span key={cell.key} className={cls('nx-intel-cell', cell.className)}>
-                  {!cell.className?.includes('is-flag') && (
+                  {!cell.className?.includes('is-flag') && !onBack && (
                     <span className="nx-intel-cell__label">{cell.label}</span>
                   )}
                   <span className="nx-intel-cell__value">{cell.value}</span>
@@ -641,7 +783,8 @@ export const ChatThread = ({
       <ThreadStateBar
         thread={thread}
         onRefetch={(threadKey) => onThreadAction?.(thread.id, 'refetch', { threadKey })}
-        disabled={isSuppressed}
+        compact={Boolean(onBack)}
+        autopilotDisabled={isSuppressed}
       />
 
       {/* ── MESSAGE TIMELINE ──────────────────────────────────────────── */}

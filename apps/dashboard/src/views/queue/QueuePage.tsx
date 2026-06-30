@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import {
   fetchQueueModel,
+  fetchAllQueueItems,
   approveQueueItem,
   holdQueueItem,
   rescheduleQueueItem,
@@ -13,7 +14,7 @@ import {
 } from '../../lib/data/queueData'
 import { shouldUseSupabase } from '../../lib/data/shared'
 import { adaptQueueModel } from './queue.adapter'
-import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis, ConfiguredMarket } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { Icon } from '../../shared/icons'
@@ -26,15 +27,29 @@ import {
   queueItemMatchesActiveContext,
 } from '../../domain/entity-graph/universal-sync'
 import { CommandIntelligenceDock } from './components/CommandIntelligenceDock'
-import { FailureCommandHeader } from './components/FailureCommandHeader'
-import { MarketHealthOverview } from './components/MarketHealthOverview'
+import { FailureIntelligenceModule } from './components/failures/FailureIntelligenceModule'
+import { EventIntelligenceModule } from './components/events/EventIntelligenceModule'
+import { buildEventTimelineItems } from './event-timeline-stats'
+import {
+  buildFailureStats,
+  deriveFailureCause,
+  FAILURE_CAUSE_LABEL,
+  type FailureCauseStat,
+} from './failure-taxonomy-stats'
+import { MarketIntelligenceModule } from './components/markets/MarketIntelligenceModule'
+import { buildMarketStats, type MarketStat } from './market-fleet-stats'
 import { QueueBulkActionDock } from './components/QueueBulkActionDock'
 import { QueueConfirmModal } from './components/QueueConfirmModal'
 import { QueueExceptionBadges } from './components/QueueExceptionBadges'
 import { QueueInlineFlow } from './components/QueueInlineFlow'
-import { SenderFleetOverview } from './components/SenderFleetOverview'
+import { SenderIntelligenceModule } from './components/senders/SenderIntelligenceModule'
+import { buildSenderStats, type SenderStat } from './sender-fleet-stats'
+import { OccQueueFilterMenu } from './components/OccQueueFilterMenu'
+import { OccMobileDossierSheet } from './components/OccMobileDossierSheet'
+import { OccMobileQueueCard } from './components/OccMobileQueueCard'
 import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
 import './components/templates/template-intelligence.css'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { useQueueLayout } from './hooks/useQueueLayout'
 import type { ViewLayoutMode, ViewWidthPercent } from '../../domain/inbox/view-layout'
 import {
@@ -42,7 +57,6 @@ import {
   buildBulkActionPreview,
   buildExceptionsCenter,
   buildSelectionPreview,
-  displayName,
   isDelivered,
   isFailed,
   isSent,
@@ -57,6 +71,9 @@ import {
   type BulkActionPreview,
   type QueueDensity,
   type QueueSection,
+  QUEUE_DENSITY_LABEL,
+  QUEUE_DENSITY_ORDER,
+  queueShowsMessagePreview,
 } from './queue-ui-helpers'
 import '../../modules/inbox/queue-ops.css'
 
@@ -93,11 +110,11 @@ const STAGE_TONE: Record<string, string> = {
 
 // ── Date filter ────────────────────────────────────────────────────────────
 
-type DatePreset = 'today' | '24h' | '7d' | '30d' | '90d' | 'all' | 'custom'
+type DatePreset = 'today' | '24h' | '7d' | '14d' | '30d' | '60d' | '90d' | 'all' | 'custom'
 
 const DATE_PRESET_LABELS: Record<DatePreset, string> = {
-  today: 'Today', '24h': 'Last 24h', '7d': 'Last 7d', '30d': 'Last 30d',
-  '90d': 'Last 90d', all: 'All time', custom: 'Custom',
+  today: 'Today', '24h': 'Last 24h', '7d': 'Last 7d', '14d': 'Last 14d', '30d': 'Last 30d',
+  '60d': 'Last 60d', '90d': 'Last 90d', all: 'All time', custom: 'Custom',
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const
@@ -111,6 +128,8 @@ function getPresetRange(preset: Exclude<DatePreset, 'custom' | 'all'>): { from: 
   }
   const ms = preset === '24h' ? 86400000
     : preset === '7d' ? 7 * 86400000
+    : preset === '14d' ? 14 * 86400000
+    : preset === '60d' ? 60 * 86400000
     : preset === '90d' ? 90 * 86400000
     : 30 * 86400000
   return { from: new Date(now.getTime() - ms).toISOString(), to }
@@ -165,13 +184,6 @@ const FAILURE_TONE: Record<string, string> = {
 
 const HEALTH_TONE: Record<string, string> = {
   healthy: 'green', watch: 'amber', degraded: 'amber', critical: 'red',
-}
-
-function healthFromPct(failRate: number): 'healthy' | 'watch' | 'degraded' | 'critical' {
-  if (failRate >= 30) return 'critical'
-  if (failRate >= 15) return 'degraded'
-  if (failRate >= 5) return 'watch'
-  return 'healthy'
 }
 
 // ── Template stats ─────────────────────────────────────────────────────────
@@ -253,133 +265,6 @@ function buildTemplateStats(items: QueueItem[]): TemplateStat[] {
   }).sort((a, b) => b.usage - a.usage)
 }
 
-// ── Sender (TextGrid) stats ────────────────────────────────────────────────
-
-interface SenderStat {
-  phone: string
-  market: string
-  sent: number
-  delivered: number
-  failed: number
-  blocked: number
-  optOuts: number
-  violations21610: number
-  deliveryPct: number
-  failPct: number
-  health: 'healthy' | 'watch' | 'degraded' | 'critical' | 'blocked'
-  performanceLabel: string
-  operationalLabel: string
-  lastUsed: string | null
-  state: 'active' | 'paused' | 'degraded' | 'blocked' | 'unregistered'
-}
-
-function buildSenderStats(items: QueueItem[]): SenderStat[] {
-  const map = new Map<string, SenderStat>()
-  for (const i of items) {
-    const phone = i.fromPhoneNumber || 'unknown'
-    if (phone === 'unknown') continue
-    const s = map.get(phone) ?? {
-      phone, market: i.market || '—', sent: 0, delivered: 0, failed: 0, blocked: 0,
-      optOuts: 0, violations21610: 0, deliveryPct: 0, failPct: 0,
-      health: 'healthy' as const, performanceLabel: 'Performance: —', operationalLabel: 'Routing available',
-      lastUsed: null, state: 'active' as const,
-    }
-    if (isSent(i.status)) s.sent++
-    if (isDelivered(i.status)) s.delivered++
-    if (isFailed(i.status)) s.failed++
-    if (BLOCKED_STATUSES.has(i.status)) s.blocked++
-    if (i.failureCategory === 'recipient_opted_out') s.optOuts++
-    if (i.failureCategory === 'blacklist_pair_21610') s.violations21610++
-    const ts = i.lastEventAt || i.sentAt || i.updatedAt
-    if (ts && (!s.lastUsed || ts > s.lastUsed)) s.lastUsed = ts
-    if (!s.market || s.market === '—') s.market = i.market || '—'
-    map.set(phone, s)
-  }
-  return Array.from(map.values()).map(s => {
-    s.deliveryPct = pct(s.delivered, s.sent)
-    s.failPct = pct(s.failed, s.sent)
-    const hasActive = items.some(i => i.fromPhoneNumber === s.phone && ['scheduled', 'queued', 'ready', 'sending'].includes(i.status))
-    s.state = s.violations21610 > 0 ? 'blocked' : s.sent === 0 ? 'unregistered' : hasActive ? 'active' : 'paused'
-    s.health = s.violations21610 > 0 ? 'blocked' : healthFromPct(s.failPct)
-    s.performanceLabel = `Performance: ${s.deliveryPct}% delivered`
-    s.operationalLabel = s.state === 'active' ? 'Routing available'
-      : s.state === 'paused' ? 'Current routing: unavailable'
-      : s.state === 'blocked' ? 'Blocked — compliance hold'
-      : 'Unregistered in range'
-    return s
-  }).sort((a, b) => (b.sent + b.delivered) - (a.sent + a.delivered))
-}
-
-// ── Market stats ───────────────────────────────────────────────────────────
-
-interface MarketStat {
-  market: string
-  total: number
-  sent: number
-  delivered: number
-  failed: number
-  blocked: number
-  optOuts: number
-  deliveryPct: number
-  health: 'healthy' | 'watch' | 'degraded' | 'critical' | 'idle'
-  performanceHealth: string
-  senderReadiness: string
-  suggestedAction: string
-  exceptionCount: number
-  configured: boolean
-  senderExists: boolean
-  active: boolean
-}
-
-function buildMarketStats(items: QueueItem[], directory: ConfiguredMarket[] = []): MarketStat[] {
-  const map = new Map<string, MarketStat>()
-  const make = (m: string): MarketStat => ({
-    market: m, total: 0, sent: 0, delivered: 0, failed: 0, blocked: 0, optOuts: 0,
-    deliveryPct: 0, health: 'healthy', performanceHealth: 'idle', senderReadiness: 'No registered sender',
-    suggestedAction: 'Register an active sender for this market', exceptionCount: 0,
-    configured: false, senderExists: false, active: false,
-  })
-
-  // Seed every configured market so zero-row markets still render.
-  for (const d of directory) {
-    const s = make(d.market)
-    s.configured = true
-    s.senderExists = d.senderCount > 0
-    s.active = d.active
-    map.set(d.market, s)
-  }
-
-  for (const i of items) {
-    const m = i.market || 'Unknown'
-    const s = map.get(m) ?? make(m)
-    s.total++
-    if (isSent(i.status)) s.sent++
-    if (isDelivered(i.status)) s.delivered++
-    if (isFailed(i.status)) s.failed++
-    if (BLOCKED_STATUSES.has(i.status)) s.blocked++
-    if (i.failureCategory === 'recipient_opted_out' || i.failureCategory === 'blacklist_pair_21610') s.optOuts++
-    map.set(m, s)
-  }
-  return Array.from(map.values()).map(s => {
-    s.deliveryPct = pct(s.delivered, s.sent)
-    const failHealth = healthFromPct(pct(s.failed, s.sent))
-    s.performanceHealth = s.total === 0 ? 'idle' : failHealth
-    s.senderReadiness = !s.senderExists ? 'No registered sender' : s.active ? 'Ready' : 'Paused sender'
-    s.exceptionCount = items.filter(i => i.market === s.market && (isFailed(i.status) || BLOCKED_STATUSES.has(i.status))).length
-    if (!s.senderExists) {
-      s.health = 'critical'
-      s.suggestedAction = 'Assign and activate a TextGrid sender'
-    } else if (!s.active && s.total > 0) {
-      s.health = failHealth === 'healthy' ? 'watch' : failHealth
-      s.suggestedAction = 'Resume sender or reroute queue rows'
-    } else {
-      s.health = s.total === 0 ? 'idle' : failHealth
-      s.suggestedAction = s.exceptionCount > 0 ? 'Review market exceptions in Failure Taxonomy' : 'No action required'
-    }
-    return s
-  }).sort((a, b) => b.total - a.total || a.market.localeCompare(b.market))
-}
-
 // ── KPI Card ────────────────────────────────────────────────────────────────
 
 interface KpiCardProps {
@@ -425,7 +310,7 @@ const DateFilter = ({
   return (
     <div className="occ-date-filter">
       <div className="occ-date-presets">
-        {(['today', '24h', '7d', '30d', '90d', 'all', 'custom'] as DatePreset[]).map(p => (
+        {(['today', '24h', '7d', '14d', '30d', '60d', '90d', 'all', 'custom'] as DatePreset[]).map(p => (
           <button
             key={p}
             type="button"
@@ -907,570 +792,6 @@ const _TemplateDossier = ({ s, onClose, onViewRows }: { s: TemplateStat; onClose
   </aside>
 )
 
-// ── Sender Numbers Module ───────────────────────────────────────────────────
-
-const SendersModule = ({
-  items,
-  selectedPhone,
-  onSelectPhone,
-}: {
-  items: QueueItem[]
-  selectedPhone: string | null
-  onSelectPhone: (phone: string | null) => void
-}) => {
-  const stats = useMemo(() => buildSenderStats(items), [items])
-
-  const STATE_TONE: Record<string, string> = { active: 'green', paused: 'muted', degraded: 'amber', blocked: 'red' }
-
-  return (
-    <div className="occ-senders-layout">
-      <SenderFleetOverview
-        senders={stats.map(s => ({
-          phone: s.phone, market: s.market, sent: s.sent, delivered: s.delivered, failed: s.failed,
-          deliveryPct: s.deliveryPct, failPct: s.failPct, violations21610: s.violations21610,
-          optOuts: s.optOuts, state: s.state, health: s.health,
-          performanceLabel: s.performanceLabel, operationalLabel: s.operationalLabel,
-          lastUsed: s.lastUsed ? relTime(s.lastUsed) : null,
-        }))}
-        selectedPhone={selectedPhone}
-        onSelect={onSelectPhone}
-      />
-    <div className="occ-module occ-module--senders">
-      <div className="occ-module-head occ-module-head--senders">
-        <div className="occ-module-col occ-col-phone">Number</div>
-        <div className="occ-module-col occ-col-market">Market</div>
-        <div className="occ-module-col occ-col-num">Sent</div>
-        <div className="occ-module-col occ-col-num">Del</div>
-        <div className="occ-module-col occ-col-num">Fail</div>
-        <div className="occ-module-col occ-col-num">Blk</div>
-        <div className="occ-module-col occ-col-num">Opt-Outs</div>
-        <div className="occ-module-col occ-col-num">21610</div>
-        <div className="occ-module-col occ-col-pct">Del%</div>
-        <div className="occ-module-col occ-col-badge">Health</div>
-        <div className="occ-module-col occ-col-small">Last Used</div>
-        <div className="occ-module-col occ-col-badge">State</div>
-      </div>
-      <div className="occ-module-body">
-        {stats.length === 0 && (
-          <div className="occ-module-empty">No sender data for this date range.</div>
-        )}
-        {stats.map(s => (
-          <button
-            key={s.phone}
-            type="button"
-            className={cls('occ-module-row occ-module-row--clickable', selectedPhone === s.phone && 'is-selected')}
-            onClick={() => onSelectPhone(selectedPhone === s.phone ? null : s.phone)}
-          >
-            <div className="occ-module-col occ-col-phone occ-mono">{s.phone}</div>
-            <div className="occ-module-col occ-col-market">{truncate(s.market, 12)}</div>
-            <div className="occ-module-col occ-col-num">{s.sent}</div>
-            <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
-            <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
-            <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
-            <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
-            <div className={cls('occ-module-col occ-col-num', s.violations21610 > 0 && 'is-red occ-bold')}>{s.violations21610}</div>
-            <div className={cls('occ-module-col occ-col-pct', s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
-              {s.deliveryPct}%
-            </div>
-            <div className="occ-module-col occ-col-badge">
-              <span className={cls('occ-state-badge', `is-${STATE_TONE[s.state] ?? 'muted'}`)}>{s.state}</span>
-              <small>{s.performanceLabel}</small>
-            </div>
-            <div className="occ-module-col occ-col-small">{relTime(s.lastUsed)}</div>
-            <div className="occ-module-col occ-col-badge">
-              <small className="occ-seller-meta">{s.operationalLabel}</small>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-    </div>
-  )
-}
-
-// ── Market Health Module ────────────────────────────────────────────────────
-
-const MarketModule = ({
-  items,
-  directory,
-  onViewRows,
-  selectedMarket,
-  onSelectMarket,
-}: {
-  items: QueueItem[]
-  directory: ConfiguredMarket[]
-  onViewRows: (market: string) => void
-  selectedMarket: string | null
-  onSelectMarket: (market: string | null) => void
-}) => {
-  const stats = useMemo(() => buildMarketStats(items, directory), [items, directory])
-  const configuredCount = stats.filter(s => s.configured).length
-
-  return (
-    <div className="occ-market-layout">
-      <MarketHealthOverview markets={stats.map(s => ({
-        market: s.market, total: s.total, health: s.health, deliveryPct: s.deliveryPct,
-        senderExists: s.senderExists, active: s.active, failed: s.failed, optOuts: s.optOuts,
-      }))} />
-    <div className="occ-module occ-module--market">
-      <div className="occ-module-head occ-module-head--market">
-        <div className="occ-module-col occ-col-name">Market</div>
-        <div className="occ-module-col occ-col-badge">Sender</div>
-        <div className="occ-module-col occ-col-num">Total</div>
-        <div className="occ-module-col occ-col-num">Sent</div>
-        <div className="occ-module-col occ-col-num">Del</div>
-        <div className="occ-module-col occ-col-num">Fail</div>
-        <div className="occ-module-col occ-col-num">Blk</div>
-        <div className="occ-module-col occ-col-num">Opt-Outs</div>
-        <div className="occ-module-col occ-col-pct">Del%</div>
-        <div className="occ-module-col occ-col-badge">Health</div>
-        <div className="occ-module-col occ-col-action">Rows</div>
-      </div>
-      <div className="occ-module-body">
-        {stats.length === 0 && (
-          <div className="occ-module-empty">No configured markets found.</div>
-        )}
-        {stats.map(s => (
-          <button
-            key={s.market}
-            type="button"
-            className={cls('occ-module-row occ-module-row--market occ-module-row--clickable', s.total === 0 && 'is-empty', selectedMarket === s.market && 'is-selected')}
-            onClick={() => onSelectMarket(selectedMarket === s.market ? null : s.market)}
-          >
-            <div className="occ-module-col occ-col-name occ-col-name--strong">
-              <span>{truncate(s.market, 20)}</span>
-              {!s.configured && <small className="occ-tag is-muted">unregistered</small>}
-            </div>
-            <div className="occ-module-col occ-col-badge">
-              {s.senderExists
-                ? <span className={cls('occ-state-badge', s.active ? 'is-green' : 'is-muted')}>{s.active ? 'active' : 'paused'}</span>
-                : <span className="occ-state-badge is-red">none</span>}
-            </div>
-            <div className="occ-module-col occ-col-num">{s.total}</div>
-            <div className="occ-module-col occ-col-num">{s.sent}</div>
-            <div className="occ-module-col occ-col-num is-green">{s.delivered}</div>
-            <div className={cls('occ-module-col occ-col-num', s.failed > 0 && 'is-red')}>{s.failed}</div>
-            <div className={cls('occ-module-col occ-col-num', s.blocked > 0 && 'is-amber')}>{s.blocked}</div>
-            <div className={cls('occ-module-col occ-col-num', s.optOuts > 0 && 'is-red')}>{s.optOuts}</div>
-            <div className={cls('occ-module-col occ-col-pct', s.total === 0 ? 'is-muted' : s.deliveryPct > 70 ? 'is-green' : s.deliveryPct > 40 ? 'is-amber' : 'is-red')}>
-              {s.total === 0 ? '—' : `${s.deliveryPct}%`}
-            </div>
-            <div className="occ-module-col occ-col-badge">
-              <span className={cls('occ-health-badge', `is-${HEALTH_TONE[s.health]}`)}>{s.total === 0 ? 'idle' : s.health}</span>
-            </div>
-            <div className="occ-module-col occ-col-action">
-              <span
-                role="button"
-                tabIndex={0}
-                className="occ-mini-btn"
-                onClick={e => { e.stopPropagation(); if (s.total > 0) onViewRows(s.market) }}
-                onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); if (s.total > 0) onViewRows(s.market) } }}
-              >
-                View
-              </span>
-            </div>
-          </button>
-        ))}
-      </div>
-      <div className="occ-module-foot">
-        {configuredCount} configured market{configuredCount === 1 ? '' : 's'} · counts reflect the loaded page/range
-      </div>
-    </div>
-    </div>
-  )
-}
-
-// ── Failure Taxonomy Module ─────────────────────────────────────────────────
-
-// Extra labels for blocked/paused rows that carry no failureCategory.
-const FAILURE_CAUSE_LABEL: Record<string, string> = {
-  ...FAILURE_LABEL,
-  paused_name_missing: 'Paused — Name Missing',
-  blocked_by_guard: 'Blocked By Queue Guard',
-}
-
-// Operational metadata per cause: category, whether a retry is safe, whether
-// suppression is required, and the recommended operator action.
-const FAILURE_META: Record<string, { category: string; retryable: boolean; suppression: boolean; action: string }> = {
-  textgrid_content_filter: { category: 'Carrier',    retryable: false, suppression: false, action: 'Revise template wording — carrier content filter rejected it.' },
-  blacklist_pair_21610:    { category: 'Compliance', retryable: false, suppression: true,  action: 'Suppress the sender↔recipient pair. Never retry (21610).' },
-  recipient_opted_out:     { category: 'Compliance', retryable: false, suppression: true,  action: 'Honor opt-out — suppress recipient permanently.' },
-  invalid_number:          { category: 'Carrier',    retryable: false, suppression: true,  action: 'Mark number invalid and suppress; re-skiptrace owner.' },
-  suppression_blocked:     { category: 'Compliance', retryable: false, suppression: true,  action: 'Already suppressed — no send. Review suppression list.' },
-  no_valid_sender:         { category: 'Routing',    retryable: true,  suppression: false, action: 'Add/inspect a TextGrid sender for this market, then retry routing.' },
-  missing_template:        { category: 'Template',   retryable: true,  suppression: false, action: 'Attach a template for this stage, then re-queue.' },
-  blank_message_body:      { category: 'Payload',    retryable: true,  suppression: false, action: 'Rehydrate message body / merge fields, then retry.' },
-  message_event_missing:   { category: 'Webhook',    retryable: true,  suppression: false, action: 'Reconcile delivery webhook to backfill the message event.' },
-  carrier_failure:         { category: 'Carrier',    retryable: true,  suppression: false, action: 'Transient carrier error — safe to retry within caps.' },
-  stale_runnable_row:      { category: 'Queue',      retryable: false, suppression: false, action: 'Exceeded retries / stale — cancel or manually re-queue.' },
-  paused_name_missing:     { category: 'Payload',    retryable: true,  suppression: false, action: 'Resolve seller name, then reprocess paused rows.' },
-  blocked_by_guard:        { category: 'Guard',      retryable: false, suppression: false, action: 'Review the queue-guard reason; clear guard or cancel.' },
-  unknown:                 { category: 'Unknown',    retryable: true,  suppression: false, action: 'Inspect raw failed_reason and classify before bulk retry.' },
-}
-
-// Maps a row to its failure cause, including blocked/paused rows that have no
-// classifier output.
-const deriveFailureCause = (i: QueueItem): string | null => {
-  if (isManualMessage(i) && (i.failureCategory === 'missing_template' || i.diagnosticFlags.includes('MISSING_TEMPLATE'))) return null
-  if (isDelivered(i.status) && i.failureCategory === 'missing_template') return null
-  if (i.failureCategory) return i.failureCategory
-  if (i.status === 'paused_name_missing') return 'paused_name_missing'
-  if (BLOCKED_STATUSES.has(i.status)) return 'blocked_by_guard'
-  if (isFailed(i.status)) return 'unknown'
-  return null
-}
-
-interface FailureCauseStat {
-  cause: string
-  label: string
-  category: string
-  count: number
-  retryable: boolean
-  suppression: boolean
-  action: string
-  markets: string[]
-  senders: string[]
-  templates: string[]
-}
-
-const FailureModule = ({
-  items,
-  onFilterCause,
-  selectedCause,
-  onSelectCause,
-}: {
-  items: QueueItem[]
-  onFilterCause: (cause: string) => void
-  selectedCause: string | null
-  onSelectCause: (cause: string | null) => void
-}) => {
-  const stats = useMemo<FailureCauseStat[]>(() => {
-    const map = new Map<string, { count: number; markets: Set<string>; senders: Set<string>; templates: Set<string> }>()
-    for (const i of items) {
-      const cause = deriveFailureCause(i)
-      if (!cause) continue
-      const entry = map.get(cause) ?? { count: 0, markets: new Set(), senders: new Set(), templates: new Set() }
-      entry.count++
-      if (i.market && i.market !== 'Market unknown') entry.markets.add(i.market)
-      if (i.fromPhoneNumber) entry.senders.add(i.fromPhoneNumber)
-      if (i.templateName && i.templateName !== 'Template not attached') entry.templates.add(i.templateName)
-      map.set(cause, entry)
-    }
-    return Array.from(map.entries()).map(([cause, e]) => {
-      const meta = FAILURE_META[cause] ?? FAILURE_META.unknown
-      return {
-        cause,
-        label: FAILURE_CAUSE_LABEL[cause] ?? cause.replace(/_/g, ' '),
-        category: meta.category,
-        count: e.count,
-        retryable: meta.retryable,
-        suppression: meta.suppression,
-        action: meta.action,
-        markets: Array.from(e.markets).sort(),
-        senders: Array.from(e.senders),
-        templates: Array.from(e.templates).sort(),
-      }
-    }).sort((a, b) => b.count - a.count)
-  }, [items])
-
-  const total = stats.reduce((n, s) => n + s.count, 0)
-  const retryable = stats.filter(s => s.retryable).reduce((n, s) => n + s.count, 0)
-  const nonRetryable = total - retryable
-  const compliance = stats.filter(s => s.category === 'Compliance').reduce((n, s) => n + s.count, 0)
-  const provider = stats.filter(s => s.category === 'Carrier').reduce((n, s) => n + s.count, 0)
-  const config = stats.filter(s => ['Template', 'Routing', 'Payload', 'Guard'].includes(s.category)).reduce((n, s) => n + s.count, 0)
-  const webhook = stats.filter(s => s.category === 'Webhook').reduce((n, s) => n + s.count, 0)
-  const unknown = stats.filter(s => s.category === 'Unknown').reduce((n, s) => n + s.count, 0)
-  const selected = stats.find(s => s.cause === selectedCause) ?? null
-  const previewRows = selected
-    ? items.filter(i => deriveFailureCause(i) === selected.cause).slice(0, 8)
-    : []
-
-  return (
-    <div className="occ-failure-command">
-      <FailureCommandHeader
-        total={total}
-        retryable={retryable}
-        nonRetryable={nonRetryable}
-        compliance={compliance}
-        provider={provider}
-        config={config}
-        webhook={webhook}
-        unknown={unknown}
-      />
-      {stats.length === 0 && (
-        <div className="occ-module-empty">No failures or blocks in the loaded page/range.</div>
-      )}
-      <div className="occ-failure-command__body">
-      <div className="occ-failure-cards">
-        {stats.map(s => {
-          const tone = FAILURE_TONE[s.category] ?? 'amber'
-          return (
-            <button
-              key={s.cause}
-              type="button"
-              className={cls('occ-failure-card', selectedCause === s.cause && 'is-selected', `is-glow-${tone}`)}
-              onClick={() => onSelectCause(selectedCause === s.cause ? null : s.cause)}
-              title="Select failure family"
-            >
-              <div className="occ-failure-card__head">
-                <span className={cls('occ-failure-card__dot', `is-${tone}`)} />
-                <span className="occ-failure-card__label">{s.label}</span>
-                <span className={cls('occ-failure-card__count', `is-${tone}`)}>{s.count}</span>
-              </div>
-              <div className="occ-failure-card__meta">
-                <span className="occ-tag">{s.category}</span>
-                <span className={cls('occ-tag', s.retryable ? 'is-green' : 'is-muted')}>{s.retryable ? 'retryable' : 'non-retryable'}</span>
-                {s.suppression && <span className="occ-tag is-red">suppress</span>}
-              </div>
-              <div className="occ-failure-card__scope">
-                <span>{s.markets.length} market{s.markets.length === 1 ? '' : 's'}</span>
-                <span>· {s.senders.length} sender{s.senders.length === 1 ? '' : 's'}</span>
-                <span>· {s.templates.length} template{s.templates.length === 1 ? '' : 's'}</span>
-              </div>
-              {s.markets.length > 0 && (
-                <div className="occ-failure-card__chips">
-                  {s.markets.slice(0, 4).map(m => <span key={m} className="occ-chip">{truncate(m, 14)}</span>)}
-                  {s.markets.length > 4 && <span className="occ-chip is-muted">+{s.markets.length - 4}</span>}
-                </div>
-              )}
-              <div className="occ-failure-card__action">{s.action}</div>
-              <span
-                role="button"
-                tabIndex={0}
-                className="occ-failure-card__cta"
-                onClick={e => { e.stopPropagation(); onFilterCause(s.cause) }}
-                onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); onFilterCause(s.cause) } }}
-              >
-                View rows →
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      {selected && (
-        <aside className="occ-failure-dossier">
-          <header className="occ-failure-dossier__head">
-            <strong>{selected.label}</strong>
-            <span className={cls('occ-failure-card__count', `is-${FAILURE_TONE[selected.category] ?? 'amber'}`)}>{selected.count}</span>
-          </header>
-          <p className="occ-failure-dossier__action">{selected.action}</p>
-          <div className="occ-failure-dossier__meta">
-            <span>{selected.retryable ? 'Retryable' : 'Non-retryable'}</span>
-            <span>{selected.markets.length} markets</span>
-            <span>{selected.senders.length} senders</span>
-          </div>
-          <div className="occ-failure-dossier__preview">
-            <span className="occ-failure-dossier__preview-title">Affected rows (sample)</span>
-            {previewRows.map(row => {
-              const id = resolveSellerIdentity(row)
-              const asset = resolveAssetTypeIcon(row.propertyType)
-              return (
-                <div key={row.id} className="occ-failure-preview-row">
-                  <span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={9} /></span>
-                  <strong>{truncate(id.primary, 20)}</strong>
-                  {id.phoneEnding && <span className="occ-contact-badge">{id.phoneEnding}</span>}
-                  <span>{truncate(row.propertyAddress, 18)}</span>
-                  <span>{resolveTemplateLabel(row)}</span>
-                </div>
-              )
-            })}
-          </div>
-          <button type="button" className="occ-action-btn is-primary" onClick={() => onFilterCause(selected.cause)}>
-            Open {selected.count} rows in Queue
-          </button>
-        </aside>
-      )}
-      </div>
-      {stats.length > 0 && (
-        <div className="occ-module-foot">{total} failed/blocked rows in loaded page/range</div>
-      )}
-    </div>
-  )
-}
-
-// ── Event Timeline Module ───────────────────────────────────────────────────
-
-const EVENT_ICON: Record<string, string> = {
-  sent: 'send', delivered: 'check', failed: 'alert-circle', retry: 'refresh-cw',
-  scheduled: 'clock', queued: 'clock', blocked: 'shield', cancelled: 'close',
-  approval: 'zap', held: 'pause', replied_before_send: 'message',
-}
-
-const TIMELINE_PAGE_SIZE = 30
-
-const TIMELINE_FILTERS = [
-  'all', 'scheduled', 'queued', 'sending', 'sent', 'delivered', 'failed', 'blocked',
-  'retry', 'opt-out', 'suppression', 'approval', 'workflow', 'provider receipt',
-] as const
-
-const EventTimelineModule = ({
-  items,
-  onSelectItem: _onSelectItem,
-  density,
-  onDensityChange,
-  selectedEventId,
-  onSelectEvent,
-}: {
-  items: QueueItem[]
-  onSelectItem: (id: string) => void
-  density: 'comfortable' | 'compact'
-  onDensityChange: (d: 'comfortable' | 'compact') => void
-  selectedEventId: string | null
-  onSelectEvent: (item: QueueItem | null) => void
-}) => {
-  const [typeFilter, setTypeFilter] = useState<string>('all')
-  const [groupBy, setGroupBy] = useState<'time' | 'campaign' | 'seller' | 'sender' | 'market'>('time')
-  const [page, setPage] = useState(0)
-
-  const sorted = useMemo(() =>
-    [...items]
-      .filter(i => i.lastEventAt || i.updatedAt)
-      .sort((a, b) => new Date(b.lastEventAt ?? b.updatedAt).getTime() - new Date(a.lastEventAt ?? a.updatedAt).getTime())
-  , [items])
-
-  const matchesTimelineFilter = (item: QueueItem, filter: string): boolean => {
-    if (filter === 'all') return true
-    const statusKey = BLOCKED_STATUSES.has(item.status) ? 'blocked' : item.status
-    if (filter === 'opt-out') return item.failureCategory === 'recipient_opted_out'
-    if (filter === 'suppression') return item.failureCategory === 'blacklist_pair_21610' || item.failureCategory === 'suppression_blocked'
-    if (filter === 'workflow') return Boolean(item.workflowId || item.automationSource)
-    if (filter === 'provider receipt') return Boolean(item.providerMessageId || item.textgridMessageId || item.lastEventType)
-    if (filter === 'retry') return item.status === 'retry'
-    return statusKey === filter || item.status === filter
-  }
-
-  const filtered = useMemo(() => sorted.filter(i => matchesTimelineFilter(i, typeFilter)), [sorted, typeFilter])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / TIMELINE_PAGE_SIZE))
-  const safePage = Math.min(page, totalPages - 1)
-  const events = filtered.slice(safePage * TIMELINE_PAGE_SIZE, safePage * TIMELINE_PAGE_SIZE + TIMELINE_PAGE_SIZE)
-
-  const groupedEvents = useMemo(() => {
-    if (groupBy === 'time') return [{ key: 'timeline', label: '', items: events }]
-    const map = new Map<string, QueueItem[]>()
-    for (const item of events) {
-      const key = groupBy === 'campaign' ? (item.campaignName || 'No campaign')
-        : groupBy === 'seller' ? displayName(item)
-        : groupBy === 'sender' ? (item.fromPhoneNumber || 'No sender')
-        : (item.market || 'Unknown market')
-      const bucket = map.get(key) ?? []
-      bucket.push(item)
-      map.set(key, bucket)
-    }
-    return Array.from(map.entries()).map(([key, groupItems]) => ({ key, label: key, items: groupItems }))
-  }, [filtered, groupBy, events])
-  const start = filtered.length === 0 ? 0 : safePage * TIMELINE_PAGE_SIZE + 1
-  const end = Math.min((safePage + 1) * TIMELINE_PAGE_SIZE, filtered.length)
-
-  const hourLabel = (iso: string) => {
-    const d = new Date(iso)
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  }
-
-  return (
-    <div className={cls('occ-module occ-module--timeline', `is-density-${density}`)}>
-      <div className="occ-timeline-controls">
-        <select
-          className="occ-filter-select"
-          value={typeFilter}
-          onChange={e => { setTypeFilter(e.target.value); setPage(0) }}
-        >
-          {TIMELINE_FILTERS.map(t => (
-            <option key={t} value={t}>{t === 'all' ? 'All events' : t.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-        <select className="occ-filter-select" value={groupBy} onChange={e => setGroupBy(e.target.value as typeof groupBy)}>
-          <option value="time">Group: time</option>
-          <option value="campaign">Group: campaign</option>
-          <option value="seller">Group: seller/thread</option>
-          <option value="sender">Group: sender</option>
-          <option value="market">Group: market</option>
-        </select>
-        <div className="occ-density-select" role="group" aria-label="Timeline density">
-          {(['compact', 'comfortable'] as const).map(d => (
-            <button key={d} type="button" className={cls('occ-density-btn', density === d && 'is-active')} onClick={() => onDensityChange(d)}>
-              {d === 'compact' ? 'Compact' : 'Comfortable'}
-            </button>
-          ))}
-        </div>
-        <span className="occ-timeline-count">{filtered.length.toLocaleString()} events</span>
-      </div>
-      {filtered.length === 0 && (
-        <div className="occ-module-empty">No events for this date range.</div>
-      )}
-      <div className="occ-timeline occ-timeline--spine">
-        <div className="occ-timeline__spine" aria-hidden="true" />
-        {groupedEvents.map(group => (
-          <div key={group.key} className="occ-timeline-group">
-            {group.label && <div className="occ-timeline-group__label">{truncate(group.label, 40)}</div>}
-            {group.items.map((i, idx) => {
-              const statusView = resolveStatusPresentation(i)
-              const identity = resolveSellerIdentity(i)
-              const asset = resolveAssetTypeIcon(i.propertyType)
-              const iconName = EVENT_ICON[i.status] ?? 'zap'
-              const exactTime = i.lastEventAt ?? i.updatedAt
-              const prev = idx > 0 ? group.items[idx - 1] : null
-              const showSep = groupBy === 'time' && exactTime && prev && (
-                new Date(exactTime).toDateString() !== new Date(prev.lastEventAt ?? prev.updatedAt).toDateString()
-                || Math.abs(new Date(exactTime).getTime() - new Date(prev.lastEventAt ?? prev.updatedAt).getTime()) > 3600000
-              )
-              return (
-                <div key={i.id} className="occ-timeline-entry">
-                  {showSep && exactTime && <div className="occ-timeline-sep">{hourLabel(exactTime)}</div>}
-                <button
-                  type="button"
-                  className={cls('occ-timeline-row', selectedEventId === i.id && 'is-selected')}
-                  onClick={() => onSelectEvent(selectedEventId === i.id ? null : i)}
-                  title={exactTime ? new Date(exactTime).toLocaleString() : undefined}
-                >
-                  <div className={cls('occ-timeline-icon', `is-${statusView.tone}`)}>
-                    <Icon name={iconName as any} size={10} />
-                  </div>
-                  <div className="occ-timeline-connector" />
-                  <div className="occ-timeline-content">
-                    <div className="occ-timeline-main">
-                      <span className="occ-asset-icon" title={asset.label}><Icon name={asset.icon} size={10} /></span>
-                      <strong className="occ-timeline-seller">{truncate(identity.primary, 24)}</strong>
-                      {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
-                      <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
-                    </div>
-                    <div className="occ-timeline-meta">
-                      <span>{truncate(i.propertyAddress, 18)}</span>
-                      <span>· {truncate(i.market, 12)}</span>
-                      {i.stageLabel && <span>· {truncate(i.stageLabel, 10)} T{i.touchNumber}</span>}
-                      <span>· {truncate(resolveMessageSource(i), 14)}</span>
-                      <span>· {truncate(resolveTemplateLabel(i), 14)}</span>
-                      {i.fromPhoneNumber && <span>· …{i.fromPhoneNumber.slice(-4)}</span>}
-                    </div>
-                    <div className="occ-timeline-expl">{statusView.hasCurrentException ? statusView.blocking : i.lastEventType || 'Queue event recorded'}</div>
-                  </div>
-                  <span className="occ-timeline-time">{relTime(exactTime)}</span>
-                </button>
-                </div>
-              )
-            })}
-          </div>
-        ))}
-      </div>
-      {filtered.length > TIMELINE_PAGE_SIZE && (
-        <div className="occ-table-footer occ-timeline-footer">
-          <span className="occ-table-footer__count">
-            Showing <strong>{start.toLocaleString()}–{end.toLocaleString()}</strong> of <strong>{filtered.length.toLocaleString()}</strong>
-          </span>
-          <div className="occ-pagination">
-            <button type="button" className="occ-page-btn" disabled={safePage === 0} onClick={() => setPage(0)}>« First</button>
-            <button type="button" className="occ-page-btn" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>‹ Prev</button>
-            <span className="occ-page-info">Page {safePage + 1} of {totalPages}</span>
-            <button type="button" className="occ-page-btn" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>Next ›</button>
-            <button type="button" className="occ-page-btn" disabled={safePage >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>Last »</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Bottom Module Tabs ──────────────────────────────────────────────────────
 
 const QUEUE_SECTIONS: Array<{ key: QueueSection; label: string; icon: string }> = [
@@ -1483,6 +804,134 @@ const QUEUE_SECTIONS: Array<{ key: QueueSection; label: string; icon: string }> 
 ]
 
 // ── Queue Table Row ─────────────────────────────────────────────────────────
+
+const CmdSep = () => <span className="occ-cmd-sep" aria-hidden="true" />
+
+const QueueCommandRow = ({
+  item,
+  isSelected,
+  isExpanded,
+  isChecked,
+  onClick,
+  onCheck,
+  onToggleExpand,
+}: {
+  item: QueueItem
+  isSelected: boolean
+  isExpanded: boolean
+  isChecked: boolean
+  onClick: () => void
+  onCheck: (id: string) => void
+  onToggleExpand: (id: string) => void
+}) => {
+  const identity = resolveSellerIdentity(item)
+  const statusView = resolveStatusPresentation(item)
+  const asset = resolveAssetTypeIcon(item.propertyType)
+  const failTone = item.failureGroup ? (FAILURE_TONE[item.failureGroup] ?? 'amber') : null
+  const stageLabel = resolveStageLabel(item)
+  const stageTone = item.stageCode ? (STAGE_TONE[item.stageCode] ?? 'muted') : 'muted'
+  const cityState = [item.propertyCity, item.propertyState].filter(Boolean).join(', ')
+  const workflowLane = resolveMessageSource(item)
+  const campaignLabel = item.campaignName ?? item.automationSource ?? item.useCase ?? '—'
+  const templateLabel = resolveTemplateLabel(item)
+  const currentFailure = statusView.hasCurrentException ? statusView.blocking : null
+  const contactOk = item.smsEligible !== false && item.routingAllowed !== false
+  const propertyLine = [item.propertyAddress, cityState].filter(Boolean).join(' · ') || 'No address'
+  const messageSnippet = item.messageText?.replace(/\s+/g, ' ').trim()
+
+  return (
+    <div className={cls('occ-row-wrap', 'is-density-command', isSelected && 'is-selected', isExpanded && 'is-expanded')}>
+      <div className={cls('occ-row', 'occ-row--command', `is-status-${statusView.tone}`, isSelected && 'is-selected')}>
+        <label className="occ-row-check occ-row-check--cmd" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={isChecked} onChange={() => onCheck(item.id)} aria-label={`Select ${identity.primary}`} />
+        </label>
+        <button
+          type="button"
+          className="occ-cmd-strip"
+          onClick={onClick}
+          title={[
+            identity.primary,
+            propertyLine,
+            `${stageLabel} · T${item.touchNumber}`,
+            campaignLabel,
+            templateLabel,
+            messageSnippet,
+          ].filter(Boolean).join(' — ')}
+        >
+          <span className="occ-cmd-block occ-cmd-block--identity">
+            <span className="occ-asset-icon" title={asset.label} aria-hidden="true">
+              <Icon name={asset.icon} size={9} />
+            </span>
+            <strong className="occ-cmd-val occ-cmd-val--name">{identity.primary}</strong>
+            {identity.phoneEnding && <span className="occ-cmd-chip occ-cmd-chip--mono">{identity.phoneEnding}</span>}
+            <span className={cls('occ-contact-indicator', contactOk ? 'is-ok' : 'is-warn')} title={contactOk ? 'SMS eligible' : 'Contact blocked'} />
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block">
+            <span className="occ-cmd-val" title={propertyLine}>{propertyLine}</span>
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block">
+            {item.stageCode
+              ? <span className={cls('occ-cmd-chip', `is-${stageTone}`)} title={stageLabel}>{item.stageCode}</span>
+              : <span className="occ-cmd-chip is-muted">—</span>}
+            <span className="occ-cmd-chip">T{item.touchNumber}</span>
+            {item.requiresApproval && <span className="occ-cmd-chip is-amber">APR</span>}
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block">
+            <span className="occ-cmd-val" title={campaignLabel}>{campaignLabel}</span>
+            <span className="occ-cmd-val occ-cmd-val--dim" title={workflowLane}>{workflowLane}</span>
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block">
+            <span className="occ-cmd-val" title={templateLabel}>{templateLabel}</span>
+            {messageSnippet && <span className="occ-cmd-val occ-cmd-val--msg" title={messageSnippet}>{messageSnippet}</span>}
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block">
+            <span className="occ-cmd-chip occ-cmd-chip--mono">{item.fromPhoneNumber ? fmtPhone(item.fromPhoneNumber) : '—'}</span>
+            <span className="occ-cmd-val occ-cmd-val--dim" title={item.market ?? undefined}>{item.market || '—'}</span>
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block occ-cmd-block--timing">
+            <span className={cls('occ-cmd-val', item.overdue && 'is-amber')} title={item.scheduledForLocal ? new Date(item.scheduledForLocal).toLocaleString() : undefined}>
+              {relTime(item.scheduledForLocal)}
+            </span>
+            <span className="occ-cmd-val occ-cmd-val--dim" title={item.lastEventAt ? new Date(item.lastEventAt).toLocaleString() : undefined}>
+              {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
+            </span>
+          </span>
+          <CmdSep />
+          <span className="occ-cmd-block occ-cmd-block--status">
+            <span className={cls('occ-status-pill occ-status-pill--cmd', `is-${statusView.tone}`)}>{statusView.primary}</span>
+            {currentFailure
+              ? <span className={cls('occ-cmd-chip', 'is-fail', failTone && `is-${failTone}`)} title={currentFailure}>{currentFailure}</span>
+              : null}
+          </span>
+        </button>
+        <button type="button" className={cls('occ-row-expand', 'occ-row-expand--cmd', isExpanded && 'is-open')} onClick={() => onToggleExpand(item.id)} aria-label="Expand row">
+          <Icon name="chevron-down" size={10} />
+        </button>
+      </div>
+      {isExpanded && (
+        <div className="occ-row-intel occ-row-intel--cmd">
+          {item.messageText && <div className="occ-row-intel__msg"><strong>Message</strong><p>{item.messageText}</p></div>}
+          <div className="occ-row-intel__grid">
+            <span>Route: {item.fromPhoneNumber || '—'} → {item.toPhoneNumber || '—'}</span>
+            <span>Eligibility: {item.retryEligible && !isNonRetryableRow(item) ? 'Retry OK' : item.smsEligible === false ? 'Not SMS eligible' : '—'}</span>
+            <span>Workflow: {item.automationSource || item.rowSource || '—'}</span>
+            <span>Campaign: {item.campaignName || '—'}</span>
+          </div>
+          {statusView.blocking && <div className="occ-row-intel__block">Blocking: {statusView.blocking}</div>}
+          {statusView.historicalWarnings.length > 0 && (
+            <div className="occ-row-intel__hist">Historical: {statusView.historicalWarnings.join(' · ')}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const QueueRow = ({
   item,
@@ -1503,6 +952,20 @@ const QueueRow = ({
   onCheck: (id: string) => void
   onToggleExpand: (id: string) => void
 }) => {
+  if (density === 'command') {
+    return (
+      <QueueCommandRow
+        item={item}
+        isSelected={isSelected}
+        isExpanded={isExpanded}
+        isChecked={isChecked}
+        onClick={onClick}
+        onCheck={onCheck}
+        onToggleExpand={onToggleExpand}
+      />
+    )
+  }
+
   const identity = resolveSellerIdentity(item)
   const statusView = resolveStatusPresentation(item)
   const asset = resolveAssetTypeIcon(item.propertyType)
@@ -1511,10 +974,15 @@ const QueueRow = ({
   const stageTone = item.stageCode ? (STAGE_TONE[item.stageCode] ?? 'muted') : 'muted'
   const cityState = [item.propertyCity, item.propertyState].filter(Boolean).join(', ')
   const workflowLane = resolveMessageSource(item)
+  const campaignLabel = item.campaignName ?? item.automationSource ?? item.useCase ?? '—'
+  const templateLabel = resolveTemplateLabel(item)
   const hasHistorical = statusView.historicalWarnings.length > 0
   const isOverdue = item.overdue
   const contactOk = item.smsEligible !== false && item.routingAllowed !== false
   const currentFailure = statusView.hasCurrentException ? statusView.blocking : null
+  const scheduledTitle = item.scheduledForLocal ? new Date(item.scheduledForLocal).toLocaleString() : undefined
+  const lastEventTitle = item.lastEventAt ? new Date(item.lastEventAt).toLocaleString() : undefined
+  const showMessagePreview = queueShowsMessagePreview(density) && Boolean(item.messageText?.trim())
 
   return (
     <div className={cls('occ-row-wrap', isSelected && 'is-selected', isExpanded && 'is-expanded', `is-density-${density}`)}>
@@ -1528,61 +996,76 @@ const QueueRow = ({
           onClick={onClick}
           style={{ '--occ-row-accent': `var(--occ-${statusView.tone}, var(--occ-muted))` } as React.CSSProperties}
         >
-          <div className="occ-cell occ-cell--seller" title={identity.primary}>
+          <div className="occ-cell occ-cell--seller">
             <div className="occ-seller-line">
               <span className="occ-asset-icon" title={asset.label} aria-hidden="true">
-                <Icon name={asset.icon} size={10} />
+                <Icon name={asset.icon} size={11} />
               </span>
-              <strong>{truncate(identity.primary, 26)}</strong>
+              <strong className="occ-row-title" title={identity.primary}>{identity.primary}</strong>
               {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
               <span className={cls('occ-contact-indicator', contactOk ? 'is-ok' : 'is-warn')} title={contactOk ? 'SMS eligible' : 'Contact blocked'} />
             </div>
-            {identity.secondary && <small className="occ-seller-sub">{truncate(identity.secondary, 24)}</small>}
-            <small>{truncate(item.propertyAddress, 28)}</small>
-            {cityState && <small className="occ-seller-meta">{cityState}{workflowLane ? ` · ${truncate(workflowLane, 16)}` : ''}</small>}
-          </div>
-          <div className="occ-cell occ-cell--stage">
-            {item.stageCode
-              ? <span className={cls('occ-stage-pill', `is-${stageTone}`)}>{stageLabel}</span>
-              : <span className="occ-stage-pill is-muted">—</span>}
-            <small>Touch {item.touchNumber} · {truncate(workflowLane, 14)}</small>
-            {item.requiresApproval && <small className="occ-approval-tag">Approval</small>}
-          </div>
-          <div className="occ-cell occ-cell--campaign">
-            <span>{truncate(item.campaignName ?? item.automationSource ?? item.useCase, 18)}</span>
-            <small>{truncate(item.market, 14)}</small>
-            {item.campaignTargetId && <small className="occ-seller-meta">Target linked</small>}
-          </div>
-          <div className="occ-cell occ-cell--template" title={resolveTemplateLabel(item)}>
-            <span>{truncate(resolveTemplateLabel(item), 20)}</span>
-            {item.templateId && <small className="occ-mono">{truncate(item.templateId, 16)}</small>}
-            <small>{item.language?.toUpperCase()}</small>
-          </div>
-          <div className="occ-cell occ-cell--from">
-            <span className="occ-mono">{item.fromPhoneNumber ? fmtPhone(item.fromPhoneNumber) : '—'}</span>
-            <small>{truncate(item.market, 12)}</small>
-          </div>
-          <div className="occ-cell occ-cell--scheduled" title={item.scheduledForLocal ? new Date(item.scheduledForLocal).toLocaleString() : undefined}>
-            <span className={isOverdue ? 'is-amber' : ''}>{relTime(item.scheduledForLocal)}</span>
-            <small>{item.timezone?.split('/').pop()}{isOverdue ? ' · overdue' : ''}</small>
-          </div>
-          <div className="occ-cell occ-cell--status">
-            <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
-            {currentFailure && <small className="occ-block-cause">{truncate(currentFailure, 22)}</small>}
-            {hasHistorical && (
-              <span className="occ-hist-warn" title={statusView.historicalWarnings.join(' · ')}>
-                <Icon name="clock" size={10} />
-              </span>
+            <p className="occ-row-address" title={item.propertyAddress ?? undefined}>
+              {item.propertyAddress || 'No address on file'}
+            </p>
+            {(identity.secondary || cityState) && (
+              <p className="occ-row-meta">
+                {identity.secondary && <span title={identity.secondary}>{identity.secondary}</span>}
+                {identity.secondary && cityState && <span className="occ-row-meta__sep">·</span>}
+                {cityState && <span>{cityState}</span>}
+              </p>
             )}
           </div>
-          <div className="occ-cell occ-cell--failure">
-            {currentFailure
-              ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)}>{truncate(currentFailure, 18)}</span>
-              : <span className="occ-fail-pill is-muted">—</span>}
+          <div className="occ-cell occ-cell--workflow">
+            <div className="occ-row-pill-row">
+              {item.stageCode
+                ? <span className={cls('occ-stage-pill', `is-${stageTone}`)}>{stageLabel}</span>
+                : <span className="occ-stage-pill is-muted">No stage</span>}
+              <span className="occ-touch-badge">T{item.touchNumber}</span>
+              {item.requiresApproval && <span className="occ-approval-tag">Approval</span>}
+            </div>
+            <span className="occ-row-secondary" title={campaignLabel}>{campaignLabel}</span>
+            <span className="occ-row-tertiary" title={workflowLane}>{workflowLane}</span>
           </div>
-          <div className="occ-cell occ-cell--event" title={item.lastEventAt ?? undefined}>
-            {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
-            {item.lastEventType && <small>{truncate(item.lastEventType, 12)}</small>}
+          <div className="occ-cell occ-cell--message">
+            <span className="occ-row-secondary" title={templateLabel}>{templateLabel}</span>
+            {showMessagePreview && (
+              <p className="occ-row-preview" title={item.messageText ?? undefined}>{item.messageText}</p>
+            )}
+            {!showMessagePreview && item.language && (
+              <span className="occ-row-tertiary">{item.language.toUpperCase()}</span>
+            )}
+          </div>
+          <div className="occ-cell occ-cell--routing">
+            <span className="occ-mono occ-row-secondary">{item.fromPhoneNumber ? fmtPhone(item.fromPhoneNumber) : '—'}</span>
+            <span className="occ-row-tertiary" title={item.market ?? undefined}>{item.market || '—'}</span>
+            {item.campaignTargetId && <span className="occ-row-tertiary is-linked">Target linked</span>}
+          </div>
+          <div className="occ-cell occ-cell--timing">
+            <span className={cls('occ-row-secondary', isOverdue && 'is-amber')} title={scheduledTitle}>
+              {relTime(item.scheduledForLocal)}
+            </span>
+            <span className="occ-row-tertiary">
+              {item.timezone?.split('/').pop() ?? 'Local'}
+              {isOverdue ? ' · overdue' : ''}
+            </span>
+            <span className="occ-row-tertiary" title={lastEventTitle}>
+              Last {item.lastEventAt ? relTime(item.lastEventAt) : '—'}
+              {item.lastEventType ? ` · ${item.lastEventType.replace(/_/g, ' ')}` : ''}
+            </span>
+          </div>
+          <div className="occ-cell occ-cell--status">
+            <div className="occ-row-pill-row">
+              <span className={cls('occ-status-pill', `is-${statusView.tone}`)}>{statusView.primary}</span>
+              {hasHistorical && (
+                <span className="occ-hist-warn" title={statusView.historicalWarnings.join(' · ')}>
+                  <Icon name="clock" size={10} />
+                </span>
+              )}
+            </div>
+            {currentFailure
+              ? <span className={cls('occ-fail-pill', failTone && `is-${failTone}`)} title={currentFailure}>{currentFailure}</span>
+              : density === 'comfortable' ? <span className="occ-row-tertiary">No active failure</span> : null}
           </div>
         </button>
         <button type="button" className={cls('occ-row-expand', isExpanded && 'is-open')} onClick={() => onToggleExpand(item.id)} aria-label="Expand row">
@@ -1628,8 +1111,10 @@ export const QueuePage = ({
   paneWidth: paneWidthProp,
 }: QueuePageProps = {}) => {
   const { rootRef, layoutMode: observedLayoutMode, paneWidth: observedPaneWidth } = useQueueLayout()
+  const { isPhone } = useBreakpoint()
   const layoutMode = layoutModeProp ?? observedLayoutMode
   const paneWidth = paneWidthProp ?? observedPaneWidth
+  const isMobileLayout = isPhone || layoutMode === 'compact'
   const [loading, setLoading] = useState(!initialData)
   const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1657,8 +1142,11 @@ export const QueuePage = ({
   const [selectedMarketName, setSelectedMarketName] = useState<string | null>(null)
   const [selectedFailureCause, setSelectedFailureCause] = useState<string | null>(null)
   const [selectedEventItem, setSelectedEventItem] = useState<QueueItem | null>(null)
+  const [eventItems, setEventItems] = useState<QueueItem[]>([])
+  const [eventItemsLoading, setEventItemsLoading] = useState(false)
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('compact')
   const [exceptionsOpen, setExceptionsOpen] = useState(false)
+
   const [templateSearchParams, setTemplateSearchParams] = useState(
     () => new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
   )
@@ -1733,6 +1221,44 @@ export const QueuePage = ({
     refreshData(0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datePreset, customFrom, customTo, dateBasis, statusFilter, pageSize])
+
+  const eventFetchOpts = useMemo((): Omit<QueueFetchOptions, 'page'> => {
+    const range = datePreset === 'all'
+      ? { from: undefined, to: undefined }
+      : datePreset === 'custom'
+        ? {
+            from: customFrom || new Date(Date.now() - 7 * 86400000).toISOString(),
+            to: customTo || new Date().toISOString(),
+          }
+        : getPresetRange(datePreset)
+    return {
+      dateFrom: range.from,
+      dateTo: range.to,
+      dateBasis,
+      status: undefined,
+    }
+  }, [datePreset, customFrom, customTo, dateBasis])
+
+  useEffect(() => {
+    if (section !== 'events') return
+    let cancelled = false
+    setEventItemsLoading(true)
+    void (async () => {
+      try {
+        if (!shouldUseSupabase()) {
+          if (!cancelled) setEventItems(adaptQueueModel().items)
+          return
+        }
+        const all = await fetchAllQueueItems(eventFetchOpts)
+        if (!cancelled) setEventItems(all)
+      } catch {
+        if (!cancelled) setEventItems(model?.items ?? [])
+      } finally {
+        if (!cancelled) setEventItemsLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [section, eventFetchOpts, model?.items])
 
   const items = model?.items ?? []
 
@@ -1811,7 +1337,9 @@ export const QueuePage = ({
     return result
   }, [items, statusFilter, marketFilter, templateFilter, senderFilter, searchQuery, causeFilter])
 
-  const selectedItem = model?.items.find(i => i.id === selectedId) ?? null
+  const selectedItem = model?.items.find(i => i.id === selectedId)
+    ?? items.find(i => i.id === selectedId)
+    ?? null
 
   useEffect(() => {
     if (!externalContext || !items.length) return
@@ -1843,17 +1371,16 @@ export const QueuePage = ({
   }, [items, kpi.failed])
 
   const handleSelectRow = useCallback((item: QueueItem) => {
-    const next = item.id === selectedId ? null : item.id
+    const next = isMobileLayout ? item.id : (item.id === selectedId ? null : item.id)
     setSelectedId(next)
-    setDossierOpen(true)
-    if (layoutMode === 'medium' || layoutMode === 'compact') setExpandedId(next)
+    setDossierOpen(Boolean(next))
+    if (!isMobileLayout && layoutMode === 'medium') setExpandedId(next)
     if (next) {
-      // Global property selection — dispatch custom event for cross-module sync
       const ctx = buildContextFromQueueItem(item, 'queue', 'open_queue')
       window.dispatchEvent(new CustomEvent('nexus:queue-select', { detail: ctx }))
-      onSelectItem?.(item)
+      if (!isMobileLayout) onSelectItem?.(item)
     }
-  }, [selectedId, onSelectItem, layoutMode])
+  }, [selectedId, onSelectItem, layoutMode, isMobileLayout])
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -1870,6 +1397,19 @@ export const QueuePage = ({
     setExpandedId(prev => (prev === id ? null : id))
   }, [])
 
+  const navigateMobileDossier = useCallback((direction: 'prev' | 'next', list: QueueItem[], currentId: string | null, select: (item: QueueItem) => void) => {
+    if (!currentId) return
+    const idx = list.findIndex(i => i.id === currentId)
+    if (idx < 0) return
+    const nextIdx = direction === 'next' ? idx + 1 : idx - 1
+    if (nextIdx >= 0 && nextIdx < list.length) select(list[nextIdx])
+  }, [])
+
+  const eventTimelineItems = useMemo(
+    () => buildEventTimelineItems(section === 'events' && eventItems.length > 0 ? eventItems : items),
+    [section, eventItems, items],
+  )
+
   // ── Pagination controls ──────────────────────────────────────────────────
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page)
@@ -1881,6 +1421,13 @@ export const QueuePage = ({
   const handleAction = useCallback(async (action: string, id: string) => {
     if (action === 'deselect') { setSelectedId(null); setExpandedId(null); return }
     if (action === 'deselect-event') { setSelectedEventItem(null); return }
+    if (action === 'open-queue-row') {
+      setSection('queue')
+      setSelectedId(id)
+      setDossierOpen(true)
+      setSelectedEventItem(null)
+      return
+    }
 
     if (action === 'retry-all-failed') {
       setConfirmPreview(null)
@@ -1947,36 +1494,17 @@ export const QueuePage = ({
 
   // ── Filter tabs ──────────────────────────────────────────────────────────
   const templateStatsMemo = useMemo(() => buildTemplateStats(items), [items])
-  const senderStatsMemo = useMemo(() => buildSenderStats(items), [items])
-  const marketStatsMemo = useMemo(() => buildMarketStats(items, model?.marketDirectory ?? []), [items, model?.marketDirectory])
-  const failureStatsMemo = useMemo<FailureCauseStat[]>(() => {
-    const map = new Map<string, { count: number; markets: Set<string>; senders: Set<string>; templates: Set<string> }>()
-    for (const i of items) {
-      const cause = deriveFailureCause(i)
-      if (!cause) continue
-      const entry = map.get(cause) ?? { count: 0, markets: new Set(), senders: new Set(), templates: new Set() }
-      entry.count++
-      if (i.market && i.market !== 'Market unknown') entry.markets.add(i.market)
-      if (i.fromPhoneNumber) entry.senders.add(i.fromPhoneNumber)
-      if (i.templateName && i.templateName !== 'Template not attached') entry.templates.add(i.templateName)
-      map.set(cause, entry)
-    }
-    return Array.from(map.entries()).map(([cause, e]) => {
-      const meta = FAILURE_META[cause] ?? FAILURE_META.unknown
-      return {
-        cause,
-        label: FAILURE_CAUSE_LABEL[cause] ?? cause.replace(/_/g, ' '),
-        category: meta.category,
-        count: e.count,
-        retryable: meta.retryable,
-        suppression: meta.suppression,
-        action: meta.action,
-        markets: Array.from(e.markets).sort(),
-        senders: Array.from(e.senders),
-        templates: Array.from(e.templates).sort(),
-      }
-    })
-  }, [items])
+  const senderStatsMemo = useMemo(
+    () => buildSenderStats(items, model?.textgridFleet ?? []),
+    [items, model?.textgridFleet],
+  )
+  const senderFleetCount = model?.textgridFleet?.length ?? senderStatsMemo.filter((s) => s.registered).length
+  const marketStatsMemo = useMemo(
+    () => buildMarketStats(items, model?.marketDirectory ?? [], model?.textgridFleet ?? []),
+    [items, model?.marketDirectory, model?.textgridFleet],
+  )
+  const marketConfiguredCount = model?.marketDirectory?.length ?? marketStatsMemo.filter((m) => m.configured).length
+  const failureStatsMemo = useMemo(() => buildFailureStats(items), [items])
 
   const exceptionsMemo = useMemo(() => buildExceptionsCenter(items), [items])
   const selectedRows = useMemo(() => items.filter(i => selectedIds.has(i.id)), [items, selectedIds])
@@ -2039,9 +1567,11 @@ export const QueuePage = ({
     const s = marketStatsMemo.find(x => x.market === selectedMarketName)
     return s ? {
       market: s.market, total: s.total, sent: s.sent, delivered: s.delivered, failed: s.failed,
-      deliveryPct: s.deliveryPct, health: s.health, performanceHealth: s.performanceHealth,
+      failPct: s.failPct, deliveryPct: s.deliveryPct, health: s.health, performanceHealth: s.performanceHealth,
       senderReadiness: s.senderReadiness, senderExists: s.senderExists, active: s.active,
-      optOuts: s.optOuts, exceptionCount: s.exceptionCount, suggestedAction: s.suggestedAction,
+      senderCount: s.senderCount, messagesSentToday: s.messagesSentToday,
+      optOuts: s.optOuts, violations21610: s.violations21610,
+      exceptionCount: s.exceptionCount, suggestedAction: s.suggestedAction,
     } : null
   }, [selectedMarketName, marketStatsMemo])
 
@@ -2050,7 +1580,9 @@ export const QueuePage = ({
     const s = failureStatsMemo.find(x => x.cause === selectedFailureCause)
     return s ? {
       cause: s.cause, label: s.label, count: s.count, retryable: s.retryable, action: s.action,
-      category: s.category, markets: s.markets, senders: s.senders,
+      category: s.category, markets: s.markets, senders: s.senders, templates: s.templates,
+      pctOfTotal: s.pctOfTotal, blockedCount: s.blockedCount, failedCount: s.failedCount,
+      suppression: s.suppression, severity: s.severity,
     } : null
   }, [selectedFailureCause, failureStatsMemo])
 
@@ -2130,6 +1662,7 @@ export const QueuePage = ({
         `is-layout-${layoutMode}`,
         `is-pane-${paneWidth}`,
         `is-density-${density}`,
+        isMobileLayout && 'is-mobile-layout',
         dossierOpen && selectedItem && 'is-dossier-open',
       )}
     >
@@ -2158,13 +1691,15 @@ export const QueuePage = ({
       <div className="occ-topbar occ-command-header">
         <div className="occ-topbar__left">
           <div className="occ-command-identity">
-            <h1 className="occ-topbar__title">Outbound Command Center</h1>
+            <h1 className="occ-topbar__title">{isMobileLayout ? 'Command Center' : 'Outbound Command Center'}</h1>
             <span className="occ-command-meta">
-              {DATE_PRESET_LABELS[datePreset]} · {DATE_BASIS_LABELS[dateBasis]} basis
+              {isMobileLayout
+                ? `${rowStart}–${rowEnd} of ${totalCount.toLocaleString()}`
+                : `${DATE_PRESET_LABELS[datePreset]} · ${DATE_BASIS_LABELS[dateBasis]} basis`}
               {loading && <span className="occ-refresh-pill">Refreshing…</span>}
             </span>
           </div>
-          {layoutMode !== 'compact' && (
+          {!isMobileLayout && (
             <DateFilter
             preset={datePreset}
             customFrom={customFrom}
@@ -2176,9 +1711,11 @@ export const QueuePage = ({
           )}
         </div>
         <div className="occ-topbar__actions">
+          {!isMobileLayout && (
           <span className="occ-topbar__total">
             {rowStart}–{rowEnd} of {totalCount.toLocaleString()}
           </span>
+          )}
           {layoutMode === 'full' && section === 'queue' && (
             <>
               <button
@@ -2229,24 +1766,109 @@ export const QueuePage = ({
         <KpiCard label="Blocked"   value={kpi.blocked}   loading={kpiLoading} tone={kpi.blocked > 0 ? 'amber' : undefined}    onClick={() => setStatusFilter('blocked')}   active={statusFilter === 'blocked'} />
         <KpiCard label="Opt-Outs"  value={kpi.optOuts}   loading={kpiLoading} tone={kpi.optOuts > 0 ? 'red' : undefined} />
         <KpiCard label="Approval"  value={kpi.approval}  loading={kpiLoading} tone={kpi.approval > 0 ? 'amber' : undefined}   onClick={() => setStatusFilter('approval')}  active={statusFilter === 'approval'} />
-        <span className={cls('occ-kpi-scope', kpiIsRange && 'is-range')} title={kpiIsRange ? 'Counts reflect the entire selected date range' : 'Counts reflect the current page'}>
-          {kpiIsRange ? `${DATE_PRESET_LABELS[datePreset]} range` : 'page scope'}
-        </span>
+        {!isMobileLayout && (
+          <span className={cls('occ-kpi-scope', kpiIsRange && 'is-range')} title={kpiIsRange ? 'Counts reflect the entire selected date range' : 'Counts reflect the current page'}>
+            {kpiIsRange ? `${DATE_PRESET_LABELS[datePreset]} range` : 'page scope'}
+          </span>
+        )}
       </div>
-      {layoutMode !== 'compact' && (
+
+      {isMobileLayout && (
+        <div className="occ-kpi-command-footer">
+          <span className={cls('occ-kpi-scope', kpiIsRange && 'is-range')} title={kpiIsRange ? 'Counts reflect the entire selected date range' : 'Counts reflect the current page'}>
+            {kpiIsRange ? `${DATE_PRESET_LABELS[datePreset]} range` : 'Page scope'}
+          </span>
+          <div className="occ-section-tabs occ-section-tabs--dock" role="tablist" aria-label="Queue command views">
+            {QUEUE_SECTIONS.map(s => {
+              const badge = s.key === 'failures' ? kpi.failed
+                : s.key === 'templates' ? templateStatsMemo.length
+                : s.key === 'senders' ? senderFleetCount
+                : s.key === 'events' ? items.filter(i => i.lastEventAt).length
+                : s.key === 'market' ? marketConfiguredCount
+                : 0
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={section === s.key}
+                  className={cls('occ-section-tab', 'occ-section-tab--dock', section === s.key && 'is-active')}
+                  onClick={() => {
+                    setSection(s.key)
+                    if (s.key !== 'queue') setSelectedId(null)
+                    if (s.key !== 'templates') setSelectedTemplateId(null)
+                    if (s.key !== 'senders') setSelectedSenderPhone(null)
+                    if (s.key !== 'market') setSelectedMarketName(null)
+                    if (s.key !== 'failures') setSelectedFailureCause(null)
+                    if (s.key !== 'events') setSelectedEventItem(null)
+                  }}
+                >
+                  <Icon name={s.icon as any} size={12} />
+                  <span>{
+                    s.key === 'queue' ? 'Queue'
+                      : s.key === 'templates' ? 'Tpl'
+                      : s.key === 'senders' ? 'Send'
+                      : s.key === 'market' ? 'Mkt'
+                      : s.key === 'failures' ? 'Fail'
+                      : 'Evts'
+                  }</span>
+                  {badge > 0 && s.key !== 'queue' && (
+                    <span className={cls('occ-section-tab__badge', s.key === 'failures' && 'is-red')}>{badge > 999 ? '999+' : badge}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {!isMobileLayout && (
         <QueueInlineFlow kpi={kpi} loading={kpiLoading} onFilter={key => setStatusFilter(key as StatusBucket)} />
       )}
       </div>
 
-      {/* ── Section selector (Phase 4) ──────────────────────────────── */}
-      <div className="occ-section-bar occ-glass-rail">
+      {isMobileLayout && section === 'queue' && (
+        <OccQueueFilterMenu
+          datePreset={datePreset}
+          dateBasis={dateBasis}
+          customFrom={customFrom}
+          customTo={customTo}
+          statusFilter={statusFilter}
+          marketFilter={marketFilter}
+          templateFilter={templateFilter}
+          senderFilter={senderFilter}
+          searchQuery={searchQuery}
+          density={density}
+          section={section}
+          filterTabs={filterTabs}
+          marketOptions={marketOptions}
+          templateOptions={templateOptions}
+          senderOptions={senderOptions}
+          causeFilter={causeFilter}
+          causeLabel={causeFilter ? (FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')) : undefined}
+          onDatePreset={setDatePreset}
+          onDateBasis={setDateBasis}
+          onCustomFrom={setCustomFrom}
+          onCustomTo={setCustomTo}
+          onStatusFilter={key => setStatusFilter(key)}
+          onMarketFilter={setMarketFilter}
+          onTemplateFilter={setTemplateFilter}
+          onSenderFilter={setSenderFilter}
+          onSearchQuery={setSearchQuery}
+          onDensity={setDensity}
+          onClearCause={() => setCauseFilter(null)}
+        />
+      )}
+
+      {/* ── Section selector (desktop) ──────────────────────────────── */}
+      {!isMobileLayout && <div className="occ-section-bar occ-glass-rail">
         <div className="occ-section-tabs" role="tablist" aria-label="Queue command views">
           {QUEUE_SECTIONS.map(s => {
             const badge = s.key === 'failures' ? kpi.failed
               : s.key === 'templates' ? templateStatsMemo.length
-              : s.key === 'senders' ? senderStatsMemo.length
+              : s.key === 'senders' ? senderFleetCount
               : s.key === 'events' ? items.filter(i => i.lastEventAt).length
-              : s.key === 'market' ? marketStatsMemo.length
+              : s.key === 'market' ? marketConfiguredCount
               : 0
             return (
               <button
@@ -2266,7 +1888,16 @@ export const QueuePage = ({
                 }}
               >
                 <Icon name={s.icon as any} size={13} />
-                <span>{s.label}</span>
+                <span>{
+                  isMobileLayout
+                    ? (s.key === 'queue' ? 'Queue'
+                      : s.key === 'templates' ? 'Templates'
+                      : s.key === 'senders' ? 'Senders'
+                      : s.key === 'market' ? 'Market'
+                      : s.key === 'failures' ? 'Failures'
+                      : 'Events')
+                    : s.label
+                }</span>
                 {badge > 0 && s.key !== 'queue' && (
                   <span className={cls('occ-section-tab__badge', s.key === 'failures' && 'is-red')}>{badge > 999 ? '999+' : badge}</span>
                 )}
@@ -2274,15 +1905,15 @@ export const QueuePage = ({
             )
           })}
         </div>
-        <label className="occ-date-basis">
-          <span>Date basis</span>
+        <label className={cls('occ-date-basis', isMobileLayout && 'occ-date-basis--mobile')}>
+          <span>{isMobileLayout ? 'Basis' : 'Date basis'}</span>
           <select className="occ-filter-select" value={dateBasis} onChange={e => setDateBasis(e.target.value as QueueDateBasis)}>
             {(['created_at', 'scheduled_for', 'updated_at'] as QueueDateBasis[]).map(b => (
               <option key={b} value={b}>{DATE_BASIS_LABELS[b]}</option>
             ))}
           </select>
         </label>
-      </div>
+      </div>}
 
       {/* ── Main area ───────────────────────────────────────────────── */}
       <div className="occ-main">
@@ -2290,21 +1921,20 @@ export const QueuePage = ({
         {section === 'queue' ? (
           <div className="occ-table-col">
 
-            {/* Filter bar */}
-            <div className="occ-filter-bar">
+            {/* Filter bar — desktop only; mobile uses liquid filter menu */}
+            {!isMobileLayout && <div className="occ-filter-bar">
               <div className="occ-density-select" role="group" aria-label="Table density">
-                {(['comfortable', 'compact', 'command'] as QueueDensity[]).map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    className={cls('occ-density-btn', density === d && 'is-active')}
-                    onClick={() => setDensity(d)}
-                  >
-                    {d === 'comfortable' ? 'Comfortable' : d === 'compact' ? 'Compact' : 'Command'}
-                  </button>
-                ))}
-              </div>
-              {layoutMode !== 'compact' && (
+                  {QUEUE_DENSITY_ORDER.map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={cls('occ-density-btn', density === d && 'is-active')}
+                      onClick={() => setDensity(d)}
+                    >
+                      {QUEUE_DENSITY_LABEL[d]}
+                    </button>
+                  ))}
+                </div>
               <div className="occ-filter-tabs">
                 {filterTabs.map(t => (
                   <button
@@ -2318,7 +1948,6 @@ export const QueuePage = ({
                   </button>
                 ))}
               </div>
-              )}
               <div className="occ-filter-selects">
                 <select className="occ-filter-select" value={marketFilter} onChange={e => setMarketFilter(e.target.value)}>
                   {marketOptions.map(o => <option key={o} value={o}>{o === 'all' ? 'All Markets' : o}</option>)}
@@ -2337,9 +1966,9 @@ export const QueuePage = ({
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
               />
-            </div>
+            </div>}
 
-            {causeFilter && (
+            {causeFilter && !isMobileLayout && (
               <div className="occ-active-filter">
                 <span className="occ-active-filter__label">Failure cause:</span>
                 <span className="occ-active-filter__value">{FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')}</span>
@@ -2347,53 +1976,85 @@ export const QueuePage = ({
               </div>
             )}
 
-            <QueueExceptionBadges
-              exceptions={exceptionsMemo}
-              activeCause={causeFilter}
-              open={exceptionsOpen}
-              onToggle={() => setExceptionsOpen(v => !v)}
-              onFilter={c => { setCauseFilter(c); setStatusFilter('failed') }}
-            />
+            {!isMobileLayout && (
+              <QueueExceptionBadges
+                exceptions={exceptionsMemo}
+                activeCause={causeFilter}
+                open={exceptionsOpen}
+                onToggle={() => setExceptionsOpen(v => !v)}
+                onFilter={c => { setCauseFilter(c); setStatusFilter('failed') }}
+              />
+            )}
 
+            <div className={cls('occ-table-scroll', isMobileLayout && 'is-mobile-cards')}>
             {/* Table header */}
-            <div className="occ-table-head">
-              <label className="occ-row-check occ-row-check--head" title="Select all on page">
-                <input
-                  type="checkbox"
-                  checked={filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.id))}
-                  onChange={() => {
-                    const allSelected = filteredItems.every(i => selectedIds.has(i.id))
-                    if (allSelected) setSelectedIds(new Set())
-                    else setSelectedIds(new Set(filteredItems.map(i => i.id)))
-                  }}
-                  aria-label="Select all visible rows"
-                />
-              </label>
-              <span>Seller / Property</span>
-              <span>Stage / Touch</span>
-              <span>Campaign / Market</span>
-              <span>Template</span>
-              <span>From</span>
-              <span>Scheduled</span>
-              <span>Status</span>
-              <span>Failure Cause</span>
-              <span>Last Event</span>
-            </div>
+            {!isMobileLayout && density === 'command' && (
+              <div className="occ-table-head occ-table-head--cmd">
+                <label className="occ-row-check occ-row-check--head occ-row-check--cmd" title="Select all on page">
+                  <input
+                    type="checkbox"
+                    checked={filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.id))}
+                    onChange={() => {
+                      const allSelected = filteredItems.every(i => selectedIds.has(i.id))
+                      if (allSelected) setSelectedIds(new Set())
+                      else setSelectedIds(new Set(filteredItems.map(i => i.id)))
+                    }}
+                    aria-label="Select all visible rows"
+                  />
+                </label>
+                <span className="occ-table-head--cmd__title">Command telemetry</span>
+                <span className="occ-table-head--cmd__hint">seller · property · workflow · message · routing · timing · status</span>
+              </div>
+            )}
+            {!isMobileLayout && density !== 'command' && (
+              <div className="occ-table-head">
+                <label className="occ-row-check occ-row-check--head" title="Select all on page">
+                  <input
+                    type="checkbox"
+                    checked={filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.id))}
+                    onChange={() => {
+                      const allSelected = filteredItems.every(i => selectedIds.has(i.id))
+                      if (allSelected) setSelectedIds(new Set())
+                      else setSelectedIds(new Set(filteredItems.map(i => i.id)))
+                    }}
+                    aria-label="Select all visible rows"
+                  />
+                </label>
+                <span>Seller / Property</span>
+                <span>Workflow</span>
+                <span>Message</span>
+                <span>Routing</span>
+                <span>Timing</span>
+                <span>Status</span>
+              </div>
+            )}
 
             {/* Table body */}
-            <div className={cls('occ-table-body', loading && 'is-refreshing')}>
+            <div className={cls('occ-table-body', isMobileLayout && 'is-mobile-cards', loading && 'is-refreshing')}>
               {filteredItems.map(item => (
-                <QueueRow
-                  key={item.id}
-                  item={item}
-                  isSelected={selectedId === item.id}
-                  isExpanded={expandedId === item.id}
-                  isChecked={selectedIds.has(item.id)}
-                  density={density}
-                  onClick={() => handleSelectRow(item)}
-                  onCheck={toggleSelect}
-                  onToggleExpand={handleToggleExpand}
-                />
+                isMobileLayout ? (
+                  <OccMobileQueueCard
+                    key={item.id}
+                    item={item}
+                    isSelected={selectedId === item.id}
+                    isChecked={selectedIds.has(item.id)}
+                    density={density}
+                    onClick={() => handleSelectRow(item)}
+                    onCheck={toggleSelect}
+                  />
+                ) : (
+                  <QueueRow
+                    key={item.id}
+                    item={item}
+                    isSelected={selectedId === item.id}
+                    isExpanded={expandedId === item.id}
+                    isChecked={selectedIds.has(item.id)}
+                    density={density}
+                    onClick={() => handleSelectRow(item)}
+                    onCheck={toggleSelect}
+                    onToggleExpand={handleToggleExpand}
+                  />
+                )
               ))}
               {filteredItems.length === 0 && (
                 <div className="occ-table-empty">
@@ -2402,6 +2063,7 @@ export const QueuePage = ({
                     : 'No rows match current filter.'}
                 </div>
               )}
+            </div>
             </div>
 
             {/* Footer with First / Prev / Next / Last pagination */}
@@ -2434,24 +2096,34 @@ export const QueuePage = ({
             </div>
           </div>
         ) : (
-          <div className="occ-section-view">
-            <div className="occ-section-view__head">
-              <h2 className="occ-section-view__title">
-                {QUEUE_SECTIONS.find(s => s.key === section)?.label}
-              </h2>
-              {section !== 'templates' && (
-                <span className="occ-section-view__meta">{DATE_PRESET_LABELS[datePreset]} · {items.length.toLocaleString()} rows on page</span>
-              )}
-              {section === 'templates' && (
-                <span className="occ-section-view__meta">Template range independent · {DATE_PRESET_LABELS[datePreset]} queue context</span>
-              )}
-            </div>
+          <div className={cls(
+            'occ-section-view',
+            isMobileLayout && section === 'templates' && 'occ-section-view--tpl-mobile',
+            isMobileLayout && section === 'senders' && 'occ-section-view--sender-mobile',
+            isMobileLayout && section === 'market' && 'occ-section-view--market-mobile',
+            isMobileLayout && section === 'failures' && 'occ-section-view--fail-mobile',
+            isMobileLayout && section === 'events' && 'occ-section-view--evt-mobile',
+          )}>
+            {!(isMobileLayout && (section === 'templates' || section === 'senders' || section === 'market' || section === 'failures' || section === 'events')) && (
+              <div className="occ-section-view__head">
+                <h2 className="occ-section-view__title">
+                  {QUEUE_SECTIONS.find(s => s.key === section)?.label}
+                </h2>
+                {section !== 'templates' && (
+                  <span className="occ-section-view__meta">{DATE_PRESET_LABELS[datePreset]} · {items.length.toLocaleString()} rows on page</span>
+                )}
+                {section === 'templates' && (
+                  <span className="occ-section-view__meta">Template range independent · {DATE_PRESET_LABELS[datePreset]} queue context</span>
+                )}
+              </div>
+            )}
             <div className="occ-section-view__body">
               {section === 'templates' && (
                 <TemplateIntelligenceModule
                   searchParams={templateSearchParams}
                   setSearchParams={syncTemplateSearchParams}
                   globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
+                  isMobileLayout={isMobileLayout}
                   onViewQueueRows={(templateId) => {
                     setTemplateFilter(templateId)
                     setSection('queue')
@@ -2459,40 +2131,54 @@ export const QueuePage = ({
                 />
               )}
               {section === 'senders' && (
-                <SendersModule items={items} selectedPhone={selectedSenderPhone} onSelectPhone={setSelectedSenderPhone} />
+                <SenderIntelligenceModule
+                  items={items}
+                  fleet={model?.textgridFleet ?? []}
+                  selectedPhone={selectedSenderPhone}
+                  onSelectPhone={setSelectedSenderPhone}
+                  isMobileLayout={isMobileLayout}
+                  globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
+                />
               )}
               {section === 'market' && (
-                <MarketModule
+                <MarketIntelligenceModule
                   items={items}
                   directory={model?.marketDirectory ?? []}
+                  fleet={model?.textgridFleet ?? []}
                   selectedMarket={selectedMarketName}
                   onSelectMarket={setSelectedMarketName}
                   onViewRows={m => { setMarketFilter(m); setSection('queue') }}
+                  isMobileLayout={isMobileLayout}
+                  globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
                 />
               )}
               {section === 'failures' && (
-                <FailureModule
+                <FailureIntelligenceModule
                   items={items}
                   selectedCause={selectedFailureCause}
                   onSelectCause={setSelectedFailureCause}
                   onFilterCause={c => { setCauseFilter(c); setSection('queue') }}
+                  isMobileLayout={isMobileLayout}
+                  globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
                 />
               )}
               {section === 'events' && (
-                <EventTimelineModule
-                  items={items}
+                <EventIntelligenceModule
+                  items={eventItems.length > 0 ? eventItems : items}
+                  loading={eventItemsLoading}
                   density={timelineDensity}
                   onDensityChange={setTimelineDensity}
                   selectedEventId={selectedEventItem?.id ?? null}
                   onSelectEvent={setSelectedEventItem}
-                  onSelectItem={id => { setSelectedId(p => p === id ? null : id); setSection('queue') }}
+                  isMobileLayout={isMobileLayout}
+                  globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
                 />
               )}
             </div>
           </div>
         )}
 
-        {section !== 'templates' && (layoutMode === 'full' || layoutMode === 'expanded' || dossierOpen) && (
+        {section !== 'templates' && !isMobileLayout && (layoutMode === 'full' || layoutMode === 'expanded' || dossierOpen) && (
           <CommandIntelligenceDock
             section={section}
             items={items}
@@ -2510,10 +2196,31 @@ export const QueuePage = ({
             onViewFailureRows={c => { setCauseFilter(c); setSection('queue'); setStatusFilter('failed') }}
           />
         )}
-        {selectedItem && (layoutMode === 'medium' || layoutMode === 'compact') && (
-          <button type="button" className="occ-dossier-fab" onClick={() => setDossierOpen(v => !v)}>
-            <Icon name="file-text" size={14} />
-          </button>
+        {isMobileLayout && section === 'queue' && selectedItem && dossierOpen && (
+          <OccMobileDossierSheet
+            open
+            item={selectedItem}
+            mode="queue"
+            index={Math.max(0, filteredItems.findIndex(i => i.id === selectedItem.id))}
+            total={filteredItems.length}
+            onClose={() => { setSelectedId(null); setDossierOpen(false) }}
+            onPrev={() => navigateMobileDossier('prev', filteredItems, selectedItem.id, handleSelectRow)}
+            onNext={() => navigateMobileDossier('next', filteredItems, selectedItem.id, handleSelectRow)}
+            onAction={handleAction}
+          />
+        )}
+        {isMobileLayout && section === 'events' && selectedEventItem && (
+          <OccMobileDossierSheet
+            open
+            item={selectedEventItem}
+            mode="event"
+            index={Math.max(0, eventTimelineItems.findIndex(i => i.id === selectedEventItem.id))}
+            total={eventTimelineItems.length}
+            onClose={() => setSelectedEventItem(null)}
+            onPrev={() => navigateMobileDossier('prev', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
+            onNext={() => navigateMobileDossier('next', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
+            onAction={handleAction}
+          />
         )}
       </div>
     </div>

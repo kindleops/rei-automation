@@ -12,7 +12,9 @@ import {
 import {
   CANONICAL_INBOX_ROW_SELECT_FIELDS,
   CANONICAL_INBOX_COUNT_KEYS,
+  INBOX_THREAD_SUMMARY_SELECT_FIELDS,
   buildEnrichmentCoverageDiagnostics,
+  compactInboxThreadSummaryRow,
 } from "../../src/lib/domain/inbox/canonical-inbox-row-contract.js";
 import { getLiveInbox } from "../../src/lib/domain/inbox/live-inbox-service.js";
 import { makeLiveInboxThreadSupabase, buildInboxCountRowFromThreads } from "../helpers/chainable-supabase.mjs";
@@ -60,6 +62,9 @@ test("canonical row contract includes required enrichment fields", () => {
     "equity_percent",
     "acquisition_stage",
     "contact_identity_class",
+    "property_flags_text",
+    "tax_delinquent",
+    "active_lien",
     "unread_count",
     "latest_message_body",
   ]) {
@@ -68,6 +73,45 @@ test("canonical row contract includes required enrichment fields", () => {
   for (const key of ["needs_attention", "qualified", "wrong_person", "unread", "all_messages"]) {
     assert.ok(CANONICAL_INBOX_COUNT_KEYS.includes(key), `missing count key ${key}`);
   }
+});
+
+test("inbox summary contract includes property distress badge fields", () => {
+  for (const field of [
+    "property_flags_text",
+    "tax_delinquent",
+    "active_lien",
+    "building_condition",
+    "equity_percent",
+    "property_type",
+    "matching_flags",
+    "person_flags_text",
+  ]) {
+    assert.match(INBOX_THREAD_SUMMARY_SELECT_FIELDS, new RegExp(field), `missing summary field ${field}`);
+  }
+});
+
+test("compact inbox summary row preserves distress badge fields", () => {
+  const compact = compactInboxThreadSummaryRow({
+    thread_key: "+15550001111",
+    property_flags_text: "Tax Delinquent; Tired Landlord",
+    tax_delinquent: true,
+    active_lien: false,
+    building_condition: "Dated",
+    equity_percent: 62,
+    property_type: "SFR",
+    matching_flags: "Likely Owner",
+    person_flags_text: "Family",
+    contact_identity_class: "probable_owner",
+  });
+  assert.equal(compact.property_flags_text, "Tax Delinquent; Tired Landlord");
+  assert.equal(compact.tax_delinquent, true);
+  assert.equal(compact.active_lien, false);
+  assert.equal(compact.building_condition, "Dated");
+  assert.equal(Number(compact.equity_percent), 62);
+  assert.equal(compact.property_type, "SFR");
+  assert.equal(compact.matching_flags, "Likely Owner");
+  assert.equal(compact.person_flags_text, "Family");
+  assert.equal(compact.contact_identity_class, "probable_owner");
 });
 
 test("enrichment coverage diagnostics stay dev-only signal shape", () => {
@@ -114,6 +158,64 @@ test("KPI hover cards omit engineering diagnostics strip", () => {
   assert.doesNotMatch(KPI_ORB_SRC, /Metrics Data Source/);
   assert.doesNotMatch(KPI_ORB_SRC, /metric_source_debug/);
   assert.doesNotMatch(KPI_ORB_SRC, /Source Tables/);
+});
+
+test("getLiveInbox trusts bucket-scoped SQL for manual bucket switch", async () => {
+  const threadRows = [
+    {
+      thread_key: "+15550001111",
+      canonical_thread_key: "+15550001111",
+      inbox_bucket: "new_replies",
+      latest_message_direction: "inbound",
+      latest_message_at: "2026-06-29T12:00:00.000Z",
+      is_read: true,
+      property_id: "p-1",
+      seller_phone: "+15550001111",
+      owner_name: "Read New Reply Seller",
+      property_address_full: "11 Reply Ave",
+      property_flags_text: "High Equity",
+      contact_identity_class: "confirmed_owner",
+      latest_message_body: "Already read but still bucketed new_replies",
+    },
+    {
+      thread_key: "+15550002222",
+      canonical_thread_key: "+15550002222",
+      inbox_bucket: "priority",
+      latest_message_direction: "inbound",
+      latest_message_at: "2026-06-29T11:00:00.000Z",
+      is_read: true,
+      property_id: "p-2",
+      seller_phone: "+15550002222",
+      owner_name: "Priority Seller",
+      property_address_full: "22 Priority Blvd",
+      property_flags_text: "Tax Delinquent",
+      contact_identity_class: "probable_owner",
+      latest_message_body: "Priority seller",
+    },
+  ];
+  const supabase = makeLiveInboxThreadSupabase(threadRows, {
+    countRows: [buildInboxCountRowFromThreads(threadRows)],
+  });
+
+  const newReplies = await getLiveInbox(
+    { filter: "new_replies", timeout_mode: "manual_bucket_switch", limit: 25, skip_counts: true },
+    { supabase },
+  );
+  const priority = await getLiveInbox(
+    { filter: "priority", timeout_mode: "manual_bucket_switch", limit: 25, skip_counts: true },
+    { supabase },
+  );
+
+  assert.ok(newReplies.threads.length >= 1, "bucket-scoped new_replies query must not drop read rows");
+  assert.ok(
+    newReplies.threads.some((row) => row.thread_key === "+15550001111"),
+    "expected persisted new_replies row to survive bucket query",
+  );
+  assert.equal(priority.threads.length, 1, "bucket-scoped priority query must return priority rows");
+  const priorityRow = priority.threads[0];
+  assert.equal(priorityRow.owner_name, "Priority Seller", "bucket tab rows must include canonical owner enrichment");
+  assert.equal(priorityRow.property_address_full, "22 Priority Blvd", "bucket tab rows must include canonical address enrichment");
+  assert.equal(priorityRow.property_flags_text, "Tax Delinquent", "bucket tab rows must include canonical property flags");
 });
 
 test("getLiveInbox returns enriched canonical rows for initial boot", async () => {

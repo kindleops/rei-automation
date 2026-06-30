@@ -54,6 +54,7 @@ interface GlassControlProps<T extends string> {
   onChange: (next: T) => void
   className?: string
   lockActive?: boolean
+  layout?: 'stacked' | 'card'
 }
 
 function GlassControl<T extends string>({
@@ -66,6 +67,7 @@ function GlassControl<T extends string>({
   onChange,
   className,
   lockActive = false,
+  layout = 'stacked',
 }: GlassControlProps<T>) {
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
@@ -148,26 +150,58 @@ function GlassControl<T extends string>({
     )
     : null
 
+  const valueLabel = error ? 'Failed' : current?.visual.label
+
   return (
-    <div className={cls('nx-conv-glass-control', 'nx-di25-glass-control', open && 'is-open', className)}>
+    <div className={cls(
+      'nx-conv-glass-control',
+      'nx-di25-glass-control',
+      layout === 'card' && 'is-card',
+      open && 'is-open',
+      pending && 'is-syncing',
+      className,
+    )}>
+      {layout === 'stacked' ? <span className="nx-di25-glass-control__label">{label}</span> : null}
       <button
         ref={btnRef}
         type="button"
-        className="nx-conv-glass-btn nx-di25-glass-btn"
+        className={cls('nx-conv-glass-btn', 'nx-di25-glass-btn', layout === 'card' && 'is-card')}
         style={btnStyle}
         onClick={() => !disabled && setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`${label}: ${error ? 'Failed' : current?.visual.label}`}
+        aria-label={`${label}: ${valueLabel}`}
         disabled={disabled}
       >
-        {pending
-          ? <span className="nx-conv-glass-btn__spinner" aria-hidden="true" />
-          : <span className="nx-conv-glass-btn__dot" style={{ background: dotColor }} />
-        }
-        <span className="nx-di25-glass-btn__label">{error ? 'Failed' : current?.visual.label}</span>
-        {lockActive ? <Icon name="key" className="nx-di25-glass-btn__lock" aria-label="Manual lock active" /> : null}
-        {!disabled && <span className="nx-conv-glass-btn__caret" aria-hidden="true">▾</span>}
+        {layout === 'card' ? (
+          <>
+            <span className="nx-di25-glass-btn__accent" style={{ background: dotColor }} aria-hidden="true" />
+            <span className="nx-di25-glass-btn__card-body">
+              <span className="nx-di25-glass-btn__card-head">
+                <em>{label}</em>
+                {!disabled ? <span className="nx-conv-glass-btn__caret" aria-hidden="true">▾</span> : null}
+              </span>
+              <span className="nx-di25-glass-btn__card-value">
+                {pending
+                  ? <span className="nx-conv-glass-btn__spinner" aria-hidden="true" />
+                  : <span className="nx-conv-glass-btn__dot" style={{ background: dotColor }} />
+                }
+                <strong>{valueLabel}</strong>
+                {lockActive ? <Icon name="key" className="nx-di25-glass-btn__lock" aria-label="Manual lock active" /> : null}
+              </span>
+            </span>
+          </>
+        ) : (
+          <>
+            {pending
+              ? <span className="nx-conv-glass-btn__spinner" aria-hidden="true" />
+              : <span className="nx-conv-glass-btn__dot" style={{ background: dotColor }} />
+            }
+            <span className="nx-di25-glass-btn__label">{valueLabel}</span>
+            {lockActive ? <Icon name="key" className="nx-di25-glass-btn__lock" aria-label="Manual lock active" /> : null}
+            {!disabled && <span className="nx-conv-glass-btn__caret" aria-hidden="true">▾</span>}
+          </>
+        )}
       </button>
       {menu}
     </div>
@@ -339,31 +373,44 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
 
   return (
     <>
-      <div
-        className={cls('nx-di25-lead-command', anyPending && 'is-syncing')}
-        aria-label="Lead lifecycle controls"
-      >
-        <GlassControl
-          label="Lifecycle stage"
-          value={stage.value}
-          options={STAGE_OPTIONS}
-          pending={stage.pending}
-          error={stage.error}
-          disabled={disabled}
-          className="nx-di25-ctrl--stage"
-          lockActive={manualStageLock}
-          onChange={handleStageChangeRequest}
-        />
-        <GlassControl
-          label="Operational status"
-          value={status.value}
-          options={STATUS_OPTIONS}
-          pending={status.pending}
-          error={status.error}
-          disabled={disabled}
-          className="nx-di25-ctrl--status"
-          onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
-        />
+      <div className="nx-di25-pipeline-console">
+        {manualStageLock ? (
+          <div className="nx-di25-pipeline-console__lock" role="status">
+            <Icon name="key" />
+            <span>Manual stage lock active</span>
+          </div>
+        ) : null}
+        <div
+          className={cls('nx-di25-lead-command', anyPending && 'is-syncing')}
+          aria-label="Lead lifecycle controls"
+        >
+          <GlassControl
+            label="Stage"
+            value={stage.value}
+            options={STAGE_OPTIONS}
+            pending={stage.pending}
+            error={stage.error}
+            disabled={disabled}
+            className="nx-di25-ctrl--stage"
+            lockActive={manualStageLock}
+            layout="card"
+            onChange={handleStageChangeRequest}
+          />
+          <span className="nx-di25-lead-command__bridge" aria-hidden="true">
+            <Icon name="chevron-right" />
+          </span>
+          <GlassControl
+            label="Status"
+            value={status.value}
+            options={STATUS_OPTIONS}
+            pending={status.pending}
+            error={status.error}
+            disabled={disabled}
+            className="nx-di25-ctrl--status"
+            layout="card"
+            onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
+          />
+        </div>
       </div>
 
       <StageChangeConfirmModal

@@ -92,6 +92,20 @@ export function deriveFollowUpNumber(row: StageRow = {}): number {
   return 0
 }
 
+export const STAGE_SORT_ORDER: StageCode[] = [
+  'S1', 'S1F', 'S2', 'S3', 'S4', 'S5', 'S6', 'manual_reply', 'auto_reply', 'other',
+]
+
+export function stageSortIndex(raw: unknown): number {
+  const code = normalizeStageCode(raw) ?? 'other'
+  const idx = STAGE_SORT_ORDER.indexOf(code)
+  return idx >= 0 ? idx : STAGE_SORT_ORDER.length
+}
+
+export function compareStageCodes(a: unknown, b: unknown): number {
+  return stageSortIndex(a) - stageSortIndex(b)
+}
+
 export function buildCanonicalDisplayName(row: StageRow & { stage_label?: string | null; language?: string | null } = {}): string {
   const code = normalizeStageCode(row.stage_code) ?? '—'
   const label = resolveStageLabel(code, row.stage_label ?? null)

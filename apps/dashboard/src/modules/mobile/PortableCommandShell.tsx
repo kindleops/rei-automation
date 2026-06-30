@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { pushRoutePath } from '../../app/router'
-import { useRoutePath } from '../../app/router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { pushRoutePath, useRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import { applyThemeToDOM, loadSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
@@ -12,6 +11,7 @@ import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from './command-navigation-registry'
+import { openInboxDealIntelligence } from './mobile-inbox-bridge'
 import { MobileCommandDock, type DockSurface } from './MobileCommandDock'
 import { MobileSheet } from './MobileSheet'
 
@@ -43,7 +43,8 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
   const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
   const { activeSurface, toggleSurface, closeAndRestoreFocus, registerTrigger, setActiveSurface } = useShellSurface()
   const [notifOpen, setNotifOpen] = useState(false)
-  const [workspaceSection, setWorkspaceSection] = useState<'apps' | 'appearance' | 'account'>('apps')
+  const [workspaceSection, setWorkspaceSection] = useState<'apps' | 'appearance'>('apps')
+  const [workspaceQuery, setWorkspaceQuery] = useState('')
   const [queueHealth, setQueueHealth] = useState<QueueProcessorHealth | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
@@ -73,6 +74,10 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
     registerTrigger('workspace', workspaceTriggerRef.current)
   })
 
+  useEffect(() => {
+    if (activeSurface !== 'workspace') setWorkspaceQuery('')
+  }, [activeSurface])
+
   const processorStatus = queueHealth?.status ?? 'unknown'
 
   const openSearch = () => {
@@ -96,6 +101,14 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
     if (notifOpen) return 'notifications'
     return null
   }
+
+  const filteredApplications = useMemo(() => {
+    const q = workspaceQuery.trim().toLowerCase()
+    if (!q) return COMMAND_NAV_ROUTES
+    return COMMAND_NAV_ROUTES.filter((item) =>
+      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
+    )
+  }, [workspaceQuery])
 
   const handleDockSurfaceChange = (surface: DockSurface) => {
     if (surface === null) {
@@ -149,95 +162,109 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
         open={activeSurface === 'workspace'}
         title="Workspace Launcher"
         height="full"
+        className="is-mobile-wsl"
         onClose={() => closeAndRestoreFocus('workspace')}
       >
-        <nav className="nx-portable-wsl-nav" aria-label="Workspace sections">
-          {(['apps', 'appearance', 'account'] as const).map((section) => (
-            <button
-              key={section}
-              type="button"
-              className={cls('nx-wsl-nav__item', workspaceSection === section && 'is-active')}
-              onClick={() => setWorkspaceSection(section)}
-            >
-              {section === 'apps' ? 'Applications' : section === 'appearance' ? 'Appearance' : 'Account'}
-            </button>
-          ))}
-        </nav>
-
-        {workspaceSection === 'apps' ? (
-          <div className="nx-wsl-panel__section">
-            {COMMAND_NAV_ROUTES.map((item) => (
-              <button
-                key={item.path}
-                type="button"
-                className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
-                onClick={() => {
-                  if (item.action === 'notifications') setNotifOpen(true)
-                  else if (item.action === 'settings') pushRoutePath('/analytics')
-                  else pushRoutePath(item.path)
-                  closeAndRestoreFocus('workspace')
-                }}
-              >
-                <Icon name={item.icon} size={14} />
-                <strong>{item.label}</strong>
-                {item.description ? <small>{item.description}</small> : null}
-              </button>
-            ))}
+        <div className="nx-wsl-root">
+          <div className="nx-wsl-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={workspaceQuery}
+              placeholder="Search applications…"
+              aria-label="Search applications"
+              onChange={(event) => setWorkspaceQuery(event.target.value)}
+            />
           </div>
-        ) : null}
-
-        {workspaceSection === 'appearance' ? (
-          <>
-            <div className="nx-wsl-panel__section">
-              <h4>Theme</h4>
-              {THEME_OPTIONS.map((theme) => (
+          <div className="nx-wsl-body is-mobile-shell">
+            <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
+              {(['apps', 'appearance'] as const).map((section) => (
                 <button
-                  key={theme.id}
+                  key={section}
                   type="button"
-                  className={cls('nx-wsl-menu-row', activeThemeId === theme.id && 'is-active')}
-                  onClick={() => {
-                    updateSetting('nexusTheme', theme.id)
-                    applyThemeToDOM()
-                  }}
+                  className={cls('nx-wsl-nav__item', workspaceSection === section && 'is-active')}
+                  onClick={() => setWorkspaceSection(section)}
                 >
-                  <span className="nx-theme-dot" data-theme={theme.id} />
-                  <strong>{theme.label}</strong>
+                  {section === 'apps' ? 'Applications' : 'Appearance'}
                 </button>
               ))}
-            </div>
-            <div className="nx-wsl-panel__section nx-wsl-panel__section--accents">
-              <h4>Accent Palette</h4>
-              {ACCENT_OPTIONS.map((accent) => (
-                <button
-                  key={accent.id}
-                  type="button"
-                  className={cls('nx-wsl-menu-row', activeAccentId === accent.id && 'is-active')}
-                  onClick={() => {
-                    updateSetting('accentPalette', accent.id)
-                    applyThemeToDOM()
-                  }}
-                >
-                  <span className="nx-accent-dot" data-accent={accent.id} />
-                  <strong>{accent.label}</strong>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : null}
+            </nav>
+            <div className="nx-wsl-panel">
+              {workspaceSection === 'apps' ? (
+                <div className="nx-wsl-panel__section">
+                  <h4>Applications</h4>
+                  {filteredApplications.map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
+                      onClick={() => {
+                        if (item.action === 'notifications') setNotifOpen(true)
+                        else if (item.action === 'settings') pushRoutePath('/analytics')
+                        else if (item.action === 'deal_intelligence') openInboxDealIntelligence()
+                        else pushRoutePath(item.path)
+                        closeAndRestoreFocus('workspace')
+                      }}
+                    >
+                      <Icon name={item.icon} size={14} />
+                      <strong>{item.label}</strong>
+                      {item.description ? <small>{item.description}</small> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
-        {workspaceSection === 'account' ? (
-          <div className="nx-wsl-panel__section">
-            <h4>Account</h4>
-            <button type="button" className="nx-wsl-menu-row" onClick={() => { pushRoutePath('/analytics'); closeAndRestoreFocus('workspace') }}>
-              <Icon name="stats" size={14} />
-              <strong>Theme &amp; KPI Settings</strong>
-            </button>
-            <button type="button" className="nx-wsl-menu-row" onClick={() => { pushRoutePath('/inbox'); closeAndRestoreFocus('workspace') }}>
-              <Icon name="settings" size={14} />
-              <strong>Workspace Preferences</strong>
-            </button>
+              {workspaceSection === 'appearance' ? (
+                <>
+                  <div className="nx-wsl-panel__section">
+                    <h4>Theme</h4>
+                    {THEME_OPTIONS.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        className={cls('nx-wsl-menu-row', activeThemeId === theme.id && 'is-active')}
+                        onClick={() => {
+                          updateSetting('nexusTheme', theme.id)
+                          applyThemeToDOM()
+                        }}
+                      >
+                        <span className="nx-theme-dot" data-theme={theme.id} />
+                        <strong>{theme.label}</strong>
+                        {activeThemeId === theme.id ? (
+                          <span className="nx-wsl-menu-row__check" aria-hidden>
+                            <Icon name="check" size={14} />
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="nx-wsl-panel__section nx-wsl-panel__section--accents">
+                    <h4>Accent Palette</h4>
+                    {ACCENT_OPTIONS.map((accent) => (
+                      <button
+                        key={accent.id}
+                        type="button"
+                        className={cls('nx-wsl-menu-row', activeAccentId === accent.id && 'is-active')}
+                        onClick={() => {
+                          updateSetting('accentPalette', accent.id)
+                          applyThemeToDOM()
+                        }}
+                      >
+                        <span className="nx-accent-dot" data-accent={accent.id} />
+                        <strong>{accent.label}</strong>
+                        {activeAccentId === accent.id ? (
+                          <span className="nx-wsl-menu-row__check" aria-hidden>
+                            <Icon name="check" size={14} />
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
-        ) : null}
+        </div>
       </MobileSheet>
 
       <MobileSheet

@@ -1,0 +1,445 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   PINNED APP DOCK — collapsible bottom liquid-glass app switcher
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --nx-pinned-dock-height: 88px;
+  --nx-pinned-dock-collapsed: 14px;
+  --nx-pinned-dock-expanded: min(56vh, 460px);
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .nx-pinned-app-dock__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 155;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: nx-pinned-dock-fade-in 220ms ease;
+  }
+
+  @keyframes nx-pinned-dock-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .nx-pinned-app-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 160;
+    pointer-events: none;
+    padding: 0 12px calc(4px + var(--nx-mobile-safe-bottom, 0px));
+  }
+
+  .nx-pinned-app-dock__glass {
+    position: relative;
+    overflow: hidden;
+    pointer-events: auto;
+    border-radius: 18px 18px 12px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(6, 10, 18, 0.78);
+    backdrop-filter: blur(28px) saturate(1.55);
+    -webkit-backdrop-filter: blur(28px) saturate(1.55);
+    box-shadow:
+      0 -10px 36px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition:
+      max-height 380ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-radius 320ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 380ms cubic-bezier(0.16, 1, 0.3, 1),
+      background 260ms ease;
+  }
+
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    border-radius: 999px;
+    background: rgba(6, 10, 18, 0.42);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.28);
+  }
+
+  .nx-pinned-app-dock__sheen {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(120% 80% at 50% 110%, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.14), transparent 58%),
+      linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0%, transparent 42%);
+    opacity: 0.95;
+  }
+
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__sheen {
+    opacity: 0.45;
+  }
+
+  .nx-pinned-app-dock__rim {
+    pointer-events: none;
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.42) 50%, transparent);
+    opacity: 0.75;
+  }
+
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__rim {
+    display: none;
+  }
+
+  .nx-pinned-app-dock__handle {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    min-height: 14px;
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle {
+    min-height: 14px;
+    padding: 5px 0;
+  }
+
+  .nx-pinned-app-dock__handle i {
+    width: 52px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.34);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), background 220ms ease, width 220ms ease;
+  }
+
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle i {
+    width: 64px;
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
+    box-shadow:
+      0 0 12px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.22),
+      0 0 0 1px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.18);
+  }
+
+  .nx-pinned-app-dock__hint {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 4;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    pointer-events: none;
+  }
+
+  .nx-pinned-app-dock__panel {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition:
+      max-height 360ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 240ms ease;
+  }
+
+  .nx-pinned-app-dock.is-docked .nx-pinned-app-dock__panel,
+  .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__panel {
+    max-height: 120px;
+    opacity: 1;
+  }
+
+  .nx-pinned-app-dock__panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 12px 4px;
+  }
+
+  .nx-pinned-app-dock__panel-head strong {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .nx-pinned-app-dock__customize {
+    border: 0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--tone-primary, #5eead4);
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.12);
+    cursor: pointer;
+  }
+
+  .nx-pinned-app-dock__track {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 0 10px 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    transition: box-shadow 220ms ease;
+  }
+
+  .nx-pinned-app-dock__track.is-drop-target {
+    box-shadow: inset 0 0 0 1px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.45);
+    border-radius: 12px;
+  }
+
+  .nx-pinned-app-dock__track::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nx-pinned-app-dock__unpin-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin: 0 10px 8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px dashed rgba(248, 113, 113, 0.28);
+    color: rgba(248, 113, 113, 0.82);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: rgba(248, 113, 113, 0.06);
+    transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+  }
+
+  .nx-pinned-app-dock__unpin-zone.is-drop-target {
+    border-color: rgba(248, 113, 113, 0.55);
+    background: rgba(248, 113, 113, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.22);
+  }
+
+  .nx-pinned-app-dock.is-reordering.is-expanded .nx-pinned-app-dock__sheet {
+    box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.12);
+    border-radius: 12px;
+    margin: 0 8px 8px;
+  }
+
+  .nx-pinned-app-dock__drop-slot {
+    flex: 0 0 auto;
+    min-width: 72px;
+    height: 58px;
+    border-radius: 12px;
+    border: 1px dashed rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.35);
+    display: grid;
+    place-items: center;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.72);
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.05);
+  }
+
+  .nx-pinned-app-dock__app {
+    position: relative;
+    flex: 0 0 auto;
+    scroll-snap-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 58px;
+    max-width: 72px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .nx-pinned-app-dock__app:active {
+    transform: scale(0.94);
+  }
+
+  .nx-pinned-app-dock__app.is-dragging {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+
+  .nx-pinned-app-dock__app.is-drag-over .nx-pinned-app-dock__glyph,
+  .nx-pinned-app-dock__app.is-catalog.is-dragging .nx-pinned-app-dock__glyph {
+    box-shadow: 0 0 0 2px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
+  }
+
+  .nx-pinned-app-dock__glyph {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 52%, rgba(255, 255, 255, 0.06) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 3px 10px rgba(0, 0, 0, 0.18);
+    transition:
+      border-color 180ms ease,
+      box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1),
+      background 180ms ease,
+      color 180ms ease;
+  }
+
+  .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__glyph {
+    border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.48);
+    color: var(--tone-primary, #5eead4);
+    background: linear-gradient(145deg, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.24) 0%, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.06) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 0 0 1px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.22),
+      0 6px 18px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.16);
+  }
+
+  .nx-pinned-app-dock__label {
+    max-width: 100%;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.82;
+  }
+
+  .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__label {
+    color: var(--tone-primary, #5eead4);
+    opacity: 1;
+  }
+
+  .nx-pinned-app-dock__badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-size: 9px;
+    font-weight: 800;
+    color: #fff;
+    background: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(6, 10, 18, 0.92);
+  }
+
+  .nx-pinned-app-dock__badge.is-warning { background: #f59e0b; }
+  .nx-pinned-app-dock__badge.is-critical { background: #ef4444; }
+
+  .nx-pinned-app-dock__dot {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #f59e0b;
+    box-shadow: 0 0 0 2px rgba(6, 10, 18, 0.92);
+  }
+
+  .nx-pinned-app-dock__sheet {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition:
+      max-height 380ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 260ms ease;
+  }
+
+  .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__sheet {
+    max-height: calc(var(--nx-pinned-dock-expanded) - 120px);
+    opacity: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nx-pinned-app-dock__sheet-section {
+    padding: 6px 10px 10px;
+  }
+
+  .nx-pinned-app-dock__sheet-section h4 {
+    margin: 0 0 6px 4px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .nx-pinned-app-dock__sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px 2px;
+  }
+
+  .nx-pinned-app-dock__sheet-grid .nx-pinned-app-dock__app {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .nx-pinned-app-dock__sheet-grid .nx-pinned-app-dock__glyph {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Reserve bottom space for collapsed line or open dock */
+  .nx-os.is-mobile-os .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell,
+  .nx-os.is-mobile-os .nx-stage {
+    padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
+  }
+
+  body:has(.nx-pinned-app-dock.is-docked),
+  body:has(.nx-pinned-app-dock.is-expanded) {
+    --nx-pinned-dock-collapsed: var(--nx-pinned-dock-height);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__glass {
+    background: rgba(255, 255, 255, 0.86);
+    border-color: rgba(15, 23, 42, 0.1);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__glyph {
+    border-color: rgba(15, 23, 42, 0.08);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(15, 23, 42, 0.03) 100%);
+    color: rgba(15, 23, 42, 0.72);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__label {
+    color: rgba(15, 23, 42, 0.62);
+  }
+}
+
+@media (min-width: 768px), (orientation: landscape) {
+  .nx-pinned-app-dock,
+  .nx-pinned-app-dock__backdrop {
+    display: none !important;
+  }
+}

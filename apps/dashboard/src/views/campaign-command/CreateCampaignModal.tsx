@@ -24,7 +24,10 @@ import {
 } from './campaignWizardAdapter'
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { CampaignBuilderMobileNav, type CampaignBuilderPhase } from './components/CampaignBuilderMobileNav'
 import './campaign-pacing.css'
+import './campaign-builder-mobile.css'
 
 interface CreateCampaignModalProps {
   onClose: () => void
@@ -648,6 +651,9 @@ export const CreateCampaignModal = ({
   const latestPreviewRequestRef = useRef<string | null>(null)
   const previewSequenceRef = useRef(0)
   const previewResultRef = useRef<CampaignPreviewResult | null>(null)
+  const { isMobile } = useBreakpoint()
+  const [mobilePhase, setMobilePhase] = useState<CampaignBuilderPhase>('build')
+  const [setupExpanded, setSetupExpanded] = useState(false)
 
   const activeFilterDraft = useMemo(
     () => buildActiveFilterDraft(draft, filterStatuses),
@@ -1350,7 +1356,7 @@ export const CreateCampaignModal = ({
 
   if (isCatalogLoading || !catalog || !activeDomainDefinition) {
     return createPortal(
-      <div className="cmp-studio-overlay">
+      <div className={`cmp-studio-overlay${isMobile ? ' cmp-studio-overlay--mobile' : ''}`}>
         <div className="cmp-studio" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100%' }}>
           <div className="cmp-studio-loading cmp-studio-loading--staged cmp-studio-loading--premium">
             <div className="cmp-studio-loading__pulse" aria-hidden />
@@ -1378,9 +1384,15 @@ export const CreateCampaignModal = ({
   // preview mean counts are unknown — block the action rather than let operators launch blind.
   const canScheduleNow = canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
 
+  const setupSummary = [
+    draft.name.trim() || 'Untitled campaign',
+    formatLabel(draft.template_use_case),
+    formatLabel(draft.stage_code),
+  ].join(' · ')
+
   const modal = (
-    <div className="cmp-studio-overlay">
-      <div className="cmp-studio cmp-studio--catalog">
+    <div className={`cmp-studio-overlay${isMobile ? ' cmp-studio-overlay--mobile' : ''}`}>
+      <div className={`cmp-studio cmp-studio--catalog${isMobile ? ' cmp-studio--mobile' : ''}`}>
         <div className="cmp-studio-workspace">
           <div className="cmp-studio-header">
             <div>
@@ -1395,6 +1407,60 @@ export const CreateCampaignModal = ({
             </button>
           </div>
 
+          {isMobile && mobilePhase === 'build' && (
+            <div className="cmp-mobile-setup">
+              <button
+                type="button"
+                className="cmp-mobile-setup__trigger"
+                onClick={() => setSetupExpanded((value) => !value)}
+                aria-expanded={setupExpanded}
+              >
+                <div>
+                  <strong>Campaign setup</strong>
+                  <span>{setupSummary}</span>
+                </div>
+                <Icon name={setupExpanded ? 'chevron-up' : 'chevron-down'} size={14} />
+              </button>
+              {setupExpanded && (
+                <div className="cmp-mobile-setup__body">
+                  <label className="cmp-mobile-setup__full">
+                    <span>Campaign Name</span>
+                    <input
+                      value={draft.name}
+                      onChange={(event) => updateDraftRoot('name', event.target.value)}
+                      placeholder="e.g. Dallas high-equity first touch"
+                    />
+                  </label>
+                  <label>
+                    <span>Scenario</span>
+                    <select value={draft.template_use_case} onChange={(event) => updateDraftRoot('template_use_case', event.target.value)}>
+                      <option value="ownership_check">Ownership Check</option>
+                      <option value="consider_selling">Consider Selling</option>
+                      <option value="seller_asking_price">Asking Price</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Stage</span>
+                    <select value={draft.stage_code} onChange={(event) => updateDraftRoot('stage_code', event.target.value)}>
+                      <option value="first_touch">First Touch</option>
+                      <option value="second_touch">Second Touch</option>
+                      <option value="reengagement">Reengagement</option>
+                    </select>
+                  </label>
+                  <label className="cmp-mobile-setup__full">
+                    <span>Description</span>
+                    <input
+                      value={draft.description}
+                      onChange={(event) => updateDraftRoot('description', event.target.value)}
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isMobile && (
           <div className="cmp-mission-strip">
             <label>
               <span>Campaign Name</span>
@@ -1429,6 +1495,7 @@ export const CreateCampaignModal = ({
               />
             </label>
           </div>
+          )}
 
           {backendDegraded ? (
             <div className="cmp-degraded-banner">
@@ -1437,6 +1504,38 @@ export const CreateCampaignModal = ({
             </div>
           ) : null}
 
+          {isMobile && mobilePhase === 'build' && (
+            <>
+              {launchReadiness.graphPartial && (
+                <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
+                  <Icon name="alert" size={12} />
+                  <span>Target graph is incomplete — counts reflect a partial market sample ({preview?.graph_row_count?.toLocaleString() ?? '?'} rows).</span>
+                </div>
+              )}
+              {totalDraftCount > 0 && (
+                <div className="cmp-draft-filter-warn">
+                  <Icon name="alert-circle" size={12} />
+                  <span>{totalDraftCount} filter{totalDraftCount !== 1 ? 's' : ''} edited but not applied</span>
+                </div>
+              )}
+              <button
+                type="button"
+                className="cmp-mobile-reach-chip"
+                onClick={() => setMobilePhase('reach')}
+              >
+                <span className="cmp-mobile-reach-chip__value">
+                  {isPreviewLoading ? '…' : formatNumber(launchEstimates.deliverable)}
+                </span>
+                <div className="cmp-mobile-reach-chip__copy">
+                  <strong>Ready to schedule</strong>
+                  <span>View reach funnel &amp; diagnostics</span>
+                </div>
+                <Icon name="chevron-right" size={16} />
+              </button>
+            </>
+          )}
+
+          {!isMobile && (
           <div className={`cmp-launch-execution cmp-launch-execution--activation cmp-launch-execution--polished ${launchPanelExpanded ? 'is-expanded' : ''}`}>
             {launchReadiness.graphPartial && (
               <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
@@ -1682,7 +1781,128 @@ export const CreateCampaignModal = ({
               </div>
             )}
           </div>
+          )}
 
+          {isMobile && mobilePhase === 'launch' && (
+            <div className="cmp-mobile-launch">
+              {launchReadiness.graphPartial && (
+                <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
+                  <Icon name="alert" size={12} />
+                  <span>Target graph is incomplete — counts reflect a partial market sample ({preview?.graph_row_count?.toLocaleString() ?? '?'} rows).</span>
+                </div>
+              )}
+              {totalDraftCount > 0 && (
+                <div className="cmp-draft-filter-warn">
+                  <Icon name="alert-circle" size={12} />
+                  <span>{totalDraftCount} filter{totalDraftCount !== 1 ? 's' : ''} edited but not applied</span>
+                </div>
+              )}
+
+              <div className="cmp-mobile-launch-hero">
+                <span className="cmp-mobile-launch-hero__label">Ready to schedule</span>
+                <div className="cmp-mobile-launch-hero__row">
+                  <span className={`cmp-mobile-launch-hero__value${isPreviewLoading ? ' is-loading' : ''}`}>
+                    {formatNumber(launchEstimates.deliverable)}
+                  </span>
+                  <span className={`cmp-readiness-badge is-${launchReadiness.status}`}>
+                    {launchReadiness.status === 'loading' ? 'Updating'
+                      : launchReadiness.status === 'no_preview' ? 'No Preview'
+                      : launchReadiness.status === 'ready' ? 'Ready'
+                      : launchReadiness.status === 'warning' ? 'Review'
+                      : 'Blocked'}
+                  </span>
+                </div>
+                {launchReadiness.reasons.length > 0 && (
+                  <div className="cmp-readiness-reasons">
+                    {launchReadiness.reasons.map((r) => <span key={r}>{r}</span>)}
+                  </div>
+                )}
+              </div>
+
+              <div className="cmp-mobile-launch-card">
+                <h4>Schedule</h4>
+                <label>
+                  <span>Send at</span>
+                  <input
+                    type="datetime-local"
+                    value={launchSettings.first_scheduled_at}
+                    onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
+                  />
+                </label>
+                <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
+                  {SCHEDULE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className="cmp-schedule-preset"
+                      onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="cmp-mobile-launch-card">
+                <h4>Pacing</h4>
+                <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
+                  {PACING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
+                      onClick={() => applyPacingPreset(preset.key)}
+                      title={preset.blurb}
+                    >
+                      <strong>{preset.label}</strong>
+                      {preset.key !== 'custom' && <span>{formatNumber(Number(preset.daily_cap))}/day</span>}
+                    </button>
+                  ))}
+                </div>
+                <div className="cmp-mobile-launch-estimates">
+                  <div><em>Messages/day</em><strong>{formatNumber(launchEstimates.dailyVolume)}</strong></div>
+                  <div><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></div>
+                  <div><em>Runtime</em><strong>{launchEstimates.durationLabel}</strong></div>
+                  <div><em>Est. cost</em><strong>{formatUsdApprox(launchEstimates.cost)}</strong></div>
+                </div>
+              </div>
+
+              <div className="cmp-mobile-launch-card">
+                <h4>Send cap</h4>
+                <label>
+                  <span>Max targets</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={launchSettings.max_targets}
+                    onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div className="cmp-mobile-launch-actions">
+                <button
+                  type="button"
+                  className="cmp-launch-btn cmp-launch-btn--ghost"
+                  disabled={isLaunching || !canRunLaunch}
+                  onClick={requestPreview}
+                >
+                  Preview targeting
+                </button>
+                <button
+                  type="button"
+                  className="cmp-launch-btn is-accent"
+                  disabled={isLaunching || !canScheduleNow}
+                  onClick={requestActivate}
+                >
+                  {isLaunching ? 'Working…' : 'Activate now'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(!isMobile || mobilePhase === 'build') && (
+          <>
           <div className="cmp-domain-tabs">
             {catalog.domains.map((domain) => {
               const count = activeFilterDraft.target_filters[domain.key].length
@@ -1805,7 +2025,24 @@ export const CreateCampaignModal = ({
               })}
             </div>
           </div>
+          </>
+          )}
 
+          {isMobile && mobilePhase === 'reach' && (
+            <TargetReachPanel
+              preview={preview}
+              loading={isPreviewLoading}
+              activeDomain={activeDomain}
+              previewMeta={previewMeta}
+              backendDegraded={backendDegraded}
+              filterGroups={activeFilterDraft.target_filters}
+              totalDraftCount={totalDraftCount}
+              isMobileLayout
+              inline
+            />
+          )}
+
+          {!isMobile && (
           <div className="cmp-studio-footer">
             <div className="cmp-footer-left">
               <button className="cmp-btn-ghost" onClick={closeModal}>Cancel</button>
@@ -1846,8 +2083,10 @@ export const CreateCampaignModal = ({
               </div>
             </div>
           </div>
+          )}
         </div>
 
+        {!isMobile && (
         <TargetReachPanel
           preview={preview}
           loading={isPreviewLoading}
@@ -1857,6 +2096,24 @@ export const CreateCampaignModal = ({
           filterGroups={activeFilterDraft.target_filters}
           totalDraftCount={totalDraftCount}
         />
+        )}
+
+        {isMobile && (
+          <CampaignBuilderMobileNav
+            phase={mobilePhase}
+            onPhaseChange={setMobilePhase}
+            deliverableCount={preview?.ready_to_queue ?? launchEstimates.deliverable}
+            isPreviewLoading={isPreviewLoading}
+            launchStatus={launchReadiness.status}
+            onPreview={() => runPreview('manual')}
+            onSaveDraft={saveCampaign}
+            onSchedule={requestSchedule}
+            canSaveDraft={canSaveDraft}
+            canSchedule={canScheduleNow}
+            isSaving={isSaving}
+            isLaunching={isLaunching}
+          />
+        )}
 
         {pendingLivePayload && (
           <LaunchConfirmModal
@@ -2189,6 +2446,8 @@ const TargetReachPanel = ({
   backendDegraded,
   filterGroups,
   totalDraftCount,
+  isMobileLayout = false,
+  inline = false,
 }: {
   preview: CampaignPreviewResult | null
   loading: boolean
@@ -2197,6 +2456,8 @@ const TargetReachPanel = ({
   backendDegraded: boolean
   filterGroups: CampaignFilterGroups
   totalDraftCount: number
+  isMobileLayout?: boolean
+  inline?: boolean
 }) => {
   const [developerMode, setDeveloperMode] = useState(false)
   const blockedTotal = preview?.blocked_waterfall.reduce((sum, item) => sum + item.count, 0) ?? 0
@@ -2305,7 +2566,7 @@ const TargetReachPanel = ({
   const graphIsStale = graphAgeMs !== null && graphAgeMs > 3_600_000 // >1 hour
 
   return (
-    <aside className="cmp-studio-summary cmp-target-reach">
+    <aside className={`cmp-studio-summary cmp-target-reach${isMobileLayout ? ' cmp-target-reach--mobile' : ''}${inline ? ' cmp-target-reach--inline' : ''}`}>
       <div className="cmp-summary-header">
         <div>
           <div className="cmp-summary-title">Target Reach</div>

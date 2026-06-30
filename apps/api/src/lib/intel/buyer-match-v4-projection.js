@@ -1,33 +1,34 @@
 /**
  * Buyer Match V4 — read-only canonical UI projection.
- * Phase 1: truthful states, no global entity-count fallback, no browser-side authority.
- *
- * Phase 4 follow-up: rehydrate purchase events + rollup when serving cached runs
- * (see buyer-match-engine.js cache path returning comps:[] and buyer_rollup:null).
+ * Phase 2: buyer family identity, transaction truth, unified aggregations.
  */
 import { buildBuyerMatchIntel } from './buyer-match-engine.js';
 import { buildCanonicalBuyerDemand } from './buyer-match-demand.js';
-import { findFreshBuyerMatchResult } from './buyer-match-job-service.js';
-import { buildIdempotencyKey } from './buyer-match-job-service.js';
+import { findFreshBuyerMatchResult, buildIdempotencyKey } from './buyer-match-job-service.js';
+import {
+  buildBuyerFamilyProjections,
+  isVerifiedInstitutional,
+  isBuilder,
+  isEligibleDispositionFamily,
+} from './buyer-match-v4-identity.js';
+import {
+  buildCanonicalPurchaseEvents,
+  countGeocodedEvents,
+} from './buyer-match-v4-transactions.js';
+import {
+  aggregateFamilyActivity,
+  buildMarketIntelligenceCounts,
+  familyToRankedBuyer,
+  repairBidRange,
+} from './buyer-match-v4-aggregations.js';
 
-export const BUYER_MATCH_V4_VERSION = 'buyer_match_v4.0';
+export const BUYER_MATCH_V4_VERSION = 'buyer_match_v4.1';
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(String(v).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : null;
 };
-
-function haversineMiles(lat1, lng1, lat2, lng2) {
-  if ([lat1, lng1, lat2, lng2].some((v) => v === null || v === undefined)) return null;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 3958.7559 * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
-}
 
 export function mapFallbackLevel(level) {
   const map = {
@@ -44,6 +45,7 @@ export function mapFallbackLevel(level) {
   return map[String(level ?? 'none').toLowerCase()] ?? 'NONE';
 }
 
+/** @deprecated Phase 2 uses buyerClass — kept for legacy tests */
 export function mapBuyerArchetype(candidate = {}) {
   if (candidate.buyer_type === 'institutional') return 'Verified institutional buyer';
   if (candidate.is_corporate_buyer || candidate.buyer_type === 'corporate') return 'Corporate repeat buyer';
@@ -53,9 +55,11 @@ export function mapBuyerArchetype(candidate = {}) {
   return 'Unknown';
 }
 
+/** @deprecated Phase 2 uses buyerClass */
 export function mapInstitutionalStatus(candidate = {}) {
-  if (candidate.buyer_type === 'institutional') return 'VERIFIED_INSTITUTIONAL';
-  if (candidate.is_corporate_buyer || candidate.buyer_type === 'corporate') return 'CORPORATE';
+  if (candidate.buyer_type === 'institutional' && num(candidate.institutional_score) >= 70) {
+    return 'VERIFIED_INSTITUTIONAL';
+  }
   return null;
 }
 
@@ -112,28 +116,29 @@ function resolveAcquisitionContext(subject = {}, context = {}) {
   };
 }
 
-function countActiveBuyers(candidates, days) {
+function countActiveFamilies(families, days) {
   const cutoff = Date.now() - days * 86_400_000;
-  return candidates.filter((c) => {
-    if (!c.last_purchase_date) return false;
-    return new Date(c.last_purchase_date).getTime() >= cutoff;
+  return families.filter((f) => {
+    const d = f.match?.lastPurchaseAt;
+    if (!d) return false;
+    return new Date(d).getTime() >= cutoff;
   }).length;
 }
 
-function countInstitutional(candidates) {
-  return candidates.filter((c) => c.buyer_type === 'institutional').length;
-}
+const EVENT_SELECT =
+  'id,buyer_entity_id,buyer_key,buyer_name,buyer_type,is_corporate_buyer,' +
+  'comp_property_id,raw_id,property_address_full,property_zip,market,' +
+  'latitude,longitude,purchase_date,recording_date,purchase_price,purchase_price_source,' +
+  'document_type,normalized_asset_class,property_type,source,source_dedup_key';
 
 async function loadLocalPurchaseEvents(supabase, subject, buyerEntityIds = []) {
-  const select =
-    'id,buyer_entity_id,buyer_key,property_address_full,latitude,longitude,purchase_date,purchase_price,normalized_asset_class,property_zip';
   const limit = 250;
   let rows = [];
 
   if (subject.zip) {
     const { data } = await supabase
       .from('buyer_purchase_events_v2')
-      .select(select)
+      .select(EVENT_SELECT)
       .eq('property_zip', subject.zip)
       .not('purchase_price', 'is', null)
       .order('purchase_date', { ascending: false })
@@ -145,7 +150,7 @@ async function loadLocalPurchaseEvents(supabase, subject, buyerEntityIds = []) {
     const d = 0.35;
     const { data } = await supabase
       .from('buyer_purchase_events_v2')
-      .select(select)
+      .select(EVENT_SELECT)
       .gte('latitude', subject.lat - d)
       .lte('latitude', subject.lat + d)
       .gte('longitude', subject.lng - d)
@@ -159,7 +164,7 @@ async function loadLocalPurchaseEvents(supabase, subject, buyerEntityIds = []) {
   if (rows.length === 0 && subject.market) {
     const { data } = await supabase
       .from('buyer_purchase_events_v2')
-      .select(select)
+      .select(EVENT_SELECT)
       .eq('market', subject.market)
       .not('purchase_price', 'is', null)
       .order('purchase_date', { ascending: false })
@@ -170,7 +175,7 @@ async function loadLocalPurchaseEvents(supabase, subject, buyerEntityIds = []) {
   if (buyerEntityIds.length > 0 && rows.length < 20) {
     const { data } = await supabase
       .from('buyer_purchase_events_v2')
-      .select(select)
+      .select(EVENT_SELECT)
       .in('buyer_entity_id', buyerEntityIds.slice(0, 25))
       .not('purchase_price', 'is', null)
       .order('purchase_date', { ascending: false })
@@ -185,59 +190,23 @@ async function loadLocalPurchaseEvents(supabase, subject, buyerEntityIds = []) {
   return rows;
 }
 
-function mapPurchaseEvents(rows, subject) {
-  return rows.map((row) => {
-    const lat = num(row.latitude);
-    const lng = num(row.longitude);
-    const distanceMiles =
-      subject.lat !== null && subject.lng !== null && lat !== null && lng !== null
-        ? Math.round(haversineMiles(subject.lat, subject.lng, lat, lng) * 100) / 100
-        : null;
-    return {
-      eventId: String(row.id),
-      buyerId: row.buyer_entity_id ?? row.buyer_key ?? 'unknown',
-      address: row.property_address_full || 'Address unavailable',
-      latitude: lat,
-      longitude: lng,
-      purchaseDate: row.purchase_date ?? null,
-      purchasePrice: num(row.purchase_price),
-      assetLane: row.normalized_asset_class ?? null,
-      distanceMiles,
-      source: 'buyer_purchase_events_v2',
-    };
-  });
-}
-
-function mapRankedBuyers(candidates, confidence = 0) {
-  return candidates.map((c) => {
-    const low = num(c.likely_exit_low) ?? (num(c.median_purchase_price) ? Math.round(num(c.median_purchase_price) * 0.92) : null);
-    const base = num(c.median_purchase_price) ?? num(c.avg_purchase_price);
-    const high = num(c.likely_exit_high) ?? (num(c.median_purchase_price) ? Math.round(num(c.median_purchase_price) * 1.05) : null);
-    return {
-      buyerId: c.buyer_entity_id ?? c.buyer_key ?? c.buyer_name,
-      buyerName: c.buyer_name ?? c.buyer_display_name ?? 'Unknown buyer',
-      entityType: c.buyer_type ?? null,
-      buyerArchetype: mapBuyerArchetype(c),
-      institutionalStatus: mapInstitutionalStatus(c),
-      matchScore: num(c.total_match_score ?? c.match_score),
-      matchGrade: c.match_grade ?? null,
-      matchConfidence: confidence,
-      reasonSummary: buildReasonSummary(c),
-      likelyBidLow: low,
-      likelyBidBase: base,
-      likelyBidHigh: high,
-      purchases90d: null,
-      purchases180d: num(c.purchase_count_180d),
-      purchases365d: num(c.purchase_count_365d),
-      lastPurchaseAt: c.last_purchase_date ?? null,
-      nearestPurchaseMiles: num(c.distance_miles),
-      contactReadiness: 'ENRICHMENT_REQUIRED',
-    };
-  });
+async function loadBuyerEntities(supabase, buyerKeys = []) {
+  const keys = [...new Set(buyerKeys.filter(Boolean))].slice(0, 50);
+  if (!keys.length) return [];
+  const { data } = await supabase
+    .from('buyer_entities_v2')
+    .select(
+      'id,buyer_key,buyer_name,normalized_buyer_name,buyer_type,is_corporate_buyer,is_repeat_buyer,' +
+      'purchase_count,purchase_count_180d,purchase_count_365d,markets_active,zips_active,' +
+      'preferred_asset_classes,median_purchase_price,avg_purchase_price,investor_score,velocity_score',
+    )
+    .in('buyer_key', keys);
+  return data ?? [];
 }
 
 export function resolveMarketDataState({
   subject,
+  families,
   candidates,
   purchaseEvents,
   cached,
@@ -245,32 +214,69 @@ export function resolveMarketDataState({
   intelError,
   rollup,
 }) {
+  const familyList = families ?? candidates ?? [];
   if (intelError) return 'ERROR';
   if (!subject.is_subject_resolved && subject.lat === null && subject.lng === null && !subject.zip) {
     return 'SUBJECT_COORDINATES_REQUIRED';
   }
-  const localFallback = mapFallbackLevel(candidates[0]?.fallback_level ?? 'none');
-  const hasLocalBuyers = candidates.length > 0 && localFallback !== 'STATE' && localFallback !== 'NONE';
+  const localFallback = mapFallbackLevel(
+    familyList[0]?.match?.candidate?.fallback_level ?? familyList[0]?.fallback_level ?? 'none',
+  );
+  const hasLocalBuyers = familyList.length > 0 && localFallback !== 'STATE' && localFallback !== 'NONE';
   const hasLocalEvents = purchaseEvents.length > 0 && localFallback !== 'STATE';
 
-  if (!hasLocalBuyers && candidates.length === 0 && purchaseEvents.length === 0) {
+  if (!hasLocalBuyers && familyList.length === 0 && purchaseEvents.length === 0) {
     if (localFallback === 'STATE' || localFallback === 'MARKET') {
-      return candidates.length > 0 ? 'PARTIAL' : 'NO_LOCAL_DATA';
+      return familyList.length > 0 ? 'PARTIAL' : 'NO_LOCAL_DATA';
     }
     return 'NO_LOCAL_DATA';
   }
-  if (cacheIncomplete || (cached && purchaseEvents.length === 0 && candidates.length > 0)) {
+  if (cacheIncomplete || (cached && purchaseEvents.length === 0 && familyList.length > 0)) {
     return 'PARTIAL';
   }
-  if (!hasLocalEvents && candidates.length > 0) return 'PARTIAL';
+  if (!hasLocalEvents && familyList.length > 0) return 'PARTIAL';
   if (localFallback === 'STATE' || localFallback === 'MARKET') return 'PARTIAL';
-  if (!rollup && candidates.length > 0) return 'PARTIAL';
+  if (!rollup && familyList.length > 0) return 'PARTIAL';
   return 'READY';
 }
 
+function buildInstitutionalPlatforms(families, events) {
+  return families
+    .filter((f) => isVerifiedInstitutional(f))
+    .map((f) => {
+      const activity = aggregateFamilyActivity(f.buyerFamilyId, events, null, 25);
+      const bids = repairBidRange(f.match?.likelyBidLow, f.match?.likelyBidBase, f.match?.likelyBidHigh);
+      return {
+        platformId: f.buyerFamilyId,
+        platformName: f.displayName,
+        parentPlatform: f.parentPlatform,
+        platformType: f.classification?.buyerClass ?? 'UNKNOWN',
+        institutionalSubtype: f.classification?.institutionalSubtype ?? null,
+        legalEntities: f.legalEntities,
+        activity,
+        matchGrade: f.match?.matchGrade ?? null,
+        matchScore: f.match?.matchScore ?? null,
+        likelyBidLow: bids.low,
+        likelyBidBase: bids.base,
+        likelyBidHigh: bids.high,
+        strategyProfile: {
+          targetAssetTypes: f.match?.entity?.preferred_asset_classes ?? [],
+          targetZips: f.match?.entity?.zips_active ?? [],
+          targetMarkets: f.match?.entity?.markets_active ?? [],
+          typicalPriceMin: num(f.match?.entity?.preferred_price_min),
+          typicalPriceMax: num(f.match?.entity?.preferred_price_max),
+          singleAssetVsPackage: {
+            singleAssetPct: activity.singleAssetPct,
+            packagePct: activity.packagePct,
+          },
+          inferred: true,
+        },
+      };
+    });
+}
+
 /**
- * Build the V4 projection (read-only). Uses persist:false for live intel unless
- * serving a fresh cached run row (read-only SELECT).
+ * Build the V4 projection (read-only).
  */
 export async function buildBuyerMatchV4Projection({
   supabase,
@@ -324,21 +330,53 @@ export async function buildBuyerMatchV4Projection({
     coordinates_unavailable: subject.is_subject_resolved === false,
   });
 
+  const buyerKeys = candidates.map((c) => c.buyer_key).filter(Boolean);
   const buyerEntityIds = candidates.map((c) => c.buyer_entity_id).filter(Boolean);
+  const entityRows = intelError ? [] : await loadBuyerEntities(supabase, buyerKeys);
+  const entityByKey = new Map(entityRows.map((e) => [e.buyer_key, e]));
+
+  const buyerFamilies = buildBuyerFamilyProjections(candidates, entityByKey);
+
+  const familyByEntity = new Map();
+  const buyerClassByFamily = new Map();
+  for (const f of buyerFamilies) {
+    buyerClassByFamily.set(f.buyerFamilyId, f.classification?.buyerClass ?? 'UNKNOWN');
+    if (f.buyerFamilyId) familyByEntity.set(f.buyerFamilyId, f.buyerFamilyId);
+    for (const le of f.legalEntities) {
+      if (le.entityId) familyByEntity.set(le.entityId, f.buyerFamilyId);
+    }
+    const bk = f.match?.candidate?.buyer_key;
+    if (bk) familyByEntity.set(bk, f.buyerFamilyId);
+  }
+
   const purchaseEventRows = intelError
     ? []
     : await loadLocalPurchaseEvents(supabase, subject, buyerEntityIds);
-  const purchaseEvents = mapPurchaseEvents(purchaseEventRows, subject);
-  const mappedPurchaseEventCount = purchaseEvents.filter(
-    (e) => e.latitude !== null && e.longitude !== null,
-  ).length;
+  const purchaseEvents = buildCanonicalPurchaseEvents(
+    purchaseEventRows,
+    subject,
+    familyByEntity,
+    buyerClassByFamily,
+  );
+  const mappedPurchaseEventCount = countGeocodedEvents(purchaseEvents);
+
+  const rankedBuyers = buyerFamilies
+    .filter((f) => isEligibleDispositionFamily(f))
+    .map((f) => {
+      const activity = aggregateFamilyActivity(f.buyerFamilyId, purchaseEvents, subject.zip, subject.radius_miles ?? 25);
+      return familyToRankedBuyer(f, activity);
+    })
+    .sort((a, b) => (num(b.matchScore) ?? 0) - (num(a.matchScore) ?? 0));
+
+  const institutionalPlatforms = buildInstitutionalPlatforms(buyerFamilies, purchaseEvents);
+  const marketCounts = buildMarketIntelligenceCounts(buyerFamilies, purchaseEvents);
 
   const acquisitionContext = resolveAcquisitionContext(subject, context);
   const fallbackLevel = mapFallbackLevel(intel?.fallback_level ?? candidates[0]?.fallback_level ?? 'none');
-  const highFitCount = candidates.filter((c) => c.match_grade === 'A+' || c.match_grade === 'A').length;
+  const highFitCount = rankedBuyers.filter((b) => b.matchGrade === 'A+' || b.matchGrade === 'A').length;
   const dataState = resolveMarketDataState({
     subject,
-    candidates,
+    families: buyerFamilies,
     purchaseEvents,
     cached,
     cacheIncomplete,
@@ -346,7 +384,13 @@ export async function buildBuyerMatchV4Projection({
     rollup: intel?.buyer_rollup,
   });
 
-  const bidRange = buyerDemand.likely_buyer_price_range ?? null;
+  const bidRange = repairBidRange(
+    buyerDemand.likely_buyer_price_range?.low,
+    buyerDemand.likely_buyer_price_range
+      ? Math.round((buyerDemand.likely_buyer_price_range.low + buyerDemand.likely_buyer_price_range.high) / 2)
+      : null,
+    buyerDemand.likely_buyer_price_range?.high,
+  );
 
   return {
     version: BUYER_MATCH_V4_VERSION,
@@ -362,31 +406,44 @@ export async function buildBuyerMatchV4Projection({
     market: {
       dataState,
       fallbackLevel,
-      verifiedBuyerCount: candidates.length > 0 ? candidates.length : null,
-      highFitBuyerCount: highFitCount > 0 ? highFitCount : null,
-      activeBuyerCount90d: candidates.length > 0 ? countActiveBuyers(candidates, 90) : null,
-      activeBuyerCount180d: candidates.length > 0 ? countActiveBuyers(candidates, 180) : null,
-      institutionalBuyerCount: countInstitutional(candidates) || null,
+      verifiedBuyerCount: marketCounts.eligibleBuyerFamilies,
+      highFitBuyerCount: marketCounts.highFitFamilies,
+      activeBuyerCount30d: buyerFamilies.length > 0 ? countActiveFamilies(buyerFamilies, 30) : null,
+      activeBuyerCount90d: buyerFamilies.length > 0 ? countActiveFamilies(buyerFamilies, 90) : null,
+      activeBuyerCount180d: buyerFamilies.length > 0 ? countActiveFamilies(buyerFamilies, 180) : null,
+      institutionalBuyerCount: marketCounts.institutionalPlatforms,
+      localRegionalBuyerCount: marketCounts.localRegionalFamilies,
+      builderBuyerCount: marketCounts.builderFamilies,
+      governmentNonMarketCount: marketCounts.governmentNonMarketFamilies,
+      unresolvedIdentityCount: marketCounts.unresolvedIdentities,
       repeatBuyerCount: buyerDemand.repeat_buyer_count ?? null,
-      verifiedPurchaseEventCount: purchaseEvents.length > 0 ? purchaseEvents.length : null,
+      verifiedPurchaseEventCount: marketCounts.uniquePurchaseEvents,
       mappedPurchaseEventCount: mappedPurchaseEventCount > 0 ? mappedPurchaseEventCount : null,
-      likelyBidLow: bidRange?.low ?? null,
-      likelyBidBase: bidRange ? Math.round((bidRange.low + bidRange.high) / 2) : null,
-      likelyBidHigh: bidRange?.high ?? null,
+      uniquePurchasedAssetCount: marketCounts.uniquePurchasedAssets,
+      packageEventCount: marketCounts.packageEventCount,
+      packageAssetCount: marketCounts.packageAssetCount,
+      qualifiedSingleAssetCount: marketCounts.qualifiedSingleAssetCount,
+      likelyBidLow: bidRange.low,
+      likelyBidBase: bidRange.base,
+      likelyBidHigh: bidRange.high,
       liquidityScore: intel?.liquidity_score ?? buyerDemand.liquidity_score ?? null,
       demandScore: intel?.demand_score ?? buyerDemand.demand_score ?? null,
       refreshedAt: generatedAt,
       cacheIncomplete: cacheIncomplete || undefined,
+      ...marketCounts,
     },
-    rankedBuyers: mapRankedBuyers(candidates, intel?.confidence ?? 0),
+    buyerFamilies,
+    rankedBuyers,
     purchaseEvents,
-    institutionalActivity: [],
+    institutionalPlatforms,
+    institutionalActivity: institutionalPlatforms,
     shortlist: [],
     meta: {
       cached,
       query_ms: Date.now() - startedAt,
       model_version: intel?.model_version ?? null,
       error: intelError,
+      geocodedEventCount: mappedPurchaseEventCount,
       phase4_cache_note: cacheIncomplete
         ? 'Cached run missing rollup/comps — Phase 4 will rehydrate purchase events in cache path'
         : undefined,

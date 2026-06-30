@@ -1,6 +1,12 @@
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { BuyerRecentPurchase } from '../../views/buyer-match/buyerCommandData'
 import type { RecentSoldComp } from '../../lib/data/commandMapData'
+import {
+  buildLiveActivityFeedSnapshot,
+  type LiveActivityChannel,
+  type LiveActivityFeedSnapshot,
+  type LiveActivityScope,
+} from './live-activity-engine'
 
 export type CommandMapActivityType =
   | 'message_sent'
@@ -78,6 +84,11 @@ export type CommandMapLiveActivitySettings = {
   pinHotEvents: boolean
   autoPinCriticalSeconds: number
   subtleSpeedVariance: boolean
+  scope: LiveActivityScope
+  activeChannel: LiveActivityChannel
+  showMapRipples: boolean
+  openTargetOnClick: boolean
+  retentionDays: number
 }
 
 export type CommandMapPerformanceMode = 'auto' | 'quality' | 'balanced' | 'speed'
@@ -181,16 +192,6 @@ const formatRelative = (value: string | null | undefined): string => {
   return minutes < 0 ? `in ${Math.ceil(Math.abs(minutes) / 1440)}d` : `${Math.floor(minutes / 1440)}d ago`
 }
 
-const formatCompactCurrency = (value: number | null | undefined): string | undefined => {
-  if (!Number.isFinite(value ?? NaN)) return undefined
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value as number)
-}
-
 const resolveSellerName = (thread: InboxWorkflowThread | null, pin: CommandMapActivityPinSource): string =>
   [
     text((thread as any)?.owner_display_name),
@@ -218,12 +219,6 @@ const resolveMarket = (thread: InboxWorkflowThread | null, pin: CommandMapActivi
     [text((thread as any)?.property_address_city || pin.property_address_city || pin.city), text((thread as any)?.property_address_state || pin.property_address_state || pin.state)].filter(Boolean).join(', '),
     text(pin.market),
   ].find(Boolean) || 'Market Unknown'
-
-const isWithinBounds = (lat: number | undefined, lng: number | undefined, bounds?: CommandMapBounds | null): boolean => {
-  if (!bounds) return true
-  if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false
-  return lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east
-}
 
 export const getActivityPriority = (event: Pick<CommandMapActivityEvent, 'type' | 'createdAt'>): CommandMapActivityPriority => {
   if (event.type === 'contract' || event.type === 'closing' || event.type === 'routing_block' || event.type === 'opt_out' || event.type === 'automation_block' || event.type === 'system_alert' || event.type === 'message_failed' || event.type === 'queue_blocked' || event.type === 'missing_message_event' || event.type === 'provider_id_missing') {
@@ -271,7 +266,7 @@ export const loadLiveActivitySettings = (isUltrawide = false): CommandMapLiveAct
     displayMode: isUltrawide ? 'compact' : 'minimal',
     speed: 'normal',
     pauseOnHover: true,
-    onlyCurrentBounds: false,
+    onlyCurrentBounds: true,
     onlySelectedMarket: false,
     onlyHotCritical: false,
     maxCardsVisible: isUltrawide ? 28 : 18,
@@ -280,6 +275,11 @@ export const loadLiveActivitySettings = (isUltrawide = false): CommandMapLiveAct
     pinHotEvents: true,
     autoPinCriticalSeconds: 22,
     subtleSpeedVariance: true,
+    scope: 'viewport',
+    activeChannel: 'live',
+    showMapRipples: true,
+    openTargetOnClick: true,
+    retentionDays: 14,
   }
   if (typeof window === 'undefined') return defaults
   try {
@@ -342,7 +342,7 @@ const normalizeLiveActivityEvent = (event: CommandMapActivityEvent): CommandMapA
   }
 }
 
-const maybeBuildPinEvent = (
+export const maybeBuildPinEvent = (
   pin: CommandMapActivityPinSource,
   thread: InboxWorkflowThread | null,
 ): CommandMapActivityEvent | null => {
@@ -730,106 +730,23 @@ type LiveActivityFeedArgs = {
   selectedMarket?: string | null
   bounds?: CommandMapBounds | null
   selectedThread?: InboxWorkflowThread | null
+  selectedPropertyId?: string | null
 }
 
-export const loadLiveActivityFeed = ({
-  pins,
-  threadsById,
-  buyerPurchases = [],
-  soldComps = [],
-  settings,
-  selectedMarket,
-  bounds,
-  selectedThread,
-}: LiveActivityFeedArgs): CommandMapActivityEvent[] => {
-  const prioritizedPins = pins
-    .slice()
-    .sort((left, right) => {
-      const lp = Number(left.priority_score ?? 0)
-      const rp = Number(right.priority_score ?? 0)
-      if (rp !== lp) return rp - lp
-      const lHot = left.activity_state === 'hot' || left.activity_state === 'replied' || left.activity_state === 'needs_review' ? 1 : 0
-      const rHot = right.activity_state === 'hot' || right.activity_state === 'replied' || right.activity_state === 'needs_review' ? 1 : 0
-      if (rHot !== lHot) return rHot - lHot
-      return new Date(right.last_activity_at || 0).getTime() - new Date(left.last_activity_at || 0).getTime()
-    })
-    .slice(0, 240)
-
-  const pinEvents = prioritizedPins
-    .map((pin) => maybeBuildPinEvent(pin, threadsById.get(pin.conversation_id) || null))
-    .filter((event): event is CommandMapActivityEvent => Boolean(event))
-
-  const buyerEvents = buyerPurchases.slice(0, 8).map((purchase) =>
-    normalizeLiveActivityEvent({
-      id: `buyer-${purchase.buyerKey}-${purchase.propertyId}-${purchase.saleDate || ''}`,
-      type: 'buyer_activity',
-      priority: 'info',
-      title: purchase.buyerName || 'Buyer Activity',
-      subtitle: purchase.market || 'Market Unknown',
-      address: purchase.propertyAddressFull || 'Property Unknown',
-      detail: `Recent purchase${purchase.saleDate ? ` • ${formatRelative(purchase.saleDate)}` : ''}`,
-      market: purchase.market || undefined,
-      createdAt: purchase.saleDate || new Date().toISOString(),
-      lat: purchase.latitude,
-      lng: purchase.longitude,
-      targetType: 'buyer',
-      targetId: purchase.buyerKey,
-      actionLabel: 'View Trail',
-      badgeLabel: 'Buyer Active',
-      valueLabel: formatCompactCurrency(purchase.salePrice ?? null),
-      scoreLabel: Number.isFinite(purchase.investorFitScore ?? NaN) ? `Fit ${Math.round(purchase.investorFitScore as number)}` : undefined,
-    }),
-  )
-
-  const subjectLat = Number((selectedThread as any)?.lat ?? (selectedThread as any)?.latitude ?? NaN)
-  const subjectLng = Number((selectedThread as any)?.lng ?? (selectedThread as any)?.longitude ?? NaN)
-  const soldCompEvents = soldComps.slice(0, 10).map((comp) => {
-    const distance =
-      Number.isFinite(subjectLat) && Number.isFinite(subjectLng)
-        ? haversineMiles(subjectLat, subjectLng, comp.latitude, comp.longitude)
-        : null
-    return normalizeLiveActivityEvent({
-      id: `sold-comp-${comp.property_id}-${comp.sale_date || comp.mls_sold_date || ''}`,
-      type: 'sold_comp',
-      priority: 'info',
-      title: comp.property_address_full || 'Sold Comp',
-      subtitle: `${comp.property_address_city || ''}${comp.property_address_state ? `, ${comp.property_address_state}` : ''}`.trim() || 'Market Unknown',
-      address: comp.property_address_full || 'Property Unknown',
-      detail: distance != null ? `${distance.toFixed(distance < 1 ? 2 : 1)} mi from selected property` : (comp.sale_source || 'Recent sold comp'),
-      market: `${comp.property_address_city || ''}${comp.property_address_state ? `, ${comp.property_address_state}` : ''}`.trim() || undefined,
-      createdAt: comp.sale_date || comp.mls_sold_date || new Date().toISOString(),
-      lat: comp.latitude,
-      lng: comp.longitude,
-      targetType: 'sold_comp',
-      targetId: comp.property_id,
-      actionLabel: 'Open Comp',
-      badgeLabel: 'Sold Comp',
-      valueLabel: formatCompactCurrency(comp.sale_price ?? comp.mls_sold_price ?? null),
-      scoreLabel: Number.isFinite(comp.comp_confidence_score ?? NaN) ? `Conf ${Math.round(comp.comp_confidence_score as number)}` : undefined,
-    })
+export const loadLiveActivityFeedSnapshot = (args: LiveActivityFeedArgs): LiveActivityFeedSnapshot => {
+  const effectiveSettings: CommandMapLiveActivitySettings = {
+    ...args.settings,
+    scope: args.settings.scope
+      ?? (args.settings.onlyCurrentBounds ? 'viewport' : 'global'),
+  }
+  return buildLiveActivityFeedSnapshot({
+    ...args,
+    settings: effectiveSettings,
+    buildPinEvent: maybeBuildPinEvent,
   })
-
-  return [...pinEvents, ...buyerEvents, ...soldCompEvents]
-    .filter((event) => settings.eventTypes[event.type])
-    .filter((event) => !settings.onlyHotCritical || event.priority === 'hot' || event.priority === 'critical')
-    .filter((event) => !settings.onlySelectedMarket || !selectedMarket || event.market === selectedMarket || event.subtitle === selectedMarket)
-    .filter((event) => !settings.onlyCurrentBounds || isWithinBounds(event.lat, event.lng, bounds))
-    .sort((left, right) => {
-      const priorityWeight: Record<CommandMapActivityPriority, number> = { critical: 5, hot: 4, normal: 3, info: 2, muted: 1 }
-      const weightDelta = priorityWeight[right.priority] - priorityWeight[left.priority]
-      if (weightDelta !== 0) return weightDelta
-      return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
-    })
-    .slice(0, Math.min(100, Math.max(8, settings.maxCardsVisible)))
 }
 
-const haversineMiles = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-  const toRadians = (value: number) => (value * Math.PI) / 180
-  const earthRadiusMiles = 3958.8
-  const dLat = toRadians(lat2 - lat1)
-  const dLng = toRadians(lng2 - lng1)
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2)
-    + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
-  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
+export const loadLiveActivityFeed = (args: LiveActivityFeedArgs): CommandMapActivityEvent[] =>
+  loadLiveActivityFeedSnapshot(args).visible
+
+export type { LiveActivityFeedSnapshot, LiveActivityScope, LiveActivityChannel }

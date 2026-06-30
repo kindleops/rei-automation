@@ -1,4 +1,11 @@
 import type maplibregl from 'maplibre-gl'
+import {
+  CARTO_VECTOR_DARK_STYLE_URL,
+  CARTO_VECTOR_LIGHT_STYLE_URL,
+  getMapVisualPreset,
+  normalizeMapVisualPresetId,
+  type MapVisualPresetId,
+} from './map-visual-presets'
 
 const CARTO_DARK_RASTER_TILES = [
   'https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png',
@@ -90,8 +97,9 @@ const MAP_STYLES = {
   },
   redOps: {
     label: 'Red Ops',
-    tileUrl: CARTO_DARK_NOLABELS_RASTER_TILES,
-    attribution: 'CARTO',
+    tileUrl: ESRI_SATELLITE_TILES,
+    attribution: 'Esri World Imagery',
+    maxzoom: 19,
   },
   executive: {
     label: 'Executive',
@@ -100,7 +108,7 @@ const MAP_STYLES = {
   },
   blueprint: {
     label: 'Blueprint',
-    tileUrl: CARTO_DARK_NOLABELS_RASTER_TILES,
+    tileUrl: CARTO_DARK_RASTER_TILES,
     attribution: 'CARTO',
   },
   lightStreet: {
@@ -126,57 +134,33 @@ const MAP_STYLES = {
   },
   matrix: {
     label: 'Matrix',
-    tileUrl: CARTO_DARK_NOLABELS_RASTER_TILES,
+    tileUrl: CARTO_DARK_RASTER_TILES,
     attribution: 'CARTO',
   },
 } satisfies Record<string, MapStyleRegistryEntry>
 
 const SATELLITE_MAP_STYLE = buildRasterStyle('satellite', 'satellite', MAP_STYLES.satellite)
 const TERRAIN_MAP_STYLE = buildRasterStyle('terrain', 'terrain', MAP_STYLES.terrain)
-const OVERLAY_DARK_MAP_STYLE = buildRasterStyle('overlay_dark', 'overlay-dark', MAP_STYLES.dark)
-const RED_OPS_MAP_STYLE = buildRasterStyle('overlay_red_ops', 'overlay-red-ops', MAP_STYLES.redOps)
-const EXECUTIVE_MAP_STYLE = buildRasterStyle('overlay_executive', 'overlay-executive', MAP_STYLES.executive)
-const BLUEPRINT_MAP_STYLE = buildRasterStyle('overlay_blueprint', 'overlay-blueprint', MAP_STYLES.blueprint)
-const LIGHT_STREET_MAP_STYLE = buildRasterStyle('light_street', 'light-street', MAP_STYLES.lightStreet)
-const MONOCHROME_MAP_STYLE = buildRasterStyle('overlay_monochrome', 'overlay-monochrome', MAP_STYLES.monochrome)
-const NIGHT_VISION_MAP_STYLE = buildRasterStyle('overlay_night_vision', 'overlay-night-vision', MAP_STYLES.nightVision)
-const MATRIX_MAP_STYLE = buildRasterStyle('overlay_matrix', 'overlay-matrix', MAP_STYLES.matrix)
-
-export type CommandMapThemeId =
-  | 'satellite'
-  | 'dark_ops'
-  | 'red_ops'
-  | 'executive'
-  | 'blueprint'
-  | 'light_street'
-  | 'terrain'
-  | 'monochrome'
-  | 'night_vision'
-  | 'matrix'
+export type CommandMapThemeId = MapVisualPresetId
 
 export type LegacyCommandMapThemeId =
   | 'midnight'
   | 'minimal_black'
   | 'acquisition_radar'
+  | 'night_vision'
 
 export type MapStyleMode = CommandMapThemeId
 
 type ThemePaintVariant = CommandMapThemeId
-type StyleSource = maplibregl.StyleSpecification
+type StyleSource = maplibregl.StyleSpecification | string
 
 export type CommandMapThemeMode = 'basemap' | 'overlay'
 
 export type CommandMapBaseStyleId =
   | 'satellite'
   | 'terrain'
-  | 'overlay_dark'
-  | 'overlay_red_ops'
-  | 'overlay_executive'
-  | 'overlay_blueprint'
-  | 'light_street'
-  | 'overlay_monochrome'
-  | 'overlay_night_vision'
-  | 'overlay_matrix'
+  | 'vector_dark'
+  | 'vector_light'
 
 export type CommandMapThemeDefinition = {
   id: CommandMapThemeId
@@ -361,7 +345,7 @@ const PIN_PALETTES: Record<CommandMapThemeId, Record<string, string>> = {
     sent: '#b0b8c4',
     delivered: '#c8d0dc',
   },
-  night_vision: {
+  radar_night: {
     not_contacted: '#3a6a58',
     contacted: '#51d6ff',
     new_reply: '#7cf7ff',
@@ -401,214 +385,153 @@ const PIN_PALETTES: Record<CommandMapThemeId, Record<string, string>> = {
   },
 }
 
+const hexToRgbTuple = (hex: string): string => {
+  const normalized = hex.replace('#', '')
+  const full = normalized.length === 3 ? normalized.split('').map((c) => c + c).join('') : normalized
+  return `${parseInt(full.slice(0, 2), 16)}, ${parseInt(full.slice(2, 4), 16)}, ${parseInt(full.slice(4, 6), 16)}`
+}
+
+const buildCardThemeFromPreset = (presetId: CommandMapThemeId): Record<string, string> => {
+  const preset = getMapVisualPreset(presetId)
+  const iface = preset.interface
+  return {
+    '--nx-card-accent': iface.accent,
+    '--nx-card-accent-rgb': hexToRgbTuple(iface.accent),
+    '--nx-card-accent-soft': iface.ambientGlow,
+    '--nx-card-shell-top': iface.glassTintStrong,
+    '--nx-card-shell-bottom': iface.glassTint,
+    '--nx-card-border': iface.glassBorder,
+    '--nx-card-glow': iface.ambientGlow,
+    '--nx-card-shadow': 'rgba(0, 0, 0, 0.56)',
+    '--nx-card-tile': 'rgba(255, 255, 255, 0.04)',
+    '--nx-card-tile-border': iface.glassBorder,
+    '--nx-card-message': 'rgba(255, 255, 255, 0.03)',
+    '--nx-card-live': iface.activityAccent,
+    '--nx-card-input': iface.glassTint,
+  }
+}
+
+const clusterPaletteFromPreset = (presetId: CommandMapThemeId) => {
+  const preset = getMapVisualPreset(presetId)
+  const b = preset.basemap
+  const m = preset.markers
+  return {
+    glow: m.clusterTint,
+    core: b.land,
+    stroke: m.inactiveStroke,
+    label: b.labelPrimary,
+    halo: b.labelHalo,
+  }
+}
+
 export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefinition> = {
   satellite: {
     id: 'satellite',
-    label: 'Satellite',
+    label: 'Satellite Recon',
     mode: 'basemap',
     baseStyleId: 'satellite',
     mapStyleObject: SATELLITE_MAP_STYLE,
     style: SATELLITE_MAP_STYLE,
-    accentColor: '#e5edf8',
+    accentColor: getMapVisualPreset('satellite').interface.accent,
     pinPalette: PIN_PALETTES.satellite,
-    clusterPalette: {
-      glow: 'rgba(214, 229, 248, 0.24)',
-      core: '#11161c',
-      stroke: 'rgba(229, 237, 248, 0.96)',
-      label: '#f4f7fb',
-      halo: 'rgba(12, 16, 22, 0.92)',
-    },
+    clusterPalette: clusterPaletteFromPreset('satellite'),
     overlayClassName: 'nx-icm--theme-satellite',
     supportsTerrain: false,
     supportsSatellite: true,
     isHighContrast: false,
     fallbackThemeId: 'monochrome',
-    cardTheme: {
-      '--nx-card-accent': '#e5edf8',
-      '--nx-card-accent-rgb': '229, 237, 248',
-      '--nx-card-accent-soft': 'rgba(229, 237, 248, 0.12)',
-      '--nx-card-shell-top': 'rgba(14, 16, 18, 0.9)',
-      '--nx-card-shell-bottom': 'rgba(10, 12, 14, 0.84)',
-      '--nx-card-border': 'rgba(218, 230, 244, 0.12)',
-      '--nx-card-glow': 'rgba(16, 18, 20, 0.2)',
-      '--nx-card-shadow': 'rgba(0, 0, 0, 0.52)',
-      '--nx-card-tile': 'rgba(255, 255, 255, 0.03)',
-      '--nx-card-tile-border': 'rgba(255, 255, 255, 0.07)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.026)',
-      '--nx-card-live': '#f4f7fb',
-      '--nx-card-input': 'rgba(18, 20, 22, 0.8)',
-    },
+    cardTheme: buildCardThemeFromPreset('satellite'),
     heatmapStops: ['rgba(0,0,0,0)', '#31444f', '#5f8c95', '#c2aa6b', '#eedfb0'],
     soldCompColor: '#ef4444',
-    buyerAccent: '#f0b25a',
+    buyerAccent: '#49C8FF',
     baseStyleTone: 'satellite',
   },
 
   dark_ops: {
     id: 'dark_ops',
-    label: 'Dark',
-    mode: 'overlay',
-    baseStyleId: 'overlay_dark',
-    mapStyleObject: OVERLAY_DARK_MAP_STYLE,
-    style: OVERLAY_DARK_MAP_STYLE,
-    accentColor: '#63d7ff',
+    label: 'DarkOps',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('dark_ops').interface.accent,
     pinPalette: PIN_PALETTES.dark_ops,
-    clusterPalette: {
-      glow: 'rgba(82, 196, 255, 0.18)',
-      core: '#09121d',
-      stroke: 'rgba(98, 217, 255, 0.94)',
-      label: '#eaf7ff',
-      halo: 'rgba(8, 12, 18, 0.94)',
-    },
+    clusterPalette: clusterPaletteFromPreset('dark_ops'),
     overlayClassName: 'nx-icm--theme-dark-ops',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
     fallbackThemeId: 'monochrome',
-    cardTheme: {
-      '--nx-card-accent': '#63d7ff',
-      '--nx-card-accent-rgb': '99, 215, 255',
-      '--nx-card-accent-soft': 'rgba(99, 215, 255, 0.18)',
-      '--nx-card-shell-top': 'rgba(8, 14, 24, 0.96)',
-      '--nx-card-shell-bottom': 'rgba(5, 10, 18, 0.94)',
-      '--nx-card-border': 'rgba(132, 191, 255, 0.18)',
-      '--nx-card-glow': 'rgba(42, 118, 255, 0.22)',
-      '--nx-card-shadow': 'rgba(4, 12, 28, 0.58)',
-      '--nx-card-tile': 'rgba(255, 255, 255, 0.045)',
-      '--nx-card-tile-border': 'rgba(167, 204, 255, 0.08)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.038)',
-      '--nx-card-live': '#68d9ff',
-      '--nx-card-input': 'rgba(10, 16, 28, 0.82)',
-    },
+    cardTheme: buildCardThemeFromPreset('dark_ops'),
     heatmapStops: ['rgba(0,0,0,0)', '#0c2434', '#1683a6', '#4cd0b0', '#9ff5cb'],
     soldCompColor: '#ef4444',
-    buyerAccent: '#f0b25a',
+    buyerAccent: '#719CFF',
     baseStyleTone: 'dark_ops',
   },
 
   red_ops: {
     id: 'red_ops',
-    label: 'Red Ops',
-    mode: 'overlay',
-    baseStyleId: 'overlay_red_ops',
-    mapStyleObject: RED_OPS_MAP_STYLE,
-    style: RED_OPS_MAP_STYLE,
-    accentColor: '#ff4d4d',
+    label: 'RedOps',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('red_ops').interface.accent,
     pinPalette: PIN_PALETTES.red_ops,
-    clusterPalette: {
-      glow: 'rgba(255, 107, 99, 0.18)',
-      core: '#16090d',
-      stroke: 'rgba(255, 129, 122, 0.92)',
-      label: '#fff2ee',
-      halo: 'rgba(14, 6, 8, 0.96)',
-    },
+    clusterPalette: clusterPaletteFromPreset('red_ops'),
     overlayClassName: 'nx-icm--theme-red-ops',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
     fallbackThemeId: 'monochrome',
-    cardTheme: {
-      '--nx-card-accent': '#ff4d4d',
-      '--nx-card-accent-rgb': '255, 77, 77',
-      '--nx-card-accent-soft': 'rgba(255, 107, 99, 0.16)',
-      '--nx-card-shell-top': 'rgba(15, 8, 10, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(10, 5, 8, 0.95)',
-      '--nx-card-border': 'rgba(255, 118, 118, 0.2)',
-      '--nx-card-glow': 'rgba(191, 29, 29, 0.28)',
-      '--nx-card-shadow': 'rgba(24, 3, 5, 0.62)',
-      '--nx-card-tile': 'rgba(255, 107, 99, 0.045)',
-      '--nx-card-tile-border': 'rgba(255, 137, 128, 0.1)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.03)',
-      '--nx-card-live': '#ff4d4d',
-      '--nx-card-input': 'rgba(18, 10, 14, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('red_ops'),
     heatmapStops: ['rgba(0,0,0,0)', '#5b1015', '#c43e35', '#ff8e45', '#ffd67a'],
     soldCompColor: '#ff6b63',
-    buyerAccent: '#ff9c6e',
+    buyerAccent: '#FF9B87',
     baseStyleTone: 'red_ops',
   },
 
   executive: {
     id: 'executive',
     label: 'Executive',
-    mode: 'overlay',
-    baseStyleId: 'overlay_executive',
-    mapStyleObject: EXECUTIVE_MAP_STYLE,
-    style: EXECUTIVE_MAP_STYLE,
-    accentColor: '#dcbf74',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('executive').interface.accent,
     pinPalette: PIN_PALETTES.executive,
-    clusterPalette: {
-      glow: 'rgba(220, 191, 116, 0.16)',
-      core: '#111014',
-      stroke: 'rgba(220, 191, 116, 0.94)',
-      label: '#fff9e8',
-      halo: 'rgba(6, 6, 10, 0.94)',
-    },
+    clusterPalette: clusterPaletteFromPreset('executive'),
     overlayClassName: 'nx-icm--theme-executive',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
     fallbackThemeId: 'dark_ops',
-    cardTheme: {
-      '--nx-card-accent': '#dcbf74',
-      '--nx-card-accent-rgb': '220, 191, 116',
-      '--nx-card-accent-soft': 'rgba(220, 191, 116, 0.18)',
-      '--nx-card-shell-top': 'rgba(16, 15, 18, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(8, 8, 12, 0.95)',
-      '--nx-card-border': 'rgba(220, 191, 116, 0.22)',
-      '--nx-card-glow': 'rgba(220, 191, 116, 0.18)',
-      '--nx-card-shadow': 'rgba(3, 3, 8, 0.6)',
-      '--nx-card-tile': 'rgba(220, 191, 116, 0.05)',
-      '--nx-card-tile-border': 'rgba(220, 191, 116, 0.1)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.038)',
-      '--nx-card-live': '#f3ddb0',
-      '--nx-card-input': 'rgba(10, 10, 14, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('executive'),
     heatmapStops: ['rgba(0,0,0,0)', '#221c10', '#705f32', '#dcbf74', '#fff4c2'],
     soldCompColor: '#f97316',
-    buyerAccent: '#dcbf74',
+    buyerAccent: '#D7B66A',
     baseStyleTone: 'executive',
   },
 
   blueprint: {
     id: 'blueprint',
     label: 'Blueprint',
-    mode: 'overlay',
-    baseStyleId: 'overlay_blueprint',
-    mapStyleObject: BLUEPRINT_MAP_STYLE,
-    style: BLUEPRINT_MAP_STYLE,
-    accentColor: '#56d9e8',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('blueprint').interface.accent,
     pinPalette: PIN_PALETTES.blueprint,
-    clusterPalette: {
-      glow: 'rgba(80, 204, 255, 0.18)',
-      core: '#071c26',
-      stroke: 'rgba(103, 224, 255, 0.94)',
-      label: '#dff8ff',
-      halo: 'rgba(3, 11, 18, 0.94)',
-    },
+    clusterPalette: clusterPaletteFromPreset('blueprint'),
     overlayClassName: 'nx-icm--theme-blueprint',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
     fallbackThemeId: 'dark_ops',
-    cardTheme: {
-      '--nx-card-accent': '#56d9e8',
-      '--nx-card-accent-rgb': '86, 217, 232',
-      '--nx-card-accent-soft': 'rgba(86, 217, 232, 0.2)',
-      '--nx-card-shell-top': 'rgba(6, 23, 30, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(4, 15, 21, 0.95)',
-      '--nx-card-border': 'rgba(122, 214, 255, 0.18)',
-      '--nx-card-glow': 'rgba(29, 120, 170, 0.22)',
-      '--nx-card-shadow': 'rgba(2, 10, 18, 0.6)',
-      '--nx-card-tile': 'rgba(105, 215, 255, 0.05)',
-      '--nx-card-tile-border': 'rgba(172, 233, 255, 0.08)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.038)',
-      '--nx-card-live': '#8ff2fa',
-      '--nx-card-input': 'rgba(7, 19, 28, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('blueprint'),
     heatmapStops: ['rgba(0,0,0,0)', '#0a3148', '#1c668f', '#57c0d9', '#d4fbff'],
     soldCompColor: '#f87171',
-    buyerAccent: '#83e6ff',
+    buyerAccent: '#26D7FF',
     baseStyleTone: 'blueprint',
   },
 
@@ -616,41 +539,21 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     id: 'light_street',
     label: 'Light Street',
     mode: 'basemap',
-    baseStyleId: 'light_street',
-    mapStyleObject: LIGHT_STREET_MAP_STYLE,
-    style: LIGHT_STREET_MAP_STYLE,
-    accentColor: '#1d4ed8',
+    baseStyleId: 'vector_light',
+    mapStyleUrl: CARTO_VECTOR_LIGHT_STYLE_URL,
+    style: CARTO_VECTOR_LIGHT_STYLE_URL,
+    accentColor: getMapVisualPreset('light_street').interface.accent,
     pinPalette: PIN_PALETTES.light_street,
-    clusterPalette: {
-      glow: 'rgba(37, 99, 235, 0.14)',
-      core: '#ffffff',
-      stroke: 'rgba(37, 99, 235, 0.82)',
-      label: '#0f172a',
-      halo: 'rgba(255, 255, 255, 0.96)',
-    },
+    clusterPalette: clusterPaletteFromPreset('light_street'),
     overlayClassName: 'nx-icm--theme-light-street',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
     fallbackThemeId: 'satellite',
-    cardTheme: {
-      '--nx-card-accent': '#1d4ed8',
-      '--nx-card-accent-rgb': '29, 78, 216',
-      '--nx-card-accent-soft': 'rgba(29, 78, 216, 0.12)',
-      '--nx-card-shell-top': 'rgba(255, 255, 255, 0.96)',
-      '--nx-card-shell-bottom': 'rgba(244, 248, 252, 0.96)',
-      '--nx-card-border': 'rgba(59, 130, 246, 0.18)',
-      '--nx-card-glow': 'rgba(37, 99, 235, 0.14)',
-      '--nx-card-shadow': 'rgba(15, 23, 42, 0.12)',
-      '--nx-card-tile': 'rgba(15, 23, 42, 0.03)',
-      '--nx-card-tile-border': 'rgba(37, 99, 235, 0.08)',
-      '--nx-card-message': 'rgba(15, 23, 42, 0.03)',
-      '--nx-card-live': '#1d4ed8',
-      '--nx-card-input': 'rgba(255, 255, 255, 0.94)',
-    },
+    cardTheme: buildCardThemeFromPreset('light_street'),
     heatmapStops: ['rgba(0,0,0,0)', '#dbeafe', '#93c5fd', '#60a5fa', '#1d4ed8'],
     soldCompColor: '#dc2626',
-    buyerAccent: '#2563eb',
+    buyerAccent: '#247CFF',
     baseStyleTone: 'light_street',
   },
 
@@ -661,164 +564,84 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
     baseStyleId: 'terrain',
     mapStyleObject: TERRAIN_MAP_STYLE,
     style: TERRAIN_MAP_STYLE,
-    accentColor: '#b7d86c',
+    accentColor: getMapVisualPreset('terrain').interface.accent,
     pinPalette: PIN_PALETTES.terrain,
-    clusterPalette: {
-      glow: 'rgba(34, 197, 94, 0.16)',
-      core: '#13161b',
-      stroke: 'rgba(196, 255, 125, 0.92)',
-      label: '#f6fee7',
-      halo: 'rgba(14, 15, 17, 0.94)',
-    },
+    clusterPalette: clusterPaletteFromPreset('terrain'),
     overlayClassName: 'nx-icm--theme-terrain',
     supportsTerrain: true,
     supportsSatellite: false,
     isHighContrast: false,
     fallbackThemeId: 'satellite',
-    cardTheme: {
-      '--nx-card-accent': '#b7d86c',
-      '--nx-card-accent-rgb': '183, 216, 108',
-      '--nx-card-accent-soft': 'rgba(183, 216, 108, 0.16)',
-      '--nx-card-shell-top': 'rgba(14, 17, 14, 0.95)',
-      '--nx-card-shell-bottom': 'rgba(11, 14, 10, 0.93)',
-      '--nx-card-border': 'rgba(190, 223, 121, 0.18)',
-      '--nx-card-glow': 'rgba(93, 125, 36, 0.22)',
-      '--nx-card-shadow': 'rgba(10, 12, 9, 0.56)',
-      '--nx-card-tile': 'rgba(195, 223, 124, 0.05)',
-      '--nx-card-tile-border': 'rgba(214, 240, 152, 0.08)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.03)',
-      '--nx-card-live': '#d3f191',
-      '--nx-card-input': 'rgba(13, 17, 12, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('terrain'),
     heatmapStops: ['rgba(0,0,0,0)', '#2f3e1f', '#6f8847', '#c0c96b', '#f2f7c9'],
     soldCompColor: '#f97316',
-    buyerAccent: '#d4ff7d',
+    buyerAccent: '#45C4A2',
     baseStyleTone: 'terrain',
   },
 
   monochrome: {
     id: 'monochrome',
     label: 'Monochrome',
-    mode: 'overlay',
-    baseStyleId: 'overlay_monochrome',
-    mapStyleObject: MONOCHROME_MAP_STYLE,
-    style: MONOCHROME_MAP_STYLE,
-    accentColor: '#cdd6e0',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('monochrome').interface.accent,
     pinPalette: PIN_PALETTES.monochrome,
-    clusterPalette: {
-      glow: 'rgba(255, 255, 255, 0.08)',
-      core: '#040506',
-      stroke: 'rgba(164, 180, 199, 0.82)',
-      label: '#f8fafc',
-      halo: 'rgba(3, 4, 5, 0.96)',
-    },
+    clusterPalette: clusterPaletteFromPreset('monochrome'),
     overlayClassName: 'nx-icm--theme-monochrome',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
     fallbackThemeId: 'satellite',
-    cardTheme: {
-      '--nx-card-accent': '#cdd6e0',
-      '--nx-card-accent-rgb': '205, 214, 224',
-      '--nx-card-accent-soft': 'rgba(211, 221, 232, 0.12)',
-      '--nx-card-shell-top': 'rgba(8, 10, 12, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(4, 5, 7, 0.95)',
-      '--nx-card-border': 'rgba(148, 163, 184, 0.18)',
-      '--nx-card-glow': 'rgba(148, 163, 184, 0.14)',
-      '--nx-card-shadow': 'rgba(0, 0, 0, 0.58)',
-      '--nx-card-tile': 'rgba(255, 255, 255, 0.035)',
-      '--nx-card-tile-border': 'rgba(255, 255, 255, 0.07)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.03)',
-      '--nx-card-live': '#eef2f6',
-      '--nx-card-input': 'rgba(8, 10, 12, 0.86)',
-    },
+    cardTheme: buildCardThemeFromPreset('monochrome'),
     heatmapStops: ['rgba(0,0,0,0)', '#0b1220', '#1f2937', '#4b5563', '#e5e7eb'],
     soldCompColor: '#f87171',
-    buyerAccent: '#d3dde8',
+    buyerAccent: '#CBD6E4',
     baseStyleTone: 'monochrome',
   },
 
-  night_vision: {
-    id: 'night_vision',
-    label: 'Night Vision',
-    mode: 'overlay',
-    baseStyleId: 'overlay_night_vision',
-    mapStyleObject: NIGHT_VISION_MAP_STYLE,
-    style: NIGHT_VISION_MAP_STYLE,
-    accentColor: '#72ffb2',
-    pinPalette: PIN_PALETTES.night_vision,
-    clusterPalette: {
-      glow: 'rgba(69, 255, 181, 0.14)',
-      core: '#081513',
-      stroke: 'rgba(114, 255, 178, 0.88)',
-      label: '#e8fff2',
-      halo: 'rgba(5, 11, 9, 0.94)',
-    },
-    overlayClassName: 'nx-icm--theme-night-vision',
+  radar_night: {
+    id: 'radar_night',
+    label: 'Radar Night',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('radar_night').interface.accent,
+    pinPalette: PIN_PALETTES.radar_night,
+    clusterPalette: clusterPaletteFromPreset('radar_night'),
+    overlayClassName: 'nx-icm--theme-radar-night',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: false,
     fallbackThemeId: 'dark_ops',
-    cardTheme: {
-      '--nx-card-accent': '#72ffb2',
-      '--nx-card-accent-rgb': '114, 255, 178',
-      '--nx-card-accent-soft': 'rgba(114, 255, 178, 0.16)',
-      '--nx-card-shell-top': 'rgba(6, 19, 15, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(4, 12, 10, 0.94)',
-      '--nx-card-border': 'rgba(114, 255, 178, 0.18)',
-      '--nx-card-glow': 'rgba(41, 163, 110, 0.2)',
-      '--nx-card-shadow': 'rgba(1, 10, 8, 0.58)',
-      '--nx-card-tile': 'rgba(114, 255, 178, 0.05)',
-      '--nx-card-tile-border': 'rgba(160, 255, 205, 0.08)',
-      '--nx-card-message': 'rgba(255, 255, 255, 0.03)',
-      '--nx-card-live': '#c8ffe0',
-      '--nx-card-input': 'rgba(8, 18, 15, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('radar_night'),
     heatmapStops: ['rgba(0,0,0,0)', '#113127', '#1f6f5a', '#4cdd9b', '#d8ffe8'],
     soldCompColor: '#f87171',
-    buyerAccent: '#72ffb2',
-    baseStyleTone: 'night_vision',
+    buyerAccent: '#48E2A0',
+    baseStyleTone: 'radar_night',
   },
 
   matrix: {
     id: 'matrix',
     label: 'Matrix',
-    mode: 'overlay',
-    baseStyleId: 'overlay_matrix',
-    mapStyleObject: MATRIX_MAP_STYLE,
-    style: MATRIX_MAP_STYLE,
-    accentColor: '#00ff88',
+    mode: 'basemap',
+    baseStyleId: 'vector_dark',
+    mapStyleUrl: CARTO_VECTOR_DARK_STYLE_URL,
+    style: CARTO_VECTOR_DARK_STYLE_URL,
+    accentColor: getMapVisualPreset('matrix').interface.accent,
     pinPalette: PIN_PALETTES.matrix,
-    clusterPalette: {
-      glow: 'rgba(0, 255, 136, 0.14)',
-      core: '#020805',
-      stroke: 'rgba(0, 255, 136, 0.9)',
-      label: '#d8ffe8',
-      halo: 'rgba(2, 8, 5, 0.96)',
-    },
+    clusterPalette: clusterPaletteFromPreset('matrix'),
     overlayClassName: 'nx-icm--theme-matrix',
     supportsTerrain: false,
     supportsSatellite: false,
     isHighContrast: true,
     fallbackThemeId: 'monochrome',
-    cardTheme: {
-      '--nx-card-accent': '#00ff88',
-      '--nx-card-accent-rgb': '0, 255, 136',
-      '--nx-card-accent-soft': 'rgba(0, 255, 136, 0.14)',
-      '--nx-card-shell-top': 'rgba(2, 8, 5, 0.97)',
-      '--nx-card-shell-bottom': 'rgba(0, 0, 0, 0.95)',
-      '--nx-card-border': 'rgba(0, 196, 106, 0.18)',
-      '--nx-card-glow': 'rgba(0, 255, 136, 0.16)',
-      '--nx-card-shadow': 'rgba(0, 0, 0, 0.64)',
-      '--nx-card-tile': 'rgba(0, 255, 136, 0.04)',
-      '--nx-card-tile-border': 'rgba(73, 255, 171, 0.08)',
-      '--nx-card-message': 'rgba(216, 255, 232, 0.03)',
-      '--nx-card-live': '#c6ffd9',
-      '--nx-card-input': 'rgba(1, 8, 5, 0.84)',
-    },
+    cardTheme: buildCardThemeFromPreset('matrix'),
     heatmapStops: ['rgba(0,0,0,0)', '#072114', '#0b5834', '#00c46a', '#d8ffe8'],
     soldCompColor: '#ff6767',
-    buyerAccent: '#00ff88',
+    buyerAccent: '#2FF58A',
     baseStyleTone: 'matrix',
   },
 }
@@ -826,17 +649,13 @@ export const commandMapThemes: Record<CommandMapThemeId, CommandMapThemeDefiniti
 export const legacyCommandMapThemeAliases: Record<LegacyCommandMapThemeId, CommandMapThemeId> = {
   midnight: 'executive',
   minimal_black: 'monochrome',
-  acquisition_radar: 'night_vision',
+  acquisition_radar: 'radar_night',
+  night_vision: 'radar_night',
 }
 
 export const normalizeCommandMapThemeId = (
   themeId: CommandMapThemeId | LegacyCommandMapThemeId | string | null | undefined,
-): CommandMapThemeId => {
-  if (!themeId) return 'dark_ops'
-  if (themeId in commandMapThemes) return themeId as CommandMapThemeId
-  if (themeId in legacyCommandMapThemeAliases) return legacyCommandMapThemeAliases[themeId as LegacyCommandMapThemeId]
-  return 'dark_ops'
-}
+): CommandMapThemeId => normalizeMapVisualPresetId(themeId)
 
 export const COMMAND_MAP_THEME_OPTIONS = Object.values(commandMapThemes)
 
@@ -846,7 +665,10 @@ export const getCommandMapTheme = (
 
 export const getCommandMapThemeStyle = (
   themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,
-): StyleSource => getCommandMapTheme(themeId).style
+): StyleSource => {
+  const theme = getCommandMapTheme(themeId)
+  return theme.mapStyleUrl ?? theme.style
+}
 
 export const getCommandMapBaseStyleId = (
   themeId: CommandMapThemeId | LegacyCommandMapThemeId | string,

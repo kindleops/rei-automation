@@ -20,35 +20,32 @@ async function waitForInboxLive(page: Page) {
 async function assertDealDeskWorkspace(page: Page) {
   await expect(page.getByTitle(/Workspace: Deal Desk/i)).toBeVisible({ timeout: 30000 })
   await expect(page.locator('.nx-intelligence-panel')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.nx-workspace-pane.is-view-thread')).toHaveCount(0)
   const widths = await page.evaluate(() => {
     const grid = document.querySelector('.nx-workspace-split-grid') as HTMLElement | null
-    const list = document.querySelector('.nx-workspace-pane.is-view-thread') as HTMLElement | null
     const conversation = document.querySelector('.nx-workspace-pane.is-view-sms_thread') as HTMLElement | null
     const intelligence = document.querySelector('.nx-workspace-pane.is-view-deal_intelligence') as HTMLElement | null
-    if (!grid || !list || !conversation || !intelligence) return null
+    if (!grid || !conversation || !intelligence) return null
     const total = grid.getBoundingClientRect().width
     return {
-      list: list.getBoundingClientRect().width / total,
       conversation: conversation.getBoundingClientRect().width / total,
       intelligence: intelligence.getBoundingClientRect().width / total,
     }
   })
   expect(widths).not.toBeNull()
-  expect(widths!.list).toBeGreaterThan(0.18)
-  expect(widths!.list).toBeLessThan(0.32)
-  expect(widths!.conversation).toBeGreaterThan(0.42)
-  expect(widths!.conversation).toBeLessThan(0.58)
+  expect(widths!.conversation).toBeGreaterThan(0.68)
+  expect(widths!.conversation).toBeLessThan(0.82)
   expect(widths!.intelligence).toBeGreaterThan(0.18)
   expect(widths!.intelligence).toBeLessThan(0.32)
 }
 
 async function selectTulsaThread(page: Page) {
-  const sidebarSearch = page.getByRole('textbox', { name: /Search inbox threads/i })
-  await sidebarSearch.fill(TULSA_SEARCH)
+  const topSearch = page.getByRole('textbox', { name: /Search sellers, buyers, addresses, locations, conversations/i })
+  await topSearch.fill(TULSA_SEARCH)
   await page.waitForTimeout(1500)
-  const thread = page.getByRole('button', { name: /4693 N Boston/i }).first()
-  await expect(thread).toBeVisible({ timeout: 45000 })
-  await thread.click()
+  const result = page.getByRole('button', { name: /4693 N Boston/i }).first()
+  await expect(result).toBeVisible({ timeout: 45000 })
+  await result.click()
   await expect(page.locator('.nx-deal-compact-shell')).toBeVisible({ timeout: 90000 })
 }
 
@@ -104,7 +101,7 @@ async function verifyTulsa25Panel(page: Page) {
 test.describe('Deal Intelligence 25% acceptance', () => {
   test('Tulsa SFR + themes', async ({ page }) => {
     await page.addInitScript(() => {
-      localStorage.setItem('nx.inbox.deal-desk-layout-version', 'v2')
+      localStorage.setItem('nx.inbox.deal-desk-layout-version', 'v3')
       localStorage.removeItem('nx.inbox.workspace-views-by-key')
       localStorage.removeItem('nx.inbox.workspace-width-overrides')
     })

@@ -1,345 +1,393 @@
-import { memo, useMemo, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type TouchEvent } from 'react'
 import type {
-  CommandMapActivityEvent,
   CommandMapLiveActivitySettings,
   CommandMapPerformanceSettings,
-  CommandMapActivityType,
   LiveActivityDisplayMode,
-  LiveActivitySpeed,
 } from '../commandMapLiveActivity'
+import type { LiveActivityEvent, LiveActivityFeedSnapshot } from '../live-activity-engine'
+import { groupEventsByRecency } from '../useLiveActivityDeck'
+import { useLiveActivityDeck } from '../useLiveActivityDeck'
+import { LiveActivitySettingsSheet } from './LiveActivitySettingsSheet'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-const DISPLAY_MODE_OPTIONS: LiveActivityDisplayMode[] = ['minimal', 'compact', 'expanded', 'docked', 'hidden']
-const SPEED_OPTIONS: LiveActivitySpeed[] = ['paused', 'slow', 'normal', 'fast']
-const EVENT_TYPE_OPTIONS: Array<{ key: CommandMapActivityType; label: string }> = [
-  { key: 'message_sent', label: 'Message Sent' },
-  { key: 'message_delivered', label: 'Delivered' },
-  { key: 'message_failed', label: 'Failed' },
-  { key: 'queue_scheduled', label: 'Scheduled' },
-  { key: 'queue_ready', label: 'Queue Ready' },
-  { key: 'queue_blocked', label: 'Queue Blocked' },
-  { key: 'queue_paused', label: 'Queue Paused' },
-  { key: 'new_reply', label: 'New Replies' },
-  { key: 'positive_reply', label: 'Positive Replies' },
-  { key: 'hot_lead', label: 'Hot Leads' },
-  { key: 'follow_up_due', label: 'Follow-Ups Due' },
-  { key: 'offer', label: 'Offers' },
-  { key: 'contract', label: 'Contracts' },
-  { key: 'closing', label: 'Closings' },
-  { key: 'buyer_activity', label: 'Buyer Activity' },
-  { key: 'sold_comp', label: 'Recent Sold Comps' },
-  { key: 'system_alert', label: 'System Alerts' },
-  { key: 'routing_block', label: 'Routing Blocks' },
-  { key: 'opt_out', label: 'DNC / Opt-Outs' },
-  { key: 'automation_block', label: 'Automation Blocks' },
-  { key: 'missing_message_event', label: 'Missing Event' },
-  { key: 'provider_id_missing', label: 'Provider ID Missing' },
-]
+const SCOPE_LABELS = {
+  viewport: 'VIEWPORT',
+  selected: 'SELECTED',
+  market: 'MARKET',
+  global: 'GLOBAL',
+} as const
 
 type Props = {
-  events: CommandMapActivityEvent[]
+  feed: LiveActivityFeedSnapshot
   settings: CommandMapLiveActivitySettings
-  performanceSettings: CommandMapPerformanceSettings
   isUltrawide: boolean
+  isMobile: boolean
   reducedMotion: boolean
+  conversationOpen?: boolean
+  composerActive?: boolean
+  sellerCardExpanded?: boolean
+  sellerCardPeek?: boolean
   onSettingsChange: (patch: Partial<CommandMapLiveActivitySettings>) => void
   onPerformanceChange: (patch: Partial<CommandMapPerformanceSettings>) => void
-  onSelectEvent: (event: CommandMapActivityEvent) => void
-}
-
-const SPEED_TO_DURATION: Record<LiveActivitySpeed, number> = {
-  paused: 0,
-  slow: 92,
-  normal: 68,
-  fast: 46,
+  onSelectEvent: (event: LiveActivityEvent) => void
+  onFocusEvent: (event: LiveActivityEvent) => void
+  onHoverEvent?: (event: LiveActivityEvent | null) => void
+  onNewEventPulse?: (event: LiveActivityEvent) => void
 }
 
 export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRail({
-  events,
+  feed,
   settings,
-  performanceSettings,
   isUltrawide,
+  isMobile,
   reducedMotion,
+  conversationOpen = false,
+  composerActive = false,
+  sellerCardExpanded = false,
+  sellerCardPeek = false,
   onSettingsChange,
   onPerformanceChange,
   onSelectEvent,
+  onFocusEvent,
+  onHoverEvent,
+  onNewEventPulse,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [manualPins, setManualPins] = useState<string[]>([])
+  const [isHovered, setIsHovered] = useState(false)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const prevTopIdRef = useRef<string | null>(null)
 
-  const effectiveMode: LiveActivityDisplayMode =
-    settings.visible && settings.displayMode !== 'hidden'
-      ? settings.displayMode
-      : 'hidden'
+  const preferredMode = settings.visible && settings.displayMode !== 'hidden'
+    ? settings.displayMode
+    : 'hidden'
 
-  const scrollEnabled = settings.autoScroll && !reducedMotion && settings.speed !== 'paused' && effectiveMode !== 'docked'
-  const duration = SPEED_TO_DURATION[settings.speed]
+  const effectiveMode: LiveActivityDisplayMode = useMemo(() => {
+    if (preferredMode === 'hidden') return 'hidden'
+    if (conversationOpen || composerActive) return 'hidden'
+    if (sellerCardExpanded && isMobile) return 'minimal'
+    if (sellerCardExpanded && preferredMode === 'expanded') return 'compact'
+    if (isMobile && preferredMode === 'docked') return 'expanded'
+    return preferredMode
+  }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded])
 
-  const pinnedEvents = useMemo(() => {
-    const pinnedSet = new Set(manualPins)
-    return events.filter((event, index) => {
-      if (pinnedSet.has(event.id)) return true
-      if (!settings.pinHotEvents) return false
-      if (event.priority === 'critical') return index < 4
-      return event.priority === 'hot' && index < (isUltrawide ? 3 : 2)
-    }).slice(0, isUltrawide ? 4 : 2)
-  }, [events, isUltrawide, manualPins, settings.pinHotEvents])
+  const timelineEvents = feed.visible
+  const tickerQueue = feed.tickerQueue
+  const displayCount = effectiveMode === 'minimal' || effectiveMode === 'compact'
+    ? feed.tickerCount
+    : feed.visibleCount
 
-  const flowingEvents = useMemo(() => {
-    const pinnedSet = new Set(pinnedEvents.map((event) => event.id))
-    return events.filter((event) => !pinnedSet.has(event.id))
-  }, [events, pinnedEvents])
+  const deck = useLiveActivityDeck({
+    queue: tickerQueue,
+    speed: settings.speed,
+    autoAdvance: settings.autoScroll,
+    pauseOnHover: settings.pauseOnHover,
+    isHovered,
+    isInteractionPaused: settingsOpen,
+    reducedMotion,
+  })
 
-  if (effectiveMode === 'hidden' || events.length === 0) return null
+  useEffect(() => {
+    const topId = tickerQueue[0]?.id ?? null
+    if (topId && topId !== prevTopIdRef.current && tickerQueue[0]) {
+      onNewEventPulse?.(tickerQueue[0])
+    }
+    prevTopIdRef.current = topId
+  }, [onNewEventPulse, tickerQueue])
+
+  const scopeLabel = SCOPE_LABELS[settings.scope ?? 'viewport']
+  const showChannelTabs = effectiveMode === 'expanded' || (effectiveMode === 'docked' && !isMobile)
+  const timelineGrouped = useMemo(() => groupEventsByRecency(timelineEvents), [timelineEvents])
+
+  const handlePrimaryClick = useCallback((event: LiveActivityEvent) => {
+    if (settings.openTargetOnClick) onSelectEvent(event)
+    deck.acknowledgeActive()
+  }, [deck, onSelectEvent, settings.openTargetOnClick])
+
+  const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0]
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+
+  const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current
+    touchStartRef.current = null
+    if (!start || effectiveMode !== 'compact') return
+    const touch = event.changedTouches[0]
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 42) {
+      if (dx < 0) deck.goNext()
+      else deck.goPrevious()
+      return
+    }
+    if (dy < -60 && isMobile) {
+      onSettingsChange({ displayMode: 'expanded' })
+      onPerformanceChange({ liveActivityMode: 'expanded' })
+    }
+    if (dy > 60 && isMobile) {
+      onSettingsChange({ displayMode: 'minimal' })
+      onPerformanceChange({ liveActivityMode: 'minimal' })
+    }
+  }
+
+  if (effectiveMode === 'hidden') return null
 
   const railClassName = cls(
     'nx-icm-activity',
     `is-${effectiveMode}`,
-    scrollEnabled && 'is-scrolling',
-    settingsOpen && 'is-settings-open',
-    reducedMotion && 'is-reduced-motion',
-    settings.pauseOnHover && 'is-pause-on-hover',
-    isUltrawide && 'is-ultrawide',
+    isMobile && 'is-mobile',
+    isHovered && 'is-hovered',
+    sellerCardPeek && 'is-behind-peek',
+    sellerCardExpanded && 'is-behind-card',
+    deck.isFlipping && 'is-flipping',
+    settingsOpen && 'is-sheet-open',
   )
 
   return (
-    <section
-      className={railClassName}
-      aria-label="Command Map live activity"
-      style={{
-        '--nx-activity-duration': `${duration}s`,
-      } as CSSProperties}
-    >
-      <div className="nx-icm-activity__header">
-        <div className="nx-icm-activity__heading">
-          <span className="nx-icm-activity__dot" />
-          <div>
-            <strong>Live Activity</strong>
-            <span>{events.length} events in flow</span>
-          </div>
-        </div>
-        <div className="nx-icm-activity__controls">
-          <button type="button" className="nx-icm-activity__toggle" onClick={() => onSettingsChange({ visible: !settings.visible, displayMode: settings.visible ? 'hidden' : performanceSettings.liveActivityMode || 'compact' })}>
-            {settings.visible ? 'Hide Live Activity' : 'Show Live Activity'}
-          </button>
-          <button type="button" className={cls('nx-icm-activity__toggle', settingsOpen && 'is-active')} onClick={() => setSettingsOpen((current) => !current)}>
-            Activity Settings
-          </button>
-        </div>
-      </div>
-
-      {settingsOpen && (
-        <CommandMapLiveActivitySettingsPanel
-          settings={settings}
-          performanceSettings={performanceSettings}
-          isUltrawide={isUltrawide}
-          onSettingsChange={onSettingsChange}
-          onPerformanceChange={onPerformanceChange}
-        />
-      )}
-
-      {pinnedEvents.length > 0 && effectiveMode !== 'minimal' && (
-        <div className="nx-icm-activity__pinned" aria-label="Pinned hot events">
-          {pinnedEvents.map((event) => (
-            <CommandMapLiveActivityCard
-              key={event.id}
-              event={event}
-              compact={effectiveMode === 'compact'}
-              pinned
-              onPin={() => setManualPins((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id])}
-              onSelect={onSelectEvent}
-            />
-          ))}
-        </div>
-      )}
-
-      {effectiveMode === 'minimal' ? (
-        <div className="nx-icm-activity__minimal">
-          <button type="button" className="nx-icm-activity__minimal-event" onClick={() => onSelectEvent(events[0])}>
-            <span>{events[0]?.badgeLabel}</span>
-            <strong>{events[0]?.title}</strong>
-            <em>{events[0]?.detail || events[0]?.address || events[0]?.subtitle}</em>
-          </button>
-        </div>
-      ) : (
-        <div className="nx-icm-activity__stream">
-          <div className="nx-icm-activity__fade nx-icm-activity__fade--left" />
-          <div className="nx-icm-activity__fade nx-icm-activity__fade--right" />
-          <div className="nx-icm-activity__viewport">
-            <div className="nx-icm-activity__track">
-              {(effectiveMode === 'docked' ? flowingEvents : [...flowingEvents, ...flowingEvents]).map((event, index) => (
-                <CommandMapLiveActivityCard
-                  key={`${event.id}-${index}`}
-                  event={event}
-                  compact={effectiveMode === 'compact'}
-                  onPin={() => setManualPins((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id])}
-                  onSelect={onSelectEvent}
-                />
-              ))}
+    <>
+      <section
+        className={railClassName}
+        aria-label="Live Activity"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        <header className="nx-icm-activity__header">
+          <div className="nx-icm-activity__heading">
+            <span className="nx-icm-activity__dot" aria-hidden />
+            <div className="nx-icm-activity__title-block">
+              <strong>Live Activity</strong>
+              <span className="nx-icm-activity__meta">
+                {displayCount} in flow
+                <em className="nx-icm-activity__scope">{scopeLabel}</em>
+              </span>
             </div>
           </div>
-        </div>
-      )}
-    </section>
+
+          <div className="nx-icm-activity__controls">
+            {showChannelTabs && (
+              <div className="nx-icm-activity__channel-switch" role="tablist">
+                <button type="button" role="tab" aria-selected={settings.activeChannel === 'live'} className={cls('nx-icm-activity__channel-btn', settings.activeChannel === 'live' && 'is-active')} onClick={() => onSettingsChange({ activeChannel: 'live' })}>Live Now</button>
+                <button type="button" role="tab" aria-selected={settings.activeChannel === 'context'} className={cls('nx-icm-activity__channel-btn', settings.activeChannel === 'context' && 'is-active')} onClick={() => onSettingsChange({ activeChannel: 'context' })}>Context</button>
+              </div>
+            )}
+            <button type="button" className="nx-icm-activity__icon-btn" aria-label="Hide" title="Hide" onClick={() => onSettingsChange({ visible: false, displayMode: 'hidden' })}>
+              <span aria-hidden>×</span>
+            </button>
+            <button type="button" className="nx-icm-activity__icon-btn" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}>
+              <span aria-hidden>⚙</span>
+            </button>
+          </div>
+        </header>
+
+        {(effectiveMode === 'minimal' || effectiveMode === 'compact') && (
+          <div className={cls('nx-icm-activity__ticker', effectiveMode === 'compact' && 'is-compact-ticker')}>
+            {deck.queueCount === 0 ? (
+              <div className="nx-icm-activity__empty nx-icm-activity__empty--ticker">
+                <strong>No live events in {settings.scope === 'market' ? 'market' : 'scope'}</strong>
+                <span>Monitoring sends, replies, offers, contracts, and automation.</span>
+              </div>
+            ) : (
+              <>
+                <div className="nx-icm-activity__flip-stage">
+                  <div
+                    className={cls('nx-icm-activity__flip-card', deck.isFlipped && 'is-flipped')}
+                    style={{ '--nx-flip-duration': `${deck.flipDurationMs}ms` } as CSSProperties}
+                  >
+                    <div className="nx-icm-activity__flip-face nx-icm-activity__flip-face--front">
+                      {deck.activeEvent && (
+                        <TickerEventFace
+                          event={deck.activeEvent}
+                          variant={effectiveMode}
+                          position={deck.activeIndex + 1}
+                          total={deck.queueCount}
+                          onPrimary={() => handlePrimaryClick(deck.activeEvent!)}
+                          onFocus={() => onFocusEvent(deck.activeEvent!)}
+                          onHover={onHoverEvent}
+                        />
+                      )}
+                    </div>
+                    <div className="nx-icm-activity__flip-face nx-icm-activity__flip-face--back">
+                      {deck.nextEvent && (
+                        <TickerEventFace
+                          event={deck.nextEvent}
+                          variant={effectiveMode}
+                          position={((deck.activeIndex + 1) % deck.queueCount) + 1}
+                          total={deck.queueCount}
+                          onPrimary={() => handlePrimaryClick(deck.nextEvent!)}
+                          onFocus={() => onFocusEvent(deck.nextEvent!)}
+                          onHover={onHoverEvent}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {effectiveMode === 'compact' && (
+                  <div className="nx-icm-activity__ticker-controls">
+                    <button type="button" className="nx-icm-activity__transport" aria-label="Previous event" title="Previous" onClick={deck.goPrevious}>‹</button>
+                    <button type="button" className="nx-icm-activity__transport" aria-label={deck.manualPaused ? 'Resume autoplay' : 'Pause autoplay'} title={deck.manualPaused ? 'Play' : 'Pause'} onClick={deck.toggleManualPause}>{deck.manualPaused ? '▶' : '❚❚'}</button>
+                    <button type="button" className="nx-icm-activity__transport" aria-label="Next event" title="Next" onClick={deck.goNext}>›</button>
+                    <button type="button" className={cls('nx-icm-activity__transport', deck.isPinned && 'is-active')} aria-label="Pin event" title="Pin event" onClick={deck.togglePinActive}>{deck.isPinned ? '★' : '☆'}</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {(effectiveMode === 'expanded' || (effectiveMode === 'docked' && !isMobile)) && (
+          <div className={cls('nx-icm-activity__timeline', effectiveMode === 'docked' && 'is-docked-timeline')}>
+            {timelineEvents.length === 0 ? (
+              <div className="nx-icm-activity__empty nx-icm-activity__empty--timeline">
+                <strong>
+                  {settings.activeChannel === 'context'
+                    ? 'No contextual intelligence in the current scope.'
+                    : 'No live operating events in the current scope.'}
+                </strong>
+                <span>
+                  {settings.activeChannel === 'context'
+                    ? 'Select a property or expand the map area.'
+                    : 'Pan the map or change scope to surface more activity.'}
+                </span>
+              </div>
+            ) : (
+              <div className="nx-icm-activity__timeline-groups">
+                {(['now', 'lastHour', 'today', 'earlier'] as const).map((group) => {
+                  const events = timelineGrouped[group]
+                  if (events.length === 0) return null
+                  const label = group === 'now' ? 'Now' : group === 'lastHour' ? 'Last Hour' : group === 'today' ? 'Today' : 'Earlier'
+                  return (
+                    <section key={group} className="nx-icm-activity__timeline-group">
+                      <h4>{label}</h4>
+                      <div className="nx-icm-activity__timeline-grid">
+                        {events.map((event) => (
+                          <TimelineEventCard
+                            key={event.id}
+                            event={event}
+                            docked={effectiveMode === 'docked'}
+                            onPrimary={() => onSelectEvent(event)}
+                            onFocus={() => onFocusEvent(event)}
+                            onHover={onHoverEvent}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <LiveActivitySettingsSheet
+        open={settingsOpen}
+        isMobile={isMobile}
+        settings={settings}
+        isUltrawide={isUltrawide}
+        onClose={() => setSettingsOpen(false)}
+        onSettingsChange={onSettingsChange}
+        onPerformanceChange={onPerformanceChange}
+      />
+    </>
   )
 })
 
-const CommandMapLiveActivityCard = memo(function CommandMapLiveActivityCard({
+function TickerEventFace({
   event,
-  compact = false,
-  pinned = false,
-  onPin,
-  onSelect,
+  variant,
+  position,
+  total,
+  onPrimary,
+  onFocus,
+  onHover,
 }: {
-  event: CommandMapActivityEvent
-  compact?: boolean
-  pinned?: boolean
-  onPin: () => void
-  onSelect: (event: CommandMapActivityEvent) => void
+  event: LiveActivityEvent
+  variant: 'minimal' | 'compact'
+  position: number
+  total: number
+  onPrimary: () => void
+  onFocus: () => void
+  onHover?: (event: LiveActivityEvent | null) => void
 }) {
-  const widthClass = (event.detail?.length || 0) > 96 || (event.address?.length || 0) > 28 ? 'is-wide' : 'is-standard'
+  const isMinimal = variant === 'minimal'
+
   return (
     <article
-      className={cls('nx-icm-activity-card', `is-${event.priority}`, `tone-${event.accentTone || 'slate'}`, compact && 'is-compact', pinned && 'is-pinned', widthClass)}
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(event)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect(event)
-        }
-      }}
+      className={cls(
+        'nx-icm-activity-ticker-card',
+        `tone-${event.accentTone || 'slate'}`,
+        `severity-${event.severity}`,
+        isMinimal && 'is-minimal',
+        event.isUnread && 'is-unread',
+      )}
+      onMouseEnter={() => onHover?.(event)}
+      onMouseLeave={() => onHover?.(null)}
     >
-      <div className="nx-icm-activity-card__top">
-        <span className="nx-icm-activity-card__badge">{event.badgeLabel}</span>
-        <span className="nx-icm-activity-card__time">{event.timeAgo}</span>
-      </div>
-      <div className="nx-icm-activity-card__main">
-        <strong>{event.title}</strong>
-        {(event.address || event.subtitle) && <span>{event.address || event.subtitle}</span>}
-      </div>
-      {event.detail && <p className="nx-icm-activity-card__detail">{event.detail}</p>}
-      <div className="nx-icm-activity-card__footer">
-        <div className="nx-icm-activity-card__meta">
-          {event.valueLabel && <span>{event.valueLabel}</span>}
-          {event.scoreLabel && <span>{event.scoreLabel}</span>}
+      <div className="nx-icm-activity-ticker-card__edge" aria-hidden />
+      <div className="nx-icm-activity-ticker-card__body" role="button" tabIndex={0} onClick={onPrimary} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPrimary() } }}>
+        <div className="nx-icm-activity-ticker-card__top">
+          <span className="nx-icm-activity-ticker-card__type">{event.badgeLabel}</span>
+          <span className="nx-icm-activity-ticker-card__time">{event.timeAgo}</span>
         </div>
-        <div className="nx-icm-activity-card__actions">
-          {event.actionLabel && <em>{event.actionLabel}</em>}
-          <button
-            type="button"
-            className="nx-icm-activity-card__pin"
-            onClick={(e) => {
-              e.stopPropagation()
-              onPin()
-            }}
-          >
-            {pinned ? 'Unpin' : 'Pin'}
+        <strong className="nx-icm-activity-ticker-card__subject">{event.title}</strong>
+        {!isMinimal && event.summary && <p className="nx-icm-activity-ticker-card__summary">{event.summary}</p>}
+        {isMinimal && event.summary && <em className="nx-icm-activity-ticker-card__summary-line">{event.summary}</em>}
+      </div>
+      <div className="nx-icm-activity-ticker-card__actions">
+        {!isMinimal && <span className="nx-icm-activity-ticker-card__position">{position} / {total}</span>}
+        <button type="button" className="nx-icm-activity-ticker-card__action" onClick={(e) => { e.stopPropagation(); onPrimary() }}>{event.primaryAction.toUpperCase()}</button>
+        {event.secondaryAction && (
+          <button type="button" className="nx-icm-activity-ticker-card__focus" title="Focus on map" aria-label="Focus on map" onClick={(e) => { e.stopPropagation(); onFocus() }}>
+            <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden><circle cx="10" cy="10" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            {!isMinimal && <span>Focus</span>}
           </button>
-        </div>
+        )}
       </div>
     </article>
   )
-})
+}
 
-function CommandMapLiveActivitySettingsPanel({
-  settings,
-  performanceSettings,
-  isUltrawide,
-  onSettingsChange,
-  onPerformanceChange,
+function TimelineEventCard({
+  event,
+  docked,
+  onPrimary,
+  onFocus,
+  onHover,
 }: {
-  settings: CommandMapLiveActivitySettings
-  performanceSettings: CommandMapPerformanceSettings
-  isUltrawide: boolean
-  onSettingsChange: (patch: Partial<CommandMapLiveActivitySettings>) => void
-  onPerformanceChange: (patch: Partial<CommandMapPerformanceSettings>) => void
+  event: LiveActivityEvent
+  docked: boolean
+  onPrimary: () => void
+  onFocus: () => void
+  onHover?: (event: LiveActivityEvent | null) => void
 }) {
   return (
-    <div className="nx-icm-activity-settings">
-      <div className="nx-icm-activity-settings__section">
-        <span className="nx-icm-activity-settings__label">Display Mode</span>
-        <div className="nx-icm-activity-settings__segment">
-          {DISPLAY_MODE_OPTIONS.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={cls('nx-icm-activity-settings__chip', settings.displayMode === mode && 'is-active')}
-              onClick={() => {
-                onSettingsChange({ visible: mode !== 'hidden', displayMode: mode })
-                onPerformanceChange({ liveActivityMode: mode })
-              }}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
+    <article
+      className={cls('nx-icm-activity-timeline-card', `tone-${event.accentTone || 'slate'}`, docked && 'is-docked', event.channel === 'context' && 'is-context')}
+      role="button"
+      tabIndex={0}
+      onClick={onPrimary}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPrimary() } }}
+      onMouseEnter={() => onHover?.(event)}
+      onMouseLeave={() => onHover?.(null)}
+    >
+      <div className="nx-icm-activity-timeline-card__top">
+        <span>{event.badgeLabel}</span>
+        <span>{event.timeAgo}</span>
       </div>
-
-      <div className="nx-icm-activity-settings__section">
-        <span className="nx-icm-activity-settings__label">Speed</span>
-        <div className="nx-icm-activity-settings__segment">
-          {SPEED_OPTIONS.map((speed) => (
-            <button
-              key={speed}
-              type="button"
-              className={cls('nx-icm-activity-settings__chip', settings.speed === speed && 'is-active')}
-              onClick={() => onSettingsChange({ speed })}
-            >
-              {speed}
-            </button>
-          ))}
-        </div>
+      <strong>{event.title}</strong>
+      {event.summary && <p>{event.summary}</p>}
+      <div className="nx-icm-activity-timeline-card__footer">
+        <button type="button" className="nx-icm-activity-ticker-card__action" onClick={(e) => { e.stopPropagation(); onPrimary() }}>{event.primaryAction}</button>
+        {event.secondaryAction && (
+          <button type="button" className="nx-icm-activity-ticker-card__focus" title="Focus" aria-label="Focus on map" onClick={(e) => { e.stopPropagation(); onFocus() }}>
+            <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden><circle cx="10" cy="10" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
+        )}
       </div>
-
-      <div className="nx-icm-activity-settings__toggles">
-        <label><input type="checkbox" checked={settings.pauseOnHover} onChange={(e) => onSettingsChange({ pauseOnHover: e.target.checked })} />Pause on hover</label>
-        <label><input type="checkbox" checked={settings.onlyCurrentBounds} onChange={(e) => onSettingsChange({ onlyCurrentBounds: e.target.checked })} />Only current bounds</label>
-        <label><input type="checkbox" checked={settings.onlySelectedMarket} onChange={(e) => onSettingsChange({ onlySelectedMarket: e.target.checked })} />Only selected market</label>
-        <label><input type="checkbox" checked={settings.onlyHotCritical} onChange={(e) => onSettingsChange({ onlyHotCritical: e.target.checked })} />Only hot / critical</label>
-        <label><input type="checkbox" checked={settings.autoScroll} onChange={(e) => onSettingsChange({ autoScroll: e.target.checked })} />Auto-scroll</label>
-        <label><input type="checkbox" checked={settings.pinHotEvents} onChange={(e) => onSettingsChange({ pinHotEvents: e.target.checked })} />Pin hot events</label>
-        <label><input type="checkbox" checked={settings.subtleSpeedVariance} onChange={(e) => onSettingsChange({ subtleSpeedVariance: e.target.checked })} />Subtle speed variance</label>
-        <label><input type="checkbox" checked={settings.visible} onChange={(e) => onSettingsChange({ visible: e.target.checked, displayMode: e.target.checked ? settings.displayMode : 'hidden' })} />Show live activity</label>
-      </div>
-
-      <div className="nx-icm-activity-settings__section">
-        <span className="nx-icm-activity-settings__label">Max Cards Visible</span>
-        <input
-          className="nx-icm-activity-settings__range"
-          type="range"
-          min={8}
-          max={isUltrawide ? 40 : 28}
-          step={2}
-          value={settings.maxCardsVisible}
-          onChange={(e) => onSettingsChange({ maxCardsVisible: Number(e.target.value) })}
-        />
-        <strong>{settings.maxCardsVisible}</strong>
-      </div>
-
-      <div className="nx-icm-activity-settings__filters">
-        {EVENT_TYPE_OPTIONS.map((option) => (
-          <label key={option.key} className="nx-icm-activity-settings__event">
-            <input
-              type="checkbox"
-              checked={settings.eventTypes[option.key]}
-              onChange={(e) => onSettingsChange({
-                eventTypes: {
-                  ...settings.eventTypes,
-                  [option.key]: e.target.checked,
-                },
-              })}
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
-
-      <div className="nx-icm-activity-settings__footer">
-        <span>Performance live activity mode: {performanceSettings.liveActivityMode}</span>
-      </div>
-    </div>
+    </article>
   )
 }

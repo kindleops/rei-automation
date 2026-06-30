@@ -16,6 +16,8 @@ interface PipelineConfigurableCardProps {
   opp: PipelineOpportunity
   design: PipelineCardDesign
   layoutMode: ViewLayoutMode
+  displayTier?: '25' | '50' | '75' | '100'
+  mobileCard?: boolean
   selected?: boolean
   dragging?: boolean
   mutableView?: boolean
@@ -39,6 +41,8 @@ export function PipelineConfigurableCard({
   opp,
   design,
   layoutMode,
+  displayTier,
+  mobileCard,
   selected,
   dragging,
   mutableView,
@@ -50,7 +54,7 @@ export function PipelineConfigurableCard({
   onDragEnd,
   onReplyAction,
 }: PipelineConfigurableCardProps) {
-  const tier = layoutTier(layoutMode)
+  const tier = displayTier ?? layoutTier(layoutMode)
   const resolved = normalizeCardDesign(design)
   const slots = resolved.slots
   const density = resolved.density
@@ -96,6 +100,7 @@ export function PipelineConfigurableCard({
         density === 'compact' && 'plv-card--compact',
         density === 'expanded' && 'plv-card--expanded',
         `plv-card--tier-${tier}`,
+        mobileCard && 'plv-card--mobile',
         selected && 'is-selected',
         dragging && 'is-dragging',
       )}

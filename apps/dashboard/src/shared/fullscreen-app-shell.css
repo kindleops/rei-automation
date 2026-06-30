@@ -110,8 +110,22 @@
   border-left: 0 !important;
 }
 
+.nx-fullscreen-app-shell.is-view-deal_intelligence .nx-intelligence-panel.is-layout-compact,
+.nx-deal-intelligence-fullscreen .nx-intelligence-panel.is-layout-compact {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 .nx-fullscreen-app-shell.is-view-deal_intelligence .nx-intel-scroll-body,
 .nx-deal-intelligence-fullscreen .nx-intel-scroll-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: scroll !important;
+  -webkit-overflow-scrolling: touch;
   padding-inline: 24px !important;
 }
 

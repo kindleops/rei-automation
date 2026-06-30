@@ -220,12 +220,30 @@ export interface QueueModel {
   // Every configured market (from textgrid_numbers), independent of whether the
   // current page has rows for it — so Market Health can show zero-row markets.
   marketDirectory?: ConfiguredMarket[]
+  // Full TextGrid number registry — drives Sender Fleet so every configured
+  // number appears even when the current page/range has zero sends for it.
+  textgridFleet?: TextgridFleetNumber[]
 }
 
 export interface ConfiguredMarket {
   market: string
   senderCount: number
   active: boolean
+}
+
+/** One row from textgrid_numbers — the authoritative sender fleet registry. */
+export interface TextgridFleetNumber {
+  id: string
+  phone: string
+  friendlyName: string | null
+  market: string
+  state: string | null
+  status: string
+  isActive: boolean
+  dailyCap: number | null
+  messagesSentToday: number
+  lastUsedAt: string | null
+  healthScore: number | null
 }
 
 export interface QueueRangeCounts {

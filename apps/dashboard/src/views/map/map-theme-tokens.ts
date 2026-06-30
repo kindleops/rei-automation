@@ -9,6 +9,7 @@
 
 import { commandMapThemes } from './commandMapThemes'
 import type { CommandMapThemeId } from './commandMapThemes'
+import { getMapVisualPreset } from './map-visual-presets'
 import { nexusGlobalThemes } from '../../domain/theme/nexusThemes'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
@@ -60,7 +61,7 @@ const LEGACY_MAP: Record<string, CommandMapThemeId> = {
   'carbon-gold':     'executive',
   'monochrome-ops':  'monochrome',
   'infrared':        'red_ops',
-  'arctic-signal':   'night_vision',
+  'arctic-signal':   'radar_night',
   'operator-black':  'dark_ops',
 }
 
@@ -82,7 +83,7 @@ const REPLY_CORE: Record<CommandMapThemeId, string> = {
   light_street:      'rgba(37,99,235,0.80)',
   terrain:           'rgba(166,210,96,0.76)',
   monochrome:        'rgba(148,163,184,0.74)',
-  night_vision:      'rgba(72,255,178,0.76)',
+  radar_night:       'rgba(72,226,160,0.76)',
   matrix:            'rgba(0,255,136,0.76)',
 }
 
@@ -96,16 +97,17 @@ const REPLY_RING: Record<CommandMapThemeId, string> = {
   light_street:      'rgba(37,99,235,0.12)',
   terrain:           'rgba(166,210,96,0.13)',
   monochrome:        'rgba(148,163,184,0.08)',
-  night_vision:      'rgba(69,255,181,0.13)',
+  radar_night:       'rgba(72,226,160,0.13)',
   matrix:            'rgba(0,255,136,0.13)',
 }
 
 export function getMapThemeTokens(nexusTheme: string): PropertyLayerTokens {
   const mapThemeId = resolveMapThemeId(nexusTheme)
   const theme = commandMapThemes[mapThemeId] ?? commandMapThemes.dark_ops
+  const preset = getMapVisualPreset(mapThemeId)
   const cp = theme.clusterPalette
   const pp = theme.pinPalette
-  const isLight = theme.baseStyleTone === 'light_street'
+  const isLight = preset.basemap.isLight
 
   // Dim base stroke — replace last opacity component with 0.36
   const baseStroke = cp.stroke.replace(/[\d.]+\)$/, '0.36)')
@@ -136,11 +138,11 @@ export function getMapThemeTokens(nexusTheme: string): PropertyLayerTokens {
     // Individual marker rendering — keep icons clearly visible without being noisy.
     // Dark themes: brighter glow + halo so icons read against dark satellite/tile bases.
     // Light themes: slightly lower opacity so icons don't overwhelm the map.
-    markerGlowOpacity:  isLight ? 0.18 : 0.26,
-    markerGlowBlur:     0.7,
-    markerIconOpacity:  isLight ? 0.85 : 0.94,
-    markerIconHaloColor: isLight ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.88)',
-    markerIconHaloWidth: isLight ? 1.2 : 1.6,
+    markerGlowOpacity:  isLight ? 0.28 : Math.max(0.28, preset.markers.haloOpacity + 0.12),
+    markerGlowBlur:     0.65,
+    markerIconOpacity:  isLight ? 0.92 : Math.min(0.99, 0.92 + preset.markers.iconLuminance * 0.06),
+    markerIconHaloColor: preset.markers.iconHaloColor,
+    markerIconHaloWidth: preset.markers.iconHaloWidth,
 
     // State colors from theme's pin palette
     colorHot:          (pp.hot           as string | undefined) ?? '#d4404c',

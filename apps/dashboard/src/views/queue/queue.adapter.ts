@@ -1,8 +1,11 @@
 import type { QueueModel, QueueItem, QueueItemStatus, QueueItemPriority, DeliveryStatus, FailureReason, RiskLevel } from '../../domain/queue/queue.types'
+import { PRODUCTION_TEXTGRID_FLEET } from '../../lib/data/textgridFleet'
 import { fetchQueueModel } from '../../lib/data/queueData'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 
 const MARKETS = ['Dallas', 'Austin', 'Houston', 'San Antonio', 'Minneapolis', 'Denver']
+
+const MOCK_TEXTGRID_FLEET = PRODUCTION_TEXTGRID_FLEET
 const AGENTS = ['Sarah Johnson', 'Mike Chen', 'Elena Rodriguez', 'James Wilson', 'Lisa Park']
 const TEMPLATES = ['Initial Outreach', 'Follow-up', 'Urgency', 'Closing Push', 'Property Update']
 const USE_CASES = ['listing', 'foreclosure', 'probate', 'distressed', 'investment']
@@ -70,7 +73,7 @@ const generateQueueItem = (index: number): QueueItem => {
     market: MARKETS[Math.floor(Math.random() * MARKETS.length)],
     phone: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
     toPhoneNumber: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
-    fromPhoneNumber: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
+    fromPhoneNumber: MOCK_TEXTGRID_FLEET[Math.floor(Math.random() * MOCK_TEXTGRID_FLEET.length)].phone,
     agent: AGENTS[Math.floor(Math.random() * AGENTS.length)],
     templateName: TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)],
     templateId: `tpl-${index}`,
@@ -106,7 +109,7 @@ const generateQueueItem = (index: number): QueueItem => {
     riskLevel,
     aiConfidence,
     estimatedCost: Math.random() * 0.025 + 0.01,
-    textgridNumber: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
+    textgridNumber: MOCK_TEXTGRID_FLEET[Math.floor(Math.random() * MOCK_TEXTGRID_FLEET.length)].phone,
     linkedInboxThreadId: Math.random() > 0.4 ? `thread-${Math.random().toString(36).substring(7)}` : null,
     linkedPropertyId: `prop-${Math.random().toString(36).substring(7)}`,
     linkedOwnerId: `owner-${Math.random().toString(36).substring(7)}`,
@@ -181,6 +184,17 @@ export const adaptQueueModel = (): QueueModel => {
   const sentTodayCount = items.filter((i) => i.status === 'sent').length
   const deliveredTodayCount = items.filter((i) => i.status === 'delivered').length
 
+  const marketDirectory = MOCK_TEXTGRID_FLEET.reduce<Array<{ market: string; senderCount: number; active: boolean }>>((acc, n) => {
+    const existing = acc.find((m) => m.market === n.market)
+    if (existing) {
+      existing.senderCount++
+      if (n.isActive) existing.active = true
+    } else {
+      acc.push({ market: n.market, senderCount: 1, active: n.isActive })
+    }
+    return acc
+  }, [])
+
   return {
     items,
     readyCount,
@@ -196,6 +210,8 @@ export const adaptQueueModel = (): QueueModel => {
     apiPressureLevel: ['low', 'medium', 'high'][Math.floor(Math.random() * 3)] as any,
     sendEngine: 'real-estate-automation',
     engineMode: 'proxy',
+    marketDirectory,
+    textgridFleet: MOCK_TEXTGRID_FLEET,
   }
 }
 

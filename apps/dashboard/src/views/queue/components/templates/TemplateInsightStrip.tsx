@@ -25,37 +25,47 @@ const INSIGHT_LABELS: Record<string, string> = {
 interface TemplateInsightStripProps {
   data: IntelligenceRailData | null
   loading?: boolean
+  isMobileLayout?: boolean
   onSelectTemplate?: (templateId: string) => void
 }
 
-export function TemplateInsightStrip({ data, loading, onSelectTemplate }: TemplateInsightStripProps) {
-  if (loading) return <div className="occ-tpl-insights is-loading">Loading insights…</div>
+export function TemplateInsightStrip({ data, loading, isMobileLayout = false, onSelectTemplate }: TemplateInsightStripProps) {
+  if (loading) return <div className={cls('occ-tpl-insights', isMobileLayout && 'occ-tpl-insights--mobile', 'is-loading')}>Loading…</div>
   if (!data?.insights?.length) return null
 
   return (
-    <div className="occ-tpl-insights" role="region" aria-label="Template insights">
-      <span className="occ-tpl-insights__label">
-        {data.templates_with_activity ?? data.tracked_templates ?? 0} templates with activity
-      </span>
-      {data.insights.map((insight) => {
-        const label = INSIGHT_LABELS[insight.metric ?? ''] ?? insight.metric
-        const clickable = Boolean(insight.template_id && insight.display_name)
-        return (
-          <button
-            key={insight.metric}
-            type="button"
-            className="occ-tpl-insight-chip"
-            disabled={!clickable}
-            title={insight.reason}
-            onClick={() => insight.template_id && onSelectTemplate?.(insight.template_id)}
-          >
-            <span className="occ-tpl-insight-chip__label">{label}</span>
-            <span className="occ-tpl-insight-chip__value">
-              {insight.display_name ?? 'Not enough data'}
-            </span>
-          </button>
-        )
-      })}
+    <div className={cls('occ-tpl-insights', isMobileLayout && 'occ-tpl-insights--mobile')} role="region" aria-label="Template insights">
+      {!isMobileLayout && (
+        <span className="occ-tpl-insights__label">
+          {data.templates_with_activity ?? data.tracked_templates ?? 0} templates with activity
+        </span>
+      )}
+      <div className="occ-tpl-insights__track">
+        {data.insights.map((insight) => {
+          const label = INSIGHT_LABELS[insight.metric ?? ''] ?? insight.metric
+          const clickable = Boolean(insight.template_id && insight.display_name)
+          const shortName = insight.display_name
+            ? (insight.display_name.length > 28 ? `${insight.display_name.slice(0, 28)}…` : insight.display_name)
+            : 'Not enough data'
+          return (
+            <button
+              key={insight.metric}
+              type="button"
+              className={cls('occ-tpl-insight-chip', isMobileLayout && 'occ-tpl-insight-chip--mobile')}
+              disabled={!clickable}
+              title={insight.reason ?? insight.display_name ?? undefined}
+              onClick={() => insight.template_id && onSelectTemplate?.(insight.template_id)}
+            >
+              <span className="occ-tpl-insight-chip__label">{isMobileLayout ? label.replace(' rate', '').replace('response', 'resp.') : label}</span>
+              <span className="occ-tpl-insight-chip__value">{shortName}</span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
+}
+
+function cls(...t: Array<string | false | null | undefined>) {
+  return t.filter(Boolean).join(' ')
 }

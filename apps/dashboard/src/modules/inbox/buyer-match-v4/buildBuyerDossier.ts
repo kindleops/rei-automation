@@ -9,45 +9,46 @@ export interface BuyerDossierModel {
   buyBox: Array<{ label: string; value: string; inferred?: boolean }>
   purchaseStats: {
     count30: number
+    count60: number
     count90: number
     count180: number
     count365: number
-    totalVerified: number
+    lifetime: number
+    events30: number
+    events180: number
+    packageAssets: number
     lastPurchase: string | null
     nearestMiles: number | null
     medianPrice: number | null
     priceLow: number | null
     priceHigh: number | null
     assetMix: string[]
+    localZipPurchases: number
+    radiusPurchases: number
+    singleAssetPct: number | null
+    packagePct: number | null
   }
   bidBasis: string
   events: PurchaseEvent[]
 }
 
-function median(values: number[]): number | null {
-  if (!values.length) return null
-  const s = [...values].sort((a, b) => a - b)
-  const m = Math.floor(s.length / 2)
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
-}
-
-function countInDays(events: PurchaseEvent[], days: number): number {
-  const cutoff = Date.now() - days * 86400000
-  return events.filter((e) => {
-    if (!e.purchaseDate) return false
-    const t = new Date(e.purchaseDate).getTime()
-    return !Number.isNaN(t) && t >= cutoff
-  }).length
+function familyId(buyer: RankedBuyer): string {
+  return buyer.buyerFamilyId ?? buyer.buyerId
 }
 
 export function buildBuyerDossier(
   buyer: RankedBuyer,
   allEvents: PurchaseEvent[],
 ): BuyerDossierModel {
-  const events = allEvents.filter((e) => e.buyerId === buyer.buyerId)
+  const fid = familyId(buyer)
+  const events = allEvents.filter((e) => (e.buyerFamilyId ?? e.buyerId) === fid)
+  const activity = buyer.activity
+
   const prices = events
-    .map((e) => e.purchasePrice)
-    .filter((v): v is number => v != null && !isUnavailableValue(v))
+    .filter((e) => e.pricingEligible && e.propertyAllocatedConsideration != null)
+    .map((e) => e.propertyAllocatedConsideration!)
+    .filter((v) => !isUnavailableValue(v))
+
   const assetLanes = [...new Set(events.map((e) => e.assetLane).filter(Boolean))] as string[]
 
   const thesis: string[] = []
@@ -56,25 +57,27 @@ export function buildBuyerDossier(
     thesis.push(`Nearest verified purchase ${fmtMiles(buyer.nearestPurchaseMiles)} from subject`)
   }
   if ((buyer.purchases180d ?? 0) > 0) {
-    thesis.push(`${buyer.purchases180d} purchases in the last 180 days near this market`)
+    thesis.push(`${buyer.purchases180d} unique assets in the last 180 days near this market`)
   }
   if (buyer.institutionalStatus === 'VERIFIED_INSTITUTIONAL') {
     thesis.push('Verified institutional acquisition pattern in this geography')
-  } else if (buyer.institutionalStatus === 'CORPORATE') {
-    thesis.push('Corporate repeat buyer with local acquisition history')
+  } else if (buyer.buyerClass === 'LOCAL_INVESTOR') {
+    thesis.push('Local investor with verified acquisition history')
+  } else if (buyer.buyerClass === 'REGIONAL_OPERATOR') {
+    thesis.push('Regional operator with multi-market velocity')
   }
   if (buyer.matchGrade) thesis.push(`Match grade ${buyer.matchGrade} based on geographic and price fit`)
 
   const buyBox: BuyerDossierModel['buyBox'] = [
     { label: 'Asset types', value: assetLanes.length ? assetLanes.join(', ') : 'Unknown', inferred: true },
     {
-      label: 'Purchase-price range',
-      value: prices.length ? `${fmtCurrency(Math.min(...prices))}–${fmtCurrency(Math.max(...prices))}` : 'Insufficient events',
+      label: 'Qualified purchase-price range',
+      value: prices.length ? `${fmtCurrency(Math.min(...prices))}–${fmtCurrency(Math.max(...prices))}` : 'Insufficient qualified events',
       inferred: true,
     },
     {
       label: 'Typical acquisition channel',
-      value: buyer.institutionalStatus ? 'Institutional acquisition' : 'Direct investor purchase',
+      value: buyer.institutionalStatus ? 'Institutional single-asset' : 'Direct investor purchase',
       inferred: true,
     },
     {
@@ -84,29 +87,61 @@ export function buildBuyerDossier(
     },
   ]
 
-  let bidBasis = 'Based on median verified purchase prices for this buyer near the subject'
+  let bidBasis = 'Based on qualified single-asset purchases and supported allocations near the subject'
   if (isUnavailableValue(buyer.likelyBidBase)) {
-    bidBasis = 'Insufficient verified purchase history to estimate likely bid'
+    bidBasis = 'Insufficient qualified purchase history to estimate likely bid'
   }
+
+  const stats = activity
+    ? {
+        count30: activity.unique30d,
+        count60: activity.unique60d,
+        count90: activity.unique90d,
+        count180: activity.unique180d,
+        count365: activity.unique365d,
+        lifetime: activity.lifetime,
+        events30: activity.events30d,
+        events180: activity.events180d,
+        packageAssets: activity.packageAssetsLifetime,
+        lastPurchase: activity.mostRecentPurchase ?? buyer.lastPurchaseAt,
+        nearestMiles: activity.nearestPurchaseMiles ?? buyer.nearestPurchaseMiles,
+        medianPrice: activity.medianQualifiedPrice ?? buyer.medianQualifiedPrice ?? null,
+        priceLow: activity.qualifiedPriceLow ?? (prices.length ? Math.min(...prices) : null),
+        priceHigh: activity.qualifiedPriceHigh ?? (prices.length ? Math.max(...prices) : null),
+        assetMix: assetLanes,
+        localZipPurchases: activity.localZipPurchases,
+        radiusPurchases: activity.radiusPurchases,
+        singleAssetPct: activity.singleAssetPct,
+        packagePct: activity.packagePct,
+      }
+    : {
+        count30: buyer.purchases30d ?? 0,
+        count60: buyer.purchases60d ?? 0,
+        count90: buyer.purchases90d ?? 0,
+        count180: buyer.purchases180d ?? 0,
+        count365: buyer.purchases365d ?? 0,
+        lifetime: buyer.lifetimePurchases ?? events.length,
+        events30: 0,
+        events180: 0,
+        packageAssets: 0,
+        lastPurchase: buyer.lastPurchaseAt,
+        nearestMiles: buyer.nearestPurchaseMiles,
+        medianPrice: buyer.medianQualifiedPrice ?? null,
+        priceLow: prices.length ? Math.min(...prices) : null,
+        priceHigh: prices.length ? Math.max(...prices) : null,
+        assetMix: assetLanes,
+        localZipPurchases: buyer.localPurchases ?? 0,
+        radiusPurchases: 0,
+        singleAssetPct: null,
+        packagePct: null,
+      }
 
   return {
     buyer,
     chips: buildMatchChips(buyer),
     matchThesis: [...new Set(thesis)].slice(0, 8),
     buyBox,
-    purchaseStats: {
-      count30: countInDays(events, 30),
-      count90: countInDays(events, 90),
-      count180: countInDays(events, 180),
-      count365: countInDays(events, 365),
-      totalVerified: events.length,
-      lastPurchase: buyer.lastPurchaseAt,
-      nearestMiles: buyer.nearestPurchaseMiles,
-      medianPrice: median(prices),
-      priceLow: prices.length ? Math.min(...prices) : null,
-      priceHigh: prices.length ? Math.max(...prices) : null,
-      assetMix: assetLanes,
-    },
+    purchaseStats: stats,
     bidBasis,
     events: events.sort((a, b) => {
       const at = a.purchaseDate ? new Date(a.purchaseDate).getTime() : 0

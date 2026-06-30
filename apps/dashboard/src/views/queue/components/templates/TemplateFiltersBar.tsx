@@ -32,6 +32,7 @@ interface TemplateFiltersBarProps {
   preset: ColumnPreset
   density: TableDensity
   visibleColumns: string[]
+  isMobileLayout?: boolean
   onFiltersChange: (patch: Partial<TemplateIntelligenceFilters>) => void
   onPresetChange: (preset: ColumnPreset) => void
   onDensityChange: (density: TableDensity) => void
@@ -45,6 +46,7 @@ export function TemplateFiltersBar({
   preset,
   density,
   visibleColumns,
+  isMobileLayout = false,
   onFiltersChange,
   onPresetChange,
   onDensityChange,
@@ -54,6 +56,8 @@ export function TemplateFiltersBar({
 }: TemplateFiltersBarProps) {
   const [moreOpen, setMoreOpen] = useState(false)
   const [colsOpen, setColsOpen] = useState(false)
+
+  if (isMobileLayout) return null
 
   const toggleCol = (col: string) => {
     if (visibleColumns.includes(col)) {

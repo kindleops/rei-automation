@@ -74,7 +74,12 @@ import { InboxConversationTable, type ConversationTableSort } from './components
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
 import { ActiveProspectCard } from './components/ActiveProspectCard'
-import type { PropertyParticipant, PropertyParticipantGraph } from './utils/participantLabels'
+import {
+  deriveOwnerMatchFlags,
+  withThreadProspectDisplayName,
+  type PropertyParticipant,
+  type PropertyParticipantGraph,
+} from './utils/participantLabels'
 // ComposerTranslationBar is now inline inside Composer
 import { IntelligencePanel } from './components/IntelligencePanel'
 import { QueuePage } from '../../views/queue/QueuePage'
@@ -82,6 +87,15 @@ import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import type { TemplateActionPayload } from './components/TemplatePopover'
 import { InboxActivityPanel } from './components/InboxActivityPanel'
 import type { MapStyleMode } from '../../views/map/InboxCommandMap'
+import { MAP_VISUAL_PRESET_STORAGE_KEY, normalizeMapVisualPresetId } from '../../views/map/map-visual-presets'
+import {
+  applySubjectCoordinates,
+  mergeThreadCoordinates,
+  resolveSubjectPropertyId,
+  threadNeedsCoordinates,
+  threadRefKeys,
+} from '../../domain/inbox/map-selection-sync'
+import { fetchPropertyRecord } from '../../domain/comp-intelligence/property-record-loader'
 import { InboxUtilityDrawer, MapDossierDrawer } from './components/InboxUtilityDrawer'
 import { LiveCopilotChat } from '../copilot/components/LiveCopilotChat'
 import { AdvancedFiltersModal } from './components/AdvancedFiltersModal'
@@ -89,8 +103,14 @@ import { InboxCommandPalette, type InboxCmd } from './InboxCommandPalette'
 import { InboxSchedulePanel, type ScheduledTime } from './InboxSchedulePanel'
 import { ThreadDebugModal } from './components/ThreadDebugModal'
 import { useBreakpoint } from '../mobile/useBreakpoint'
-import { MobileThreadHeader } from '../mobile/MobileThreadHeader'
-import { publishMobileInboxBadge } from '../mobile/mobile-inbox-bridge'
+
+import {
+  clearPendingInboxDealIntelligence,
+  OPEN_INBOX_DEAL_INTEL_EVENT,
+  openInboxDealIntelligence,
+  peekPendingInboxDealIntelligence,
+  publishMobileInboxBadge,
+} from '../mobile/mobile-inbox-bridge'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
@@ -166,7 +186,6 @@ import {
   getSavedPresetConfig,
   isSuppressedThread,
   resolveThreadPrimaryName,
-  resolveThreadOwnerName,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
   type InboxSavedFilterPreset,
@@ -184,6 +203,7 @@ import {
 import {
   getViewLayoutMode,
   resolveLayoutModeForPane,
+  resolveMobileAwareLayoutMode,
   resolveWorkspaceFlexBases,
   resolveWorkspaceWidthLabels,
   type ViewWidthPercent,
@@ -674,7 +694,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [pendingMessagesByThread, setPendingMessagesByThread] = useState<Record<string, ThreadMessage[]>>({})
   const [visibleThreadCount, setVisibleThreadCount] = useState(1000)
   const [mapSourceMode, setMapSourceMode] = useState<MapSourceMode>(defaultMapSourceMode)
-  const [commandMapTheme, setCommandMapTheme] = useState<MapStyleMode>('dark_ops')
+  const [commandMapTheme, setCommandMapTheme] = useState<MapStyleMode>(() => {
+    if (typeof window === 'undefined') return 'dark_ops'
+    return normalizeMapVisualPresetId(window.localStorage.getItem(MAP_VISUAL_PRESET_STORAGE_KEY))
+  })
   const [commandMapMarket, setCommandMapMarket] = useState('')
 
   const [threadContext, setThreadContext] = useState<ThreadContext | null>(null)
@@ -733,6 +756,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileIntelOpen, setMobileIntelOpen] = useState(false)
+  /** Portrait mobile: thread pane only after explicit row tap — not auto-select. */
+  const [mobileThreadOpen, setMobileThreadOpen] = useState(false)
+  const isMobileInboxShell = isMobile && routeMode === 'workspace'
 
   const [queueModel, setQueueModel] = useState<QueueModel | null>(null)
   const [templateInventory, setTemplateInventory] = useState<SmsTemplate[]>([])
@@ -784,16 +810,31 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const mapThreads = useMemo(() => {
     const pins = data.mapPins ?? []
     if (pins.length === 0) return threads
-    const pinByKey = new Map(pins.map((pin) => [pin.threadKey || pin.id, pin]))
-    const seen = new Set<string>()
-    const hydrated = threads.map((thread) => {
-      const pin = pinByKey.get(thread.threadKey || thread.id)
+
+    const pinByRef = new Map<string, (typeof pins)[number]>()
+    for (const pin of pins) {
+      for (const ref of [pin.threadKey, pin.id, pin.propertyId].map((value) => String(value ?? '').trim()).filter(Boolean)) {
+        if (!pinByRef.has(ref)) pinByRef.set(ref, pin)
+      }
+    }
+
+    const resolvePin = (thread: InboxWorkflowThread) => {
+      for (const key of threadRefKeys(thread)) {
+        const pin = pinByRef.get(key)
+        if (pin) return pin
+      }
+      return undefined
+    }
+
+    return threads.map((thread) => {
+      const pin = resolvePin(thread)
       if (!pin) return thread
-      seen.add(pin.threadKey || pin.id)
       return {
         ...thread,
         lat: pin.lat,
         lng: pin.lng,
+        latitude: pin.lat,
+        longitude: pin.lng,
         propertyAddress: thread.propertyAddress || pin.propertyAddress,
         latestMessageBody: thread.latestMessageBody || pin.latestMessageBody,
         streetview_image: (thread as any).streetview_image || null,
@@ -801,28 +842,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         satellite_image: (thread as any).satellite_image || null,
       }
     })
-
-    const synthetic = pins
-      .filter((pin) => !seen.has(pin.threadKey || pin.id))
-      .map((pin) => ({
-        id: pin.threadKey || pin.id,
-        threadKey: pin.threadKey || pin.id,
-        ownerName: pin.ownerName || 'Unknown Seller',
-        subject: pin.propertyAddress || 'Property pin',
-        preview: pin.latestMessageBody || 'Map pin',
-        propertyAddress: pin.propertyAddress,
-        marketId: 'unknown',
-        priority: 'normal',
-        inboxStatus: 'waiting',
-        conversationStage: pin.stage || 'needs_review',
-        lat: pin.lat,
-        lng: pin.lng,
-        lastMessageAt: new Date().toISOString(),
-        lastMessageIso: new Date().toISOString(),
-        lastMessageBody: pin.latestMessageBody || '',
-        isRead: true,
-      } as InboxWorkflowThread))
-    return [...hydrated, ...synthetic]
   }, [data.mapPins, threads])
 
   void useMemo(() => getAdvancedFilterOptions(threads), [threads])
@@ -1046,6 +1065,73 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [selected, effectiveActiveContext, canonicalSelectedContext],
   )
 
+  const mapSelectedPropertyId = useMemo(
+    () => resolveSubjectPropertyId(
+      workspaceThread,
+      canonicalSelectedContext as unknown as Record<string, unknown> | null,
+    ),
+    [canonicalSelectedContext, workspaceThread],
+  )
+  const [mapPropertyCoords, setMapPropertyCoords] = useState<{ propertyId: string; lat: number; lng: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setMapPropertyCoords(null)
+    if (!workspaceThread || !mapSelectedPropertyId) return () => { cancelled = true }
+
+    const hydrated = mapThreads.find((thread) => (
+      thread.id === workspaceThread.id
+      || thread.threadKey === workspaceThread.threadKey
+      || getConversationThreadIdForThread(thread) === getConversationThreadIdForThread(workspaceThread)
+    )) ?? workspaceThread
+    const withContext = applySubjectCoordinates(
+      hydrated,
+      canonicalSelectedContext as unknown as Record<string, unknown> | null,
+    )
+    if (!threadNeedsCoordinates(withContext)) return () => { cancelled = true }
+
+    void fetchPropertyRecord(mapSelectedPropertyId).then((record) => {
+      if (cancelled || !record) return
+      const resolved = applySubjectCoordinates(
+        hydrated,
+        canonicalSelectedContext as unknown as Record<string, unknown> | null,
+        record,
+      )
+      if (!resolved || threadNeedsCoordinates(resolved)) return
+      const lat = Number((resolved as { lat?: number }).lat ?? (resolved as { latitude?: number }).latitude)
+      const lng = Number((resolved as { lng?: number }).lng ?? (resolved as { longitude?: number }).longitude)
+      setMapPropertyCoords({ propertyId: mapSelectedPropertyId, lat, lng })
+    }).catch(() => {})
+
+    return () => { cancelled = true }
+  }, [
+    canonicalSelectedContext,
+    mapSelectedPropertyId,
+    mapThreads,
+    workspaceThread,
+  ])
+
+  const mapSelectedThread = useMemo(() => {
+    if (!workspaceThread) return null
+    const hydrated = mapThreads.find((thread) => (
+      thread.id === workspaceThread.id
+      || thread.threadKey === workspaceThread.threadKey
+      || getConversationThreadIdForThread(thread) === getConversationThreadIdForThread(workspaceThread)
+    )) ?? workspaceThread
+    const withContext = applySubjectCoordinates(
+      hydrated,
+      canonicalSelectedContext as unknown as Record<string, unknown> | null,
+    ) ?? hydrated
+    if (
+      mapPropertyCoords
+      && mapPropertyCoords.propertyId === mapSelectedPropertyId
+      && threadNeedsCoordinates(withContext)
+    ) {
+      return mergeThreadCoordinates(withContext, mapPropertyCoords.lat, mapPropertyCoords.lng)
+    }
+    return withContext
+  }, [canonicalSelectedContext, mapPropertyCoords, mapSelectedPropertyId, mapThreads, workspaceThread])
+
   const inboxHighlightId = useMemo(
     () => resolveInboxHighlightId(threads, selected, effectiveActiveContext),
     [threads, selected, effectiveActiveContext],
@@ -1140,6 +1226,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // After bucket/category switch, surface the first lead once the list is stable.
   // Brief deferral keeps user-initiated row clicks ahead of boot dossier fetches.
   useEffect(() => {
+    if (isMobileInboxShell) return
     if (typeof window !== 'undefined' && (window as Window & { __INBOX_PROOF_DISABLE_AUTO_SELECT__?: boolean }).__INBOX_PROOF_DISABLE_AUTO_SELECT__) {
       return
     }
@@ -1162,7 +1249,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setLayoutState((current) => ({ ...current, selectedThreadId: first.id }))
     }, 400)
     return () => clearTimeout(timer)
-  }, [filtered, selectedId, selectedThreadKey, viewFilter])
+  }, [filtered, isMobileInboxShell, selectedId, selectedThreadKey, viewFilter])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
 
@@ -1271,11 +1358,28 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
     const nextView = viewMap[view] ?? (view as InboxViewSelectValue)
     setViewFilter(nextView)
+    setSidebarListScrollOffset(0)
+    setSelectedId(null)
+    setSelectedThreadKey(null)
+    selectedThreadFallbackRef.current = null
+    void refreshInbox({
+      filters: {
+        view: nextView,
+        stage: stageFilter,
+        query: searchQuery,
+        advanced: serverAdvancedPayload,
+      },
+      cursor: null,
+      limit: 30,
+      _force: true,
+      _timeoutMode: 'manual_bucket_switch',
+      _refreshReason: 'navigate_inbox_view',
+    })
     if (!selectedWorkspaceViews.includes('thread')) {
       setSelectedWorkspaceViews((current) => (['thread', ...current] as InboxWorkspaceView[]).slice(0, MAX_TOGGLED_VIEWS))
     }
     pushRoutePath('/inbox')
-  }, [selectedWorkspaceViews])
+  }, [refreshInbox, searchQuery, selectedWorkspaceViews, serverAdvancedPayload, stageFilter])
 
   const viewLabelByKey = useMemo(
     () => new Map(WORKSPACE_VIEW_OPTIONS.map((view) => [view.key, view.label.replace(' View', '')])),
@@ -1403,6 +1507,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       console.log('[BUCKET_STATE_SET]', config.view)
       setViewFilter(config.view)
     }
+
+    // Virtual list scroll offset is global — reset on every bucket switch so a deep
+    // scroll in All Messages cannot leave Priority/New Replies looking blank.
+    setSidebarListScrollOffset(0)
 
     // Clear selection so stale thread from the previous bucket is never shown in the new bucket.
     setSelectedId(null)
@@ -1544,6 +1652,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [handleFocusWorkspaceView])
 
   const handleSelectWorkspace = useCallback((workspaceKey: string) => {
+    if (isMobile && !isRouteFullscreen && workspaceKey !== DEFAULT_WORKSPACE_KEY) {
+      return
+    }
     const preset = NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === workspaceKey)
     if (!preset) return
     let views = [...preset.views]
@@ -1561,7 +1672,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedWorkspaceKey(preset.key)
     setSelectedWorkspaceViews(views)
     setWorkspaceWidthOverrides(resolvePresetWidthOverrides(views, preset.widths))
-  }, [])
+  }, [isMobile, isRouteFullscreen])
 
   const persistWorkspaceViewOverride = useCallback((workspaceKey: NexusWorkspaceKey, views: InboxWorkspaceView[]) => {
     try {
@@ -1616,6 +1727,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
     const asWorkspaceView = viewKey as InboxWorkspaceView
     if (!WORKSPACE_VIEW_OPTIONS.some((option) => option.key === asWorkspaceView)) return
+    if (asWorkspaceView === 'deal_intelligence' && isMobile && !isRouteFullscreen) {
+      openInboxDealIntelligence()
+      return
+    }
     setSelectedWorkspaceViews((current) => {
       if (current.includes(asWorkspaceView)) {
         if (current.length <= 1) {
@@ -1634,7 +1749,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setWorkspaceWidthOverrides((existing) => sanitizeWorkspaceWidthOverrides(nextViews, existing))
       return nextViews
     })
-  }, [emitNotification])
+  }, [emitNotification, isMobile, isRouteFullscreen])
 
   const handleSelectWorkspaceViewWidth = useCallback((viewKey: string, width: ViewWidthPercent) => {
     const normalizedViewKey = viewKey === 'analytics'
@@ -1774,7 +1889,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       || (nextContext.intent === 'focus_map' ? 'command_map' : undefined)
 
     if (focusTarget) {
-      if (options?.preserveCurrentViews === false) {
+      if (options?.preserveCurrentViews === false && (!isMobile || isRouteFullscreen)) {
         setSelectedWorkspaceViews([focusTarget])
       } else {
         focusWorkspaceView(focusTarget)
@@ -1783,20 +1898,70 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (options?.openThread) {
       focusWorkspaceView('sms_thread')
+      if (isMobileInboxShell) setMobileThreadOpen(true)
     }
-  }, [focusWorkspaceView, threads])
+  }, [focusWorkspaceView, isMobile, isMobileInboxShell, isRouteFullscreen, threads])
+
+  const resolveDealIntelThreadId = useCallback((): string | null => {
+    const active = selectedRef.current
+    if (active?.id) return active.id
+    const fallback = filtered[0] ?? threads[0] ?? null
+    return fallback?.id ?? null
+  }, [filtered, threads])
+
+  const selectThreadForDealIntel = useCallback((threadId: string) => {
+    const match = threads.find((thread) => thread.id === threadId || (thread.threadKey || thread.id) === threadId)
+      ?? filtered.find((thread) => thread.id === threadId || (thread.threadKey || thread.id) === threadId)
+    if (!match) return false
+    setSelectedId(match.id)
+    setSelectedThreadKey(getConversationThreadIdForThread(match) || match.threadKey || match.id)
+    setLayoutState((current) => ({ ...current, selectedThreadId: match.id }))
+    return true
+  }, [filtered, threads])
 
   const handleOpenDealIntelligence = useCallback((threadId?: string | null) => {
-    if (threadId) {
-      setSelectedId(threadId)
-      const match = threads.find((thread) => thread.id === threadId || (thread.threadKey || thread.id) === threadId)
-      if (match) {
-        setSelectedThreadKey(match.threadKey || match.id)
+    const resolvedThreadId = threadId || resolveDealIntelThreadId()
+    if (resolvedThreadId) {
+      selectThreadForDealIntel(resolvedThreadId)
+    } else if (peekPendingInboxDealIntelligence()) {
+      return
+    }
+    if (isMobile && !isRouteFullscreen) {
+      setSelectedWorkspaceViews((current) => (
+        current.length > 1 && current.includes('deal_intelligence')
+          ? current
+          : cloneDefaultWorkspaceViews()
+      ))
+      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
+      if (resolvedThreadId) {
+        setMobileThreadOpen(true)
+        setMobileIntelOpen(true)
+        clearPendingInboxDealIntelligence()
       }
+      return
     }
     setWorkspaceWidthOverrides({})
     setSelectedWorkspaceViews(['deal_intelligence'])
-  }, [threads])
+    clearPendingInboxDealIntelligence()
+  }, [isMobile, isRouteFullscreen, resolveDealIntelThreadId, selectThreadForDealIntel])
+
+  useEffect(() => {
+    const onOpenDealIntel = () => {
+      handleOpenDealIntelligence(resolveDealIntelThreadId())
+    }
+    window.addEventListener(OPEN_INBOX_DEAL_INTEL_EVENT, onOpenDealIntel)
+    if (peekPendingInboxDealIntelligence()) {
+      onOpenDealIntel()
+    }
+    return () => window.removeEventListener(OPEN_INBOX_DEAL_INTEL_EVENT, onOpenDealIntel)
+  }, [handleOpenDealIntelligence, resolveDealIntelThreadId])
+
+  useEffect(() => {
+    if (!peekPendingInboxDealIntelligence()) return
+    const threadId = resolveDealIntelThreadId()
+    if (!threadId) return
+    handleOpenDealIntelligence(threadId)
+  }, [filtered, handleOpenDealIntelligence, resolveDealIntelThreadId, threads])
 
   const handleOpenSellerAutomation = useCallback((threadId?: string | null) => {
     const match = threadId
@@ -2506,6 +2671,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       window.localStorage.setItem('nx.inbox.selected-workspace', selectedWorkspaceKey)
     } catch {}
   }, [selectedWorkspaceKey])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MAP_VISUAL_PRESET_STORAGE_KEY, commandMapTheme)
+    } catch {}
+  }, [commandMapTheme])
 
   useEffect(() => {
     const sync = () => {
@@ -3226,6 +3397,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const anchorThreadSelection = useCallback((id: string) => {
     const thread = findThreadByRef(threads, id)
     if (thread) {
+      setActiveContext(buildContextFromThread(thread, 'pipeline'), { preserveCurrentViews: true })
       setSelectedId(thread.id)
       setSelectedThreadKey(thread.threadKey || thread.id)
       setLayoutState((current) => ({ ...current, selectedThreadId: thread.id }))
@@ -3235,13 +3407,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedId(id)
     setSelectedThreadKey(id)
     setLayoutState((current) => ({ ...current, selectedThreadId: id }))
-  }, [threads])
+  }, [setActiveContext, threads])
 
   const handleMobileBack = useCallback(() => {
+    setMobileThreadOpen(false)
     setSelectedId(null)
     setSelectedThreadKey(null)
     selectedThreadFallbackRef.current = null
     setMobileIntelOpen(false)
+    setMobileSidebarOpen(false)
     setLayoutState((current) => ({ ...current, selectedThreadId: null }))
   }, [])
 
@@ -3293,7 +3467,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         body: JSON.stringify({ thread_key: canonicalStateKey, patch: { is_read: true } }),
       })
     }
-  }, [setActiveContext, selectedId, selectedThreadKey, threads, viewFilter])
+    if (isMobileInboxShell) {
+      setMobileThreadOpen(true)
+      setMobileIntelOpen(false)
+    }
+  }, [isMobileInboxShell, setActiveContext, selectedId, selectedThreadKey, threads, viewFilter])
 
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
@@ -3341,13 +3519,44 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     let cancelled = false
     const controller = new AbortController()
     setPropertyParticipantsLoading(true)
-    const fallbackParticipant = selected ? {
-      participant_id: `${propertyId}:${selectedPhone || selected.id}`,
-      property_id: propertyId,
-      canonical_e164: selectedPhone || selected.canonicalE164 || selected.bestPhone || null,
-      display_name: resolveThreadPrimaryName(selected) || selected.subject || null,
-      relationship_to_property: String((selected as unknown as Record<string, unknown>).contact_identity_class || 'respondent'),
-    } satisfies PropertyParticipant : null
+    const fallbackSeed = selected ? (() => {
+      const selectedRecord = selected as unknown as Record<string, unknown>
+      const identityClass = String(
+        selectedRecord.contact_identity_class
+        || selectedRecord.contactIdentityClass
+        || 'respondent',
+      )
+      return {
+        participant_id: `${propertyId}:${selectedPhone || selected.id}`,
+        property_id: propertyId,
+        canonical_e164: selectedPhone || selected.canonicalE164 || selected.bestPhone || null,
+        display_name: resolveThreadPrimaryName(selected) || selected.subject || null,
+        relationship_to_property: identityClass,
+        identity_class: identityClass,
+        matching_flags: String(selectedRecord.matching_flags || selectedRecord.matchingFlags || '') || null,
+        person_flags_text: String(selectedRecord.person_flags_text || selectedRecord.personFlagsText || '') || null,
+        likely_owner: selectedRecord.likely_owner === true
+          || selectedRecord.likelyOwner === true
+          || identityClass === 'confirmed_owner'
+          || identityClass === 'probable_owner',
+        likely_renting: selectedRecord.likely_renter === true
+          || selectedRecord.likelyRenter === true
+          || identityClass === 'renter_occupant',
+        ownership_status: identityClass === 'confirmed_owner'
+          ? 'confirmed'
+          : identityClass === 'probable_owner'
+            ? 'inferred'
+            : 'unconfirmed',
+      } satisfies PropertyParticipant
+    })() : null
+    const fallbackParticipant = fallbackSeed
+      ? {
+          ...fallbackSeed,
+          owner_match_flags: deriveOwnerMatchFlags(fallbackSeed),
+        }
+      : null
+
+    const threadProspectName = selected ? resolveThreadPrimaryName(selected) : null
 
     const loadParticipants = () => {
       if (cancelled) return
@@ -3356,7 +3565,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           if (cancelled) return
           if (!res.ok) {
             setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
-            setSelectedParticipant(fallbackParticipant)
+            setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
             return
           }
           const payload = (res.data ?? {}) as PropertyParticipantGraph
@@ -3366,16 +3575,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           setPropertyParticipants(participants)
           setMasterOwnerHouseholdLabel(payload.master_owner_household_label || null)
           setNextEligibleContact(payload.next_eligible_contact || null)
-          const current = participants.find((row) => String(row.canonical_e164 ?? '').trim() === String(selectedPhone ?? '').trim())
-            || payload.selected_participant
-            || participants[0]
-            || fallbackParticipant
+          const current = withThreadProspectDisplayName(
+            participants.find((row) => String(row.canonical_e164 ?? '').trim() === String(selectedPhone ?? '').trim())
+              || payload.selected_participant
+              || participants[0]
+              || fallbackParticipant,
+            threadProspectName,
+            selectedPhone,
+          )
           setSelectedParticipant(current)
         })
         .catch(() => {
           if (!cancelled) {
             setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
-            setSelectedParticipant(fallbackParticipant)
+            setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
           }
         })
         .finally(() => {
@@ -3670,7 +3883,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         return
       }
       if (kind === 'set_map_theme') {
-        const theme = typeof detail.theme === 'string' ? detail.theme as MapStyleMode : null
+        const theme = typeof detail.theme === 'string' ? normalizeMapVisualPresetId(detail.theme) : null
         if (!theme) return
         setCommandMapTheme(theme)
         handleFocusWorkspaceView('command_map')
@@ -3785,10 +3998,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         await handleThreadAction(thread, 'unread')
         break
       case 'open_dossier':
-        setActiveOverlay('dossier')
+        handleOpenDealIntelligence(thread.id)
         break
       case 'add_note':
-        setActiveOverlay('dossier')
+        handleOpenDealIntelligence(thread.id)
         break
       case 'mark_reviewed':
         await handleThreadAction(thread, 'read')
@@ -3972,15 +4185,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
 
   const handleSelectCalendarEvent = useCallback((event: import('../../lib/data/calendarData').CalendarEvent) => {
-    setActiveContext(buildContextFromCalendarEvent(event), { preserveCurrentViews: true })
     if (event.threadId) {
-      const match = threads.find((thread) => thread.id === event.threadId || (thread.threadKey || thread.id) === event.threadId)
+      const match = findThreadByRef(threads, event.threadId)
       if (match) {
-        setSelectedId(match.id)
-        setSelectedThreadKey(match.threadKey || match.id)
+        handleSelect(match.id)
+        return
       }
     }
-  }, [setActiveContext, threads])
+    setActiveContext(buildContextFromCalendarEvent(event), { preserveCurrentViews: true })
+  }, [handleSelect, setActiveContext, threads])
 
   const handleActivityNavigation = useCallback((event: import('../../views/map/commandMapLiveActivity').CommandMapActivityEvent) => {
     const openThread = event.targetView === 'thread' || event.type === 'new_reply' || event.type === 'positive_reply'
@@ -4245,6 +4458,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const workspaceBlocked = selectedWorkspacePreset.status !== 'ready'
 
   const isMultiView = renderViews.length > 1
+  const useFullscreenShell = !workspaceBlocked && !isMultiView
+  const useMobileInboxFlow = isMobile && !useFullscreenShell
+
+  /** Mount only the active mobile pane — hidden CSS panes were crashing mobile browsers. */
+  const mobilePaneViews = useMemo((): InboxWorkspaceView[] | null => {
+    if (!useMobileInboxFlow) return null
+    if (mobileIntelOpen) return ['deal_intelligence']
+    if (mobileThreadOpen) return ['sms_thread']
+    return ['thread']
+  }, [useMobileInboxFlow, mobileIntelOpen, mobileThreadOpen])
+
+  const viewsToRender = mobilePaneViews ?? renderViews
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
     || (isMultiView
       && renderViews.includes('thread')
@@ -4253,10 +4478,49 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const isCustomMultiView = isMultiView && isDealDeskLayout
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
+  const isMobilePipelineView = isMobile && activeWorkspaceView === 'pipeline'
   const _isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
   void _isEntityGraphView
-  const useFullscreenShell = !workspaceBlocked && !isMultiView
   const isDoubleSided = inboxMode === 'full_double'
+
+  const focusWorkspaceViewOnMobile = useCallback((view: InboxWorkspaceView) => {
+    if (!useMobileInboxFlow) {
+      setSelectedWorkspaceViews([view])
+      return
+    }
+    if (view === 'deal_intelligence') {
+      setMobileIntelOpen(true)
+      return
+    }
+    const routeByView: Partial<Record<InboxWorkspaceView, string>> = {
+      command_map: '/map',
+      queue: '/queue',
+      pipeline: '/pipeline',
+      calendar: '/calendar',
+      comp_intelligence: '/comp-intelligence',
+      buyer_match: '/buyer-match',
+      workflow_studio: '/workflow-studio',
+      metrics: '/analytics',
+      email: '/email-command',
+      campaigns: '/campaign-command',
+      closing_desk: '/closing-desk',
+      entity_graph: '/entity-graph',
+    }
+    const route = routeByView[view]
+    if (route) pushRoutePath(route)
+  }, [useMobileInboxFlow])
+
+  useEffect(() => {
+    const handleOpenMapForComp = () => {
+      if (isMobile && !isRouteFullscreen) {
+        focusWorkspaceViewOnMobile('command_map')
+        return
+      }
+      focusWorkspaceView('command_map')
+    }
+    window.addEventListener('nexus:map-focus-workspace', handleOpenMapForComp)
+    return () => window.removeEventListener('nexus:map-focus-workspace', handleOpenMapForComp)
+  }, [focusWorkspaceView, focusWorkspaceViewOnMobile, isMobile, isRouteFullscreen])
 
   const renderWorkspaceStatusShell = () => {
     const statusLabel = selectedWorkspacePreset.status === 'backend_not_ready' ? 'Backend Not Ready' : 'Coming Soon'
@@ -4312,22 +4576,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         `is-layout-${layoutMode}`,
       )}
     >
-      {isMobile ? (
-        <MobileThreadHeader
-          thread={selected}
-          onBack={handleMobileBack}
-          onOpenIntelligence={() => handleOpenDealIntelligence(selected?.id ?? null)}
-          onOpenWorkflow={selected ? () => {
-            openSellerAutomationStudioFromEntity({
-              propertyId: selected.propertyId ?? undefined,
-              threadKey: selected.threadKey ?? selected.id,
-            })
-            handleFocusWorkspaceView('workflow_studio')
-          } : undefined}
-        />
-      ) : null}
       <ChatThread
         thread={selected}
+        onBack={isMobile ? handleMobileBack : undefined}
         messages={displayedMessagesWithTranslation}
         loading={messagesLoading}
         isSuppressed={selectedSuppressed}
@@ -4354,7 +4605,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       <ActiveProspectCard
         participants={propertyParticipants}
         selectedParticipant={selectedParticipant}
-        masterOwnerHousehold={masterOwnerHouseholdLabel || (selected ? `${resolveThreadOwnerName(selected)} household` : null)}
+        prospectName={selected ? resolveThreadPrimaryName(selected) : null}
         loading={propertyParticipantsLoading}
         onSelectParticipant={handleParticipantSelect}
         onTryNextEligible={handleTryNextEligible}
@@ -4462,16 +4713,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     paneMode: 'single' | 'multi' = 'single',
     paneWidth: ViewWidthPercent = '100',
   ) => {
-    let layoutMode = resolveLayoutModeForPane(
+    const layoutMode = resolveMobileAwareLayoutMode(
+      view,
       workspaceFlexBases[view] ?? Number(paneWidth),
       workspaceWidthOverrides[view] ?? paneWidth,
+      isMobile,
     )
-    if (isMobile) {
-      if (view === 'pipeline' || view === 'command_map') layoutMode = 'compact'
-      else if (view === 'deal_intelligence') layoutMode = 'medium'
-      else if (view === 'queue' || view === 'campaigns' || view === 'email') layoutMode = 'medium'
-      else if (view === 'workflow_studio') layoutMode = 'compact'
-    }
 
     if (view === 'thread') {
       return renderInboxRailPane(paneMode, paneWidth)
@@ -4537,7 +4784,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             <InboxCommandMap
               threads={mapThreads}
               visibleThreads={filtered}
-              selectedThread={workspaceThread}
+              selectedThread={mapSelectedThread}
               selectedThreadMessages={displayedMessages}
               selectedThreadMessagesLoading={messagesLoading}
               quickReplyDraft={draftText}
@@ -4564,6 +4811,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               }}
               fullHeight={paneMode === 'single'}
               layoutMode={layoutMode}
+              mobileConversationOpen={useMobileInboxFlow && mobileThreadOpen}
               paused={heavyLoadPaused}
             />
             </WorkspaceSuspense>
@@ -4581,8 +4829,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           dealContext={canonicalSelectedContext}
           onStatusChange={handleStatusChange}
           onStageChange={handleStageChange}
-          onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
-          onOpenComps={() => setSelectedWorkspaceViews(['comp_intelligence'])}
+          onCollapse={useMobileInboxFlow ? () => setMobileIntelOpen(false) : undefined}
+          onOpenMap={() => focusWorkspaceViewOnMobile('command_map')}
+          onOpenComps={() => focusWorkspaceViewOnMobile('comp_intelligence')}
           onOpenDossier={() => handleOpenDealIntelligence(workspaceThread?.id ?? null)}
           onOpenSellerAutomation={() => handleOpenSellerAutomation(workspaceThread?.id ?? null)}
           onOpenAi={() => setActiveOverlay('ai')}
@@ -4647,9 +4896,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           externalContext={effectiveActiveContext}
           layoutMode={layoutMode}
           paneWidth={paneWidth}
-          onSelectItem={queueItem =>
+          onSelectItem={(queueItem) => {
+            if (isMobile) return
+            const linkedThread = queueItem.linkedInboxThreadId
+              ? findThreadByRef(threads, queueItem.linkedInboxThreadId)
+              : undefined
+            if (linkedThread) {
+              handleSelect(linkedThread.id)
+              return
+            }
             setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
-          }
+          }}
         />,
       )
     }
@@ -4806,6 +5063,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         ...layoutClasses,
         isRouteFullscreen && 'is-route-fullscreen',
         useFullscreenShell && 'is-workspace-fullscreen',
+        isMobilePipelineView && 'is-mobile-pipeline',
         isCommandMapView && 'is-command-view-active',
         `is-workspace-${activeWorkspaceView}`,
         isCustomMultiView && 'is-deal-desk-layout',
@@ -4913,6 +5171,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           className={cls(
             'nx-fullscreen-app-shell',
             `is-view-${activeWorkspaceView}`,
+            isMobilePipelineView && 'is-mobile-pipeline',
             isDealIntelligenceView && 'nx-deal-intelligence-fullscreen',
             activeWorkspaceView === 'closing_desk' && 'is-view-closing_desk',
           )}
@@ -4925,7 +5184,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         className={cls(
           'nx-inbox-shell',
           isMobile && !useFullscreenShell && 'is-mobile-inbox',
-          isMobile && Boolean(selected) && 'm-thread-open',
+          isMobile && mobileThreadOpen && 'm-thread-open',
           mobileSidebarOpen && 'm-sidebar-open',
           mobileIntelOpen && 'm-intel-open',
         )}
@@ -5014,13 +5273,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
           {isMultiView ? (
             <section className="nx-workspace-split-grid">
-              {renderViews.map((view) => {
+              {viewsToRender.map((view) => {
                 const paneWidth = workspaceWidths[view] ?? '25'
                 const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
-                const layoutMode = resolveLayoutModeForPane(
+                const layoutMode = resolveMobileAwareLayoutMode(
+                  view,
                   flexBasis,
                   workspaceWidthOverrides[view] ?? paneWidth,
+                  isMobile,
                 )
+                const mobilePaneStyle = useMobileInboxFlow
+                  ? { flex: '1 1 auto', maxWidth: '100%', minWidth: 0 }
+                  : { flex: `1 1 ${flexBasis}%`, maxWidth: `${flexBasis}%`, minWidth: 0 }
                 return (
                   <div
                     key={view}
@@ -5031,7 +5295,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                       `is-layout-${layoutMode}`,
                       view === activeWorkspaceView && 'is-primary',
                     )}
-                    style={{ flex: `1 1 ${flexBasis}%`, maxWidth: `${flexBasis}%`, minWidth: 0 }}
+                    style={mobilePaneStyle}
                   >
                     {renderWorkspacePane(view, 'multi', paneWidth)}
                   </div>
@@ -5074,7 +5338,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               <InboxCommandMap
                 threads={mapThreads}
                 visibleThreads={filtered}
-                selectedThread={workspaceThread}
+                selectedThread={mapSelectedThread}
                 selectedThreadMessages={displayedMessages}
                 selectedThreadMessagesLoading={messagesLoading}
                 quickReplyDraft={draftText}
@@ -5098,6 +5362,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                 setCommandMapTheme(state.mapStyleMode)
                 setCommandMapMarket(state.filters.market || '')
               }}
+              mobileConversationOpen={useMobileInboxFlow && mobileThreadOpen}
             />
           </div>
         </aside>

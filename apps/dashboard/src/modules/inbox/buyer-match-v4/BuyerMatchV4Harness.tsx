@@ -75,11 +75,77 @@ export default function BuyerMatchV4Harness() {
     }
   }, [theme])
 
+  const selectBuyer = q.get('selectBuyer') || q.get('buyerId')
+  const shortlistFirst = Number(q.get('shortlistFirst') || 0)
+
   useEffect(() => {
     if (!tab) return
-    const el = document.querySelector(`[data-bmv4-tab="${tab.toUpperCase()}"]`) as HTMLButtonElement | null
+    const normalized = tab.toUpperCase() === 'ACTIVITY' ? 'PURCHASE_ACTIVITY' : tab.toUpperCase()
+    const el = document.querySelector(`[data-bmv4-tab="${normalized}"]`) as HTMLButtonElement | null
     el?.click()
   }, [tab, pane, propertyId])
+
+  const mode = q.get('mode')
+  useEffect(() => {
+    if (!mode) return
+    const t = window.setTimeout(() => {
+      const labels: Record<string, string> = {
+        local_regional: 'Local & Regional',
+        institutional: 'Institutional',
+        research: 'Research',
+        builders: 'Builders',
+        all_eligible: 'All Eligible',
+        best_match: 'Best Match',
+      }
+      const label = labels[mode] ?? mode
+      const btn = [...document.querySelectorAll('.bmv4-segmented__btn')].find((b) => b.textContent?.includes(label))
+      ;(btn as HTMLButtonElement | undefined)?.click()
+    }, 2200)
+    return () => window.clearTimeout(t)
+  }, [mode, tab, propertyId])
+
+  const selectFirst = q.get('selectFirst')
+  useEffect(() => {
+    if (!selectFirst) return
+    const t = window.setTimeout(() => {
+      const row = document.querySelector('.bmv4-dir-row, .bmv4-inst-card header') as HTMLElement | null
+      row?.click()
+    }, 2800)
+    return () => window.clearTimeout(t)
+  }, [selectFirst, tab, propertyId, mode])
+
+  const expandFirst = q.get('expandFirst')
+  useEffect(() => {
+    if (!expandFirst) return
+    const t = window.setTimeout(() => {
+      document.querySelector('.bmv4-inst-card .bmv4-btn')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      document.querySelector('.bmv4-dir-row .bmv4-btn')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    }, 3000)
+    return () => window.clearTimeout(t)
+  }, [expandFirst, tab, propertyId])
+
+  useEffect(() => {
+    if (!shortlistFirst) return
+    const t = window.setTimeout(() => {
+      const stars = [...document.querySelectorAll('.bmv4-shortlist-btn, .bmv4-directory-table .bmv4-btn.is-ghost')]
+      stars.slice(0, shortlistFirst).forEach((btn) => (btn as HTMLButtonElement).click())
+      if (tab?.toUpperCase() !== 'SHORTLIST') {
+        document.querySelector('[data-bmv4-tab="SHORTLIST"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      }
+    }, 2500)
+    return () => window.clearTimeout(t)
+  }, [shortlistFirst, tab, propertyId])
+
+  useEffect(() => {
+    if (!selectBuyer) return
+    const t = window.setTimeout(() => {
+      const row = [...document.querySelectorAll('.bmv4-dir-name, .bmv4-inst-card h4')].find((el) =>
+        el.textContent?.includes(selectBuyer),
+      )
+      row?.closest('tr, .bmv4-inst-card')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    }, 2000)
+    return () => window.clearTimeout(t)
+  }, [selectBuyer, tab, propertyId])
 
   const sim = q.get('sim')
   const workspace = (

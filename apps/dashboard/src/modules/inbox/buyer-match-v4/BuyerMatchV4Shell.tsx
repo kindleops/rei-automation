@@ -18,6 +18,7 @@ import { BuyerTabNav } from './BuyerTabNav'
 import { BuyerFiltersRail } from './BuyerFiltersRail'
 import { BuyerDirectory } from './BuyerDirectory'
 import { BuyerDossier } from './BuyerDossier'
+import { InstitutionsWorkspace } from './InstitutionsWorkspace'
 import { ActivityControlsRail } from './ActivityControlsRail'
 import { PurchaseFeed } from './PurchaseFeed'
 import { MarketIntelligenceRail } from './MarketIntelligenceRail'
@@ -37,6 +38,16 @@ interface Props {
   onRetry?: () => void
 }
 
+function normalizeTab(tab: string | null): BuyerMatchV4Tab | null {
+  if (!tab) return null
+  if (tab === 'ACTIVITY') return 'PURCHASE_ACTIVITY'
+  const upper = tab.toUpperCase().replace(/ /g, '_') as BuyerMatchV4Tab
+  if (['MARKET', 'BUYERS', 'INSTITUTIONS', 'PURCHASE_ACTIVITY', 'SHORTLIST'].includes(upper)) {
+    return upper
+  }
+  return null
+}
+
 export function BuyerMatchV4Shell({
   subject,
   projection,
@@ -48,13 +59,18 @@ export function BuyerMatchV4Shell({
   onOpenFull,
   onRetry,
 }: Props) {
-  const [shellState, setShellState] = useState<BuyerMatchV4ShellState>(INITIAL_SHELL_STATE)
+  const [shellState, setShellState] = useState<BuyerMatchV4ShellState>(() => {
+    const q = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+    const tab = normalizeTab(q?.get('tab') ?? null)
+    return tab ? { ...INITIAL_SHELL_STATE, activeTab: tab } : INITIAL_SHELL_STATE
+  })
   const subjectKey = subjectContextKey(subject)
 
   useEffect(() => {
     setShellState((prev) => ({
       ...INITIAL_SHELL_STATE,
       activeTab: prev.activeTab,
+      selectedBuyerId: prev.selectedBuyerId,
     }))
   }, [subjectKey])
 
@@ -86,6 +102,24 @@ export function BuyerMatchV4Shell({
     }))
   }, [])
 
+  const toggleExpandBuyer = useCallback((buyerId: string) => {
+    setShellState((s) => ({
+      ...s,
+      expandedBuyerIds: s.expandedBuyerIds.includes(buyerId)
+        ? s.expandedBuyerIds.filter((id) => id !== buyerId)
+        : [...s.expandedBuyerIds, buyerId],
+    }))
+  }, [])
+
+  const toggleExpandPlatform = useCallback((platformId: string) => {
+    setShellState((s) => ({
+      ...s,
+      expandedBuyerIds: s.expandedBuyerIds.includes(platformId)
+        ? s.expandedBuyerIds.filter((id) => id !== platformId)
+        : [...s.expandedBuyerIds, platformId],
+    }))
+  }, [])
+
   const selectedBuyer = useMemo(
     () => projection?.rankedBuyers.find((b) => b.buyerId === shellState.selectedBuyerId) ?? null,
     [projection?.rankedBuyers, shellState.selectedBuyerId],
@@ -99,7 +133,7 @@ export function BuyerMatchV4Shell({
   const institutionalIds = useMemo(
     () => new Set(
       (projection?.rankedBuyers ?? [])
-        .filter((b) => b.institutionalStatus === 'VERIFIED_INSTITUTIONAL' || b.institutionalStatus === 'CORPORATE')
+        .filter((b) => b.institutionalStatus === 'VERIFIED_INSTITUTIONAL')
         .map((b) => b.buyerId),
     ),
     [projection?.rankedBuyers],
@@ -107,37 +141,61 @@ export function BuyerMatchV4Shell({
 
   const activityEvents = useMemo(() => {
     const all = projection?.purchaseEvents ?? []
-    let filtered = filterPurchaseEvents(all, {
-      periodDays: shellState.activityFilters.periodDays,
+    const f = shellState.activityFilters
+    return filterPurchaseEvents(all, {
+      periodDays: f.periodDays,
+      buyerId: shellState.selectedBuyerId,
       institutionalBuyerIds: institutionalIds,
-      institutionalOnly: shellState.activityFilters.institutionalOnly,
-      radiusMiles: shellState.activityFilters.radiusMiles,
-    })
-    if (shellState.activityFilters.repeatOnly) {
-      const repeatIds = new Set(
-        (projection?.rankedBuyers ?? [])
-          .filter((b) => /repeat/i.test(b.buyerArchetype ?? ''))
-          .map((b) => b.buyerId),
-      )
-      filtered = filtered.filter((e) => repeatIds.has(e.buyerId))
-    }
-    return filtered.sort((a, b) => {
+      institutionalOnly: f.institutionalOnly,
+      localRegionalOnly: f.localRegionalOnly,
+      singleAssetOnly: f.singleAssetOnly,
+      packageOnly: f.packageOnly,
+      pricingEligibleOnly: f.pricingEligibleOnly,
+      demandOnly: f.demandOnly,
+      nonMarketOnly: f.nonMarketOnly,
+      unknownIdentityOnly: f.unknownIdentityOnly,
+      buyerClass: f.buyerClass,
+      radiusMiles: f.radiusMiles,
+    }).sort((a, b) => {
       const at = a.purchaseDate ? new Date(a.purchaseDate).getTime() : 0
       const bt = b.purchaseDate ? new Date(b.purchaseDate).getTime() : 0
       return bt - at
     })
-  }, [projection, shellState.activityFilters, institutionalIds])
+  }, [projection, shellState.activityFilters, shellState.selectedBuyerId, institutionalIds])
+
+  const geocodedActivityEvents = useMemo(
+    () => activityEvents.filter((e) => e.latitude != null && e.longitude != null),
+    [activityEvents],
+  )
 
   const layout = TAB_LAYOUT_COLUMNS[shellState.activeTab]
-  const tabClass = `is-tab-${shellState.activeTab.toLowerCase()}`
+  const tabClass = `is-tab-${shellState.activeTab.toLowerCase().replace('_', '-')}`
+  const isActivityTab = shellState.activeTab === 'PURCHASE_ACTIVITY'
 
   const mapPanel = (
     <BuyerActivityMap
       projection={projection}
+      events={isActivityTab ? geocodedActivityEvents : undefined}
       selectedBuyerId={shellState.selectedBuyerId}
       selectedEventId={shellState.selectedEventId}
-      activityFilters={shellState.activeTab === 'ACTIVITY' ? shellState.activityFilters : undefined}
+      activityFilters={isActivityTab ? shellState.activityFilters : undefined}
       onSelectEvent={selectEvent}
+    />
+  )
+
+  const directory = (
+    <BuyerDirectory
+      projection={projection}
+      loading={loading}
+      timedOut={timedOut}
+      filters={shellState.filters}
+      selectedBuyerId={shellState.selectedBuyerId}
+      expandedBuyerIds={shellState.expandedBuyerIds}
+      shortlistIds={shellState.shortlistIds}
+      onSelectBuyer={selectBuyer}
+      onToggleExpand={toggleExpandBuyer}
+      onToggleShortlist={toggleShortlist}
+      onRetry={onRetry}
     />
   )
 
@@ -168,20 +226,17 @@ export function BuyerMatchV4Shell({
               {mapPanel}
             </>
           )}
-          {shellState.activeTab === 'BUYERS' && (
-            <BuyerDirectory
+          {shellState.activeTab === 'BUYERS' && directory}
+          {shellState.activeTab === 'INSTITUTIONS' && (
+            <InstitutionsWorkspace
               projection={projection}
-              loading={loading}
-              timedOut={timedOut}
-              filters={shellState.filters}
-              selectedBuyerId={shellState.selectedBuyerId}
-              shortlistIds={shellState.shortlistIds}
-              onSelectBuyer={selectBuyer}
-              onToggleShortlist={toggleShortlist}
-              onRetry={onRetry}
+              selectedPlatformId={shellState.selectedBuyerId}
+              expandedPlatformIds={shellState.expandedBuyerIds}
+              onSelectPlatform={selectBuyer}
+              onToggleExpand={toggleExpandPlatform}
             />
           )}
-          {shellState.activeTab === 'ACTIVITY' && mapPanel}
+          {isActivityTab && mapPanel}
           {shellState.activeTab === 'SHORTLIST' && (
             <ShortlistPanel
               shortlistedBuyers={shortlistedBuyers}
@@ -246,17 +301,27 @@ export function BuyerMatchV4Shell({
               onClear={() => setShellState((s) => ({ ...s, filters: INITIAL_FILTER_STATE }))}
             />
           </div>
+          <div className="bmv4-col-main">{directory}</div>
+          <div className="bmv4-col-right">
+            <BuyerDossier
+              buyer={selectedBuyer}
+              events={projection?.purchaseEvents ?? []}
+              shortlisted={shellState.shortlistIds.includes(shellState.selectedBuyerId ?? '')}
+              onToggleShortlist={() => shellState.selectedBuyerId && toggleShortlist(shellState.selectedBuyerId)}
+            />
+          </div>
+        </>
+      )}
+
+      {shellState.activeTab === 'INSTITUTIONS' && (
+        <>
           <div className="bmv4-col-main">
-            <BuyerDirectory
+            <InstitutionsWorkspace
               projection={projection}
-              loading={loading}
-              timedOut={timedOut}
-              filters={shellState.filters}
-              selectedBuyerId={shellState.selectedBuyerId}
-              shortlistIds={shellState.shortlistIds}
-              onSelectBuyer={selectBuyer}
-              onToggleShortlist={toggleShortlist}
-              onRetry={onRetry}
+              selectedPlatformId={shellState.selectedBuyerId}
+              expandedPlatformIds={shellState.expandedBuyerIds}
+              onSelectPlatform={selectBuyer}
+              onToggleExpand={toggleExpandPlatform}
             />
           </div>
           <div className="bmv4-col-right">
@@ -270,12 +335,13 @@ export function BuyerMatchV4Shell({
         </>
       )}
 
-      {shellState.activeTab === 'ACTIVITY' && (
+      {isActivityTab && (
         <>
           <div className="bmv4-col-left">
             <ActivityControlsRail
               filters={shellState.activityFilters}
               eventCount={activityEvents.length}
+              mappedCount={geocodedActivityEvents.length}
               onChange={(patch) => setShellState((s) => ({ ...s, activityFilters: { ...s.activityFilters, ...patch } }))}
             />
           </div>

@@ -2,7 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { buildBuyerMatchSubjectContext, subjectContextKey } from '../../src/modules/inbox/buyer-match-v4/buildSubjectContext'
-import { shouldRejectStaleProjection } from '../../src/modules/inbox/buyer-match-v4/useBuyerMatchV4Projection'
+import {
+  shouldRejectStaleProjection,
+  unwrapBuyerMatchV4Projection,
+} from '../../src/modules/inbox/buyer-match-v4/useBuyerMatchV4Projection'
 
 test('buildBuyerMatchSubjectContext uses property_id not address alone', () => {
   const subject = buildBuyerMatchSubjectContext({
@@ -58,4 +61,20 @@ test('subjectContextKey prefers propertyId', () => {
 test('shouldRejectStaleProjection rejects responses for previous property', () => {
   assert.equal(shouldRejectStaleProjection('property-a', 'property-b'), true)
   assert.equal(shouldRejectStaleProjection('property-a', 'property-a'), false)
+})
+
+test('unwrapBuyerMatchV4Projection unwraps callBackend API envelope', () => {
+  const projection = {
+    version: 'buyer_match_v4.0',
+    subject: { propertyId: '2131309217' },
+    market: { dataState: 'READY' },
+    rankedBuyers: [],
+    purchaseEvents: [],
+    institutionalActivity: [],
+    shortlist: [],
+    meta: {},
+  }
+  const apiBody = { ok: true, data: projection }
+  assert.deepEqual(unwrapBuyerMatchV4Projection(apiBody), projection)
+  assert.deepEqual(unwrapBuyerMatchV4Projection(projection), projection)
 })

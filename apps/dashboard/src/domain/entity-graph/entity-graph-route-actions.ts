@@ -1,4 +1,5 @@
 import { pushRoutePath } from '../../app/router'
+import { openInboxDealIntelligence } from '../../modules/mobile/mobile-inbox-bridge'
 import type { EntityGraphAction, UniversalEntityContext } from './entity-graph.types'
 import { activeInboxFromUniversalContext } from './universal-entity-context'
 import {
@@ -9,7 +10,7 @@ import {
 function buildPropertyIntelligenceUrl(patch: Record<string, string>): string {
   const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
   Object.entries(patch).forEach(([key, value]) => params.set(key, value))
-  return `/deal-intelligence?${params.toString()}`
+  return `/properties?${params.toString()}`
 }
 
 export type EntityGraphRouteActionOptions = {
@@ -60,7 +61,7 @@ export function routeEntityGraphAction(
       return true
     }
     syncContext()
-    pushRoutePath('/deal-intelligence')
+    openInboxDealIntelligence()
     return true
   }
 
@@ -123,7 +124,7 @@ export function routeEntityGraphAction(
       pushRoutePath(buildPropertyIntelligenceUrl({ pi_q: context.entityId, pi_page: '1' }))
       return true
     }
-    pushRoutePath('/deal-intelligence')
+    pushRoutePath('/properties')
     return true
   }
 

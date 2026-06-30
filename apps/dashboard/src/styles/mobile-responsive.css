@@ -132,9 +132,9 @@
     position: relative;
   }
 
-  /* Sidebar (nx-sidebar-rebuilt) + Intelligence panel: off-canvas defaults */
-  .nx-sidebar-rebuilt,
-  .nx-intelligence-panel {
+  /* Sidebar + intelligence: legacy off-canvas slide-in (not the portrait mobile inbox shell) */
+  .nx-inbox-shell:not(.is-mobile-inbox) .nx-sidebar-rebuilt,
+  .nx-inbox-shell:not(.is-mobile-inbox) .nx-intelligence-panel {
     position: fixed !important;
     top: 0 !important;
     bottom: 0 !important;
@@ -145,29 +145,67 @@
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     overflow-y: auto !important;
   }
-  .nx-sidebar-rebuilt {
+  .nx-inbox-shell:not(.is-mobile-inbox) .nx-sidebar-rebuilt {
     left: 0;
     transform: translateX(-100%);
     border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
   }
-  .nx-intelligence-panel {
+  .nx-inbox-shell:not(.is-mobile-inbox) .nx-intelligence-panel {
     right: 0;
     transform: translateX(100%);
     border-left: 1px solid rgba(255, 255, 255, 0.08) !important;
   }
-  /* Show when parent shell has toggle class */
-  .nx-inbox-shell.m-sidebar-open .nx-sidebar-rebuilt { transform: translateX(0) !important; }
-  .nx-inbox-shell.m-intel-open .nx-intelligence-panel { transform: translateX(0) !important; }
+  .nx-inbox-shell:not(.is-mobile-inbox).m-sidebar-open .nx-sidebar-rebuilt { transform: translateX(0) !important; }
+  .nx-inbox-shell:not(.is-mobile-inbox).m-intel-open .nx-intelligence-panel { transform: translateX(0) !important; }
 
-  /* Overlay backdrop when panel is open */
-  .nx-inbox-shell.m-sidebar-open::before,
-  .nx-inbox-shell.m-intel-open::before {
+  .nx-inbox-shell:not(.is-mobile-inbox).m-sidebar-open::before,
+  .nx-inbox-shell:not(.is-mobile-inbox).m-intel-open::before {
     content: '';
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 190;
     backdrop-filter: blur(4px);
+  }
+
+  /* Portrait mobile inbox: full-screen deal intelligence (no conversation bleed) */
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open {
+    overflow: hidden !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-mobile-panel-toggles {
+    display: none !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-inbox-center {
+    overflow: hidden !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-workspace-split-grid .nx-workspace-pane.is-view-deal_intelligence {
+    display: flex !important;
+    position: fixed !important;
+    inset: 0 0 env(safe-area-inset-bottom, 0px) 0 !important;
+    z-index: 180 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: rgba(6, 8, 14, 0.98) !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-workspace-pane.is-view-deal_intelligence .nx-intelligence-panel {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    transform: none !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    border: none !important;
+    z-index: auto !important;
+    overflow: hidden !important;
   }
 
   /* Mobile panel toggle buttons (hidden on desktop) */

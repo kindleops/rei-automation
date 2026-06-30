@@ -110,6 +110,47 @@ export type CommandMapSellerPin = {
   motivation_score: number | null
   final_acquisition_score?: number | null
   priority_score?: number | null
+  owner_priority_score?: number | null
+  owner_priority_tier?: string | null
+  lifecycle_stage?: string | null
+  operational_status?: string | null
+  lead_temperature?: string | null
+  contactability_status?: string | null
+  mailing_address_full?: string | null
+  owner_mailing_address?: string | null
+  effective_year_built?: number | null
+  construction_type?: string | null
+  building_condition?: string | null
+  stories?: number | null
+  zoning?: string | null
+  land_use?: string | null
+  ownership_years?: number | null
+  tax_delinquent?: boolean | null
+  absentee_owner?: boolean | null
+  out_of_state_owner?: boolean | null
+  active_lien?: boolean | null
+  mortgage_balance?: number | null
+  loan_count?: number | null
+  loan_type?: string | null
+  assessed_total_value?: number | null
+  assessed_land_value?: number | null
+  assessed_improvement_value?: number | null
+  annual_taxes?: number | null
+  last_sale_amount?: number | null
+  last_sale_date?: string | null
+  last_inbound_text?: string | null
+  last_inbound_at?: string | null
+  last_outbound_text?: string | null
+  last_outbound_at?: string | null
+  delivery_status?: string | null
+  suppression_reason?: string | null
+  campaign_name?: string | null
+  automation_state?: string | null
+  follow_up_due_at?: string | null
+  next_action_at?: string | null
+  canonical_e164?: string | null
+  seller_phone?: string | null
+  property_count?: number | null
   property_tags_text: string | null
   property_tags_json: unknown | null
   podio_tags?: unknown
@@ -239,13 +280,12 @@ const OPERATOR_KEYWORDS = [
   'REALTY',
 ]
 
-const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
+/** Columns verified on v_command_map_seller_pin_feed (no streetview — lives on properties). */
+const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'property_id',
   'master_owner_id',
   'prospect_id',
   'thread_key',
-  'seller_display_name',
-  'seller_name',
   'owner_display_name',
   'owner_name',
   'owner_full_name',
@@ -278,9 +318,6 @@ const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
   'podio_tags',
   'property_flags_text',
   'property_flags_json',
-  'streetview_image',
-  'map_image',
-  'satellite_image',
   'owner_type',
   'seller_state',
   'seller_status',
@@ -305,6 +342,66 @@ const COMMAND_MAP_SELLER_PIN_DETAIL_SELECT = [
   'pulse_style',
   'execution_ring_color',
   'render_priority',
+].join(',')
+
+/** Canonical thread state from canonical_inbox_threads. */
+const COMMAND_MAP_CANONICAL_THREAD_SELECT = [
+  'thread_key',
+  'property_id',
+  'master_owner_id',
+  'canonical_e164',
+  'seller_phone',
+  'lead_temperature',
+  'seller_stage',
+  'conversation_status',
+  'temperature',
+  'inbox_bucket',
+  'inbox_category',
+  'suppression_status',
+  'is_suppressed',
+  'latest_message_body',
+  'latest_message_at',
+  'latest_message_direction',
+  'last_inbound_at',
+  'last_outbound_at',
+  'delivery_status',
+  'latest_delivery_status',
+  'follow_up_at',
+  'owner_name',
+  'property_address_full',
+  'market',
+  'property_type',
+].join(',')
+
+/** Extended property + owner dossier fields from properties + master_owners. */
+const COMMAND_MAP_PROPERTY_ENRICHMENT_SELECT = [
+  'property_id',
+  'streetview_image',
+  'map_image',
+  'satellite_image',
+  'effective_year_built',
+  'construction_type',
+  'building_condition',
+  'stories',
+  'zoning',
+  'county_land_use_code',
+  'lot_square_feet',
+  'lot_acreage',
+  'ownership_years',
+  'tax_delinquent',
+  'out_of_state_owner',
+  'absentee_owner',
+  'active_lien',
+  'total_loan_balance',
+  'loan_count',
+  'loan_type',
+  'assd_total_value',
+  'assd_land_value',
+  'assd_improvement_value',
+  'tax_amt',
+  'saleprice',
+  'sale_date',
+  'master_owner_id',
 ].join(',')
 
 let lastSellerPinErrorMsg: string | null = null
@@ -617,15 +714,87 @@ export const loadCommandMapSellerPins = async (
   return data as CommandMapSellerPin[]
 }
 
+const mapCanonicalThreadRow = (row: Record<string, unknown> | null): Partial<CommandMapSellerPin> | null => {
+  if (!row) return null
+  const latestBody = String(row.latest_message_body ?? '').trim()
+  const latestDirection = String(row.latest_message_direction ?? '').trim().toLowerCase()
+  return {
+    thread_key: String(row.thread_key ?? '').trim() || null,
+    property_id: String(row.property_id ?? '').trim(),
+    master_owner_id: String(row.master_owner_id ?? '').trim() || null,
+    owner_name: String(row.owner_name ?? '').trim() || null,
+    owner_display_name: String(row.owner_name ?? '').trim() || null,
+    property_address_full: String(row.property_address_full ?? '').trim() || null,
+    market: String(row.market ?? '').trim() || null,
+    property_type: String(row.property_type ?? '').trim() || null,
+    canonical_e164: String(row.canonical_e164 ?? row.seller_phone ?? '').trim() || null,
+    seller_phone: String(row.seller_phone ?? row.canonical_e164 ?? '').trim() || null,
+    lifecycle_stage: String(row.seller_stage ?? '').trim() || null,
+    operational_status: String(row.conversation_status ?? '').trim() || null,
+    lead_temperature: String(row.lead_temperature ?? row.temperature ?? '').trim() || null,
+    inbox_category: String(row.inbox_category ?? row.inbox_bucket ?? '').trim() || null,
+    latest_message_at: String(row.latest_message_at ?? '').trim() || null,
+    latest_direction: String(row.latest_message_direction ?? '').trim() || null,
+    last_inbound_at: String(row.last_inbound_at ?? '').trim() || null,
+    last_outbound_at: String(row.last_outbound_at ?? '').trim() || null,
+    last_inbound_text: latestDirection === 'inbound' ? latestBody || null : null,
+    last_outbound_text: latestDirection === 'outbound' ? latestBody || null : null,
+    delivery_status: String(row.delivery_status ?? row.latest_delivery_status ?? '').trim() || null,
+    follow_up_due_at: String(row.follow_up_at ?? '').trim() || null,
+    suppression_reason: String(row.suppression_status ?? '').trim() || null,
+  }
+}
+
+const mapPropertyEnrichmentRow = (
+  row: Record<string, unknown> | null,
+  masterOwner: Record<string, unknown> | null,
+): Partial<CommandMapSellerPin> | null => {
+  if (!row) return null
+  const taxAmt = Number(row.tax_amt)
+  const salePrice = Number(row.saleprice)
+  return {
+    property_id: String(row.property_id ?? '').trim(),
+    master_owner_id: String(row.master_owner_id ?? masterOwner?.master_owner_id ?? '').trim() || null,
+    streetview_image: String(row.streetview_image ?? '').trim() || null,
+    map_image: String(row.map_image ?? '').trim() || null,
+    satellite_image: String(row.satellite_image ?? '').trim() || null,
+    effective_year_built: Number.isFinite(Number(row.effective_year_built)) ? Number(row.effective_year_built) : null,
+    construction_type: String(row.construction_type ?? '').trim() || null,
+    building_condition: String(row.building_condition ?? '').trim() || null,
+    stories: Number.isFinite(Number(row.stories)) ? Number(row.stories) : null,
+    zoning: String(row.zoning ?? '').trim() || null,
+    land_use: String(row.county_land_use_code ?? '').trim() || null,
+    lot_square_feet: Number.isFinite(Number(row.lot_square_feet)) ? Number(row.lot_square_feet) : null,
+    lot_acreage: Number.isFinite(Number(row.lot_acreage)) ? Number(row.lot_acreage) : null,
+    loan_count: Number.isFinite(Number(row.loan_count)) ? Number(row.loan_count) : null,
+    loan_type: String(row.loan_type ?? '').trim() || null,
+    ownership_years: Number.isFinite(Number(row.ownership_years)) ? Number(row.ownership_years) : null,
+    tax_delinquent: row.tax_delinquent === true,
+    absentee_owner: row.absentee_owner === true,
+    out_of_state_owner: row.out_of_state_owner === true,
+    active_lien: row.active_lien === true,
+    mortgage_balance: Number.isFinite(Number(row.total_loan_balance)) ? Number(row.total_loan_balance) : null,
+    assessed_total_value: Number.isFinite(Number(row.assd_total_value)) ? Number(row.assd_total_value) : null,
+    assessed_land_value: Number.isFinite(Number(row.assd_land_value)) ? Number(row.assd_land_value) : null,
+    assessed_improvement_value: Number.isFinite(Number(row.assd_improvement_value)) ? Number(row.assd_improvement_value) : null,
+    annual_taxes: Number.isFinite(taxAmt) ? taxAmt : null,
+    last_sale_amount: Number.isFinite(salePrice) ? salePrice : null,
+    last_sale_date: String(row.sale_date ?? '').trim() || null,
+    owner_priority_score: Number.isFinite(Number(masterOwner?.priority_score)) ? Number(masterOwner?.priority_score) : null,
+    owner_priority_tier: String(masterOwner?.priority_tier ?? '').trim() || null,
+    mailing_address_full: String(masterOwner?.primary_owner_address ?? '').trim() || null,
+    property_count: Number.isFinite(Number(masterOwner?.property_count)) ? Number(masterOwner?.property_count) : null,
+  }
+}
+
 export const loadCommandMapSellerPinDetail = async (
   propertyId: string,
   options: DetailLookupOptions = {},
 ): Promise<Partial<CommandMapSellerPin> | null> => {
   const supabase = getSupabaseClient()
 
-  const readSingle = async (view: 'v_command_map_seller_pin_feed' | 'v_operator_inbox_threads') => {
-    let query = supabase.from(view).select(COMMAND_MAP_SELLER_PIN_DETAIL_SELECT)
-
+  const readFeed = async () => {
+    let query = supabase.from('v_command_map_seller_pin_feed').select(COMMAND_MAP_SELLER_PIN_FEED_SELECT)
     if (propertyId) {
       query = query.eq('property_id', propertyId)
     } else if (options.threadKey) {
@@ -637,33 +806,98 @@ export const loadCommandMapSellerPinDetail = async (
     } else {
       return null
     }
-
     if (options.signal) query = query.abortSignal(options.signal)
-
     const { data, error } = await query.limit(1).maybeSingle()
-
     if (error) {
       if (isAbortError(error)) return null
-      if (import.meta.env.DEV) console.warn(`[CommandMap] detail lookup failed from ${view}:`, error)
+      if (import.meta.env.DEV) console.warn('[CommandMap] seller pin feed detail failed:', error)
       return null
     }
-
     return data as Partial<CommandMapSellerPin> | null
   }
 
-  const [sellerWorkItem, inboxEnriched] = await Promise.all([
-    readSingle('v_command_map_seller_pin_feed'),
-    readSingle('v_operator_inbox_threads'),
+  const readCanonicalThread = async () => {
+    let query = supabase.from('canonical_inbox_threads').select(COMMAND_MAP_CANONICAL_THREAD_SELECT)
+    if (propertyId) {
+      query = query.eq('property_id', propertyId)
+    } else if (options.threadKey) {
+      query = query.eq('thread_key', options.threadKey)
+    } else if (options.masterOwnerId) {
+      query = query.eq('master_owner_id', options.masterOwnerId)
+    } else {
+      return null
+    }
+    if (options.signal) query = query.abortSignal(options.signal)
+    const { data, error } = await query.order('latest_message_at', { ascending: false }).limit(1).maybeSingle()
+    if (error) {
+      if (isAbortError(error)) return null
+      if (import.meta.env.DEV) console.warn('[CommandMap] canonical thread detail failed:', error)
+      return null
+    }
+    return mapCanonicalThreadRow(data as Record<string, unknown> | null)
+  }
+
+  const readPropertyEnrichment = async (resolvedPropertyId: string, masterOwnerId: string | null) => {
+    let query = supabase.from('properties').select(COMMAND_MAP_PROPERTY_ENRICHMENT_SELECT).eq('property_id', resolvedPropertyId)
+    if (options.signal) query = query.abortSignal(options.signal)
+    const { data: propertyRow, error: propertyError } = await query.limit(1).maybeSingle()
+    if (propertyError) {
+      if (!isAbortError(propertyError) && import.meta.env.DEV) {
+        console.warn('[CommandMap] property enrichment failed:', propertyError)
+      }
+    }
+
+    const propertyData = propertyError ? null : (propertyRow as Record<string, unknown> | null)
+    let masterOwner: Record<string, unknown> | null = null
+    const ownerId = masterOwnerId || String(propertyData?.master_owner_id ?? '').trim() || null
+    if (ownerId) {
+      let ownerQuery = supabase
+        .from('master_owners')
+        .select('master_owner_id,priority_score,priority_tier,primary_owner_address,property_count')
+        .eq('master_owner_id', ownerId)
+      if (options.signal) ownerQuery = ownerQuery.abortSignal(options.signal)
+      const { data: ownerRow } = await ownerQuery.limit(1).maybeSingle()
+      masterOwner = (ownerRow as Record<string, unknown> | null) ?? null
+    }
+
+    return mapPropertyEnrichmentRow(propertyData, masterOwner)
+  }
+
+  const [sellerWorkItem, canonicalThread] = await Promise.all([
+    readFeed(),
+    readCanonicalThread(),
   ])
 
-  if (!sellerWorkItem && !inboxEnriched) return null
+  const resolvedPropertyId = canonicalThread?.property_id
+    || sellerWorkItem?.property_id
+    || propertyId
+  const resolvedMasterOwnerId = canonicalThread?.master_owner_id
+    || sellerWorkItem?.master_owner_id
+    || options.masterOwnerId
+    || null
 
-  return {
+  const propertyEnrichment = resolvedPropertyId
+    ? await readPropertyEnrichment(resolvedPropertyId, resolvedMasterOwnerId)
+    : null
+
+  if (!sellerWorkItem && !canonicalThread && !propertyEnrichment) return null
+
+  const merged = {
     ...(sellerWorkItem ?? {}),
-    ...(inboxEnriched ?? {}),
-    property_id: inboxEnriched?.property_id ?? sellerWorkItem?.property_id ?? propertyId,
-    thread_key: inboxEnriched?.thread_key ?? sellerWorkItem?.thread_key ?? options.threadKey ?? null,
-    master_owner_id: inboxEnriched?.master_owner_id ?? sellerWorkItem?.master_owner_id ?? options.masterOwnerId ?? null,
-    prospect_id: inboxEnriched?.prospect_id ?? sellerWorkItem?.prospect_id ?? options.prospectId ?? null,
-  }
+    ...(canonicalThread ?? {}),
+    ...(propertyEnrichment ?? {}),
+    property_id: resolvedPropertyId,
+    thread_key: canonicalThread?.thread_key ?? sellerWorkItem?.thread_key ?? options.threadKey ?? null,
+    master_owner_id: resolvedMasterOwnerId,
+    prospect_id: sellerWorkItem?.prospect_id ?? options.prospectId ?? null,
+    owner_priority_score:
+      propertyEnrichment?.owner_priority_score
+      ?? sellerWorkItem?.priority_score
+      ?? null,
+    priority_score: sellerWorkItem?.priority_score ?? propertyEnrichment?.owner_priority_score ?? null,
+    next_action_at: sellerWorkItem?.next_scheduled_for ?? canonicalThread?.follow_up_due_at ?? null,
+    automation_state: sellerWorkItem?.execution_state ?? null,
+  } satisfies Partial<CommandMapSellerPin>
+
+  return merged
 }

@@ -1,7 +1,35 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { supabase } from '../../src/lib/supabase/client.js'
-import { buildDealIntelligenceDossier, ENGINE_PROGRESS_STAGES } from '../../src/lib/cockpit/deal-intelligence-dossier.js'
+import {
+  buildBaselineScores,
+  buildDealIntelligenceDossier,
+  ENGINE_PROGRESS_STAGES,
+} from '../../src/lib/cockpit/deal-intelligence-dossier.js'
+
+test('buildBaselineScores uses property Supabase columns only, not engine AOS', () => {
+  const baseline = buildBaselineScores(
+    {
+      final_acquisition_score: 72,
+      structured_motivation_score: 61,
+      deal_strength_score: 58,
+      tag_distress_score: 44,
+    },
+    null,
+  )
+
+  assert.equal(baseline.acquisition_score, 72)
+  assert.equal(baseline.motivation_score, 61)
+  assert.equal(baseline.deal_strength_score, 58)
+  assert.equal(baseline.distress_score, 44)
+
+  const polluted = buildBaselineScores(
+    { final_acquisition_score: 72 },
+    { priority_score: 55 },
+  )
+  assert.equal(polluted.acquisition_score, 72)
+  assert.equal(polluted.motivation_score, 55)
+})
 
 test('buildDealIntelligenceDossier returns canonical sections', async (t) => {
   const originalFrom = supabase.from

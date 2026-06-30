@@ -195,7 +195,7 @@ async function loadQueuePage(opts = {}) {
       : Promise.resolve({ data: [], error: null }),
     supabase
       .from('textgrid_numbers')
-      .select('id,phone_number,friendly_name,market,state,is_active,daily_cap'),
+      .select('id,phone_number,friendly_name,market,status,daily_limit,messages_sent_today,last_used_at,health_score,metadata'),
   ])
 
   const properties = propertiesResult.error ? [] : (propertiesResult.data || [])

@@ -606,6 +606,10 @@ function canonicalAssetType(row = {}) {
   if (/storage|self storage|mini storage/.test(blob)) return 'storage';
   if (/strip|shopping center|retail center/.test(blob)) return 'strip_mall';
   if (/commercial|retail|office|industrial|warehouse|hotel|motel/.test(blob)) return 'commercial';
+  const units = num(first(row.units_count, row.units));
+  if (units != null && units > 1 && !['commercial', 'strip_mall', 'storage', 'land'].includes(normalized)) {
+    return 'multifamily';
+  }
   return normalized || 'other';
 }
 
@@ -1107,8 +1111,15 @@ function standardDeviation(values = []) {
   return Math.sqrt(variance);
 }
 
+function isMultifamilyLane(property = {}) {
+  if (property.asset_family === 'multifamily') return true;
+  const units = num(property.units);
+  return units != null && units > 1;
+}
+
 function assetCompatible(subject, comp) {
   if (subject.asset_type === comp.asset_type) return true;
+  if (isMultifamilyLane(subject) && isMultifamilyLane(comp)) return true;
   if (subject.asset_family === comp.asset_family) {
     if (subject.asset_family === 'commercial') {
       return (

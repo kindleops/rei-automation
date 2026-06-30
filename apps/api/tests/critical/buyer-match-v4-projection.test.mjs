@@ -25,9 +25,9 @@ test('mapBuyerArchetype does not label hedge funds from score alone', () => {
 });
 
 test('mapInstitutionalStatus only marks verified institutional type', () => {
-  assert.equal(mapInstitutionalStatus({ buyer_type: 'institutional' }), 'VERIFIED_INSTITUTIONAL');
+  assert.equal(mapInstitutionalStatus({ buyer_type: 'institutional', institutional_score: 80 }), 'VERIFIED_INSTITUTIONAL');
   assert.equal(mapInstitutionalStatus({ institutional_score: 99 }), null);
-  assert.equal(mapInstitutionalStatus({ is_corporate_buyer: true }), 'CORPORATE');
+  assert.equal(mapInstitutionalStatus({ is_corporate_buyer: true }), null);
 });
 
 test('resolveMarketDataState returns NO_LOCAL_DATA when no buyers and no events', () => {
@@ -75,5 +75,5 @@ test('buildReasonSummary prefers RPC reason_for_match', () => {
 });
 
 test('BUYER_MATCH_V4_VERSION is set', () => {
-  assert.equal(BUYER_MATCH_V4_VERSION, 'buyer_match_v4.0');
+  assert.equal(BUYER_MATCH_V4_VERSION, 'buyer_match_v4.1');
 });

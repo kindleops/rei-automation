@@ -9,6 +9,7 @@ import {
   DEFAULT_PERFORMANCE_COLUMNS,
 } from '../../../../lib/data/templateIntelligenceData'
 import { useTemplateIntelligenceFilters } from '../../hooks/useTemplateIntelligenceFilters'
+import { OccTemplateFilterMenu } from './OccTemplateFilterMenu'
 import { TemplateDetailModal } from './TemplateDetailModal'
 import { TemplateFiltersBar } from './TemplateFiltersBar'
 import { TemplateInsightStrip } from './TemplateInsightStrip'
@@ -16,10 +17,13 @@ import { TemplateIntelligenceHeader } from './TemplateIntelligenceHeader'
 import { TemplateIntelligenceTable } from './TemplateIntelligenceTable'
 import './template-intelligence.css'
 
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
+
 interface TemplateIntelligenceModuleProps {
   searchParams: URLSearchParams
   setSearchParams: (next: URLSearchParams) => void
   globalRangeLabel?: string
+  isMobileLayout?: boolean
   onViewQueueRows?: (templateId: string) => void
 }
 
@@ -27,6 +31,7 @@ export function TemplateIntelligenceModule({
   searchParams,
   setSearchParams,
   globalRangeLabel,
+  isMobileLayout = false,
   onViewQueueRows,
 }: TemplateIntelligenceModuleProps) {
   const { filters, updateFilters, resetFilters } = useTemplateIntelligenceFilters(searchParams, setSearchParams)
@@ -39,7 +44,7 @@ export function TemplateIntelligenceModule({
   const [stale, setStale] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(100)
-  const [sort, setSort] = useState('template_name')
+  const [sort, setSort] = useState('stage_code')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [preset, setPreset] = useState<ColumnPreset>('performance')
   const [density, setDensity] = useState<TableDensity>('comfortable')
@@ -129,12 +134,26 @@ export function TemplateIntelligenceModule({
   const stageCode = filters.stage && filters.stage !== 'all' ? filters.stage : selectedRow?.identity.stage_code
 
   return (
-    <div className="occ-tpl-intel-layout">
+    <div className={cls('occ-tpl-intel-layout', isMobileLayout && 'is-mobile-layout')}>
+      {isMobileLayout && (
+        <OccTemplateFilterMenu
+          filters={filters}
+          preset={preset}
+          density={density}
+          matchingCount={matchingCount}
+          onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
+          onPresetChange={setPreset}
+          onDensityChange={setDensity}
+          onReset={() => { setPage(0); resetFilters() }}
+          onExport={exporting ? undefined : handleExport}
+        />
+      )}
       <TemplateIntelligenceHeader
         cards={kpiCards}
         loading={loading}
         filters={filters}
         globalRangeLabel={globalRangeLabel}
+        isMobileLayout={isMobileLayout}
         onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
       />
       <TemplateFiltersBar
@@ -142,6 +161,7 @@ export function TemplateIntelligenceModule({
         preset={preset}
         density={density}
         visibleColumns={visibleColumns}
+        isMobileLayout={isMobileLayout}
         onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
         onPresetChange={setPreset}
         onDensityChange={setDensity}
@@ -152,6 +172,7 @@ export function TemplateIntelligenceModule({
       <TemplateInsightStrip
         data={rail as Parameters<typeof TemplateInsightStrip>[0]['data']}
         loading={loading}
+        isMobileLayout={isMobileLayout}
         onSelectTemplate={setSelectedId}
       />
       <div className="occ-tpl-intel-main">
@@ -169,6 +190,7 @@ export function TemplateIntelligenceModule({
           onSelect={setSelectedId}
           onSort={handleSort}
           stageCode={stageCode}
+          isMobileLayout={isMobileLayout}
         />
       </div>
       {selectedRow && (
@@ -177,33 +199,48 @@ export function TemplateIntelligenceModule({
           rows={rows}
           dossier={dossier}
           loading={dossierLoading}
+          isMobileLayout={isMobileLayout}
           onClose={() => setSelectedId(null)}
           onNavigate={setSelectedId}
           onViewQueueRows={onViewQueueRows}
         />
       )}
-      <div className="occ-tpl-intel-footer">
-        <span>
-          Matching {matchingCount.toLocaleString()} templates
-          {' · '}Catalog {totalCount.toLocaleString()}
-          {' · '}With activity {trackedCount.toLocaleString()}
-          {' · '}Page {page + 1} of {totalPages}
-        </span>
-        <label className="occ-page-size">
-          <span>Per page</span>
-          <select value={pageSize} onChange={(e) => { setPage(0); setPageSize(Number(e.target.value)) }}>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-            <option value={250}>250</option>
-            <option value={500}>500</option>
-          </select>
-        </label>
-        <div className="occ-pagination">
-          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage(0)}>«</button>
-          <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>‹</button>
-          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>›</button>
-          <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
-        </div>
+      <div className={cls('occ-tpl-intel-footer', isMobileLayout && 'occ-tpl-intel-footer--mobile')}>
+        {isMobileLayout ? (
+          <>
+            <span className="occ-tpl-intel-footer__mobile-meta">
+              {matchingCount.toLocaleString()} templates · Page {page + 1}/{totalPages}
+            </span>
+            <div className="occ-pagination occ-pagination--mobile">
+              <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">‹ Prev</button>
+              <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)} aria-label="Next page">Next ›</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span>
+              Matching {matchingCount.toLocaleString()} templates
+              {' · '}Catalog {totalCount.toLocaleString()}
+              {' · '}With activity {trackedCount.toLocaleString()}
+              {' · '}Page {page + 1} of {totalPages}
+            </span>
+            <label className="occ-page-size">
+              <span>Per page</span>
+              <select value={pageSize} onChange={(e) => { setPage(0); setPageSize(Number(e.target.value)) }}>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={250}>250</option>
+                <option value={500}>500</option>
+              </select>
+            </label>
+            <div className="occ-pagination">
+              <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage(0)}>«</button>
+              <button type="button" className="occ-page-btn" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>‹</button>
+              <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>›</button>
+              <button type="button" className="occ-page-btn" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>»</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

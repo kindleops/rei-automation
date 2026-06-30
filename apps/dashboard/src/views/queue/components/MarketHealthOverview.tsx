@@ -26,13 +26,15 @@ export function MarketHealthOverview({ markets }: MarketHealthOverviewProps) {
     idle: markets.filter(m => m.total === 0).length,
   }
 
+  const withActivity = markets.filter(m => m.total > 0).length
   const tiles = [
-    { label: 'Markets', val: markets.length, tone: 'primary' },
+    { label: 'Tracked', val: markets.length, tone: 'primary' },
+    { label: 'With Activity', val: withActivity, tone: 'cyan' },
     { label: 'Healthy', val: buckets.healthy, tone: 'green' },
     { label: 'Watch', val: buckets.watch, tone: 'amber' },
     { label: 'Degraded', val: buckets.degraded, tone: 'red' },
-    { label: 'No Registered Sender', val: buckets.noSender, tone: 'red' },
-    { label: 'No Activity', val: buckets.idle, tone: 'muted' },
+    { label: 'No Sender', val: buckets.noSender, tone: 'red' },
+    { label: 'Idle', val: buckets.idle, tone: 'muted' },
   ]
 
   return (

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 import {
   calculateAcquisitionDecision,
+  evaluateCompEligibility,
   loadComparableProperties,
   loadSubjectProperty,
   normalizePropertyFeatures,
@@ -458,6 +459,90 @@ test('stale comp select columns fail loudly instead of becoming empty evidence',
       return true;
     },
   );
+});
+
+test('multifamily subject matches multifamily comp on raw RPC rows after normalization', () => {
+  const subject = normalizePropertyFeatures(
+    {
+      property_id: 'mf-subject',
+      property_type: 'Multifamily',
+      normalized_asset_class: 'multifamily',
+      units_count: 4,
+      building_square_feet: 3200,
+      latitude: 33.45,
+      longitude: -112.07,
+      property_address_zip: '85001',
+      sale_price: 500_000,
+      sale_date: '2024-06-01',
+    },
+    { now: NOW },
+  );
+
+  const rawRpcComp = {
+    comp_id: 'mf-comp-1',
+    address: '200 Oak St, Phoenix, AZ 85001',
+    property_type: 'Duplex',
+    normalized_asset_class: 'multifamily',
+    units_count: 2,
+    building_square_feet: 1800,
+    sale_price: 280_000,
+    sale_date: '2026-01-15',
+    distance_miles: 1.2,
+    latitude: 33.46,
+    longitude: -112.08,
+    property_address_zip: '85001',
+  };
+
+  const rawEligibility = evaluateCompEligibility(subject, rawRpcComp, NOW);
+  const scored = scoreComparable(subject, rawRpcComp, { now: NOW });
+
+  assert.ok(
+    rawEligibility.reasons.includes('asset_type_mismatch'),
+    'raw RPC rows lack normalized asset_type and must not be compared directly',
+  );
+  assert.equal(scored.eligible, true);
+  assert.ok(!scored.reasons?.includes('asset_type_mismatch'));
+  assert.equal(scored.comp.asset_family, 'multifamily');
+});
+
+test('multifamily lane matches across residential-labeled multi-unit comps', () => {
+  const subject = normalizePropertyFeatures(
+    { property_type: 'Multifamily', normalized_asset_class: 'multifamily', units_count: 8, building_square_feet: 6200 },
+    { now: NOW },
+  );
+  const comp = normalizePropertyFeatures(
+    {
+      property_type: 'Residential',
+      units_count: 4,
+      building_square_feet: 3100,
+      sale_price: 720_000,
+      sale_date: '2026-03-10',
+      latitude: 33.46,
+      longitude: -112.08,
+      property_address_zip: '85001',
+      distance_miles: 1.4,
+    },
+    { now: NOW },
+  );
+
+  assert.equal(subject.asset_family, 'multifamily');
+  assert.equal(comp.asset_family, 'multifamily');
+  assert.equal(evaluateCompEligibility(subject, comp, NOW).eligible, true);
+});
+
+test('multi-unit properties without explicit MF label normalize to multifamily family', () => {
+  const subject = normalizePropertyFeatures(
+    { property_type: 'Residential', units_count: 4, building_square_feet: 2800 },
+    { now: NOW },
+  );
+  const comp = normalizePropertyFeatures(
+    { property_type: 'Residential', units_count: 3, building_square_feet: 2100, sale_price: 410_000, sale_date: '2026-02-01' },
+    { now: NOW },
+  );
+
+  assert.equal(subject.asset_family, 'multifamily');
+  assert.equal(comp.asset_family, 'multifamily');
+  assert.equal(evaluateCompEligibility(subject, comp, NOW).eligible, true);
 });
 
 test('advanced comp scoring treats missing fields as confidence loss, not a mismatch penalty', () => {

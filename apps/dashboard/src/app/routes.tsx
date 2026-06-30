@@ -5,6 +5,7 @@ import { InboxView } from '../views/inbox/InboxView'
 import { EntityGraphView } from '../views/entity-graph/EntityGraphView'
 
 import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
+import { DealIntelligenceInboxRoute } from '../views/deal-intelligence/DealIntelligenceInboxRoute'
 import { loadAcquisitionWorkspace } from '../domain/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
 import { ConversationView } from '../views/conversation/ConversationView'
@@ -71,9 +72,16 @@ const conversationRoute = defineRoute<null>({
   render: () => <ConversationView />,
 })
 
-const dealIntelligenceRoute = defineRoute<AcquisitionWorkspaceModel>({
+const dealIntelligenceRoute = defineRoute<null>({
   path: '/deal-intelligence',
   title: 'NEXUS | Deal Intelligence',
+  loader: async () => null,
+  render: () => <DealIntelligenceInboxRoute />,
+})
+
+const propertiesRoute = defineRoute<AcquisitionWorkspaceModel>({
+  path: '/properties',
+  title: 'NEXUS | Properties',
   loader: loadAcquisitionWorkspace,
   render: (data) => wrapFullscreen(<PropertyIntelligenceApp data={data} />, 'deal_intelligence'),
 })
@@ -246,6 +254,7 @@ const routes = [
   inboxRoute,
   conversationRoute,
   dealIntelligenceRoute,
+  propertiesRoute,
   compIntelligenceRoute,
   buyerMatchRoute,
   queueRoute,
@@ -276,7 +285,6 @@ const legacyRouteAliases: Record<string, string> = {
   '/workflows-v2': '/workflow-studio',
   '/workflow-studio-v1': '/workflow-studio',
 
-  '/properties': '/deal-intelligence',
   '/list': '/entity-graph',
 
   '/markets': '/map',
@@ -284,7 +292,7 @@ const legacyRouteAliases: Record<string, string> = {
   '/agents': '/analytics',
   '/mobile': '/inbox',
   '/notifications': '/inbox',
-  '/watchlists': '/deal-intelligence',
+  '/watchlists': '/properties',
 }
 
 const normalizePath = (path: string) => {

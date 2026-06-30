@@ -3,6 +3,7 @@ import {
   deriveWidthPercentFromFlex,
   getViewLayoutMode,
   resolveLayoutModeForPane,
+  resolveMobileAwareLayoutMode,
   resolveWorkspaceFlexBases,
   resolveWorkspaceWidthLabels,
 } from './view-layout'
@@ -63,5 +64,12 @@ describe('layout mode helpers', () => {
     expect(resolveLayoutModeForPane(12.5, '75')).toBe('expanded')
     expect(resolveLayoutModeForPane(12.5)).toBe('compact')
     expect(deriveWidthPercentFromFlex(12.5)).toBe('25')
+  })
+
+  it('routes mobile deal intelligence through the compact 25% panel', () => {
+    expect(resolveMobileAwareLayoutMode('deal_intelligence', 25, '25', true)).toBe('compact')
+    expect(resolveMobileAwareLayoutMode('deal_intelligence', 50, '50', true)).toBe('compact')
+    expect(resolveMobileAwareLayoutMode('deal_intelligence', 25, '25', false)).toBe('compact')
+    expect(resolveMobileAwareLayoutMode('sms_thread', 50, '50', true)).toBe('medium')
   })
 })

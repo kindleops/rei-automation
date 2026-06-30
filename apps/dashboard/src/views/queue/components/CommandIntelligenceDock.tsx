@@ -64,13 +64,17 @@ interface MarketDockData {
   sent: number
   delivered: number
   failed: number
+  failPct?: number
   deliveryPct: number
   health: string
   performanceHealth: string
   senderReadiness: string
   senderExists: boolean
   active: boolean
+  senderCount?: number
+  messagesSentToday?: number
   optOuts: number
+  violations21610?: number
   exceptionCount: number
   suggestedAction: string
 }
@@ -80,10 +84,16 @@ interface FailureDockData {
   label: string
   count: number
   retryable: boolean
+  suppression?: boolean
+  severity?: string
   action: string
   category: string
   markets: string[]
   senders: string[]
+  templates?: string[]
+  pctOfTotal?: number
+  blockedCount?: number
+  failedCount?: number
 }
 
 interface TabOverviewData {
@@ -231,7 +241,13 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
           <InspRow label="Queue volume" value={m.total} />
           <InspRow label="Sent / Del / Fail" value={`${m.sent} / ${m.delivered} / ${m.failed}`} />
           <InspRow label="Delivery rate" value={`${m.deliveryPct}%`} />
+          {m.failPct != null && <InspRow label="Fail rate" value={`${m.failPct}%`} />}
+          {m.senderCount != null && <InspRow label="Sender pool" value={`${m.senderCount} number${m.senderCount === 1 ? '' : 's'}`} />}
+          {m.messagesSentToday != null && <InspRow label="Sent today" value={m.messagesSentToday} />}
           <InspRow label="Opt-outs" value={m.optOuts} />
+          {m.violations21610 != null && m.violations21610 > 0 && (
+            <InspRow label="21610 violations" value={m.violations21610} tone="red" />
+          )}
           <InspRow label="Exceptions" value={m.exceptionCount} tone={m.exceptionCount > 0 ? 'amber' : undefined} />
           <InspRow label="Action" value={m.suggestedAction} />
         </div>
@@ -249,9 +265,15 @@ export function CommandIntelligenceDock(props: CommandIntelligenceDockProps) {
         </header>
         <div className="occ-cmd-dock__body">
           <InspRow label="Category" value={f.category} tone="red" />
-          <InspRow label="Retryable" value={f.retryable ? 'Yes' : 'No'} />
+          <InspRow label="Retryable" value={f.retryable ? 'Yes' : 'No'} tone={f.retryable ? 'green' : 'red'} />
+          {f.suppression && <InspRow label="Disposition" value="Suppress required" tone="red" />}
+          {f.pctOfTotal != null && <InspRow label="Share of failures" value={`${f.pctOfTotal}%`} />}
+          {f.failedCount != null && <InspRow label="Failed / Blocked" value={`${f.failedCount} / ${f.blockedCount ?? 0}`} />}
           <InspRow label="Markets" value={f.markets.slice(0, 5).join(', ') || '—'} />
           <InspRow label="Senders" value={f.senders.slice(0, 5).map(p => `…${p.slice(-4)}`).join(', ') || '—'} />
+          {f.templates && f.templates.length > 0 && (
+            <InspRow label="Templates" value={f.templates.slice(0, 3).join(', ')} />
+          )}
           <p className="occ-failure-card__action">{f.action}</p>
           <button type="button" className="occ-action-btn is-primary" onClick={() => props.onViewFailureRows(f.cause)}>View rows</button>
         </div>

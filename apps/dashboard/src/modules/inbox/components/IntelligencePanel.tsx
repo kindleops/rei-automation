@@ -6052,7 +6052,10 @@ export const IntelligencePanel = ({
         </header>
       ) : null}
 
-      <div className="nx-intel-scroll-body">
+      <div
+        className="nx-intel-scroll-body"
+        data-di-scroll-root={layoutMode === 'compact' ? 'true' : undefined}
+      >
         {layoutMode === 'compact' ? (
           <DealIntelligence25Panel
             key={[

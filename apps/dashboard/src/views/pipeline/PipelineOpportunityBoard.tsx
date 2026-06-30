@@ -19,15 +19,24 @@ import {
 import { resolveReplyAttentionState } from '../../domain/pipeline/pipeline-field-resolver'
 import { DEFAULT_PIPELINE_CARD_DESIGN, normalizeCardDesign } from '../../domain/pipeline/pipeline-card-presets'
 import { PipelineViewSelector } from './components/PipelineViewSelector'
-import { PipelineCommandPanel } from './components/PipelineCommandPanel'
 import { PipelineConfigurableCard } from './components/PipelineConfigurableCard'
+import { PipelineRichDealCard } from './components/PipelineRichDealCard'
+import { PipelineFilterMenu } from './components/PipelineFilterMenu'
 import { PipelineCardDesigner } from './components/PipelineCardDesigner'
 import { PipelineSortBuilder } from './components/PipelineSortBuilder'
 import { PipelineFilterBuilder } from './components/PipelineFilterBuilder'
 import { PipelineViewManager } from './components/PipelineViewManager'
 import { StageChangeConfirmModal } from '../../modules/inbox/components/StageChangeConfirmModal'
 import { normalizeLifecycleStage, type LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { PipelineMobileHeader } from './components/PipelineMobileHeader'
+import { PipelineMobileToolbar } from './components/PipelineMobileToolbar'
+import { PipelineMobileStageRail } from './components/PipelineMobileStageRail'
+import { PipelineMobileDetailSheet } from './components/PipelineMobileDetailSheet'
+import { PipelineMobileOpportunityDetail } from './components/PipelineMobileOpportunityDetail'
+import '../../modules/inbox/queue-ops.css'
 import './pipeline-view.css'
+import './pipeline-mobile.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -175,6 +184,7 @@ export function PipelineOpportunityBoard({
   const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(loadCollapsedLanes)
   const pointerDragRef = useRef<{ cardId: string; startX: number; startY: number; active: boolean } | null>(null)
   const suppressClickRef = useRef(false)
+  const { isMobile } = useBreakpoint()
 
   useEffect(() => {
     setGroupOverrides({})
@@ -446,26 +456,135 @@ export function PipelineOpportunityBoard({
     />
   )
 
-  const renderCard = (card: OppCard) => {
+  const desktopCardTier = (): '25' | '50' | '75' | '100' => {
+    if (layoutMode === 'compact') return '25'
+    if (layoutMode === 'medium') return '50'
+    if (layoutMode === 'expanded') return '75'
+    return '100'
+  }
+
+  const renderCard = (card: OppCard, mobileLayout = false) => {
+    const shared = {
+      selected: card.opp.id === selectedId,
+      dragging: dragCardId === card.opp.id,
+      mutableView,
+      onClick: () => handleCardClick(card.opp.id),
+      onMouseEnter: () => onPreview?.(card.opp.id),
+      onMouseLeave: () => {
+        if (card.opp.id !== selectedId) onClearPreview?.()
+      },
+      onReplyAction: () => onOpenCommandView(card.opp.primary_thread_key),
+      onPointerDown: (e: React.PointerEvent<HTMLElement>) => handleCardPointerDown(card.opp.id, e),
+      onDragStart: (e: React.DragEvent) => handleDragStart(e, card.opp.id),
+      onDragEnd: handleDragEnd,
+    }
+
+    if (mobileLayout) {
+      return (
+        <PipelineConfigurableCard
+          key={card.opp.id}
+          {...shared}
+          opp={card.opp}
+          design={activeCardDesign}
+          layoutMode={layoutMode}
+          displayTier="50"
+          mobileCard
+        />
+      )
+    }
+
     return (
-      <PipelineConfigurableCard
+      <PipelineRichDealCard
         key={card.opp.id}
+        {...shared}
         opp={card.opp}
-        design={activeCardDesign}
-        layoutMode={layoutMode}
-        selected={card.opp.id === selectedId}
-        dragging={dragCardId === card.opp.id}
-        mutableView={mutableView}
-        onClick={() => handleCardClick(card.opp.id)}
-        onMouseEnter={() => onPreview?.(card.opp.id)}
-        onMouseLeave={() => {
-          if (card.opp.id !== selectedId) onClearPreview?.()
-        }}
-        onReplyAction={() => onOpenCommandView(card.opp.primary_thread_key)}
-        onPointerDown={(e) => handleCardPointerDown(card.opp.id, e)}
-        onDragStart={(e) => handleDragStart(e, card.opp.id)}
-        onDragEnd={handleDragEnd}
+        tier={desktopCardTier()}
       />
+    )
+  }
+
+  if (isCompact && isMobile) {
+    const sheetOpp = panelOpportunity
+    const activeCards = activeStage?.cards ?? []
+
+    return (
+      <div className="plv plv--mobile-studio">
+        <PipelineMobileHeader
+          scope={scope}
+          onScopeChange={onScopeChange}
+          metrics={kpi}
+          scopedTotal={scopedTotal}
+          globalTotal={globalTotal}
+          refreshing={refreshing}
+        />
+
+        {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
+
+        <PipelineMobileToolbar
+          query={query}
+          onQueryChange={setQuery}
+          groupBy={groupBy}
+          onGroupByChange={onGroupByChange}
+          hotOnly={hotOnly}
+          followUpOnly={followUpOnly}
+          showSuppressed={showSuppressed}
+          onHotOnly={setHotOnly}
+          onFollowUpOnly={setFollowUpOnly}
+          onShowSuppressed={setShowSuppressed}
+          resultCount={visibleCards.length}
+        />
+
+        <PipelineMobileStageRail
+          stages={displayStageModels.map((s) => ({
+            id: s.def.id,
+            label: s.def.label,
+            tone: s.def.tone,
+            count: s.count,
+          }))}
+          activeId={activeStageId}
+          onSelect={setActiveStageId}
+        />
+
+        <div className="plv-mobile-list">
+          {loading && opportunities.length === 0 && (
+            <div className="plv-mobile-empty" role="status">
+              <strong>Loading pipeline…</strong>
+            </div>
+          )}
+          {!loading && activeCards.length === 0 && (
+            <div className="plv-mobile-empty" role="status">
+              <strong>No deals in {activeStage?.def.label ?? 'this stage'}</strong>
+              <span>Try another stage, widen scope, or clear filters.</span>
+            </div>
+          )}
+          {activeCards.map((card) => renderCard(card, true))}
+        </div>
+
+        <PipelineMobileDetailSheet
+          open={dockOpen && Boolean(sheetOpp)}
+          immersive
+          onClose={handleCloseInspector}
+        >
+          {sheetOpp && (
+            <PipelineMobileOpportunityDetail
+              opportunity={sheetOpp}
+              loading={detailLoading}
+              hydrating={detailLoading}
+              error={detailError}
+              onRetry={onRetryDetail}
+              onClose={handleCloseInspector}
+              onAction={onAction}
+              onOpenCommandView={(threadId) => {
+                handleCloseInspector()
+                onOpenCommandView(threadId)
+              }}
+              onOpenSellerAutomation={onOpenSellerAutomation}
+            />
+          )}
+        </PipelineMobileDetailSheet>
+
+        {stageConfirmModal}
+      </div>
     )
   }
 
@@ -528,7 +647,8 @@ export function PipelineOpportunityBoard({
         </div>
         {panelOpportunity && showDetail && (
           <div className="plv-drawer plv-drawer--overlay">
-            <PipelineCommandPanel
+            <PipelineMobileOpportunityDetail
+              variant="sheet"
               opportunity={panelOpportunity}
               loading={detailLoading}
               hydrating={detailLoading}
@@ -536,6 +656,7 @@ export function PipelineOpportunityBoard({
               onAction={onAction}
               onRetry={onRetryDetail}
               error={detailError}
+              onOpenCommandView={onOpenCommandView}
               onOpenSellerAutomation={onOpenSellerAutomation}
             />
           </div>
@@ -570,7 +691,17 @@ export function PipelineOpportunityBoard({
             />
           </div>
           <div className="plv-filters__controls">
-            <PipelineViewSelector value={groupBy} onChange={onGroupByChange} compact={isCompact} />
+            <PipelineFilterMenu
+              layout="desktop"
+              groupBy={groupBy}
+              onGroupByChange={onGroupByChange}
+              hotOnly={hotOnly}
+              followUpOnly={followUpOnly}
+              showSuppressed={showSuppressed}
+              onHotOnly={setHotOnly}
+              onFollowUpOnly={setFollowUpOnly}
+              onShowSuppressed={setShowSuppressed}
+            />
             {onSortsChange && sorts && (
               <PipelineSortBuilder sorts={sorts} onChange={onSortsChange} />
             )}
@@ -599,11 +730,6 @@ export function PipelineOpportunityBoard({
                 Reset View
               </button>
             )}
-            <button type="button" className={cls('plv-filter-chip', hotOnly && 'is-active')} onClick={() => setHotOnly(!hotOnly)}>Hot</button>
-            <button type="button" className={cls('plv-filter-chip', followUpOnly && 'is-active')} onClick={() => setFollowUpOnly(!followUpOnly)}>Due</button>
-            <button type="button" className={cls('plv-filter-chip', showSuppressed && 'is-active')} onClick={() => setShowSuppressed(!showSuppressed)}>
-              {showSuppressed ? 'Hide Supp.' : 'Show Supp.'}
-            </button>
           </div>
         </div>
         {savedViews.length > 0 && (
@@ -692,7 +818,8 @@ export function PipelineOpportunityBoard({
         {(isFull || (isOps && showDetail)) && (
           <aside className="plv-detail-panel">
             {panelOpportunity ? (
-              <PipelineCommandPanel
+              <PipelineMobileOpportunityDetail
+                variant="panel"
                 opportunity={panelOpportunity}
                 loading={detailLoading}
                 hydrating={detailLoading}
@@ -702,6 +829,7 @@ export function PipelineOpportunityBoard({
                 onToggleCollapse={() => setPanelCollapsed((v) => !v)}
                 onClose={handleCloseInspector}
                 onAction={onAction}
+                onOpenCommandView={onOpenCommandView}
                 onOpenSellerAutomation={onOpenSellerAutomation}
               />
             ) : (

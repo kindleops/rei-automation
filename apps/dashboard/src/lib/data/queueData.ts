@@ -22,7 +22,7 @@ import * as backendClient from '../api/backendClient'
 
 
 
-export { fetchQueueModel } from './fetchQueueModel'
+export { fetchQueueModel, fetchAllQueueItems } from './fetchQueueModel'
 
 // ── Queue Actions ─────────────────────────────────────────────────────────
 

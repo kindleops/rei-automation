@@ -5,6 +5,7 @@ import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
 import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 import { fetchQueuePage, getBackendBaseUrl } from '../api/backendClient'
+import { buildTextgridFleet, TEXTGRID_FLEET_SELECT } from './textgridFleet'
 
 // ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
 
@@ -272,7 +273,7 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       ? fetchChunked(oArr, async chunk => await supabase.from('master_owners').select('master_owner_id,display_name,full_name,first_name').in('master_owner_id', chunk).limit(500), 100)
       : Promise.resolve({ data: apiOwners }),
     needsTextgridFetch
-      ? supabase.from('textgrid_numbers').select('id,phone_number,friendly_name,market,state,is_active,daily_cap')
+      ? supabase.from('textgrid_numbers').select(TEXTGRID_FLEET_SELECT)
       : Promise.resolve({ data: apiTextgridNumbers, error: null }),
   ])
 
@@ -284,24 +285,19 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
   const ownerById = new Map(safeArray(ownerRes.data as AnyRecord[]).map(r => [r.master_owner_id, r]))
   const textgridNumbers = safeArray(tgRes.data as AnyRecord[])
 
+  const textgridFleet = buildTextgridFleet(textgridNumbers)
+
   // Configured-market registry from the textgrid_numbers fleet. Drives Market
   // Health so every market we own a sender in shows up — even with zero rows in
-  // the current page/range. "active" is defensive: a market counts as active
-  // unless every sender is explicitly flagged inactive/paused.
+  // the current page/range.
   const marketDirectory = (() => {
     const m = new Map<string, { senderCount: number; active: boolean }>()
-    for (const n of textgridNumbers) {
-      const market = asString(getFirst(n, ['market', 'sender_market']), '').trim()
-      if (!market) continue
-      const entry = m.get(market) ?? { senderCount: 0, active: false }
+    for (const n of textgridFleet) {
+      if (!n.market || n.market === '—') continue
+      const entry = m.get(n.market) ?? { senderCount: 0, active: false }
       entry.senderCount++
-      const status = asString(getFirst(n, ['status', 'state']), '').toLowerCase()
-      const explicitlyInactive =
-        asBoolean(getFirst(n, ['paused', 'is_paused']), false) ||
-        status === 'paused' || status === 'inactive' || status === 'disabled' ||
-        asBoolean(getFirst(n, ['active', 'is_active']), true) === false
-      if (!explicitlyInactive) entry.active = true
-      m.set(market, entry)
+      if (n.isActive) entry.active = true
+      m.set(n.market, entry)
     }
     return Array.from(m.entries())
       .map(([market, v]) => ({ market, senderCount: v.senderCount, active: v.active }))
@@ -590,5 +586,27 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     // page falls back to page-scoped counts when this is undefined.
     rangeCounts: rangeOk ? rangeKpis : undefined,
     marketDirectory,
+    textgridFleet,
   }
+}
+
+/** Fetch every queue row for the current date/status filters (paginated server-side). */
+export async function fetchAllQueueItems(
+  opts: Omit<QueueFetchOptions, 'page'> = {},
+): Promise<QueueItem[]> {
+  const pageSize = 100
+  const all: QueueItem[] = []
+  let page = 0
+  let totalPages = 1
+
+  while (page < totalPages) {
+    const model = await fetchQueueModel({ ...opts, page, pageSize })
+    all.push(...model.items)
+    totalPages = model.totalPages ?? 1
+    if (!model.hasMore && model.items.length === 0) break
+    page += 1
+    if (page > 500) break
+  }
+
+  return all
 }

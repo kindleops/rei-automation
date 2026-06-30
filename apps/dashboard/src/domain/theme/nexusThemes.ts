@@ -112,7 +112,7 @@ export const nexusGlobalThemes: Record<NexusGlobalThemeId, NexusGlobalThemeDefin
     description: 'Black/green — low-brightness tactical, radar style accents',
     accent: '#72ffb2',
     personality: 'radar',
-    mapThemeId: 'night_vision',
+    mapThemeId: 'radar_night',
     defaultAnimationLevel: 'full',
     isHighContrast: false,
   },
@@ -139,6 +139,6 @@ export const MAP_THEME_TO_NEXUS_GLOBAL: Partial<Record<CommandMapThemeId, NexusG
   light_street: 'light',
   terrain: 'terrain',
   monochrome: 'monochrome',
-  night_vision: 'night_vision',
+  radar_night: 'night_vision',
   matrix: 'matrix',
 }

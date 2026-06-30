@@ -21,6 +21,7 @@ import {
 } from '../domain/command-center/command.types'
 import { useBreakpoint } from '../modules/mobile/useBreakpoint'
 import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
+import { PinnedAppDock } from '../modules/mobile/PinnedAppDock'
 import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -135,10 +136,10 @@ const canonicalizeRoutePath = (target?: string) => {
       return '/workflow-studio'
     case '/list':
       return '/entity-graph'
-    case '/properties':
     case '/dossier':
-    case '/watchlists':
       return '/deal-intelligence'
+    case '/watchlists':
+      return '/properties'
     case '/mobile':
     case '/notifications':
       return '/inbox'
@@ -168,6 +169,7 @@ const GlobalNotificationShell = ({
   return (
     <>
       {showPortableShell ? <PortableCommandShell onOpenSearch={onOpenSearch} /> : null}
+      {isMobile ? <PinnedAppDock routePath={routePath} /> : null}
       {children}
       {showGlobalBell ? (
         <div className="nx-os-notif-bell">

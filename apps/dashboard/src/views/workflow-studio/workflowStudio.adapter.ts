@@ -33,8 +33,24 @@ const unwrap = <T,>(result: BackendResult<T>): T => {
   return result.data as T
 }
 
+type WorkflowApiEnvelope<T = Record<string, unknown>> = {
+  ok: boolean
+  data?: T
+  meta?: Record<string, unknown>
+}
+
+/** Unwrap cockpit `workflowSuccess` `{ ok, data, meta }` when present; pass flat bodies through. */
+export const unwrapWorkflowApiPayload = <T,>(body: unknown): T => {
+  if (!body || typeof body !== 'object') return body as T
+  const record = body as WorkflowApiEnvelope<T>
+  if (record.ok === true && record.data != null && typeof record.data === 'object') {
+    return record.data as T
+  }
+  return body as T
+}
+
 const unwrapWorkflowResponse = <T,>(result: BackendResult<Record<string, unknown>>): T => {
-  return unwrap(result as unknown as BackendResult<T>)
+  return unwrapWorkflowApiPayload<T>(unwrap(result))
 }
 
 export const loadWorkflowStudio = async (): Promise<{ workflows: Workflow[] }> => {
@@ -219,7 +235,9 @@ export const listNodeTypes = async (
     `/api/cockpit/workflows/node-registry${qs}`,
   )
   if (!result.ok) throw new Error(result.message || result.error || 'Node registry load failed')
-  return result.data
+  return unwrapWorkflowResponse<WorkflowNodeTypesResponse>(
+    result as unknown as BackendResult<Record<string, unknown>>,
+  )
 }
 
 export const cloneLegacyWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {

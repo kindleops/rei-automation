@@ -2,10 +2,13 @@ const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean
 
 export interface SenderCardData {
   phone: string
+  friendlyName?: string | null
   market: string
+  stateCode?: string | null
   sent: number
   delivered: number
   failed: number
+  blocked?: number
   deliveryPct: number
   failPct: number
   violations21610: number
@@ -15,6 +18,9 @@ export interface SenderCardData {
   performanceLabel: string
   operationalLabel: string
   lastUsed: string | null
+  dailyCap?: number | null
+  messagesSentToday?: number
+  rangeRows?: number
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -31,8 +37,8 @@ export function SenderFleetOverview({ senders, selectedPhone, onSelect }: Sender
   if (senders.length === 0) return null
 
   return (
-    <div className="occ-fleet-strip">
-      <span className="occ-fleet-strip__label">Sender Fleet · {senders.length}</span>
+    <div className="occ-fleet-strip occ-fleet-strip--v2">
+      <span className="occ-fleet-strip__label">Sender Fleet · {senders.length} numbers</span>
       <div className="occ-fleet-strip__track">
         {senders.map(s => (
           <button
@@ -41,20 +47,25 @@ export function SenderFleetOverview({ senders, selectedPhone, onSelect }: Sender
             className={cls('occ-fleet-strip__card', `is-${s.state}`, selectedPhone === s.phone && 'is-selected', s.violations21610 > 0 && 'is-critical')}
             onClick={() => onSelect(selectedPhone === s.phone ? null : s.phone)}
           >
-            <span className="occ-fleet-strip__num">{s.phone}</span>
-            <span className="occ-fleet-strip__market">{s.market}</span>
+            <span className="occ-fleet-strip__num">{s.friendlyName || s.phone}</span>
+            {s.friendlyName && <span className="occ-fleet-strip__sub occ-mono">{s.phone}</span>}
+            <span className="occ-fleet-strip__market">
+              {s.market}{s.stateCode ? ` · ${s.stateCode}` : ''}
+            </span>
             <span className={cls('occ-fleet-strip__state', `is-${s.state}`)}>{STATE_LABEL[s.state] ?? s.state}</span>
             <span className="occ-fleet-strip__ops">{s.operationalLabel}</span>
             <span className="occ-fleet-strip__metrics">
               <span className="is-green">{s.deliveryPct}% del</span>
               <span className={s.failPct > 10 ? 'is-red' : ''}>{s.failPct}% fail</span>
-              <span>{s.sent} sent</span>
+              <span>{(s.messagesSentToday ?? 0) > 0 ? `${s.messagesSentToday} today` : `${s.sent} sent`}</span>
             </span>
             <span className="occ-fleet-strip__metrics is-sub">
               <span>{s.delivered} del</span>
               <span>{s.failed} fail</span>
+              {(s.blocked ?? 0) > 0 && <span className="is-amber">{s.blocked} blk</span>}
               {s.violations21610 > 0 && <span className="is-red">21610 ×{s.violations21610}</span>}
               {s.optOuts > 0 && <span className="is-red">{s.optOuts} opt-out</span>}
+              {s.dailyCap != null && <span className="is-muted">cap {s.dailyCap}</span>}
             </span>
             {s.lastUsed && <span className="occ-fleet-strip__used">Last {s.lastUsed}</span>}
           </button>

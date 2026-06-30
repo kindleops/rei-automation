@@ -6,6 +6,7 @@ import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
 import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from '../mobile/command-navigation-registry'
+import { openInboxDealIntelligence } from '../mobile/mobile-inbox-bridge'
 import { MobileSheet } from '../mobile/MobileSheet'
 import { CommandDrawer } from './primitives/CommandDrawer'
 import { FilterChip } from './primitives/FilterChip'
@@ -15,14 +16,10 @@ const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filt
 
 type LauncherCategory = 'applications' | 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
 
+/** Mobile portrait shell — applications + appearance only (desktop keeps full launcher). */
 const MOBILE_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'applications', label: 'Applications' },
-  { id: 'pinned', label: 'Pinned' },
-  { id: 'workspaces', label: 'Workspaces' },
-  { id: 'views', label: 'Views' },
   { id: 'appearance', label: 'Appearance' },
-  { id: 'administration', label: 'Administration' },
-  { id: 'account', label: 'Account' },
 ]
 
 const DESKTOP_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
@@ -354,6 +351,8 @@ export const WorkspaceLauncher = ({
       onSettings?.()
     } else if (action === 'notifications') {
       onOpenNotifications?.()
+    } else if (action === 'deal_intelligence') {
+      openInboxDealIntelligence()
     } else {
       pushRoutePath(path)
     }
@@ -573,12 +572,12 @@ export const WorkspaceLauncher = ({
         <input
           type="search"
           value={query}
-          placeholder="Search workspaces and views…"
-          aria-label="Search workspaces and views"
+          placeholder={mobileShell ? 'Search applications…' : 'Search workspaces and views…'}
+          aria-label={mobileShell ? 'Search applications' : 'Search workspaces and views'}
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <div className={cls('nx-wsl-body', compact && 'is-compact')}>
+      <div className={cls('nx-wsl-body', compact && 'is-compact', mobileShell && 'is-mobile-shell')}>
         <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
           {categoryOptions.map((item) => (
             <button
@@ -598,7 +597,7 @@ export const WorkspaceLauncher = ({
 
   if (mobileShell) {
     return (
-      <MobileSheet open={open} title="Workspace Launcher" height="full" onClose={onClose}>
+      <MobileSheet open={open} title="Workspace Launcher" height="full" className="is-mobile-wsl" onClose={onClose}>
         {launcherBody}
       </MobileSheet>
     )

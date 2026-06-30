@@ -27,6 +27,29 @@ function projectionCacheKey(subject: BuyerMatchSubjectContext): string {
   ].join('|')
 }
 
+const PROJECTION_CACHE = new Map<string, BuyerMatchV4Projection>()
+const PARTIAL_REFRESH_ATTEMPTED = new Set<string>()
+
+function isBuyerMatchProjection(value: unknown): value is BuyerMatchV4Projection {
+  return (
+    Boolean(value) &&
+    typeof value === 'object' &&
+    'version' in (value as Record<string, unknown>) &&
+    'subject' in (value as Record<string, unknown>) &&
+    'market' in (value as Record<string, unknown>)
+  )
+}
+
+/** callBackend returns the full JSON body; API wraps projection in `{ ok, data }`. */
+export function unwrapBuyerMatchV4Projection(data: unknown): BuyerMatchV4Projection | null {
+  if (isBuyerMatchProjection(data)) return data
+  if (!data || typeof data !== 'object') return null
+
+  const envelope = data as { data?: unknown }
+  if (envelope.data) return unwrapBuyerMatchV4Projection(envelope.data)
+  return null
+}
+
 export function useBuyerMatchV4Projection(
   subject: BuyerMatchSubjectContext,
   paused = false,
@@ -48,17 +71,21 @@ export function useBuyerMatchV4Projection(
       return
     }
 
+    const cacheKey = projectionCacheKey(current)
     const requestKey = subjectContextKey(current)
+    const cached = PROJECTION_CACHE.get(cacheKey) ?? null
+
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
-    if (projection && refresh) setRefreshing(true)
-    else if (!projection) setLoading(true)
     setError(null)
+    setRefreshing(Boolean(cached && refresh))
+    setLoading(!cached)
+    if (cached) setProjection(cached)
 
     try {
-      const res = await callBackend<BuyerMatchV4Projection>(
+      const res = await callBackend<unknown>(
         '/api/cockpit/buyer-match-v4/projection',
         {
           method: 'POST',
@@ -95,21 +122,27 @@ export function useBuyerMatchV4Projection(
         return
       }
 
-      const envelope = res.data as { data?: BuyerMatchV4Projection } | BuyerMatchV4Projection | undefined
-      const payload =
-        envelope && typeof envelope === 'object' && 'data' in envelope && envelope.data
-          ? envelope.data
-          : (envelope as BuyerMatchV4Projection | undefined)
+      const payload = unwrapBuyerMatchV4Projection(res.data)
+      if (!payload) {
+        setError('projection_empty')
+        return
+      }
 
-      if (payload) {
-        setProjection(payload)
-        if (payload.market?.dataState === 'PARTIAL' && payload.meta?.cached) {
-          window.setTimeout(() => {
-            if (!controller.signal.aborted && subjectContextKey(subjectRef.current) === requestKey) {
-              void run(subjectRef.current, true)
-            }
-          }, 1200)
-        }
+      PROJECTION_CACHE.set(cacheKey, payload)
+      setProjection(payload)
+
+      if (
+        payload.market?.dataState === 'PARTIAL' &&
+        payload.meta?.cached &&
+        !refresh &&
+        !PARTIAL_REFRESH_ATTEMPTED.has(cacheKey)
+      ) {
+        PARTIAL_REFRESH_ATTEMPTED.add(cacheKey)
+        window.setTimeout(() => {
+          if (!controller.signal.aborted && projectionCacheKey(subjectRef.current) === cacheKey) {
+            void run(subjectRef.current, true)
+          }
+        }, 1200)
       }
     } catch (err) {
       if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') return
@@ -120,10 +153,12 @@ export function useBuyerMatchV4Projection(
         setRefreshing(false)
       }
     }
-  }, [paused, projection])
+  }, [paused])
 
   useEffect(() => {
-    setProjection(null)
+    const key = projectionCacheKey(subject)
+    const cached = PROJECTION_CACHE.get(key) ?? null
+    setProjection(cached)
     setError(null)
     void run(subject, false)
     return () => abortRef.current?.abort()
@@ -131,6 +166,9 @@ export function useBuyerMatchV4Projection(
   }, [run, projectionCacheKey(subject)])
 
   const refresh = useCallback(() => {
+    const key = projectionCacheKey(subjectRef.current)
+    PARTIAL_REFRESH_ATTEMPTED.delete(key)
+    PROJECTION_CACHE.delete(key)
     void run(subjectRef.current, true)
   }, [run])
 

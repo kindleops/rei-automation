@@ -39,7 +39,7 @@ export const MOBILE_MORE_ROUTES: Array<{
   { path: '/workflow-studio', label: 'Workflow Studio', description: 'Live executions', icon: 'grid' },
   { path: '/email-command', label: 'Email Command', description: 'Threads & replies', icon: 'mail' },
   { path: '/closing-desk', label: 'Closing Desk', description: 'S6–S10 operations', icon: 'file-text' },
-  { path: '/deal-intelligence', label: 'Deal Intelligence', description: 'Property dossier', icon: 'target' },
+  { path: '/inbox', label: 'Deal Intelligence', description: 'Seller, property & offer intel', icon: 'target' },
   { path: '/analytics', label: 'Analytics', description: 'KPI intelligence', icon: 'stats' },
   { path: '__settings__', label: 'Settings', description: 'Theme & preferences', icon: 'settings' },
 ]

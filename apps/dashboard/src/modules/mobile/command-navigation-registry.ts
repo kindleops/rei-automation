@@ -1,6 +1,6 @@
 import type { NavIconName } from './mobile-nav-routes'
 
-export type CommandNavAction = 'route' | 'settings' | 'notifications'
+export type CommandNavAction = 'route' | 'settings' | 'notifications' | 'deal_intelligence'
 
 export interface CommandNavRoute {
   path: string
@@ -22,7 +22,7 @@ export const COMMAND_NAV_ROUTES: CommandNavRoute[] = [
   { path: '/workflow-studio', label: 'Workflow Studio', description: 'Automations & canvas', icon: 'grid' },
   { path: '/email-command', label: 'Email Command', description: 'Threads & replies', icon: 'mail' },
   { path: '/closing-desk', label: 'Closing Desk', description: 'S6–S10 operations', icon: 'file-text' },
-  { path: '/deal-intelligence', label: 'Deal Intelligence', description: 'Property dossier', icon: 'target' },
+  { path: '__deal_intelligence__', label: 'Deal Intelligence', description: 'Seller, property & offer intel', icon: 'target', workspaceKey: 'deal_desk', action: 'deal_intelligence' },
   { path: '/buyer-match', label: 'Buyer Match', description: 'Buyer command', icon: 'users' },
   { path: '/analytics', label: 'Analytics', description: 'KPI intelligence', icon: 'stats' },
   { path: '/calendar', label: 'Calendar', description: 'Events & follow-ups', icon: 'bell' },
@@ -33,6 +33,9 @@ export const COMMAND_NAV_ROUTES: CommandNavRoute[] = [
 const INBOX_ROUTE_PATHS = new Set(['/', '/inbox', '/conversation'])
 
 export function isCommandNavRouteActive(routePath: string, item: CommandNavRoute): boolean {
+  if (item.action === 'deal_intelligence') {
+    return routePath === '/deal-intelligence' || routePath.startsWith('/deal-intelligence/')
+  }
   if (item.action) return false
   if (item.path === '/inbox') return INBOX_ROUTE_PATHS.has(routePath)
   return routePath === item.path || routePath.startsWith(`${item.path}/`)

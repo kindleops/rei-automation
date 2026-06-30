@@ -141,3 +141,21 @@ export const isMediumLayout = (layoutMode: ViewLayoutMode): boolean => layoutMod
 
 export const isExpandedLayout = (layoutMode: ViewLayoutMode): boolean =>
   layoutMode === 'expanded' || layoutMode === 'full'
+
+/** Mobile inbox panes — Deal Desk intelligence uses the 25% compact panel. */
+export const resolveMobileAwareLayoutMode = (
+  view: string,
+  flexBasis: number,
+  widthOverride: ViewWidthPercent | undefined,
+  isMobile: boolean,
+): ViewLayoutMode => {
+  const layoutMode = resolveLayoutModeForPane(flexBasis, widthOverride)
+  if (!isMobile) return layoutMode
+
+  if (view === 'pipeline' || view === 'command_map' || view === 'queue' || view === 'workflow_studio') {
+    return 'compact'
+  }
+  if (view === 'deal_intelligence') return 'compact'
+  if (view === 'campaigns' || view === 'email') return 'medium'
+  return layoutMode
+}

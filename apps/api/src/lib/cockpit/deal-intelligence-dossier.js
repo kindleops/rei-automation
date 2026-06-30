@@ -46,11 +46,22 @@ const PROPERTY_SELECT = [
   'total_loan_balance', 'property_flags_text', 'property_flags_json', 'streetview_image',
   'satellite_image', 'final_acquisition_score', 'structured_motivation_score',
   'deal_strength_score', 'tag_distress_score', 'ai_score', 'ownership_years',
-  'sale_date', 'saleprice', 'document_type', 'recording_date', 'default_date',
+  'sale_date', 'saleprice', 'document_type', 'last_sale_doc_type', 'recording_date', 'default_date',
   'total_loan_amt', 'total_loan_payment', 'tax_amt', 'tax_delinquent', 'active_lien',
   'lot_acreage', 'lot_square_feet', 'stories', 'avg_sqft_per_unit', 'beds_per_unit',
   'assd_improvement_value', 'assd_land_value', 'assd_total_value',
-  'rehab_level', 'construction_type',
+  'rehab_level', 'construction_type', 'air_conditioning', 'basement', 'exterior_walls',
+  'floor_cover', 'garage', 'heating_fuel_type', 'heating_type', 'interior_walls', 'pool',
+  'porch', 'patio', 'deck', 'driveway', 'roof_cover', 'roof_type', 'sewer', 'water', 'zoning',
+  'subdivision_name', 'school_district_name', 'flood_zone', 'hoa1_name', 'hoa1_type', 'hoa_fee_amount',
+].join(',')
+
+const PROPERTY_BASELINE_SELECT = [
+  'property_id',
+  'final_acquisition_score',
+  'structured_motivation_score',
+  'deal_strength_score',
+  'tag_distress_score',
 ].join(',')
 
 const PROPERTY_ENGINE_SELECT = [
@@ -67,8 +78,9 @@ const OWNER_SELECT = [
   'master_owner_id', 'display_name', 'owner_type_guess',
   'priority_score', 'priority_tier', 'urgency_score', 'financial_pressure_score',
   'contactability_score', 'best_contact_window', 'portfolio_total_value',
-  'portfolio_total_equity', 'portfolio_total_loan_balance', 'property_count',
-  'portfolio_total_units', 'tax_delinquent_count', 'active_lien_count',
+  'portfolio_total_equity', 'portfolio_total_loan_balance', 'portfolio_total_loan_payment',
+  'portfolio_total_tax_amount', 'property_count', 'portfolio_total_units',
+  'tax_delinquent_count', 'active_lien_count',
   'seller_tags_text', 'seller_tags_json', 'primary_owner_address',
   'best_language', 'routing_market', 'routing_timezone',
   'best_phone_1', 'best_phone_2', 'best_phone_3', 'best_email_1', 'best_email_2',
@@ -84,7 +96,7 @@ const PROSPECT_SELECT = [
 ].join(',')
 
 const PHONE_SELECT = [
-  'phone_id', 'canonical_e164', 'phone', 'phone_type',
+  'phone_id', 'canonical_e164', 'phone', 'phone_type', 'phone_owner',
   'activity_status', 'usage_12_months', 'usage_2_months', 'contact_score_final',
   'contact_window', 'timezone', 'wrong_number_at', 'sort_rank',
 ].join(',')
@@ -261,7 +273,7 @@ function buildPropertySnapshot(propertyRow, hydrated, property) {
     building_condition: property?.condition,
     last_sale_date: lastSaleDate,
     last_sale_price: lastSalePrice,
-    last_sale_document_type: pick(propertyRow?.document_type),
+    last_sale_document_type: pick(propertyRow?.last_sale_doc_type, propertyRow?.document_type),
     recording_date: pick(propertyRow?.recording_date),
     ownership_years: num(property?.ownership_years),
     active_lien: propertyRow?.active_lien ?? null,
@@ -291,6 +303,7 @@ function buildPropertyDetailGroups(propertyRow, hydrated, property) {
       last_sale_date: pick(propertyRow?.sale_date),
       last_sale_price: num(pick(propertyRow?.sale_price, propertyRow?.saleprice)),
       document_type: pick(propertyRow?.document_type),
+      last_sale_doc_type: pick(propertyRow?.last_sale_doc_type, hydrated?.last_sale_doc_type),
       recording_date: pick(propertyRow?.recording_date),
       default_date: pick(propertyRow?.default_date),
     },
@@ -305,10 +318,34 @@ function buildPropertyDetailGroups(propertyRow, hydrated, property) {
       lot_square_feet: num(propertyRow?.lot_square_feet),
       stories: num(propertyRow?.stories),
       property_class: pick(propertyRow?.property_class, hydrated?.property_class),
-      construction_type: pick(propertyRow?.construction_type),
-      building_quality: pick(propertyRow?.building_quality),
+      construction_type: pick(propertyRow?.construction_type, hydrated?.construction_type),
+      building_quality: pick(propertyRow?.building_quality, hydrated?.building_quality),
       building_condition: property?.condition,
-      rehab_level: pick(propertyRow?.rehab_level),
+      rehab_level: pick(propertyRow?.rehab_level, hydrated?.rehab_level),
+      air_conditioning: pick(propertyRow?.air_conditioning, hydrated?.air_conditioning),
+      basement: pick(propertyRow?.basement, hydrated?.basement),
+      exterior_walls: pick(propertyRow?.exterior_walls, hydrated?.exterior_walls),
+      floor_cover: pick(propertyRow?.floor_cover, hydrated?.floor_cover),
+      garage: pick(propertyRow?.garage, hydrated?.garage),
+      heating_fuel_type: pick(propertyRow?.heating_fuel_type, hydrated?.heating_fuel_type),
+      heating_type: pick(propertyRow?.heating_type, hydrated?.heating_type),
+      interior_walls: pick(propertyRow?.interior_walls, hydrated?.interior_walls),
+      pool: pick(propertyRow?.pool, hydrated?.pool),
+      porch: pick(propertyRow?.porch, hydrated?.porch),
+      patio: pick(propertyRow?.patio, hydrated?.patio),
+      deck: pick(propertyRow?.deck, hydrated?.deck),
+      driveway: pick(propertyRow?.driveway, hydrated?.driveway),
+      roof_cover: pick(propertyRow?.roof_cover, hydrated?.roof_cover),
+      roof_type: pick(propertyRow?.roof_type, hydrated?.roof_type),
+      sewer: pick(propertyRow?.sewer, hydrated?.sewer),
+      water: pick(propertyRow?.water, hydrated?.water),
+      zoning: pick(propertyRow?.zoning, hydrated?.zoning),
+      subdivision_name: pick(propertyRow?.subdivision_name, hydrated?.subdivision_name),
+      school_district_name: pick(propertyRow?.school_district_name, hydrated?.school_district_name),
+      flood_zone: pick(propertyRow?.flood_zone, hydrated?.flood_zone),
+      hoa1_name: pick(propertyRow?.hoa1_name, hydrated?.hoa1_name),
+      hoa1_type: pick(propertyRow?.hoa1_type, hydrated?.hoa1_type),
+      hoa_fee_amount: num(pick(propertyRow?.hoa_fee_amount, hydrated?.hoa_fee_amount)),
     },
     distress_flags: {
       tax_delinquent: propertyRow?.tax_delinquent ?? null,
@@ -367,6 +404,55 @@ const COMP_REJECTION_LABELS = {
 function compRejectionLabel(reason) {
   return COMP_REJECTION_LABELS[reason] || reason.replace(/_/g, ' ')
 }
+
+const COMP_IDENTITY_SELECT = [
+  'id', 'owner_name', 'owner_1_name', 'is_corporate_owner', 'document_type', 'last_sale_doc_type',
+  'recording_date', 'sale_price', 'mls_sold_price', 'subdivision_name', 'school_district_name',
+].join(',')
+
+function looksLikeLlcEntity(name) {
+  const n = String(name || '').toLowerCase()
+  return /\b(llc|l\.l\.c|inc|corp|corporation|trust|lp|ltd|holdings|properties|investments|partners)\b/.test(n)
+}
+
+function resolveCompSaleChannel(comp = {}, identity = null) {
+  const mlsPrice = num(comp.mls_sold_price ?? identity?.mls_sold_price)
+  const mlsDate = comp.mls_sold_date || null
+  const salePrice = num(comp.sale_price ?? identity?.sale_price)
+  const isMlsSale = (mlsPrice != null && mlsPrice > 0) || Boolean(mlsDate)
+  const isOffMarket = !isMlsSale && salePrice != null && salePrice > 0
+  return { is_mls_sale: isMlsSale, is_off_market: isOffMarket }
+}
+
+function resolveCompBuyerProfile(comp = {}, identity = null) {
+  const buyerName = clean(identity?.owner_name || identity?.owner_1_name || comp.buyer_name || comp.owner_name || '')
+  const corporateFlag = identity?.is_corporate_owner === true || comp.is_corporate_owner === true
+  const isCorporateBuyer = corporateFlag || (buyerName ? looksLikeLlcEntity(buyerName) : false)
+  const buyerType = isCorporateBuyer
+    ? (looksLikeLlcEntity(buyerName) ? 'llc_corporate' : 'corporate')
+    : buyerName
+      ? 'individual'
+      : null
+  return {
+    buyer_name: buyerName || null,
+    is_corporate_buyer: isCorporateBuyer,
+    buyer_type: buyerType,
+  }
+}
+
+async function fetchCompIdentityBatch(compIds, abortSignal) {
+  if (!compIds.length) return new Map()
+  let query = supabase.from('buyer_comp_raw_v2').select(COMP_IDENTITY_SELECT).in('id', compIds)
+  if (abortSignal) query = query.abortSignal(abortSignal)
+  const { data, error } = await query
+  if (error) {
+    console.warn('[DEAL_INTEL_COMP_IDENTITY]', error?.message)
+    return new Map()
+  }
+  return new Map((data || []).map((row) => [clean(row.id), row]))
+}
+
+const average = (arr) => (arr.length ? arr.reduce((sum, value) => sum + value, 0) / arr.length : null)
 
 async function queryMaybe(table, select, filters = {}, abortSignal) {
   let query = supabase.from(table).select(select)
@@ -617,6 +703,9 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
     console.warn('[DEAL_INTEL_COMPS]', error?.message)
   }
 
+  const compIds = [...new Set(rawComps.map((raw) => clean(raw.comp_id || raw.id)).filter(Boolean))]
+  const identityById = await fetchCompIdentityBatch(compIds, abortSignal)
+
   const qualification = {
     candidates_found: rawComps.length,
     asset_type_matches: 0,
@@ -627,10 +716,21 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
   }
 
   const analyzed = rawComps.map((raw) => {
-    const eligibility = evaluateCompEligibility(subject, raw)
     const scored = scoreComparable(subject, raw)
-    const assetMatch = !eligibility.reasons.includes('asset_type_mismatch')
-    const locationOk = !eligibility.reasons.some((r) =>
+    const comp = scored?.comp || normalizePropertyFeatures(raw, {
+      source: raw.source || 'v_recent_sold_comps',
+      distance_miles: raw.distance_miles,
+    })
+    const gateEligibility = evaluateCompEligibility(subject, comp)
+    const eligibilityReasons = scored?.eligible === false ? (scored.reasons || []) : []
+    const eligibility = {
+      eligible: scored?.eligible === true,
+      reasons: eligibilityReasons,
+      distance_miles: comp.distance_miles ?? gateEligibility.distance_miles ?? num(raw.distance_miles),
+      sale_age_months: comp.sale_age_months ?? gateEligibility.sale_age_months,
+    }
+    const assetMatch = !gateEligibility.reasons.includes('asset_type_mismatch')
+    const locationOk = !gateEligibility.reasons.some((r) =>
       ['outside_radius', 'outside_zip_without_coordinates'].includes(r),
     )
     const similarityScore = num(scored?.comp_confidence ?? scored?.weighted_score)
@@ -641,30 +741,55 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
     if (scored?.eligible) qualification.similarity_qualified += 1
     if (usable) qualification.weighted_usable += 1
     else qualification.rejected += 1
+    const compId = clean(comp.id || comp.comp_id || comp.property_id)
+    const identity = identityById.get(compId) || null
+    const salePrice = num(comp.sale_price || comp.mls_sold_price || identity?.sale_price)
+    const units = num(comp.units_count ?? comp.units)
+    const sqft = num(comp.building_square_feet ?? comp.sqft)
+    const channel = resolveCompSaleChannel(comp, identity)
+    const buyer = resolveCompBuyerProfile(comp, identity)
+    const documentType = clean(identity?.document_type || identity?.last_sale_doc_type || comp.document_type || '')
 
-    const comp = scored?.comp || raw
     return {
-      id: clean(comp.id || comp.comp_id || comp.property_id),
+      id: compId,
+      property_id: clean(comp.property_id || compId),
+      latitude: num(comp.latitude),
+      longitude: num(comp.longitude),
       address: comp.property_address_full || comp.address || null,
       property_type: comp.property_type || comp.asset_type || null,
       asset_class: comp.normalized_asset_class || comp.asset_class || null,
       zip: comp.property_address_zip || comp.zip || null,
       distance_miles: num(eligibility.distance_miles ?? comp.distance_miles),
-      units: num(comp.units_count ?? comp.units),
-      sqft: num(comp.building_square_feet ?? comp.sqft),
+      units,
+      sqft,
       bedrooms: num(comp.total_bedrooms ?? comp.beds),
       bathrooms: num(comp.total_baths ?? comp.baths),
+      avg_sqft_per_unit: num(comp.avg_sqft_per_unit ?? (sqft && units ? sqft / units : null)),
+      avg_beds_per_unit: num(comp.avg_beds_per_unit ?? (num(comp.total_bedrooms ?? comp.beds) && units ? num(comp.total_bedrooms ?? comp.beds) / units : null)),
       year_built: num(comp.year_built),
+      effective_year_built: num(comp.effective_year_built),
+      condition: comp.condition || comp.building_condition || null,
+      construction_type: comp.construction_type || null,
+      subdivision: comp.subdivision || identity?.subdivision_name || null,
+      school_district: comp.school_district || identity?.school_district_name || null,
+      lot_sqft: num(comp.lot_sqft ?? comp.lot_square_feet),
       sale_date: comp.sale_date || comp.mls_sold_date || null,
-      sale_price: num(comp.sale_price || comp.mls_sold_price),
-      ppsf: num(comp.computed_ppsf || comp.price_per_sqft || (comp.sale_price && comp.building_square_feet ? comp.sale_price / comp.building_square_feet : null)),
-      ppu: num(comp.ppu || (comp.sale_price && comp.units_count ? comp.sale_price / comp.units_count : null)),
+      recording_date: identity?.recording_date || comp.recording_date || null,
+      sale_price: salePrice,
+      mls_sold_price: num(comp.mls_sold_price ?? identity?.mls_sold_price),
+      document_type: documentType || null,
+      ...channel,
+      ...buyer,
+      ppsf: num(comp.computed_ppsf || comp.price_per_sqft || (salePrice && sqft ? salePrice / sqft : null)),
+      ppu: num(comp.ppu || comp.price_per_unit || (salePrice && units ? salePrice / units : null)),
       similarity_score: similarityScore,
       weight: num(scored?.weight),
       included: usable,
       exclusion_reason: usable
         ? null
-        : compRejectionLabel(eligibility.reasons[0] || (scored?.eligible ? 'low_similarity' : 'not_eligible')),
+        : compRejectionLabel(
+          eligibilityReasons[0] || (scored?.eligible ? 'low_similarity' : 'not_eligible'),
+        ),
       source: comp.source || 'v_recent_sold_comps',
     }
   })
@@ -674,7 +799,6 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
   const ppsfValues = usableRecords.map((r) => r.ppsf).filter((v) => v > 0).sort((a, b) => a - b)
   const ppuValues = usableRecords.map((r) => r.ppu).filter((v) => v > 0).sort((a, b) => a - b)
   const median = (arr) => (arr.length ? arr[Math.floor(arr.length / 2)] : null)
-  const isMultifamily = isMultifamilyProperty(property)
   const usableCount = usableRecords.length
   let confidence = null
   if (usableCount > 0) {
@@ -694,8 +818,13 @@ async function fetchCompsSection(property, location, propertyRow, abortSignal) {
     comp_count: usableCount,
     weighted_comp_count: qualification.weighted_usable,
     median_sale: median(salePrices),
-    median_ppsf: isMultifamily ? null : median(ppsfValues),
-    median_ppu: isMultifamily ? median(ppuValues) : null,
+    median_ppsf: median(ppsfValues),
+    avg_ppsf: average(ppsfValues),
+    median_ppu: median(ppuValues),
+    avg_ppu: average(ppuValues),
+    mls_sale_count: usableRecords.filter((r) => r.is_mls_sale).length,
+    off_market_count: usableRecords.filter((r) => r.is_off_market).length,
+    corporate_buyer_count: usableRecords.filter((r) => r.is_corporate_buyer).length,
     valuation_low: salePrices.length ? Math.min(...salePrices) : null,
     valuation_high: salePrices.length ? Math.max(...salePrices) : null,
     valuation_mid: median(salePrices),
@@ -965,24 +1094,27 @@ function ageFromMob(mob) {
   return null
 }
 
-function buildBaselineScores(propertyRow, hydrated, acquisitionRow = null) {
+/** Baseline scores from public.properties only — never engine AOS. */
+export function buildBaselineScores(propertyRow, hydrated) {
   return {
     acquisition_score: num(pick(
       propertyRow?.final_acquisition_score,
       hydrated?.final_acquisition_score,
-      acquisitionRow?.aos_score,
     )),
-    deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
+    deal_strength_score: num(pick(
+      propertyRow?.deal_strength_score,
+      hydrated?.deal_strength_score,
+    )),
     motivation_score: num(pick(
       propertyRow?.structured_motivation_score,
-      hydrated?.priority_score,
       hydrated?.structured_motivation_score,
-      acquisitionRow?.seller_financial_pressure_score,
+      hydrated?.motivation_score,
+      hydrated?.priority_score,
     )),
     distress_score: num(pick(
       propertyRow?.tag_distress_score,
       hydrated?.tag_distress_score,
-      acquisitionRow?.forced_sale_pressure_score,
+      hydrated?.distress_score,
     )),
     label: 'Baseline Property Intelligence',
   }
@@ -1060,9 +1192,18 @@ function normalizeProperty(propertyRow, hydrated, location) {
     latitude: location.latitude,
     longitude: location.longitude,
     acquisition_score: num(pick(propertyRow?.final_acquisition_score, hydrated?.final_acquisition_score)),
-    motivation_score: num(pick(propertyRow?.structured_motivation_score, hydrated?.priority_score)),
+    motivation_score: num(pick(
+      propertyRow?.structured_motivation_score,
+      hydrated?.structured_motivation_score,
+      hydrated?.motivation_score,
+      hydrated?.priority_score,
+    )),
     deal_strength_score: num(pick(propertyRow?.deal_strength_score, hydrated?.deal_strength_score)),
-    distress_score: num(pick(propertyRow?.tag_distress_score, hydrated?.tag_distress_score)),
+    distress_score: num(pick(
+      propertyRow?.tag_distress_score,
+      hydrated?.tag_distress_score,
+      hydrated?.distress_score,
+    )),
     ai_score: num(pick(propertyRow?.ai_score, hydrated?.ai_score)),
   }
 }
@@ -1132,6 +1273,8 @@ function normalizeOwner(ownerRow, hydrated) {
     portfolio_value: num(pick(ownerRow?.portfolio_total_value, hydrated?.portfolio_total_value)),
     portfolio_equity: num(pick(ownerRow?.portfolio_total_equity, hydrated?.portfolio_total_equity)),
     portfolio_loan_balance: num(pick(ownerRow?.portfolio_total_loan_balance, hydrated?.portfolio_total_loan_balance)),
+    portfolio_loan_payment: num(pick(ownerRow?.portfolio_total_loan_payment, hydrated?.portfolio_total_loan_payment)),
+    portfolio_tax_amount: num(pick(ownerRow?.portfolio_total_tax_amount, hydrated?.portfolio_total_tax_amount)),
     property_count: num(pick(ownerRow?.property_count, hydrated?.property_count)),
     total_units: num(pick(ownerRow?.portfolio_total_units, hydrated?.portfolio_total_units)),
     tax_delinquent_count: num(pick(ownerRow?.tax_delinquent_count, hydrated?.tax_delinquent_count)),
@@ -1157,7 +1300,8 @@ function normalizePhone(phoneRow, hydrated, canonicalE164, ownerRow, compliance)
       number: pick(phoneRow.canonical_e164, phoneRow.phone, canonicalE164),
       alternate_numbers: [...new Set(alternates)],
       type: phoneRow.phone_type || null,
-      carrier: phoneRow.carrier || null,
+      phone_owner: pick(phoneRow.phone_owner, hydrated?.phone_owner),
+      carrier: pick(phoneRow.phone_owner, hydrated?.phone_owner),
       activity_status: phoneRow.activity_status || null,
       activity_period: phoneRow.activity_status || null,
       usage: phoneRow.usage_12_months || phoneRow.usage_2_months || null,
@@ -1292,6 +1436,7 @@ export async function buildDealIntelligenceDossier({
 
   const [
     propertyRow,
+    propertyBaselineRow,
     prospectRow,
     ownerRow,
     phoneRow,
@@ -1300,6 +1445,9 @@ export async function buildDealIntelligenceDossier({
   ] = await Promise.all([
     identity.property_id
       ? queryMaybe('properties', PROPERTY_SELECT, { property_id: identity.property_id }, abortSignal)
+      : null,
+    identity.property_id
+      ? queryMaybe('properties', PROPERTY_BASELINE_SELECT, { property_id: identity.property_id }, abortSignal)
       : null,
     identity.prospect_id
       ? queryMaybe('prospects', PROSPECT_SELECT, { prospect_id: identity.prospect_id }, abortSignal)
@@ -1368,7 +1516,10 @@ export async function buildDealIntelligenceDossier({
     ])
 
   const acquisition = normalizeAcquisitionDecision(acquisitionRow)
-  const baseline_scores = buildBaselineScores(propertyRow, hydrated, acquisitionRow)
+  const baselinePropertyRow = propertyBaselineRow
+    ? { ...(propertyRow || {}), ...propertyBaselineRow }
+    : propertyRow
+  const baseline_scores = buildBaselineScores(baselinePropertyRow, hydrated)
   const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
   const prospect = normalizeProspect(prospectRow, hydrated, phoneRow)
   const owner = normalizeOwner(ownerRow, hydrated)

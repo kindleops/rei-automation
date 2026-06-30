@@ -3,6 +3,17 @@ import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 
 export type QueueDensity = 'comfortable' | 'compact' | 'command'
+
+export const QUEUE_DENSITY_ORDER: QueueDensity[] = ['comfortable', 'compact', 'command']
+
+export const QUEUE_DENSITY_LABEL: Record<QueueDensity, string> = {
+  comfortable: 'Comfortable',
+  compact: 'Compact',
+  command: 'Command',
+}
+
+export const queueShowsMessagePreview = (density: QueueDensity): boolean =>
+  density === 'comfortable'
 export type QueueSection = 'queue' | 'templates' | 'senders' | 'market' | 'failures' | 'events'
 
 export const BLOCKED_STATUSES = new Set([

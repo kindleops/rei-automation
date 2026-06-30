@@ -776,12 +776,12 @@
 @media (max-width: 767px) and (orientation: portrait) {
   .nx-inbox-shell.is-mobile-inbox .nx-workspace-split-grid {
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
   }
   .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane {
     flex: 1 1 auto !important;
     max-width: 100% !important;
-    min-height: 280px;
+    min-height: 0 !important;
   }
 }
 

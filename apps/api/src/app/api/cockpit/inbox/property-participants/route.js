@@ -100,9 +100,9 @@ function mergeParticipantRecord(base = {}, { prospectById, phoneByE164, latestIn
   const prospect = prospectId ? prospectById.get(prospectId) : null
 
   const displayName = clean(
-    base.display_name
-    || prospect?.full_name
+    prospect?.full_name
     || [prospect?.first_name, prospect?.last_name].filter(Boolean).join(' ')
+    || base.display_name
     || null,
   )
 

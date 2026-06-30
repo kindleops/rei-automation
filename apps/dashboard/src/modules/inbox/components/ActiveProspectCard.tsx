@@ -2,7 +2,9 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { formatPhone } from '../../../shared/formatters'
 import {
+  deriveOwnerMatchFlags,
   formatParticipantRelationship,
+  ownerMatchFlagTone,
   ownershipStatusLabel,
   ownershipStatusTone,
   type PropertyParticipant,
@@ -14,7 +16,7 @@ const cls = (...tokens: Array<string | false | null | undefined>) =>
 type Props = {
   participants: PropertyParticipant[]
   selectedParticipant: PropertyParticipant | null
-  masterOwnerHousehold?: string | null
+  prospectName?: string | null
   loading?: boolean
   onSelectParticipant: (participant: PropertyParticipant) => void
   onTryNextEligible?: (participant: PropertyParticipant) => void
@@ -49,7 +51,7 @@ const OwnershipIndicator = ({ status }: { status?: string | null }) => {
   }
   return (
     <span className="nx-active-prospect__ownership is-neutral" title="Ownership unconfirmed">
-        <Icon name="user" />
+      <Icon name="user" />
       <span>Unconfirmed</span>
     </span>
   )
@@ -58,21 +60,25 @@ const OwnershipIndicator = ({ status }: { status?: string | null }) => {
 const ActiveProspectCardComponent = ({
   participants,
   selectedParticipant,
-  masterOwnerHousehold = null,
+  prospectName = null,
   loading = false,
   onSelectParticipant,
   onTryNextEligible,
   nextEligiblePreview = null,
 }: Props) => {
   const [open, setOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const selected = selectedParticipant || participants[0] || null
-  const visibleFlags = (selected?.owner_match_flags || []).slice(0, 4)
-  const hiddenFlagCount = Math.max(0, (selected?.owner_match_flags?.length || 0) - visibleFlags.length)
+  const matchFlags = useMemo(
+    () => (selected?.owner_match_flags?.length
+      ? selected.owner_match_flags
+      : deriveOwnerMatchFlags(selected || {})),
+    [selected],
+  )
 
   const switcherList = useMemo(() => participants, [participants])
+  const headlineName = selected?.display_name || prospectName || 'Select prospect'
 
   useEffect(() => {
     if (!open) return
@@ -92,11 +98,7 @@ const ActiveProspectCardComponent = ({
 
   if (!switcherList.length && !loading) return null
 
-  const relationship = formatParticipantRelationship(
-    selected?.relationship_to_property || selected?.identity_class,
-  )
   const phone = String(selected?.canonical_e164 ?? '').trim()
-  const rankLabel = selected?.contact_rank_label || (selected?.contact_rank ? `#${selected.contact_rank}` : null)
 
   return (
     <section className="nx-active-prospect" ref={rootRef} aria-label="Active prospect">
@@ -105,14 +107,8 @@ const ActiveProspectCardComponent = ({
           <div className="nx-active-prospect__identity">
             <span className="nx-active-prospect__eyebrow">Active Prospect</span>
             <h3 className="nx-active-prospect__name">
-              {loading && !selected ? 'Loading…' : (selected?.display_name || 'Select prospect')}
+              {loading && !selected ? 'Loading…' : headlineName}
             </h3>
-            {phone ? (
-              <span className="nx-active-prospect__phone">{formatPhone(phone)}</span>
-            ) : null}
-            {masterOwnerHousehold ? (
-              <span className="nx-active-prospect__household">{masterOwnerHousehold}</span>
-            ) : null}
           </div>
           <div className="nx-active-prospect__actions">
             <button
@@ -130,61 +126,18 @@ const ActiveProspectCardComponent = ({
 
         <div className="nx-active-prospect__meta-row">
           <OwnershipIndicator status={selected?.ownership_status} />
-          {rankLabel ? <span className="nx-active-prospect__rank">{rankLabel}</span> : null}
-          <span className="nx-active-prospect__relationship">{relationship}</span>
-          <span className={cls(
-            'nx-active-prospect__sms',
-            selected?.sms_eligible === false && 'is-blocked',
-          )}>
-            {selected?.sms_eligible === false ? 'SMS blocked' : 'SMS eligible'}
-          </span>
-          <span className={cls(
-            'nx-active-prospect__contactability',
-            selected?.safe_to_contact === false && 'is-blocked',
-          )}>
-            {selected?.safe_to_contact === false ? 'Do not contact' : 'Contactable'}
-          </span>
+          {matchFlags.map((flag) => (
+            <span
+              key={flag.key}
+              className={cls(
+                'nx-active-prospect__match-flag',
+                `is-${ownerMatchFlagTone(flag.key)}`,
+              )}
+            >
+              {flag.label}
+            </span>
+          ))}
         </div>
-
-        {visibleFlags.length > 0 ? (
-          <div className="nx-active-prospect__flags">
-            {visibleFlags.map((flag) => (
-              <span key={flag.key} className="nx-active-prospect__flag">{flag.label}</span>
-            ))}
-            {hiddenFlagCount > 0 ? (
-              <button
-                type="button"
-                className="nx-active-prospect__flag is-more"
-                onClick={() => setDetailsOpen((value) => !value)}
-              >
-                +{hiddenFlagCount}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {(detailsOpen || hiddenFlagCount === 0) && (selected?.owner_match_flags?.length || 0) > visibleFlags.length ? (
-          <div className="nx-active-prospect__details">
-            {(selected?.owner_match_flags || []).slice(visibleFlags.length).map((flag) => (
-              <span key={flag.key} className="nx-active-prospect__flag is-detail">{flag.label}</span>
-            ))}
-            {selected?.ownership_inference_reason ? (
-              <span className="nx-active-prospect__detail-line">
-                Inference: {selected.ownership_inference_reason.replace(/_/g, ' ')}
-              </span>
-            ) : null}
-            {typeof selected?.ownership_confidence === 'number' ? (
-              <span className="nx-active-prospect__detail-line">
-                Ownership confidence: {Math.round(selected.ownership_confidence * (selected.ownership_confidence <= 1 ? 100 : 1))}%
-              </span>
-            ) : null}
-            {selected?.active_thread_state ? (
-              <span className="nx-active-prospect__detail-line">
-                Thread: {selected.active_thread_state}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
 
         {nextEligiblePreview && onTryNextEligible ? (
           <div className="nx-active-prospect__next">
@@ -197,7 +150,6 @@ const ActiveProspectCardComponent = ({
             </button>
             <span className="nx-active-prospect__next-preview">
               {nextEligiblePreview.display_name || 'Next contact'}
-              {nextEligiblePreview.canonical_e164 ? ` · ${formatPhone(nextEligiblePreview.canonical_e164)}` : ''}
             </span>
           </div>
         ) : null}
@@ -212,6 +164,8 @@ const ActiveProspectCardComponent = ({
             const participantRelationship = formatParticipantRelationship(
               participant.relationship_to_property || participant.identity_class,
             )
+            const rankLabel = participant.contact_rank_label
+              || (participant.contact_rank ? `#${participant.contact_rank}` : null)
             return (
               <li key={participant.participant_id || participantPhone} role="presentation">
                 <button
@@ -237,10 +191,10 @@ const ActiveProspectCardComponent = ({
                     {participantPhone ? formatPhone(participantPhone) : 'No phone'}
                     <span className="nx-active-prospect__dot">•</span>
                     {participantRelationship}
-                    {participant.contact_rank_label ? (
+                    {rankLabel ? (
                       <>
                         <span className="nx-active-prospect__dot">•</span>
-                        {participant.contact_rank_label}
+                        {rankLabel}
                       </>
                     ) : null}
                   </span>

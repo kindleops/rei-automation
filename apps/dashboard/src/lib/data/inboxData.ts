@@ -143,6 +143,7 @@ export interface LiveInboxPagination {
 export interface LiveInboxMapPin {
   id: string
   threadKey: string
+  propertyId?: string
   lat: number
   lng: number
   status?: string
@@ -1649,6 +1650,29 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
   return normalizeInboxThread(row, 0, index)
 }
 
+const normalizeLiveInboxMapPin = (row: AnyRecord, index: number): LiveInboxMapPin => {
+  const propertyId = asString(row.property_id ?? row.propertyId, '')
+  const threadKey = asString(
+    row.thread_key ?? row.threadKey ?? row.latest_thread_key ?? row.latestThreadKey,
+    '',
+  )
+  const id = threadKey || propertyId || asString(row.id, `pin:${index}`)
+  return {
+    id,
+    threadKey: threadKey || id,
+    propertyId: propertyId || undefined,
+    lat: asNumber(row.lat ?? row.latitude, 0),
+    lng: asNumber(row.lng ?? row.longitude, 0),
+    status: asString(row.status ?? row.thread_stage ?? row.inbox_status, ''),
+    stage: asString(row.stage ?? row.thread_stage ?? row.conversation_stage, ''),
+    ownerName: asString(row.owner_name ?? row.ownerName ?? row.prospect_name, ''),
+    propertyAddress: asString(
+      row.property_address ?? row.propertyAddress ?? row.property_address_full,
+      '',
+    ),
+    latestMessageBody: asString(row.latest_message_body ?? row.latestMessageBody, ''),
+  }
+}
 
 const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): LiveInboxResponse => {
   const rawThreads = safeArray(payload['threads'] as AnyRecord[])
@@ -1661,17 +1685,7 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
     rawRows: rawThreads,
     messages: rawMessages.map(toThreadMessage),
     counts: (payload['counts'] ?? {}) as Record<string, number | null | undefined>,
-    mapPins: rawPins.map((pin, index) => ({
-      id: asString(pin['id'], `pin:${index}`),
-      threadKey: asString(pin['thread_key'] ?? pin['threadKey'], ''),
-      lat: asNumber(pin['lat'] ?? pin['latitude'], 0),
-      lng: asNumber(pin['lng'] ?? pin['longitude'], 0),
-      status: asString(pin['status'], ''),
-      stage: asString(pin['stage'], ''),
-      ownerName: asString(pin['owner_name'] ?? pin['ownerName'], ''),
-      propertyAddress: asString(pin['property_address'] ?? pin['propertyAddress'], ''),
-      latestMessageBody: asString(pin['latest_message_body'] ?? pin['latestMessageBody'], ''),
-    })),
+    mapPins: rawPins.map((pin, index) => normalizeLiveInboxMapPin(pin, index)),
     pagination: {
       cursor: asString(pagination['cursor'], '') || null,
       nextCursor: asString(pagination['nextCursor'] ?? pagination['next_cursor'], '') || null,
@@ -2567,6 +2581,10 @@ export const getInboxThreads = async (
       distress_score: asNumber(row.distress_score ?? row.tag_distress_score, 0) || undefined,
       property_flags_text: asString(row.property_flags_text, '') || undefined,
       propertyFlagsText: asString(row.property_flags_text, '') || undefined,
+      tax_delinquent: asBoolean(row.tax_delinquent, false) || undefined,
+      taxDelinquent: asBoolean(row.tax_delinquent, false) || undefined,
+      active_lien: asBoolean(row.active_lien, false) || undefined,
+      activeLien: asBoolean(row.active_lien, false) || undefined,
       priorityScore: asNumber(row.priority_score, 0) || undefined,
       unitCount: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
       units_count: asNumber(row.units_count ?? row.units ?? row.number_of_units, 0) || undefined,
@@ -2675,19 +2693,34 @@ export const getInboxThreads = async (
 
 export const fetchInboxMapPins = async (
   filters: InboxThreadFilters = {},
+  options: { propertyIds?: string[] } = {},
 ): Promise<LiveInboxMapPin[]> => {
+  const propertyIds = [...new Set(
+    (options.propertyIds ?? []).map((value) => String(value ?? '').trim()).filter(Boolean),
+  )]
+  if (propertyIds.length === 0) return []
+
   const supabase = getSupabaseClient()
-  // Use canonical v_map_property_pins which has lat/lng data
-  let query = supabase
-    .from('v_map_property_pins')
-    .select('*')
+  const scopedIds = propertyIds.slice(0, 500)
+  // Prefer canonical properties table — v_map_property_pins can lag property_universe_state.
+  let { data, error } = await supabase
+    .from('properties')
+    .select('property_id, latitude, longitude, property_address_full, property_type')
+    .in('property_id', scopedIds)
     .not('latitude', 'is', null)
     .not('longitude', 'is', null)
 
-  const filterState = filters
-  query = applyInboxSearchServerFilter(query, filterState.query)
-
-  const { data, error } = await query
+  if (error || !data?.length) {
+    if (error && DEV) console.warn('[fetchInboxMapPins] properties fallback', mapErrorMessage(error))
+    const fallback = await supabase
+      .from('v_map_property_pins')
+      .select('*')
+      .in('property_id', scopedIds)
+      .not('latitude', 'is', null)
+      .not('longitude', 'is', null)
+    data = fallback.data
+    error = fallback.error
+  }
 
   if (error) {
     if (DEV) console.warn('[fetchInboxMapPins] failed', mapErrorMessage(error))
@@ -2701,18 +2734,10 @@ export const fetchInboxMapPins = async (
     return []
   }
 
+  void filters
+
   const rows = safeArray(data as AnyRecord[])
-  const pins = rows.map((row, index) => ({
-    id: asString(row.thread_key ?? row.threadKey ?? row.id, `pin:${index}`),
-    threadKey: asString(row.thread_key ?? row.threadKey, ''),
-    lat: asNumber(row.latitude, 0),
-    lng: asNumber(row.longitude, 0),
-    status: asString(row.status ?? row.thread_stage, ''),
-    stage: asString(row.stage ?? row.thread_stage, ''),
-    ownerName: asString(row.owner_name ?? row.ownerName ?? row.prospect_name, ''),
-    propertyAddress: asString(row.property_address ?? row.propertyAddress ?? row.property_address_full, ''),
-    latestMessageBody: asString(row.latest_message_body ?? row.latestMessageBody, ''),
-  }))
+  const pins = rows.map((row, index) => normalizeLiveInboxMapPin(row, index))
   const deduped = dedupeMapPinsByThreadKey(pins)
   if (DEV) {
     console.log('[NexusInboxMapHydration]', {
@@ -2730,19 +2755,33 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const tStart = Date.now()
   const lastLiveFetchAt = new Date().toISOString()
   const filterState = options.filters || {}
-  const mapPins: any[] = []
 
   // Keep row delivery ahead of count enrichment.
   // If the live response already degraded counts, or this is initial boot, do not
   // block thread rendering on a secondary count request.
   const COUNTS_TIMEOUT_MS = 3000
   let viewResult: any
+  let mapPins: LiveInboxMapPin[] = []
   try {
     const tLiveFetchStart = Date.now()
     viewResult = await getInboxRowsForView((filterState.view || 'all_messages') as InboxViewSelectValue, options)
+    const threadRows = viewResult?.rows ?? []
+    const propertyIds = [...new Set(
+      (threadRows as AnyRecord[]).map((row) => asString(
+        row.property_id ?? row.propertyId ?? row.final_property_id ?? row.selected_property_id,
+        '',
+      )).filter(Boolean),
+    )]
+    mapPins = await fetchInboxMapPins(filterState, { propertyIds }).catch((err) => {
+      if (DEV && !isAbortLikeError(err, options.signal)) {
+        console.warn('[fetchInboxModel] map pins fetch failed', err)
+      }
+      return [] as LiveInboxMapPin[]
+    })
     if (DEV) {
       const liveFetchMs = Date.now() - tLiveFetchStart
       console.log(`[InboxTiming] live_fetch_ms: ${liveFetchMs}ms`)
+      console.log(`[InboxTiming] map_pins_ms: included in live_fetch_ms (${mapPins.length} pins for ${propertyIds.length} properties)`)
       console.log(`[InboxTiming] lightweight_normalize_ms: 0ms (built-in)`)
     }
   } catch (err) {

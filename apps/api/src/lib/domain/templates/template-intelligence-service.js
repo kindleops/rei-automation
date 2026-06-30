@@ -371,9 +371,24 @@ function buildDataQuality(row, metrics, identity = null) {
   }
 }
 
+const STAGE_SORT_ORDER = ['S1', 'S1F', 'S2', 'S3', 'S4', 'S5', 'S6', 'manual_reply', 'auto_reply', 'other']
+
+function stageSortIndex(code) {
+  const normalized = normalizeStageCode(code) ?? 'other'
+  const idx = STAGE_SORT_ORDER.indexOf(normalized)
+  return idx >= 0 ? idx : STAGE_SORT_ORDER.length
+}
+
 function sortTemplates(rows, { field, ascending }) {
   const dir = ascending ? 1 : -1
   return [...rows].sort((a, b) => {
+    if (field === 'stage_code') {
+      const stageDelta = (stageSortIndex(a.identity?.stage_code) - stageSortIndex(b.identity?.stage_code)) * dir
+      if (stageDelta !== 0) return stageDelta
+      const touchDelta = (Number(a.identity?.touch_number ?? 0) - Number(b.identity?.touch_number ?? 0)) * dir
+      if (touchDelta !== 0) return touchDelta
+      return String(a.identity?.template_name ?? '').localeCompare(String(b.identity?.template_name ?? '')) * dir
+    }
     const av = field === 'copy_score'
       ? a.autopilot?.intelligence?.copy_score ?? 0
       : field === 'reply_rate'
@@ -409,7 +424,7 @@ function filterByIntelligence(rows, filters = {}) {
 async function loadTemplateIntelligence({
   page = 0,
   pageSize = 500,
-  sort = 'template_name',
+  sort = 'stage_code',
   sortDir = 'asc',
   filters = {},
   range = '7d',

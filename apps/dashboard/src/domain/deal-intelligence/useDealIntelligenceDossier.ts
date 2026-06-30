@@ -11,11 +11,26 @@ interface ThreadIdentity {
   masterOwnerId?: string
 }
 
-interface EngineProgress {
+export type EngineRunPhase = 'running' | 'success' | 'error'
+
+export type EngineProgressStatus = 'pending' | 'running' | 'done' | 'error'
+
+export interface EngineProgress {
   stage: EngineProgressStage
-  status: 'running' | 'done' | 'error'
+  status: EngineProgressStatus
   label: string
 }
+
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+  window.setTimeout(resolve, ms)
+})
+
+const buildInitialEngineProgress = (): EngineProgress[] =>
+  ENGINE_STAGE_DISPLAY_ORDER.map((stage, index) => ({
+    stage,
+    status: index === 0 ? 'running' : 'pending',
+    label: ENGINE_STAGE_LABELS[stage],
+  }))
 
 function resolvePropertyId(thread: ThreadIdentity | null | undefined, dossier: DealIntelligenceDossier | null) {
   return (
@@ -55,6 +70,7 @@ export function useDealIntelligenceDossier(
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [engineRunning, setEngineRunning] = useState(false)
+  const [engineRunPhase, setEngineRunPhase] = useState<EngineRunPhase | null>(null)
   const [engineError, setEngineError] = useState<string | null>(null)
   const [engineProgress, setEngineProgress] = useState<EngineProgress[]>([])
   const requestIdRef = useRef(0)
@@ -153,14 +169,9 @@ export function useDealIntelligenceDossier(
     }
 
     setEngineRunning(true)
+    setEngineRunPhase('running')
     setEngineError(null)
-    setEngineProgress(
-      ENGINE_STAGE_DISPLAY_ORDER.map((stage) => ({
-        stage,
-        status: 'running',
-        label: ENGINE_STAGE_LABELS[stage],
-      })),
-    )
+    setEngineProgress(buildInitialEngineProgress())
 
     const base = getBackendBaseUrl()
     const secret = getBackendSecret()
@@ -211,10 +222,12 @@ export function useDealIntelligenceDossier(
               prev.map((item) => {
                 const itemIndex = stageOrder.indexOf(item.stage)
                 if (item.stage === event.stage) {
-                  return { ...item, status: event.status === 'done' ? 'done' : 'running' }
+                  if (event.status === 'done') return { ...item, status: 'done' }
+                  return { ...item, status: 'running' }
                 }
-                if (itemIndex >= 0 && eventIndex >= 0 && itemIndex < eventIndex) {
-                  return { ...item, status: 'done' }
+                if (itemIndex >= 0 && eventIndex >= 0) {
+                  if (itemIndex < eventIndex) return { ...item, status: 'done' }
+                  if (itemIndex > eventIndex) return { ...item, status: 'pending' }
                 }
                 return item
               }),
@@ -227,14 +240,24 @@ export function useDealIntelligenceDossier(
       }
 
       if (streamFailed) throw new Error(streamFailed)
+      setEngineProgress((prev) => prev.map((item) => ({ ...item, status: 'done' })))
       await refresh()
+      setEngineRunPhase('success')
+      await sleep(1200)
     } catch (err: unknown) {
       setEngineError(err instanceof Error ? err.message : 'run_engine_failed')
       setEngineProgress((prev) =>
-        prev.map((item) => (item.status === 'running' ? { ...item, status: 'error' } : item)),
+        prev.map((item) => {
+          if (item.status === 'running') return { ...item, status: 'error' }
+          if (item.status === 'pending') return item
+          return item
+        }),
       )
+      setEngineRunPhase('error')
+      await sleep(1400)
     } finally {
       setEngineRunning(false)
+      setEngineRunPhase(null)
     }
   }, [refresh])
 
@@ -245,6 +268,7 @@ export function useDealIntelligenceDossier(
     refresh,
     runDecisionEngine,
     engineRunning,
+    engineRunPhase,
     engineError,
     engineProgress,
   }

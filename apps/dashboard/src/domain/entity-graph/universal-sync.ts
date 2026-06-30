@@ -153,6 +153,14 @@ export function findThreadForActiveContext(
     const byKey = findThreadByRef(threads, active.threadKey)
     if (byKey) return byKey
   }
+  if (active.opportunityId) {
+    const byOpportunity = threads.find((thread) => {
+      const record = thread as unknown as Record<string, unknown>
+      return record.opportunityId === active.opportunityId
+        || record.opportunity_id === active.opportunityId
+    })
+    if (byOpportunity) return byOpportunity
+  }
   if (active.propertyId) {
     const byProperty = threads.find((thread) => thread.propertyId === active.propertyId)
     if (byProperty) return byProperty

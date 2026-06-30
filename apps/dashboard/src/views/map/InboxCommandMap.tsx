@@ -1,18 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './map-intelligence-cards.css'
 import type { FeatureCollection, GeoJsonProperties, LineString, Point, Polygon } from 'geojson'
-import { getThreadMessages, type ThreadMessage } from '../../lib/data/inboxData'
+import type { ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { MapSourceMode } from '../../domain/inbox/inbox-layout-state'
+import { findPinForThread, isMappableCoord } from '../../domain/inbox/map-selection-sync'
 import { buildConversationDecision } from '../../domain/inbox/inbox-decisioning'
 import { buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
 import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { SellerIntelligenceCard } from './components/SellerIntelligenceCard'
+import { SellerMapCard } from './seller-card/SellerMapCard'
 import {
   defaultBuyerMapFilters,
   type BuyerCommandData,
@@ -25,12 +25,13 @@ import { loadCensusForProperty, calculateInvestorOpportunityScore, type CensusDa
 import { loadSoldCompsInBounds, type RecentSoldComp, loadCommandMapSellerPinDetail, loadCommandMapSellerPins, type CommandMapSellerPin } from '../../lib/data/commandMapData'
 import {
   centerMapOnActivity,
-  loadLiveActivityFeed,
+  loadLiveActivityFeedSnapshot,
   type CommandMapActivityEvent,
   type CommandMapActivityPinSource,
   type CommandMapBounds,
   type CommandMapPerformanceSettings,
 } from './commandMapLiveActivity'
+import type { LiveActivityEvent } from './live-activity-engine'
 import { useCommandMapLiveActivitySettings } from './useCommandMapLiveActivitySettings'
 import { useCommandMapPerformanceMode } from './useCommandMapPerformanceMode'
 import { CommandMapLiveActivityRail } from './components/CommandMapLiveActivityRail'
@@ -52,6 +53,23 @@ import {
   type MapStyleMode,
 } from './commandMapThemes'
 import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from './pin-icons'
+
+import { buildThemeIdentityCssVars, getCommandMapThemeIdentity } from './command-map-theme-identity'
+import type { CommandMapIntelligenceModeId } from './command-map-intelligence-modes'
+import {
+  buildUniversalSellerPinVisuals,
+  buildSellerClusterCoreExpr,
+  buildSellerClusterRingExpr,
+  buildSellerClusterStrokeExpr,
+  resolveCommandPinRingColor,
+  resolveEffectiveSellerState,
+  SELLER_PIN_CLUSTER_PROPERTIES,
+  UNIVERSAL_PIN_GLASS_OPACITY_EXPR,
+  UNIVERSAL_PIN_GLOW_OPACITY_EXPR,
+  UNIVERSAL_PIN_ICON_SCALE_EXPR,
+  UNIVERSAL_PIN_RING_STROKE_EXPR,
+  UNIVERSAL_PIN_RING_WIDTH_EXPR,
+} from './universal-pin-system'
 import {
   getMapThemeTokens,
   buildClusterRingExpr,
@@ -61,6 +79,16 @@ import {
   PRIORITY_MARKER_STATES,
   PRIORITY_ASSET_TYPES,
 } from './map-theme-tokens'
+import {
+  applyVisualPresetBasemapPaint,
+  buildPresetInterfaceCssVars,
+} from './map-basemap-paint'
+import {
+  CARTO_VECTOR_DARK_STYLE_URL,
+  MAP_VISUAL_PRESET_OPTIONS,
+  normalizeMapVisualPresetId,
+  THEME_TRANSITION_MS,
+} from './map-visual-presets'
 import { fetchMapProperties } from '../../lib/api/backendClient'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
@@ -68,7 +96,6 @@ import {
   DISPOSITION_ORDER,
   LIFECYCLE_STAGE_META,
   LIFECYCLE_STAGE_ORDER,
-  LEAD_TEMPERATURE_META,
   OPERATIONAL_STATUS_ORDER,
   contactabilityBlocksSend,
   normalizeContactability,
@@ -78,6 +105,12 @@ import {
   normalizeOperationalStatus,
 } from '../../domain/lead-state/universal-lead-state-registry'
 import { UniversalLeadStateControls } from '../../domain/lead-state/UniversalLeadStateControls'
+import {
+  consumePendingMapComp,
+  MAP_FOCUS_COMP_EVENT,
+  mapFocusPayloadToSoldCompFeature,
+  type MapFocusCompPayload,
+} from './command-map-bridge'
 
 export type { MapStyleMode } from './commandMapThemes'
 
@@ -153,6 +186,27 @@ const PROPERTY_UNIVERSE_LAYER_IDS = {
   markers:      'prop-univ-markers',
 } as const
 
+const PROPERTY_UNIVERSE_MARKER_ICON_EXPR: maplibregl.ExpressionSpecification = [
+  'match', ['get', 'assetType'],
+  'sfr', PIN_ICON.sfr,
+  'condo', PIN_ICON.sfr,
+  'townhome', PIN_ICON.sfr,
+  'multifamily_small', PIN_ICON.multi,
+  'multifamily_large', PIN_ICON.apt,
+  'storage', PIN_ICON.storage,
+  'shopping_plaza', PIN_ICON.retail,
+  'retail', PIN_ICON.retail,
+  'office', PIN_ICON.office,
+  'industrial', PIN_ICON.industrial,
+  'warehouse', PIN_ICON.industrial,
+  'mixed_use', PIN_ICON.comm,
+  'hotel', PIN_ICON.hotel,
+  'mhp', PIN_ICON.mhp,
+  'land', PIN_ICON.land,
+  'commercial', PIN_ICON.comm,
+  PIN_ICON.default,
+]
+
 const CENSUS_LAYER_IDS = {
   fill: 'census-overlay-fill',
   line: 'census-overlay-line',
@@ -180,6 +234,7 @@ const SOLD_COMPS_CLUSTER_LAYER_IDS = {
 const ALL_SOLD_COMPS_LAYER_IDS = [...Object.values(SOLD_COMPS_LAYER_IDS), ...Object.values(SOLD_COMPS_CLUSTER_LAYER_IDS)]
 
 const SELLER_PINS_LAYER_IDS = {
+  hit: 'seller-pins-hit',
   glow: 'seller-pins-glow',
   pulse: 'seller-pins-pulse',
   ring: 'seller-pins-ring',
@@ -189,6 +244,43 @@ const SELLER_PINS_LAYER_IDS = {
   clusterCore: 'seller-pins-cluster-core',
   clusterCount: 'seller-pins-cluster-count',
 } as const
+
+const SELLER_PIN_HOVER_LAYER_IDS = [
+  SELLER_PINS_LAYER_IDS.hit,
+  SELLER_PINS_LAYER_IDS.core,
+  SELLER_PINS_LAYER_IDS.ring,
+  SELLER_PINS_LAYER_IDS.glow,
+  SELLER_PINS_LAYER_IDS.pulse,
+  SELLER_PINS_LAYER_IDS.clusterCore,
+  SELLER_PINS_LAYER_IDS.clusterGlow,
+] as const
+
+const commandMapPinToSellerCardRecord = (
+  props: CommandMapPin,
+  hydratedThread: Record<string, unknown> | null,
+): Record<string, unknown> => ({
+  ...(hydratedThread ?? {}),
+  ...props,
+  property_id: props.property_id,
+  master_owner_id: props.master_owner_id,
+  thread_key: props.conversation_id,
+  property_address_full: props.property_address_full || props.address,
+  property_address: props.address,
+  owner_display_name: props.owner_display_name || props.owner_name || props.seller_name,
+  owner_name: props.owner_name || props.seller_name,
+  total_bedrooms: props.beds,
+  total_baths: props.baths,
+  building_square_feet: props.sqft,
+  units_count: props.units,
+  estimated_repair_cost: props.repair_estimate,
+  owner_priority_score: props.priority_score,
+  priority_score: props.priority_score,
+  latest_message_at: props.last_activity_at,
+  latest_direction: props.last_message_direction,
+  last_inbound_at: props.last_inbound_at || props.last_reply_at,
+  last_outbound_at: props.last_outbound_at,
+  delivery_status: props.delivery_status,
+})
 const ALL_SELLER_PINS_LAYER_IDS = Object.values(SELLER_PINS_LAYER_IDS)
 
 const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v2'
@@ -394,7 +486,7 @@ type MapKpiChip = {
 }
 
 type ControlsTab = 'modes' | 'filters' | 'style' | 'intel' | 'performance'
-type MapModeKey = 'acquisition' | 'buyer_demand' | 'opportunity_heat' | 'execution' | 'comps' | 'territory' | 'census'
+type MapModeKey = CommandMapIntelligenceModeId
 type FilterCategory = 'property' | 'prospect' | 'owner' | 'buyer' | 'saved'
 type CinematicControlsState = {
   livePulses: 'off' | 'subtle' | 'full'
@@ -533,9 +625,35 @@ type MapCardState = {
   intent: MapCardIntent
   id: string
   anchor: { x: number; y: number }
+  coordinates: [number, number]
   feature: Record<string, unknown>
   containerSize: { width: number; height: number }
+  hydrating?: boolean
 } | null
+
+const resolveActiveSellerMapCard = (
+  hovered: MapCardState,
+  selected: MapCardState,
+): MapCardState | null => {
+  if (selected?.kind === 'seller') return selected
+  if (hovered?.kind === 'seller') return hovered
+  return null
+}
+
+const buildMapCardContainerContext = (
+  map: maplibregl.Map | null,
+  containerEl: HTMLElement | null,
+  coordinates: [number, number],
+) => {
+  const containerBounds = containerEl?.getBoundingClientRect()
+  const containerWidth = containerBounds?.width ?? window.innerWidth
+  const containerHeight = containerBounds?.height ?? window.innerHeight
+  const pixelPoint = map?.project(coordinates) ?? { x: containerWidth / 2, y: containerHeight / 2 }
+  return {
+    anchor: { x: pixelPoint.x, y: pixelPoint.y },
+    containerSize: { width: containerWidth, height: containerHeight },
+  }
+}
 
 const defaultBuyerLayerToggles: BuyerLayerToggles = {
   sellerThreads: true,
@@ -623,13 +741,14 @@ const CONTROLS_TABS: Array<{ key: ControlsTab; label: string }> = [
 ]
 
 const MAP_MODES: Array<{ key: MapModeKey; label: string; description: string; swatches: string[] }> = [
-  { key: 'acquisition', label: 'Acquisition Radar', description: 'Seller leads, threads, motivation, urgency', swatches: ['#eab308', '#22c55e', '#3b82f6'] },
-  { key: 'buyer_demand', label: 'Buyer Demand', description: 'Buyer comps, repeat buyers, liquidity', swatches: ['#a855f7', '#06b6d4', '#38bdf8'] },
-  { key: 'comps', label: 'Comps Intel', description: 'Sold comps, price anchors, valuation context', swatches: ['#ef4444', '#3b82f6', '#eab308'] },
-  { key: 'execution', label: 'Execution Live', description: 'Queued, sent, delivered, failed, replies', swatches: ['#22c55e', '#f97316', '#ef4444'] },
-  { key: 'opportunity_heat', label: 'Opportunity Heat', description: 'Equity, distress, motivation, census pressure', swatches: ['#f97316', '#ec4899', '#eab308'] },
-  { key: 'territory', label: 'Territory Scan', description: 'Property universe, asset mix, boundaries', swatches: ['#64748b', '#94a3b8', '#475569'] },
+  { key: 'acquisition', label: 'Acquisition Radar', description: 'Seller leads, threads, motivation, urgency', swatches: ['#7a8fa8', '#30d158', '#ff6b35'] },
+  { key: 'buyer_demand', label: 'Buyer Demand', description: 'Buyer comps, repeat buyers, liquidity hotspots', swatches: ['#2563eb', '#14b8a6', '#8b5cf6'] },
+  { key: 'comps', label: 'Comps Intel', description: 'Sold comps, price anchors, valuation context', swatches: ['#ef4444', '#f97316', '#eab308'] },
+  { key: 'execution', label: 'Execution Live', description: 'Queued, sent, delivered, failed, replies', swatches: ['#8f9bad', '#5bb6ff', '#30d158'] },
+  { key: 'opportunity_heat', label: 'Opportunity Heat', description: 'Equity, distress, motivation, census pressure', swatches: ['#3b82f6', '#14b8a6', '#f97316', '#ef4444'] },
+  { key: 'territory', label: 'Territory Scan', description: 'Property universe, asset mix, boundaries', swatches: ['#64748b', '#94a3b8', '#a6d260'] },
   { key: 'census', label: 'Census Intel', description: 'Demographic and economic overlays', swatches: ['#06b6d4', '#8b5cf6', '#38bdf8'] },
+  { key: 'command', label: 'Command Mode', description: 'Highest-priority leads, follow-ups, replies, urgent activity', swatches: ['#ff2d87', '#ff6b35', '#30d158'] },
 ]
 
 const FILTER_CATEGORIES: Array<{ key: FilterCategory; label: string }> = [
@@ -656,28 +775,25 @@ const FILTER_PRESETS: Array<{ key: string; label: string; filters: Partial<MapFi
 ]
 
 type CinematicThemeDef = { id: MapStyleMode; label: string; description: string; bestFor: string }
-const CINEMATIC_THEME_DEFINITIONS: CinematicThemeDef[] = [
-  { id: 'satellite', label: 'Satellite Recon', description: 'Parcel-level satellite acquisition view', bestFor: 'Acquisitions' },
-  { id: 'red_ops', label: 'Red Ops', description: 'High-intensity execution mode', bestFor: 'Execution' },
-  { id: 'executive', label: 'Executive', description: 'Clean institutional review mode', bestFor: 'Review' },
-  { id: 'dark_ops', label: 'Dark Ops', description: 'Tactical low-noise operations view', bestFor: 'Ops' },
-  { id: 'blueprint', label: 'Blueprint', description: 'Technical parcel and census analysis', bestFor: 'Analysis' },
-  { id: 'night_vision', label: 'Acquisition Radar', description: 'Warm overlay for lead tracking', bestFor: 'Lead Hunt' },
-  { id: 'matrix', label: 'Matrix', description: 'High-contrast signal mode', bestFor: 'Signals' },
-  { id: 'light_street', label: 'Light Street', description: 'Bright street-level review mode', bestFor: 'Due Diligence' },
-  { id: 'terrain', label: 'Terrain', description: 'Land and geography context', bestFor: 'Land' },
-  { id: 'monochrome', label: 'Monochrome', description: 'Low-noise neutral analysis', bestFor: 'Stealth' },
-]
+const CINEMATIC_THEME_DEFINITIONS: CinematicThemeDef[] = MAP_VISUAL_PRESET_OPTIONS.map((preset) => ({
+  id: preset.id,
+  label: preset.label,
+  description: preset.description,
+  bestFor: preset.id === 'satellite' ? 'Recon'
+    : preset.id === 'red_ops' ? 'Execution'
+      : preset.id === 'executive' ? 'Review'
+        : preset.id === 'dark_ops' ? 'Ops'
+          : preset.id === 'blueprint' ? 'Analysis'
+            : preset.id === 'radar_night' ? 'Acquisition'
+              : preset.id === 'matrix' ? 'Signals'
+                : preset.id === 'light_street' ? 'Due Diligence'
+                  : preset.id === 'terrain' ? 'Land'
+                    : 'Stealth',
+}))
 
-const OVERLAY_RASTER_THEMES = new Set<MapStyleMode>([
-  'dark_ops',
-  'red_ops',
-  'executive',
-  'blueprint',
-  'monochrome',
-  'night_vision',
-  'matrix',
-])
+const RASTER_BASEMAP_THEMES = new Set<MapStyleMode>(['satellite', 'terrain'])
+
+
 
 
 const MAP_LEGEND_ITEMS = [
@@ -730,21 +846,12 @@ const nullIfZeroish = (value: number | null | undefined): number | null => {
   return Math.abs(value) <= 0.000001 ? null : value
 }
 
-const joinName = (...parts: Array<string | null | undefined>): string | null => {
-  const value = parts.map((part) => text(part)).filter(Boolean).join(' ').trim()
-  return value || null
-}
-
 const resolveSellerPinDisplayName = (record: Partial<CommandMapSellerPin>): string => (
-  text(record.seller_display_name)
-  || text(record.owner_display_name)
+  text(record.owner_display_name)
   || text(record.owner_name)
-  || text((record as Record<string, unknown>).prospect_name as string)
-  || text((record as Record<string, unknown>).contact_name as string)
+  || text(record.owner_full_name)
   || text(record.entity_name)
-  || joinName((record as Record<string, unknown>).first_name as string | null | undefined, (record as Record<string, unknown>).last_name as string | null | undefined)
-  || text(record.seller_name)
-  || 'Unknown Seller'
+  || 'Unknown Owner'
 )
 
 const resolveSellerPinAddress = (record: Partial<CommandMapSellerPin>): string => (
@@ -762,16 +869,28 @@ const resolveSellerPinAddress = (record: Partial<CommandMapSellerPin>): string =
 
 const needsSellerPinHydration = (pin: Partial<CommandMapSellerPin>): boolean => {
   const hasDisplayName = Boolean(
-    text(pin.seller_display_name)
-    || text(pin.owner_display_name)
+    text(pin.owner_display_name)
     || text(pin.owner_name)
-    || text(pin.entity_name)
-    || text(pin.seller_name),
+    || text(pin.owner_full_name)
+    || text(pin.entity_name),
   )
   const hasAddress = Boolean(text(pin.property_address_full) || text(pin.property_address))
   const hasPhysical = [pin.total_bedrooms, pin.total_baths, pin.building_square_feet, pin.year_built].some((value) => nullIfZeroish(value ?? null) !== null)
-  const hasFinancial = [pin.estimated_value, pin.equity_amount, pin.equity_percent, pin.estimated_repair_cost, pin.final_acquisition_score, pin.motivation_score].some((value) => nullIfZeroish(value ?? null) !== null)
-  return !hasDisplayName || !hasAddress || (!hasPhysical && !hasFinancial)
+  const hasFinancial = [pin.estimated_value, pin.equity_amount, pin.equity_percent, pin.estimated_repair_cost].some((value) => nullIfZeroish(value ?? null) !== null)
+  const hasPriority = nullIfZeroish(pin.owner_priority_score ?? pin.priority_score ?? null) !== null
+  const hasCanonicalState = Boolean(
+    text(pin.lifecycle_stage)
+    || text(pin.lead_temperature)
+    || text(pin.operational_status)
+    || (text(pin.seller_state) && text(pin.seller_state) !== 'not_contacted'),
+  )
+  const hasImage = Boolean(text(pin.streetview_image) || text(pin.map_image) || text(pin.satellite_image))
+  return !hasDisplayName
+    || !hasAddress
+    || (!hasPhysical && !hasFinancial)
+    || !hasPriority
+    || !hasCanonicalState
+    || !hasImage
 }
 
 const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapSellerPin => {
@@ -815,6 +934,50 @@ const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapS
     motivation_score: nullIfZeroish(pin.motivation_score ?? null),
     final_acquisition_score: nullIfZeroish(pin.final_acquisition_score ?? null),
     priority_score: nullIfZeroish(pin.priority_score ?? null),
+    owner_priority_score: nullIfZeroish(pin.owner_priority_score ?? pin.priority_score ?? null),
+    owner_priority_tier: text(pin.owner_priority_tier) || null,
+    lifecycle_stage: text(pin.lifecycle_stage) || null,
+    operational_status: text(pin.operational_status) || text(pin.seller_status) || null,
+    lead_temperature: text(pin.lead_temperature) || null,
+    contactability_status: text(pin.contactability_status) || null,
+    mailing_address_full: text(pin.mailing_address_full) || text(pin.owner_mailing_address) || null,
+    owner_mailing_address: text(pin.owner_mailing_address) || text(pin.mailing_address_full) || null,
+    effective_year_built: nullIfZeroish(pin.effective_year_built ?? null),
+    construction_type: text(pin.construction_type) || null,
+    building_condition: text(pin.building_condition) || null,
+    stories: nullIfZeroish(pin.stories ?? null),
+    zoning: text(pin.zoning) || null,
+    land_use: text(pin.land_use) || null,
+    ownership_years: nullIfZeroish(pin.ownership_years ?? null),
+    tax_delinquent: pin.tax_delinquent ?? null,
+    absentee_owner: pin.absentee_owner ?? null,
+    out_of_state_owner: pin.out_of_state_owner ?? null,
+    active_lien: pin.active_lien ?? null,
+    mortgage_balance: nullIfZeroish(pin.mortgage_balance ?? null),
+    loan_count: nullIfZeroish(pin.loan_count ?? null),
+    loan_type: text(pin.loan_type) || null,
+    assessed_total_value: nullIfZeroish(pin.assessed_total_value ?? null),
+    assessed_land_value: nullIfZeroish(pin.assessed_land_value ?? null),
+    assessed_improvement_value: nullIfZeroish(pin.assessed_improvement_value ?? null),
+    annual_taxes: nullIfZeroish(pin.annual_taxes ?? null),
+    last_sale_amount: nullIfZeroish(pin.last_sale_amount ?? null),
+    last_sale_date: text(pin.last_sale_date) || null,
+    last_inbound_text: text(pin.last_inbound_text) || null,
+    last_inbound_at: text(pin.last_inbound_at) || null,
+    last_outbound_text: text(pin.last_outbound_text) || null,
+    last_outbound_at: text(pin.last_outbound_at) || null,
+    delivery_status: text(pin.delivery_status) || null,
+    suppression_reason: text(pin.suppression_reason) || null,
+    campaign_name: text(pin.campaign_name) || null,
+    automation_state: text(pin.automation_state) || text(pin.execution_state) || null,
+    follow_up_due_at: text(pin.follow_up_due_at) || null,
+    next_action_at: text(pin.next_action_at) || text(pin.next_scheduled_for) || null,
+    canonical_e164: text(pin.canonical_e164) || text(pin.seller_phone) || null,
+    seller_phone: text(pin.seller_phone) || text(pin.canonical_e164) || null,
+    property_count: nullIfZeroish(pin.property_count ?? null),
+    streetview_image: text(pin.streetview_image) || null,
+    map_image: text(pin.map_image) || null,
+    satellite_image: text(pin.satellite_image) || null,
     property_tags_text: text(pin.property_tags_text) || text(pin.property_flags_text) || null,
     property_tags_json: pin.property_tags_json ?? pin.podio_tags ?? null,
     podio_tags: pin.podio_tags ?? null,
@@ -850,11 +1013,6 @@ const ringColorsForTheme = (styleMode: MapStyleMode) => {
     offer: palette.delivered ?? palette.positive_intent ?? theme.accentColor,
     contract: palette.active ?? palette.scheduled ?? theme.accentColor,
   }
-}
-
-const temperaturePinColor = (pin: CommandMapPin): string => {
-  const temp = normalizeLeadTemperature(pin.lead_temperature)
-  return LEAD_TEMPERATURE_META[temp]?.color ?? '#94a3b8'
 }
 
 const stageBadgeColor = (pin: CommandMapPin): string => {
@@ -962,7 +1120,7 @@ const buyerColorFor = (styleMode: MapStyleMode, category: string): string => {
     if (category === 'landlord') return '#9fd38c'
     return '#9bc3d9'
   }
-  if (styleMode === 'matrix' || styleMode === 'night_vision') {
+  if (styleMode === 'matrix' || styleMode === 'radar_night') {
     if (category === 'institutional') return '#72ffb2'
     if (category === 'builder') return '#c8ff4d'
     if (category === 'flipper') return '#9d7cff'
@@ -1208,9 +1366,7 @@ let lastWorkingDarkStyleSpec: maplibregl.StyleSpecification | null = null
 
 const fetchDarkStyleSpec = async (): Promise<maplibregl.StyleSpecification | null> => {
   if (!darkStyleSpecPromise) {
-    const darkOpsTheme = getCommandMapTheme('dark_ops')
-    const darkStyleUrl = darkOpsTheme.mapStyleUrl
-    if (!darkStyleUrl) return null
+    const darkStyleUrl = CARTO_VECTOR_DARK_STYLE_URL
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 4000)
     darkStyleSpecPromise = fetch(darkStyleUrl, { signal: controller.signal })
@@ -1726,7 +1882,7 @@ const featureCollectionForPins = (
         featureType: 'pin',
         selected,
         focusOpacity,
-        stageColor: temperaturePinColor(pin),
+        stageColor: resolveCommandPinRingColor(pin),
         pulseTier:
           pin.activity_mode === 'sends'
             ? (pin.activity_state === 'sending'
@@ -1828,7 +1984,8 @@ const isValidHttpUrl = (value: unknown): value is string => {
   }
 }
 
-const sanitizeStyleSpec = (style: maplibregl.StyleSpecification): maplibregl.StyleSpecification | null => {
+const sanitizeStyleSpec = (style: maplibregl.StyleSpecification | string): maplibregl.StyleSpecification | string | null => {
+  if (typeof style === 'string') return style
   const normalizedSources: Record<string, unknown> = {}
   for (const [sourceId, sourceValue] of Object.entries(style.sources ?? {})) {
     const source = sourceValue as Record<string, unknown>
@@ -1845,8 +2002,8 @@ const sanitizeStyleSpec = (style: maplibregl.StyleSpecification): maplibregl.Sty
   return { ...style, sources: normalizedSources as maplibregl.StyleSpecification['sources'] }
 }
 
-const resolveStyle = (styleMode: MapStyleMode): maplibregl.StyleSpecification => {
-  const theme = getCommandMapTheme(styleMode)
+const resolveStyle = (styleMode: MapStyleMode): maplibregl.StyleSpecification | string => {
+  const theme = getCommandMapTheme(normalizeMapVisualPresetId(styleMode))
   const sanitized = sanitizeStyleSpec(getCommandMapThemeStyle(styleMode))
   if (sanitized) return sanitized
   const fallback = getCommandMapTheme(theme.fallbackThemeId)
@@ -1866,7 +2023,7 @@ const mapThemeRootClassName = (styleMode: MapStyleMode): string => {
     case 'monochrome': return 'map-theme-monochrome'
     case 'executive': return 'map-theme-executive'
     case 'terrain': return 'map-theme-terrain'
-    case 'night_vision': return 'map-theme-night-vision'
+    case 'radar_night': return 'map-theme-radar-night'
     case 'light_street': return 'map-theme-light-street'
     default: return `map-theme-${String(styleMode).replace(/_/g, '-')}`
   }
@@ -1875,7 +2032,7 @@ const mapThemeRootClassName = (styleMode: MapStyleMode): string => {
 const canvasFilterForTheme = (styleMode: MapStyleMode): string => {
   // Overlay raster themes are tinted via MapLibre raster paint — stacking CSS filters
   // on top double-processes the canvas and blacks out red_ops / matrix / etc.
-  if (OVERLAY_RASTER_THEMES.has(styleMode)) return 'none'
+  if (!RASTER_BASEMAP_THEMES.has(styleMode)) return 'none'
   if (styleMode === 'light_street' || styleMode === 'satellite') return 'none'
   if (styleMode === 'terrain') return 'saturate(1.08) contrast(1.04)'
   return 'none'
@@ -1923,23 +2080,6 @@ const countBuyerFilters = (filters: BuyerMapFilters | undefined): number => {
   count += filters.matchTags.length
   return count
 }
-
-const sellerCardMaxWidthForLayout = (layoutMode: ViewLayoutMode): string => {
-  if (layoutMode === 'compact') return '360px'
-  if (layoutMode === 'medium') return '392px'
-  if (layoutMode === 'expanded') return '420px'
-  return '440px'
-}
-
-
-const buildHoverCardMarkup = (record: Record<string, unknown>, layoutMode: ViewLayoutMode): string =>
-  renderToStaticMarkup(
-    <SellerIntelligenceCard
-      record={record}
-      layoutMode={layoutMode}
-      variant="hover"
-    />,
-  )
 
 const buildBuyerHoverMarkup = (buyer: BuyerFeatureProps, styleMode: MapStyleMode): string => `
   <article class="nx-icm-hover nx-icm-hover--buyer" style="${escapeHtml(cardThemeStyleAttr(styleMode))}">
@@ -2511,181 +2651,6 @@ const SoldCompMapCard = ({
   )
 }
 
-const SellerMapCard = ({
-  pin,
-  intent,
-  anchor,
-  containerSize,
-  onClose,
-  onCenterMap,
-  onOpenDealIntelligence,
-  onMouseEnter,
-  onMouseLeave,
-}: {
-  pin: Record<string, unknown>
-  intent: MapCardIntent
-  anchor: { x: number; y: number }
-  containerSize: { width: number; height: number }
-  onClose: () => void
-  onCenterMap: () => void
-  onOpenDealIntelligence?: () => void
-  onMouseEnter?: () => void
-  onMouseLeave?: () => void
-}) => {
-  const isSelected = intent === 'selected'
-  const cardWidth = isSelected ? 440 : 340
-  const cardMaxHeight = isSelected
-    ? Math.min(680, containerSize.height - 120)
-    : Math.min(380, containerSize.height - 140)
-  const cardStyle = getViewportSafeCardStyle(anchor, containerSize, cardWidth, cardMaxHeight)
-
-  const stage = text(pin.conversation_stage || pin.seller_stage || pin.pipeline_stage || '')
-  const status = text(pin.conversation_status || pin.contact_status || '')
-  const isHot = lower(pin.lead_temperature) === 'hot' || lower(pin.lead_temperature) === 'very_hot'
-  const isPositive = lower(stage).includes('positive') || lower(stage).includes('negotiating') || lower(stage).includes('offer')
-  const accentMod = isHot ? 'nx-map-card--seller-hot' : isPositive ? 'nx-map-card--seller-positive' : ''
-
-  const sellerName = text(pin.seller_display_name || pin.owner_display_name || pin.owner_name || pin.seller_name || 'Unknown Seller')
-  const address = text(pin.property_address_full || pin.address || (pin as any).situs_address || '')
-  const estValue = num(pin.estimated_value)
-  const equityPct = num(pin.equity_percent)
-  const repairs = num(pin.repair_estimate || pin.estimated_repair_cost)
-  const motivationScore = num(pin.motivation_score || pin.final_acquisition_score || pin.priority_score)
-  const propertyType = text(pin.property_type || pin.normalized_asset_class || '')
-  const units = num(pin.units || pin.units_count)
-  const beds = num(pin.total_bedrooms || (pin as any).beds || (pin as any).bedrooms)
-  const baths = num(pin.total_baths || (pin as any).baths || (pin as any).bathrooms)
-  const sqft = num(pin.building_square_feet || (pin as any).sqft)
-  const ownershipYears = num(pin.ownership_years)
-  const sentCount = num(pin.sent_count)
-  const rawImageUrl = text(pin.streetview_image || pin.street_view_image || pin.map_image || '')
-  const imageUrl = rawImageUrl || (address && address !== 'Property Unknown' ? (buildStreetViewUrl(address) || '') : '')
-
-  const stageLabel = text(pin.market_status_label || stage || status || 'Active')
-  const lastActivity = text(pin.latest_message_body || (pin as any).last_outreach_message || pin.last_message || (pin as any).latestMessageBody || '')
-  const lastActivityTime = text(pin.last_reply_at || pin.last_outbound_at || (pin as any).last_activity_at || pin.latest_message_at || '')
-
-  const rawTags = text((pin as any).seller_tags_text || (pin as any).property_flags_text || '')
-  const tags = rawTags ? rawTags.split(/[;,|]/).map((t: string) => t.trim()).filter(Boolean).slice(0, isSelected ? 6 : 3) : []
-
-  const physicalParts: string[] = []
-  if (beds !== null && beds > 0) physicalParts.push(`${Math.round(beds)} bd`)
-  if (baths !== null && baths > 0) physicalParts.push(`${Math.round(baths)} ba`)
-  if (sqft !== null && sqft > 0) physicalParts.push(`${formatInteger(sqft)} sqft`)
-  const physicalSummary = physicalParts.join(' · ')
-
-  return (
-    <div
-      className={cls(
-        'nx-map-card nx-map-card--seller',
-        accentMod,
-        isSelected ? 'nx-map-card--selected' : 'nx-map-card--hover',
-      )}
-      style={cardStyle}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {/* MAP_CARD_AUDIT: unified seller card (hover=compact, selected=expanded) */}
-      {/* Close button — only in selected mode */}
-      {isSelected && (
-        <button type="button" className="nx-map-card__close-btn" onClick={onClose} aria-label="Close (Esc)">×</button>
-      )}
-
-      {/* Media header */}
-      {imageUrl && (
-        <div className="nx-map-card__media nx-map-card__media--seller">
-          <img src={imageUrl} alt={address || sellerName} loading="lazy" />
-          <div className="nx-map-card__media-scrim" />
-        </div>
-      )}
-
-      <div className="nx-map-card__body">
-        {/* Identity */}
-        <div className="nx-map-card__identity">
-          <div className="nx-map-card__pills">
-            {stageLabel && <span className="nx-map-card__pill nx-map-card__pill--stage">{stageLabel}</span>}
-            {propertyType && <span className="nx-map-card__pill nx-map-card__pill--muted">{propertyType}</span>}
-            {units && units > 1 && <span className="nx-map-card__pill nx-map-card__pill--muted">{Math.round(units)} units</span>}
-            {isSelected && sentCount !== null && sentCount > 0 && (
-              <span className="nx-map-card__pill nx-map-card__pill--muted">{Math.round(sentCount)} sent</span>
-            )}
-          </div>
-          <div className="nx-map-card__seller-name">{sellerName}</div>
-          <div className="nx-map-card__address">{address}</div>
-          {physicalSummary && <div className="nx-map-card__physical">{physicalSummary}</div>}
-        </div>
-
-        {/* Value metrics */}
-        <div className="nx-map-card__metric-grid">
-          {estValue !== null && (
-            <div className="nx-map-card__metric">
-              <span>Est. Value</span>
-              <strong>{formatCompactCurrency(estValue)}</strong>
-            </div>
-          )}
-          {equityPct !== null && (
-            <div className={cls('nx-map-card__metric', equityPct >= 40 ? 'nx-map-card__metric--green' : '')}>
-              <span>Equity</span>
-              <strong>{Math.round(equityPct)}%</strong>
-            </div>
-          )}
-          {repairs !== null && (
-            <div className="nx-map-card__metric">
-              <span>Repairs</span>
-              <strong>{formatCompactCurrency(repairs)}</strong>
-            </div>
-          )}
-          {isSelected && ownershipYears !== null && (
-            <div className="nx-map-card__metric">
-              <span>Owned</span>
-              <strong>{Math.round(ownershipYears)} yrs</strong>
-            </div>
-          )}
-        </div>
-
-        {/* Motivation score bar */}
-        {motivationScore !== null && (
-          <div className="nx-map-card__scorebar">
-            <span>Motivation</span>
-            <div className="nx-map-card__scorebar-track">
-              <div className="nx-map-card__scorebar-fill" style={{ width: `${Math.min(100, motivationScore)}%` }} />
-            </div>
-            <strong>{Math.round(motivationScore)}</strong>
-          </div>
-        )}
-
-        {/* Tags — selected only */}
-        {isSelected && tags.length > 0 && (
-          <div className="nx-map-card__tags">
-            {tags.map((tag: string) => (
-              <span key={tag} className="nx-map-card__pill nx-map-card__pill--tag">{tag}</span>
-            ))}
-          </div>
-        )}
-
-        {/* Last activity */}
-        {lastActivity && (
-          <div className="nx-map-card__last-activity">
-            <span>Last Reply{lastActivityTime ? ` · ${formatRelative(lastActivityTime)}` : ''}</span>
-            <p>{lastActivity.length > 100 ? `${lastActivity.slice(0, 100)}…` : lastActivity}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      {isSelected && (
-        <div className="nx-map-card__footer nx-map-card__actions">
-          <button type="button" className="nx-mic-btn nx-mic-btn--primary" onClick={onCenterMap}>Center</button>
-          {onOpenDealIntelligence && (
-            <button type="button" className="nx-mic-btn nx-mic-btn--violet" onClick={onOpenDealIntelligence}>Deal Intel</button>
-          )}
-          <button type="button" className="nx-mic-btn" onClick={onClose}>Close</button>
-        </div>
-      )}
-    </div>
-  )
-}
-
 const MapEntityCard = ({
   card,
   subject,
@@ -2695,6 +2660,12 @@ const MapEntityCard = ({
   onOpenCompIntel,
   clearHoverTimerRef,
   cancelClearHover,
+  onPeekToFocus,
+  sellerDraftText = '',
+  onSellerDraftChange,
+  onSellerSend: _onSellerSend,
+  sellerMessagingDisabled: _sellerMessagingDisabled = false,
+  onSellerActivityRefresh,
 }: {
   card: MapCardState
   subject?: any | null
@@ -2704,6 +2675,12 @@ const MapEntityCard = ({
   onOpenCompIntel?: () => void
   clearHoverTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>
   cancelClearHover: () => void
+  onPeekToFocus?: () => void
+  sellerDraftText?: string
+  onSellerDraftChange?: (value: string) => void
+  onSellerSend?: (value: string) => void | Promise<void>
+  sellerMessagingDisabled?: boolean
+  onSellerActivityRefresh?: () => void
 }) => {
   if (!card) return null
 
@@ -2745,20 +2722,24 @@ const MapEntityCard = ({
 
   if (card.kind === 'seller') {
     const pin = card.feature
+    const mode = card.intent === 'selected' ? 'focus' : 'peek'
     return (
       <div
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: card.intent === 'selected' ? 28 : 22 }}
       >
         <SellerMapCard
-          pin={pin}
-          intent={card.intent}
+          key={text((pin as Record<string, unknown>).property_id) || card.id}
+          record={pin}
+          mode={mode}
           anchor={card.anchor}
           containerSize={card.containerSize}
-          onClose={onClose}
-          onCenterMap={() => onCenterMap(Number(pin.lng ?? pin.longitude ?? 0), Number(pin.lat ?? pin.latitude ?? 0))}
-          onOpenDealIntelligence={onOpenDealIntelligence}
+          draftText={sellerDraftText}
+          onDraftChange={onSellerDraftChange}
+          onClose={card.intent === 'selected' ? onClose : undefined}
+          onPeekToFocus={card.intent === 'hover' ? onPeekToFocus : undefined}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
+          onActivityRefresh={onSellerActivityRefresh}
         />
       </div>
     )
@@ -2930,207 +2911,6 @@ const CensusIntelPanel = ({
   )
 }
 
-const MiniThreadPopup = ({
-  thread,
-  messages,
-
-  loading,
-  draftText,
-  disabled,
-  onDraftChange,
-  onSend,
-  onClose,
-  onOpenDealIntelligence,
-  layoutMode,
-}: {
-  thread: InboxWorkflowThread | null
-  messages: ThreadMessage[]
-  loading: boolean
-  draftText: string
-  disabled: boolean
-  onDraftChange: (value: string) => void
-  onSend: () => void
-  onClose: () => void
-  onOpenDealIntelligence?: () => void
-  layoutMode: ViewLayoutMode
-}) => (
-  <div onClick={(event) => event.stopPropagation()}>
-    <SellerIntelligenceCard
-      record={thread as Record<string, unknown> | null}
-      layoutMode={layoutMode}
-      variant="selected"
-      messages={messages}
-      loading={loading}
-      draftText={draftText}
-      disabled={disabled}
-      onDraftChange={onDraftChange}
-      onSend={onSend}
-      onClose={onClose}
-      onOpenDealIntelligence={onOpenDealIntelligence}
-    />
-  </div>
-)
-
-// ── Lightweight in-map conversation panel ────────────────────────────────────
-// Renders the full SMS history for a contacted seller pin without requiring
-// a navigation away from the map. Heavy ChatThread is intentionally not reused
-// here because it needs a full InboxWorkflowThread and ships the operator rail,
-// phase-3 intelligence, and action buttons that are out of scope for the popup.
-
-const fmtTime = (iso: string): string => {
-  try {
-    const d = new Date(iso)
-    const diff = (Date.now() - d.getTime()) / 1000
-    if (diff < 60) return 'just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  } catch {
-    return ''
-  }
-}
-
-const deliveryColor = (status: string): string => {
-  const s = status.toLowerCase()
-  if (s === 'delivered') return '#30d158'
-  if (s === 'sent') return '#64d2ff'
-  if (s === 'failed') return '#ff453a'
-  if (s === 'queued' || s === 'approval') return '#ffd60a'
-  return '#97a3b6'
-}
-
-const MapConversationPanel = ({
-  pin,
-  onOpenInbox,
-  onOpenQueue,
-}: {
-  pin: CommandMapSellerPin
-  onOpenInbox?: () => void
-  onOpenQueue?: () => void
-}) => {
-  const threadKey = (pin as any).thread_key as string | null | undefined
-  const [messages, setMessages] = useState<ThreadMessage[]>([])
-  const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState(false)
-  const listRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!threadKey) { setLoading(false); return }
-    let cancelled = false
-    setLoading(true)
-    setErr(false)
-    getThreadMessages(threadKey)
-      .then((msgs) => { if (!cancelled) { setMessages(msgs); setLoading(false) } })
-      .catch(() => { if (!cancelled) { setErr(true); setLoading(false) } })
-    return () => { cancelled = true }
-  }, [threadKey])
-
-  useEffect(() => {
-    if (!loading && listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight
-    }
-  }, [messages, loading])
-
-  const sellerName = pin.seller_name || 'Unknown Seller'
-  const address = pin.property_address_full || ''
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, background: 'rgba(8,14,24,0.97)', borderRadius: 12, border: '1px solid rgba(99,215,255,0.18)', overflow: 'hidden', maxHeight: 480, minWidth: 280 }}>
-      {/* Compact header */}
-      <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid rgba(99,215,255,0.10)', flexShrink: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, color: '#e2e8f0', lineHeight: 1.3 }}>{sellerName}</div>
-        {address && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{address}</div>}
-        <div style={{ marginTop: 4, fontSize: 10, color: '#4d8fff', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          {pin.sent_count ? `${pin.sent_count} sent` : 'Conversation'}
-          {pin.latest_message_at ? ` · ${fmtTime(pin.latest_message_at)}` : ''}
-        </div>
-      </div>
-
-      {/* Message list */}
-      <div ref={listRef} style={{ flex: '1 1 0', overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, minHeight: 60, maxHeight: 320 }}>
-        {loading && (
-          <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 12 }}>Loading conversation…</div>
-        )}
-        {!loading && err && (
-          <div style={{ textAlign: 'center', padding: '16px 0', color: '#ff6b63', fontSize: 12 }}>Could not load messages. Open full inbox to view.</div>
-        )}
-        {!loading && !err && !threadKey && (
-          <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 12 }}>No thread key — open full inbox to view this conversation.</div>
-        )}
-        {!loading && !err && threadKey && messages.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 12 }}>No messages found for this thread.</div>
-        )}
-        {messages.slice(-50).map((msg) => {
-          const isOut = msg.direction === 'outbound'
-          return (
-            <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isOut ? 'flex-end' : 'flex-start', gap: 2 }}>
-              <div style={{
-                maxWidth: '85%',
-                padding: '6px 10px',
-                borderRadius: isOut ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-                background: isOut ? 'rgba(77,143,255,0.22)' : 'rgba(255,255,255,0.07)',
-                border: `1px solid ${isOut ? 'rgba(77,143,255,0.3)' : 'rgba(255,255,255,0.09)'}`,
-                fontSize: 12.5,
-                lineHeight: 1.5,
-                color: '#e2e8f0',
-                wordBreak: 'break-word',
-              }}>
-                {msg.body || <em style={{ color: '#64748b' }}>No content</em>}
-              </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingInline: 2 }}>
-                <span style={{ fontSize: 10, color: '#475569' }}>{fmtTime(msg.createdAt || msg.timelineAt)}</span>
-                {isOut && msg.deliveryStatus && (
-                  <span style={{ fontSize: 10, color: deliveryColor(msg.deliveryStatus) }}>{msg.deliveryStatus}</span>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Footer actions — read-only for now; full reply lives in inbox */}
-      <div style={{ padding: '8px 10px', borderTop: '1px solid rgba(99,215,255,0.10)', display: 'flex', gap: 6, flexShrink: 0 }}>
-        {onOpenInbox && (
-          <button
-            type="button"
-            className="nx-seller-card__mini-action is-primary"
-            style={{ flex: 1 }}
-            onClick={onOpenInbox}
-          >
-            Open Full Inbox
-          </button>
-        )}
-        {onOpenQueue && (
-          <button
-            type="button"
-            className="nx-seller-card__mini-action"
-            onClick={onOpenQueue}
-          >
-            Queue
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-type SellerPinCardMode = 'conversation' | 'queued' | 'uncontacted' | 'property'
-
-const resolveEffectiveSellerState = (pin: Partial<CommandMapSellerPin>): string => {
-  const normalized = lower(pin.seller_state).replace(/\s+/g, '_')
-  const inboxCategory = lower(pin.inbox_category).replace(/\s+/g, '_')
-  if (!normalized || normalized === 'none' || normalized === 'null' || normalized === 'unknown') {
-    if (inboxCategory === 'not_contacted') return 'not_contacted'
-    if (inboxCategory === 'new_reply') return 'new_reply'
-    if (inboxCategory === 'needs_review') return 'issue'
-    if (inboxCategory === 'suppressed' || inboxCategory === 'dnc_suppressed') return 'blocked'
-    return 'not_contacted'
-  }
-  if (normalized === 'new_replies') return 'new_reply'
-  if (normalized === 'positive') return 'positive_intent'
-  return normalized
-}
-
 const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
   property_id: text(pin.property_id || pin.id || pin.conversation_id),
   master_owner_id: text(pin.master_owner_id) || null,
@@ -3195,134 +2975,6 @@ const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
   execution_ring_color: null,
   render_priority: (pin as any).render_priority ?? null,
 })
-
-const resolveSellerPinCardMode = (pin: CommandMapSellerPin): SellerPinCardMode => {
-  const state = resolveEffectiveSellerState(pin)
-  const hasMsg = Boolean(pin.latest_message_at)
-    || Number(pin.sent_count ?? 0) > 0
-    || Number(pin.delivered_count ?? 0) > 0
-    || (state !== '' && state !== 'not_contacted')
-  if (hasMsg) return 'conversation'
-  const hasQueue = Number(pin.queued_count ?? 0) > 0
-    || Number(pin.scheduled_count ?? 0) > 0
-    || Number(pin.ready_count ?? 0) > 0
-    || lower(pin.execution_state).includes('queue')
-    || lower(pin.execution_state).includes('scheduled')
-    || lower(pin.execution_state).includes('ready')
-  if (hasQueue) return 'queued'
-  if (!state || state === 'not_contacted') return 'uncontacted'
-  return 'property'
-}
-
-const MiniSellerPinPopup = ({
-  pin,
-  layoutMode,
-  onClose,
-  onOpenProperty,
-  onOpenQueue,
-  onOpenDealIntelligence,
-  hydrating = false,
-  hydrationFailed = false,
-}: {
-  pin: CommandMapSellerPin
-  layoutMode: ViewLayoutMode
-  onClose: () => void
-  onOpenProperty?: () => void
-  onOpenQueue?: () => void
-  onOpenDealIntelligence?: () => void
-  hydrating?: boolean
-  hydrationFailed?: boolean
-}) => {
-  const mode = resolveSellerPinCardMode(pin)
-
-  if (hydrating) {
-    return (
-      <div onClick={(event) => event.stopPropagation()} style={{ minWidth: 320, padding: '18px 16px', borderRadius: 12, background: 'rgba(8,14,24,0.97)', border: '1px solid rgba(99,215,255,0.18)', color: '#e2e8f0' }}>
-        <strong style={{ display: 'block', marginBottom: 6 }}>Hydrating seller record…</strong>
-        <p style={{ margin: 0, color: '#94a3b8', fontSize: 12 }}>Loading full owner and property context before opening the card.</p>
-      </div>
-    )
-  }
-
-  // Conversation mode: render the full SMS thread inline without any click-through.
-  // The SellerIntelligenceCard header (property image, address, scores) is skipped
-  // here to save vertical space in the popup — the conversation panel has its own
-  // compact header.
-  if (mode === 'conversation') {
-    return (
-      <div onClick={(event) => event.stopPropagation()} style={{ position: 'relative' }}>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          style={{ position: 'absolute', top: 6, right: 8, zIndex: 1, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 16, lineHeight: 1 }}
-        >
-          ×
-        </button>
-        <MapConversationPanel
-          pin={pin}
-          onOpenInbox={onOpenProperty}
-          onOpenQueue={onOpenQueue ?? undefined}
-        />
-      </div>
-    )
-  }
-
-  // Queued / uncontacted / property modes: show the seller intelligence card
-  // with a contextual action strip beneath it.
-  return (
-    <div onClick={(event) => event.stopPropagation()}>
-      <SellerIntelligenceCard
-        record={pin as unknown as Record<string, unknown>}
-        layoutMode={layoutMode}
-        variant="selected"
-        messages={[]}
-        loading={false}
-        disabled
-        onClose={onClose}
-        onOpenConversation={onOpenProperty}
-        onOpenDealIntelligence={onOpenDealIntelligence}
-      />
-
-      {mode === 'queued' && (
-        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 10, background: 'rgba(15,23,38,0.94)', border: '1px solid rgba(245,185,76,0.22)' }}>
-          <p style={{ margin: '0 0 6px', color: '#f5b94c', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {lower(pin.execution_state) || 'Queued'} · {pin.next_scheduled_for ? `Scheduled ${new Date(pin.next_scheduled_for).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Pending send'}
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {onOpenQueue && <button type="button" className="nx-seller-card__mini-action is-primary" onClick={onOpenQueue}>Open Queue</button>}
-            <button type="button" className="nx-seller-card__mini-action" onClick={onOpenProperty}>Open Property</button>
-          </div>
-        </div>
-      )}
-
-      {mode === 'uncontacted' && (
-        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 10, background: 'rgba(15,23,38,0.94)', border: '1px solid rgba(148,163,184,0.22)' }}>
-          <p style={{ margin: '0 0 6px', color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>No outreach yet</p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="nx-seller-card__mini-action is-primary" onClick={onOpenProperty}>Open Dossier</button>
-            {onOpenQueue && <button type="button" className="nx-seller-card__mini-action" onClick={onOpenQueue}>View Queue</button>}
-          </div>
-        </div>
-      )}
-
-      {mode === 'property' && (
-        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 10, background: 'rgba(15,23,38,0.94)', border: '1px solid rgba(148,163,184,0.16)' }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="nx-seller-card__mini-action is-primary" onClick={onOpenProperty}>Open Property</button>
-            {onOpenQueue && <button type="button" className="nx-seller-card__mini-action" onClick={onOpenQueue}>Open Queue</button>}
-          </div>
-        </div>
-      )}
-
-      {hydrationFailed && (
-        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 10, background: 'rgba(38,15,15,0.92)', border: '1px solid rgba(255,107,99,0.18)', color: '#ffd6d1', fontSize: 12 }}>
-          Full hydration could not be loaded for this pin. Showing the best available seller record.
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
 function isMapSafe(map: maplibregl.Map | null | undefined): map is maplibregl.Map {
@@ -3412,6 +3064,8 @@ interface Props {
   fullHeight?: boolean
   layoutMode?: ViewLayoutMode
   commandMode?: boolean
+  /** True when mobile SMS thread pane is open and covers the map composer area */
+  mobileConversationOpen?: boolean
   initialActivityMode?: InboxMapActivityMode
   initialMapStyleMode?: MapStyleMode
   initialFilters?: Partial<MapFilterState>
@@ -3774,8 +3428,8 @@ export function InboxCommandMap({
   selectedBuyerKey = null,
   onSelectBuyerKey,
   selectedThread,
-  selectedThreadMessages = [],
-  selectedThreadMessagesLoading = false,
+  selectedThreadMessages: _selectedThreadMessages = [],
+  selectedThreadMessagesLoading: _selectedThreadMessagesLoading = false,
   quickReplyDraft = '',
   onQuickReplyDraftChange,
   onQuickReplySend,
@@ -3791,6 +3445,7 @@ export function InboxCommandMap({
   fullHeight = false,
   layoutMode = 'full',
   commandMode = false,
+  mobileConversationOpen = false,
   initialActivityMode = 'threads',
   initialMapStyleMode = 'dark_ops',
   initialFilters,
@@ -3802,16 +3457,15 @@ export function InboxCommandMap({
   const containerRef = useRef<HTMLDivElement>(null)
   const controlsRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
+  const lastAutoNavSelectionRef = useRef<string | null>(null)
   const mapContextLostRef = useRef(false)
+  const mapContextLossOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mapContainerKeyRef = useRef(0)
   const propUnivHandlersRegisteredRef = useRef(false)
   const animationRef = useRef<number | null>(null)
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
   const clearPinHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const threadPopupRef = useRef<maplibregl.Popup | null>(null)
-  const threadPopupRootRef = useRef<Root | null>(null)
-  const threadPopupHostRef = useRef<HTMLDivElement | null>(null)
-  const activeThreadPopupRef = useRef<{ id: string; coordinates: [number, number] } | null>(null)
+
   const applyCommandMapThemeRef = useRef<((map: maplibregl.Map, nextThemeId: MapStyleMode) => void) | null>(null)
   const activeKpiFilterRef = useRef<MapKpiFilterKey | null>(null)
   const onSelectThreadIdRef = useRef<Props['onSelectThreadId']>(onSelectThreadId)
@@ -3891,10 +3545,14 @@ export function InboxCommandMap({
   const lastSellerPinsDataKeyRef = useRef<string>('')
   const sellerPinsByPropertyIdRef = useRef<Map<string, CommandMapSellerPin>>(new Map())
   const sellerPinDetailsCacheRef = useRef<Map<string, CommandMapSellerPin>>(new Map())
-  const sellerPinHydrationAbortRef = useRef<AbortController | null>(null)
+
+  const mapCardHydrationAbortRef = useRef<AbortController | null>(null)
+  const mapCardHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sellerPinsFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sellerPinsAbortRef = useRef<AbortController | null>(null)
   const propertyUniverseAbortRef = useRef<AbortController | null>(null)
+  const propertyUniverseRawFeaturesRef = useRef<GeoJSON.Feature<Point>[]>([])
+
   const styleLoadSeqRef = useRef(0)
   const styleLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const styleLoadStartedAtRef = useRef<number | null>(null)
@@ -3945,6 +3603,10 @@ export function InboxCommandMap({
     mapAtmosphere: 'clean',
   })
   const { isMobile } = useBreakpoint()
+  const isMobileRef = useRef(isMobile)
+  useEffect(() => {
+    isMobileRef.current = isMobile
+  }, [isMobile])
   const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'compact' : 'full'
   ))
@@ -3956,6 +3618,7 @@ export function InboxCommandMap({
   const [baseStyleLoading, setBaseStyleLoading] = useState(false)
   const [styleFallbackWarning, setStyleFallbackWarning] = useState<string | null>(null)
   const [mapContextLost, setMapContextLost] = useState(false)
+  const [mapInitError, setMapInitError] = useState<string | null>(null)
   const [mapContainerKey, setMapContainerKey] = useState(0)
 
   const scheduleMapResize = () => {
@@ -3977,8 +3640,7 @@ export function InboxCommandMap({
   }
   const [mapDimension, setMapDimension] = useState<'2d' | '3d'>('2d')
   const [mapOverlays, setMapOverlays] = useState<MapOverlayToggles>({ ...defaultMapOverlays, ...initialMapOverlays })
-  const [activeThreadPopup, setActiveThreadPopup] = useState<{ id: string; coordinates: [number, number] } | null>(null)
-  const [activeSellerPinPopup, setActiveSellerPinPopup] = useState<{ pin: CommandMapSellerPin; coordinates: [number, number]; hydrating?: boolean; hydrationFailed?: boolean } | null>(null)
+
   const [showKpiBadges, setShowKpiBadges] = useState(true)
   const [activeKpiFilter, setActiveKpiFilter] = useState<MapKpiFilterKey | null>(null)
   const [viewportBounds, setViewportBounds] = useState<CommandMapBounds | null>(null)
@@ -4050,11 +3712,11 @@ export function InboxCommandMap({
         break
 
       case 'buyer_demand':
-        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
         setBuyerLayers((p) => {
           track('buyerMatches', true); track('buyerHeatmap', true); track('recentSoldComps', true)
           track('repeatBuyers', true); track('corporateBuyers', true); track('localInvestors', true)
-          return { ...p, sellerThreads: false, buyerMatches: true, buyerHeatmap: true, recentSoldComps: true, repeatBuyers: true, corporateBuyers: true, localInvestors: true, flippers: true, buyerProfiles: false }
+          return { ...p, sellerThreads: true, buyerMatches: true, buyerHeatmap: true, recentSoldComps: true, repeatBuyers: true, corporateBuyers: true, localInvestors: true, flippers: true, buyerProfiles: false }
         })
         setBuyerDemandLayers(defaultBuyerDemandLayers)
         setCensusLayers(defaultCensusLayers)
@@ -4062,10 +3724,10 @@ export function InboxCommandMap({
         break
 
       case 'comps':
-        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
         setBuyerLayers((p) => {
           track('recentSoldComps', true); track('buyerMatches', true); track('buyerProfiles', true)
-          return { ...p, sellerThreads: false, recentSoldComps: true, buyerMatches: true, buyerProfiles: true, buyerHeatmap: false }
+          return { ...p, sellerThreads: true, recentSoldComps: true, buyerMatches: true, buyerProfiles: true, buyerHeatmap: false }
         })
         setBuyerDemandLayers((p) => {
           track('soldPrice', true); track('activity6mo', true)
@@ -4117,15 +3779,30 @@ export function InboxCommandMap({
         break
 
       case 'census':
-        setSellerPinLayers((p) => { track('sellerPins', false); return { ...p, sellerPins: false } })
+        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
-          return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+          return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
         })
         setBuyerDemandLayers(defaultBuyerDemandLayers)
         setSingleCensusMetric('incomeHeat', true)
         track('incomeHeat', true)
         setShowCensusDock(true)
+        break
+
+      case 'command':
+        setSellerPinLayers((p) => {
+          track('sellerPins', true); track('newReplies', true); track('hot', true)
+          track('negotiating', true); track('issues', true); track('failedIssue', true)
+          return { ...p, sellerPins: true, newReplies: true, hot: true, positive: true, negotiating: true, issues: true, failedIssue: true, queued: true, scheduled: true, sent: true, delivered: true }
+        })
+        setBuyerLayers((p) => {
+          track('buyerMatches', false); track('recentSoldComps', false)
+          return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
+        })
+        setBuyerDemandLayers(defaultBuyerDemandLayers)
+        setCensusLayers(defaultCensusLayers)
+        setShowCensusDock(false)
         break
 
       default:
@@ -4198,9 +3875,20 @@ export function InboxCommandMap({
   }, [sellerPins])
   const selectedHydratedThread = useMemo(() => {
     if (!selectedThread) return null
-    return hydratedThreadsById.get(selectedThread.id)
+    const hydrated = hydratedThreadsById.get(selectedThread.id)
       || hydratedThreadsByKey.get(String((selectedThread as any).threadKey || selectedThread.id))
       || selectedThread
+    if (isMappableCoord(getLat(hydrated), getLng(hydrated))) return hydrated
+    if (isMappableCoord(getLat(selectedThread), getLng(selectedThread))) {
+      return {
+        ...hydrated,
+        lat: getLat(selectedThread),
+        lng: getLng(selectedThread),
+        latitude: getLat(selectedThread),
+        longitude: getLng(selectedThread),
+      }
+    }
+    return hydrated
   }, [hydratedThreadsById, hydratedThreadsByKey, selectedThread])
   const baseThreads = useMemo(
     () => sourceMode === 'visible_threads' ? visibleHydratedThreads : threads,
@@ -4240,13 +3928,13 @@ export function InboxCommandMap({
     applyPinPerformanceWindow(baseVisiblePins, viewportBounds, viewportZoom, performanceSettings)
   ), [baseVisiblePins, performanceSettings, viewportBounds, viewportZoom])
   const selectedPin = useMemo(
-    () => visiblePins.find((pin) => pin.conversation_id === (selectedPinId || selectedHydratedThread?.id))
-      ?? baseVisiblePins.find((pin) => pin.conversation_id === (selectedPinId || selectedHydratedThread?.id))
-      ?? visiblePins[0]
-      ?? baseVisiblePins[0]
+    () => findPinForThread(visiblePins, selectedHydratedThread, [selectedPinId])
+      ?? findPinForThread(baseVisiblePins, selectedHydratedThread, [selectedPinId])
+      ?? findPinForThread(allPins, selectedHydratedThread, [selectedPinId])
       ?? selectedBasePin,
-    [baseVisiblePins, selectedBasePin, selectedPinId, selectedHydratedThread?.id, visiblePins],
+    [allPins, baseVisiblePins, selectedBasePin, selectedPinId, selectedHydratedThread, visiblePins],
   )
+  const focusPin = selectedPin ?? selectedBasePin
   const kpiChips = useMemo(() => {
     const chips = buildKpiChips(visiblePins, activityMode)
     // Count genuinely uncontacted seller pins (those with no conversation history).
@@ -4268,16 +3956,21 @@ export function InboxCommandMap({
         : chip,
     )
   }, [activityMode, sellerPins, visiblePins])
-  const popupThread = useMemo(() => {
-    if (!activeThreadPopup?.id) return null
-    return hydratedThreadsById.get(activeThreadPopup.id)
-      || hydratedThreadsByKey.get(activeThreadPopup.id)
-      || threads.find((thread) => thread.id === activeThreadPopup.id || String((thread as any).threadKey || '') === activeThreadPopup.id)
-      || null
-  }, [activeThreadPopup?.id, hydratedThreadsById, hydratedThreadsByKey, threads])
+  const activeSellerMapCard = useMemo(
+    () => resolveActiveSellerMapCard(hoveredMapCard, selectedMapCard),
+    [hoveredMapCard, selectedMapCard],
+  )
+  const activeSellerCardHydrationKey = activeSellerMapCard
+    ? `${activeSellerMapCard.kind}|${activeSellerMapCard.intent}|${activeSellerMapCard.id}`
+    : null
   const geojson = useMemo(
-    () => featureCollectionForPins(visiblePins, selectedPin?.conversation_id ?? null, activeKpiFilter, mapStyleMode),
-    [activeKpiFilter, mapStyleMode, visiblePins, selectedPin?.conversation_id],
+    () => featureCollectionForPins(
+      visiblePins,
+      selectedThread?.id ?? selectedPin?.conversation_id ?? null,
+      activeKpiFilter,
+      mapStyleMode,
+    ),
+    [activeKpiFilter, mapStyleMode, selectedPin?.conversation_id, selectedThread?.id, visiblePins],
   )
   const filteredBuyerPurchases = useMemo(() => {
     const purchases = buyerCommandData?.recentPurchases ?? []
@@ -4362,19 +4055,10 @@ export function InboxCommandMap({
     count += buyerFilterCount
     return count
   }, [filters, buyerFilterCount])
-  const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => {
-    if (!selectedPin || !selectedPin.lat || !selectedPin.lng) {
-      return { type: 'FeatureCollection', features: [] }
-    }
-    return {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [selectedPin.lng, selectedPin.lat] },
-        properties: { conversation_id: selectedPin.conversation_id },
-      }],
-    }
-  }, [selectedPin])
+  const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => ({
+    type: 'FeatureCollection',
+    features: [],
+  }), [])
   const buyerFilterOptions = useMemo(() => {
     const profiles = buyerCommandData?.profiles ?? []
     const purchases = buyerCommandData?.recentPurchases ?? []
@@ -4404,14 +4088,24 @@ export function InboxCommandMap({
   const mapThemeStyle = useMemo(
     () => ({
       ...activeThemeDefinition.cardTheme,
+      ...buildThemeIdentityCssVars(getCommandMapThemeIdentity(mapStyleMode)),
+      ...buildPresetInterfaceCssVars(mapStyleMode),
       '--nx-map-canvas-filter': canvasFilterForTheme(mapStyleMode),
+      '--nx-theme-transition-ms': `${THEME_TRANSITION_MS}ms`,
     } as CSSProperties),
     [activeThemeDefinition, mapStyleMode],
   )
 
   const clearBuyerFilters = () => onBuyerFiltersChange?.(defaultBuyerMapFilters)
-  const liveActivityEvents = useMemo(() => (
-    loadLiveActivityFeed({
+  const selectedPropertyId = useMemo(() => (
+    text((selectedHydratedThread as any)?.propertyId)
+      || text((selectedHydratedThread as any)?.property_id)
+      || text((selectedPin as any)?.property_id)
+      || null
+  ), [selectedHydratedThread, selectedPin])
+
+  const liveActivityFeed = useMemo(() => (
+    loadLiveActivityFeedSnapshot({
       pins: visiblePins as CommandMapActivityPinSource[],
       threadsById: hydratedThreadsById,
       buyerPurchases: filteredBuyerPurchases,
@@ -4420,19 +4114,20 @@ export function InboxCommandMap({
       selectedMarket: filters.market || selectedPin?.market || null,
       bounds: viewportBounds,
       selectedThread: selectedHydratedThread,
+      selectedPropertyId,
     })
-  ), [visiblePins, hydratedThreadsById, filteredBuyerPurchases, soldComps, liveActivitySettings, filters.market, viewportBounds, selectedHydratedThread, selectedPin?.market])
+  ), [visiblePins, hydratedThreadsById, filteredBuyerPurchases, soldComps, liveActivitySettings, filters.market, viewportBounds, selectedHydratedThread, selectedPin?.market, selectedPropertyId])
   const debugStats = useMemo(() => ({
     allPinsCount: allPins.length,
     filteredPinsCount: filteredPins.length,
     visiblePinsCount: visiblePins.length,
     buyerPurchasesCount: filteredBuyerPurchases.length,
     buyerProfilesCount: filteredBuyerProfiles.length,
-    liveActivityEventsCount: liveActivityEvents.length,
+    liveActivityEventsCount: liveActivityFeed.visibleCount,
     unmappedCount: pinPipeline.unmapped.length,
     activeMode: activityMode,
     activeFilters: filters,
-  }), [activityMode, allPins.length, filteredBuyerProfiles.length, filteredBuyerPurchases.length, filteredPins.length, filters, liveActivityEvents.length, pinPipeline.unmapped.length, visiblePins.length])
+  }), [activityMode, allPins.length, filteredBuyerProfiles.length, filteredBuyerPurchases.length, filteredPins.length, filters, liveActivityFeed.visibleCount, pinPipeline.unmapped.length, visiblePins.length])
 
   useEffect(() => {
     activeThemeRef.current = getCommandMapTheme(mapStyleMode)
@@ -4468,7 +4163,6 @@ export function InboxCommandMap({
 
   geojsonRef.current = geojson
   activityModeRef.current = activityMode
-  activeThreadPopupRef.current = activeThreadPopup
   activeKpiFilterRef.current = activeKpiFilter
   performanceSettingsRef.current = performanceSettings
   reducedMotionRef.current = prefersReducedMotion || performanceSettings.animation !== 'full'
@@ -4526,23 +4220,12 @@ export function InboxCommandMap({
   useEffect(() => {
     setSelectedPinId(selectedThread?.id ?? null)
     if (selectedThread?.id) {
+      setShowSelectedHidden(true)
       setSelectedClusterSummary(null)
-      setActiveSellerPinPopup(null)
+    } else {
+      lastAutoNavSelectionRef.current = null
     }
   }, [selectedThread?.id])
-
-  useEffect(() => {
-    if (!selectedThread || activeThreadPopup?.id !== selectedThread.id) return
-    const pin = visiblePins.find((item) => item.conversation_id === selectedThread.id)
-      || filteredPins.find((item) => item.conversation_id === selectedThread.id)
-      || selectedBasePin
-    if (!pin) return
-    setActiveThreadPopup((current) => (
-      current?.id === selectedThread.id
-        ? { ...current, coordinates: [pin.lng, pin.lat] }
-        : current
-    ))
-  }, [activeThreadPopup?.id, filteredPins, selectedBasePin, selectedThread, visiblePins])
 
   useEffect(() => {
     setActivityMode(initialActivityMode)
@@ -4559,128 +4242,6 @@ export function InboxCommandMap({
   useEffect(() => {
     setMapOverlays({ ...defaultMapOverlays, ...initialMapOverlays })
   }, [initialMapOverlays])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || (!activeThreadPopup && !activeSellerPinPopup)) {
-      threadPopupRootRef.current?.unmount()
-      threadPopupRootRef.current = null
-      threadPopupHostRef.current = null
-      threadPopupRef.current?.remove()
-      threadPopupRef.current = null
-      return
-    }
-
-    if (!threadPopupHostRef.current) {
-      threadPopupHostRef.current = document.createElement('div')
-      threadPopupHostRef.current.className = 'nx-icm-thread-popup-host'
-    }
-    if (!threadPopupRootRef.current && threadPopupHostRef.current) {
-      const host = threadPopupHostRef.current
-      threadPopupRootRef.current = createRoot(host)
-    }
-    if (!threadPopupRootRef.current || !threadPopupHostRef.current) return
-
-    const popupCoordinates = activeThreadPopup?.coordinates ?? activeSellerPinPopup?.coordinates
-    const isSelectedThreadActive = Boolean(activeThreadPopup && selectedThread?.id === activeThreadPopup.id)
-    const popupMessages = isSelectedThreadActive ? selectedThreadMessages : []
-    const popupLoading = isSelectedThreadActive ? selectedThreadMessagesLoading : true
-    const popupDraft = isSelectedThreadActive ? quickReplyDraft : ''
-    const popupDisabled = !isSelectedThreadActive || quickReplyDisabled
-
-    if (!threadPopupRootRef.current) return
-    if (activeSellerPinPopup && !activeThreadPopup) {
-      const sellerPin = activeSellerPinPopup.pin
-      const hasQueue = Number(sellerPin.queued_count ?? 0) > 0
-        || Number(sellerPin.scheduled_count ?? 0) > 0
-        || Number(sellerPin.ready_count ?? 0) > 0
-        || lower(sellerPin.execution_state).includes('queue')
-        || lower(sellerPin.execution_state).includes('scheduled')
-        || lower(sellerPin.execution_state).includes('ready')
-      threadPopupRootRef.current.render(
-        <MiniSellerPinPopup
-          pin={sellerPin}
-          layoutMode={layoutMode}
-          hydrating={activeSellerPinPopup.hydrating}
-          hydrationFailed={activeSellerPinPopup.hydrationFailed}
-          onClose={() => setActiveSellerPinPopup(null)}
-          onOpenDealIntelligence={() => setDealIntelSheet({ type: 'seller', thread: null, pin: sellerPin })}
-          onOpenProperty={() => {
-            const propertyId = text((sellerPin as any).property_id)
-            const masterOwnerId = text((sellerPin as any).master_owner_id || (sellerPin as any).owner_id || (sellerPin as any).seller_id || (sellerPin as any).prospect_id)
-            onSelectSellerContextRef.current?.({
-              propertyId: propertyId || undefined,
-              masterOwnerId: masterOwnerId || undefined,
-              sourceView: 'map',
-              intent: 'open_seller',
-            })
-          }}
-          onOpenQueue={hasQueue ? () => {
-            const propertyId = text((sellerPin as any).property_id)
-            const masterOwnerId = text((sellerPin as any).master_owner_id || (sellerPin as any).owner_id || (sellerPin as any).seller_id || (sellerPin as any).prospect_id)
-            onSelectSellerContextRef.current?.({
-              propertyId: propertyId || undefined,
-              masterOwnerId: masterOwnerId || undefined,
-              sourceView: 'map',
-              intent: 'open_queue',
-            })
-          } : undefined}
-        />,
-      )
-    } else {
-      threadPopupRootRef.current.render(
-        <MiniThreadPopup
-          thread={popupThread}
-          messages={popupMessages}
-          loading={popupLoading}
-          draftText={popupDraft}
-          disabled={popupDisabled}
-          layoutMode={layoutMode}
-          onDraftChange={(value) => {
-            if (!isSelectedThreadActive) return
-            onQuickReplyDraftChange?.(value)
-          }}
-          onSend={() => {
-            if (!isSelectedThreadActive || !popupDraft.trim()) return
-            void onQuickReplySend?.(popupDraft)
-          }}
-          onClose={() => setActiveThreadPopup(null)}
-          onOpenDealIntelligence={popupThread ? () => {
-            setDealIntelSheet({ type: 'seller', thread: popupThread })
-            onOpenDealIntelligenceRef.current?.(popupThread.id)
-          } : undefined}
-        />,
-      )
-    }
-
-    const popup = threadPopupRef.current ?? new maplibregl.Popup({
-      closeButton: false,
-      closeOnClick: false,
-      closeOnMove: false,
-      offset: 18,
-      className: 'nx-icm-thread-popup',
-      maxWidth: sellerCardMaxWidthForLayout(layoutMode),
-      focusAfterOpen: false,
-    })
-
-    popup
-      .setLngLat(popupCoordinates as [number, number])
-      .setDOMContent(threadPopupHostRef.current)
-      .addTo(map)
-
-    threadPopupRef.current = popup
-  }, [
-    activeThreadPopup,
-    activeSellerPinPopup,
-    onQuickReplyDraftChange,
-    onQuickReplySend,
-    popupThread,
-    quickReplyDisabled,
-    quickReplyDraft,
-    selectedThread?.id,
-    selectedThreadMessages,
-    selectedThreadMessagesLoading,
-  ])
 
   useEffect(() => {
     onStateChange?.({
@@ -4802,6 +4363,46 @@ export function InboxCommandMap({
     return () => window.removeEventListener('nexus:map-flyto', handleFlyTo)
   }, [])
 
+  const focusExternalSoldComp = useCallback((payload: MapFocusCompPayload | null | undefined) => {
+    if (!payload) return
+    const lat = Number(payload.latitude)
+    const lng = Number(payload.longitude)
+    const map = mapRef.current
+    const containerEl = containerRef.current
+    if (!map || !Number.isFinite(lat) || !Number.isFinite(lng)) return
+
+    const feature = mapFocusPayloadToSoldCompFeature(payload)
+    const coordinates: [number, number] = [lng, lat]
+    const pixelPoint = map.project(coordinates)
+    const containerBounds = containerEl?.getBoundingClientRect()
+    const containerWidth = containerBounds?.width ?? window.innerWidth
+    const containerHeight = containerBounds?.height ?? window.innerHeight
+
+    setSelectedSoldComp(feature as RecentSoldComp)
+    setHoveredMapCard(null)
+    setSelectedMapCard({
+      kind: 'sold_comp',
+      intent: 'selected',
+      id: String(feature.property_id),
+      anchor: { x: pixelPoint.x, y: pixelPoint.y },
+      coordinates,
+      feature,
+      containerSize: { width: containerWidth, height: containerHeight },
+    })
+    map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 13.2), duration: 620 })
+  }, [])
+
+  useEffect(() => {
+    const handleFocusComp = (event: Event) => {
+      const payload = (event as CustomEvent<{ comp?: MapFocusCompPayload }>).detail?.comp
+      if (payload) focusExternalSoldComp(payload)
+    }
+    window.addEventListener(MAP_FOCUS_COMP_EVENT, handleFocusComp)
+    const pending = consumePendingMapComp()
+    if (pending) window.setTimeout(() => focusExternalSoldComp(pending), 160)
+    return () => window.removeEventListener(MAP_FOCUS_COMP_EVENT, handleFocusComp)
+  }, [focusExternalSoldComp])
+
   useEffect(() => {
     if (!import.meta.env.DEV) return
     console.log('[InboxCommandMap]', debugStats)
@@ -4837,49 +4438,139 @@ export function InboxCommandMap({
     })
   }, [sellerPinsRaw])
 
-  useEffect(() => {
-    if (!activeSellerPinPopup) return
-    if (activeSellerPinPopup.hydrating || activeSellerPinPopup.hydrationFailed) return
-    const currentPin = activeSellerPinPopup.pin
-    const propertyId = text(currentPin.property_id)
-    if (!propertyId || !needsSellerPinHydration(currentPin)) {
-      if (activeSellerPinPopup.hydrating) {
-        setActiveSellerPinPopup((popup) => popup ? { ...popup, hydrating: false } : popup)
-      }
-      return
-    }
+  const hydrateSellerMapCard = useCallback((
+    card: MapCardState,
+    setter: React.Dispatch<React.SetStateAction<MapCardState>>,
+  ) => {
+    if (!card || card.kind !== 'seller' || card.hydrating) return
+    const propertyId = text(card.feature.property_id)
+    if (!propertyId) return
 
     const cached = sellerPinDetailsCacheRef.current.get(propertyId)
     if (cached) {
-      setActiveSellerPinPopup((popup) => {
-        if (!popup || text(popup.pin.property_id) !== propertyId) return popup
-        return { ...popup, pin: sanitizeSellerPinRecord({ ...popup.pin, ...cached }), hydrating: false, hydrationFailed: false }
+      setter((current) => {
+        if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
+        return {
+          ...current,
+          feature: sanitizeSellerPinRecord({ ...current.feature, ...cached }) as Record<string, unknown>,
+          hydrating: false,
+        }
       })
       return
     }
 
-    sellerPinHydrationAbortRef.current?.abort()
+    mapCardHydrationAbortRef.current?.abort()
     const controller = new AbortController()
-    sellerPinHydrationAbortRef.current = controller
-    setActiveSellerPinPopup((popup) => popup && text(popup.pin.property_id) === propertyId ? { ...popup, hydrating: true } : popup)
+    mapCardHydrationAbortRef.current = controller
+    setter((current) => (
+      current && current.kind === 'seller' && text(current.feature.property_id) === propertyId
+        ? { ...current, hydrating: true }
+        : current
+    ))
 
-    loadCommandMapSellerPinDetail(propertyId, { signal: controller.signal })
+    const pinSnapshot = sanitizeSellerPinRecord(card.feature as Partial<CommandMapSellerPin>)
+    const threadKey = text(card.feature.thread_key) || null
+    const masterOwnerId = text(card.feature.master_owner_id) || null
+    loadCommandMapSellerPinDetail(propertyId, {
+      signal: controller.signal,
+      threadKey,
+      masterOwnerId,
+    })
       .then((detail) => {
         if (!detail) return
-        const hydrated = sanitizeSellerPinRecord({ ...currentPin, ...detail })
+        const hydrated = sanitizeSellerPinRecord({ ...pinSnapshot, ...detail })
         sellerPinDetailsCacheRef.current.set(propertyId, hydrated)
-        setActiveSellerPinPopup((popup) => {
-        if (!popup || text(popup.pin.property_id) !== propertyId) return popup
-          return { ...popup, pin: hydrated, hydrating: false, hydrationFailed: false }
+        setter((current) => {
+          if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
+          return {
+            ...current,
+            feature: hydrated as Record<string, unknown>,
+            hydrating: false,
+          }
         })
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        setActiveSellerPinPopup((popup) => popup && text(popup.pin.property_id) === propertyId ? { ...popup, hydrating: false, hydrationFailed: true } : popup)
+        setter((current) => (
+          current && current.kind === 'seller' && text(current.feature.property_id) === propertyId
+            ? { ...current, hydrating: false }
+            : current
+        ))
       })
+  }, [])
 
-    return () => controller.abort()
-  }, [activeSellerPinPopup])
+  useEffect(() => {
+    if (mapCardHydrationTimerRef.current) {
+      clearTimeout(mapCardHydrationTimerRef.current)
+      mapCardHydrationTimerRef.current = null
+    }
+    const card = resolveActiveSellerMapCard(hoveredMapCardRef.current, selectedMapCardRef.current)
+    if (!card) return
+
+    const propertyId = text(card.feature.property_id)
+    const applySellerCardUpdate: React.Dispatch<React.SetStateAction<MapCardState>> = (updater) => {
+      setSelectedMapCard((current) => {
+        if (current?.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
+        return typeof updater === 'function' ? updater(current) : updater
+      })
+      setHoveredMapCard((current) => {
+        if (current?.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
+        return typeof updater === 'function' ? updater(current) : updater
+      })
+    }
+
+    const runHydration = () => hydrateSellerMapCard(card, applySellerCardUpdate)
+    if (card.intent === 'hover') {
+      mapCardHydrationTimerRef.current = setTimeout(runHydration, 90)
+    } else {
+      runHydration()
+    }
+    return () => {
+      if (mapCardHydrationTimerRef.current) {
+        clearTimeout(mapCardHydrationTimerRef.current)
+        mapCardHydrationTimerRef.current = null
+      }
+    }
+  }, [activeSellerCardHydrationKey, hydrateSellerMapCard])
+
+  useEffect(() => {
+    const map = mapRef.current
+    const containerEl = containerRef.current
+    if (!map || !containerEl) return
+
+    const syncMapCardAnchors = () => {
+      const containerBounds = containerEl.getBoundingClientRect()
+      const containerSize = { width: containerBounds.width, height: containerBounds.height }
+      const projectAnchor = (coordinates: [number, number]) => {
+        try {
+          const pixelPoint = map.project(coordinates)
+          return { x: pixelPoint.x, y: pixelPoint.y }
+        } catch {
+          return null
+        }
+      }
+
+      setHoveredMapCard((current) => {
+        if (!current?.coordinates) return current
+        const anchor = projectAnchor(current.coordinates)
+        if (!anchor) return current
+        return { ...current, anchor, containerSize }
+      })
+      setSelectedMapCard((current) => {
+        if (!current?.coordinates) return current
+        const anchor = projectAnchor(current.coordinates)
+        if (!anchor) return current
+        return { ...current, anchor, containerSize }
+      })
+    }
+
+    map.on('move', syncMapCardAnchors)
+    map.on('resize', syncMapCardAnchors)
+    return () => {
+      map.off('move', syncMapCardAnchors)
+      map.off('resize', syncMapCardAnchors)
+    }
+  }, [mapRef.current, containerRef.current])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -4925,155 +4616,7 @@ export function InboxCommandMap({
     }
 
     const applyThemeBasemapPaint = (map: maplibregl.Map, theme: CommandMapThemeDefinition) => {
-      const layers = map.getStyle()?.layers ?? []
-      const tone = theme.baseStyleTone
-      layers.forEach((layer) => {
-        const typedLayer = layer as StyleLayerLike
-        if (!typedLayer.id || isCustomLayer(typedLayer.id)) return
-        const id = lower(typedLayer.id)
-        const sourceLayer = lower(typedLayer['source-layer'])
-        const token = `${id} ${sourceLayer}`
-
-        try {
-          if (typedLayer.type === 'background') {
-            map.setPaintProperty(
-              typedLayer.id,
-              'background-color',
-              tone === 'light_street' ? '#edf3f8'
-                : tone === 'terrain' ? '#111613'
-                  : tone === 'matrix' ? '#020805'
-                    : tone === 'red_ops' ? '#14080a'
-                      : tone === 'executive' ? '#060b16'
-                        : tone === 'blueprint' ? '#071821'
-                          : tone === 'monochrome' ? '#040506'
-                            : tone === 'night_vision' ? '#071510'
-                              : '#070d15',
-            )
-          }
-          if (typedLayer.type === 'fill') {
-            const fillColor =
-              tone === 'light_street'
-                ? (token.includes('water') ? '#dbeafe' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#eaf4e8' : '#f8fbfd')
-                : tone === 'terrain'
-                  ? (token.includes('water') ? '#14241b' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#1d2818' : '#171a16')
-                  : tone === 'matrix'
-                    ? (token.includes('water') ? '#03120d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#07150f' : '#050a08')
-                    : tone === 'red_ops'
-                      ? (token.includes('water') ? '#24090d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#1b0d10' : '#18090b')
-                      : tone === 'executive'
-                        ? (token.includes('water') ? '#09182d' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#101628' : '#0b1120')
-                        : tone === 'blueprint'
-                          ? (token.includes('water') ? '#082538' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0c1f2a' : '#07131d')
-                          : tone === 'monochrome'
-                            ? (token.includes('water') ? '#07090c' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#090c10' : '#040506')
-                            : tone === 'night_vision'
-                              ? (token.includes('water') ? '#071f19' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0a1814' : '#07110f')
-                              : (token.includes('water') ? '#0e2034' : token.includes('park') || token.includes('landcover') || token.includes('landuse') ? '#0d1520' : '#0a1220')
-            map.setPaintProperty(typedLayer.id, 'fill-color', fillColor)
-            map.setPaintProperty(typedLayer.id, 'fill-opacity', tone === 'terrain' ? 0.18 : tone === 'light_street' ? 0.84 : tone === 'monochrome' ? 0.96 : 0.9)
-          }
-          if (typedLayer.type === 'line') {
-            const roadColor =
-              tone === 'light_street'
-                ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#9aa7b7' : '#cbd5e1')
-                : tone === 'terrain'
-                  ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#93a172' : '#45533a')
-                  : tone === 'matrix'
-                    ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#0f7b4f' : '#114733')
-                    : tone === 'red_ops'
-                      ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#8f2e34' : '#5a1d22')
-                      : tone === 'executive'
-                        ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#4e6fbf' : '#29375a')
-                        : tone === 'blueprint'
-                          ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#4cb7df' : '#1f6d87')
-                          : tone === 'monochrome'
-                            ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#58616e' : '#2b3038')
-                            : tone === 'night_vision'
-                              ? (token.includes('road') || token.includes('transport') || token.includes('highway') ? '#26b879' : '#175f45')
-                              : '#3a81ae'
-            map.setPaintProperty(typedLayer.id, 'line-color', roadColor)
-            map.setPaintProperty(typedLayer.id, 'line-opacity', token.includes('road') || token.includes('highway') ? (tone === 'monochrome' ? 0.66 : 0.9) : 0.72)
-          }
-          if (typedLayer.type === 'symbol') {
-            const textColor =
-              tone === 'light_street'
-                ? (token.includes('postal') || token.includes('zip') ? '#475569' : token.includes('poi') ? '#64748b' : token.includes('place') || token.includes('city') || token.includes('town') ? '#0f172a' : '#334155')
-                : tone === 'terrain'
-                  ? (token.includes('postal') || token.includes('zip') ? '#f1e7ba' : token.includes('poi') ? '#cfdb9c' : token.includes('place') || token.includes('city') || token.includes('town') ? '#f7f5d0' : '#e4efb6')
-                  : tone === 'matrix'
-                    ? (token.includes('postal') || token.includes('zip') ? '#6debb0' : token.includes('poi') ? '#5ccf97' : token.includes('place') || token.includes('city') || token.includes('town') ? '#d8ffe8' : '#8bd6b0')
-                    : tone === 'red_ops'
-                      ? (token.includes('postal') || token.includes('zip') ? '#ffb7a8' : token.includes('poi') ? '#f28f82' : token.includes('place') || token.includes('city') || token.includes('town') ? '#ffd4c9' : '#d8898d')
-                      : tone === 'executive'
-                        ? (token.includes('postal') || token.includes('zip') ? '#9cbcff' : token.includes('poi') ? '#8da8de' : token.includes('place') || token.includes('city') || token.includes('town') ? '#eef4ff' : '#b6caef')
-                        : tone === 'blueprint'
-                          ? (token.includes('postal') || token.includes('zip') ? '#95e5ff' : token.includes('poi') ? '#74d2f7' : token.includes('place') || token.includes('city') || token.includes('town') ? '#dff7ff' : '#9ccce0')
-                          : tone === 'monochrome'
-                            ? (token.includes('postal') || token.includes('zip') ? '#a4b4c7' : token.includes('poi') ? '#8492a6' : token.includes('place') || token.includes('city') || token.includes('town') ? '#e2e8f0' : '#a4b0bf')
-                            : tone === 'night_vision'
-                              ? (token.includes('postal') || token.includes('zip') ? '#98f8c6' : token.includes('poi') ? '#7ce9b2' : token.includes('place') || token.includes('city') || token.includes('town') ? '#e6fff0' : '#9fe4c2')
-                              : (token.includes('postal') || token.includes('zip') ? '#9edfff' : token.includes('poi') ? '#7ed6ff' : token.includes('place') || token.includes('city') || token.includes('town') ? '#eef8ff' : '#9fbbd7')
-            if (typedLayer.paint && 'text-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'text-color', textColor)
-            if (typedLayer.paint && 'text-halo-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'text-halo-color', tone === 'light_street' ? 'rgba(255,255,255,0.96)' : tone === 'matrix' ? 'rgba(2,8,5,0.94)' : tone === 'red_ops' ? 'rgba(20,8,10,0.92)' : 'rgba(8,10,15,0.92)')
-            if (typedLayer.paint && 'icon-color' in typedLayer.paint) map.setPaintProperty(typedLayer.id, 'icon-color', tone === 'light_street' ? '#64748b' : tone === 'matrix' ? '#00c46a' : tone === 'red_ops' ? '#ff7a72' : tone === 'blueprint' ? '#57d5ff' : tone === 'night_vision' ? '#6affb7' : '#7ecfff')
-          }
-          if (typedLayer.type === 'raster') {
-            // Keep overlay themes readable: light hue shifts on the basemap, avoid crushing brightness.
-            const saturation =
-              tone === 'satellite' ? -0.12
-                : tone === 'light_street' ? 0
-                  : tone === 'terrain' ? 0.18
-                    : tone === 'monochrome' ? -1
-                      : tone === 'blueprint' ? 0.42
-                        : tone === 'executive' ? 0.28
-                          : tone === 'night_vision' ? 0.4
-                            : tone === 'matrix' ? 0.44
-                              : tone === 'red_ops' ? 0.38
-                                : tone === 'dark_ops' ? -0.22 : -0.28
-            const contrast =
-              tone === 'light_street' ? 0.04
-                : tone === 'terrain' ? 0.12
-                  : tone === 'monochrome' ? 0.35
-                    : tone === 'blueprint' ? 0.14
-                      : tone === 'executive' ? 0.08
-                        : tone === 'red_ops' ? 0.16
-                          : tone === 'matrix' ? 0.18
-                            : tone === 'night_vision' ? 0.16
-                              : tone === 'dark_ops' ? 0.2 : 0.18
-            const brightnessMin =
-              tone === 'light_street' ? 0.1
-                : tone === 'satellite' ? 0.05
-                  : tone === 'terrain' ? 0.05
-                    : tone === 'executive' ? 0.08
-                      : 0.04
-            const brightnessMax =
-              tone === 'light_street' ? 1
-                : tone === 'satellite' ? 0.92
-                  : tone === 'terrain' ? 0.84
-                    : tone === 'monochrome' ? 0.72
-                      : tone === 'executive' ? 0.96
-                        : tone === 'red_ops' || tone === 'blueprint' || tone === 'night_vision' || tone === 'matrix'
-                          ? 0.92
-                          : tone === 'dark_ops' ? 0.88 : 0.9
-            const hueRotate =
-              tone === 'red_ops' ? 318
-                : tone === 'executive' ? 32
-                  : tone === 'blueprint' ? 178
-                    : tone === 'night_vision' ? 92
-                      : tone === 'matrix' ? 108
-                        : tone === 'dark_ops' ? 195
-                          : tone === 'monochrome' ? 0
-                            : 0
-            map.setPaintProperty(typedLayer.id, 'raster-saturation', saturation)
-            map.setPaintProperty(typedLayer.id, 'raster-contrast', contrast)
-            map.setPaintProperty(typedLayer.id, 'raster-brightness-min', brightnessMin)
-            map.setPaintProperty(typedLayer.id, 'raster-brightness-max', brightnessMax)
-            map.setPaintProperty(typedLayer.id, 'raster-hue-rotate', hueRotate)
-          }
-        } catch {
-          // Keep map resilient when a style layer lacks a property.
-        }
-      })
+      applyVisualPresetBasemapPaint(map, theme.id, isCustomLayer)
     }
 
     const updateCustomThemeLayers = (map: maplibregl.Map, theme: CommandMapThemeDefinition) => {
@@ -5142,7 +4685,6 @@ export function InboxCommandMap({
         map.setPaintProperty(SOLD_COMPS_CLUSTER_LAYER_IDS.core, 'circle-color', soldCompColor)
       }
 
-      // Property universe — retheme clusters and markers to match active theme
       const puTokens = getMapThemeTokens(theme.id)
       if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)) {
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, 'circle-color', buildClusterRingExpr(puTokens) as maplibregl.ExpressionSpecification)
@@ -5166,31 +4708,34 @@ export function InboxCommandMap({
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-width', puTokens.markerIconHaloWidth)
       }
 
-      const pinAccent = theme.accentColor
-      const pinColorExpr = ['coalesce', ['get', 'pin_color'], pinAccent] as maplibregl.ExpressionSpecification
-      const pinRingExpr = ['coalesce', ['get', 'execution_ring_color'], ['get', 'pin_color'], `${pinAccent}66`] as maplibregl.ExpressionSpecification
+      const themeIdentity = getCommandMapThemeIdentity(theme.id)
+      const pinColorExpr = ['coalesce', ['get', 'pin_color'], themeIdentity.pinGlowHue] as maplibregl.ExpressionSpecification
       if (map.getLayer(SELLER_PINS_LAYER_IDS.glow)) {
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-opacity', UNIVERSAL_PIN_GLOW_OPACITY_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.ring)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.ring, 'circle-stroke-color', pinRingExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.ring, 'circle-stroke-color', UNIVERSAL_PIN_RING_STROKE_EXPR as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.ring, 'circle-stroke-width', UNIVERSAL_PIN_RING_WIDTH_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-color', ['coalesce', ['get', 'ring_color'], pinColorExpr] as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.core)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.core, 'circle-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.core, 'circle-color', ['coalesce', ['get', 'glass_color'], themeIdentity.pinGlassBody] as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.core, 'circle-opacity', UNIVERSAL_PIN_GLASS_OPACITY_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.icon)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-color', ['coalesce', ['get', 'icon_color'], themeIdentity.pinIconTint] as maplibregl.ExpressionSpecification)
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-halo-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-size', UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterGlow)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterGlow, 'circle-color', clusterPalette.glow)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterGlow, 'circle-color', buildSellerClusterRingExpr(themeIdentity.clusterTint) as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCore)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-color', clusterPalette.core)
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-stroke-color', clusterPalette.stroke)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-color', buildSellerClusterCoreExpr(clusterPalette.core) as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCore, 'circle-stroke-color', buildSellerClusterStrokeExpr(clusterPalette.stroke) as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCount)) {
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.clusterCount, 'text-color', clusterPalette.label)
@@ -5275,7 +4820,7 @@ export function InboxCommandMap({
           : tone === 'red_ops' ? 'rgba(170, 45, 52, 0.18)'
             : tone === 'blueprint' ? 'rgba(35, 130, 185, 0.16)'
               : tone === 'executive' ? 'rgba(195, 160, 80, 0.16)'
-                : tone === 'night_vision' ? 'rgba(28, 130, 88, 0.16)'
+                : tone === 'radar_night' ? 'rgba(28, 130, 88, 0.16)'
                   : tone === 'monochrome' ? 'rgba(0, 0, 0, 0.22)'
                     : tone === 'light_street' ? 'rgba(255, 255, 255, 0.01)'
                       : 'rgba(28, 68, 130, 0.14)'
@@ -5285,11 +4830,11 @@ export function InboxCommandMap({
             : tone === 'executive' ? 0.12
               : tone === 'red_ops' ? 0.14
                 : tone === 'blueprint' ? 0.12
-                  : tone === 'night_vision' || tone === 'matrix' ? 0.12
+                  : tone === 'radar_night' || tone === 'matrix' ? 0.12
                     : tone === 'dark_ops' ? 0.1
                       : 0.1
       const showGrid = tone === 'matrix' || tone === 'blueprint'
-      const showRadar = tone === 'night_vision'
+      const showRadar = tone === 'radar_night'
 
       if (map.getLayer(THEME_TINT_LAYER_ID)) {
         map.setPaintProperty(THEME_TINT_LAYER_ID, 'fill-color', tintColor)
@@ -5460,8 +5005,24 @@ export function InboxCommandMap({
           type: 'geojson',
           data: sellerPinsGeojsonRef.current,
           cluster: true,
-          clusterRadius: 40,
-          clusterMaxZoom: 11,
+          clusterRadius: 48,
+          clusterMaxZoom: 12,
+          clusterProperties: SELLER_PIN_CLUSTER_PROPERTIES as Record<string, maplibregl.ExpressionSpecification>,
+        })
+      }
+
+      if (!map.getLayer(SELLER_PINS_LAYER_IDS.hit)) {
+        map.addLayer({
+          id: SELLER_PINS_LAYER_IDS.hit,
+          type: 'circle',
+          source: SELLER_PINS_SOURCE_ID,
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 14, 12, 20],
+            'circle-color': '#000000',
+            'circle-opacity': 0,
+          },
+          layout: { visibility: 'none' },
         })
       }
 
@@ -5472,10 +5033,10 @@ export function InboxCommandMap({
           source: SELLER_PINS_SOURCE_ID,
           filter: ['!', ['has', 'point_count']],
           paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 14, 12, 22],
+            'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 6, 16, 12, 26], ['*', ['coalesce', ['get', 'glow_strength'], 0.5], 8]],
             'circle-color': ['coalesce', ['get', 'pin_color'], '#38d0f0'],
-            'circle-opacity': 0.18,
-            'circle-blur': 1.0,
+            'circle-opacity': UNIVERSAL_PIN_GLOW_OPACITY_EXPR as maplibregl.ExpressionSpecification,
+            'circle-blur': 0.85,
           },
           layout: { visibility: 'none' },
         })
@@ -5488,12 +5049,12 @@ export function InboxCommandMap({
           source: SELLER_PINS_SOURCE_ID,
           filter: ['!', ['has', 'point_count']],
           paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 9, 12, 13],
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 14],
             'circle-color': 'rgba(0,0,0,0)',
-            'circle-stroke-color': ['coalesce', ['get', 'execution_ring_color'], ['get', 'pin_color'], 'rgba(56,208,240,0.4)'],
-            'circle-stroke-width': 1.4,
+            'circle-stroke-color': UNIVERSAL_PIN_RING_STROKE_EXPR as maplibregl.ExpressionSpecification,
+            'circle-stroke-width': UNIVERSAL_PIN_RING_WIDTH_EXPR as maplibregl.ExpressionSpecification,
             'circle-opacity': 0,
-            'circle-stroke-opacity': 0.65,
+            'circle-stroke-opacity': ['*', ['coalesce', ['get', 'ring_opacity'], 0.92], ['coalesce', ['get', 'focus_opacity'], 1]],
           },
           layout: { visibility: 'none' },
         })
@@ -5523,11 +5084,12 @@ export function InboxCommandMap({
           source: SELLER_PINS_SOURCE_ID,
           filter: ['!', ['has', 'point_count']],
           paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 3.2, 12, 5.2],
-            'circle-color': ['coalesce', ['get', 'pin_color'], '#38d0f0'],
-            'circle-opacity': 0,
-            'circle-stroke-color': 'rgba(8,12,18,0)',
-            'circle-stroke-width': 0,
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 7.2, 12, 9.6],
+            'circle-color': ['coalesce', ['get', 'glass_color'], 'rgba(8,12,18,0.82)'],
+            'circle-opacity': UNIVERSAL_PIN_GLASS_OPACITY_EXPR as maplibregl.ExpressionSpecification,
+            'circle-stroke-color': ['coalesce', ['get', 'ring_color'], ['get', 'pin_color'], '#38d0f0'],
+            'circle-stroke-width': 1.2,
+            'circle-stroke-opacity': ['*', 0.42, ['coalesce', ['get', 'focus_opacity'], 1]],
           },
           layout: { visibility: 'none' },
         })
@@ -5552,66 +5114,52 @@ export function InboxCommandMap({
               'comm',  PIN_ICON.comm,
               PIN_ICON.default,
             ],
-            'icon-size': [
-              'interpolate', ['linear'], ['zoom'],
-              6,  0.22,
-              10, 0.32,
-              13, 0.44,
-              16, 0.56,
-            ],
+            'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
             'icon-allow-overlap': true,
             'icon-ignore-placement': true,
             'icon-pitch-alignment': 'map',
             'icon-rotation-alignment': 'map',
           },
           paint: {
-            'icon-color': ['coalesce', ['get', 'pin_color'], '#38d0f0'],
-            'icon-opacity': ['coalesce', ['get', 'focusOpacity'], 1],
+            'icon-color': ['coalesce', ['get', 'icon_color'], ['get', 'ring_color'], '#e8f4fc'],
+            'icon-opacity': ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1],
             'icon-halo-color': ['coalesce', ['get', 'pin_color'], '#38d0f0'],
-            'icon-halo-width': 1.2,
-            'icon-halo-blur': 1.5,
+            'icon-halo-width': 1.6,
+            'icon-halo-blur': 1.2,
           },
         } as maplibregl.LayerSpecification)
       }
 
       if (!map.getLayer(SELLER_PINS_LAYER_IDS.clusterGlow)) {
+        const clusterIdentity = getCommandMapThemeIdentity(activeThemeRef.current.id)
         map.addLayer({
           id: SELLER_PINS_LAYER_IDS.clusterGlow,
           type: 'circle',
           source: SELLER_PINS_SOURCE_ID,
           filter: ['has', 'point_count'],
           paint: {
-            'circle-radius': ['step', ['get', 'point_count'], 26, 20, 34, 80, 42, 200, 52, 500, 62],
-            'circle-color': [
-              'step', ['get', 'point_count'],
-              'rgba(56,208,240,0.06)',
-              20,  'rgba(245,184,73,0.07)',
-              80,  'rgba(212,64,76,0.08)',
-            ],
+            'circle-radius': ['step', ['get', 'point_count'], 28, 20, 36, 80, 44, 200, 54, 500, 64],
+            'circle-color': buildSellerClusterRingExpr(clusterIdentity.clusterTint) as maplibregl.ExpressionSpecification,
             'circle-opacity': 1,
-            'circle-blur': 1.2,
+            'circle-blur': 0.9,
           },
           layout: { visibility: 'none' },
         })
       }
 
       if (!map.getLayer(SELLER_PINS_LAYER_IDS.clusterCore)) {
+        const clusterPalette = activeThemeRef.current.clusterPalette
         map.addLayer({
           id: SELLER_PINS_LAYER_IDS.clusterCore,
           type: 'circle',
           source: SELLER_PINS_SOURCE_ID,
           filter: ['has', 'point_count'],
           paint: {
-            'circle-radius': ['step', ['get', 'point_count'], 14, 20, 18, 80, 22, 200, 26, 500, 30],
-            'circle-color': 'rgba(7,11,22,0.84)',
-            'circle-stroke-color': [
-              'step', ['get', 'point_count'],
-              'rgba(56,208,240,0.62)',
-              20,  'rgba(245,184,73,0.66)',
-              80,  'rgba(212,64,76,0.72)',
-            ],
-            'circle-stroke-width': 1.5,
-            'circle-opacity': 1,
+            'circle-radius': ['step', ['get', 'point_count'], 15, 20, 19, 80, 23, 200, 27, 500, 31],
+            'circle-color': buildSellerClusterCoreExpr(clusterPalette.core) as maplibregl.ExpressionSpecification,
+            'circle-stroke-color': buildSellerClusterStrokeExpr(clusterPalette.stroke) as maplibregl.ExpressionSpecification,
+            'circle-stroke-width': 2,
+            'circle-opacity': 0.96,
           },
           layout: { visibility: 'none' },
         })
@@ -5966,7 +5514,7 @@ export function InboxCommandMap({
             paint: {
               'circle-radius': ['+', 14, ['*', ['get', 'glowStrength'], 18]],
               'circle-blur': 1,
-              'circle-opacity': ['*', ['case', ['==', ['get', 'glowStrength'], 1], 0.44, ['>=', ['get', 'glowStrength'], 0.8], 0.32, ['>=', ['get', 'glowStrength'], 0.52], 0.22, 0.12], ['get', 'focusOpacity']],
+              'circle-opacity': ['*', ['case', ['==', ['get', 'glowStrength'], 1], 0.52, ['>=', ['get', 'glowStrength'], 0.8], 0.40, ['>=', ['get', 'glowStrength'], 0.52], 0.30, 0.18], ['get', 'focusOpacity']],
               'circle-color': ['get', 'stageColor'],
             },
           })
@@ -6291,7 +5839,10 @@ export function InboxCommandMap({
           layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
         })
       }
-      // ── Property universe — viewport-fetched full property database ──────
+      // ── Property universe — asset-type markers + classic clusters ───────────
+      const puTokens = getMapThemeTokens(activeThemeRef.current.id)
+      const puAnchor = map.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
+
       if (!map.getSource(PROPERTY_UNIVERSE_SOURCE_ID)) {
         map.addSource(PROPERTY_UNIVERSE_SOURCE_ID, {
           type: 'geojson',
@@ -6308,11 +5859,6 @@ export function InboxCommandMap({
           },
         })
       }
-
-      const puTheme = activeThemeRef.current.id
-      const puTokens = getMapThemeTokens(puTheme)
-      // Insert below existing cluster layers so active seller pins render above
-      const puAnchor = map.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
 
       if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)) {
         map.addLayer({
@@ -6377,7 +5923,7 @@ export function InboxCommandMap({
           source: PROPERTY_UNIVERSE_SOURCE_ID,
           filter: ['!', ['has', 'point_count']],
           paint: {
-            'circle-radius': 12,
+            'circle-radius': 14,
             'circle-blur': puTokens.markerGlowBlur,
             'circle-opacity': puTokens.markerGlowOpacity,
             'circle-color': buildMarkerColorExpr(puTokens) as maplibregl.ExpressionSpecification,
@@ -6393,17 +5939,10 @@ export function InboxCommandMap({
           source: PROPERTY_UNIVERSE_SOURCE_ID,
           filter: ['!', ['has', 'point_count']],
           layout: {
-            'icon-image': ['match', ['get', 'assetType'],
-              'sfr', 'nexus-pin-sfr', 'condo', 'nexus-pin-sfr', 'townhome', 'nexus-pin-sfr',
-              'multifamily_small', 'nexus-pin-multi', 'multifamily_large', 'nexus-pin-apt',
-              'storage', 'nexus-pin-storage', 'shopping_plaza', 'nexus-pin-retail', 'retail', 'nexus-pin-retail',
-              'office', 'nexus-pin-office', 'industrial', 'nexus-pin-industrial', 'warehouse', 'nexus-pin-industrial',
-              'mixed_use', 'nexus-pin-comm', 'hotel', 'nexus-pin-hotel', 'mhp', 'nexus-pin-mhp',
-              'land', 'nexus-pin-land', 'commercial', 'nexus-pin-comm', 'nexus-pin-default',
-            ] as maplibregl.ExpressionSpecification,
+            'icon-image': PROPERTY_UNIVERSE_MARKER_ICON_EXPR,
             'icon-size': 0.32,
-            'icon-allow-overlap': false,
-            'icon-ignore-placement': false,
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
             visibility: 'none',
           },
           paint: {
@@ -6415,53 +5954,101 @@ export function InboxCommandMap({
         }, puAnchor)
       }
 
-      // Click cluster → zoom in
-      // Click individual marker → open property card via seller context
-      // Guard: only register once per map instance (addMapLayers runs on every style.load)
       if (!propUnivHandlersRegisteredRef.current) {
         propUnivHandlersRegisteredRef.current = true
 
-        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, (e) => {
-          e.preventDefault()
+        const handlePropertyUniverseClusterClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          ;(e as { _clickHandled?: boolean })._clickHandled = true
           const feature = e.features?.[0]
           if (!feature?.geometry || feature.geometry.type !== 'Point') return
           const clusterId = feature.properties?.cluster_id as number
           const coords = feature.geometry.coordinates as [number, number]
           const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource
           void src.getClusterExpansionZoom(clusterId).then((zoom) => {
-            map.easeTo({ center: coords, zoom: zoom + 0.5, duration: 700 })
+            map.easeTo({ center: coords, zoom: Math.max(zoom, map.getZoom() + 0.8), duration: 700 })
           })
-        })
+        }
 
-        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.markers, (e) => {
+        const handlePropertyUniversePinClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          ;(e as { _clickHandled?: boolean })._clickHandled = true
           const feature = e.features?.[0]
           if (!feature?.properties) return
-          const propertyId = String(feature.properties.propertyId || feature.properties.property_id || '')
+          const props = feature.properties as Record<string, unknown>
+          const propertyId = text(props.property_id || props.propertyId)
           if (!propertyId) return
-          const coords = (feature.geometry as Point).coordinates as [number, number]
+          const coordinates = (feature.geometry as Point).coordinates as [number, number]
           hoverPopupRef.current?.remove()
           setSelectedClusterSummary(null)
           setSelectedCensusFeature(null)
+          setSelectedBuyerPurchase(null)
+          setSelectedSoldComp(null)
+          const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+          const masterOwnerId = text(props.master_owner_id || props.owner_id)
           onSelectSellerContextRef.current?.({
             propertyId,
+            masterOwnerId: masterOwnerId || undefined,
             sourceView: 'map',
             intent: 'open_seller',
           })
-          const bounds = map.getBounds()
-          if (!bounds.contains(coords)) map.easeTo({ center: coords, duration: 500 })
-        })
+          setHoveredMapCard(null)
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            id: propertyId,
+            anchor,
+            coordinates,
+            feature: props,
+            containerSize,
+          })
+          if (!map.getBounds().contains(coordinates)) map.easeTo({ center: coordinates, duration: 500 })
+        }
 
-        // Use circle layers (markerGlow + clusterCore) for cursor — NOT the symbol layer.
-        // Registering mouseenter on symbol layers causes MapLibre to run hit detection
-        // against the symbol bucket on every mousemove, which crashes when the bucket's
-        // string table is not yet populated (race with tile loading).
+        const handlePropertyUniversePinHover = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          const feature = e.features?.[0]
+          if (!feature?.properties || selectedMapCardRef.current?.kind === 'seller') return
+          const props = feature.properties as Record<string, unknown>
+          const propertyId = text(props.property_id || props.propertyId)
+          if (!propertyId) return
+          const coordinates = (feature.geometry as Point).coordinates as [number, number]
+          if (clearPinHoverTimerRef.current) {
+            clearTimeout(clearPinHoverTimerRef.current)
+            clearPinHoverTimerRef.current = null
+          }
+          const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+          let pixelPoint = { x: anchor.x, y: anchor.y }
+          try { pixelPoint = map.project(coordinates) } catch { /* ignore */ }
+          map.getCanvas().style.cursor = 'pointer'
+          setHoveredMapCard({
+            kind: 'seller',
+            intent: 'hover',
+            id: propertyId,
+            anchor: { x: pixelPoint.x, y: pixelPoint.y },
+            coordinates,
+            feature: props,
+            containerSize,
+          })
+        }
+
+        const clearPropertyUniverseHover = () => {
+          if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
+          clearPinHoverTimerRef.current = setTimeout(() => {
+            if (selectedMapCardRef.current?.kind === 'seller') return
+            setHoveredMapCard(null)
+          }, 120)
+        }
+
+        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, handlePropertyUniverseClusterClick)
+        for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, PROPERTY_UNIVERSE_LAYER_IDS.markers]) {
+          map.on('click', lid, handlePropertyUniversePinClick)
+        }
+        map.on('mouseenter', PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, handlePropertyUniversePinHover)
+        map.on('mouseleave', PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, clearPropertyUniverseHover)
         for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow]) {
           map.on('mouseenter', lid, () => { map.getCanvas().style.cursor = 'pointer' })
           map.on('mouseleave', lid, () => { map.getCanvas().style.cursor = '' })
         }
       }
 
-      // ── Selected property star marker — always on top of all other layers ──
       if (!map.getSource(SELECTED_STAR_SOURCE_ID)) {
         map.addSource(SELECTED_STAR_SOURCE_ID, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       }
@@ -6470,18 +6057,8 @@ export function InboxCommandMap({
           id: SELECTED_STAR_LAYER_ID,
           type: 'symbol',
           source: SELECTED_STAR_SOURCE_ID,
-          layout: {
-            'icon-image': PIN_ICON.selected,
-            'icon-size': 0.54,
-            'icon-allow-overlap': true,
-            'icon-ignore-placement': true,
-          },
-          paint: {
-            'icon-color': '#FFD700',
-            'icon-opacity': 1,
-            'icon-halo-color': 'rgba(0,0,0,0.55)',
-            'icon-halo-width': 2,
-          },
+          layout: { visibility: 'none', 'icon-image': PIN_ICON.selected, 'icon-size': 0 },
+          paint: { 'icon-opacity': 0 },
         })
       }
 
@@ -6589,49 +6166,93 @@ export function InboxCommandMap({
     const center: [number, number] = selectedPin ? [selectedPin.lng, selectedPin.lat] : [-96, 37.8]
     setBaseStyleLoading(true)
     styleLoadStartedAtRef.current = performance.now()
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: resolveStyle(mapStyleModeRef.current),
-      center,
-      zoom: zoomedIn ? 10.5 : 4.4,
-      minZoom: 2,
-      maxZoom: 18,
-      attributionControl: false,
-      dragRotate: false,
-      pitchWithRotate: false,
-    })
+
+    let map: maplibregl.Map
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: resolveStyle(mapStyleModeRef.current),
+        center,
+        zoom: zoomedIn ? 10.5 : 4.4,
+        minZoom: 2,
+        maxZoom: 18,
+        attributionControl: false,
+        dragRotate: false,
+        pitchWithRotate: false,
+        canvasContextAttributes: {
+          antialias: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'default',
+          failIfMajorPerformanceCaveat: false,
+          desynchronized: false,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to initialize WebGL'
+      console.error('[CommandMap] WebGL initialization failed', error)
+      mapContextLostRef.current = true
+      setMapInitError(message)
+      setMapContextLost(true)
+      setBaseStyleLoading(false)
+      if (styleLoadTimerRef.current) {
+        clearTimeout(styleLoadTimerRef.current)
+        styleLoadTimerRef.current = null
+      }
+      return () => {
+        if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
+      }
+    }
+
     mapRef.current = map
     mapContextLostRef.current = false
+    setMapInitError(null)
     activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
+
+    map.on('error', (event) => {
+      const err = (event as { error?: Error & { type?: string } }).error
+      const message = err?.message ?? ''
+      const type = err?.type ?? ''
+      if (type === 'webglcontextcreationerror' || message === 'Failed to initialize WebGL') {
+        console.error('[CommandMap] Map runtime WebGL error', err)
+        mapContextLostRef.current = true
+        setMapInitError(message || 'Map renderer failed')
+        setMapContextLost(true)
+        setBaseStyleLoading(false)
+      }
+    })
 
     const canvas = map.getCanvas?.()
     const handleContextLost = (event: Event) => {
       console.warn('[CommandMap] WebGL context lost')
-      mapContextLostRef.current = true
-      setMapContextLost(true)
       event.preventDefault()
+      if (mapContextLossOverlayTimerRef.current) clearTimeout(mapContextLossOverlayTimerRef.current)
+      mapContextLossOverlayTimerRef.current = setTimeout(() => {
+        mapContextLossOverlayTimerRef.current = null
+        if (!mapRef.current) return
+        try {
+          const canvas = mapRef.current.getCanvas()
+          const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl')
+          if (gl && !gl.isContextLost()) return
+        } catch { /* fall through to overlay */ }
+        mapContextLostRef.current = true
+        setMapInitError('Map renderer lost its graphics context')
+        setMapContextLost(true)
+      }, 800)
     }
     const handleContextRestored = () => {
       console.info('[CommandMap] WebGL context restored')
-      // Delay recovery to the next animation frame so MapLibre's own recovery
-      // handlers run first. If the map is still broken after that (shader compile
-      // failure), force a full remount via mapContainerKey.
+      if (mapContextLossOverlayTimerRef.current) {
+        clearTimeout(mapContextLossOverlayTimerRef.current)
+        mapContextLossOverlayTimerRef.current = null
+      }
+      mapContextLostRef.current = false
+      setMapInitError(null)
+      setMapContextLost(false)
       requestAnimationFrame(() => {
-        if (!mapRef.current) return
         try {
-          const gl = mapRef.current.getCanvas().getContext('webgl') ?? mapRef.current.getCanvas().getContext('webgl2')
-          if (!gl || gl.isContextLost()) {
-            // Context still lost — force full remount
-            mapContextLostRef.current = false
-            setMapContextLost(false)
-            setMapContainerKey((k) => k + 1)
-            mapContainerKeyRef.current += 1
-            return
-          }
+          mapRef.current?.resize()
         } catch { /* ignore */ }
-        mapContextLostRef.current = false
-        setMapContextLost(false)
       })
     }
     canvas?.addEventListener('webglcontextlost', handleContextLost, false)
@@ -6697,15 +6318,58 @@ export function InboxCommandMap({
         const id = String(feature.properties?.conversation_id || '')
         if (!id) return
         hoverPopupRef.current?.remove()
-        threadPopupRef.current?.remove()
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
-        setActiveSellerPinPopup(null)
+        setSelectedBuyerPurchase(null)
         setSelectedPinId(id)
         onSelectThreadIdRef.current?.(id)
+        const props = feature.properties as unknown as CommandMapPin
+        const hydratedThread = hydratedThreadsByIdRef.current.get(id)
+          || hydratedThreadsByKeyRef.current.get(id)
+          || null
+        const sellerRecord = commandMapPinToSellerCardRecord(props, hydratedThread as Record<string, unknown> | null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        setActiveThreadPopup({ id, coordinates })
-        map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 12), duration: 700 })
+        const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+        const mobile = isMobileRef.current
+        const existingSeller = selectedMapCardRef.current?.kind === 'seller'
+          ? selectedMapCardRef.current
+          : hoveredMapCardRef.current?.kind === 'seller'
+            ? hoveredMapCardRef.current
+            : null
+
+        if (mobile) {
+          if (existingSeller?.id === id && existingSeller.intent === 'hover') {
+            setSelectedMapCard({ ...existingSeller, intent: 'selected', anchor, containerSize, coordinates })
+            setHoveredMapCard(null)
+          } else {
+            setSelectedMapCard(null)
+            setHoveredMapCard({
+              kind: 'seller',
+              intent: 'hover',
+              id,
+              anchor,
+              coordinates,
+              feature: sellerRecord,
+              containerSize,
+            })
+          }
+        } else {
+          setHoveredMapCard(null)
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            id,
+            anchor,
+            coordinates,
+            feature: sellerRecord,
+            containerSize,
+          })
+        }
+
+        const bounds = map.getBounds()
+        if (!bounds.contains(coordinates)) {
+          map.easeTo({ center: coordinates, duration: 500 })
+        }
       }
 
       const handleClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
@@ -6714,8 +6378,6 @@ export function InboxCommandMap({
         if (!feature) return
         const clusterId = Number(feature.properties?.cluster_id)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        setActiveThreadPopup(null)
-        setActiveSellerPinPopup(null)
         setSelectedBuyerPurchase(null)
         setSelectedClusterSummary(null)
         if (Number.isFinite(clusterId)) {
@@ -6735,35 +6397,78 @@ export function InboxCommandMap({
         })
       }
 
-      const handlePinHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      const showSellerHoverCard = (
+        record: Record<string, unknown>,
+        coordinates: [number, number],
+        cardId: string,
+      ) => {
+        if (mapContextLostRef.current || !isStyleSafe(map)) return
+        if (selectedMapCardRef.current?.kind === 'seller') return
+
+        const existingHover = hoveredMapCardRef.current
+        if (
+          existingHover?.kind === 'seller'
+          && existingHover.intent === 'hover'
+          && existingHover.id === cardId
+        ) {
+          cancelClearPinHover()
+          return
+        }
+
         cancelClearPinHover()
         setHoveredClusterSummary(null)
+        hoverPopupRef.current?.remove()
+        hoverPopupRef.current = null
+
+        const propertyId = text(record.property_id || record.propertyId)
+        const cachedPin = propertyId ? sellerPinDetailsCacheRef.current.get(propertyId) : null
+        const mergedRecord = cachedPin
+          ? sanitizeSellerPinRecord({ ...record, ...cachedPin } as Partial<CommandMapSellerPin>)
+          : sanitizeSellerPinRecord(record as Partial<CommandMapSellerPin>)
+
+        let pixelPoint = { x: 0, y: 0 }
+        try {
+          pixelPoint = map.project(coordinates)
+        } catch {
+          return
+        }
+        const containerEl = containerRef.current
+        const containerBounds = containerEl?.getBoundingClientRect()
+        const containerWidth = containerBounds?.width ?? window.innerWidth
+        const containerHeight = containerBounds?.height ?? window.innerHeight
+        map.getCanvas().style.cursor = 'pointer'
+        setHoveredMapCard({
+          kind: 'seller',
+          intent: 'hover',
+          id: cardId,
+          anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          coordinates,
+          feature: mergedRecord as Record<string, unknown>,
+          containerSize: { width: containerWidth, height: containerHeight },
+        })
+      }
+
+      const handlePinHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         const feature = event.features?.[0]
         if (!feature?.properties) return
         const props = feature.properties as unknown as CommandMapPin
         const hydratedThread = hydratedThreadsByIdRef.current.get(props.conversation_id)
           || hydratedThreadsByKeyRef.current.get(props.conversation_id)
           || null
-        const sellerRecord = { ...((hydratedThread as Record<string, unknown> | null) ?? {}), ...props }
+        const sellerRecord = commandMapPinToSellerCardRecord(props, hydratedThread as Record<string, unknown> | null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const popup = hoverPopupRef.current ?? new maplibregl.Popup({
-          closeButton: false,
-          closeOnClick: false,
-          offset: 18,
-          className: 'nx-icm-hover-popup',
-          maxWidth: sellerCardMaxWidthForLayout(layoutMode),
-        })
-        popup
-          .setLngLat(coordinates)
-          .setHTML(buildHoverCardMarkup(sellerRecord, layoutMode))
-          .addTo(map)
-        hoverPopupRef.current = popup
+        showSellerHoverCard(
+          sellerRecord,
+          coordinates,
+          String(props.property_id || props.conversation_id || coordinates.join(',')),
+        )
       }
 
       const clearPinHover = () => {
         // Hover-intent delay: when moving between pin sub-layers (core → ring → glow),
         // MapLibre fires mouseleave then mouseenter rapidly. The 120ms delay prevents
         // the hover popup from flickering by giving the next mouseenter time to cancel.
+        sellerClusterHoverSeq += 1
         if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
         clearPinHoverTimerRef.current = setTimeout(() => {
           clearPinHoverTimerRef.current = null
@@ -6782,26 +6487,50 @@ export function InboxCommandMap({
       }
 
       const handleSellerPinHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
-        cancelClearPinHover()
-        setHoveredClusterSummary(null)
         const feature = event.features?.[0]
         if (!feature?.properties) return
-        const props = sanitizeSellerPinRecord(feature.properties as unknown as Partial<CommandMapSellerPin>)
+        const props = feature.properties as unknown as Partial<CommandMapSellerPin>
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const pixelPoint = map.project(coordinates)
-        const containerEl = containerRef.current
-        const containerBounds = containerEl?.getBoundingClientRect()
-        const containerWidth = containerBounds?.width ?? window.innerWidth
-        const containerHeight = containerBounds?.height ?? window.innerHeight
-        map.getCanvas().style.cursor = 'pointer'
         if (DEBUG_MAP_CARDS) console.debug('[MapCard] seller hover', { id: props.property_id, feature: props })
-        setHoveredMapCard({
-          kind: 'seller',
-          intent: 'hover',
-          id: String(props.property_id || (props as any).seller_id || coordinates.join(',')),
-          anchor: { x: pixelPoint.x, y: pixelPoint.y },
-          feature: props as Record<string, unknown>,
-          containerSize: { width: containerWidth, height: containerHeight },
+        showSellerHoverCard(
+          props as Record<string, unknown>,
+          coordinates,
+          String(props.property_id || coordinates.join(',')),
+        )
+      }
+
+      let sellerClusterHoverSeq = 0
+      const handleSellerPinClusterHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        const feature = event.features?.[0]
+        if (!feature?.properties) return
+        const clusterId = Number(feature.properties?.cluster_id)
+        if (!Number.isFinite(clusterId)) return
+        const coordinates = (feature.geometry as Point).coordinates as [number, number]
+        const hoverSeq = ++sellerClusterHoverSeq
+        const source = safeGetSource(map, SELLER_PINS_SOURCE_ID) as (maplibregl.GeoJSONSource & {
+          getClusterLeaves?: (
+            clusterId: number,
+            limit: number,
+            offset: number,
+            callback: (error: Error | null, features: maplibregl.MapGeoJSONFeature[]) => void,
+          ) => void
+        }) | null
+        if (!source?.getClusterLeaves) return
+        source.getClusterLeaves(clusterId, 24, 0, (error, leaves) => {
+          if (hoverSeq !== sellerClusterHoverSeq) return
+          if (error || !leaves?.length) return
+          const bestLeaf = leaves
+            .map((leaf) => leaf.properties as Record<string, unknown>)
+            .sort((left, right) => (
+              Number(right.render_priority ?? 0) - Number(left.render_priority ?? 0)
+              || Number(right.priority_score ?? 0) - Number(left.priority_score ?? 0)
+            ))[0]
+          if (!bestLeaf) return
+          showSellerHoverCard(
+            bestLeaf,
+            coordinates,
+            `seller-cluster-${clusterId}-${String(bestLeaf.property_id ?? '')}`,
+          )
         })
       }
 
@@ -6830,18 +6559,13 @@ export function InboxCommandMap({
         if (!propertyId) return
         hoverPopupRef.current?.remove()
         hoverPopupRef.current = null
-        threadPopupRef.current?.remove()
-        setHoveredMapCard(null)
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
         setSelectedSoldComp(null)
-        // Clear old MapLibre Popup state — seller click now uses React overlay
-        setActiveThreadPopup(null)
-        setActiveSellerPinPopup(null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
+        const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
 
-        // Match the click to a hydrated thread for inbox panel sync (non-overlay use)
         const matchedThread = hydratedThreadsByPropertyIdRef.current.get(propertyId)
           || visibleHydratedThreadsRef.current.find((thread) => text((thread as any).propertyId || (thread as any).property_id) === propertyId)
           || hydratedThreadsByIdRef.current.get(propertyId)
@@ -6855,46 +6579,52 @@ export function InboxCommandMap({
           intent: 'open_seller',
         })
 
+        const cardId = matchedThread ? matchedThread.id : propertyId
+        const mergedFeature = matchedThread
+          ? { ...props, ...matchedThread as unknown as Record<string, unknown> }
+          : props as Record<string, unknown>
+
         if (matchedThread) {
           setSelectedPinId(matchedThread.id)
           onSelectThreadIdRef.current?.(matchedThread.id)
-          // Merge thread data into pin for the card
-          const mergedFeature = { ...props, ...matchedThread as unknown as Record<string, unknown> }
-          const pixelPoint = map.project(coordinates)
-          const containerEl = containerRef.current
-          const containerBounds = containerEl?.getBoundingClientRect()
-          const containerWidth = containerBounds?.width ?? window.innerWidth
-          const containerHeight = containerBounds?.height ?? window.innerHeight
-          setSelectedMapCard({
-            kind: 'seller',
-            intent: 'selected',
-            id: matchedThread.id,
-            anchor: { x: pixelPoint.x, y: pixelPoint.y },
-            feature: mergedFeature,
-            containerSize: { width: containerWidth, height: containerHeight },
-          })
         } else {
           setSelectedPinId(propertyId)
-          const pixelPoint = map.project(coordinates)
-          const containerEl = containerRef.current
-          const containerBounds = containerEl?.getBoundingClientRect()
-          const containerWidth = containerBounds?.width ?? window.innerWidth
-          const containerHeight = containerBounds?.height ?? window.innerHeight
-          setSelectedMapCard({
-            kind: 'seller',
-            intent: 'selected',
-            id: propertyId,
-            anchor: { x: pixelPoint.x, y: pixelPoint.y },
-            feature: props as Record<string, unknown>,
-            containerSize: { width: containerWidth, height: containerHeight },
-          })
         }
 
-        // Only pan if the pin is outside the current viewport — don't force-zoom
+        const mobile = isMobileRef.current
+        const existingSeller = selectedMapCardRef.current?.kind === 'seller'
+          ? selectedMapCardRef.current
+          : hoveredMapCardRef.current?.kind === 'seller'
+            ? hoveredMapCardRef.current
+            : null
+
+        const nextCard: MapCardState = {
+          kind: 'seller',
+          intent: 'selected',
+          id: cardId,
+          anchor,
+          coordinates,
+          feature: mergedFeature,
+          containerSize,
+        }
+
+        if (mobile) {
+          if (existingSeller?.id === cardId && existingSeller.intent === 'hover') {
+            setSelectedMapCard({ ...existingSeller, ...nextCard, intent: 'selected' })
+            setHoveredMapCard(null)
+          } else if (existingSeller?.id === cardId && existingSeller.intent === 'selected') {
+            return
+          } else {
+            setSelectedMapCard(null)
+            setHoveredMapCard({ ...nextCard, intent: 'hover' })
+          }
+        } else {
+          setHoveredMapCard(null)
+          setSelectedMapCard(nextCard)
+        }
+
         const bounds = map.getBounds()
-        const [pinLng, pinLat] = coordinates
-        const isPinVisible = bounds.contains([pinLng, pinLat])
-        if (!isPinVisible) {
+        if (!bounds.contains(coordinates)) {
           map.easeTo({ center: coordinates, duration: 500 })
         }
       }
@@ -6954,13 +6684,29 @@ export function InboxCommandMap({
       }
 
       const handleSoldCompHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+        if (mapContextLostRef.current || !isStyleSafe(map)) return
         if (selectedMapCardRef.current?.kind === 'sold_comp') return
-        cancelClearPinHover()
         const feature = event.features?.[0]
         const props = feature?.properties as RecentSoldComp | undefined
         if (!feature || !props) return
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const pixelPoint = map.project(coordinates)
+        const cardId = String(props.property_id || coordinates.join(','))
+        const existingHover = hoveredMapCardRef.current
+        if (
+          existingHover?.kind === 'sold_comp'
+          && existingHover.intent === 'hover'
+          && existingHover.id === cardId
+        ) {
+          cancelClearPinHover()
+          return
+        }
+        cancelClearPinHover()
+        let pixelPoint = { x: 0, y: 0 }
+        try {
+          pixelPoint = map.project(coordinates)
+        } catch {
+          return
+        }
         const containerEl = containerRef.current
         const containerBounds = containerEl?.getBoundingClientRect()
         const containerWidth = containerBounds?.width ?? window.innerWidth
@@ -6969,14 +6715,15 @@ export function InboxCommandMap({
         hoverPopupRef.current = null
         map.getCanvas().style.cursor = 'pointer'
         if (DEBUG_MAP_CARDS) console.debug('[MapCard] comp hover', { id: props.property_id, feature: props })
-        
+
         const rawComp = soldComps.find((item) => String(item.property_id) === String(props.property_id)) || props
 
         setHoveredMapCard({
           kind: 'sold_comp',
           intent: 'hover',
-          id: String(props.property_id || coordinates.join(',')),
+          id: cardId,
           anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          coordinates,
           feature: rawComp as unknown as Record<string, unknown>,
           containerSize: { width: containerWidth, height: containerHeight },
         })
@@ -7009,6 +6756,7 @@ export function InboxCommandMap({
           intent: 'selected',
           id: String(props.property_id || coordinates.join(',')),
           anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          coordinates,
           feature: rawComp as unknown as Record<string, unknown>,
           containerSize: { width: containerWidth, height: containerHeight },
         })
@@ -7121,6 +6869,7 @@ export function InboxCommandMap({
       map.on('click', SOLD_COMPS_LAYER_IDS.marker, handleSoldCompClick)
       map.on('click', SOLD_COMPS_LAYER_IDS.label, handleSoldCompClick)
       map.on('click', SOLD_COMPS_CLUSTER_LAYER_IDS.core, handleSoldCompClusterClick)
+      map.on('click', SELLER_PINS_LAYER_IDS.hit, handleSellerPinClick)
       map.on('click', SELLER_PINS_LAYER_IDS.core, handleSellerPinClick)
       map.on('click', SELLER_PINS_LAYER_IDS.icon, handleSellerPinClick)
       map.on('click', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterClick)
@@ -7134,12 +6883,10 @@ export function InboxCommandMap({
           'command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core',
           'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core',
           SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core,
-          SELLER_PINS_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.clusterCore,
+          SELLER_PINS_LAYER_IDS.hit, SELLER_PINS_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.clusterCore,
           PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
         ])
         if (rendered.length === 0) {
-          setActiveThreadPopup(null)
-          setActiveSellerPinPopup(null)
           setSelectedBuyerPurchase(null)
           setSelectedSoldComp(null)
           setCompCardAnchor(null)
@@ -7159,12 +6906,10 @@ export function InboxCommandMap({
       map.on('mouseenter', 'command-buyer-purchase-core', handleBuyerHover)
       map.on('mouseenter', 'command-buyer-profile-core', handleBuyerHover)
       map.on('mouseenter', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompHover)
-      map.on('mouseenter', SOLD_COMPS_LAYER_IDS.marker, handleSoldCompHover)
-      // sold-comps-label is a symbol layer — skip mouseenter to avoid crash
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.core, handleSellerPinHover)
-      // seller-pins-icon is a symbol layer — skip mouseenter; core provides coverage
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.ring, handleSellerPinHover)
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.glow, handleSellerPinHover)
+      // sold-comps-marker/label are symbol layers — hit layer covers hover without layer churn
+      // Single wide hit layer avoids rapid mouseenter/mouseleave churn across ring/glow/pulse.
+      map.on('mouseenter', SELLER_PINS_LAYER_IDS.hit, handleSellerPinHover)
+      map.on('mouseenter', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterHover)
       map.on('mouseleave', 'command-pin-core-raw', clearPinHover)
       map.on('mouseleave', 'command-pin-core-clustered', clearPinHover)
       map.on('mouseleave', 'command-pin-cluster-core', clearClusterHover)
@@ -7172,10 +6917,8 @@ export function InboxCommandMap({
       map.on('mouseleave', 'command-buyer-purchase-core', clearPinHover)
       map.on('mouseleave', 'command-buyer-profile-core', clearPinHover)
       map.on('mouseleave', SOLD_COMPS_LAYER_IDS.hit, clearPinHover)
-      map.on('mouseleave', SOLD_COMPS_LAYER_IDS.marker, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.core, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.ring, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.glow, clearPinHover)
+      map.on('mouseleave', SELLER_PINS_LAYER_IDS.hit, clearPinHover)
+      map.on('mouseleave', SELLER_PINS_LAYER_IDS.clusterCore, clearPinHover)
 
       const pulseConfig: Record<PinFeatureProps['pulseTier'], { baseRadius: number; maxAdd: number; baseOpacity: number; speed: number }> = {
         fast: { baseRadius: 13, maxAdd: 8, baseOpacity: 0.26, speed: 1.65 },
@@ -7190,6 +6933,7 @@ export function InboxCommandMap({
       let pulsesSuppressed = false
       const animate = () => {
         if (!mapRef.current) return
+        frame = (frame + 1) % 360
         const shouldAnimatePins =
           !reducedMotionRef.current
           && performanceSettingsRef.current?.animation === 'full'
@@ -7206,11 +6950,9 @@ export function InboxCommandMap({
             }
             pulsesSuppressed = true
           }
-          animationRef.current = requestAnimationFrame(animate)
-          return
+        } else {
+          pulsesSuppressed = false
         }
-        pulsesSuppressed = false
-        frame = (frame + 1) % 360
         const makeRadiusExpr = (tier: PinFeatureProps['pulseTier'], modeValue: PinFeatureProps['pulseMode']) => {
           const cfg = pulseConfig[tier]
           const phase = frame / 60
@@ -7234,6 +6976,7 @@ export function InboxCommandMap({
           return cfg.baseOpacity * (1 - wave * 0.55)
         }
         try {
+          if (shouldAnimatePins) {
           ;(['command-pin-pulse-raw', 'command-pin-pulse-clustered'] as const).forEach((layerId) => {
             if (!map.getLayer(layerId)) return
             map.setPaintProperty(layerId, 'circle-radius', [
@@ -7269,7 +7012,7 @@ export function InboxCommandMap({
             ])
           })
 
-          if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
+          if (shouldAnimatePins && map.getLayer(SELLER_PINS_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
             map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-radius', [
               'match', ['coalesce', ['get', 'pulse_style'], 'none'],
               'pulse_strong', makeRadiusExpr('fast', 'continuous'),
@@ -7287,6 +7030,7 @@ export function InboxCommandMap({
               0
             ])
           }
+          }
 
         } catch {
           return
@@ -7299,7 +7043,7 @@ export function InboxCommandMap({
       // Symbol layer mouseenter triggers MapLibre hit detection on every mousemove
       // which crashes with "Out of bounds" when the symbol bucket string table is
       // not yet populated (race condition during tile loading).
-      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, SELLER_PINS_LAYER_IDS.core] as const).forEach((layerId) => {
+      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, ...SELLER_PIN_HOVER_LAYER_IDS, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow] as const).forEach((layerId) => {
         if (mapRef.current?.getLayer(layerId)) {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer' })
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = '' })
@@ -7312,17 +7056,16 @@ export function InboxCommandMap({
     })
 
     return () => {
+      if (mapContextLossOverlayTimerRef.current) {
+        clearTimeout(mapContextLossOverlayTimerRef.current)
+        mapContextLossOverlayTimerRef.current = null
+      }
       canvas?.removeEventListener('webglcontextlost', handleContextLost)
       canvas?.removeEventListener('webglcontextrestored', handleContextRestored)
       if (animationRef.current !== null) cancelAnimationFrame(animationRef.current)
       if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
       if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
       hoverPopupRef.current?.remove()
-      threadPopupRootRef.current?.unmount()
-      threadPopupRootRef.current = null
-      threadPopupHostRef.current = null
-      threadPopupRef.current?.remove()
-      threadPopupRef.current = null
       applyCommandMapThemeRef.current = null
       propUnivHandlersRegisteredRef.current = false
       try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
@@ -7352,12 +7095,12 @@ export function InboxCommandMap({
   }, [mapStyleMode])
 
   // ── Property universe viewport fetch ─────────────────────────────────────
-  // Fetches the full property database for the current viewport whenever
-  // the user pans/zooms to a new area. Only runs at zoom >= 10 (cluster view).
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
     if (!viewportBounds || viewportZoom < 10) return
+    const showAcquisitionField = mapMode === 'acquisition' || mapMode === 'command' || mapMode === 'territory'
+    if (!showAcquisitionField) return
 
     propertyUniverseAbortRef.current?.abort()
     propertyUniverseAbortRef.current = new AbortController()
@@ -7371,14 +7114,12 @@ export function InboxCommandMap({
       zoom: Math.round(viewportZoom),
     }, signal).then((result) => {
       if (!result.ok || signal.aborted) return
+      propertyUniverseRawFeaturesRef.current = result.data.data.features as GeoJSON.Feature<Point>[]
       const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-      src?.setData({
-        type: 'FeatureCollection',
-        features: result.data.data.features as GeoJSON.Feature<Point>[],
-      })
+      src?.setData({ type: 'FeatureCollection', features: propertyUniverseRawFeaturesRef.current })
     }).catch(() => { /* aborted or network error */ })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportBounds, viewportZoom, baseStyleLoading])
+  }, [viewportBounds, viewportZoom, baseStyleLoading, mapMode])
 
   // ── Property universe zoom-gated visibility ───────────────────────────────
   // zoom < 10      → hidden entirely (national view)
@@ -7389,8 +7130,9 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
 
-    const showClusters = viewportZoom >= 10
-    const showMarkers = viewportZoom >= 11.75
+    const showAcquisitionField = mapMode === 'acquisition' || mapMode === 'command' || mapMode === 'territory'
+    const showClusters = showAcquisitionField && viewportZoom >= 10
+    const showMarkers = showAcquisitionField && viewportZoom >= 11.75
     const vis = (v: boolean) => v ? 'visible' : 'none'
 
     for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterCount]) {
@@ -7406,7 +7148,7 @@ export function InboxCommandMap({
         baseFilter,
         ['any',
           ['in', ['get', 'markerState'], ['literal', [...PRIORITY_MARKER_STATES]]],
-          ['in', ['get', 'assetType'],   ['literal', [...PRIORITY_ASSET_TYPES]]],
+          ['in', ['get', 'assetType'], ['literal', [...PRIORITY_ASSET_TYPES]]],
           ['>=', ['get', 'acquisitionScore'], 85],
         ],
       ]
@@ -7415,7 +7157,14 @@ export function InboxCommandMap({
         if (map.getLayer(lid)) map.setFilter(lid, activeFilter)
       }
     }
-  }, [viewportZoom, baseStyleLoading])
+  }, [baseStyleLoading, mapMode, viewportZoom])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!isStyleSafe(map)) return
+    if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow)) return
+    map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, 'circle-radius', isMobile ? 22 : 14)
+  }, [isMobile])
 
   useEffect(() => {
     const map = mapRef.current
@@ -8041,20 +7790,12 @@ export function InboxCommandMap({
       return true
     })
     const normalizedFilteredPins = nextFilteredPins.map((pin) => sanitizeSellerPinRecord(pin))
-    const palette = activeThemeRef.current.pinPalette
-    const dataKey = `${mapStyleMode}:${normalizedFilteredPins.length}:${normalizedFilteredPins[0]?.property_id || ''}:${normalizedFilteredPins[normalizedFilteredPins.length - 1]?.property_id || ''}`
+    const themeId = activeThemeRef.current.id
+    const dataKey = `${mapStyleMode}:${mapMode}:${normalizedFilteredPins.length}:${normalizedFilteredPins[0]?.property_id || ''}:${normalizedFilteredPins[normalizedFilteredPins.length - 1]?.property_id || ''}`
     setSellerPins(normalizedFilteredPins)
     if (dataKey === lastSellerPinsDataKeyRef.current) return
     const features = normalizedFilteredPins.map((normalizedPin) => {
-      const sellerState = resolveEffectiveSellerState(normalizedPin)
-      const executionState = lower(normalizedPin.execution_state)
-      const resolvedPinColor =
-        palette[sellerState]
-        || palette[executionState]
-        || palette.not_contacted
-      const executionRingColor =
-        (executionState ? palette[executionState] : undefined)
-        || 'transparent'
+      const visuals = buildUniversalSellerPinVisuals(normalizedPin, themeId, mapMode)
       return ({
         type: 'Feature' as const,
         id: `seller-pin-${normalizedPin.property_id}`,
@@ -8062,8 +7803,9 @@ export function InboxCommandMap({
         properties: {
           ...normalizedPin,
           id: `seller-pin-${normalizedPin.property_id}`,
-          pin_color: resolvedPinColor,
-          execution_ring_color: executionRingColor,
+          seller_state: resolveEffectiveSellerState(normalizedPin),
+          priority_score: normalizedPin.priority_score ?? normalizedPin.final_acquisition_score ?? 0,
+          ...visuals,
           propTypeSlug: normalizePropertyTypeSlug(normalizedPin.property_type ?? 'default'),
         },
       })
@@ -8079,7 +7821,7 @@ export function InboxCommandMap({
       Rendered Buyer Comps: ${soldCompsGeojsonRef.current?.features?.length ?? 0}
       Current Zoom: ${mapRef.current?.getZoom()?.toFixed(2) ?? 'Unknown'}
     `)
-  }, [mapStyleMode, pinPipeline.mapped, sellerPinLayers, sellerPinsRaw])
+  }, [mapMode, mapStyleMode, pinPipeline.mapped, sellerPinLayers, sellerPinsRaw])
 
   // ── Push census + buyer demand GeoJSON to map sources ─────────────────────
   useEffect(() => {
@@ -8126,6 +7868,7 @@ export function InboxCommandMap({
     if (!isStyleSafe(map) || !sellerPinLayers.sellerPins) return
     const pointFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
     const clusterFilter: maplibregl.FilterSpecification = ['has', 'point_count']
+    if (map.getLayer(SELLER_PINS_LAYER_IDS.hit)) map.setFilter(SELLER_PINS_LAYER_IDS.hit, pointFilter)
     if (map.getLayer(SELLER_PINS_LAYER_IDS.core)) map.setFilter(SELLER_PINS_LAYER_IDS.core, pointFilter)
     if (map.getLayer(SELLER_PINS_LAYER_IDS.icon)) map.setFilter(SELLER_PINS_LAYER_IDS.icon, pointFilter)
     if (map.getLayer(SELLER_PINS_LAYER_IDS.glow)) map.setFilter(SELLER_PINS_LAYER_IDS.glow, pointFilter)
@@ -8174,47 +7917,23 @@ export function InboxCommandMap({
   }, [buyerDemandLayers])
 
   useEffect(() => {
-    if (!mapRef.current || visiblePins.length === 0) return
-    if (selectedPin) {
-      mapRef.current.easeTo({
-        center: [selectedPin.lng, selectedPin.lat],
-        zoom: Math.max(mapRef.current.getZoom(), zoomedIn ? 13 : 11.25),
-        duration: 680,
-        offset: dockTier === 'full' ? [150, 0] : [0, 0],
-      })
-      return
-    }
-    const uniqueCoords = new Map<string, [number, number]>()
-    visiblePins.forEach((pin) => {
-      uniqueCoords.set(`${pin.lng}:${pin.lat}`, [pin.lng, pin.lat])
+    if (!mapRef.current || !selectedThread?.id) return
+    if (!focusPin || !isMappableCoord(focusPin.lat, focusPin.lng)) return
+    const selectionKey = [
+      selectedThread.id,
+      focusPin.conversation_id,
+      focusPin.lat,
+      focusPin.lng,
+    ].join(':')
+    if (lastAutoNavSelectionRef.current === selectionKey) return
+    lastAutoNavSelectionRef.current = selectionKey
+    mapRef.current.easeTo({
+      center: [focusPin.lng, focusPin.lat],
+      zoom: Math.max(mapRef.current.getZoom(), zoomedIn ? 13 : 11.25),
+      duration: 680,
+      offset: dockTier === 'full' ? [150, 0] : [0, 0],
     })
-    const coords = Array.from(uniqueCoords.values())
-    const padding =
-      dockTier === 'full'
-        ? { top: 116, right: 72, bottom: 118, left: 36 }
-        : dockTier === 'compact'
-          ? { top: 92, right: 64, bottom: 90, left: 24 }
-          : { top: 72, right: 24, bottom: 132, left: 24 }
-
-    if (coords.length === 1) {
-      mapRef.current.easeTo({ center: coords[0], zoom: zoomedIn ? 12 : 8, duration: 500 })
-      return
-    }
-    const bounds = coords.reduce(
-      (acc, [lng, lat]) => ({
-        minLng: Math.min(acc.minLng, lng),
-        maxLng: Math.max(acc.maxLng, lng),
-        minLat: Math.min(acc.minLat, lat),
-        maxLat: Math.max(acc.maxLat, lat),
-      }),
-      { minLng: Infinity, maxLng: -Infinity, minLat: Infinity, maxLat: -Infinity },
-    )
-    mapRef.current.fitBounds([[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]], {
-      padding,
-      duration: 550,
-      maxZoom: zoomedIn ? 13 : 11,
-    })
-  }, [dockTier, selectedPin?.conversation_id, visiblePins.length > 0, zoomedIn])
+  }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn])
 
   const markets = Array.from(new Set(allPins.map((pin) => pin.market).filter(Boolean))).sort()
   const stages = LIFECYCLE_STAGE_ORDER.filter((code) =>
@@ -8244,14 +7963,34 @@ export function InboxCommandMap({
     return 'No visible pins found.'
   }, [allPins.length, filteredPins.length, pinPipeline.unmapped.length, visiblePins.length, sellerPins.length, sellerPinLayers.sellerPins])
 
-  const handleActivitySelect = (event: CommandMapActivityEvent) => {
-    onSelectActivity?.(event)
-    const center = centerMapOnActivity(event)
+  const openActivityTarget = (event: LiveActivityEvent, center: [number, number] | null) => {
     if (event.targetType === 'seller' && event.targetId) {
+      const resolvedCenter = center ?? centerMapOnActivity(event)
+      if (!resolvedCenter) return
       setSelectedPinId(event.targetId)
-      setActiveSellerPinPopup(null)
       onSelectThreadId?.(event.targetId)
-      if (center) setActiveThreadPopup({ id: event.targetId, coordinates: center })
+      const thread = hydratedThreadsById.get(event.targetId)
+        || hydratedThreadsByKey.get(event.targetId)
+        || threads.find((item) => item.id === event.targetId || String((item as any).threadKey || '') === event.targetId)
+        || null
+      const pin = visiblePins.find((item) => item.conversation_id === event.targetId)
+        || filteredPins.find((item) => item.conversation_id === event.targetId)
+      const sellerRecord = thread
+        ? { ...(thread as unknown as Record<string, unknown>) }
+        : pin
+          ? commandMapPinToSellerCardRecord(pin, null)
+          : { property_id: event.targetId }
+      const { anchor, containerSize } = buildMapCardContainerContext(mapRef.current, containerRef.current, resolvedCenter)
+      setHoveredMapCard(null)
+      setSelectedMapCard({
+        kind: 'seller',
+        intent: 'selected',
+        id: event.targetId,
+        anchor,
+        coordinates: resolvedCenter,
+        feature: sellerRecord,
+        containerSize,
+      })
     }
     if (event.targetType === 'buyer' && event.targetId) {
       const purchase = filteredBuyerPurchases.find((item) => item.buyerKey === event.targetId)
@@ -8278,11 +8017,18 @@ export function InboxCommandMap({
           intent: 'selected',
           id: String(comp.property_id),
           anchor: { x: pixelPoint.x, y: pixelPoint.y },
+          coordinates,
           feature: comp as unknown as Record<string, unknown>,
           containerSize: { width: containerWidth, height: containerHeight },
         })
       }
     }
+  }
+
+  const handleActivityFocus = (event: LiveActivityEvent) => {
+    onSelectActivity?.(event)
+    const center = centerMapOnActivity(event)
+    openActivityTarget(event, center)
     if (center) {
       mapRef.current?.easeTo({
         center,
@@ -8290,6 +8036,12 @@ export function InboxCommandMap({
         duration: 620,
       })
     }
+  }
+
+  const handleActivitySelect = (event: LiveActivityEvent) => {
+    onSelectActivity?.(event)
+    const center = centerMapOnActivity(event)
+    openActivityTarget(event, center)
   }
 
   return (
@@ -8303,6 +8055,7 @@ export function InboxCommandMap({
         mapThemeRootClassName(mapStyleMode),
         activeThemeDefinition.overlayClassName,
         mapStyleMode === 'matrix' && 'matrix-grid-overlay matrix-control-panel matrix-card-scanline matrix-pin-glow',
+        mapMode === 'command' && 'is-command-mode',
         `is-layout-${layoutMode}`,
         filtersOpen && 'is-controls-open',
         fullHeight && 'nx-icm--full',
@@ -8432,6 +8185,14 @@ export function InboxCommandMap({
                           <span>{def.label}</span>
                         </label>
                       ))}
+                      {mapMode === 'command' && (<>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.sellerPins} onChange={(e) => setSellerPinLayers((c) => ({ ...c, sellerPins: e.target.checked }))} /><span>Command Surface</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.hot} onChange={(e) => setSellerPinLayers((c) => ({ ...c, hot: e.target.checked }))} /><span>Hot / Urgent</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.newReplies} onChange={(e) => setSellerPinLayers((c) => ({ ...c, newReplies: e.target.checked }))} /><span>New Replies</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.negotiating} onChange={(e) => setSellerPinLayers((c) => ({ ...c, negotiating: e.target.checked }))} /><span>Negotiating</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.issues} onChange={(e) => setSellerPinLayers((c) => ({ ...c, issues: e.target.checked }))} /><span>Follow-Up / Issues</span></label>
+                        <label className="nx-icm__layer-toggle"><input type="checkbox" checked={sellerPinLayers.queued} onChange={(e) => setSellerPinLayers((c) => ({ ...c, queued: e.target.checked }))} /><span>Live Automations</span></label>
+                      </>)}
                     </div>
                   </div>
 
@@ -9277,14 +9038,14 @@ export function InboxCommandMap({
         </div>
       )}
 
-      {selectedUnmapped && (
+      {!isMobile && selectedUnmapped ? (
         <div className="nx-icm__empty" style={{ top: '56px', left: '50%', transform: 'translateX(-50%)', padding: '12px 16px' }}>
           <div className="nx-icm__empty-title">Selected Conversation Is Unmapped</div>
           <p className="nx-icm__empty-sub">No coordinates are available for {selectedUnmapped.seller_name || 'this conversation'}.</p>
         </div>
-      )}
+      ) : null}
 
-      {selectedHiddenByFilters && selectedBasePin && !showSelectedHidden && (
+      {!isMobile && selectedHiddenByFilters && selectedBasePin && !showSelectedHidden ? (
         <div className="nx-icm__empty" style={{ top: '56px', left: '50%', transform: 'translateX(-50%)', padding: '12px 16px' }}>
           <div className="nx-icm__empty-title">Selected Hidden By Filters</div>
           <p className="nx-icm__empty-sub">The selected conversation has coordinates but is excluded by the current filters.</p>
@@ -9292,7 +9053,7 @@ export function InboxCommandMap({
             Show Selected
           </button>
         </div>
-      )}
+      ) : null}
 
       {dockTier === 'full' && showKpiBadges && !filtersOpen && !commandMode && <div className="nx-icm__overlay-kpis" aria-label="Map mode KPIs">
         {kpiChips.map((chip) => (
@@ -9311,14 +9072,19 @@ export function InboxCommandMap({
 
       {!commandMode && (
         <CommandMapLiveActivityRail
-          events={liveActivityEvents}
+          feed={liveActivityFeed}
           settings={liveActivitySettings}
-          performanceSettings={performanceSettings}
           isUltrawide={isUltrawide}
+          isMobile={isMobile}
           reducedMotion={prefersReducedMotion || performanceSettings.animation !== 'full'}
+          conversationOpen={mobileConversationOpen}
+          composerActive={mobileConversationOpen}
+          sellerCardExpanded={Boolean(activeSellerMapCard?.intent === 'selected')}
+          sellerCardPeek={Boolean(activeSellerMapCard?.intent === 'hover')}
           onSettingsChange={patchLiveActivitySettings}
           onPerformanceChange={patchPerformanceSettings}
           onSelectEvent={handleActivitySelect}
+          onFocusEvent={handleActivityFocus}
         />
       )}
 
@@ -9334,17 +9100,52 @@ export function InboxCommandMap({
         </div>
       )}
 
-      {/* MAP_CARD_AUDIT: unified hover card — replaces hoverPopupRef for seller and comp */}
-      {hoveredMapCard && !selectedMapCard && (
+      {activeSellerMapCard ? (
+        <MapEntityCard
+          key={activeSellerMapCard.id}
+          card={activeSellerMapCard}
+          subject={selectedThread}
+          onClose={() => {
+            if (activeSellerMapCard.intent === 'selected' && isMobile) {
+              setSelectedMapCard(null)
+              setHoveredMapCard({
+                ...activeSellerMapCard,
+                intent: 'hover',
+              })
+              return
+            }
+            setSelectedMapCard(null)
+            setHoveredMapCard(null)
+            onBackgroundClickRef.current?.()
+          }}
+          onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
+          onPeekToFocus={() => {
+            setSelectedMapCard({
+              ...activeSellerMapCard,
+              intent: 'selected',
+            })
+            setHoveredMapCard(null)
+          }}
+          sellerDraftText={quickReplyDraft}
+          onSellerDraftChange={onQuickReplyDraftChange}
+          onSellerSend={onQuickReplySend}
+          sellerMessagingDisabled={quickReplyDisabled}
+          clearHoverTimerRef={clearPinHoverTimerRef}
+          cancelClearHover={() => {
+            if (clearPinHoverTimerRef.current) {
+              clearTimeout(clearPinHoverTimerRef.current)
+              clearPinHoverTimerRef.current = null
+            }
+          }}
+        />
+      ) : null}
+
+      {hoveredMapCard?.kind === 'sold_comp' && !selectedMapCard && (
         <MapEntityCard
           card={hoveredMapCard}
           subject={selectedThread}
           onClose={() => setHoveredMapCard(null)}
           onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
-          onOpenDealIntelligence={hoveredMapCard.kind === 'seller' ? () => {
-            const pin = hoveredMapCard.feature
-            setDealIntelSheet({ type: 'seller', thread: null, pin: pin as unknown as CommandMapSellerPin })
-          } : undefined}
           clearHoverTimerRef={clearPinHoverTimerRef}
           cancelClearHover={() => {
             if (clearPinHoverTimerRef.current) {
@@ -9355,21 +9156,19 @@ export function InboxCommandMap({
         />
       )}
 
-      {/* MAP_CARD_AUDIT: unified selected card — replaces selectedSoldComp + compCardAnchor */}
-      {selectedMapCard && (
+      {selectedMapCard?.kind === 'sold_comp' ? (
         <MapEntityCard
           card={selectedMapCard}
           subject={selectedThread}
-          onClose={() => setSelectedMapCard(null)}
+          onClose={() => {
+            setSelectedMapCard(null)
+            onBackgroundClickRef.current?.()
+          }}
           onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
-          onOpenDealIntelligence={selectedMapCard.kind === 'seller' ? () => {
-            const pin = selectedMapCard.feature
-            setDealIntelSheet({ type: 'seller', thread: null, pin: pin as unknown as CommandMapSellerPin })
-          } : undefined}
-          onOpenCompIntel={selectedMapCard.kind === 'sold_comp' ? () => {
+          onOpenCompIntel={() => {
             const comp = selectedMapCard.feature as unknown as RecentSoldComp
             setDealIntelSheet({ type: 'comp', comp })
-          } : undefined}
+          }}
           clearHoverTimerRef={clearPinHoverTimerRef}
           cancelClearHover={() => {
             if (clearPinHoverTimerRef.current) {
@@ -9378,7 +9177,7 @@ export function InboxCommandMap({
             }
           }}
         />
-      )}
+      ) : null}
 
       {dealIntelSheet && (
         <DealIntelligenceSideSheet
@@ -9388,20 +9187,35 @@ export function InboxCommandMap({
       )}
 
       {mapContextLost && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,10,15,0.88)', backdropFilter: 'blur(4px)', gap: 12 }}>
-          <p style={{ color: '#94a3b8', margin: 0, fontSize: 13 }}>Map renderer paused — click reload map</p>
-          <button
-            type="button"
-            className="nx-icm__mode-tab is-active"
-            onClick={() => {
-              mapContextLostRef.current = false
-              setMapContextLost(false)
-              setMapContainerKey((k) => k + 1)
-              mapContainerKeyRef.current += 1
-            }}
-          >
-            Reload map
-          </button>
+        <div style={{ position: 'absolute', inset: 0, zIndex: 999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,10,15,0.94)', gap: 12, padding: '0 24px', textAlign: 'center' }}>
+          <p style={{ color: '#e2e8f0', margin: 0, fontSize: 14, fontWeight: 600 }}>Map renderer unavailable</p>
+          <p style={{ color: '#94a3b8', margin: 0, fontSize: 13, maxWidth: 420 }}>
+            {mapInitError || 'The command map paused its graphics context. Reload the map to continue.'}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button
+              type="button"
+              className="nx-icm__mode-tab is-active"
+              onClick={() => {
+                mapContextLostRef.current = false
+                setMapInitError(null)
+                setMapContextLost(false)
+                setMapContainerKey((k) => k + 1)
+                mapContainerKeyRef.current += 1
+              }}
+            >
+              Reload map
+            </button>
+            {(mapInitError?.toLowerCase().includes('blocked') || mapInitError?.toLowerCase().includes('failed to initialize')) ? (
+              <button
+                type="button"
+                className="nx-icm__mode-tab"
+                onClick={() => window.location.reload()}
+              >
+                Reload page
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
     </div>

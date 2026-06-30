@@ -11,11 +11,14 @@ const RANGE_OPTIONS = [
   { key: 'all', label: 'All time' },
 ] as const
 
+const MOBILE_KPI_KEYS = new Set(['sends', 'delivery_rate', 'reply_rate', 'templates_used'])
+
 interface TemplateIntelligenceHeaderProps {
   cards: TemplateKpiCard[]
   loading?: boolean
   filters: TemplateIntelligenceFilters
   globalRangeLabel?: string
+  isMobileLayout?: boolean
   onFiltersChange: (patch: Partial<TemplateIntelligenceFilters>) => void
   onCardClick?: (key: string) => void
 }
@@ -35,9 +38,55 @@ export function TemplateIntelligenceHeader({
   loading,
   filters,
   globalRangeLabel,
+  isMobileLayout = false,
   onFiltersChange,
   onCardClick,
 }: TemplateIntelligenceHeaderProps) {
+  const visibleCards = isMobileLayout
+    ? cards.filter((card) => MOBILE_KPI_KEYS.has(card.key))
+    : cards
+
+  const renderCard = (card: TemplateKpiCard) => (
+    <button
+      key={card.key}
+      type="button"
+      className={cls(
+        'occ-tpl-kpi-card',
+        isMobileLayout && 'occ-tpl-kpi-card--mobile',
+        loading && 'is-loading',
+        card.unavailable && 'is-unavailable',
+        card.insufficientData && 'is-insufficient',
+      )}
+      onClick={() => onCardClick?.(card.key)}
+      title={card.unavailable ? card.unavailableReason : undefined}
+    >
+      <span className="occ-tpl-kpi-card__label">{isMobileLayout ? card.label.replace(' Rate', '').replace('Templates Used', 'Used') : card.label}</span>
+      <span className="occ-tpl-kpi-card__value">{loading ? '—' : formatValue(card)}</span>
+      {!isMobileLayout && card.numerator != null && card.denominator != null && !card.unavailable && !loading && (
+        <span className="occ-tpl-kpi-card__denom">{card.numerator}/{card.denominator}</span>
+      )}
+      {!isMobileLayout && card.unavailable && !loading && (
+        <span className="occ-tpl-kpi-card__denom">{card.unavailableReason ?? 'Unavailable'}</span>
+      )}
+      {!isMobileLayout && card.priorDelta != null && !loading && !card.unavailable && (
+        <span className={cls('occ-tpl-kpi-card__delta', card.priorDelta >= 0 ? 'is-up' : 'is-down')}>
+          {card.priorDelta >= 0 ? '+' : ''}{card.priorDelta}{card.denominator != null ? 'pp' : ''}
+          {card.priorLabel ? ` ${card.priorLabel}` : ''}
+        </span>
+      )}
+    </button>
+  )
+
+  if (isMobileLayout) {
+    return (
+      <header className="occ-tpl-intel-header occ-tpl-intel-header--mobile">
+        <div className="occ-tpl-mobile-kpi-rail">
+          {visibleCards.map(renderCard)}
+        </div>
+      </header>
+    )
+  }
+
   return (
     <header className="occ-tpl-intel-header">
       <div className="occ-tpl-intel-header__top">
@@ -85,35 +134,7 @@ export function TemplateIntelligenceHeader({
         </p>
       )}
       <div className="occ-tpl-intel-header__cards">
-        {cards.map((card) => (
-          <button
-            key={card.key}
-            type="button"
-            className={cls(
-              'occ-tpl-kpi-card',
-              loading && 'is-loading',
-              card.unavailable && 'is-unavailable',
-              card.insufficientData && 'is-insufficient',
-            )}
-            onClick={() => onCardClick?.(card.key)}
-            title={card.unavailable ? card.unavailableReason : undefined}
-          >
-            <span className="occ-tpl-kpi-card__label">{card.label}</span>
-            <span className="occ-tpl-kpi-card__value">{loading ? '—' : formatValue(card)}</span>
-            {card.numerator != null && card.denominator != null && !card.unavailable && !loading && (
-              <span className="occ-tpl-kpi-card__denom">{card.numerator}/{card.denominator}</span>
-            )}
-            {card.unavailable && !loading && (
-              <span className="occ-tpl-kpi-card__denom">{card.unavailableReason ?? 'Unavailable'}</span>
-            )}
-            {card.priorDelta != null && !loading && !card.unavailable && (
-              <span className={cls('occ-tpl-kpi-card__delta', card.priorDelta >= 0 ? 'is-up' : 'is-down')}>
-                {card.priorDelta >= 0 ? '+' : ''}{card.priorDelta}{card.denominator != null ? 'pp' : ''}
-                {card.priorLabel ? ` ${card.priorLabel}` : ''}
-              </span>
-            )}
-          </button>
-        ))}
+        {visibleCards.map(renderCard)}
       </div>
     </header>
   )

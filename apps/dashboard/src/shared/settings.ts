@@ -165,6 +165,12 @@ export interface NexusSettings {
   atmosphericIntensity: number    // 0–1
   glowIntensity: number           // 0–1
   labelDensity: number            // 0–1
+
+  /** Mobile pinned app dock — same layout on every app/route */
+  pinnedAppDock: {
+    pinnedIds: string[]
+    recentIds: string[]
+  }
 }
 
 // ── Defaults ──────────────────────────────────────────────────────────────
@@ -270,6 +276,20 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   atmosphericIntensity: 0.7,
   glowIntensity: 0.6,
   labelDensity: 0.5,
+
+  pinnedAppDock: {
+    pinnedIds: [
+      '/inbox',
+      '/map',
+      '/pipeline',
+      '/campaign-command',
+      '/queue',
+      '/workflow-studio',
+      '/closing-desk',
+      '__deal_intelligence__',
+    ],
+    recentIds: [],
+  },
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@ export function RankedBuyerPanel({
   onSelectBuyer,
   onGradeFilter,
 }: Props) {
-  const dataState = projection?.market.dataState
+  const dataState = projection?.market?.dataState
   const buyers = (projection?.rankedBuyers ?? []).filter((b) => {
     if (gradeFilter === 'all') return true
     return b.matchGrade === gradeFilter

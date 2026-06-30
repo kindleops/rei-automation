@@ -75,12 +75,28 @@ function VirtualizedInboxListInner<T>({
 
   useEffect(() => {
     const api = listRef.current as ListImperativeAPI | null
-    if (!api || initialScrollOffset <= 0) return
-    api.scrollToRow({ index: Math.floor(initialScrollOffset / rowHeight), align: 'start', behavior: 'instant' })
-    lastOffsetRef.current = initialScrollOffset
-    onScrollOffsetChange?.(initialScrollOffset)
-    markListScrollOffset(initialScrollOffset)
-  }, [initialScrollOffset, listRef, onScrollOffsetChange, rowHeight])
+    if (!api || items.length === 0) return
+
+    const maxIndex = Math.max(0, items.length - 1)
+    const requestedIndex = Math.floor(initialScrollOffset / rowHeight)
+    const targetIndex = Math.min(Math.max(0, requestedIndex), maxIndex)
+    const targetOffset = targetIndex * rowHeight
+
+    if (initialScrollOffset > 0 && requestedIndex > maxIndex) {
+      lastOffsetRef.current = 0
+      onScrollOffsetChange?.(0)
+      markListScrollOffset(0)
+      api.scrollToRow({ index: 0, align: 'start', behavior: 'instant' })
+      return
+    }
+
+    if (initialScrollOffset <= 0) return
+
+    api.scrollToRow({ index: targetIndex, align: 'start', behavior: 'instant' })
+    lastOffsetRef.current = targetOffset
+    onScrollOffsetChange?.(targetOffset)
+    markListScrollOffset(targetOffset)
+  }, [initialScrollOffset, items.length, listRef, onScrollOffsetChange, rowHeight])
 
   if (items.length === 0) return null
 

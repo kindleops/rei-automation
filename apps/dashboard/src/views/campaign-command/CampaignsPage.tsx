@@ -23,7 +23,7 @@ import {
   matchesListFilter,
   type CampaignListFilter,
 } from './campaign-health'
-import { isTestModeCampaign, operatorStateLabel } from './campaign-operator'
+
 import { CampaignActivationModal } from './components/CampaignActivationModal'
 import { computeCampaignCostMetrics, formatCostUsd } from './campaign-cost'
 import { CreateCampaignModal } from './CreateCampaignModal'
@@ -46,40 +46,21 @@ import type {
   CampaignCommandState,
 } from './campaigns.types'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { CampaignFilterMenu } from './components/CampaignFilterMenu'
+import { CampaignDetailHeader } from './components/CampaignDetailHeader'
+import { CampaignDetailTabBar } from './components/CampaignDetailTabBar'
+import { CampaignStatusBadge } from './components/CampaignStatusBadge'
+import { CampaignMobileActionDock } from './components/CampaignMobileActionDock'
+import { CampaignMobileIntelRibbon } from './components/CampaignMobileIntelRibbon'
+import { CampaignChipFilterMenu } from './components/CampaignChipFilterMenu'
+import { cls, fmt, fmtInterval, fmtPct, fmtRelative } from './campaign-formatters'
+import '../../modules/inbox/queue-ops.css'
 import './campaigns.css'
 import './campaign-command.css'
+import './campaign-command-glass.css'
+import './campaign-mobile.css'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-export const cls = (...tokens: Array<string | false | null | undefined>) =>
-  tokens.filter(Boolean).join(' ')
-
-export const fmt = (n: number): string =>
-  n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
-
-export const fmtPct = (n: number): string => `${n.toFixed(1)}%`
-
-export const fmtInterval = (secs: number): string => {
-  if (secs < 60) return `${secs}s`
-  if (secs < 3600) return `${Math.round(secs / 60)}m`
-  return `${(secs / 3600).toFixed(1)}h`
-}
-
-export const fmtRelative = (iso: string | null | undefined): string => {
-  if (!iso) return '—'
-  const diff = new Date(iso).getTime() - Date.now()
-  if (diff < 0) {
-    const ago = Math.abs(diff)
-    const mins = Math.floor(ago / 60_000)
-    if (mins < 60) return `${mins}m ago`
-    if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
-    return `${Math.floor(mins / 1440)}d ago`
-  }
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return `in ${mins}m`
-  if (mins < 1440) return `in ${Math.floor(mins / 60)}h`
-  return `in ${Math.floor(mins / 1440)}d`
-}
+export { cls, fmt, fmtPct, fmtInterval, fmtRelative }
 
 const fmtTime = (iso: string): string => {
   const d = new Date(iso)
@@ -109,32 +90,6 @@ const statusOrder: Record<CampaignStatus, number> = {
 
 // ── Primitive components ──────────────────────────────────────────────────────
 
-const StatusBadge = ({
-  status,
-  executionProof,
-}: {
-  status: CampaignStatus
-  executionProof?: CampaignSummary['execution_proof']
-}) => {
-  const labels: Record<CampaignStatus, string> = {
-    active: 'Active', ready: 'Ready', built: 'Targets Built', queued: 'Queued',
-    live_limited: 'Live Limited', paused: 'Paused', scheduled: 'Scheduled',
-    draft: 'Draft', previewed: 'Previewed', activating: 'Activating', failed: 'Failed',
-    completed: 'Completed', archived: 'Archived',
-  }
-  const operatorLabel = executionProof?.proof_mode ? 'Test' : null
-  const label = operatorLabel
-    ?? (executionProof?.proof_mode
-      ? operatorStateLabel({ status, execution_proof: executionProof } as CampaignSummary)
-      : (labels[status] ?? status))
-  return (
-    <span className={cls('ccc-status', `is-${status}`, executionProof?.proof_mode && 'is-proof')}>
-      <span className="ccc-status__dot" />
-      {label}
-    </span>
-  )
-}
-
 const RateCell = ({
   value, good = 90, warn = 70, isOptOut = false, isFailure = false,
 }: { value: number; good?: number; warn?: number; isOptOut?: boolean; isFailure?: boolean }) => {
@@ -149,24 +104,47 @@ const RateCell = ({
 
 // ── KPI Strip ─────────────────────────────────────────────────────────────────
 
-export const KpiStrip = ({ kpis }: { kpis: CampaignModel['kpis'] }) => {
-  const cards = [
-    { label: 'Active Campaigns', value: kpis.activeCampaigns, variant: 'is-success' },
-    { label: 'Total Targets',    value: fmt(kpis.totalTargets),    variant: '' },
-    { label: 'Ready Targets',    value: fmt(kpis.readyTargets),    variant: 'is-accent' },
-    { label: 'Scheduled Queue Rows', value: fmt(kpis.scheduledQueueRows), variant: 'is-blue' },
-    { label: 'Planned Targets',  value: fmt(kpis.plannedTargets),  variant: '' },
-    { label: 'Sent Today',       value: fmt(kpis.sentToday),       variant: '' },
-    { label: 'Delivered Today',  value: fmt(kpis.deliveredToday),  variant: 'is-success' },
-    { label: 'Reply Rate',       value: fmtPct(kpis.replyRate),    variant: 'is-accent' },
-    { label: 'Positive Replies', value: fmt(kpis.positiveReplies), variant: 'is-success' },
-    { label: 'Opt-Out Rate',     value: fmtPct(kpis.optOutRate),   variant: kpis.optOutRate > 6 ? 'is-danger' : kpis.optOutRate > 3 ? 'is-warning' : '' },
-    { label: 'Failure Rate',     value: fmtPct(kpis.failureRate),  variant: kpis.failureRate > 8 ? 'is-danger' : kpis.failureRate > 4 ? 'is-warning' : '' },
+export const KpiStrip = ({
+  kpis,
+  isMobileLayout = false,
+}: {
+  kpis: CampaignModel['kpis']
+  isMobileLayout?: boolean
+}) => {
+  const allCards = [
+    { label: 'Active', value: kpis.activeCampaigns, variant: 'is-success' },
+    { label: 'Total Targets', value: fmt(kpis.totalTargets), variant: '' },
+    { label: 'Ready', value: fmt(kpis.readyTargets), variant: 'is-accent' },
+    { label: 'Scheduled', value: fmt(kpis.scheduledQueueRows), variant: 'is-blue' },
+    { label: 'Planned', value: fmt(kpis.plannedTargets), variant: '' },
+    { label: 'Sent Today', value: fmt(kpis.sentToday), variant: '' },
+    { label: 'Delivered', value: fmt(kpis.deliveredToday), variant: 'is-success' },
+    { label: 'Reply Rate', value: fmtPct(kpis.replyRate), variant: 'is-accent' },
+    { label: 'Positive', value: fmt(kpis.positiveReplies), variant: 'is-success' },
+    {
+      label: 'Opt-Out',
+      value: fmtPct(kpis.optOutRate),
+      variant: kpis.optOutRate > 6 ? 'is-danger' : kpis.optOutRate > 3 ? 'is-warning' : '',
+    },
+    {
+      label: 'Failures',
+      value: fmtPct(kpis.failureRate),
+      variant: kpis.failureRate > 8 ? 'is-danger' : kpis.failureRate > 4 ? 'is-warning' : '',
+    },
   ]
+
+  const cards = isMobileLayout
+    ? allCards.filter((c) => ['Active', 'Ready', 'Sent Today', 'Reply Rate'].includes(c.label))
+    : allCards
+
   return (
-    <div className="ccc__kpi-strip">
+    <div className={cls(
+      'ccc__kpi-strip',
+      'ccc__kpi-strip--glass',
+      isMobileLayout && 'ccc__kpi-strip--mobile',
+    )}>
       {cards.map((c) => (
-        <div key={c.label} className="ccc__kpi-card">
+        <div key={c.label} className="ccc__kpi-card ccc__kpi-card--glass">
           <div className="ccc__kpi-label">{c.label}</div>
           <div className={cls('ccc__kpi-value', c.variant)}>{c.value}</div>
         </div>
@@ -315,46 +293,7 @@ const SuppressionChecklist = ({ checks }: { checks: SuppressionCheck[] }) => (
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 
-const CampaignDetailOpsStrip = ({
-  campaign,
-  scopeLabel,
-}: {
-  campaign: CampaignSummary
-  scopeLabel: string
-}) => {
-  const queueRows = campaign.queued_targets + campaign.scheduled_targets
-  const deliveryState = campaign.sent_count > 0
-    ? `${fmt(campaign.delivered_count)} of ${fmt(campaign.sent_count)} delivered`
-    : 'No sends yet'
-  const replies = campaign.reply_count || campaign.positive_reply_count + campaign.negative_reply_count
-
-  return (
-    <div className="ccc__detail-ops-strip">
-      <div>
-        <span>Graph Scope</span>
-        <strong>{scopeLabel}</strong>
-      </div>
-      <div>
-        <span>Target Count</span>
-        <strong>{fmt(campaign.total_targets)}</strong>
-      </div>
-      <div>
-        <span>Queue Rows</span>
-        <strong>{fmt(queueRows)}</strong>
-      </div>
-      <div>
-        <span>Delivery State</span>
-        <strong>{deliveryState}</strong>
-      </div>
-      <div>
-        <span>Replies</span>
-        <strong>{fmt(replies)}</strong>
-      </div>
-    </div>
-  )
-}
-
-const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
+const OverviewTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignSummary; isMobileLayout?: boolean }) => {
   const checks = buildSuppressionChecklist(campaign)
   const cost = computeCampaignCostMetrics(campaign)
   const health = computeHealth(campaign)
@@ -363,16 +302,26 @@ const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
   const sampleSufficient = health.sampleSufficient
 
   return (
-    <div>
-      <div className="ccc__section-title">Launch Readiness</div>
-      <div className={cls('ccc__readiness-banner', `is-${readiness.level}`)}>
-        <strong>{readiness.label}</strong>
-        {readiness.blockers.map((b) => <span key={b} className="ccc__readiness-blocker">{b}</span>)}
-        {readiness.warnings.map((w) => <span key={w} className="ccc__readiness-warning">{w}</span>)}
-      </div>
+    <div className={cls('ccc-detail-overview', isMobileLayout && 'ccc-detail-overview--mobile')}>
+      {isMobileLayout && <CampaignMobileIntelRibbon campaign={campaign} />}
 
-      <div className="ccc__section-title">Cost &amp; Spend</div>
-      <div className="ccc__cost-grid">
+      <section className={cls('ccc-detail-section', isMobileLayout && 'ccc-detail-section--collapsible')}>
+        <div className="ccc-detail-section__head">
+          <h3>Launch readiness</h3>
+          <span className={cls('ccc-detail-section__badge', `is-${readiness.level}`)}>{readiness.label}</span>
+        </div>
+        <div className={cls('ccc__readiness-banner', 'ccc-detail-readiness', `is-${readiness.level}`)}>
+          {readiness.blockers.map((b) => <span key={b} className="ccc__readiness-blocker">{b}</span>)}
+          {readiness.warnings.map((w) => <span key={w} className="ccc__readiness-warning">{w}</span>)}
+          {readiness.blockers.length === 0 && readiness.warnings.length === 0 && (
+            <span className="ccc-detail-readiness__ok">All checks passed — campaign is ready to launch.</span>
+          )}
+        </div>
+      </section>
+
+      <section className="ccc-detail-section">
+        <div className="ccc-detail-section__head"><h3>Cost &amp; spend</h3></div>
+        <div className="ccc__cost-grid ccc-detail-cost-grid">
         <div className="ccc__cost-card">
           <div className="ccc__cost-label">Actual Spend</div>
           <div className="ccc__cost-value">{formatCostUsd(cost.totalSpend)}</div>
@@ -392,9 +341,12 @@ const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
           <div className="ccc__cost-value">{formatCostUsd(cost.costPerLead)}</div>
           <div className="ccc__cost-sub">{campaign.positive_reply_count} positive</div>
         </div>
-      </div>
+        </div>
+      </section>
 
-      <div className="ccc__section-title">Target Funnel</div>
+      <section className="ccc-detail-section">
+        <div className="ccc-detail-section__head"><h3>Target funnel</h3></div>
+        <div className="ccc-detail-funnel">
       {[
         { label: 'Total', value: campaign.total_targets, pct: 100, color: '' },
         { label: 'Ready', value: campaign.ready_targets, pct: campaign.total_targets > 0 ? (campaign.ready_targets / campaign.total_targets) * 100 : 0, color: 'is-blue' },
@@ -405,78 +357,86 @@ const OverviewTab = ({ campaign }: { campaign: CampaignSummary }) => {
         { label: 'Failed', value: campaign.failed_count, pct: campaign.total_targets > 0 ? (campaign.failed_count / campaign.total_targets) * 100 : 0, color: 'is-danger' },
         { label: 'Opted Out', value: campaign.opt_out_count, pct: campaign.total_targets > 0 ? (campaign.opt_out_count / campaign.total_targets) * 100 : 0, color: 'is-warn' },
       ].map(({ label, value, pct, color }) => (
-        <div key={label} style={{ marginBottom: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, fontSize: 11 }}>
-            <span style={{ color: 'var(--text-2)' }}>{label}</span>
-            <span style={{ color: 'var(--text-0)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</span>
+        <div key={label} className="ccc-detail-funnel__row">
+          <div className="ccc-detail-funnel__top">
+            <span>{label}</span>
+            <strong>{fmt(value)}</strong>
           </div>
           <div className="ccc__bar-track">
             <div className={cls('ccc__bar-fill', color)} style={{ width: `${Math.min(pct, 100)}%` }} />
           </div>
         </div>
       ))}
+        </div>
+      </section>
 
-      <div className="ccc__section-title">Performance Rates</div>
+      <section className="ccc-detail-section">
+        <div className="ccc-detail-section__head"><h3>Performance</h3></div>
       {sampleSufficient ? (
-        <div className="ccc__stat-grid">
-          <div className="ccc__stat-card">
+        <div className="ccc__stat-grid ccc-detail-stat-grid">
+          <div className="ccc__stat-card ccc-detail-stat-card">
             <div className="ccc__stat-card-label">Delivery Rate</div>
             <div className={cls('ccc__stat-card-value', campaign.delivery_rate >= 90 ? 'is-success' : campaign.delivery_rate >= 75 ? 'is-warning' : 'is-danger')}>
               {fmtPct(campaign.delivery_rate)}
             </div>
           </div>
-          <div className="ccc__stat-card">
+          <div className="ccc__stat-card ccc-detail-stat-card">
             <div className="ccc__stat-card-label">Reply Rate</div>
             <div className={cls('ccc__stat-card-value', campaign.reply_rate >= 12 ? 'is-success' : campaign.reply_rate >= 7 ? 'is-warning' : 'is-danger')}>
               {fmtPct(campaign.reply_rate)}
             </div>
           </div>
-          <div className="ccc__stat-card">
+          <div className="ccc__stat-card ccc-detail-stat-card">
             <div className="ccc__stat-card-label">Opt-Out Rate</div>
             <div className={cls('ccc__stat-card-value', campaign.opt_out_rate <= 3 ? 'is-success' : campaign.opt_out_rate <= 6 ? 'is-warning' : 'is-danger')}>
               {fmtPct(campaign.opt_out_rate)}
             </div>
           </div>
-          <div className="ccc__stat-card">
+          <div className="ccc__stat-card ccc-detail-stat-card">
             <div className="ccc__stat-card-label">Positive Leads</div>
             <div className="ccc__stat-card-value is-success">{campaign.positive_reply_count}</div>
           </div>
         </div>
       ) : (
-        <div className="ccc__empty" style={{ padding: '12px 0' }}>
-          <div className="ccc__empty-sub">{health.label} — performance rates require sufficient send sample</div>
-        </div>
+        <div className="ccc-detail-empty-note">{health.label} — performance rates require sufficient send sample</div>
       )}
+      </section>
 
-      <div className="ccc__section-title">Schedule</div>
-      <div className="ccc__setting-row">
+      <section className="ccc-detail-section">
+        <div className="ccc-detail-section__head"><h3>Schedule</h3></div>
+        <div className="ccc-detail-settings">
+      <div className="ccc__setting-row ccc-detail-setting-row">
         <div><div className="ccc__setting-label">Next Send</div><div className="ccc__setting-desc">Next scheduled execution</div></div>
         <div className="ccc__setting-value">{fmtRelative(campaign.next_send_at)}</div>
       </div>
-      <div className="ccc__setting-row">
+      <div className="ccc__setting-row ccc-detail-setting-row">
         <div><div className="ccc__setting-label">Send Interval</div><div className="ccc__setting-desc">Delay between sends</div></div>
         <div className="ccc__setting-value">{fmtInterval(campaign.send_interval_seconds)}</div>
       </div>
       {campaign.send_window_start && (
-        <div className="ccc__setting-row">
+        <div className="ccc__setting-row ccc-detail-setting-row">
           <div><div className="ccc__setting-label">Send Window</div><div className="ccc__setting-desc">Active outreach hours</div></div>
           <div className="ccc__setting-value">{campaign.send_window_start} – {campaign.send_window_end ?? '—'}</div>
         </div>
       )}
-      <div className="ccc__setting-row">
+      <div className="ccc__setting-row ccc-detail-setting-row">
         <div><div className="ccc__setting-label">Auto Send</div><div className="ccc__setting-desc">Automated outreach engine</div></div>
         <div className={cls('ccc-toggle', campaign.auto_send_enabled && 'is-on')} />
       </div>
+        </div>
+      </section>
 
-      <div className="ccc__section-title">Suppression Validation</div>
-      <SuppressionChecklist checks={checks} />
+      <section className="ccc-detail-section">
+        <div className="ccc-detail-section__head"><h3>Suppression</h3></div>
+        <SuppressionChecklist checks={checks} />
+      </section>
     </div>
   )
 }
 
 // ── Targets Tab ───────────────────────────────────────────────────────────────
 
-const TargetsTab = ({ campaignId }: { campaignId: string }) => {
+const TargetsTab = ({ campaignId, isMobileLayout = false }: { campaignId: string; isMobileLayout?: boolean }) => {
   const [targets, setTargets] = useState<CampaignTarget[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -512,29 +472,45 @@ const TargetsTab = ({ campaignId }: { campaignId: string }) => {
   }, [campaignId, filter, page, pageSize, search])
 
   const statusOptions = ['all', 'ready', 'planned', 'queued', 'scheduled', 'sent', 'delivered', 'failed', 'blocked', 'opted_out']
+  const filterOptions = statusOptions.map((s) => ({
+    key: s,
+    label: s === 'all' ? 'All statuses' : s.replace(/_/g, ' '),
+  }))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          type="search"
-          className="ccc__chip"
-          placeholder="Search owner, property, phone…"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-          style={{ minWidth: 200, padding: '4px 8px' }}
-        />
-        {statusOptions.map((s) => (
-          <button
-            key={s}
-            className={cls('ccc__chip', filter === s && 'is-active')}
-            onClick={() => { setFilter(s); setPage(1) }}
-          >
-            {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
-          </button>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-2)', alignSelf: 'center' }}>
-          Page {page} of {Math.max(totalPages, 1)} · {totalCount.toLocaleString()} recipients
+    <div className={cls('ccc-targets-tab', isMobileLayout && 'ccc-targets-tab--mobile')}>
+      <div className={cls('ccc-targets-toolbar', isMobileLayout && 'ccc-targets-toolbar--mobile')}>
+        <div className="ccc__list-search ccc__list-search--glass ccc-targets-search">
+          <Icon name="search" size={12} />
+          <input
+            type="search"
+            placeholder="Search owner, property, phone…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          />
+        </div>
+        {isMobileLayout ? (
+          <CampaignChipFilterMenu
+            label="Status"
+            value={filter}
+            options={filterOptions}
+            onChange={(key) => { setFilter(key); setPage(1) }}
+          />
+        ) : (
+          <div className="ccc__filter-chips">
+            {statusOptions.map((s) => (
+              <button
+                key={s}
+                className={cls('ccc__chip', filter === s && 'is-active')}
+                onClick={() => { setFilter(s); setPage(1) }}
+              >
+                {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+              </button>
+            ))}
+          </div>
+        )}
+        <span className="ccc-targets-count">
+          {totalCount.toLocaleString()} recipients · p{page}/{Math.max(totalPages, 1)}
         </span>
       </div>
 
@@ -544,6 +520,40 @@ const TargetsTab = ({ campaignId }: { campaignId: string }) => {
         </div>
       ) : targets.length === 0 ? (
         <div className="ccc__empty"><div className="ccc__empty-title">No targets match this filter.</div><div className="ccc__empty-sub">Build targets or adjust filters.</div></div>
+      ) : isMobileLayout ? (
+        <>
+          <div className="ccc-mobile-target-list">
+            {targets.map((t) => (
+              <article key={t.id} className="ccc-mobile-target-card">
+                <div className="ccc-mobile-target-card__head">
+                  <strong>{t.seller_full_name ?? 'Unknown owner'}</strong>
+                  <span className={cls('ccc__target-status', `is-${t.target_status}`)}>
+                    {t.target_status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <p className="ccc-mobile-target-card__addr">{t.property_address_full ?? '—'}</p>
+                <div className="ccc-mobile-target-card__meta">
+                  <span>{t.market ?? '—'}</span>
+                  <span>{t.canonical_e164 ?? '—'}</span>
+                  {t.final_acquisition_score != null && (
+                    <span className={cls('ccc__score-badge', t.final_acquisition_score >= 75 ? 'is-high' : t.final_acquisition_score >= 40 ? 'is-mid' : 'is-low')}>
+                      {t.final_acquisition_score}
+                    </span>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="ccc-mobile-pager">
+            <button type="button" className="ccc-btn" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Previous
+            </button>
+            <span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount.toLocaleString()}</span>
+            <button type="button" className="ccc-btn" disabled={page >= totalPages || loading} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </button>
+          </div>
+        </>
       ) : (
         <>
           <div className="ccc__targets-scroll">
@@ -619,7 +629,7 @@ const TargetsTab = ({ campaignId }: { campaignId: string }) => {
 
 // ── Queue Tab ─────────────────────────────────────────────────────────────────
 
-const QueueTab = ({ campaign }: { campaign: CampaignSummary }) => {
+const QueueTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignSummary; isMobileLayout?: boolean }) => {
   const [items, setItems] = useState<CampaignQueueRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -645,45 +655,46 @@ const QueueTab = ({ campaign }: { campaign: CampaignSummary }) => {
   }, [items])
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+    <div className={cls('ccc-queue-tab', isMobileLayout && 'ccc-queue-tab--mobile')}>
+      <div className={cls('ccc-mobile-kpi-row', isMobileLayout && 'ccc-mobile-kpi-row--3')}>
         {[
-          { label: 'Ready',     value: campaign.ready_targets,     cls: 'is-success' },
-          { label: 'Queued',    value: campaign.queued_targets,    cls: '' },
-          { label: 'Scheduled', value: campaign.scheduled_targets, cls: 'is-warning' },
+          { label: 'Ready', value: campaign.ready_targets, tone: 'is-success' },
+          { label: 'Queued', value: campaign.queued_targets, tone: '' },
+          { label: 'Scheduled', value: campaign.scheduled_targets, tone: 'is-warning' },
         ].map((s) => (
-          <div key={s.label} className="ccc__stat-card" style={{ flex: 1 }}>
-            <div className="ccc__stat-card-label">{s.label}</div>
-            <div className={cls('ccc__stat-card-value', s.cls)}>{s.value}</div>
+          <div key={s.label} className={cls('ccc-mobile-kpi', s.tone)}>
+            <span>{s.label}</span>
+            <strong>{s.value}</strong>
           </div>
         ))}
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {[1, 2, 3].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 40, width: '100%' }} />)}
+        <div className="ccc-mobile-shimmer-stack">
+          {[1, 2, 3].map((i) => <div key={i} className="ccc__shimmer ccc-mobile-shimmer-card" />)}
         </div>
       ) : items.length === 0 ? (
         <div className="ccc__empty"><div className="ccc__empty-title">Queue is empty</div><div className="ccc__empty-sub">No real targets ready or queued</div></div>
       ) : (
         Array.from(groups.entries()).map(([date, rows]) => (
-          <div key={date} style={{ marginBottom: 12 }}>
-            <div className="ccc__q-group-header">
-              <Icon name="clock" size={10} />
-              {date} — {rows.length} sends
-            </div>
+          <section key={date} className="ccc-mobile-queue-group">
+            <header className="ccc-mobile-queue-group__head">
+              <Icon name="clock" size={11} />
+              <span>{date}</span>
+              <strong>{rows.length} sends</strong>
+            </header>
             {rows.map((item) => (
-              <div key={item.id} className="ccc__q-row">
-                <div className={cls('ccc__q-dot', `is-${item.queue_status}`)} />
-                <div className="ccc__q-owner">{item.seller_full_name}</div>
-                <div className="ccc__q-addr">{item.property_address_full}</div>
-                <div className="ccc__q-preview">Template: {item.template_name || '—'}</div>
-                <span style={{ fontSize: 10, color: 'var(--accent-blue)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                  {item.scheduled_for ? fmtTime(item.scheduled_for) : '—'}
-                </span>
-              </div>
+              <article key={item.id} className="ccc-mobile-queue-card">
+                <div className="ccc-mobile-queue-card__top">
+                  <div className={cls('ccc__q-dot', `is-${item.queue_status}`)} />
+                  <strong>{item.seller_full_name}</strong>
+                  <span>{item.scheduled_for ? fmtTime(item.scheduled_for) : '—'}</span>
+                </div>
+                <p>{item.property_address_full}</p>
+                <span className="ccc-mobile-queue-card__tmpl">Template: {item.template_name || '—'}</span>
+              </article>
             ))}
-          </div>
+          </section>
         ))
       )}
     </div>
@@ -692,7 +703,7 @@ const QueueTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
 // ── Replies Tab ───────────────────────────────────────────────────────────────
 
-const RepliesTab = ({ campaign }: { campaign: CampaignSummary }) => {
+const RepliesTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignSummary; isMobileLayout?: boolean }) => {
   const [filter, setFilter] = useState<'all' | 'positive' | 'negative' | 'neutral' | 'opt_out' | 'question'>('all')
   const [replies, setReplies] = useState<CampaignReply[]>([])
   const [loading, setLoading] = useState(true)
@@ -710,28 +721,42 @@ const RepliesTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
   const filtered = filter === 'all' ? replies : replies.filter((r) => r.reply_type === filter)
 
+  const replyFilterOptions = (['all', 'positive', 'negative', 'neutral', 'opt_out', 'question'] as const).map((f) => ({
+    key: f,
+    label: f === 'all' ? 'All replies' : f.replace(/_/g, ' '),
+  }))
+
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+    <div className={cls('ccc-replies-tab', isMobileLayout && 'ccc-replies-tab--mobile')}>
+      <div className={cls('ccc-mobile-kpi-row', isMobileLayout && 'ccc-mobile-kpi-row--3')}>
         {[
-          { label: 'Positive', value: campaign.positive_reply_count, cls: 'is-success' },
-          { label: 'Negative', value: campaign.negative_reply_count, cls: 'is-danger' },
-          { label: 'Opted Out', value: campaign.opt_out_count,    cls: 'is-warning' },
+          { label: 'Positive', value: campaign.positive_reply_count, tone: 'is-success' },
+          { label: 'Negative', value: campaign.negative_reply_count, tone: 'is-danger' },
+          { label: 'Opted out', value: campaign.opt_out_count, tone: 'is-warning' },
         ].map((s) => (
-          <div key={s.label} className="ccc__stat-card" style={{ flex: 1 }}>
-            <div className="ccc__stat-card-label">{s.label}</div>
-            <div className={cls('ccc__stat-card-value', s.cls)}>{s.value}</div>
+          <div key={s.label} className={cls('ccc-mobile-kpi', s.tone)}>
+            <span>{s.label}</span>
+            <strong>{s.value}</strong>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 12 }}>
-        {(['all', 'positive', 'negative', 'neutral', 'opt_out', 'question'] as const).map((f) => (
-          <button key={f} className={cls('ccc__chip', filter === f && 'is-active')} onClick={() => setFilter(f)}>
-            {f === 'all' ? 'All' : f.replace(/_/g, ' ')}
-          </button>
-        ))}
-      </div>
+      {isMobileLayout ? (
+        <CampaignChipFilterMenu
+          label="Reply type"
+          value={filter}
+          options={replyFilterOptions}
+          onChange={(key) => setFilter(key as typeof filter)}
+        />
+      ) : (
+        <div className="ccc__filter-chips" style={{ marginBottom: 12 }}>
+          {(['all', 'positive', 'negative', 'neutral', 'opt_out', 'question'] as const).map((f) => (
+            <button key={f} className={cls('ccc__chip', filter === f && 'is-active')} onClick={() => setFilter(f)}>
+              {f === 'all' ? 'All' : f.replace(/_/g, ' ')}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -996,36 +1021,38 @@ export const DetailPanel = ({
   onClose,
   onAction,
   initialTab,
+  isMobileLayout = false,
 }: {
   campaign: CampaignSummary | null
   commandState: CampaignCommandState
   onClose: () => void
   onAction: (action: string, campaign: CampaignSummary) => void
   initialTab?: CampaignDetailTab
+  isMobileLayout?: boolean
 }) => {
   const [activeTab, setActiveTab] = useState<CampaignDetailTab>(initialTab ?? 'overview')
 
   useEffect(() => { setActiveTab(initialTab ?? 'overview') }, [campaign?.id, initialTab])
 
-  const TABS: Array<{ id: CampaignDetailTab; label: string }> = [
-    { id: 'overview',   label: 'Overview' },
-    { id: 'execution',  label: 'Execution' },
-    { id: 'targets',    label: 'Targets' },
-    { id: 'queue',      label: 'Queue' },
-    { id: 'replies',    label: 'Replies' },
-    { id: 'failures',   label: 'Failures' },
-    { id: 'geography',  label: 'Geography' },
-    { id: 'templates',  label: 'Templates' },
-    { id: 'logs',       label: 'Logs' },
+  const TABS = [
+    { id: 'overview' as const, label: 'Overview', group: 'primary' as const },
+    { id: 'execution' as const, label: 'Execution', group: 'primary' as const },
+    { id: 'targets' as const, label: 'Targets', group: 'primary' as const },
+    { id: 'queue' as const, label: 'Queue', group: 'primary' as const },
+    { id: 'replies' as const, label: 'Replies', group: 'primary' as const },
+    { id: 'failures' as const, label: 'Failures', group: 'more' as const },
+    { id: 'geography' as const, label: 'Geography', group: 'more' as const },
+    { id: 'templates' as const, label: 'Templates', group: 'more' as const },
+    { id: 'logs' as const, label: 'Logs', group: 'more' as const },
   ]
 
   if (!campaign) {
     return (
-      <div className="ccc__detail-panel ccc-glass-workspace">
-        <div className="ccc__detail-empty">
+      <div className="ccc__detail-panel ccc-glass-workspace ccc__detail-panel--glass">
+        <div className="ccc__detail-empty ccc__detail-empty--glass">
           <div className="ccc__detail-empty-icon"><Icon name="send" size={36} /></div>
-          <div className="ccc__detail-empty-title">Select a Campaign</div>
-          <div className="ccc__detail-empty-sub">Click any campaign row to view details, targets, queue, and performance</div>
+          <div className="ccc__detail-empty-title">Select a campaign</div>
+          <div className="ccc__detail-empty-sub">Tap a row to view targets, queue, execution, and performance.</div>
         </div>
       </div>
     )
@@ -1033,115 +1060,27 @@ export const DetailPanel = ({
 
   const detailActions = getDetailActions(campaign)
 
-  const scopeLabel = (() => {
-    switch (commandState.displayScope) {
-      case 'property': return 'Property Scope'
-      case 'target': return 'Target Scope'
-      case 'thread': return 'Thread Scope'
-      case 'queue_row': return 'Queue Scope'
-      default: return 'Campaign Scope'
-    }
-  })()
-
   return (
-    <div className="ccc__detail-panel ccc-glass-workspace">
-      {/* Context Breadcrumb */}
-      {commandState.displayScope !== 'campaign' && (
-        <div style={{ padding: '8px 16px 0', fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>Campaign Command</span>
-          <Icon name="chevron-right" size={10} />
-          <span>{campaign.campaign_name}</span>
-          <Icon name="chevron-right" size={10} />
-          <span style={{ color: 'var(--accent-blue)', fontWeight: 600 }}>{scopeLabel}</span>
-        </div>
-      )}
-
-      <div className="ccc__detail-header">
-        <div className="ccc__detail-title-row">
-          <div className="ccc__detail-campaign-name">
-            {campaign.campaign_name}
-            <span style={{ marginLeft: 8, fontSize: 10, padding: '2px 6px', background: 'var(--surface-3)', borderRadius: 4, color: 'var(--text-2)' }}>
-              {scopeLabel}
-            </span>
-          </div>
-          <button className="ccc__drawer-close" onClick={onClose} title="Close">
-            <Icon name="close" size={13} />
-          </button>
-        </div>
-        {isTestModeCampaign(campaign) && (
-          <div className="ccc__test-mode-banner">
-            <span>TEST MODE — NO MESSAGES WILL TRANSMIT</span>
-            <button
-              type="button"
-              className="ccc-btn is-primary"
-              style={{ marginLeft: 'auto' }}
-              onClick={() => onAction('convert_to_live', campaign)}
-            >
-              Convert to Live Campaign
-            </button>
-          </div>
-        )}
-        <div className="ccc__detail-meta-row">
-          <StatusBadge status={campaign.status} executionProof={campaign.execution_proof} />
-          <span>·</span>
-          <span>{campaign.total_targets.toLocaleString()} targets</span>
-          <span>·</span>
-          <span style={{ color: 'var(--success)', fontVariantNumeric: 'tabular-nums' }}>
-            {campaign.positive_reply_count} leads
-          </span>
-          {campaign.auto_send_enabled && (
-            <><span>·</span><span style={{ color: 'var(--accent)' }}>Auto-Send ON</span></>
-          )}
-          <span style={{ marginLeft: 'auto', color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
-            Next: {fmtRelative(campaign.next_send_at)}
-          </span>
-        </div>
-        <div className="ccc__detail-actions">
-          {detailActions.map((act) => (
-            <button
-              key={act.id}
-              className={cls('ccc-btn', act.variant)}
-              onClick={() => onAction(act.id, campaign)}
-            >
-              <Icon
-                name={
-                  act.id === 'pause' ? 'pause'
-                    : act.id === 'queue_batch' ? 'zap'
-                      : act.id === 'schedule' || act.id === 'reschedule' ? 'calendar'
-                        : act.id === 'build_targets' ? 'users'
-                          : 'play'
-                }
-                size={11}
-              />
-              {act.id === 'queue_batch' ? `Queue Batch (${fmt(campaign.ready_targets)})` : act.label}
-            </button>
-          ))}
-          <button className="ccc-btn is-blue" onClick={() => onAction('sync_metrics', campaign)}>
-            <Icon name="activity" size={11} />
-            Sync Metrics
-          </button>
-          <button className="ccc-btn" onClick={() => onAction('refresh', campaign)}>
-            <Icon name="refresh-cw" size={11} />
-            Refresh
-          </button>
-        </div>
-        <CampaignDetailOpsStrip campaign={campaign} scopeLabel={scopeLabel} />
+    <div className={cls('ccc__detail-panel', 'ccc-glass-workspace', 'ccc__detail-panel--glass', isMobileLayout && 'is-mobile-detail')}>
+      <div className={cls('ccc-mobile-detail-chrome', isMobileLayout && 'is-sticky')}>
+        <CampaignDetailHeader
+          campaign={campaign}
+          commandState={commandState}
+          detailActions={detailActions}
+          isMobileLayout={isMobileLayout}
+          onClose={onClose}
+          onAction={onAction}
+        />
+        <CampaignDetailTabBar
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          isMobileLayout={isMobileLayout}
+        />
       </div>
 
-      <div className="ccc__detail-tabs">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={cls('ccc__detail-tab', activeTab === tab.id && 'is-active')}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="ccc__detail-body">
-        {activeTab === 'overview'  && <OverviewTab campaign={campaign} />}
+      <div className={cls('ccc__detail-body', 'ccc__detail-body--glass', isMobileLayout && 'ccc__detail-body--mobile-dock')}>
+        {activeTab === 'overview'  && <OverviewTab campaign={campaign} isMobileLayout={isMobileLayout} />}
         {activeTab === 'execution' && (
           <CampaignControlCenter
             campaignId={campaign.id}
@@ -1149,14 +1088,22 @@ export const DetailPanel = ({
             onLifecycleChange={() => onAction('refresh', campaign)}
           />
         )}
-        {activeTab === 'targets'   && <TargetsTab campaignId={campaign.id} />}
-        {activeTab === 'queue'     && <QueueTab campaign={campaign} />}
-        {activeTab === 'replies'   && <RepliesTab campaign={campaign} />}
+        {activeTab === 'targets'   && <TargetsTab campaignId={campaign.id} isMobileLayout={isMobileLayout} />}
+        {activeTab === 'queue'     && <QueueTab campaign={campaign} isMobileLayout={isMobileLayout} />}
+        {activeTab === 'replies'   && <RepliesTab campaign={campaign} isMobileLayout={isMobileLayout} />}
         {activeTab === 'failures'  && <FailuresTab campaign={campaign} />}
         {activeTab === 'geography' && <GeographyTab campaign={campaign} />}
         {activeTab === 'templates' && <TemplatesTab campaign={campaign} />}
         {activeTab === 'logs'      && <LogsTab campaign={campaign} />}
       </div>
+
+      {isMobileLayout && (
+        <CampaignMobileActionDock
+          campaign={campaign}
+          detailActions={detailActions}
+          onAction={onAction}
+        />
+      )}
     </div>
   )
 }
@@ -1174,6 +1121,7 @@ export const CampaignListPanel = ({
   setSearchQuery,
   statusFilter,
   setStatusFilter,
+  isMobileLayout = false,
 }: {
   campaigns: CampaignSummary[]
   allCampaigns: CampaignSummary[]
@@ -1185,6 +1133,7 @@ export const CampaignListPanel = ({
   setSearchQuery: (q: string) => void
   statusFilter: CampaignListFilter
   setStatusFilter: (s: CampaignListFilter) => void
+  isMobileLayout?: boolean
 }) => {
   const [contextMenu, setContextMenu] = useState<{ campaign: CampaignSummary; x: number; y: number } | null>(null)
 
@@ -1208,35 +1157,36 @@ export const CampaignListPanel = ({
     ) as Record<CampaignListFilter, number>
   }, [allCampaigns, statusFilters])
 
+  const filterOptions = statusFilters.map((f) => ({
+    key: f.key,
+    label: f.label,
+    count: filterCounts[f.key] ?? 0,
+  }))
+
   return (
     <div className="ccc__list-panel ccc-glass-rail">
-      <div className="ccc__list-toolbar">
-        <div className="ccc__list-search">
-          <Icon name="search" size={11} />
+      <div className="ccc__list-toolbar ccc__list-toolbar--glass">
+        <div className="ccc__list-search ccc__list-search--glass">
+          <Icon name="search" size={12} />
           <input
-            placeholder="Search…"
+            placeholder="Search campaigns…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <div className="ccc__list-toolbar-row">
+          <CampaignFilterMenu
+            statusFilter={statusFilter}
+            options={filterOptions}
+            onStatusFilter={setStatusFilter}
+            isMobileLayout={isMobileLayout}
+          />
+          <span className="ccc__list-count-pill">
+            {campaigns.length} shown
+          </span>
+        </div>
       </div>
-      <div className="ccc__filter-bar">
-        {statusFilters.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={cls('ccc__filter-segment', statusFilter === f.key && 'is-active')}
-            onClick={() => setStatusFilter(f.key)}
-          >
-            {f.label}
-            <span className="ccc__filter-count">{filterCounts[f.key] ?? 0}</span>
-          </button>
-        ))}
-      </div>
-      <div style={{ padding: '5px 12px', fontSize: 9, color: 'var(--text-2)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', borderBottom: '1px solid var(--border)' }}>
-        {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''}
-      </div>
-      <div className="ccc__list-scroll">
+      <div className="ccc__list-scroll ccc__list-scroll--glass">
         {loading ? (
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {[1, 2, 3, 4, 5].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 56, width: '100%' }} />)}
@@ -1254,52 +1204,74 @@ export const CampaignListPanel = ({
             return (
               <div
                 key={c.id}
-                className={cls('ccc__list-row', isSelected && 'is-selected')}
+                className={cls('ccc__list-row', 'ccc__list-row--glass', isSelected && 'is-selected')}
                 onClick={() => onSelect(isSelected ? null : c)}
               >
                 <div className={cls('ccc__list-dot', `is-${c.status}`)} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="ccc__list-name" title={c.campaign_name}>{c.campaign_name}</div>
-                  <div className="ccc__list-meta">
-                    <StatusBadge status={c.status} executionProof={c.execution_proof} />
-                    <span>·</span>
-                    <span>{fmt(c.total_targets)} tgt</span>
-                    <span>·</span>
-                    <span className="ccc__list-metric is-blue">{fmt(c.ready_targets)} ready</span>
-                    <span>·</span>
-                    <span>{fmt(c.sent_count)} sent</span>
+                  <div className="ccc__list-row-top">
+                    <div className="ccc__list-name" title={c.campaign_name}>{c.campaign_name}</div>
+                    <CampaignStatusBadge status={c.status} executionProof={c.execution_proof} />
                   </div>
-                  <div className="ccc__list-meta" style={{ marginTop: 1 }}>
+                  <div className="ccc__list-stats">
+                    <span className="ccc__list-stat">
+                      <strong>{fmt(c.total_targets)}</strong> tgt
+                    </span>
+                    <span className="ccc__list-stat is-accent">
+                      <strong>{fmt(c.ready_targets)}</strong> ready
+                    </span>
+                    <span className="ccc__list-stat">
+                      <strong>{fmt(c.sent_count)}</strong> sent
+                    </span>
                     {health.sampleSufficient ? (
                       <>
-                        <span className={cls('ccc__list-metric', c.delivery_rate >= 90 ? 'is-good' : 'is-warn')}>
-                          {fmtPct(c.delivery_rate)} dlv
+                        <span className={cls('ccc__list-stat', c.delivery_rate >= 90 ? 'is-good' : 'is-warn')}>
+                          <strong>{fmtPct(c.delivery_rate)}</strong> dlv
                         </span>
-                        <span>·</span>
-                        <span className="ccc__list-metric is-good">{c.positive_reply_count} +reply</span>
+                        {c.positive_reply_count > 0 && (
+                          <span className="ccc__list-stat is-good">
+                            <strong>{c.positive_reply_count}</strong> leads
+                          </span>
+                        )}
                       </>
                     ) : (
-                      <span className="ccc__list-metric">{health.label}</span>
-                    )}
-                    {c.next_send_at && (
-                      <><span>·</span><span style={{ color: 'var(--text-2)' }}>next {fmtRelative(c.next_send_at)}</span></>
+                      <span className="ccc__list-stat">{health.label}</span>
                     )}
                   </div>
                 </div>
-                <div className="ccc__list-action" onClick={(e) => e.stopPropagation()}>
-                  <CampaignOverflowButton
-                    onClick={(e) => {
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                      setContextMenu({ campaign: c, x: rect.left, y: rect.bottom + 4 })
-                    }}
-                  />
-                  <button
-                    className={cls('ccc__list-action-btn', pAction.variant)}
-                    onClick={() => onCampaignAction(pAction.id, c)}
+                {isMobileLayout ? (
+                  <span className="ccc__list-chevron" aria-hidden="true">
+                    <Icon name="chevron-right" size={14} />
+                  </span>
+                ) : (
+                  <div
+                    className="ccc__list-action ccc__list-action--compact ccc__list-action--desktop"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {pAction.label}
-                  </button>
-                </div>
+                    <CampaignOverflowButton
+                      onClick={(e) => {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setContextMenu({ campaign: c, x: rect.left, y: rect.bottom + 4 })
+                      }}
+                    />
+                    <button
+                      className={cls('ccc__list-action-btn', 'ccc__list-action-btn--icon', pAction.variant)}
+                      title={pAction.label}
+                      onClick={() => onCampaignAction(pAction.id, c)}
+                    >
+                      <Icon
+                        name={
+                          pAction.id === 'pause' ? 'pause'
+                            : pAction.id === 'queue_batch' ? 'zap'
+                              : pAction.id === 'schedule' || pAction.id === 'reschedule' ? 'calendar'
+                                : pAction.id === 'build_targets' ? 'users'
+                                  : 'play'
+                        }
+                        size={12}
+                      />
+                    </button>
+                  </div>
+                )}
               </div>
             )
           })
@@ -1486,21 +1458,34 @@ export const CampaignsPage = () => {
     }))
   }
 
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+
+  const portfolioSubtitle = model
+    ? `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled`
+    : 'Loading…'
+
   return (
-    <div className={cls('ccc', 'ccc--glass', isMobile && 'is-mobile', isMobile && selectedCampaign && 'is-detail-open')}>
-      {/* Header */}
-      <div className="ccc__header">
+    <div className={cls(
+      'ccc',
+      'ccc--glass',
+      isMobile && 'is-mobile',
+      isMobile && selectedCampaign && 'is-detail-open',
+      isMobile && selectedCampaign && 'ccc--mobile-campaign-detail',
+    )}>
+      {/* Header — hidden on mobile when viewing campaign detail */}
+      {!(isMobile && selectedCampaign) && (
+      <div className={cls('ccc__header', isMobile && 'ccc__header--compact')}>
         <div className="ccc__brand">
           <div className="ccc__brand-icon"><Icon name="send" size={14} /></div>
           <div>
             <div className="ccc__title">Campaign Command</div>
             <div className="ccc__subtitle">
-              {model ? `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled · ${model.campaigns.filter((c) => c.status === 'paused').length} paused` : 'Loading…'}
-              {lastRefreshedAt && ` · refreshed ${fmtRelative(lastRefreshedAt.toISOString())}`}
+              {portfolioSubtitle}
+              {!isMobile && lastRefreshedAt && ` · refreshed ${fmtRelative(lastRefreshedAt.toISOString())}`}
             </div>
           </div>
         </div>
-        <div className="ccc__actions">
+        <div className="ccc__actions ccc__actions--desktop">
           <button className="ccc-btn is-primary" onClick={() => handleGlobalAction('create')}>
             <Icon name="bolt" size={11} />
             New Campaign
@@ -1524,24 +1509,81 @@ export const CampaignsPage = () => {
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
+        <div className="ccc__actions ccc__actions--mobile">
+          <button className="ccc-btn is-primary" onClick={() => handleGlobalAction('create')}>
+            <Icon name="bolt" size={11} />
+            New
+          </button>
+          <div className="ccc__header-menu-wrap">
+            <button
+              type="button"
+              className="ccc__header-menu-btn"
+              aria-expanded={headerMenuOpen}
+              aria-label="More actions"
+              onClick={() => setHeaderMenuOpen((v) => !v)}
+            >
+              <Icon name="more" size={16} />
+            </button>
+            {headerMenuOpen && (
+              <>
+                <button
+                  type="button"
+                  className="occ-liquid-filter__backdrop"
+                  aria-label="Close menu"
+                  onClick={() => setHeaderMenuOpen(false)}
+                />
+                <div className="ccc__header-menu" role="menu">
+                  <button type="button" className="ccc__header-menu-item" role="menuitem" onClick={() => { handleGlobalAction('targets'); setHeaderMenuOpen(false) }}>
+                    <Icon name="users" size={12} /> Build Targets
+                  </button>
+                  <button type="button" className="ccc__header-menu-item" role="menuitem" onClick={() => { handleGlobalAction('schedule'); setHeaderMenuOpen(false) }}>
+                    <Icon name="calendar" size={12} /> Schedule
+                  </button>
+                  {selectedCampaign?.status === 'active' && (
+                    <button
+                      type="button"
+                      className="ccc__header-menu-item is-danger"
+                      role="menuitem"
+                      onClick={() => { void handleCampaignAction('pause', selectedCampaign); setHeaderMenuOpen(false) }}
+                    >
+                      <Icon name="pause" size={12} /> Pause Campaign
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="ccc__header-menu-item"
+                    role="menuitem"
+                    disabled={refreshing}
+                    onClick={() => { handleGlobalAction('refresh'); setHeaderMenuOpen(false) }}
+                  >
+                    <Icon name="refresh-cw" size={12} /> {refreshing ? 'Refreshing…' : 'Refresh'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
+      )}
 
       {/* KPI Strip */}
-      {loading && !model ? (
-        <div className="ccc__kpi-strip">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="ccc__kpi-card">
-              <div className="ccc__shimmer" style={{ height: 9, width: 80, marginBottom: 6 }} />
-              <div className="ccc__shimmer" style={{ height: 20, width: 50 }} />
-            </div>
-          ))}
+      {!(isMobile && selectedCampaign) && (loading && !model ? (
+        <div className="ccc__kpi-zone">
+          <div className={cls('ccc__kpi-strip', 'ccc__kpi-strip--glass', isMobile && 'ccc__kpi-strip--mobile')}>
+            {Array.from({ length: isMobile ? 4 : 8 }).map((_, i) => (
+              <div key={i} className="ccc__kpi-card ccc__kpi-card--glass">
+                <div className="ccc__shimmer" style={{ height: 9, width: 80, marginBottom: 6 }} />
+                <div className="ccc__shimmer" style={{ height: 20, width: 50 }} />
+              </div>
+            ))}
+          </div>
         </div>
       ) : model ? (
-        <>
-          <div className="ccc__portfolio-label">Campaign Portfolio</div>
-          <KpiStrip kpis={model.kpis} />
-        </>
-      ) : null}
+        <div className="ccc__kpi-zone">
+          {!isMobile && <div className="ccc__portfolio-label">Campaign Portfolio</div>}
+          <KpiStrip kpis={model.kpis} isMobileLayout={isMobile} />
+        </div>
+      ) : null)}
 
       {/* Body: 3 columns */}
       <div className="ccc__body">
@@ -1556,6 +1598,7 @@ export const CampaignsPage = () => {
           setSearchQuery={setSearchQuery}
           statusFilter={statusFilter}
           setStatusFilter={setStatusFilter}
+          isMobileLayout={isMobile}
         />
 
         <DetailPanel
@@ -1564,6 +1607,7 @@ export const CampaignsPage = () => {
           onClose={() => handleSelectCampaign(null)}
           onAction={handleCampaignAction}
           initialTab={detailTab}
+          isMobileLayout={isMobile}
         />
 
         <CampaignIntelligenceRail campaign={selectedCampaign} />

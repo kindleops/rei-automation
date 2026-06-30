@@ -190,6 +190,33 @@ const AUTO_OPTIONS: PillOption<AutopilotMode>[] = (Object.keys(autopilotModeVisu
   }),
 )
 
+const STATUS_COMPACT_LABELS: Record<ThreadStatus, string> = {
+  not_contacted: 'New',
+  scheduled: 'Sched',
+  new_reply: 'Reply',
+  active_communication: 'Active',
+  waiting_on_seller: 'Wait',
+  follow_up_due: 'Follow',
+  needs_review: 'Review',
+  snoozed: 'Snooze',
+  paused: 'Pause',
+}
+
+const TEMP_COMPACT_LABELS: Record<ThreadTemperature, string> = {
+  unscored: '—',
+  cold: 'Cold',
+  warm: 'Warm',
+  hot: 'Hot',
+}
+
+const compactOptions = <T extends string>(
+  options: PillOption<T>[],
+  labelFor: (value: T, visual: PillVisual) => string,
+): PillOption<T>[] => options.map((opt) => ({
+  ...opt,
+  visual: { ...opt.visual, label: labelFor(opt.value, opt.visual) },
+}))
+
 function useOptimisticField<T extends string>(initial: T) {
   const [value, setValue] = useState<T>(initial)
   const [pending, setPending] = useState(false)
@@ -218,11 +245,21 @@ function useOptimisticField<T extends string>(initial: T) {
 export interface ThreadStateBarProps {
   thread: InboxWorkflowThread
   onRefetch?: (threadKey: string) => void
+  /** @deprecated Use autopilotDisabled — state controls stay editable for universal lead state */
   disabled?: boolean
+  autopilotDisabled?: boolean
+  compact?: boolean
   sourceView?: LeadStateSourceView
 }
 
-export const ThreadStateBar = ({ thread, onRefetch, disabled = false, sourceView = 'thread' }: ThreadStateBarProps) => {
+export const ThreadStateBar = ({
+  thread,
+  onRefetch,
+  disabled = false,
+  autopilotDisabled = false,
+  compact = false,
+  sourceView = 'thread',
+}: ThreadStateBarProps) => {
   const threadKey = thread.threadKey || thread.id
 
   const status = useOptimisticField<ThreadStatus>(resolveThreadStatus(thread))
@@ -270,50 +307,66 @@ export const ThreadStateBar = ({ thread, onRefetch, disabled = false, sourceView
   }
 
   const anyPending = status.pending || stage.pending || temperature.pending || autopilot.pending
+  const statusOptions = compact
+    ? compactOptions(STATUS_OPTIONS, (value) => STATUS_COMPACT_LABELS[value])
+    : STATUS_OPTIONS
+  const stageOptions = compact
+    ? compactOptions(STAGE_OPTIONS, (_value, visual) => visual.shortLabel || visual.label)
+    : STAGE_OPTIONS
+  const tempOptions = compact
+    ? compactOptions(TEMP_OPTIONS, (value) => TEMP_COMPACT_LABELS[value])
+    : TEMP_OPTIONS
 
   return (
     <>
-      <div className={cls('nx-conv-command-strip', anyPending && 'is-syncing')} aria-label="Universal thread controls">
+      <div className={cls(
+        'nx-conv-command-strip',
+        compact && 'is-compact',
+        anyPending && 'is-syncing',
+      )} aria-label="Universal thread controls">
         <div className="nx-conv-command-strip__primary">
           <GlassControl
             label="Conversation status"
             value={status.value}
-            options={STATUS_OPTIONS}
+            options={statusOptions}
             pending={status.pending}
             error={status.error}
-            disabled={disabled}
+            disabled={false}
             className="nx-ctrl--status"
+            compact={compact}
             onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
           />
           <GlassControl
             label="Acquisition stage"
             value={stage.value}
-            options={STAGE_OPTIONS}
+            options={stageOptions}
             pending={stage.pending}
             error={stage.error}
-            disabled={disabled}
+            disabled={false}
             className="nx-ctrl--stage"
+            compact={compact}
             onChange={handleStageChangeRequest}
           />
           <GlassControl
             label="Lead temperature"
             value={temperature.value}
-            options={TEMP_OPTIONS}
+            options={tempOptions}
             pending={temperature.pending}
             error={temperature.error}
-            disabled={disabled}
+            disabled={false}
             className="nx-ctrl--temperature"
+            compact={compact}
             onChange={(next) => temperature.commit(next, () => persist({ lead_temperature: next }))}
           />
         </div>
-        <div className="nx-conv-command-strip__spacer" aria-hidden="true" />
+        {!compact && <div className="nx-conv-command-strip__spacer" aria-hidden="true" />}
         <GlassControl
           label="Automation state"
           value={autopilot.value}
           options={AUTO_OPTIONS}
           pending={autopilot.pending}
           error={autopilot.error}
-          disabled={disabled}
+          disabled={autopilotDisabled || disabled}
           className="nx-conv-auto-control"
           compact
           icon="zap"

@@ -46,7 +46,14 @@ import {
   useSellerAutomationStudioLocation,
 } from './workflow-studio-routing'
 import { SellerAutomationStudioPanel } from './SellerAutomationStudioPanel'
-import { UniversalLeadStateControls } from '../../../domain/lead-state/UniversalLeadStateControls'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
+import {
+  WorkflowMobileActionsSheet,
+  WorkflowMobileDock,
+  WorkflowMobileHeader,
+  WorkflowMobileSheet,
+  type WorkflowMobilePanel,
+} from './WorkflowMobileStudio'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -120,7 +127,10 @@ export const WorkflowStudioV2 = ({
   const [renameTarget, setRenameTarget] = useState<Workflow | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null)
+  const [mobilePanel, setMobilePanel] = useState<WorkflowMobilePanel>('canvas')
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
 
+  const { isMobile } = useBreakpoint()
   const selectedId = selected?.workflow.id ?? null
   const studioContext = useMemo(() => applyUniversalContextToWorkflowStudio(), [])
   const contextThreadKey = studioContext.thread_key ?? null
@@ -466,7 +476,315 @@ export const WorkflowStudioV2 = ({
       const result = await runWorkflowDryRun(requireWorkflow(), sampleDryRunContext)
       setDryRunResult(result)
       setConsoleOpen(true)
+      if (isMobile) setMobilePanel('console')
     }, 'Dry run complete')
+  }
+
+  const handleMobilePanelSelect = (panel: WorkflowMobilePanel) => {
+    setMobilePanel(panel)
+    if (panel === 'console') {
+      setConsoleOpen(true)
+      return
+    }
+    if (panel === 'canvas') setConsoleOpen(false)
+  }
+
+  const closeMobileSheet = () => setMobilePanel('canvas')
+
+  const sharedBanners = (
+    <>
+      {!apiAvailable && apiError ? (
+        <WorkflowApiErrorPanel
+          message={apiError.message}
+          traceId={apiError.traceId}
+          onRetry={() => {
+            setLoading(true)
+            void refreshList()
+              .then((rows) => {
+                const first = rows[0]
+                if (first) return loadSelected(first.id)
+              })
+              .finally(() => setLoading(false))
+          }}
+          onOfflineDemo={() => {
+            setOfflineDemo(true)
+            setApiError(null)
+            setError('')
+          }}
+        />
+      ) : null}
+
+      {modeBanner ? (
+        <div className={cls('wfs2__banner', studioMode !== 'canonical' && 'is-warning')}>
+          <Icon name="alert" />
+          <span>{modeBanner}</span>
+        </div>
+      ) : null}
+
+      {(notice || (error && apiAvailable)) && (
+        <div className={cls('wfs2__banner', error && 'is-error')}>
+          <Icon name={error ? 'alert' : 'check'} />
+          <span>{error || notice}</span>
+        </div>
+      )}
+    </>
+  )
+
+  const canvasBlock = sellerAutomationMode ? (
+    <SellerAutomationStudioPanel
+      focus={{
+        propertyId: sellerFocus.propertyId,
+        participantId: sellerFocus.participantId,
+        threadId: sellerFocus.threadId ?? contextThreadKey,
+        executionId: sellerFocus.executionId,
+      }}
+      replayMode={sellerFocus.replayMode}
+    />
+  ) : (
+    <WorkflowCanvasV2
+      ref={canvasRef}
+      detail={selected}
+      dryRunResult={dryRunResult}
+      selectedNodeId={selectedNodeId}
+      selectedNodeIds={selectedNodeIds}
+      onSelectNode={(id) => {
+        setSelectedNodeId(id)
+        if (isMobile && id) setMobilePanel('inspect')
+      }}
+      onSelectNodes={setSelectedNodeIds}
+      busy={busy}
+      layoutRevision={layoutRevision}
+      onDropNode={addNodeFromPalette}
+      onDropOnNode={(item, target, placement) => {
+        const offset =
+          placement === 'insert-before' ? { x: target.x - 120, y: target.y } :
+          placement === 'add-branch' ? { x: target.x, y: target.y + 160 } :
+          placement === 'replace' ? { x: target.x, y: target.y } :
+          { x: target.x + 120, y: target.y }
+        applyGraphPlacement(item, target, placement, offset)
+      }}
+      readOnly={!graphMutable}
+      offlineDemo={offlineDemo}
+      onDropOnEdge={(item, connection, position) => {
+        void insertOnEdge(item, connection, position)
+      }}
+      onCreateDraft={() => setCreateOpen(true)}
+      liveOverlay={(
+        <WorkflowLiveModeV2
+          workflowId={selectedId}
+          enabled={liveMode === 'live'}
+          demoMode={liveMode === 'demo'}
+          nodes={canvasNodes}
+        />
+      )}
+    />
+  )
+
+  if (isMobile) {
+    return (
+      <section className={cls('wfs2', 'wfs2--mobile-studio', `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+        <WorkflowMobileHeader
+          detail={selected}
+          busy={busy}
+          validationCount={validationCount}
+          liveMode={liveMode !== 'off'}
+          consoleOpen={consoleOpen}
+          onDryRun={runDryRun}
+          onToggleConsole={() => {
+            setConsoleOpen((open) => !open)
+            setMobilePanel((panel) => (panel === 'console' ? 'canvas' : 'console'))
+          }}
+          onToggleLiveMode={() => setLiveMode((value) => (value === 'off' ? 'live' : value === 'live' ? 'demo' : 'off'))}
+          onOpenActions={() => setMobileActionsOpen(true)}
+        />
+
+        {sharedBanners}
+
+        <div className="wfs2-mobile__stage">{canvasBlock}</div>
+
+        <WorkflowMobileDock
+          active={mobilePanel}
+          hasSelection={Boolean(selectedCanvasNode)}
+          onSelect={handleMobilePanelSelect}
+        />
+
+        <WorkflowMobileSheet
+          open={mobilePanel === 'workflows'}
+          title="Flows"
+          subtitle="Pick a workflow to edit or monitor"
+          badge={workflows.length}
+          tone="flows"
+          onClose={closeMobileSheet}
+        >
+          <WorkflowNavigatorV2
+            variant="mobile"
+            workflows={workflows}
+            selectedId={selectedId}
+            loading={loading}
+            busy={busy}
+            onSelect={(workflowId) => {
+              void loadSelected(workflowId)
+              closeMobileSheet()
+            }}
+            onCreate={() => {
+              setCreateOpen(true)
+              closeMobileSheet()
+            }}
+            onAction={handleNavigatorAction}
+          />
+        </WorkflowMobileSheet>
+
+        <WorkflowMobileSheet
+          open={mobilePanel === 'nodes'}
+          title="Nodes"
+          subtitle={sellerAutomationMode ? 'Seller automation registry' : 'Tap a node to add to canvas'}
+          tone="nodes"
+          onClose={closeMobileSheet}
+        >
+          <WorkflowNodePaletteV2
+            onAddNode={(item) => {
+              addNodeFromPalette(item)
+              closeMobileSheet()
+            }}
+            disabled={busy || !selected || !graphMutable}
+            offlineDemo={offlineDemo}
+            sellerAutomationMode={sellerAutomationMode}
+          />
+        </WorkflowMobileSheet>
+
+        <WorkflowMobileSheet
+          open={mobilePanel === 'inspect'}
+          title={selectedCanvasNode?.label ?? 'Inspector'}
+          subtitle={selectedCanvasNode ? 'Node configuration' : 'Select a node on the canvas'}
+          tone="inspect"
+          onClose={closeMobileSheet}
+        >
+          {selectedCanvasNode ? (
+            <WorkflowInspectorV2
+              node={selectedCanvasNode}
+              detail={selected}
+              dryRunStep={selectedDryRunStep}
+              dryRunResult={dryRunResult}
+              readOnly={!graphMutable}
+              studioMode={studioMode}
+            />
+          ) : (
+            <div className="wfs2-mobile-empty">
+              <Icon name="settings" size={20} />
+              <strong>No node selected</strong>
+              <p>Tap a node on the canvas to inspect configuration, validation, and dry-run output.</p>
+            </div>
+          )}
+        </WorkflowMobileSheet>
+
+        <WorkflowMobileActionsSheet
+          open={mobileActionsOpen}
+          busy={busy}
+          detail={selected}
+          validationCount={validationCount}
+          onClose={() => setMobileActionsOpen(false)}
+          onClone={() => withBusy(async () => {
+            const detail = await cloneWorkflowDraft(requireWorkflow())
+            setSelected(detail)
+          }, 'Workflow cloned')}
+          onPause={() => withBusy(async () => {
+            const detail = await pauseWorkflowDraft(requireWorkflow())
+            setSelected(detail)
+          }, 'Workflow paused')}
+          onResume={() => withBusy(async () => {
+            const detail = await resumeWorkflowDraft(requireWorkflow())
+            setSelected(detail)
+          }, 'Workflow resumed')}
+          onPublish={() => withBusy(async () => {
+            const detail = await publishWorkflow(requireWorkflow(), { validate: true })
+            setSelected(detail)
+          }, 'Workflow published')}
+          onGoLive={() => withBusy(async () => {
+            const detail = await enableWorkflowLive(requireWorkflow())
+            setSelected(detail)
+            setLiveMode('live')
+          }, 'Workflow live mode armed')}
+        />
+
+        <WorkflowConsoleV2
+          workflowId={selectedId}
+          open={consoleOpen}
+          onClose={() => {
+            setConsoleOpen(false)
+            if (mobilePanel === 'console') setMobilePanel('canvas')
+          }}
+          dryRunEvents={fallbackConsoleEvents}
+          apiAvailable={apiAvailable}
+        />
+
+        <WorkflowCreateModal
+          open={createOpen}
+          busy={busy}
+          onClose={() => setCreateOpen(false)}
+          onSubmit={submitCreateWorkflow}
+        />
+
+        <WorkflowGlassModal
+          open={Boolean(renameTarget)}
+          title="Rename workflow"
+          onClose={() => setRenameTarget(null)}
+          footer={(
+            <>
+              <button type="button" className="wfs2__btn is-ghost" onClick={() => setRenameTarget(null)}>Cancel</button>
+              <button
+                type="button"
+                className="wfs2__btn is-primary"
+                disabled={!renameValue.trim() || busy}
+                onClick={() => {
+                  if (!renameTarget) return
+                  void withBusy(async () => {
+                    const detail = await renameWorkflow(renameTarget.id, renameValue.trim())
+                    if (selectedId === renameTarget.id) setSelected(detail)
+                    setRenameTarget(null)
+                  }, 'Workflow renamed')
+                }}
+              >
+                Save
+              </button>
+            </>
+          )}
+        >
+          <label className="wfs2-modal__field">
+            <span>Workflow name</span>
+            <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+          </label>
+        </WorkflowGlassModal>
+
+        <WorkflowGlassModal
+          open={Boolean(deleteTarget)}
+          title="Delete draft"
+          subtitle="Only custom drafts without run history can be deleted."
+          onClose={() => setDeleteTarget(null)}
+          footer={(
+            <>
+              <button type="button" className="wfs2__btn is-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button
+                type="button"
+                className="wfs2__btn is-danger"
+                disabled={busy}
+                onClick={() => {
+                  if (!deleteTarget) return
+                  void withBusy(async () => {
+                    await deleteWorkflowDraft(deleteTarget.id)
+                    if (selectedId === deleteTarget.id) setSelected(null)
+                    setDeleteTarget(null)
+                  }, 'Draft deleted')
+                }}
+              >
+                Delete draft
+              </button>
+            </>
+          )}
+        >
+          <p>Delete draft &quot;{deleteTarget?.name}&quot;? This cannot be undone.</p>
+        </WorkflowGlassModal>
+      </section>
+    )
   }
 
   return (
@@ -512,50 +830,7 @@ export const WorkflowStudioV2 = ({
         }, 'Workflow live mode armed')}
       />
 
-      {!apiAvailable && apiError ? (
-        <WorkflowApiErrorPanel
-          message={apiError.message}
-          traceId={apiError.traceId}
-          onRetry={() => {
-            setLoading(true)
-            void refreshList()
-              .then((rows) => {
-                const first = rows[0]
-                if (first) return loadSelected(first.id)
-              })
-              .finally(() => setLoading(false))
-          }}
-          onOfflineDemo={() => {
-            setOfflineDemo(true)
-            setApiError(null)
-            setError('')
-          }}
-        />
-      ) : null}
-
-      {modeBanner ? (
-        <div className={cls('wfs2__banner', studioMode !== 'canonical' && 'is-warning')}>
-          <Icon name="alert" />
-          <span>{modeBanner}</span>
-        </div>
-      ) : null}
-
-      {(notice || (error && apiAvailable)) && (
-        <div className={cls('wfs2__banner', error && 'is-error')}>
-          <Icon name={error ? 'alert' : 'check'} />
-          <span>{error || notice}</span>
-        </div>
-      )}
-
-      {contextThreadKey ? (
-        <div className="wfs2__lead-state-strip">
-          <UniversalLeadStateControls
-            thread={{ threadKey: contextThreadKey, id: contextThreadKey }}
-            sourceView="workflow_studio"
-            compact
-          />
-        </div>
-      ) : null}
+      {sharedBanners}
 
       <div className="wfs2__body">
         {!prefs.focusMode && !prefs.leftRailCollapsed && (
@@ -619,55 +894,7 @@ export const WorkflowStudioV2 = ({
           </button>
         )}
 
-        <div className="wfs2__canvas-host">
-          {sellerAutomationMode && (
-            <SellerAutomationStudioPanel
-              focus={{
-                propertyId: sellerFocus.propertyId,
-                participantId: sellerFocus.participantId,
-                threadId: sellerFocus.threadId ?? contextThreadKey,
-                executionId: sellerFocus.executionId,
-              }}
-              replayMode={sellerFocus.replayMode}
-            />
-          )}
-          {!sellerAutomationMode && (
-          <WorkflowCanvasV2
-            ref={canvasRef}
-            detail={selected}
-            dryRunResult={dryRunResult}
-            selectedNodeId={selectedNodeId}
-            selectedNodeIds={selectedNodeIds}
-            onSelectNode={setSelectedNodeId}
-            onSelectNodes={setSelectedNodeIds}
-            busy={busy}
-            layoutRevision={layoutRevision}
-            onDropNode={addNodeFromPalette}
-            onDropOnNode={(item, target, placement) => {
-              const offset =
-                placement === 'insert-before' ? { x: target.x - 120, y: target.y } :
-                placement === 'add-branch' ? { x: target.x, y: target.y + 160 } :
-                placement === 'replace' ? { x: target.x, y: target.y } :
-                { x: target.x + 120, y: target.y }
-              applyGraphPlacement(item, target, placement, offset)
-            }}
-            readOnly={!graphMutable}
-            offlineDemo={offlineDemo}
-            onDropOnEdge={(item, connection, position) => {
-              void insertOnEdge(item, connection, position)
-            }}
-            onCreateDraft={() => setCreateOpen(true)}
-            liveOverlay={(
-              <WorkflowLiveModeV2
-                workflowId={selectedId}
-                enabled={liveMode === 'live'}
-                demoMode={liveMode === 'demo'}
-                nodes={canvasNodes}
-              />
-            )}
-          />
-          )}
-        </div>
+        <div className="wfs2__canvas-host">{canvasBlock}</div>
 
         {!prefs.focusMode && !prefs.rightRailCollapsed && (
           <div className="wfs2__inspector-wrap">

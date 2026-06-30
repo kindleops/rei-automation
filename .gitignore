@@ -21,3 +21,13 @@ apps/api/classify_tail.txt
 
 # Local/generated audit outputs
 audits/
+
+# Local dev supervisor and MCP artifacts
+.dev-all/
+.playwright-mcp/
+apps/dashboard/test-results/
+apps/dashboard/proof/**/*.png
+apps/dashboard/proof/**/structure-evidence.txt
+
+# Root-level local screenshots
+/*.png
