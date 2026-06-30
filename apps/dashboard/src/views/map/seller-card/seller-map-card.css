@@ -1067,3 +1067,40 @@
 .smc-shell.is-conversation .smc-thread__list {
   padding: 10px clamp(10px, 3%, 24px) 12px;
 }
+
+/* ── Mobile bottom sheet (no 3D flip — upright composer) ───────────────── */
+.smc-shell.is-mobile-sheet {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.smc-shell.is-mobile-sheet .smc-flip,
+.smc-shell.is-mobile-sheet.is-conversation .smc-flip {
+  transform: none !important;
+  perspective: none !important;
+}
+
+.smc-shell.is-mobile-sheet .smc-flip__front,
+.smc-shell.is-mobile-sheet .smc-flip__back {
+  position: relative;
+  inset: auto;
+  transform: none !important;
+  backface-visibility: visible;
+  -webkit-backface-visibility: visible;
+}
+
+.smc-mobile-bottom-sheet .smc-body--peek {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.smc-mobile-bottom-sheet .smc-image.is-peek {
+  height: 96px;
+}
+
+.smc-mobile-bottom-sheet .smc-image.is-focus {
+  height: 112px;
+}

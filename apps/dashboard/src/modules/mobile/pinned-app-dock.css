@@ -409,12 +409,23 @@ html.is-mobile-layout {
     height: 40px;
   }
 
-  /* Reserve bottom space for collapsed line or open dock */
+  /* Reserve bottom space for collapsed line or open dock — except fullscreen map */
   .nx-os.is-mobile-os .nx-premium-inbox,
   .nx-os.is-mobile-os .nx-fullscreen-app-shell,
   .nx-os.is-mobile-os .nx-route-redirect-shell,
   .nx-os.is-mobile-os .nx-stage {
     padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
+  }
+
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-premium-inbox,
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-route-redirect-shell,
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-stage,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-premium-inbox,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-route-redirect-shell,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-stage {
+    padding-bottom: 0 !important;
   }
 
   body:has(.nx-pinned-app-dock.is-docked),

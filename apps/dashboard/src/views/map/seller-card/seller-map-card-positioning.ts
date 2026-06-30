@@ -37,16 +37,11 @@ export const getSellerMapCardStyle = (
   const dims = getSellerCardDimensions(mode, isMobile)
 
   if (isMobile) {
-    const safeBottom = 6
-    const height = dims.maxHeight
     return {
-      position: 'absolute',
-      left: 6,
-      right: 6,
-      bottom: `calc(${safeBottom}px + env(safe-area-inset-bottom, 0px))`,
-      width: 'calc(100vw - 12px)',
-      height,
-      maxHeight: height,
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      maxHeight: 'none',
     }
   }
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { ThreadContext } from '../../../lib/data/inboxData'
 import { Composer } from '../../../modules/inbox/components/Composer'
+import { MobileBottomSheet, type BottomSheetSnap } from '../../../modules/mobile/MobileBottomSheet'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import {
   LIFECYCLE_STAGE_META,
@@ -21,6 +23,28 @@ import '../../../modules/inbox/conversation-live.css'
 import './seller-map-card.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+
+const SELLER_SHEET_SNAP_HEIGHTS = {
+  collapsed: '25dvh',
+  half: '42dvh',
+  expanded: '60dvh',
+} as const
+
+const SELLER_COMPOSER_SHEET_SNAP_HEIGHTS = {
+  collapsed: '25dvh',
+  half: '42dvh',
+  expanded: '72dvh',
+} as const
+
+const snapFromCardMode = (mode: SellerMapCardMode): BottomSheetSnap => (
+  mode === 'peek' ? 'collapsed' : 'expanded'
+)
+
+const cardModeFromSnap = (snap: BottomSheetSnap, current: SellerMapCardMode): SellerMapCardMode => {
+  if (current === 'conversation') return 'conversation'
+  if (snap === 'collapsed') return 'peek'
+  return 'focus'
+}
 
 const followUpButtonLabel = (
   state: string,
@@ -120,6 +144,11 @@ export const SellerMapCard = ({
   const layoutMode = getSellerMapCardLayoutMode(cardMode)
   const cardStyle = getSellerMapCardStyle(layoutMode, anchor, containerSize, isMobile)
   const isPeek = cardMode === 'peek'
+  const [sheetSnap, setSheetSnap] = useState<BottomSheetSnap>(() => snapFromCardMode(cardMode))
+
+  useEffect(() => {
+    setSheetSnap(snapFromCardMode(cardMode))
+  }, [cardMode])
 
   const stageColor = LIFECYCLE_STAGE_META[viewModel.operations.stage as keyof typeof LIFECYCLE_STAGE_META]?.color
   const statusColor = OPERATIONAL_STATUS_META[viewModel.operations.status as keyof typeof OPERATIONAL_STATUS_META]?.color
@@ -296,7 +325,10 @@ export const SellerMapCard = ({
         type="button"
         className="smc-action smc-action--message"
         disabled={viewModel.messagingBlocked}
-        onClick={() => setCardMode('conversation')}
+        onClick={() => {
+          setCardMode('conversation')
+          setSheetSnap('expanded')
+        }}
       >
         Message
       </button>
@@ -362,7 +394,7 @@ export const SellerMapCard = ({
     </div>
   )
 
-  const focusBody = (
+  const focusScrollBody = (
     <>
       <div className="smc-sticky-head">
         {imageBlock}
@@ -380,6 +412,12 @@ export const SellerMapCard = ({
         {activityBlock}
         {focusSections}
       </div>
+    </>
+  )
+
+  const focusBody = (
+    <>
+      {focusScrollBody}
       {actionFooter}
     </>
   )
@@ -389,85 +427,164 @@ export const SellerMapCard = ({
   ) : (
     <div className="smc-sms-pane nx-workspace-pane-surface--sms-thread">
       <div className="smc-conversation nx-conv-live nx-chat-container is-layout-full">
-      <header className="smc-conversation__head">
-        <div className="smc-conversation__identity">
-          <div className="smc-conversation__name">{viewModel.masterOwner.displayName}</div>
-          <div className="smc-conversation__addr">{viewModel.property.address}</div>
-          <div className="smc-conversation__badges">
-            <span className="smc-badge smc-badge--stage">{viewModel.operations.stageLabel}</span>
-            <span className="smc-badge smc-badge--status">{viewModel.operations.statusLabel}</span>
-            <span className="smc-badge smc-badge--temp">{viewModel.operations.temperatureLabel}</span>
-            <span className="smc-badge smc-badge--asset">{viewModel.property.assetType}</span>
+        <header className="smc-conversation__head">
+          <div className="smc-conversation__identity">
+            <div className="smc-conversation__name">{viewModel.masterOwner.displayName}</div>
+            <div className="smc-conversation__addr">{viewModel.property.address}</div>
+            <div className="smc-conversation__badges">
+              <span className="smc-badge smc-badge--stage">{viewModel.operations.stageLabel}</span>
+              <span className="smc-badge smc-badge--status">{viewModel.operations.statusLabel}</span>
+              <span className="smc-badge smc-badge--temp">{viewModel.operations.temperatureLabel}</span>
+              <span className="smc-badge smc-badge--asset">{viewModel.property.assetType}</span>
+            </div>
+            <div className="smc-conversation__meta">
+              {viewModel.operations.automationState !== 'none' ? (
+                <span>{viewModel.operations.automationState}</span>
+              ) : null}
+              {sendingNumber ? <span>{sendingNumber}</span> : null}
+            </div>
           </div>
-          <div className="smc-conversation__meta">
-            {viewModel.operations.automationState !== 'none' ? (
-              <span>{viewModel.operations.automationState}</span>
-            ) : null}
-            {sendingNumber ? <span>{sendingNumber}</span> : null}
+          <div className="smc-conversation__controls">
+            <button
+              type="button"
+              className="smc-icon-btn"
+              onClick={() => {
+                setCardMode('focus')
+                setSheetSnap('expanded')
+              }}
+              aria-label="Back to property card"
+            >
+              ←
+            </button>
+            {onClose ? <button type="button" className="smc-icon-btn" onClick={onClose} aria-label="Close">×</button> : null}
           </div>
-        </div>
-        <div className="smc-conversation__controls">
-          <button type="button" className="smc-icon-btn" onClick={() => setCardMode('focus')} aria-label="Back to property card">←</button>
-          {onClose ? <button type="button" className="smc-icon-btn" onClick={onClose} aria-label="Close">×</button> : null}
-        </div>
-      </header>
-      <div className="smc-thread">
-        {conversationLoading ? null : (
+        </header>
+        <div className="smc-thread">
           <SellerMapCardThreadList
             messages={messages}
             loading={conversationLoading}
             error={conversationError}
             onRetry={() => { void refreshConversation() }}
           />
-        )}
-      </div>
-      <div className="smc-composer-wrap">
-        <Composer
-          draftText={localDraft}
-          onSend={(text) => { void handleSend(text) }}
-          onOpenSchedule={() => {}}
-          onAI={() => {}}
-          thread={thread}
-          threadContext={threadContext as ThreadContext | null}
-          onSendTemplate={(payload) => { void sendTemplate(payload) }}
-          onQueueTemplate={(payload) => { void queueTemplate(payload) }}
-          onScheduleTemplate={() => {}}
-          isSending={isSending}
-          disabled={viewModel.messagingBlocked}
-          disabledReason={viewModel.messagingBlockReason || undefined}
-          isTranslatingDraft={isTranslatingDraft}
-          onTranslateDraft={(text) => { void handleTranslateDraft(text) }}
-          layoutMode="full"
-        />
-      </div>
+        </div>
+        <div className="smc-composer-wrap">
+          <Composer
+            draftText={localDraft}
+            onSend={(text) => { void handleSend(text) }}
+            onOpenSchedule={() => {}}
+            onAI={() => {}}
+            thread={thread}
+            threadContext={threadContext as ThreadContext | null}
+            onSendTemplate={(payload) => { void sendTemplate(payload) }}
+            onQueueTemplate={(payload) => { void queueTemplate(payload) }}
+            onScheduleTemplate={() => {}}
+            isSending={isSending}
+            disabled={viewModel.messagingBlocked}
+            disabledReason={viewModel.messagingBlockReason || undefined}
+            isTranslatingDraft={isTranslatingDraft}
+            onTranslateDraft={(text) => { void handleTranslateDraft(text) }}
+            layoutMode="full"
+          />
+        </div>
       </div>
     </div>
   )
 
-  const mobileSheetHandle = isMobile && !isConversation ? (
-    <button
-      type="button"
-      className="smc-sheet-handle"
-      aria-label={isPeek ? 'Expand property card' : 'Collapse property card'}
-      onClick={(event) => {
-        event.stopPropagation()
-        if (isPeek) onPeekToFocus?.()
-        else if (isFocus) onClose?.()
-      }}
-    />
-  ) : null
+  const shellClassName = cls(
+    'smc-shell',
+    `is-${cardMode}`,
+    `is-accent-${viewModel.edgeAccent}`,
+    isMobile && 'is-mobile',
+    isMobile && 'is-mobile-sheet',
+    prefersReducedMotion && 'is-reduced-motion',
+    !isMobile && isConversation && 'is-flipped-shell is-flipping',
+    !isMobile && (isFocus || isConversation) && 'is-size-locked',
+  )
+
+  const shellInner = (
+    <>
+      <div className="smc-glass-noise" aria-hidden="true" />
+      <div className="smc-glass-glow" aria-hidden="true" />
+      {isMobile ? (
+        isConversation ? (
+          <div className="smc-mobile-sheet__content is-composer">{conversationBody}</div>
+        ) : isPeek ? (
+          <div className="smc-mobile-sheet__content is-peek">{peekBody}</div>
+        ) : (
+          <>
+            <div className="smc-mobile-sheet__scroll">{focusScrollBody}</div>
+            {actionFooter}
+          </>
+        )
+      ) : (
+        <div className={cls('smc-flip', isConversation && 'is-flipped')}>
+          <div className="smc-flip__front">
+            {isPeek ? peekBody : focusBody}
+          </div>
+          <div className="smc-flip__back smc-flip__back--sms">
+            {conversationBody}
+          </div>
+          <div className="smc-flip__sheen" aria-hidden="true" />
+        </div>
+      )}
+    </>
+  )
+
+  if (isMobile && typeof document !== 'undefined') {
+    return createPortal(
+      <MobileBottomSheet
+        open
+        snap={sheetSnap}
+        snapHeights={isConversation ? SELLER_COMPOSER_SHEET_SNAP_HEIGHTS : SELLER_SHEET_SNAP_HEIGHTS}
+        showBackdrop={false}
+        elevated={isConversation}
+        className={cls('smc-mobile-bottom-sheet', isConversation && 'is-composer')}
+        onSnapChange={(nextSnap) => {
+          setSheetSnap(nextSnap)
+          const nextMode = cardModeFromSnap(nextSnap, cardMode)
+          if (nextMode === cardMode) return
+          setCardMode(nextMode)
+          if (nextMode === 'focus' && cardMode === 'peek') onPeekToFocus?.()
+        }}
+        onClose={() => {
+          if (isConversation) {
+            setCardMode('focus')
+            setSheetSnap('expanded')
+            return
+          }
+          if (isFocus) {
+            setCardMode('peek')
+            setSheetSnap('collapsed')
+            return
+          }
+          onClose?.()
+        }}
+      >
+        <article
+          className={shellClassName}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (isPeek) {
+              setCardMode('focus')
+              setSheetSnap('expanded')
+              onPeekToFocus?.()
+            }
+          }}
+          role={isPeek ? 'button' : 'region'}
+          aria-label={isPeek ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
+        >
+          {shellInner}
+        </article>
+      </MobileBottomSheet>,
+      document.body,
+    )
+  }
 
   return (
     <article
-      className={cls(
-        'smc-shell',
-        `is-${cardMode}`,
-        `is-accent-${viewModel.edgeAccent}`,
-        isMobile && 'is-mobile',
-        prefersReducedMotion && 'is-reduced-motion',
-        isConversation && 'is-flipped-shell is-flipping',
-        (isFocus || isConversation) && 'is-size-locked',
-      )}
+      className={shellClassName}
       style={shellStyle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
@@ -478,18 +595,7 @@ export const SellerMapCard = ({
       role={isPeek ? 'button' : 'region'}
       aria-label={isPeek ? 'Seller property preview' : 'Seller property card'}
     >
-      {mobileSheetHandle}
-      <div className={cls('smc-glass-noise')} aria-hidden="true" />
-      <div className={cls('smc-glass-glow')} aria-hidden="true" />
-      <div className={cls('smc-flip', isConversation && 'is-flipped')}>
-        <div className="smc-flip__front">
-          {isPeek ? peekBody : focusBody}
-        </div>
-        <div className="smc-flip__back smc-flip__back--sms">
-          {conversationBody}
-        </div>
-        <div className="smc-flip__sheen" aria-hidden="true" />
-      </div>
+      {shellInner}
     </article>
   )
 }

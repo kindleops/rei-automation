@@ -2977,6 +2977,48 @@ const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
 })
 
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
+type MapWebGLErrorDetails = {
+  message: string
+  blocked: boolean
+}
+
+function parseMapWebGLError(error: unknown): MapWebGLErrorDetails {
+  const err = error as Error & { type?: string; statusMessage?: string }
+  const statusMessage = typeof err?.statusMessage === 'string' ? err.statusMessage.trim() : ''
+  const message = statusMessage || (err instanceof Error ? err.message : '') || 'Failed to initialize WebGL'
+  const blocked = /context loss and was blocked|web page caused context loss/i.test(statusMessage)
+    || /webgl.*blocked/i.test(message)
+  return { message, blocked }
+}
+
+function webglBlockedUserMessage(details: MapWebGLErrorDetails): string {
+  if (!details.blocked) return details.message
+  return 'Chrome blocked WebGL on this tab after repeated graphics context loss. Reload the full page to restore the map.'
+}
+
+function probeWebGLAvailability(): { ok: true } | { ok: false; reason: string; blocked: boolean } {
+  if (typeof document === 'undefined') {
+    return { ok: false, reason: 'WebGL is unavailable in this environment.', blocked: false }
+  }
+  try {
+    const canvas = document.createElement('canvas')
+    const gl =
+      canvas.getContext('webgl2', { failIfMajorPerformanceCaveat: false, powerPreference: 'default' })
+      ?? canvas.getContext('webgl', { failIfMajorPerformanceCaveat: false, powerPreference: 'default' })
+    if (!gl) {
+      return {
+        ok: false,
+        reason: 'WebGL is unavailable. Enable hardware acceleration or try another browser.',
+        blocked: false,
+      }
+    }
+    return { ok: true }
+  } catch (error) {
+    const parsed = parseMapWebGLError(error)
+    return { ok: false, reason: webglBlockedUserMessage(parsed), blocked: parsed.blocked }
+  }
+}
+
 function isMapSafe(map: maplibregl.Map | null | undefined): map is maplibregl.Map {
   return !!map && !(map as unknown as { _removed?: boolean })._removed && typeof map.loaded === 'function'
 }
@@ -3619,6 +3661,7 @@ export function InboxCommandMap({
   const [styleFallbackWarning, setStyleFallbackWarning] = useState<string | null>(null)
   const [mapContextLost, setMapContextLost] = useState(false)
   const [mapInitError, setMapInitError] = useState<string | null>(null)
+  const [mapWebglBlocked, setMapWebglBlocked] = useState(false)
   const [mapContainerKey, setMapContainerKey] = useState(0)
 
   const scheduleMapResize = () => {
@@ -6167,6 +6210,23 @@ export function InboxCommandMap({
     setBaseStyleLoading(true)
     styleLoadStartedAtRef.current = performance.now()
 
+    const webglProbe = probeWebGLAvailability()
+    if (!webglProbe.ok) {
+      console.error('[CommandMap] WebGL preflight failed', webglProbe)
+      mapContextLostRef.current = true
+      setMapWebglBlocked(webglProbe.blocked)
+      setMapInitError(webglProbe.reason)
+      setMapContextLost(true)
+      setBaseStyleLoading(false)
+      if (styleLoadTimerRef.current) {
+        clearTimeout(styleLoadTimerRef.current)
+        styleLoadTimerRef.current = null
+      }
+      return () => {
+        if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
+      }
+    }
+
     let map: maplibregl.Map
     try {
       map = new maplibregl.Map({
@@ -6188,10 +6248,11 @@ export function InboxCommandMap({
         },
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to initialize WebGL'
+      const parsed = parseMapWebGLError(error)
       console.error('[CommandMap] WebGL initialization failed', error)
       mapContextLostRef.current = true
-      setMapInitError(message)
+      setMapWebglBlocked(parsed.blocked)
+      setMapInitError(webglBlockedUserMessage(parsed))
       setMapContextLost(true)
       setBaseStyleLoading(false)
       if (styleLoadTimerRef.current) {
@@ -6206,17 +6267,20 @@ export function InboxCommandMap({
     mapRef.current = map
     mapContextLostRef.current = false
     setMapInitError(null)
+    setMapWebglBlocked(false)
     activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
     map.on('error', (event) => {
-      const err = (event as { error?: Error & { type?: string } }).error
-      const message = err?.message ?? ''
-      const type = err?.type ?? ''
-      if (type === 'webglcontextcreationerror' || message === 'Failed to initialize WebGL') {
+      const err = (event as { error?: Error & { type?: string; statusMessage?: string } }).error
+      if (!err) return
+      const parsed = parseMapWebGLError(err)
+      const type = err.type ?? ''
+      if (type === 'webglcontextcreationerror' || parsed.message === 'Failed to initialize WebGL' || parsed.blocked) {
         console.error('[CommandMap] Map runtime WebGL error', err)
         mapContextLostRef.current = true
-        setMapInitError(message || 'Map renderer failed')
+        setMapWebglBlocked(parsed.blocked)
+        setMapInitError(webglBlockedUserMessage(parsed))
         setMapContextLost(true)
         setBaseStyleLoading(false)
       }
@@ -6248,6 +6312,7 @@ export function InboxCommandMap({
       }
       mapContextLostRef.current = false
       setMapInitError(null)
+      setMapWebglBlocked(false)
       setMapContextLost(false)
       requestAnimationFrame(() => {
         try {
@@ -9190,23 +9255,43 @@ export function InboxCommandMap({
         <div style={{ position: 'absolute', inset: 0, zIndex: 999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,10,15,0.94)', gap: 12, padding: '0 24px', textAlign: 'center' }}>
           <p style={{ color: '#e2e8f0', margin: 0, fontSize: 14, fontWeight: 600 }}>Map renderer unavailable</p>
           <p style={{ color: '#94a3b8', margin: 0, fontSize: 13, maxWidth: 420 }}>
-            {mapInitError || 'The command map paused its graphics context. Reload the map to continue.'}
+            {mapInitError || (mapWebglBlocked
+              ? 'Chrome blocked WebGL on this tab after repeated graphics context loss. Reload the full page to restore the map.'
+              : 'The command map paused its graphics context. Reload the map to continue.')}
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button
-              type="button"
-              className="nx-icm__mode-tab is-active"
-              onClick={() => {
-                mapContextLostRef.current = false
-                setMapInitError(null)
-                setMapContextLost(false)
-                setMapContainerKey((k) => k + 1)
-                mapContainerKeyRef.current += 1
-              }}
-            >
-              Reload map
-            </button>
-            {(mapInitError?.toLowerCase().includes('blocked') || mapInitError?.toLowerCase().includes('failed to initialize')) ? (
+            {mapWebglBlocked ? (
+              <button
+                type="button"
+                className="nx-icm__mode-tab is-active"
+                onClick={() => window.location.reload()}
+              >
+                Reload page
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="nx-icm__mode-tab is-active"
+                onClick={() => {
+                  mapContextLostRef.current = false
+                  setMapInitError(null)
+                  setMapWebglBlocked(false)
+                  setMapContextLost(false)
+                  const existing = mapRef.current
+                  if (existing) {
+                    try { existing.remove() } catch { /* ignore teardown errors */ }
+                    mapRef.current = null
+                  }
+                  window.setTimeout(() => {
+                    setMapContainerKey((k) => k + 1)
+                    mapContainerKeyRef.current += 1
+                  }, 200)
+                }}
+              >
+                Reload map
+              </button>
+            )}
+            {!mapWebglBlocked ? (
               <button
                 type="button"
                 className="nx-icm__mode-tab"

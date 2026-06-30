@@ -5,34 +5,42 @@ const cls = (...tokens: Array<string | false | null | undefined>) =>
 
 export type BottomSheetSnap = 'collapsed' | 'half' | 'expanded'
 
+const DEFAULT_SNAP_HEIGHTS: Record<BottomSheetSnap, string> = {
+  collapsed: '22vh',
+  half: '48vh',
+  expanded: '78vh',
+}
+
 interface MobileBottomSheetProps {
   open: boolean
   title?: string
   snap?: BottomSheetSnap
+  snapHeights?: Partial<Record<BottomSheetSnap, string>>
   onSnapChange?: (snap: BottomSheetSnap) => void
   onClose?: () => void
   children: ReactNode
   className?: string
-}
-
-const SNAP_OFFSET: Record<BottomSheetSnap, string> = {
-  collapsed: '22vh',
-  half: '48vh',
-  expanded: '78vh',
+  showBackdrop?: boolean
+  elevated?: boolean
 }
 
 export const MobileBottomSheet = ({
   open,
   title,
   snap: controlledSnap,
+  snapHeights,
   onSnapChange,
   onClose,
   children,
   className,
+  showBackdrop = true,
+  elevated = false,
 }: MobileBottomSheetProps) => {
   const [internalSnap, setInternalSnap] = useState<BottomSheetSnap>('half')
   const snap = controlledSnap ?? internalSnap
   const dragRef = useRef<{ startY: number; startSnap: BottomSheetSnap } | null>(null)
+
+  const heights = { ...DEFAULT_SNAP_HEIGHTS, ...snapHeights }
 
   const setSnap = useCallback((next: BottomSheetSnap) => {
     if (onSnapChange) onSnapChange(next)
@@ -49,12 +57,17 @@ export const MobileBottomSheet = ({
 
   return (
     <>
-      {onClose ? (
-        <button type="button" className="nx-mobile-sheet-backdrop" aria-label="Close sheet" onClick={onClose} />
+      {showBackdrop && onClose ? (
+        <button type="button" className="nx-mobile-sheet-backdrop is-map-context" aria-label="Close sheet" onClick={onClose} />
       ) : null}
       <aside
-        className={cls('nx-mobile-bottom-sheet', `is-${snap}`, className)}
-        style={{ maxHeight: SNAP_OFFSET[snap] }}
+        className={cls(
+          'nx-mobile-bottom-sheet',
+          `is-${snap}`,
+          elevated && 'is-elevated',
+          className,
+        )}
+        style={{ maxHeight: heights[snap] }}
         role="dialog"
         aria-label={title || 'Details'}
       >
@@ -64,7 +77,12 @@ export const MobileBottomSheet = ({
           tabIndex={0}
           aria-label="Resize sheet"
           onClick={cycleSnap}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycleSnap() } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              cycleSnap()
+            }
+          }}
           onPointerDown={(e) => {
             dragRef.current = { startY: e.clientY, startSnap: snap }
             ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
