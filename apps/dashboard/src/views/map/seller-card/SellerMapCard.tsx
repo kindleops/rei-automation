@@ -25,14 +25,14 @@ import './seller-map-card.css'
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
 const SELLER_SHEET_SNAP_HEIGHTS = {
-  collapsed: '25dvh',
-  half: '42dvh',
+  collapsed: '31dvh',
+  half: '46dvh',
   expanded: '60dvh',
 } as const
 
 const SELLER_COMPOSER_SHEET_SNAP_HEIGHTS = {
-  collapsed: '25dvh',
-  half: '42dvh',
+  collapsed: '31dvh',
+  half: '46dvh',
   expanded: '72dvh',
 } as const
 
@@ -208,17 +208,43 @@ export const SellerMapCard = ({
     </div>
   )
 
+  const mobilePeekPriorityRing = isMobile && isPeek ? (
+    <div className="smc-image__priority-glass" aria-label="Seller priority score">
+      <SellerMapCardPriorityRing
+        score={viewModel.masterOwner.priorityScore}
+        tier={null}
+        classification={viewModel.masterOwner.priorityClassification}
+        size={32}
+        showUnscoredLabel={false}
+        compact
+      />
+    </div>
+  ) : null
+
   const imageBlock = viewModel.property.imageUrl ? (
-    <div className={cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus')}>
+    <div className={cls(
+      'smc-image',
+      isPeek && 'is-peek',
+      !isPeek && 'is-focus',
+      isMobile && isPeek && 'is-mobile-hero',
+    )}>
       <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="lazy" decoding="async" />
       <div className="smc-image__gradient" />
+      {mobilePeekPriorityRing}
       {!isPeek && onClose ? (
         <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
       ) : null}
     </div>
   ) : (
-    <div className={cls('smc-image', 'is-placeholder', isPeek && 'is-peek', !isPeek && 'is-focus')}>
+    <div className={cls(
+      'smc-image',
+      'is-placeholder',
+      isPeek && 'is-peek',
+      !isPeek && 'is-focus',
+      isMobile && isPeek && 'is-mobile-hero',
+    )}>
       <span>Property Preview</span>
+      {mobilePeekPriorityRing}
       {!isPeek && onClose ? (
         <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
       ) : null}
@@ -347,6 +373,19 @@ export const SellerMapCard = ({
         {contextualLine}
         {flagsBlock}
         {activityBlock}
+      </div>
+    </>
+  )
+
+  const mobilePeekBody = (
+    <>
+      {imageBlock}
+      <div className="smc-body smc-body--peek smc-body--mobile-peek">
+        {identityHeader}
+        {viewModel.assetSummaryLine ? (
+          <p className="smc-summary smc-summary--physical">{viewModel.assetSummaryLine}</p>
+        ) : null}
+        {metricsBlock(viewModel.peekMetrics, 'peek')}
       </div>
     </>
   )
@@ -509,7 +548,7 @@ export const SellerMapCard = ({
         isConversation ? (
           <div className="smc-mobile-sheet__content is-composer">{conversationBody}</div>
         ) : isPeek ? (
-          <div className="smc-mobile-sheet__content is-peek">{peekBody}</div>
+          <div className="smc-mobile-sheet__content is-peek">{mobilePeekBody}</div>
         ) : (
           <>
             <div className="smc-mobile-sheet__scroll">{focusScrollBody}</div>

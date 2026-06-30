@@ -17,12 +17,14 @@ export const SellerMapCardPriorityRing = ({
   classification = null,
   size = 44,
   showUnscoredLabel = false,
+  compact = false,
 }: {
   score: number | null
   tier?: string | null
   classification?: string | null
   size?: number
   showUnscoredLabel?: boolean
+  compact?: boolean
 }) => {
   const radius = 18
   const circumference = 2 * Math.PI * radius
@@ -32,7 +34,7 @@ export const SellerMapCardPriorityRing = ({
 
   return (
     <div
-      className="smc-priority-ring"
+      className={compact ? 'smc-priority-ring is-compact' : 'smc-priority-ring'}
       style={{ width: size, height: size }}
       title={title}
       aria-label={title}

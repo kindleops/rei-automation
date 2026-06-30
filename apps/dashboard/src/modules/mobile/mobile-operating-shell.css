@@ -2181,7 +2181,7 @@ html.is-mobile-layout {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  .nx-map-card--hover { max-height: 25dvh !important; }
+  .nx-map-card--hover { max-height: 31dvh !important; }
   .nx-map-card--selected { max-height: 60dvh !important; }
 
   .nx-map-card__body {
@@ -2216,6 +2216,60 @@ html.is-mobile-layout {
   .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet.is-elevated,
   .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet.is-composer {
     z-index: 168;
+  }
+
+  [data-nexus-theme='light'] .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
+    border-color: rgba(12, 25, 48, 0.1);
+    background:
+      radial-gradient(ellipse 120% 80% at 50% 0%, rgba(10, 132, 255, 0.07), transparent 55%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(248, 250, 255, 0.94));
+    backdrop-filter: blur(28px) saturate(1.75);
+    -webkit-backdrop-filter: blur(28px) saturate(1.75);
+    box-shadow: 0 -18px 56px rgba(20, 50, 100, 0.14);
+    color: #0c1930;
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__name {
+    color: #0c1930;
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__address,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-summary,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric span,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-head__label,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell span {
+    color: #4a6a8a;
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-activity,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-kv {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(12, 25, 48, 0.08);
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric strong,
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell strong {
+    color: #0c1930;
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-badge {
+    border-color: rgba(12, 25, 48, 0.1);
+    background: rgba(255, 255, 255, 0.5);
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-actions {
+    background: linear-gradient(180deg, transparent, rgba(248, 250, 255, 0.94) 24%);
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action {
+    color: #0c1930;
+  }
+
+  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action--message {
+    background: color-mix(in srgb, var(--smc-accent, #0a84ff) 14%, rgba(255, 255, 255, 0.72));
+    border-color: color-mix(in srgb, var(--smc-accent, #0a84ff) 28%, rgba(12, 25, 48, 0.1));
   }
 
   .smc-mobile-bottom-sheet .nx-mobile-bottom-sheet__body {

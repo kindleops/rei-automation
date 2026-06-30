@@ -428,6 +428,18 @@ html.is-mobile-layout {
     padding-bottom: 0 !important;
   }
 
+  /* Map view — dock flush to bottom edge (overlays map + peek sheet) */
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-pinned-app-dock,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-pinned-app-dock {
+    bottom: 0;
+    padding: 0 8px env(safe-area-inset-bottom, 0px);
+  }
+
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    border-radius: 999px;
+  }
+
   body:has(.nx-pinned-app-dock.is-docked),
   body:has(.nx-pinned-app-dock.is-expanded) {
     --nx-pinned-dock-collapsed: var(--nx-pinned-dock-height);
