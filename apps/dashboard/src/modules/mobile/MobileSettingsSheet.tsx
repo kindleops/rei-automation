@@ -8,6 +8,7 @@ import {
   type NexusTheme,
 } from '../../shared/settings'
 import { formatBuildIdentityLine, resolveBuildIdentity } from '../../lib/build-identity'
+import { useBreakpoint } from './useBreakpoint'
 
 const THEME_OPTIONS: Array<{ id: NexusTheme; label: string }> = [
   { id: 'dark', label: 'Dark' },
@@ -25,6 +26,7 @@ interface MobileSettingsSheetProps {
 export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps) => {
   const [theme, setTheme] = useState<NexusTheme>(() => loadSettings().nexusTheme)
   const build = resolveBuildIdentity()
+  const viewport = useBreakpoint()
 
   useEffect(() => {
     return subscribeSettings(() => setTheme(loadSettings().nexusTheme))
@@ -65,6 +67,10 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
             <code>{formatBuildIdentityLine(build)}</code>
             <span>SHA</span>
             <code>{build.gitSha}</code>
+            <span>Viewport</span>
+            <code>
+              {viewport.layoutWidth}×{viewport.layoutHeight} layout · {viewport.width}×{viewport.height} effective · mobile={viewport.isMobile ? 'yes' : 'no'}
+            </code>
           </div>
         </div>
       </aside>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { resolveViewportMetrics } from './viewport-metrics'
 
 export type Breakpoint = 'phone' | 'tablet' | 'desktop'
 
@@ -9,6 +10,25 @@ export function resolveBreakpoint(width: number): Breakpoint {
   if (width <= PHONE_MAX) return 'phone'
   if (width <= TABLET_MAX) return 'tablet'
   return 'desktop'
+}
+
+function readViewportState() {
+  if (typeof window === 'undefined') {
+    return resolveViewportMetrics({
+      innerWidth: 1280,
+      innerHeight: 800,
+    })
+  }
+
+  return resolveViewportMetrics({
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    screenWidth: window.screen?.width,
+    screenHeight: window.screen?.height,
+    visualViewportWidth: window.visualViewport?.width,
+    visualViewportHeight: window.visualViewport?.height,
+    orientationPortrait: window.matchMedia?.('(orientation: portrait)')?.matches,
+  })
 }
 
 export function useBreakpoint(): {
@@ -25,25 +45,28 @@ export function useBreakpoint(): {
   isPortrait: boolean
   width: number
   height: number
+  layoutWidth: number
+  layoutHeight: number
 } {
-  const [dims, setDims] = useState(() => ({
-    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
-    height: typeof window !== 'undefined' ? window.innerHeight : 800,
-  }))
+  const [viewport, setViewport] = useState(readViewportState)
 
   useEffect(() => {
-    const onResize = () => setDims({ width: window.innerWidth, height: window.innerHeight })
-    window.addEventListener('resize', onResize, { passive: true })
-    window.addEventListener('orientationchange', onResize, { passive: true })
+    const sync = () => setViewport(readViewportState())
+    sync()
+    window.addEventListener('resize', sync, { passive: true })
+    window.addEventListener('orientationchange', sync, { passive: true })
+    window.visualViewport?.addEventListener('resize', sync, { passive: true })
+    window.visualViewport?.addEventListener('scroll', sync, { passive: true })
     return () => {
-      window.removeEventListener('resize', onResize)
-      window.removeEventListener('orientationchange', onResize)
+      window.removeEventListener('resize', sync)
+      window.removeEventListener('orientationchange', sync)
+      window.visualViewport?.removeEventListener('resize', sync)
+      window.visualViewport?.removeEventListener('scroll', sync)
     }
   }, [])
 
-  const { width, height } = dims
+  const { effectiveWidth: width, effectiveHeight: height, isPortrait, layoutWidth, layoutHeight } = viewport
   const breakpoint = resolveBreakpoint(width)
-  const isPortrait = height >= width
   const isPhone = breakpoint === 'phone'
   const isLandscapeMobile = isPhone && !isPortrait
   const isMobile = isPhone && isPortrait
@@ -59,5 +82,7 @@ export function useBreakpoint(): {
     isPortrait,
     width,
     height,
+    layoutWidth,
+    layoutHeight,
   }
 }
