@@ -95,8 +95,6 @@ import {
   buildClusterRingExpr,
   buildClusterCoreExpr,
   buildClusterStrokeExpr,
-  PRIORITY_MARKER_STATES,
-  PRIORITY_ASSET_TYPES,
 } from './map-theme-tokens'
 import {
   applyVisualPresetBasemapPaint,
@@ -144,7 +142,6 @@ const RAW_LAYER_IDS = [
   'command-pin-core-raw',
   'command-pin-icon-raw',
   'command-pin-warning-badge-raw',
-  'seller-pins-icon',
 ] as const
 const CLUSTER_POINT_LAYER_IDS = [
   'command-pin-glow-clustered',
@@ -207,8 +204,14 @@ const PROPERTY_UNIVERSE_LAYER_IDS = {
   markers:      'prop-univ-markers',
 } as const
 
-const PROPERTY_UNIVERSE_CLUSTER_MAX_ZOOM = 10
-const SELLER_PINS_CLUSTER_MAX_ZOOM = 10
+const PROPERTY_UNIVERSE_CLUSTER_MAX_ZOOM = 8
+const SELLER_PINS_CLUSTER_MAX_ZOOM = 8
+
+const PIN_ASSET_GLOW_COLOR_EXPR = [
+  'coalesce',
+  ['get', 'icon_color'],
+  PIN_ICON_COLOR_COALESCED_EXPR,
+] as maplibregl.ExpressionSpecification
 
 const enrichPropertyUniverseFeatures = (
   features: GeoJSON.Feature<Point>[],
@@ -576,6 +579,14 @@ const defaultSellerPinLayers: SellerPinLayerToggles = {
   delivered: true,
   failedIssue: true,
 }
+
+const withAllSellerPinCategories = (
+  overrides: Partial<SellerPinLayerToggles> = {},
+): SellerPinLayerToggles => ({
+  ...defaultSellerPinLayers,
+  sellerPins: true,
+  ...overrides,
+})
 
 type BuyerLayerToggles = {
   sellerThreads: boolean
@@ -3758,11 +3769,8 @@ export function InboxCommandMap({
 
     switch (mapMode) {
       case 'acquisition':
-        setSellerPinLayers((p) => {
-          track('sellerPins', true); track('newReplies', true); track('hot', true)
-          track('positive', true); track('negotiating', true); track('issues', true)
-          return { ...p, sellerPins: true, newReplies: true, hot: true, positive: true, negotiating: true, issues: true, blocked: false }
-        })
+        setSellerPinLayers(() => withAllSellerPinCategories({ blocked: false }))
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false); track('buyerHeatmap', false)
           return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -3773,7 +3781,8 @@ export function InboxCommandMap({
         break
 
       case 'buyer_demand':
-        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', true); track('buyerHeatmap', true); track('recentSoldComps', true)
           track('repeatBuyers', true); track('corporateBuyers', true); track('localInvestors', true)
@@ -3785,7 +3794,8 @@ export function InboxCommandMap({
         break
 
       case 'comps':
-        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('recentSoldComps', true); track('buyerMatches', true); track('buyerProfiles', true)
           return { ...p, sellerThreads: true, recentSoldComps: true, buyerMatches: true, buyerProfiles: true, buyerHeatmap: false }
@@ -3799,11 +3809,8 @@ export function InboxCommandMap({
         break
 
       case 'execution':
-        setSellerPinLayers((p) => {
-          track('sellerPins', true); track('queued', true); track('scheduled', true)
-          track('ready', true); track('sent', true); track('delivered', true); track('failedIssue', true)
-          return { ...p, sellerPins: true, queued: true, scheduled: true, ready: true, activeSending: true, sent: true, delivered: true, failedIssue: true, newReplies: true }
-        })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
           return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -3814,7 +3821,8 @@ export function InboxCommandMap({
         break
 
       case 'opportunity_heat':
-        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
           return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -3828,7 +3836,8 @@ export function InboxCommandMap({
         break
 
       case 'territory':
-        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
           return { ...p, sellerThreads: false, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -3840,7 +3849,8 @@ export function InboxCommandMap({
         break
 
       case 'census':
-        setSellerPinLayers((p) => { track('sellerPins', true); return { ...p, sellerPins: true } })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
           return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -3852,11 +3862,8 @@ export function InboxCommandMap({
         break
 
       case 'command':
-        setSellerPinLayers((p) => {
-          track('sellerPins', true); track('newReplies', true); track('hot', true)
-          track('negotiating', true); track('issues', true); track('failedIssue', true)
-          return { ...p, sellerPins: true, newReplies: true, hot: true, positive: true, negotiating: true, issues: true, failedIssue: true, queued: true, scheduled: true, sent: true, delivered: true }
-        })
+        setSellerPinLayers(() => withAllSellerPinCategories())
+        track('sellerPins', true)
         setBuyerLayers((p) => {
           track('buyerMatches', false); track('recentSoldComps', false)
           return { ...p, sellerThreads: true, buyerMatches: false, recentSoldComps: false, buyerHeatmap: false, buyerProfiles: false }
@@ -4774,9 +4781,8 @@ export function InboxCommandMap({
       }
 
       const themeIdentity = getCommandMapThemeIdentity(theme.id)
-      const pinColorExpr = ['coalesce', ['get', 'pin_color'], themeIdentity.pinGlowHue] as maplibregl.ExpressionSpecification
       if (map.getLayer(SELLER_PINS_LAYER_IDS.glow)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-color', pinColorExpr)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-color', PIN_ASSET_GLOW_COLOR_EXPR)
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.glow, 'circle-opacity', UNIVERSAL_PIN_GLOW_OPACITY_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.ring)) {
@@ -4784,7 +4790,7 @@ export function InboxCommandMap({
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.ring, 'circle-stroke-width', UNIVERSAL_PIN_RING_WIDTH_EXPR as maplibregl.ExpressionSpecification)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-color', ['coalesce', ['get', 'ring_color'], pinColorExpr] as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-color', PIN_ASSET_GLOW_COLOR_EXPR)
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.core)) {
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.core, 'circle-color', ['coalesce', ['get', 'glass_color'], themeIdentity.pinGlassBody] as maplibregl.ExpressionSpecification)
@@ -4792,7 +4798,7 @@ export function InboxCommandMap({
       }
       if (map.getLayer(SELLER_PINS_LAYER_IDS.icon)) {
         map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-color', PIN_ICON_COLOR_COALESCED_EXPR as maplibregl.ExpressionSpecification)
-        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-halo-color', ['coalesce', ['get', 'ring_color'], pinColorExpr] as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-halo-color', PIN_ASSET_GLOW_COLOR_EXPR)
         map.setPaintProperty(
           SELLER_PINS_LAYER_IDS.icon,
           'icon-size',
@@ -5103,7 +5109,7 @@ export function InboxCommandMap({
           filter: ['!', ['has', 'point_count']],
           paint: {
             'circle-radius': ['+', ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 16], ['*', ['coalesce', ['get', 'glow_strength'], 0.5], 5]],
-            'circle-color': ['coalesce', ['get', 'ring_color'], ['get', 'pin_color'], '#38d0f0'],
+            'circle-color': PIN_ASSET_GLOW_COLOR_EXPR,
             'circle-opacity': UNIVERSAL_PIN_GLOW_OPACITY_EXPR as maplibregl.ExpressionSpecification,
             'circle-blur': 0.52,
           },
@@ -5137,7 +5143,7 @@ export function InboxCommandMap({
           filter: ['all', ['!', ['has', 'point_count']], ['!=', ['get', 'pulse_style'], 'none']],
           paint: {
             'circle-radius': 14,
-            'circle-color': ['coalesce', ['get', 'pin_color'], '#38d0f0'],
+            'circle-color': PIN_ASSET_GLOW_COLOR_EXPR,
             'circle-opacity': 0,
             'circle-blur': 0.4,
           },
@@ -5184,7 +5190,7 @@ export function InboxCommandMap({
           paint: {
             'icon-color': PIN_ICON_COLOR_COALESCED_EXPR,
             'icon-opacity': ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1],
-            'icon-halo-color': ['coalesce', ['get', 'ring_color'], ['get', 'pin_color'], '#38d0f0'],
+            'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
             'icon-halo-width': 1.4,
             'icon-halo-blur': 0.8,
           },
@@ -5567,8 +5573,8 @@ export function InboxCommandMap({
             paint: {
               'circle-radius': ['+', 14, ['*', ['get', 'glowStrength'], 18]],
               'circle-blur': 1,
-              'circle-opacity': ['*', ['case', ['==', ['get', 'glowStrength'], 1], 0.52, ['>=', ['get', 'glowStrength'], 0.8], 0.40, ['>=', ['get', 'glowStrength'], 0.52], 0.30, 0.18], ['get', 'focusOpacity']],
-              'circle-color': ['get', 'stageColor'],
+              'circle-opacity': ['*', ['case', ['==', ['get', 'glowStrength'], 1], 0.36, ['>=', ['get', 'glowStrength'], 0.8], 0.28, ['>=', ['get', 'glowStrength'], 0.52], 0.22, 0.14], ['get', 'focusOpacity']],
+              'circle-color': PIN_ASSET_GLOW_COLOR_EXPR,
             },
           })
         }
@@ -5581,10 +5587,10 @@ export function InboxCommandMap({
             ...(filter ? { filter: layerFilter } : {}),
             paint: {
               'circle-radius': ['match', ['get', 'pulseTier'], 'fast', 20, 'medium_fast', 18, 'medium', 16, 'slow', 14, 'very_slow', 12, 10],
-              'circle-opacity': ['*', ['case', ['==', ['get', 'pulseMode'], 'none'], 0, ['match', ['get', 'pulseTier'], 'fast', 0.28, 'medium_fast', 0.22, 'medium', 0.18, 'slow', 0.12, 'very_slow', 0, 0]], ['get', 'focusOpacity']],
-              'circle-color': ['get', 'stageColor'],
+              'circle-opacity': ['*', ['case', ['==', ['get', 'pulseMode'], 'none'], 0, ['match', ['get', 'pulseTier'], 'fast', 0.22, 'medium_fast', 0.18, 'medium', 0.14, 'slow', 0.10, 'very_slow', 0, 0]], ['get', 'focusOpacity']],
+              'circle-color': PIN_ASSET_GLOW_COLOR_EXPR,
               'circle-stroke-width': ['case', ['==', ['get', 'pulseMode'], 'none'], 0, ['match', ['get', 'pulseTier'], 'fast', 1.8, 'medium_fast', 1.5, 'medium', 1.3, 'slow', 1.1, 'very_slow', 0, 0]],
-              'circle-stroke-color': ['get', 'stageColor'],
+              'circle-stroke-color': PIN_ASSET_GLOW_COLOR_EXPR,
             },
           })
         }
@@ -5676,7 +5682,7 @@ export function InboxCommandMap({
             paint: {
               'icon-color': PIN_ICON_COLOR_COALESCED_EXPR,
               'icon-opacity': ['*', ['case', ['==', ['get', 'lockState'], 1], 0.9, 0.98], ['get', 'focusOpacity']],
-              'icon-halo-color': ['get', 'stageColor'],
+              'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
               'icon-halo-width': 1.2,
               'icon-halo-blur': 1.5,
             },
@@ -6408,6 +6414,12 @@ export function InboxCommandMap({
         })
       }
     }
+
+    map.on('styleimagemissing', (event) => {
+      if (Object.values(PIN_ICON).includes(event.id as (typeof PIN_ICON)[keyof typeof PIN_ICON])) {
+        loadPropertyIcons(map)
+      }
+    })
 
     map.on('load', () => {
       handleStyleReady()
@@ -7203,8 +7215,7 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
     if (!viewportBounds || viewportZoom < 10) return
-    const showAcquisitionField = mapMode === 'acquisition' || mapMode === 'command' || mapMode === 'territory'
-    if (!showAcquisitionField) return
+    if (!sellerPinLayers.sellerPins) return
 
     propertyUniverseAbortRef.current?.abort()
     propertyUniverseAbortRef.current = new AbortController()
@@ -7228,7 +7239,7 @@ export function InboxCommandMap({
       src?.setData({ type: 'FeatureCollection', features: enriched })
     }).catch(() => { /* aborted or network error */ })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportBounds, viewportZoom, baseStyleLoading, mapMode, selectedPropertyId, mapStyleMode])
+  }, [viewportBounds, viewportZoom, baseStyleLoading, sellerPinLayers.sellerPins, selectedPropertyId, mapStyleMode])
 
   // ── Property universe zoom-gated visibility ───────────────────────────────
   // zoom < 10      → hidden entirely (national view)
@@ -7239,10 +7250,10 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
 
-    const showAcquisitionField = mapMode === 'acquisition' || mapMode === 'command' || mapMode === 'territory'
-    const markerRevealZoom = isMobile ? 10.25 : 11.75
-    const showClusters = showAcquisitionField && viewportZoom >= 10
-    const showMarkers = showAcquisitionField && viewportZoom >= markerRevealZoom
+    const showPropertyField = sellerPinLayers.sellerPins
+    const markerRevealZoom = isMobile ? 9.5 : 10.5
+    const showClusters = showPropertyField && viewportZoom >= 10
+    const showMarkers = showPropertyField && viewportZoom >= markerRevealZoom
     const vis = (v: boolean) => v ? 'visible' : 'none'
 
     for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterCount]) {
@@ -7260,20 +7271,11 @@ export function InboxCommandMap({
 
     if (showMarkers) {
       const baseFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
-      const priorityFilter: maplibregl.FilterSpecification = ['all',
-        baseFilter,
-        ['any',
-          ['in', ['get', 'markerState'], ['literal', [...PRIORITY_MARKER_STATES]]],
-          ['in', ['get', 'assetType'], ['literal', [...PRIORITY_ASSET_TYPES]]],
-          ['>=', ['get', 'acquisitionScore'], 85],
-        ],
-      ]
-      const activeFilter = isMobile || viewportZoom >= 13 ? baseFilter : priorityFilter
       for (const lid of markerLayerIds) {
-        if (map.getLayer(lid)) map.setFilter(lid, activeFilter)
+        if (map.getLayer(lid)) map.setFilter(lid, baseFilter)
       }
     }
-  }, [baseStyleLoading, isMobile, mapMode, viewportZoom])
+  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, viewportZoom])
 
   useEffect(() => {
     const map = mapRef.current
@@ -7290,6 +7292,15 @@ export function InboxCommandMap({
         'icon-size',
         (isMobile ? PIN_ICON_SCALE_TOUCH_EXPR : UNIVERSAL_PIN_ICON_SCALE_EXPR) as maplibregl.ExpressionSpecification,
       )
+    }
+    for (const layerId of ['command-pin-icon-raw', 'command-pin-icon-clustered'] as const) {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(
+          layerId,
+          'icon-size',
+          (isMobile ? PIN_ICON_SCALE_TOUCH_EXPR : UNIVERSAL_PIN_ICON_SCALE_EXPR) as maplibregl.ExpressionSpecification,
+        )
+      }
     }
   }, [isMobile])
 
@@ -7362,17 +7373,17 @@ export function InboxCommandMap({
     const clusteredMode =
       (activityMode !== 'sends' && !activeKpiFilter)
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
-    const sellerVisible = buyerLayers.sellerThreads
+    const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinLayers.sellerPins
     RAW_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
     })
     CLUSTER_POINT_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
     })
     CLUSTER_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
     })
-  }, [activeKpiFilter, activityMode, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, baseStyleLoading])
+  }, [activeKpiFilter, activityMode, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, baseStyleLoading])
 
   useEffect(() => {
     const map = mapRef.current

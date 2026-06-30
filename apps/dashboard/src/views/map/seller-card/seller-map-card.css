@@ -1129,7 +1129,7 @@
 .smc-mobile-bottom-sheet .smc-image.is-mobile-hero {
   flex-shrink: 0;
   width: 100%;
-  height: clamp(108px, 42%, 132px);
+  height: 72px;
   margin: 0;
   border-radius: 0;
   background: rgba(8, 12, 20, 0.2);
@@ -1168,19 +1168,27 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
-.smc-body--mobile-peek {
+.smc-body--mobile-header {
   gap: 6px;
   padding: 10px 14px 12px;
 }
 
-.smc-body--mobile-peek .smc-identity__name {
+.smc-body--mobile-header .smc-state-row {
+  max-height: none;
+}
+
+.smc-body--mobile-header .smc-identity__name {
   font-size: 16px;
   line-height: 1.15;
 }
 
-.smc-body--mobile-peek .smc-identity__address {
+.smc-body--mobile-header .smc-identity__address {
   font-size: 12px;
   -webkit-line-clamp: 2;
+}
+
+.smc-body--mobile-expanded {
+  padding-top: 4px;
 }
 
 .smc-summary--physical {
@@ -1190,17 +1198,17 @@
   color: color-mix(in srgb, var(--smc-text) 92%, transparent);
 }
 
-.smc-body--mobile-peek .smc-metrics {
+.smc-body--mobile-expanded .smc-metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
 }
 
-.smc-body--mobile-peek .smc-metric {
+.smc-body--mobile-expanded .smc-metric {
   min-height: 44px;
   padding: 5px 6px;
 }
 
-.smc-body--mobile-peek .smc-metric strong {
+.smc-body--mobile-expanded .smc-metric strong {
   font-size: 11px;
 }
 

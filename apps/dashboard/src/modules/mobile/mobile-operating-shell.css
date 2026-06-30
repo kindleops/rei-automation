@@ -2200,7 +2200,7 @@ html.is-mobile-layout {
   /* Seller + shared draggable map sheets */
   .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
     z-index: 145;
-    bottom: 0;
+    bottom: calc(var(--nx-pinned-dock-collapsed, 14px) + var(--nx-mobile-safe-bottom, 0px));
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-bottom: none;
     background:
@@ -2209,7 +2209,7 @@ html.is-mobile-layout {
     backdrop-filter: blur(28px) saturate(1.5);
     -webkit-backdrop-filter: blur(28px) saturate(1.5);
     box-shadow: 0 -18px 56px rgba(0, 0, 0, 0.48);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0;
     transition: max-height 280ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
