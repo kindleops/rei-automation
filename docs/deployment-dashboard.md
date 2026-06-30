@@ -66,6 +66,39 @@ http://localhost:5173/*
 
 Set **Site URL** to `https://ops.leadcommand.ai` once the domain is live.
 
+## Seller Autopilot Release (2026-06-30)
+
+Canonical branch: `main` @ `32d1f22`.
+
+| Target | URL |
+|---|---|
+| Dashboard production | `https://dashboard-azure-six-92.vercel.app` |
+| API production | `https://api-steel-three-96.vercel.app` |
+| Preview (branch deploy, SSO-protected) | `https://dashboard-30wke4ipi-real-estate-automation.vercel.app` |
+
+### Focused verification commands
+
+```bash
+# Builds
+npm run build:api
+cd apps/dashboard && npm run build
+
+# Seller-flow critical proofs (API)
+cd apps/api && npm run proof:seller-inbound-orchestration
+
+# Dashboard unit proofs (map/inbox/mobile dock)
+cd apps/dashboard && npx vitest run tests/unit/map-selection-sync.test.ts tests/unit/universal-pin-system.test.ts
+```
+
+### Architecture entry points
+
+- **Seller automation:** `apps/api/src/lib/seller-inbound/` orchestrator + `seller_automation_executions` timeline tables
+- **Universal lead state:** `apps/api/supabase/migrations/20260627120000_universal_lead_state.sql` + dashboard `universal-sync.ts`
+- **Mobile shell:** `PortableCommandShell.tsx` + `PinnedAppDock.tsx` (portrait); landscape uses desktop `CommandCenterApp`
+- **Desktop Deal Desk:** 25/50/25 via `view-layout.ts` + `InboxPage.tsx`
+- **Map seller pins:** `InboxCommandMap.tsx` + `universal-pin-system.ts` + `seller-card/`
+- **Queue/send:** `apps/api/src/app/api/internal/queue/run` + `send_queue` atomic claim RPCs
+
 ## After Dashboard Domain Is Live
 
 Lock `apps/api` CORS to the dashboard domain only:
