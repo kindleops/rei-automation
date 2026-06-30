@@ -2087,6 +2087,24 @@
     color: var(--tone-primary, #5eead4);
   }
 
+  .nx-mobile-settings-sheet__about {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .nx-mobile-settings-sheet__about code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.86);
+    word-break: break-all;
+  }
+
   /* Email command mobile split */
   .ecc__inbox.is-mobile:not(.is-thread-open) .ecc__thread-panel {
     display: none !important;

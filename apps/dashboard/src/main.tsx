@@ -16,8 +16,34 @@ import App from './App.tsx'
 applyThemeToDOM()
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  let reloadScheduled = false
+  const scheduleReload = () => {
+    if (reloadScheduled) return
+    reloadScheduled = true
+    window.setTimeout(() => window.location.reload(), 120)
+  }
+
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{ type?: string }>) => {
+    if (event.data?.type === 'NEXUS_SW_ACTIVATED') scheduleReload()
+  })
+  navigator.serviceWorker.addEventListener('controllerchange', scheduleReload)
+
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+    void navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((registration) => {
+        registration.update().catch(() => undefined)
+        registration.addEventListener('updatefound', () => {
+          const worker = registration.installing
+          if (!worker) return
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+              worker.postMessage({ type: 'SKIP_WAITING' })
+            }
+          })
+        })
+      })
+      .catch(() => undefined)
   })
 }
 

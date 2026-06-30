@@ -7,6 +7,7 @@ import {
   updateSetting,
   type NexusTheme,
 } from '../../shared/settings'
+import { formatBuildIdentityLine, resolveBuildIdentity } from '../../lib/build-identity'
 
 const THEME_OPTIONS: Array<{ id: NexusTheme; label: string }> = [
   { id: 'dark', label: 'Dark' },
@@ -23,6 +24,7 @@ interface MobileSettingsSheetProps {
 
 export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps) => {
   const [theme, setTheme] = useState<NexusTheme>(() => loadSettings().nexusTheme)
+  const build = resolveBuildIdentity()
 
   useEffect(() => {
     return subscribeSettings(() => setTheme(loadSettings().nexusTheme))
@@ -56,6 +58,13 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
                 {option.label}
               </button>
             ))}
+          </div>
+          <p className="nx-mobile-settings-sheet__label">About</p>
+          <div className="nx-mobile-settings-sheet__about">
+            <span>Build</span>
+            <code>{formatBuildIdentityLine(build)}</code>
+            <span>SHA</span>
+            <code>{build.gitSha}</code>
           </div>
         </div>
       </aside>

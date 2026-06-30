@@ -628,16 +628,23 @@ function resolveBackendProxyTarget(env: Record<string, string>, mode: string): s
   return configured
 }
 
-const pwaManifestPlugin = (): Plugin => {
+function resolveBuildCacheVersion(devIdentity: { commitSha: string }) {
+  const sha = (process.env.VERCEL_GIT_COMMIT_SHA || devIdentity.commitSha || 'local').trim()
+  return sha === 'unknown' || sha === 'local' ? `dev-${Date.now()}` : sha.slice(0, 12)
+}
+
+const pwaManifestPlugin = (cacheVersion: string): Plugin => {
   const manifestPath = fileURLToPath(new URL('./manifest.webmanifest', import.meta.url))
   const swPath = fileURLToPath(new URL('./sw.js', import.meta.url))
+  const swSource = () => fs.readFileSync(swPath, 'utf8').replace('__NEXUS_CACHE_VERSION__', cacheVersion)
   const serveManifest = (_req: unknown, res: { setHeader: (k: string, v: string) => void; end: (b: string) => void }) => {
     res.setHeader('Content-Type', 'application/manifest+json')
     res.end(fs.readFileSync(manifestPath, 'utf8'))
   }
   const serveSw = (_req: unknown, res: { setHeader: (k: string, v: string) => void; end: (b: string) => void }) => {
-    res.setHeader('Content-Type', 'application/javascript')
-    res.end(fs.readFileSync(swPath, 'utf8'))
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate')
+    res.end(swSource())
   }
   return {
     name: 'pwa-manifest',
@@ -654,7 +661,7 @@ const pwaManifestPlugin = (): Plugin => {
       this.emitFile({
         type: 'asset',
         fileName: 'sw.js',
-        source: fs.readFileSync(swPath, 'utf8'),
+        source: swSource(),
       })
     },
   }
@@ -665,16 +672,22 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendProxyTarget = resolveBackendProxyTarget(env, mode)
   const devIdentity = resolveDevGitIdentity()
+  const buildTime = process.env.VITE_BUILD_TIME || new Date().toISOString()
+  const commitSha = process.env.VERCEL_GIT_COMMIT_SHA
+    || process.env.GIT_COMMIT_SHA
+    || devIdentity.commitSha
+  const cacheVersion = resolveBuildCacheVersion({ commitSha })
   return {
     define: {
-      'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA || 'local'),
-      'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
-      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'rei-automation-dashboard'),
+      'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(commitSha),
+      'import.meta.env.VITE_BUILD_TIME': JSON.stringify(buildTime),
+      'import.meta.env.VITE_DEPLOYMENT_ID': JSON.stringify(process.env.VERCEL_DEPLOYMENT_ID || 'local'),
+      'import.meta.env.VITE_VERCEL_PROJECT': JSON.stringify(process.env.VERCEL_PROJECT_NAME || 'dashboard'),
       'import.meta.env.VITE_DASHBOARD_GIT_SHA': JSON.stringify(devIdentity.commitSha),
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
-    plugins: [react(), pwaManifestPlugin(), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    plugins: [react(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     server: {
       host: '0.0.0.0',
       port: 5173,

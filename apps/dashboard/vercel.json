@@ -1,9 +1,39 @@
 {
   "framework": "vite",
   "devCommand": "vite --host 0.0.0.0 --port $PORT",
-  "buildCommand": "npm run build",
+  "buildCommand": "GIT_COMMIT_SHA=${VERCEL_GIT_COMMIT_SHA:-$(git rev-parse HEAD)} VITE_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build",
   "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/version",
+      "destination": "/api/version"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
