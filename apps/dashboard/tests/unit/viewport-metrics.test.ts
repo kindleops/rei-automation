@@ -19,7 +19,7 @@ describe('resolveViewportMetrics', () => {
       innerHeight: 844,
       screenWidth: 390,
       screenHeight: 844,
-      orientationPortrait: true,
+      orientationPortrait: false,
     })
     expect(metrics.effectiveWidth).toBe(390)
     expect(metrics.effectiveHeight).toBe(844)

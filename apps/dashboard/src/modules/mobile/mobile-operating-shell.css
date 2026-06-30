@@ -26,7 +26,55 @@
   border: 0;
 }
 
-@media (max-width: 767px) and (orientation: portrait) {
+@keyframes nx-dock-mount {
+  from { transform: translateY(-12px); opacity: 0.72; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes nx-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes nx-search-layer-in {
+  from { transform: translateY(-8px); opacity: 0.75; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes nx-mobile-sheet-drop {
+  from { transform: translateY(-14px); opacity: 0.68; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes nx-mobile-sheet-in {
+  from { transform: translateY(-14px); opacity: 0.68; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes nx-mobile-header-breathe {
+  0% { filter: saturate(1.15) brightness(1); }
+  100% { filter: saturate(1.45) brightness(1.08); }
+}
+
+@keyframes nx-mobile-liquid-field {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); opacity: 0.62; }
+  33% { transform: translate3d(5%, -3%, 0) scale(1.08) rotate(2deg); opacity: 0.92; }
+  66% { transform: translate3d(-4%, 2%, 0) scale(1.04) rotate(-1.5deg); opacity: 0.74; }
+}
+
+@keyframes nx-mobile-liquid-bloom {
+  0% { transform: translate3d(0, 0, 0) scale(0.92); opacity: 0.55; }
+  50% { transform: translate3d(-6%, 4%, 0) scale(1.14); opacity: 0.98; }
+  100% { transform: translate3d(3%, -2%, 0) scale(1.06); opacity: 0.78; }
+}
+
+@keyframes nx-mobile-liquid-edge {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.42; }
+  50% { transform: translate3d(6%, -2%, 0); opacity: 0.82; }
+}
+
+/* Class-gated (not viewport media queries) so Safari desktop-website mode still styles mobile shell. */
+html.is-mobile-layout {
   .nx-os.is-mobile-os .nx-room-label {
     display: none;
   }
@@ -52,11 +100,6 @@
     padding: calc(3px + var(--nx-mobile-safe-top)) 10px 0;
     pointer-events: none;
     animation: nx-dock-mount 380ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes nx-dock-mount {
-    from { transform: translateY(-12px); opacity: 0.72; }
-    to { transform: translateY(0); opacity: 1; }
   }
 
   .nx-mobile-command-dock__inner {
@@ -298,11 +341,6 @@
     animation: nx-backdrop-in 220ms ease;
   }
 
-  @keyframes nx-backdrop-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
   .nx-mobile-search-layer {
     position: fixed;
     left: 0;
@@ -316,11 +354,6 @@
     padding: 8px 10px 0;
     pointer-events: none;
     animation: nx-search-layer-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes nx-search-layer-in {
-    from { transform: translateY(-8px); opacity: 0.75; }
-    to { transform: translateY(0); opacity: 1; }
   }
 
   .nx-mobile-search-layer__field {
@@ -400,16 +433,6 @@
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     overflow: hidden;
     animation: nx-mobile-sheet-drop 280ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes nx-mobile-sheet-drop {
-    from { transform: translateY(-14px); opacity: 0.68; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-
-  @keyframes nx-mobile-sheet-in {
-    from { transform: translateY(-14px); opacity: 0.68; }
-    to { transform: translateY(0); opacity: 1; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1033,28 +1056,6 @@
   .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--edge {
     animation: nx-mobile-liquid-edge 5.5s ease-in-out infinite !important;
     opacity: 0.72 !important;
-  }
-
-  @keyframes nx-mobile-header-breathe {
-    0% { filter: saturate(1.15) brightness(1); }
-    100% { filter: saturate(1.45) brightness(1.08); }
-  }
-
-  @keyframes nx-mobile-liquid-field {
-    0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); opacity: 0.62; }
-    33% { transform: translate3d(5%, -3%, 0) scale(1.08) rotate(2deg); opacity: 0.92; }
-    66% { transform: translate3d(-4%, 2%, 0) scale(1.04) rotate(-1.5deg); opacity: 0.74; }
-  }
-
-  @keyframes nx-mobile-liquid-bloom {
-    0% { transform: translate3d(0, 0, 0) scale(0.92); opacity: 0.55; }
-    50% { transform: translate3d(-6%, 4%, 0) scale(1.14); opacity: 0.98; }
-    100% { transform: translate3d(3%, -2%, 0) scale(1.06); opacity: 0.78; }
-  }
-
-  @keyframes nx-mobile-liquid-edge {
-    0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.42; }
-    50% { transform: translate3d(6%, -2%, 0); opacity: 0.82; }
   }
 
   .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-hero {
@@ -2354,12 +2355,10 @@
   }
 }
 
-@media (min-width: 768px) {
-  .nx-mobile-bottom-nav,
-  .nx-mobile-more-sheet,
-  .nx-mobile-sheet-backdrop,
-  .nx-mobile-command-dock,
-  .nx-conv-back {
-    display: none !important;
-  }
+.nx-os:not(.is-mobile-os) .nx-mobile-bottom-nav,
+.nx-os:not(.is-mobile-os) .nx-mobile-more-sheet,
+.nx-os:not(.is-mobile-os) .nx-mobile-sheet-backdrop,
+.nx-os:not(.is-mobile-os) .nx-mobile-command-dock,
+.nx-os:not(.is-mobile-os) .nx-conv-back {
+  display: none !important;
 }

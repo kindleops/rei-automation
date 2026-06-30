@@ -219,6 +219,11 @@ export const CommandCenterApp = () => {
     return subscribeSettings(() => applyThemeToDOM())
   }, [])
 
+  useEffect(() => {
+    document.documentElement.classList.toggle('is-mobile-layout', isMobile)
+    return () => document.documentElement.classList.remove('is-mobile-layout')
+  }, [isMobile])
+
   // ── Room transition sound ──
   const prevPathRef = useRef(route.path)
 

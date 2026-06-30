@@ -25,13 +25,20 @@ export function resolveViewportMetrics(input: {
   const screenHeight = Math.round(input.screenHeight ?? layoutHeight)
   const shortEdge = Math.min(screenWidth, screenHeight)
   const longEdge = Math.max(screenWidth, screenHeight)
-  const isPortrait = input.orientationPortrait ?? layoutHeight >= layoutWidth
+  const screenPortrait = screenHeight >= screenWidth
 
+  // Safari "Request Desktop Website" inflates layout width (e.g. 980) while the
+  // device screen stays phone-sized. Layout-based orientation then reads landscape.
   const inflatedDesktopViewport =
-    isPortrait
-    && layoutWidth > PHONE_MAX
+    layoutWidth > PHONE_MAX
+    && layoutWidth > longEdge
     && shortEdge <= PHONE_MAX
     && longEdge <= PHONE_LONG_EDGE_MAX
+    && screenPortrait
+
+  const isPortrait = inflatedDesktopViewport
+    ? screenPortrait
+    : (input.orientationPortrait ?? layoutHeight >= layoutWidth)
 
   const effectiveWidth = inflatedDesktopViewport ? shortEdge : layoutWidth
   const effectiveHeight = inflatedDesktopViewport ? longEdge : layoutHeight

@@ -8,7 +8,13 @@
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 
-@media (max-width: 767px) and (orientation: portrait) {
+@keyframes nx-pinned-dock-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Class-gated (not viewport media queries) so Safari desktop-website mode still styles mobile shell. */
+html.is-mobile-layout {
   .nx-pinned-app-dock__backdrop {
     position: fixed;
     inset: 0;
@@ -19,11 +25,6 @@
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
     animation: nx-pinned-dock-fade-in 220ms ease;
-  }
-
-  @keyframes nx-pinned-dock-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
   }
 
   .nx-pinned-app-dock {
@@ -437,9 +438,7 @@
   }
 }
 
-@media (min-width: 768px), (orientation: landscape) {
-  .nx-pinned-app-dock,
-  .nx-pinned-app-dock__backdrop {
-    display: none !important;
-  }
+html:not(.is-mobile-layout) .nx-pinned-app-dock,
+html:not(.is-mobile-layout) .nx-pinned-app-dock__backdrop {
+  display: none !important;
 }
