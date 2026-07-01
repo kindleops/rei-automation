@@ -7,6 +7,10 @@ import { getSystemValue } from '@/lib/system-control.js'
 import { renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import {
+  canonicalLanguageLabel,
+  resolveLanguage,
+} from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import {
   asBoolean,
   isEmergencyStopActive,
   normalizeQueueProcessorMode,
@@ -23,13 +27,8 @@ function clean(value) {
   return String(value ?? '').trim()
 }
 
-function normalizeLanguage(code) {
-  const raw = clean(code).toLowerCase()
-  if (!raw || raw === 'auto') return 'en'
-  if (raw.startsWith('es') || raw === 'spanish') return 'es'
-  if (raw.startsWith('ru') || raw === 'russian') return 'ru'
-  if (raw.startsWith('en') || raw === 'english') return 'en'
-  return raw.slice(0, 5)
+function metadataObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
 const BLOCKER_LABELS = {
@@ -49,6 +48,7 @@ const BLOCKER_LABELS = {
   template_required: 'No approved template resolved for scenario/stage/language',
   language_template_gap: 'Targets missing language template assignment',
   no_ready_recipients: 'No ready recipients in target snapshot',
+  no_launch_ready_recipients: 'No launch-ready recipients after template and routing gates',
   missing_canonical_phone: 'Recipient missing canonical phone',
   suppression_blocked: 'Active suppression on ready recipients',
   routing_blocked: 'Sender route unavailable for ready recipients',
@@ -57,6 +57,28 @@ const BLOCKER_LABELS = {
   campaign_not_queueable: 'Campaign lifecycle does not allow activation',
   missing_launch_caps: 'Campaign missing required pacing caps',
   provider_disabled: 'Outbound SMS provider is disabled',
+  zero_valid_senders: 'No active sender route covers this campaign market',
+}
+
+function isTargetRoutingReady(row = {}) {
+  return (
+    clean(row.target_status) === 'ready' &&
+    clean(row.routing_status) === 'ready' &&
+    clean(row.suppression_status) !== 'blocked'
+  )
+}
+
+function isTargetLaunchReady(row = {}) {
+  return (
+    isTargetRoutingReady(row) &&
+    clean(row.template_status) === 'ready' &&
+    clean(row.identity_status) !== 'blocked'
+  )
+}
+
+function isSenderCoveredTarget(row = {}) {
+  const metadata = metadataObject(row.metadata)
+  return metadata.sender_covered === true || metadata.candidate_snapshot?.sender_covered === true
 }
 
 export function resolveLaunchReadinessContext(options = {}) {
@@ -98,19 +120,15 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     processorModeRaw,
     globalAutoEnqueue,
     outboundSms,
-    readyCountRes,
-    readyTargetsRes,
-    languageTargetsRes,
-    routableCountRes,
+    targetRowsRes,
+    senderRowsRes,
   ] = await Promise.all([
     loadSystemValue('queue_emergency_stop_at'),
     loadSystemValue('queue_processor_mode'),
     loadSystemValue('queue_auto_enqueue_enabled'),
     loadSystemValue('outbound_sms_enabled'),
-    supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('target_status', 'ready'),
-    supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).eq('target_status', 'ready').order('priority_score', { ascending: false, nullsFirst: false }).limit(20),
-    supabase.from('campaign_targets').select('language,template_status').eq('campaign_id', campaignId).limit(50000),
-    supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).eq('target_status', 'ready').eq('routing_status', 'ready').eq('template_status', 'ready'),
+    supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).limit(50000),
+    supabase.from('textgrid_numbers').select('id,market,is_active').eq('is_active', true).limit(500),
   ])
 
   const brakeState = evaluateGlobalSendBrakeState({
@@ -188,39 +206,88 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     blockerCodes.push('missing_send_window')
   }
 
-  const ready = readyTargetsRes.data || []
-  const readyTotal = Number(readyCountRes.count ?? ready.length)
-  const routableTotal = Number(routableCountRes.count ?? 0)
+  const targets = targetRowsRes.data || []
+  const persistedTargetCount = targets.length
+  const readyTargets = targets.filter((row) => clean(row.target_status) === 'ready')
+  const readyTotal = readyTargets.length
+  const routingReadyTargets = targets.filter(isTargetRoutingReady)
+  const routingReadyTotal = routingReadyTargets.length
+  const templateReadyTotal = targets.filter((row) => clean(row.template_status) === 'ready').length
+  const launchReadyTargets = targets.filter(isTargetLaunchReady)
+  const launchReadyTotal = launchReadyTargets.length
+  const suppressedTotal = targets.filter((row) => clean(row.suppression_status) === 'blocked').length
+  const awaitingTemplateTotal = routingReadyTargets.filter((row) => clean(row.template_status) !== 'ready').length
+  const senderCoveredTotal = routingReadyTargets.filter(isSenderCoveredTarget).length
+  const outsideSenderCapacityTotal = Math.max(0, routingReadyTotal - senderCoveredTotal)
+
+  const langBuckets = new Map()
+  let unsupportedLanguageTotal = 0
+  for (const row of targets) {
+    const lang = canonicalLanguageLabel(row.language)
+    const resolved = resolveLanguage(row.language)
+    if (!langBuckets.has(lang)) {
+      langBuckets.set(lang, { total: 0, unassigned: 0, unsupported: 0 })
+    }
+    const bucket = langBuckets.get(lang)
+    bucket.total += 1
+    if (resolved.unsupported) {
+      bucket.unsupported += 1
+      unsupportedLanguageTotal += 1
+    } else if (clean(row.template_status) !== 'ready') {
+      bucket.unassigned += 1
+    }
+  }
+
+  const routableTotal = routingReadyTotal
+  const templateCoveragePct = routingReadyTotal > 0
+    ? (launchReadyTotal / routingReadyTotal) * 100
+    : 100
 
   if (!readyTotal) {
     blockers.push(BLOCKER_LABELS.no_ready_recipients)
     blockerCodes.push('no_ready_recipients')
   }
 
-  if (readyTotal > 0 && routableTotal === 0) {
+  if (readyTotal > 0 && routingReadyTotal === 0) {
     blockers.push(BLOCKER_LABELS.routing_zero)
     blockerCodes.push('routing_zero')
   }
 
-  const langBuckets = new Map()
-  for (const row of languageTargetsRes.data || []) {
-    const lang = normalizeLanguage(row.language)
-    if (!langBuckets.has(lang)) langBuckets.set(lang, { total: 0, unassigned: 0 })
-    const b = langBuckets.get(lang)
-    b.total += 1
-    if (clean(row.template_status) !== 'ready') b.unassigned += 1
+  if (routingReadyTotal > 0 && launchReadyTotal === 0) {
+    blockers.push(BLOCKER_LABELS.no_launch_ready_recipients)
+    blockerCodes.push('no_launch_ready_recipients')
   }
-  const totalLangTargets = [...langBuckets.values()].reduce((sum, bucket) => sum + bucket.total, 0)
-  const totalUnassigned = [...langBuckets.values()].reduce((sum, bucket) => sum + bucket.unassigned, 0)
-  const templateCoveragePct = totalLangTargets > 0
-    ? ((totalLangTargets - totalUnassigned) / totalLangTargets) * 100
-    : 100
+
+  const activeSenders = (senderRowsRes.data || []).filter((row) => row.is_active !== false)
+  const campaignMarket = clean(campaign.market).toLowerCase()
+  const marketAliases = new Set([
+    campaignMarket,
+    'los angeles',
+    'los angeles, ca',
+    'la',
+    'riverside',
+    'inland empire',
+    'san bernardino',
+  ].filter(Boolean))
+  const marketSenders = activeSenders.filter((row) => marketAliases.has(clean(row.market).toLowerCase()))
+  if (routingReadyTotal > 0 && marketSenders.length === 0) {
+    blockers.push(BLOCKER_LABELS.zero_valid_senders)
+    blockerCodes.push('zero_valid_senders')
+  } else if (outsideSenderCapacityTotal > 0 && launchReadyTotal > 0) {
+    warnings.push(
+      `${outsideSenderCapacityTotal} routing-ready targets are outside current sender capacity — initial batch will cover ${senderCoveredTotal}`
+    )
+  }
 
   for (const [lang, bucket] of langBuckets) {
-    if (bucket.unassigned > 0) {
-      const label = lang === 'es' ? 'Spanish' : lang === 'ru' ? 'Russian' : lang === 'en' ? 'English' : lang
-      const message = `${bucket.unassigned} ${label} targets have no assigned template`
-      if (context.controlled_hydration && templateCoveragePct >= 95) {
+    if (bucket.unsupported > 0) {
+      warnings.push(`${bucket.unsupported} ${lang} targets excluded — no approved S1 template`)
+    }
+    if (bucket.unassigned > 0 && !bucket.unsupported) {
+      const message = `${bucket.unassigned} ${lang} targets awaiting template assignment`
+      if (launchReadyTotal > 0) {
+        warnings.push(message)
+      } else if (context.controlled_hydration && templateCoveragePct >= 95) {
         warnings.push(message)
       } else {
         blockers.push(message)
@@ -229,18 +296,28 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     }
   }
 
+  if (unsupportedLanguageTotal > 0 && launchReadyTotal > 0) {
+    warnings.push(`${unsupportedLanguageTotal} targets excluded for unsupported language — campaign can still launch`)
+  }
+
   let templateResolved = 0
   let templateMissing = 0
-  const sampleSize = Math.min(5, ready.length)
+  const sampleTargets = launchReadyTargets.length
+    ? launchReadyTargets.slice(0, 5)
+    : routingReadyTargets.slice(0, 5)
+  const sampleSize = Math.min(5, sampleTargets.length)
+  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
 
   for (let i = 0; i < sampleSize; i += 1) {
-    const target = ready[i]
+    const target = sampleTargets[i]
     const candidate = launchCandidateFromTarget(target, campaign)
-    candidate.stage_code = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
+    candidate.stage_code = stageCode
     const rendered = await renderOutboundTemplate(candidate, {
       template_use_case: campaign.metadata?.template_use_case || campaign.objective || 'ownership_check',
-      stage_code: normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1'),
+      stage_code: stageCode,
       first_touch: true,
+      campaign_template_assignment: true,
+      allow_identity_unknown: true,
     }, deps)
     if (rendered.ok && (rendered.selected_template_id || rendered.template?.template_id)) {
       templateResolved += 1
@@ -249,7 +326,7 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     }
   }
 
-  if (readyTotal && templateMissing === sampleSize) {
+  if (routingReadyTotal && templateMissing === sampleSize && launchReadyTotal === 0) {
     if (context.controlled_hydration && routableTotal > 0) {
       warnings.push(BLOCKER_LABELS.template_required)
     } else {
@@ -276,12 +353,28 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     blocker_codes: uniqueCodes,
     blockers: uniqueBlockers,
     warnings,
-    template_readiness: templateMissing === 0 && readyTotal ? 'resolved' : templateMissing === sampleSize ? 'missing' : 'partial',
+    template_readiness: templateMissing === 0 && launchReadyTotal ? 'resolved' : templateMissing === sampleSize ? 'missing' : 'partial',
     template_sample: { resolved: templateResolved, missing: templateMissing, sampled: sampleSize },
+    counts: {
+      candidates_discovered: Number(campaign.metadata?.candidate_count || campaign.metadata?.preview_ready_to_queue || 0) || null,
+      persisted_targets: persistedTargetCount,
+      routing_ready: routingReadyTotal,
+      template_assigned: templateReadyTotal,
+      sender_covered: senderCoveredTotal,
+      launch_ready: launchReadyTotal,
+      awaiting_template: awaitingTemplateTotal,
+      unsupported_language: unsupportedLanguageTotal,
+      outside_sender_capacity: outsideSenderCapacityTotal,
+      suppressed: suppressedTotal,
+      excluded: unsupportedLanguageTotal + suppressedTotal,
+    },
     ready_recipient_count: readyTotal,
     routable_recipient_count: routableTotal,
+    launch_ready_recipient_count: launchReadyTotal,
     remediation: uniqueBlockers,
     readiness_context: context,
     send_brake_state: brakeState,
+    stage_code: stageCode,
+    false_routing_blocker_removed: true,
   }
 }

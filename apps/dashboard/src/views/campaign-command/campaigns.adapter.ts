@@ -181,6 +181,9 @@ function applyCommandSummaryToCampaign(campaign: CampaignSummary, summary: Await
     readiness_label: summary.readiness_label ?? summary.readiness?.label ?? campaign.readiness_label,
     launch_readiness: (summary.readiness?.level as CampaignSummary['launch_readiness']) ?? campaign.launch_readiness,
     launch_blockers: summary.blockers?.length ? summary.blockers : campaign.launch_blockers,
+    launch_blocker_codes: summary.readiness?.blocker_codes ?? campaign.launch_blocker_codes,
+    routable_recipient_count: Number(counts.routable_recipients ?? campaign.routable_recipient_count ?? 0),
+    launch_ready_recipient_count: Number(counts.launch_ready_recipients ?? campaign.launch_ready_recipient_count ?? 0),
     execution_proof: campaign.execution_proof
       ? {
           ...campaign.execution_proof,

@@ -19,6 +19,8 @@ import {
 } from '@/lib/domain/campaigns/campaign-operator-state.js'
 import { evaluateCampaignLaunchReadiness } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
 import { fetchCampaignTargetStatusCounts } from '@/lib/domain/campaigns/campaign-recipient-metrics.js'
+import { canonicalLanguageLabel } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 const TERMINAL_QUEUE_FAILURE = ['failed', 'expired', 'cancelled', 'suppressed', 'blocked']
@@ -28,19 +30,7 @@ function clean(value) {
   return String(value ?? '').trim()
 }
 
-function normalizeLanguage(code) {
-  const raw = clean(code).toLowerCase()
-  if (!raw || raw === 'auto') return 'en'
-  if (raw.startsWith('es') || raw === 'spanish') return 'es'
-  if (raw.startsWith('ru') || raw === 'russian') return 'ru'
-  if (raw.startsWith('en') || raw === 'english') return 'en'
-  return raw.slice(0, 5)
-}
 
-function languageLabel(code) {
-  const map = { en: 'English', es: 'Spanish', ru: 'Russian' }
-  return map[code] || code.toUpperCase()
-}
 
 async function loadCurrentRun(supabase, campaignId) {
   const { data } = await supabase
@@ -203,9 +193,9 @@ async function aggregateLanguageCoverage(supabase, campaignId) {
 
   const byLang = new Map()
   for (const row of data || []) {
-    const lang = normalizeLanguage(row.language)
+    const lang = canonicalLanguageLabel(row.language)
     if (!byLang.has(lang)) {
-      byLang.set(lang, { language: lang, label: languageLabel(lang), targets: 0, assigned: 0, blocked: 0 })
+      byLang.set(lang, { language: lang, label: lang, targets: 0, assigned: 0, blocked: 0 })
     }
     const entry = byLang.get(lang)
     entry.targets += 1
@@ -319,7 +309,9 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
     blocked_rows: targets.blocked_rows + queueExec.blocked_rows,
     opted_out_rows: targets.opted_out_rows,
     remaining_targets: targets.remaining,
-    routable_recipients: queueExec.routing_allowed,
+    routable_recipients: readiness.routable_recipient_count ?? readiness.counts?.routing_ready ?? 0,
+    launch_ready_recipients: readiness.launch_ready_recipient_count ?? readiness.counts?.launch_ready ?? 0,
+    readiness_counts: readiness.counts || null,
   }
 
   return {
@@ -366,7 +358,7 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
       name: campaign.name,
       market: campaign.market,
       objective: campaign.objective,
-      stage_code: campaign.metadata?.stage_code || 'S1',
+      stage_code: normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1'),
       send_interval_seconds: campaign.send_interval_seconds,
       contact_window_start: campaign.contact_window_start,
       contact_window_end: campaign.contact_window_end,

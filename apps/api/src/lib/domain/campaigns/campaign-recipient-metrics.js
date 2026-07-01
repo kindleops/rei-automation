@@ -124,10 +124,9 @@ async function computeDistinctCountsFallback(supabase, campaignId) {
     }
     if (row.master_owner_id) ownerCounts[row.master_owner_id] = (ownerCounts[row.master_owner_id] || 0) + 1
     const suppressed = clean(row.suppression_status) === 'blocked'
-    const routableOk = clean(row.routing_status) === 'ready'
-    const templateOk = clean(row.template_status) === 'ready'
+    const routingReady = clean(row.routing_status) === 'ready'
     if (!suppressed) compliant += 1
-    if (!suppressed && routableOk && templateOk && clean(row.target_status) === 'ready') routable += 1
+    if (!suppressed && routingReady && clean(row.target_status) === 'ready') routable += 1
   }
 
   return {

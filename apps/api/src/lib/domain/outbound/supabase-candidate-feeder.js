@@ -25,6 +25,8 @@ import {
   BLOCK_REASONS,
 } from "@/lib/domain/outbound/presend-eligibility-engine.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
+import { resolveLanguage } from "@/lib/sms/language_aliases.js";
+import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -1516,7 +1518,7 @@ function filterTemplatesByPreferredLanguage(templates = [], selector = {}) {
   };
 }
 
-function resolveProspectTemplateRouting(candidate = {}, selector = {}, templates = []) {
+function resolveProspectTemplateRouting(candidate = {}, selector = {}, templates = [], options = {}) {
   const prospect_matching_flags = extractExactProspectMatchingFlags(candidate.matching_flags);
   const identity_unknown = lower(candidate?.identity_alignment?.status) === "unknown";
   const normalized_use_case = lower(selector.use_case);
@@ -1561,7 +1563,10 @@ function resolveProspectTemplateRouting(candidate = {}, selector = {}, templates
     };
   }
 
-  if (identity_unknown) {
+  const allowIdentityUnknown =
+    asBoolean(options.allow_identity_unknown, false) ||
+    asBoolean(options.campaign_template_assignment, false);
+  if (identity_unknown && !allowIdentityUnknown) {
     return {
       blocked: true,
       templates: [],
@@ -3111,13 +3116,19 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     return deps.renderOutboundTemplate(candidate, options);
   }
 
+  const rawLanguage = clean(pick(candidate.best_language, candidate.language, "English")) || "English";
+  const languageResolved = resolveLanguage(rawLanguage);
+
   const selector = {
     use_case: clean(options.template_use_case || candidate.template_lookup_use_case || candidate.template_use_case) || "ownership_check",
-    stage_code: clean(candidate.stage_code) || "S1",
+    stage_code: normalizeCampaignStageCode(
+      clean(options.stage_code || candidate.stage_code),
+      "S1"
+    ),
     stage_label: clean(candidate.stage_label) || "Ownership Confirmation",
     touch_number: asPositiveInteger(candidate.touch_number, 1),
     is_first_touch: Number(candidate.touch_number || 1) === 1,
-    preferred_language: clean(pick(candidate.best_language, candidate.language, "English")) || "English",
+    preferred_language: languageResolved.canonical || rawLanguage,
     preferred_agent_persona: clean(candidate.agent_persona) || "",
     property_type_scope: clean(candidate.raw?.property_type_scope) || null,
     deal_strategy: clean(candidate.raw?.deal_strategy) || null,
@@ -3129,6 +3140,21 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       ? "template_routing_pending"
       : "template_routing_not_applicable",
   };
+
+  if (languageResolved.unsupported) {
+    return {
+      ok: false,
+      reason_code: REASON_CODES.NO_TEMPLATE,
+      reason: "unsupported_language",
+      template: null,
+      rendered_message_body: null,
+      missing_variables: [],
+      variable_payload_preview: buildTemplateVariablePayload(candidate),
+      selected_template_preview: null,
+      unsupported_language: rawLanguage,
+      ...template_routing_details,
+    };
+  }
 
   const is_cold_s1_fetch = isS1OwnershipCheckRotation(selector);
   const fetch_limit = is_cold_s1_fetch ? 500 : 200;
@@ -3216,7 +3242,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const language_filtered = filterTemplatesByPreferredLanguage(templates, selector);
   fetch_diagnostics.template_count_after_language_filter = language_filtered.templates.length;
   templates = language_filtered.templates;
-  const prospect_template_routing = resolveProspectTemplateRouting(candidate, selector, templates);
+  const prospect_template_routing = resolveProspectTemplateRouting(candidate, selector, templates, options);
   template_routing_details.prospect_matching_flags = prospect_template_routing.prospect_matching_flags;
   template_routing_details.template_routing_reason = prospect_template_routing.template_routing_reason;
 

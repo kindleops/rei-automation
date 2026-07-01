@@ -387,8 +387,10 @@ const computeLaunchReadiness = (
   const reasons: string[] = []
   if (graphPartial) reasons.push('Target graph is incomplete — counts reflect a partial market sample, not the full universe')
   if (draftCount > 0) reasons.push(`${draftCount} filter${draftCount !== 1 ? 's' : ''} edited but not applied`)
-  if (estimates.senderCoveragePct !== null && estimates.senderCoveragePct < 50) {
-    reasons.push(`Low sender coverage (${estimates.senderCoveragePct}%)`)
+  if (estimates.senderCovered === 0) {
+    reasons.push('No valid sender route for selected market')
+  } else if (estimates.senderCoveragePct !== null && estimates.senderCoveragePct < 100) {
+    reasons.push(`Partial sender coverage (${estimates.senderCoveragePct}% — initial batch limited, feeder replenishes)`)
   }
   return { status: reasons.length > 0 ? 'warning' : 'ready', reasons, graphPartial }
 }
@@ -1530,15 +1532,20 @@ export const CreateCampaignModal = ({
         ...(!preview ? ['Run preview to validate targeting'] : []),
         ...(backendDegraded ? [backendDegradedMessage] : []),
         ...(launchEstimates.deliverable === 0 ? ['No eligible targets'] : []),
-        ...(launchEstimates.senderCovered === 0 ? ['No valid sender coverage for selected market'] : []),
+        ...(launchEstimates.senderCovered === 0 ? ['No valid sender route for selected market'] : []),
         ...(launchReadiness.status === 'blocked' ? launchReadiness.reasons : []),
         ...activationBlockers,
       ].filter((value, index, list) => value && list.indexOf(value) === index)
     : []
-  const mobileActivationWarnings = isMobile && mobilePhase === 'launch' && launchReadiness.status === 'warning'
-    ? launchReadiness.reasons
+  const mobileActivationWarnings = isMobile && mobilePhase === 'launch'
+    ? [
+        ...(launchReadiness.status === 'warning' ? launchReadiness.reasons : []),
+        ...(launchEstimates.senderCoveragePct !== null && launchEstimates.senderCoveragePct < 100 && launchEstimates.senderCovered > 0
+          ? [`${launchEstimates.senderCovered.toLocaleString()} targets covered by sender capacity — feeder replenishes as capacity opens`]
+          : []),
+      ].filter((value, index, list) => value && list.indexOf(value) === index)
     : []
-  const mobileActivationBlockers = [...mobileHardBlockers, ...mobileActivationWarnings]
+  const mobileActivationBlockers = mobileHardBlockers
   const canScheduleNow = isMobile
     ? Boolean(savedCampaignId) && canRunLaunch && !isPreviewLoading && preview !== null && launchEstimates.deliverable > 0 && !isPersistingLaunch
     : canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
@@ -1957,10 +1964,25 @@ export const CreateCampaignModal = ({
                   <code className="cmp-mobile-launch-id">{savedCampaignId}</code>
                 </div>
               )}
+              <div className="cmp-mobile-launch-card">
+                <h4>Launch readiness</h4>
+                <div className="ccc__intel-metric-row"><span>Persisted targets</span><strong>{formatNumber(preview?.built_target_count ?? preview?.ready_to_queue ?? launchEstimates.deliverable)}</strong></div>
+                <div className="ccc__intel-metric-row"><span>Preview candidates</span><strong>{formatNumber(launchEstimates.deliverable)}</strong></div>
+                <div className="ccc__intel-metric-row"><span>Sender covered</span><strong>{formatNumber(launchEstimates.senderCovered)}</strong></div>
+              </div>
               {mobileActivationBlockers.length > 0 && (
                 <div className="cmp-readiness-reasons cmp-readiness-reasons--blockers">
-                  {mobileActivationBlockers.map((blocker) => (
+                  <strong>Blockers</strong>
+                  {mobileActivationBlockers.slice(0, 3).map((blocker) => (
                     <span key={blocker}>{blocker}</span>
+                  ))}
+                </div>
+              )}
+              {mobileActivationWarnings.length > 0 && (
+                <div className="cmp-readiness-reasons">
+                  <strong>Warnings</strong>
+                  {mobileActivationWarnings.slice(0, 3).map((warning) => (
+                    <span key={warning}>{warning}</span>
                   ))}
                 </div>
               )}
@@ -1990,7 +2012,7 @@ export const CreateCampaignModal = ({
               )}
 
               <div className="cmp-mobile-launch-hero">
-                <span className="cmp-mobile-launch-hero__label">Ready to schedule</span>
+                <span className="cmp-mobile-launch-hero__label">Preview candidates</span>
                 <div className="cmp-mobile-launch-hero__row">
                   <span className={`cmp-mobile-launch-hero__value${isPreviewLoading ? ' is-loading' : ''}`}>
                     {formatNumber(launchEstimates.deliverable)}

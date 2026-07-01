@@ -35,6 +35,8 @@ import {
   transitionCampaignStatus,
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
+import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import {
   acquireCampaignExecutionLock,
   checkpointCampaignHydration,
@@ -1154,7 +1156,7 @@ function previewOptionsFromInput(input = {}, campaign = null) {
     scan_limit: Math.max(1, Math.min(effectiveScanLimit, 5000)),
     target_limit: Math.max(1, Math.min(targetLimit, 5000)),
     template_use_case: clean(input.template_use_case || metadata.template_use_case || campaign?.objective || mergedFilters.template_use_case || 'ownership_check') || 'ownership_check',
-    stage_code: clean(input.stage_code || metadata.stage_code || mergedFilters.stage_code || 'S1') || 'S1',
+    stage_code: normalizeCampaignStageCode(input.stage_code || metadata.stage_code || mergedFilters.stage_code, 'S1'),
     touch_number: asPositiveInteger(input.touch_number || mergedFilters.touch_number, 1),
     within_contact_window_now: asBoolean(input.within_contact_window_now ?? input.respect_contact_window ?? mergedFilters.within_contact_window_now, false),
     routing_safe_only: asBoolean(input.routing_safe_only ?? mergedFilters.routing_safe_only, true),
@@ -6169,6 +6171,11 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     snapshot.owner_name,
     metadata.owner_name
   )
+  const languageRaw = firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English')
+  const languageResolved = resolveLanguage(languageRaw)
+  const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
+  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
+  const propertyType = firstNonEmpty(snapshot.property_type, target.asset_type)
   return {
     master_owner_id: firstNonEmpty(target.master_owner_id, snapshot.master_owner_id),
     prospect_id: prospectId,
@@ -6183,8 +6190,9 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     timezone,
     source_timezone: sourceTimezone,
     contact_window: firstNonEmpty(snapshot.contact_window, target.contact_window),
-    language: firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English'),
-    best_language: firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English'),
+    language: canonicalLanguage,
+    best_language: canonicalLanguage,
+    stage_code: stageCode,
     template_use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
     template_lookup_use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
     touch_number: asPositiveInteger(metadata.touch_number ?? snapshot.current_touch_number, 1),
@@ -6212,7 +6220,17 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     wrong_number: outreach.wrong_number === true,
     pending_prior_touch: outreach.pending_prior_touch === true,
     active_queue_item: outreach.active_queue_item === true,
-    raw: snapshot,
+    raw: {
+      ...snapshot,
+      language: canonicalLanguage,
+      language_preference: canonicalLanguage,
+      property_type_scope: resolvePropertyTypeScope({
+        use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
+        property_type: propertyType,
+        unit_count: snapshot.unit_count ?? snapshot.units ?? null,
+        owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
+      }),
+    },
   }
 }
 
@@ -6648,6 +6666,8 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     routing_safe_only: input.routing_safe_only !== false,
     allow_phone_fallback: false,
     first_touch: input.first_touch ?? true,
+    campaign_template_assignment: true,
+    allow_identity_unknown: true,
   }
   const plannedItems = []
   const sampleSkips = []
@@ -7512,6 +7532,25 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       inserted: result.inserted ?? result.activation?.inserted ?? 0,
       auto_send_enabled: result.auto_send_enabled,
       auto_reply_mode: result.auto_reply_mode,
+    }
+  }
+
+  if (action === 'repair_readiness' || action === 'repair-readiness') {
+    const { repairCampaignLaunchPrerequisites } = await import('@/lib/domain/campaigns/campaign-target-template-assignment.js')
+    const repair = await repairCampaignLaunchPrerequisites(campaignId, deps)
+    if (!repair.ok) return { ok: false, error: repair.error, campaign_id: campaignId }
+    const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
+    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps, {
+      guarded_live_launch: true,
+      explicit_operator_action: true,
+    })
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action: 'repair_readiness',
+      repair,
+      readiness,
+      activate_now_enabled: readiness.launch_readiness !== 'blocked' && (readiness.launch_ready_recipient_count ?? 0) > 0,
     }
   }
 

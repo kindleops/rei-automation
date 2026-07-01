@@ -154,7 +154,12 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
     }
   }
 
-  if (proof && (proof.routing_allowed ?? 0) === 0 && ['active', 'activating', 'scheduled'].includes(campaign.status)) {
+  if (
+    proof &&
+    (proof.routing_allowed ?? 0) === 0 &&
+    ['active', 'activating', 'scheduled'].includes(campaign.status) &&
+    (campaign.routable_recipient_count ?? campaign.ready_targets ?? 0) === 0
+  ) {
     blockers.push('No routable recipients — sender routing unavailable')
   }
 
@@ -170,7 +175,10 @@ export function computeCampaignReadiness(campaign: CampaignSummary): CampaignRea
   if (campaign.ready_targets === 0 && campaign.total_targets > 0) {
     warnings.push('Zero ready targets after build — review exclusions')
   }
-  if (campaign.launch_blocker_codes?.includes('template_required')) {
+  if (
+    campaign.launch_blocker_codes?.includes('template_required') &&
+    (campaign.launch_ready_recipient_count ?? campaign.ready_targets ?? 0) === 0
+  ) {
     blockers.push('Approved template required for campaign stage/language')
   }
 

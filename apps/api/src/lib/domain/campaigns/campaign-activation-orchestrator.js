@@ -109,6 +109,13 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     }
 
     recordStep('resolving_templates')
+    const { repairCampaignLaunchPrerequisites } = await import('@/lib/domain/campaigns/campaign-target-template-assignment.js')
+    const repair = await repairCampaignLaunchPrerequisites(campaignId, deps)
+    recordStep('templates_repaired', {
+      stage_repaired: repair.stage_repaired,
+      templates_assigned: repair.templates_assigned,
+      launch_ready: repair.templates_assigned,
+    })
     const launchMode = mergeLaunchWriteModeIntoInput(campaign, input)
     const proofNoSend = launchMode.no_send === true
     const scheduledActivation = input.scheduled_activation === true || clean(input.lock_owner) === 'scheduled_worker'

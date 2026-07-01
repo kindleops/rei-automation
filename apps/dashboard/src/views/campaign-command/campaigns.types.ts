@@ -36,6 +36,7 @@ export interface CampaignRecipientMetrics {
   unique_e164_count?: number
   compliant_recipient_count?: number
   routable_recipient_count?: number
+  launch_ready_recipient_count?: number
   ready_recipient_count?: number
   planned_count?: number
   queued_count?: number
