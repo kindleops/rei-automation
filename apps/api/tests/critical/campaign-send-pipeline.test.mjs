@@ -20,6 +20,8 @@ import {
 import {
   normalizeSendQueueRow,
   reconcileCanonicalQueueLifecycle,
+  isRowEligibleForStaleExpiration,
+  isReplaceableStaleExpiredQueueRow,
   shouldRunSendQueueRow,
   validateSendQueueRowPreclaim,
 } from "@/lib/supabase/sms-engine.js";
@@ -168,6 +170,62 @@ test("campaign status gating holds non-live campaign rows", () => {
   assert.deepEqual(runQueueCampaignFilter(rows, liveIds).map((row) => row.id), ["1", "3"]);
 });
 
+test("future scheduled rows are never eligible for stale expiration", () => {
+  const row = {
+    queue_status: "scheduled",
+    created_at: "2026-07-01T01:57:52.000Z",
+    updated_at: "2026-07-01T01:57:52.000Z",
+    scheduled_for: "2026-07-01T02:19:52.000Z",
+    sms_eligible: true,
+    metadata: {},
+  };
+  assert.equal(
+    isRowEligibleForStaleExpiration(row, {
+      now: "2026-07-01T02:00:53.000Z",
+      stale_minutes: 3,
+    }),
+    false,
+  );
+});
+
+test("past-due scheduled rows expire only after scheduled_for passes stale grace", () => {
+  const row = {
+    queue_status: "scheduled",
+    created_at: "2026-07-01T01:57:52.000Z",
+    updated_at: "2026-07-01T01:57:52.000Z",
+    scheduled_for: "2026-07-01T02:19:52.000Z",
+    sms_eligible: true,
+    metadata: {},
+  };
+  assert.equal(
+    isRowEligibleForStaleExpiration(row, {
+      now: "2026-07-01T02:45:00.000Z",
+      stale_minutes: 20,
+    }),
+    true,
+  );
+});
+
+test("stale_runnable_row_expired without send evidence is replaceable", () => {
+  assert.equal(
+    isReplaceableStaleExpiredQueueRow({
+      queue_status: "expired",
+      failed_reason: "stale_runnable_row_expired",
+      sent_at: null,
+      provider_message_id: null,
+    }),
+    true,
+  );
+  assert.equal(
+    isReplaceableStaleExpiredQueueRow({
+      queue_status: "expired",
+      failed_reason: "stale_runnable_row_expired",
+      sent_at: "2026-07-01T03:00:00.000Z",
+    }),
+    false,
+  );
+});
+
 test("emergency-stop recovery does not expire held runnable rows", async () => {
   const updates = [];
   const row = {
@@ -221,7 +279,7 @@ test("emergency-stop recovery does not expire held runnable rows", async () => {
 
   const result = await reconcileCanonicalQueueLifecycle({
     supabase,
-    now: "2026-06-01T12:00:00.000Z",
+    now: "2026-06-01T00:30:00.000Z",
     stale_minutes: 180,
     queue_emergency_stop_at: "2026-05-30T00:00:00.000Z",
     queue_processor_mode: "off",
@@ -229,6 +287,72 @@ test("emergency-stop recovery does not expire held runnable rows", async () => {
 
   assert.ok(result.brake_held_rows >= 1);
   assert.ok(updates.some((entry) => entry.patch?.metadata?.send_brake_hold === true));
+  assert.equal(updates.some((entry) => entry.patch?.queue_status === "expired"), false);
+});
+
+test("reconcile does not expire future-scheduled LA-style rows at reconcile time", async () => {
+  const updates = [];
+  const row = {
+    id: "la-row-1",
+    queue_status: "scheduled",
+    created_at: "2026-07-01T01:57:52.000Z",
+    updated_at: "2026-07-01T01:57:52.000Z",
+    scheduled_for: "2026-07-01T02:19:52.000Z",
+    sms_eligible: true,
+    routing_allowed: true,
+    campaign_id: "b821cb13-deeb-4ab4-9505-01dbcdaa136d",
+    metadata: { confirm_live: true, no_send: false },
+    retry_count: 0,
+    max_retries: 3,
+  };
+  const supabase = {
+    from(table) {
+      if (table === "send_queue") {
+        return {
+          select: () => ({
+            in: () => ({
+              order: () => ({
+                limit: async () => ({ data: [row], error: null }),
+              }),
+            }),
+            eq: () => ({
+              in: () => ({
+                order: () => ({
+                  limit: async () => ({ data: [], error: null }),
+                }),
+              }),
+            }),
+          }),
+          update: (patch) => ({
+            eq: async (col, id) => {
+              updates.push({ id, patch });
+              return { data: null, error: null };
+            },
+          }),
+        };
+      }
+      if (table === "campaigns") {
+        return {
+          select: () => ({
+            in: async () => ({
+              data: [{ id: "b821cb13-deeb-4ab4-9505-01dbcdaa136d", status: "active" }],
+              error: null,
+            }),
+          }),
+        };
+      }
+      return makeTerminalQuery();
+    },
+  };
+
+  const result = await reconcileCanonicalQueueLifecycle({
+    supabase,
+    now: "2026-07-01T02:00:53.000Z",
+    stale_minutes: 3,
+    queue_processor_mode: "normal",
+  });
+
+  assert.equal(result.stale_rows, 0);
   assert.equal(updates.some((entry) => entry.patch?.queue_status === "expired"), false);
 });
 

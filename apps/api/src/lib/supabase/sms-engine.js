@@ -268,6 +268,59 @@ function toTimestamp(value) {
   return normalizeTimestamp(value);
 }
 
+function lowerStatus(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function rowHasSendEvidence(row = {}) {
+  return Boolean(
+    clean(row.provider_message_id) ||
+    clean(row.textgrid_message_id) ||
+    row.sent_at ||
+    row.delivered_at
+  );
+}
+
+export function isReplaceableStaleExpiredQueueRow(row = {}) {
+  if (lowerStatus(row.queue_status) !== "expired") return false;
+  if (clean(row.failed_reason) !== "stale_runnable_row_expired") return false;
+  if (rowHasSendEvidence(row)) return false;
+  return true;
+}
+
+export function isRowEligibleForStaleExpiration(row = {}, options = {}) {
+  const now = options.now || nowIso();
+  const stale_minutes = Math.max(Number(options.stale_minutes ?? 180), 1);
+  const stale_cutoff_ts =
+    options.stale_cutoff_ts ??
+    (toTimestamp(
+      new Date((toTimestamp(now) ?? Date.now()) - stale_minutes * 60 * 1000).toISOString()
+    ) ?? 0);
+  const now_ts = toTimestamp(now) ?? Date.now();
+  const status = lowerStatus(row.queue_status);
+
+  if (status === "processing" && row.is_locked) {
+    return false;
+  }
+  if (rowHasSendEvidence(row)) {
+    return false;
+  }
+
+  const schedule_at = row.scheduled_for_utc || row.scheduled_for;
+  const schedule_ts = toTimestamp(schedule_at);
+
+  if (schedule_ts !== null && schedule_ts > now_ts) {
+    return false;
+  }
+
+  if (status === "scheduled" && schedule_ts !== null) {
+    return schedule_ts <= now_ts && schedule_ts <= stale_cutoff_ts;
+  }
+
+  const activity_ts = toTimestamp(row.updated_at || row.created_at) ?? 0;
+  return activity_ts <= stale_cutoff_ts;
+}
+
 function toIsoOrNull(value) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -2046,7 +2099,14 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   const active_with_send_evidence = rows.filter((row) =>
     Boolean(clean(row.provider_message_id) || clean(row.textgrid_message_id) || row.sent_at || row.delivered_at)
   );
-  const stale_rows = rows.filter((row) => (toTimestamp(row.updated_at || row.created_at) ?? 0) <= (toTimestamp(stale_cutoff) ?? 0));
+  const stale_cutoff_ts = toTimestamp(stale_cutoff) ?? 0;
+  const stale_rows = rows.filter((row) =>
+    isRowEligibleForStaleExpiration(row, {
+      now,
+      stale_minutes,
+      stale_cutoff_ts,
+    })
+  );
   const past_due_scheduled = rows.filter((row) => {
     const status = lower(row.queue_status);
     if (!["scheduled", "queued"].includes(status)) return false;
@@ -4140,6 +4200,45 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     }
 
     if (existing_error) throw existing_error;
+
+    if (existing && isReplaceableStaleExpiredQueueRow(existing)) {
+      const superseded_key = `${clean(insert_payload.dedupe_key)}:superseded:${Date.now()}`;
+      const existing_metadata =
+        existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
+      await supabase
+        .from(SEND_QUEUE_TABLE)
+        .update({
+          dedupe_key: superseded_key,
+          metadata: {
+            ...existing_metadata,
+            superseded_by_replacement: true,
+            superseded_at: now,
+            replacement_reason: "stale_runnable_row_expired",
+          },
+          updated_at: now,
+        })
+        .eq("id", existing.id);
+
+      const retry = await supabase
+        .from(SEND_QUEUE_TABLE)
+        .insert(insert_payload)
+        .select()
+        .maybeSingle();
+      if (!retry.error) {
+        return {
+          ok: true,
+          replaced_expired_row: true,
+          replaced_row_id: existing.id || null,
+          item_id: retry.data?.id || null,
+          queue_row_id: retry.data?.id || null,
+          queue_item_id: retry.data?.id || null,
+          queue_id: retry.data?.queue_id || insert_payload.queue_id,
+          queue_key: retry.data?.queue_key || insert_payload.queue_key,
+          raw: retry.data || insert_payload,
+        };
+      }
+      throw retry.error;
+    }
 
     if (existing) {
       return {
