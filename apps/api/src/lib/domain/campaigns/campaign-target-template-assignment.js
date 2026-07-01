@@ -2,17 +2,18 @@
  * Repair campaign launch prerequisites — stage normalization + per-target template assignment.
  */
 
+import crypto from 'node:crypto'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
-import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
-import {
-  launchCandidateFromTarget,
-} from '@/lib/domain/campaigns/campaign-automation-service.js'
+import { expandTemplatePropertyScopes } from '@/lib/sms/property_scope.js'
 
 function clean(value) {
   return String(value ?? '').trim()
+}
+
+function lower(value) {
+  return clean(value).toLowerCase()
 }
 
 function metadataObject(value) {
@@ -21,6 +22,121 @@ function metadataObject(value) {
 
 function increment(bucket, key, amount = 1) {
   bucket[key] = Number(bucket[key] || 0) + amount
+}
+
+async function loadOwnershipTemplates(supabase, useCase, stageCode) {
+  const { data, error } = await supabase
+    .from('sms_templates')
+    .select('*')
+    .eq('is_active', true)
+    .eq('use_case', useCase)
+    .eq('stage_code', stageCode)
+    .limit(5000)
+  if (error) throw error
+  return Array.isArray(data) ? data : []
+}
+
+function templatesForLanguage(templates, language) {
+  const lang = lower(language)
+  const exact = templates.filter((row) => lower(row.language) === lang)
+  if (exact.length) return exact
+  if (lang === 'english') {
+    return templates.filter((row) => lower(row.language) === 'english')
+  }
+  return []
+}
+
+function templatesForPropertyScopes(templates, scopes = []) {
+  const scopeSet = new Set(scopes.map((scope) => lower(scope)))
+  const exact = templates.filter((row) => scopeSet.has(lower(row.property_type_scope)))
+  if (exact.length) return exact
+  const relaxed = templates.filter((row) => {
+    const scope = lower(row.property_type_scope)
+    return scope === 'landlord / multifamily' || scope === 'any residential' || scope === 'residential'
+  })
+  return relaxed
+}
+
+function pickDeterministicTemplate(candidates, seed) {
+  const sorted = [...candidates].sort((left, right) => {
+    const leftId = clean(left.template_id || left.id)
+    const rightId = clean(right.template_id || right.id)
+    return leftId.localeCompare(rightId)
+  })
+  if (!sorted.length) return null
+  const hash = crypto.createHash('sha1').update(seed).digest('hex')
+  const index = Number.parseInt(hash.slice(0, 8), 16) % sorted.length
+  return sorted[index]
+}
+
+function assignTemplateForTargetFast(target, campaign, templateCatalog) {
+  const metadata = metadataObject(target.metadata)
+  const snapshot = metadataObject(metadata.candidate_snapshot)
+  const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
+  const languageResolved = resolveLanguage(languageRaw)
+
+  if (languageResolved.unsupported) {
+    return {
+      ok: false,
+      excluded: true,
+      reason: 'unsupported_language',
+      language: languageRaw,
+      template_status: 'blocked',
+      block_reason: `unsupported_language:${languageRaw}`,
+    }
+  }
+
+  const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
+  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
+  const templateUseCase = clean(
+    campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
+  ) || 'ownership_check'
+
+  const propertyType = clean(snapshot.property_type || target.asset_type || metadata.property_type)
+  const propertyScopes = expandTemplatePropertyScopes({
+    use_case: templateUseCase,
+    property_type: propertyType,
+    unit_count: snapshot.unit_count ?? snapshot.units ?? null,
+    owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
+  })
+
+  const languageMatches = templatesForLanguage(templateCatalog, canonicalLanguage)
+  const scopedMatches = templatesForPropertyScopes(languageMatches, propertyScopes)
+  const seed = [
+    target.id,
+    target.master_owner_id,
+    target.property_id,
+    target.phone_id,
+    canonicalLanguage,
+    propertyScopes[0],
+    stageCode,
+    templateUseCase,
+  ].join('|')
+  const selected = pickDeterministicTemplate(scopedMatches, seed)
+  const templateId = clean(selected?.template_id || selected?.id)
+
+  if (!templateId) {
+    return {
+      ok: false,
+      excluded: false,
+      reason: 'no_template_for_language_scope',
+      language: canonicalLanguage,
+      template_status: 'blocked',
+      block_reason: 'no_template_for_language_scope',
+      property_scopes: propertyScopes,
+    }
+  }
+
+  return {
+    ok: true,
+    excluded: false,
+    language: canonicalLanguage,
+    template_id: templateId,
+    template_status: 'ready',
+    template_name: selected?.template_name || null,
+    property_type_scope: selected?.property_type_scope || propertyScopes[0] || null,
+    block_reason: null,
+  }
 }
 
 export async function repairCampaignStageMetadata(campaign = {}, deps = {}) {
@@ -58,83 +174,6 @@ export async function repairCampaignStageMetadata(campaign = {}, deps = {}) {
   }
 }
 
-async function assignTemplateForTarget(target, campaign, deps = {}) {
-  const metadata = metadataObject(target.metadata)
-  const snapshot = metadataObject(metadata.candidate_snapshot)
-  const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
-  const languageResolved = resolveLanguage(languageRaw)
-
-  if (languageResolved.unsupported) {
-    return {
-      ok: false,
-      excluded: true,
-      reason: 'unsupported_language',
-      language: languageRaw,
-      template_status: 'blocked',
-      block_reason: `unsupported_language:${languageRaw}`,
-    }
-  }
-
-  const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
-  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
-  const templateUseCase = clean(
-    campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
-  ) || 'ownership_check'
-
-  const candidate = launchCandidateFromTarget(target, campaign)
-  candidate.stage_code = stageCode
-  candidate.language = canonicalLanguage
-  candidate.best_language = canonicalLanguage
-  candidate.template_use_case = templateUseCase
-  candidate.template_lookup_use_case = templateUseCase
-  candidate.raw = {
-    ...metadataObject(candidate.raw),
-    ...snapshot,
-    language: canonicalLanguage,
-    language_preference: canonicalLanguage,
-    property_type_scope: resolvePropertyTypeScope({
-      use_case: templateUseCase,
-      property_type: clean(snapshot.property_type || target.asset_type || metadata.property_type),
-      unit_count: snapshot.unit_count ?? snapshot.units ?? null,
-      owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
-    }),
-  }
-
-  const rendered = await renderOutboundTemplate(candidate, {
-    template_use_case: templateUseCase,
-    stage_code: stageCode,
-    first_touch: true,
-    campaign_template_assignment: true,
-    allow_identity_unknown: true,
-  }, deps)
-
-  if (!rendered.ok) {
-    return {
-      ok: false,
-      excluded: false,
-      reason: rendered.reason || rendered.reason_code || 'template_render_failed',
-      language: canonicalLanguage,
-      template_status: 'blocked',
-      block_reason: clean(rendered.reason || rendered.reason_code || 'template_render_failed'),
-    }
-  }
-
-  const templateId = clean(
-    rendered.selected_template_id || rendered.template?.template_id || rendered.template?.id
-  )
-
-  return {
-    ok: true,
-    excluded: false,
-    language: canonicalLanguage,
-    template_id: templateId || null,
-    template_status: templateId ? 'ready' : 'blocked',
-    template_name: rendered.template?.template_name || null,
-    rendered_message_preview: clean(rendered.rendered_message_body).slice(0, 180),
-    block_reason: templateId ? null : 'template_id_missing',
-  }
-}
-
 export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const { data: campaign, error: campErr } = await supabase
@@ -144,6 +183,12 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     .maybeSingle()
   if (campErr) throw campErr
   if (!campaign) return { ok: false, error: 'campaign_not_found' }
+
+  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
+  const templateUseCase = clean(
+    campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
+  ) || 'ownership_check'
+  const templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
 
   const { data: targets, error: targetErr } = await supabase
     .from('campaign_targets')
@@ -170,7 +215,7 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
       continue
     }
 
-    const result = await assignTemplateForTarget(target, campaign, deps)
+    const result = assignTemplateForTargetFast(target, campaign, templateCatalog)
     const lang = result.language || 'Unknown'
 
     if (result.excluded) {
@@ -203,9 +248,9 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
         metadata: {
           ...metadataObject(target.metadata),
           template_id: result.template_id,
-          template_use_case: campaign.metadata?.template_use_case || campaign.objective || 'ownership_check',
+          template_use_case: templateUseCase,
           template_name: result.template_name,
-          rendered_message_preview: result.rendered_message_preview,
+          property_type_scope: result.property_type_scope,
           template_assignment: {
             template_id: result.template_id,
             language: lang,
@@ -226,6 +271,7 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
         template_assignment: {
           reason: result.reason,
           language: lang,
+          property_scopes: result.property_scopes || null,
           assigned_at: new Date().toISOString(),
         },
       },
@@ -250,6 +296,7 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     skipped,
     assigned_by_language: assignedByLanguage,
     unsupported_by_language: unsupportedLanguages,
+    template_catalog_count: templateCatalog.length,
   }
 }
 

@@ -5,7 +5,7 @@ import { wrapCampaignActionResponse } from '@/lib/domain/campaigns/campaign-life
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 function withCors(request, payload, status = 200) {
   return NextResponse.json(payload, { status, headers: corsHeaders(request) })
