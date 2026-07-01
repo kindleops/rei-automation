@@ -74,7 +74,7 @@ export async function reconcileCampaignExecutionHealth(options = {}, deps = {}) 
   }
 
   const deliveryRecovery = await recoverUnprocessedDeliveryWebhooks(
-    { limit: Math.min(Number(options.delivery_recovery_limit ?? 50), 100) },
+    { limit: Math.min(Number(options.delivery_recovery_limit ?? 10), 25) },
     deps
   )
 

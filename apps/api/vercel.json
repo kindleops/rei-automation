@@ -36,6 +36,14 @@
     {
       "path": "/api/internal/seller-flow/recover-inbound",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/webhooks/recover-delivery",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/internal/webhooks/recover-inbound",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

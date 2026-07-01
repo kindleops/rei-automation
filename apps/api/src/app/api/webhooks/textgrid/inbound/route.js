@@ -7,6 +7,8 @@ import {
   logInboundMessageEvent as logSupabaseInboundMessageEvent,
   writeWebhookLog,
 } from "@/lib/supabase/sms-engine.js";
+import { processInboundWebhookLive } from "@/lib/domain/webhooks/webhook-event-processor.js";
+import { setSystemValues } from "@/lib/system-control.js";
 import { handleTextgridInbound } from "@/lib/flows/handle-textgrid-inbound.js";
 import {
   buildTextgridWebhookBypassResult,
@@ -52,6 +54,7 @@ const defaultDeps = {
   normalizeTextgridInboundPayloadImpl: normalizeTextgridInboundPayload,
   writeWebhookLogImpl: writeWebhookLog,
   logSupabaseInboundMessageEventImpl: logSupabaseInboundMessageEvent,
+  processInboundWebhookLiveImpl: processInboundWebhookLive,
   sendInboundSmsDiscordAlertImpl: sendInboundSmsDiscordAlert,
 };
 
@@ -208,6 +211,7 @@ export async function POST(request) {
   let inbound_alert_sent = false;
   let buyer_handler_failed = false;
   let buyer_handler_error_message = null;
+  let inbound_webhook_log_row = null;
 
   async function sendAcceptedInboundAlert({
     result = null,
@@ -528,7 +532,7 @@ export async function POST(request) {
 
       if (hasSupabaseConfig()) {
         try {
-          await runtimeDeps.writeWebhookLogImpl({
+          inbound_webhook_log_row = await runtimeDeps.writeWebhookLogImpl({
             event_type: payload.header_event || "inbound",
             direction: "inbound",
             provider_message_sid: payload.message_id || null,
@@ -1019,26 +1023,68 @@ export async function POST(request) {
       })
     );
 
-    const result = await runtimeDeps.handleTextgridInboundImpl(payload, {
-      inbound_debug_stage,
-      dry_run,
-      auto_reply_enabled:
-        process.env.INBOUND_AUTOPILOT_ENABLED ??
-        process.env.AUTO_REPLY_ENABLED ??
-        null,
-      auto_reply_live_enabled:
-        process.env.AUTO_REPLY_LIVE_ENABLED ??
-        process.env.INBOUND_AUTOPILOT_LIVE_ENABLED ??
-        null,
-      auto_reply_dry_run: process.env.AUTO_REPLY_DRY_RUN ?? null,
-      auto_reply_mode:
-        process.env.AUTO_REPLY_MODE ??
-        process.env.INBOUND_AUTOPILOT_MODE ??
-        null,
-      auto_post_discord_card: asBool(process.env.INBOUND_AUTOPILOT_POST_DISCORD_CARD, true),
-      auto_reply_delay_seconds: Number.parseInt(process.env.INBOUND_AUTOPILOT_DELAY_SECONDS || "60", 10) || 60,
-      inbound_user_initiated: true,
-    });
+    let result;
+    if (inbound_webhook_log_row?.id && hasSupabaseConfig()) {
+      const live_started = Date.now();
+      const live_outcome = await runtimeDeps.processInboundWebhookLiveImpl(
+        inbound_webhook_log_row,
+        {
+          now: new Date().toISOString(),
+          inbound_options: {
+            inbound_debug_stage,
+            dry_run,
+            auto_reply_enabled:
+              process.env.INBOUND_AUTOPILOT_ENABLED ??
+              process.env.AUTO_REPLY_ENABLED ??
+              null,
+            auto_reply_live_enabled:
+              process.env.AUTO_REPLY_LIVE_ENABLED ??
+              process.env.INBOUND_AUTOPILOT_LIVE_ENABLED ??
+              null,
+            auto_reply_dry_run: process.env.AUTO_REPLY_DRY_RUN ?? null,
+            auto_reply_mode:
+              process.env.AUTO_REPLY_MODE ??
+              process.env.INBOUND_AUTOPILOT_MODE ??
+              null,
+            auto_post_discord_card: asBool(process.env.INBOUND_AUTOPILOT_POST_DISCORD_CARD, true),
+            auto_reply_delay_seconds:
+              Number.parseInt(process.env.INBOUND_AUTOPILOT_DELAY_SECONDS || "60", 10) || 60,
+            inbound_user_initiated: true,
+          },
+        },
+        runtimeDeps,
+      );
+      result = live_outcome?.result || live_outcome;
+      await setSystemValues({
+        webhook_live_inbound_last_at: new Date().toISOString(),
+        webhook_live_inbound_last_latency_ms: String(
+          live_outcome?.latency_ms ?? Date.now() - live_started,
+        ),
+        webhook_live_inbound_last_provider_sid: payload.message_id || null,
+      }).catch(() => {});
+    } else {
+      result = await runtimeDeps.handleTextgridInboundImpl(payload, {
+        inbound_debug_stage,
+        dry_run,
+        auto_reply_enabled:
+          process.env.INBOUND_AUTOPILOT_ENABLED ??
+          process.env.AUTO_REPLY_ENABLED ??
+          null,
+        auto_reply_live_enabled:
+          process.env.AUTO_REPLY_LIVE_ENABLED ??
+          process.env.INBOUND_AUTOPILOT_LIVE_ENABLED ??
+          null,
+        auto_reply_dry_run: process.env.AUTO_REPLY_DRY_RUN ?? null,
+        auto_reply_mode:
+          process.env.AUTO_REPLY_MODE ??
+          process.env.INBOUND_AUTOPILOT_MODE ??
+          null,
+        auto_post_discord_card: asBool(process.env.INBOUND_AUTOPILOT_POST_DISCORD_CARD, true),
+        auto_reply_delay_seconds:
+          Number.parseInt(process.env.INBOUND_AUTOPILOT_DELAY_SECONDS || "60", 10) || 60,
+        inbound_user_initiated: true,
+      });
+    }
 
     captureSystemEvent("inbound_sms_classified", {
       provider_message_id: payload?.message_id || null,

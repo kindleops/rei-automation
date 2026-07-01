@@ -3,9 +3,10 @@ import { child } from "@/lib/logging/logger.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import {
   markWebhookLogFailed,
-  syncDeliveryEvent,
   writeWebhookLog,
 } from "@/lib/supabase/sms-engine.js";
+import { processDeliveryWebhookLive } from "@/lib/domain/webhooks/webhook-event-processor.js";
+import { setSystemValues } from "@/lib/system-control.js";
 import {
   buildTextgridWebhookBypassResult,
   buildTextgridWebhookLogMeta,
@@ -74,7 +75,7 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
     handleTextgridDeliveryImpl = handleTextgridDelivery,
     verifyTextgridWebhookSignatureImpl = verifyTextgridWebhookRequest,
     writeWebhookLogImpl = writeWebhookLog,
-    syncDeliveryEventImpl = syncDeliveryEvent,
+    processDeliveryWebhookLiveImpl = processDeliveryWebhookLive,
   } = deps;
 
   let log_payload = null;
@@ -244,9 +245,10 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
     if (
       hasSupabaseConfig() ||
       typeof deps.writeWebhookLogImpl === "function" ||
-      typeof deps.syncDeliveryEventImpl === "function"
+      typeof deps.processDeliveryWebhookLiveImpl === "function"
     ) {
       let webhook_log_row = null;
+      const live_started = Date.now();
       try {
         webhook_log_row = await writeWebhookLogImpl({
           event_type: payload.header_event || "delivery",
@@ -257,16 +259,28 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
           received_at: nowIso(),
           source: "textgrid",
         });
-        await syncDeliveryEventImpl(
-          {
-            ...payload,
-            webhook_log_id: webhook_log_row?.id || null,
-          },
-          {
-            now: nowIso(),
-            webhook_log_id: webhook_log_row?.id || null,
-          },
+
+        const live_result = await processDeliveryWebhookLiveImpl(
+          webhook_log_row,
+          { now: nowIso() },
+          deps,
         );
+
+        await setSystemValues({
+          webhook_live_delivery_last_at: nowIso(),
+          webhook_live_delivery_last_latency_ms: String(
+            live_result?.latency_ms ?? Date.now() - live_started,
+          ),
+          webhook_live_delivery_last_provider_sid: payload.message_id || null,
+        }).catch(() => {});
+
+        logger.info("textgrid_delivery.live_lane_processed", {
+          webhook_log_id: webhook_log_row?.id || null,
+          provider_message_sid: payload.message_id || null,
+          matched: live_result?.matched ?? null,
+          final_delivery_status: live_result?.final_delivery_status || null,
+          latency_ms: live_result?.latency_ms ?? Date.now() - live_started,
+        });
       } catch (supabase_error) {
         if (webhook_log_row?.id) {
           try {

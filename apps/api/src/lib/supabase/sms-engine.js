@@ -2884,15 +2884,30 @@ export async function markWebhookLogProcessed(webhook_log_id, options = {}) {
   }
 
   const supabase = getSupabase(options);
+  const update = {
+    processed: true,
+    processed_at: now,
+    error_message: null,
+  };
+
+  if (options.processor_version) update.processor_version = clean(options.processor_version);
+  if (options.deployed_sha) update.deployed_sha = clean(options.deployed_sha);
+  if (options.reconciliation_execution_id) {
+    update.reconciliation_execution_id = clean(options.reconciliation_execution_id);
+  }
+  if (options.processing_result) update.processing_result = ensureObject(options.processing_result);
+  if (options.matched_record_id) update.matched_record_id = clean(options.matched_record_id);
+  if (options.processing_error_code !== undefined) {
+    update.processing_error_code = options.processing_error_code
+      ? clean(options.processing_error_code)
+      : null;
+  }
+
   const { data, error } = await supabase
     .from(WEBHOOK_LOG_TABLE)
-    .update({
-      processed: true,
-      processed_at: now,
-      error_message: null,
-    })
+    .update(update)
     .eq("id", id)
-    .select("id, processed, processed_at")
+    .select("id, processed, processed_at, processor_version, processing_result, matched_record_id")
     .maybeSingle();
 
   if (error) throw error;
