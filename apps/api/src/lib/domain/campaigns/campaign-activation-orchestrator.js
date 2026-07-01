@@ -9,9 +9,11 @@ import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progr
 
 import { isQueueableStatus, normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import {
+  countLiveConfirmedQueueRows,
   isCampaignFullyLive,
-  isCampaignLiveInconsistent,
+  isCampaignLiveInconsistentWithQueue,
   mergeLaunchWriteModeIntoInput,
+  reconcileCampaignLiveState,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 
 function clean(value) {
@@ -68,7 +70,33 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
 
     const skipHydration = input.skip_queue_hydration === true || input.skipQueueHydration === true
     const forceLive = input.force_live === true || input.forceLive === true
-    const needsReconcile = isCampaignLiveInconsistent(campaign)
+    const liveQueueRows = await countLiveConfirmedQueueRows(supabase, campaignId)
+    const needsReconcile = isCampaignLiveInconsistentWithQueue(campaign, { liveQueueRows })
+
+    // Split-brain repair: an already-active campaign whose live queue rows do not
+    // match its execution flags must be reconciled — never returned as "already
+    // active" while inconsistent. This self-heals active + proof + live-row state.
+    if (status === 'active' && needsReconcile && !forceLive) {
+      const repair = await reconcileCampaignLiveState(campaignId, deps)
+      await (deps.recomputeCampaignProgress || recomputeCampaignProgress)(campaignId, deps)
+      const { data: repairedCampaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+      recordStep('complete', { reconciled: true, outcome: repair.outcome, live_queue_rows: liveQueueRows })
+      return {
+        ok: true,
+        idempotent: true,
+        reconciled: true,
+        campaign_id: campaignId,
+        campaign: repairedCampaign || repair.campaign || campaign,
+        steps,
+        inserted: 0,
+        skipped: 0,
+        blockers: [],
+        from: 'active',
+        to: 'active',
+        outcome: repair.outcome,
+        live_queue_rows: liveQueueRows,
+      }
+    }
 
     if (
       status === 'active' &&
