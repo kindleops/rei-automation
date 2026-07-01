@@ -150,7 +150,11 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
       blockers.push(BLOCKER_LABELS.transmission_disabled)
       blockerCodes.push('transmission_disabled')
     }
-  } else if (asBoolean(campaign.auto_send_enabled, false)) {
+  } else if (
+    asBoolean(campaign.auto_send_enabled, false) &&
+    !context.guarded_live_launch &&
+    !asBoolean(campaign.metadata?.production_launch, false)
+  ) {
     blockers.push(BLOCKER_LABELS.unrestricted_auto_send)
     blockerCodes.push('unrestricted_auto_send')
   }
