@@ -128,7 +128,7 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     loadSystemValue('queue_auto_enqueue_enabled'),
     loadSystemValue('outbound_sms_enabled'),
     supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).limit(50000),
-    supabase.from('textgrid_numbers').select('id,market,is_active').eq('is_active', true).limit(500),
+    supabase.from('textgrid_numbers').select('id,market,status').eq('status', 'active').limit(500),
   ])
 
   const brakeState = evaluateGlobalSendBrakeState({
@@ -258,7 +258,7 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     blockerCodes.push('no_launch_ready_recipients')
   }
 
-  const activeSenders = (senderRowsRes.data || []).filter((row) => row.is_active !== false)
+  const activeSenders = (senderRowsRes.data || []).filter((row) => clean(row.status).toLowerCase() === 'active')
   const campaignMarket = clean(campaign.market).toLowerCase()
   const marketAliases = new Set([
     campaignMarket,
