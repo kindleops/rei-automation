@@ -75,24 +75,19 @@ export async function POST(request, { params }) {
       }, 423)
     }
 
-    const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
-    const productionLaunch = Boolean(metadata.production_launch || metadata.converted_to_live_at)
-    const explicitLive = body?.confirm_live === true || body?.confirmLive === true
-    // Active proof campaigns stay no-send unless production launch conversion already occurred.
-    const forceProofBatch = ['active', 'activating', 'paused'].includes(status)
-      && !campaign.auto_send_enabled
-      && !productionLaunch
-    const noSend = (forceProofBatch && !explicitLive) || body?.no_send === true || body?.noSend === true
-    const confirmLive = productionLaunch || explicitLive || (!forceProofBatch && body?.confirm_live !== false && body?.confirmLive !== false)
+    const explicitProof = body?.no_send === true || body?.noSend === true || body?.proof_hydration === true
+    const explicitLive = body?.confirm_live === true || body?.confirmLive === true || body?.force_live === true
 
     const result = await createCampaignQueuePlan(campaignId, {
       ...body,
       dry_run: false,
-      no_send: noSend,
-      hydrate_canonical_queue: noSend,
-      confirm_live: confirmLive,
       create_send_queue_rows: true,
       explicit_operator_action: true,
+      ...(explicitProof
+        ? { no_send: true, proof_hydration: true }
+        : explicitLive
+          ? { no_send: false, confirm_live: true, production_live_write: true, force_live: true }
+          : {}),
     })
 
     const payload = sanitizeQueueBatchPayload({ ...result, campaign_id: campaignId })

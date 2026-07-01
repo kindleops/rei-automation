@@ -42,6 +42,7 @@ import {
   releaseCampaignExecutionLock,
   renewCampaignExecutionLock,
 } from '@/lib/domain/campaigns/campaign-execution-lock.js'
+import { mergeLaunchWriteModeIntoInput } from '@/lib/domain/campaigns/campaign-live-execution.js'
 
 const DEFAULT_CANDIDATE_SOURCE = 'v_feeder_candidates_fast'
 const DEFAULT_SCAN_LIMIT = 1000
@@ -6475,12 +6476,25 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
   }
 }
 
-export function resolveCampaignQueueWriteMode(input = {}) {
-  const dryRun = input.dry_run !== false
-  const noSend = asBoolean(input.no_send ?? input.noSend, true)
-  const confirmLive = asBoolean(input.confirm_live ?? input.confirmLive, false)
-  const createRows = input.create_send_queue_rows === false ? false : true
-  const hydrateNoSend = !dryRun && noSend && createRows && asBoolean(input.hydrate_canonical_queue ?? input.hydrateCanonicalQueue, true)
+export function resolveCampaignQueueWriteMode(input = {}, campaign = null) {
+  const dryRun = input.dry_run === true || input.dryRun === true
+  const createRows = input.create_send_queue_rows === false || input.createSendQueueRows === false ? false : true
+
+  let noSend
+  let confirmLive
+  let productionLiveWrite = false
+  if (campaign) {
+    const derived = mergeLaunchWriteModeIntoInput(campaign, input)
+    noSend = derived.no_send === true
+    confirmLive = derived.confirm_live === true
+    productionLiveWrite = derived.production_live_write === true
+  } else {
+    noSend = input.no_send === true || input.noSend === true
+    confirmLive = asBoolean(input.confirm_live ?? input.confirmLive, input.no_send === false || input.noSend === false)
+    productionLiveWrite = input.production_live_write === true || input.productionLiveWrite === true
+  }
+
+  const hydrateNoSend = !dryRun && noSend && createRows && asBoolean(input.hydrate_canonical_queue ?? input.hydrateCanonicalQueue, noSend)
   const isLiveSendWrite = !dryRun && !noSend && confirmLive && createRows
   return {
     dryRun,
@@ -6490,16 +6504,12 @@ export function resolveCampaignQueueWriteMode(input = {}) {
     hydrateNoSend,
     isLiveSendWrite,
     isProofHydrationWrite: hydrateNoSend,
+    productionLiveWrite,
   }
 }
 
 export async function createCampaignQueuePlan(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const writeMode = resolveCampaignQueueWriteMode(input)
-  const dryRun = writeMode.dryRun
-  const noSend = writeMode.noSend
-  const confirmLive = writeMode.confirmLive
-  const createRows = writeMode.createRows
   const explicitOperatorAction = asBoolean(input.explicit_operator_action || input.operator_action, false)
   const suppressPreviouslyContacted = asBoolean(
     input.suppress_previously_contacted ??
@@ -6521,7 +6531,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     .single()
   if (campaignError) throw campaignError
   if (!campaign) return { ok: false, error: 'campaign_not_found', campaign_id: campaignId, blockers: ['campaign_not_found'] }
-  const blockers = []
+
+  const writeMode = resolveCampaignQueueWriteMode(input, campaign)
+  const dryRun = writeMode.dryRun
+  const noSend = writeMode.noSend
+  const confirmLive = writeMode.confirmLive
+  const createRows = writeMode.createRows
   const globalStop = await globalEmergencyStopActive(deps)
   const campaignStop = isEmergencyStopActive(campaign.emergency_stop_at)
 
@@ -6538,14 +6553,21 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
   const hydrateNoSend = writeMode.hydrateNoSend
   const isLiveSendWrite = writeMode.isLiveSendWrite
+  const productionLiveWrite = writeMode.productionLiveWrite === true
+  const blockers = []
   for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
   if (!isQueueableStatus(campaign.status)) blockers.push(`campaign_status_not_queueable:${campaign.status}`)
   if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
   if (campaignStop) blockers.push('campaign_emergency_stop_active')
   if (globalStop && isLiveSendWrite && blockOnGlobalEmergencyStop) blockers.push('global_emergency_stop_active')
-  if (campaign.auto_send_enabled) blockers.push('auto_send_must_remain_disabled')
-  if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled') blockers.push('auto_reply_must_remain_disabled')
+  if (campaign.auto_send_enabled && !productionLiveWrite) blockers.push('auto_send_must_remain_disabled')
+  if (clean(campaign.auto_reply_mode || 'disabled') !== 'disabled' && !productionLiveWrite) {
+    blockers.push('auto_reply_must_remain_disabled')
+  }
   if (isLiveSendWrite && !confirmLive) blockers.push('confirm_live_required')
+  if (isLiveSendWrite && productionLiveWrite && !explicitOperatorAction && !asBoolean(campaign.auto_queue_enabled, false)) {
+    blockers.push('auto_queue_disabled_without_operator_action')
+  }
 
   const isProofHydrationWrite = hydrateNoSend && blockers.length === 0
 
@@ -7240,7 +7262,12 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
     return { ok: false, error: 'campaign_not_queueable', blockers, inserted: 0, skipped: 0 }
   }
 
-  if (status === 'active' && (campaign.activated_at || existingQueueRows > 0 || Number(campaign.queued_count || 0) > 0)) {
+  const forceLive = input.force_live === true || input.forceLive === true
+  if (
+    status === 'active' &&
+    !forceLive &&
+    (campaign.activated_at || existingQueueRows > 0 || Number(campaign.queued_count || 0) > 0)
+  ) {
     return {
       ok: true,
       idempotent: true,
@@ -7299,13 +7326,9 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
       }
     }
 
-    const proofNoSend = input.no_send === true || input.noSend === true
-    queueResult = await createCampaignQueuePlan(campaignId, {
+    const launchInput = mergeLaunchWriteModeIntoInput(campaign, {
       ...input,
       dry_run: false,
-      no_send: proofNoSend,
-      hydrate_canonical_queue: proofNoSend ? true : input.hydrate_canonical_queue,
-      confirm_live: proofNoSend ? true : input.confirm_live !== false,
       create_send_queue_rows: true,
       explicit_operator_action: true,
       batch_max: batchLimit,
@@ -7314,8 +7337,10 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
       daily_cap: input.daily_cap ?? campaign.daily_cap ?? batchLimit,
       per_sender_cap: input.per_sender_cap ?? campaign.per_sender_cap ?? batchLimit,
       per_market_cap: input.per_market_cap ?? campaign.market_cap ?? batchLimit,
-      block_on_global_emergency_stop: proofNoSend ? false : input.block_on_global_emergency_stop,
-    }, deps)
+      block_on_global_emergency_stop: false,
+    })
+    const proofNoSend = launchInput.no_send === true
+    queueResult = await createCampaignQueuePlan(campaignId, launchInput, deps)
 
     inserted = Number(queueResult?.send_queue_rows_created || queueResult?.queue_rows_created || 0)
     skipped = Number(queueResult?.skipped_count || 0)
@@ -7454,6 +7479,7 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       ok: true,
       campaign_id: campaignId,
       action: 'convert_to_live',
+      outcome: result.outcome || 'successfully_converted',
       from: result.from,
       to: result.to,
       state: result.state,
@@ -7467,7 +7493,9 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       warnings: result.warnings || [],
       activation_mode: 'live',
       proof_hydration: false,
-      inserted: result.activation?.inserted ?? 0,
+      inserted: result.inserted ?? result.activation?.inserted ?? 0,
+      auto_send_enabled: result.auto_send_enabled,
+      auto_reply_mode: result.auto_reply_mode,
     }
   }
 

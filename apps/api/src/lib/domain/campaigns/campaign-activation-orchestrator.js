@@ -8,6 +8,11 @@ import { evaluateCampaignLaunchReadiness, resolveLaunchReadinessContext } from '
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 
 import { isQueueableStatus, normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import {
+  isCampaignFullyLive,
+  isCampaignLiveInconsistent,
+  mergeLaunchWriteModeIntoInput,
+} from '@/lib/domain/campaigns/campaign-live-execution.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -61,7 +66,16 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       .eq('campaign_id', campaignId)
       .in('queue_status', ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending'])
 
-    if (status === 'active' && (campaign.activated_at || Number(activeQueueCount || 0) > 0 || Number(campaign.queued_count || 0) > 0)) {
+    const skipHydration = input.skip_queue_hydration === true || input.skipQueueHydration === true
+    const forceLive = input.force_live === true || input.forceLive === true
+    const needsReconcile = isCampaignLiveInconsistent(campaign)
+
+    if (
+      status === 'active' &&
+      !forceLive &&
+      !needsReconcile &&
+      (campaign.activated_at || Number(activeQueueCount || 0) > 0 || Number(campaign.queued_count || 0) > 0)
+    ) {
       await (deps.recomputeCampaignProgress || recomputeCampaignProgress)(campaignId, deps)
       recordStep('complete', { idempotent: true, queue_rows: activeQueueCount })
       return {
@@ -75,6 +89,7 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
         blockers: [],
         from: 'active',
         to: 'active',
+        outcome: isCampaignFullyLive(campaign) ? 'already_live_and_healthy' : 'active_with_queue_rows',
       }
     }
 
@@ -94,12 +109,14 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     }
 
     recordStep('resolving_templates')
-    const proofNoSend = input.no_send === true || input.noSend === true
+    const launchMode = mergeLaunchWriteModeIntoInput(campaign, input)
+    const proofNoSend = launchMode.no_send === true
     const scheduledActivation = input.scheduled_activation === true || clean(input.lock_owner) === 'scheduled_worker'
     const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps, {
       ...input,
+      ...launchMode,
       proof_hydration: proofNoSend,
-      guarded_live_launch: !proofNoSend && input.confirm_live !== false,
+      guarded_live_launch: !proofNoSend && launchMode.confirm_live === true,
       explicit_operator_action: asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, !scheduledActivation),
       scheduled_activation: scheduledActivation,
     })
@@ -115,26 +132,26 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
     recordStep('applying_compliance')
 
     const batchMax = input.batch_max ?? input.batchMax ?? input.limit ?? 5
-    recordStep('hydrating_queue', { batch_max: batchMax })
+    recordStep('hydrating_queue', { batch_max: batchMax, skip_hydration: skipHydration })
 
     const scheduledFor = input.scheduled_for || input.scheduledFor || input.first_scheduled_at || campaign.scheduled_for || null
-    const result = await activateCampaignWithHydration(campaignId, {
-      ...input,
-      activation_idempotency_key: idempotencyKey,
-      confirm_live: proofNoSend ? true : input.confirm_live !== false,
-      no_send: proofNoSend,
-      hydrate_canonical_queue: proofNoSend,
-      explicit_operator_action: asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, !scheduledActivation),
-      scheduled_activation: scheduledActivation,
-      scheduled_for: scheduledFor,
-      first_scheduled_at: input.first_scheduled_at || input.first_scheduled_at_utc || scheduledFor,
-      first_scheduled_at_utc: input.first_scheduled_at_utc || input.first_scheduled_at || scheduledFor,
-      batch_max: batchMax,
-      limit: batchMax,
-      lock_owner: owner,
-      reason: clean(input.reason) || `operator:${owner}`,
-      block_on_global_emergency_stop: false,
-    }, deps)
+    const result = skipHydration || batchMax <= 0
+      ? { ok: true, inserted: 0, skipped: 0, blockers: [], from: status, to: status, campaign }
+      : await activateCampaignWithHydration(campaignId, {
+        ...input,
+        ...launchMode,
+        activation_idempotency_key: idempotencyKey,
+        explicit_operator_action: asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, !scheduledActivation),
+        scheduled_activation: scheduledActivation,
+        scheduled_for: scheduledFor,
+        first_scheduled_at: input.first_scheduled_at || input.first_scheduled_at_utc || scheduledFor,
+        first_scheduled_at_utc: input.first_scheduled_at_utc || input.first_scheduled_at || scheduledFor,
+        batch_max: batchMax,
+        limit: batchMax,
+        lock_owner: owner,
+        reason: clean(input.reason) || `operator:${owner}`,
+        block_on_global_emergency_stop: false,
+      }, deps)
 
     if (!result.ok) {
       return failResult(result.error || 'activation_failed', steps, {

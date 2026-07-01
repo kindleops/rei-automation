@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { info, warn } from "@/lib/logging/logger.js";
-import { getSystemFlag, getSystemValue, buildDisabledResponse } from "@/lib/system-control.js";
+import { getSystemFlag, getSystemValue, buildDisabledResponse, setSystemValues } from "@/lib/system-control.js";
 import {
   blockedRuntimeBrakeResult,
   evaluateQueueSendRuntimeBrakes,
@@ -397,7 +397,17 @@ export async function runSendQueue(
       batch_duration_ms: Date.now() - new Date(run_started_at).getTime()
   });
 
-  return { 
+  if (!dry_run) {
+    const heartbeatAt = new Date().toISOString();
+    await setSystemValues({
+      queue_processor_heartbeat_at: heartbeatAt,
+      queue_processor_last_claimed_at: rows.length > 0 ? heartbeatAt : await get_system_value("queue_processor_last_claimed_at"),
+      queue_processor_last_sent_count: String(sent_count),
+      queue_processor_last_claimed_count: String(rows.length),
+    }, { supabase });
+  }
+
+  return {
     ok: true, 
     sent_count, 
     failed_count, 

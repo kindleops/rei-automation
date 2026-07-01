@@ -228,6 +228,12 @@ async function loadQueueProcessorState(supabase) {
     'queue_auto_send_enabled',
     'queue_emergency_stop_at',
     'outbound_sms_enabled',
+    'queue_processor_heartbeat_at',
+    'queue_processor_last_claimed_at',
+    'campaign_feeder_heartbeat_at',
+    'campaign_feeder_last_batch_at',
+    'recovery_worker_heartbeat_at',
+    'auto_reply_mode',
   ]
   const settings = {}
   for (const key of keys) {
@@ -237,10 +243,17 @@ async function loadQueueProcessorState(supabase) {
   return {
     processor_mode: processorMode,
     processor_enabled: processorMode !== 'off',
+    processor_heartbeat_at: settings.queue_processor_heartbeat_at || null,
+    processor_last_claimed_at: settings.queue_processor_last_claimed_at || null,
+    feeder_heartbeat_at: settings.campaign_feeder_heartbeat_at || null,
+    feeder_last_batch_at: settings.campaign_feeder_last_batch_at || null,
+    recovery_worker_heartbeat_at: settings.recovery_worker_heartbeat_at || null,
+    followup_scheduler_heartbeat_at: settings.recovery_worker_heartbeat_at || settings.queue_processor_heartbeat_at || null,
     auto_enqueue_enabled: asBoolean(settings.queue_auto_enqueue_enabled, false),
     auto_send_enabled: asBoolean(settings.queue_auto_send_enabled, false),
     emergency_stop_active: isEmergencyStopActive(settings.queue_emergency_stop_at),
     outbound_sms_enabled: asBoolean(settings.outbound_sms_enabled, false),
+    auto_reply_mode: clean(settings.auto_reply_mode) || 'disabled',
   }
 }
 
@@ -277,9 +290,10 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
 
   queueExec.campaign_state = normalizeCampaignStatus(campaign.status)
   queueExec.transmission_enabled =
+    asBoolean(campaign.auto_send_enabled, false) &&
+    productionLaunch &&
     queueExec.live_send_rows > 0 &&
-    queueExec.routing_allowed > 0 &&
-    (asBoolean(campaign.auto_send_enabled, false) || productionLaunch)
+    queueExec.routing_allowed > 0
 
   const operatorState = deriveOperatorState(campaign, queueExec, readiness)
   const mode = operatorModeLabel(queueExec)
@@ -358,7 +372,17 @@ export async function buildCampaignCommandSummary(campaignId, deps = {}) {
       contact_window_end: campaign.contact_window_end,
       auto_queue_enabled: campaign.auto_queue_enabled,
       auto_send_enabled: campaign.auto_send_enabled,
+      auto_reply_mode: campaign.auto_reply_mode,
+      execution_heartbeat_at: campaign.execution_heartbeat_at || null,
       next_scheduled_at: queueExec.next_scheduled_at || campaign.scheduled_for || null,
+    },
+    automation: {
+      feeder_heartbeat_at: processorState.feeder_heartbeat_at,
+      feeder_last_batch_at: processorState.feeder_last_batch_at,
+      processor_heartbeat_at: processorState.processor_heartbeat_at,
+      processor_last_claimed_at: processorState.processor_last_claimed_at,
+      followup_scheduler_heartbeat_at: processorState.followup_scheduler_heartbeat_at,
+      recovery_worker_heartbeat_at: processorState.recovery_worker_heartbeat_at,
     },
   }
 }

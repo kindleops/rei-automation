@@ -76,11 +76,17 @@ export function deriveOperatorState(campaign = {}, execution = {}, readiness = {
   if (status === 'scheduled') return 'scheduled'
 
   if (['active', 'activating'].includes(status)) {
-    if (liveSendRows > 0 && routingAllowed > 0 && (transmissionEnabled || productionLaunch)) return 'live'
-    if (proofMode) return 'test_mode'
+    const autoSendEnabled = Boolean(campaign.auto_send_enabled)
+    const fullyLive =
+      autoSendEnabled &&
+      clean(campaign.auto_reply_mode) === 'live_limited' &&
+      productionLaunch
+    if (proofMode || (!autoSendEnabled && !fullyLive)) return 'test_mode'
+    if (fullyLive && autoSendEnabled) return 'live'
+    if (liveSendRows > 0 && routingAllowed > 0 && transmissionEnabled && autoSendEnabled) return 'live'
     if (hasBlockers || routingAllowed === 0) return 'blocked'
     if (!transmissionEnabled && !productionLaunch) return 'blocked'
-    return 'live'
+    return autoSendEnabled ? 'live' : 'test_mode'
   }
 
   return status
@@ -142,11 +148,11 @@ export function primaryCommandForState(operatorState, options = {}) {
     case 'scheduled':
       return { action: 'activate', label: 'Go Live' }
     case 'live':
-      return liveReady
-        ? { action: 'queue_batch_live', label: 'Prepare Controlled Live Batch' }
-        : { action: 'pause', label: 'Pause' }
+      return { action: 'pause', label: 'Pause' }
     case 'test_mode':
-      return { action: 'queue_batch_test', label: 'Prepare Test Batch' }
+      return options.inconsistentLive
+        ? { action: 'convert_to_live', label: 'Repair Live State' }
+        : { action: 'convert_to_live', label: 'Convert to Live' }
     case 'paused':
       return { action: 'resume', label: 'Resume' }
     case 'blocked':

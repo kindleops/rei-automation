@@ -59,7 +59,10 @@ export function computeCampaignHealth(campaign: CampaignSummary): CampaignHealth
     if (campaign.ready_targets === 0 && LIVE.includes(campaign.status)) {
       issues.push('No ready targets — build or refresh target list')
     }
-    if (campaign.auto_send_enabled) issues.push('Auto-send must stay disabled in Phase 1')
+    const productionLive = Boolean(campaign.execution_proof?.transmission_enabled) && campaign.auto_send_enabled
+    if (campaign.auto_send_enabled && !productionLive) {
+      issues.push('Auto-send enabled but live transmission not fully configured')
+    }
 
     return {
       level: campaign.sent_count === 0 ? 'not_started' : 'awaiting',
@@ -99,9 +102,10 @@ export function computeCampaignHealth(campaign: CampaignSummary): CampaignHealth
     score -= 5
     issues.push(`Reply rate ${campaign.reply_rate.toFixed(1)}% is below target`)
   }
-  if (campaign.auto_send_enabled) {
+  const productionLive = Boolean(campaign.execution_proof?.transmission_enabled) && campaign.auto_send_enabled
+  if (campaign.auto_send_enabled && !productionLive) {
     score -= 15
-    issues.push('Auto-send must stay disabled in Phase 1')
+    issues.push('Auto-send enabled but live transmission not fully configured')
   }
   if (campaign.ready_targets === 0 && LIVE.includes(campaign.status)) {
     score -= 10

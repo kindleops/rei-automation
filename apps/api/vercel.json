@@ -28,6 +28,14 @@
     {
       "path": "/api/internal/campaigns/activate-due",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/campaigns/feed",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/seller-flow/recover-inbound",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

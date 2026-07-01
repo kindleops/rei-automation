@@ -11,6 +11,15 @@ import { buildCampaignCommandSummary } from '@/lib/domain/campaigns/campaign-com
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 import { asBoolean } from '@/lib/domain/queue/queue-control-safety.js'
+import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automation-service.js'
+import {
+  buildCanonicalLiveCampaignPatch,
+  CANONICAL_FULL_AUTOPILOT_MODE,
+  isCampaignFullyLive,
+  isCampaignLiveInconsistent,
+  mergeLaunchWriteModeIntoInput,
+} from '@/lib/domain/campaigns/campaign-live-execution.js'
+import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 
 const PROOF_CANCEL_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 const MARKET_TIMEZONES = {
@@ -147,6 +156,48 @@ async function cancelProofQueueRows(supabase, campaignId) {
   return { cancelled, proof_rows: cancelled, deleted: 0 }
 }
 
+async function countActiveLiveQueueRows(supabase, campaignId) {
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('id,metadata')
+    .eq('campaign_id', campaignId)
+    .in('queue_status', PROOF_CANCEL_STATUSES)
+  if (error) throw error
+  return (data || []).filter((row) => !isProofQueueRow(row)).length
+}
+
+async function applyLiveCampaignState(supabase, campaign, schedule) {
+  const patch = buildCanonicalLiveCampaignPatch(campaign, schedule)
+  const { data, error } = await supabase
+    .from('campaigns')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', campaign.id)
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return data
+}
+
+async function createInitialLiveBatch(campaignId, campaign, schedule, input, deps) {
+  const batchMax = Number(input.batch_max ?? input.limit ?? campaign.daily_cap ?? campaign.batch_max ?? 5)
+  const launchInput = mergeLaunchWriteModeIntoInput(campaign, {
+    ...input,
+    lock_owner: 'convert_to_live',
+    production_live_write: true,
+    force_live: true,
+    no_send: false,
+    confirm_live: true,
+    explicit_operator_action: true,
+    scheduled_for: schedule.scheduled_for,
+    first_scheduled_at: schedule.scheduled_for,
+    batch_max: batchMax,
+    limit: batchMax,
+    block_on_global_emergency_stop: false,
+  })
+  const planFn = deps.createCampaignQueuePlan || createCampaignQueuePlan
+  return planFn(campaignId, launchInput, deps)
+}
+
 export async function convertTestCampaignToLive(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   if (!campaignId) return { ok: false, error: 'campaign_id_required' }
@@ -159,18 +210,36 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
   if (campErr) throw campErr
   if (!campaign) return { ok: false, error: 'campaign_not_found' }
 
-  const beforeSummary = await buildCampaignCommandSummary(campaignId, deps)
-  const proofRows = Number(beforeSummary.counts?.proof_no_send_rows || 0)
-  const liveRows = Number(beforeSummary.counts?.live_send_rows || 0)
-  const inTestMode = beforeSummary.state === 'test_mode' || proofRows > 0 || beforeSummary.mode === 'test'
-
-  if (!inTestMode && liveRows > 0) {
-    return { ok: false, error: 'already_live', message: 'Campaign is already on the live send path.' }
-  }
-
   if (!asBoolean(input.confirm_live ?? input.confirmLive, true)) {
     return { ok: false, error: 'confirm_live_required', message: 'Operator must confirm live conversion.' }
   }
+
+  const status = normalizeCampaignStatus(campaign.status)
+  const summaryFn = deps.buildCampaignCommandSummary || buildCampaignCommandSummary
+  const beforeSummary = await summaryFn(campaignId, deps)
+
+  if (isCampaignFullyLive(campaign)) {
+    return {
+      ok: true,
+      campaign_id: campaignId,
+      action: 'convert_to_live',
+      outcome: 'already_live_and_healthy',
+      from: status,
+      to: campaign.status,
+      state: beforeSummary.state,
+      state_label: beforeSummary.state_label,
+      mode: beforeSummary.mode,
+      counts: beforeSummary.counts,
+      blockers: beforeSummary.blockers || [],
+      warnings: beforeSummary.warnings || [],
+      campaign,
+      idempotent: true,
+      inserted: 0,
+    }
+  }
+
+  const inconsistent = isCampaignLiveInconsistent(campaign)
+  const outcome = inconsistent ? 'live_state_repaired' : 'successfully_converted'
 
   const purged = await cancelProofQueueRows(supabase, campaignId)
 
@@ -186,22 +255,6 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
   if (staleError) throw staleError
   const staleCancelled = staleActive?.length || 0
 
-  await syncCampaignMetrics(campaignId, deps)
-
-  if (asBoolean(input.enable_processor ?? input.enableProcessor, true)) {
-    await setSystemValues({
-      queue_emergency_stop_at: '',
-      queue_processor_mode: 'on',
-      queue_auto_enqueue_enabled: 'true',
-      outbound_sms_enabled: 'true',
-      auto_reply_mode: 'live_limited',
-    }, { supabase })
-  }
-
-  const schedule = computeNextValidSendInstant(campaign)
-  const batchMax = Number(input.batch_max ?? input.limit ?? campaign.daily_cap ?? campaign.batch_max ?? 5)
-  const status = normalizeCampaignStatus(campaign.status)
-
   if (status === 'paused') {
     const resumed = await transitionCampaignStatus(supabase, campaignId, 'active', {
       reason: clean(input.reason) || 'operator:convert_to_live',
@@ -209,85 +262,113 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
     if (!resumed.ok) return { ok: false, error: resumed.error || 'resume_failed', from: status }
   }
 
-  await supabase.from('campaigns').update({
-    auto_queue_enabled: true,
-    scheduled_for: schedule.scheduled_for,
-    metadata: {
-      ...(campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}),
-      converted_to_live_at: new Date().toISOString(),
-      production_launch: true,
-      test_mode_cleared: true,
-      launch_timezone: schedule.timezone,
-      launch_window: { start: schedule.window_start, end: schedule.window_end },
-    },
-  }).eq('id', campaignId)
+  const schedule = computeNextValidSendInstant(campaign)
+  const batchMax = Number(input.batch_max ?? input.limit ?? campaign.daily_cap ?? campaign.batch_max ?? 5)
 
-  const activation = await runCanonicalCampaignActivation(campaignId, {
+  const setValuesFn = deps.setSystemValues || setSystemValues
+  const getValueFn = deps.getSystemValue || ((key, opts) => getSystemValue(key, opts))
+  if (asBoolean(input.enable_processor ?? input.enableProcessor, true)) {
+    await setValuesFn({
+      queue_emergency_stop_at: '',
+      queue_processor_mode: 'on',
+      queue_auto_enqueue_enabled: 'true',
+      outbound_sms_enabled: 'true',
+      auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
+    }, { supabase })
+  }
+
+  const queuePlanFn = deps.createCampaignQueuePlan || createCampaignQueuePlan
+  const queueResult = await createInitialLiveBatch(campaignId, campaign, schedule, {
+    ...input,
+    batch_max: batchMax,
+    limit: batchMax,
+  }, { ...deps, createCampaignQueuePlan: queuePlanFn })
+
+  const inserted = Number(queueResult?.send_queue_rows_created ?? queueResult?.queue_rows_created ?? 0)
+  const queueBlockers = queueResult?.blockers || []
+
+  const refreshedCampaign = await applyLiveCampaignState(supabase, campaign, schedule)
+
+  if (inserted === 0 && queueBlockers.length) {
+    return {
+      ok: false,
+      error: 'activation_failed',
+      blockers: queueBlockers,
+      purged: { ...purged, stale_cancelled: staleCancelled },
+      schedule,
+      from: status,
+      to: refreshedCampaign?.status || 'active',
+      queue_result: queueResult,
+    }
+  }
+
+  const activationFn = deps.runCanonicalCampaignActivation || runCanonicalCampaignActivation
+  const activation = await activationFn(campaignId, {
     ...input,
     action: 'activate',
+    force_live: true,
+    production_live_write: true,
     no_send: false,
     confirm_live: true,
     explicit_operator_action: true,
     scheduled_activation: true,
     scheduled_for: schedule.scheduled_for,
     first_scheduled_at: schedule.scheduled_for,
-    batch_max: batchMax,
-    limit: batchMax,
+    batch_max: 0,
+    limit: 0,
+    skip_queue_hydration: true,
     activation_idempotency_key: clean(input.activation_idempotency_key) || `convert-live:${Date.now()}`,
     reason: clean(input.reason) || 'operator:convert_to_live',
     lock_owner: 'convert_to_live',
   }, deps)
 
-  if (!activation.ok) {
-    return {
-      ok: false,
-      error: activation.error || 'activation_failed',
-      blockers: activation.blockers || [],
-      purged: { ...purged, stale_cancelled: staleCancelled },
-      schedule,
-      from: status,
-      to: normalizeCampaignStatus(campaign.status),
-    }
-  }
+  await (deps.recomputeCampaignProgress || recomputeCampaignProgress)(campaignId, deps)
+  const syncFn = deps.syncCampaignMetrics || syncCampaignMetrics
+  await syncFn(campaignId, deps)
+  const afterSummary = await summaryFn(campaignId, deps)
 
-  await syncCampaignMetrics(campaignId, deps)
-  const afterSummary = await buildCampaignCommandSummary(campaignId, deps)
-
-  const processorMode = await getSystemValue('queue_processor_mode', { supabase })
+  const processorMode = await getValueFn('queue_processor_mode', { supabase })
   await supabase.from('campaign_events').insert({
     campaign_id: campaignId,
     event_type: 'campaign.converted_to_live',
     severity: 'success',
     title: 'Converted to Live Campaign',
-    description: `Test rows purged (${purged.cancelled}). Live queue hydrated. Scheduled for ${schedule.scheduled_for}.`,
+    description: `${outcome}: purged ${purged.cancelled} proof rows, inserted ${inserted} live rows. Scheduled for ${schedule.scheduled_for}.`,
     metadata: {
+      outcome,
       purged_proof_rows: purged.cancelled,
       scheduled_for: schedule.scheduled_for,
       timezone: schedule.timezone,
-      inserted: activation.inserted ?? 0,
+      inserted,
       processor_mode: processorMode,
+      auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
       counts: afterSummary.counts,
     },
   })
 
-  const { data: refreshed } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+  const { data: finalCampaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
 
   return {
     ok: true,
     campaign_id: campaignId,
     action: 'convert_to_live',
+    outcome,
     from: status,
-    to: refreshed?.status || 'active',
+    to: finalCampaign?.status || 'active',
     state: afterSummary.state,
     state_label: afterSummary.state_label,
     mode: afterSummary.mode,
     purged: { ...purged, stale_cancelled: staleCancelled },
     schedule,
     activation,
+    queue_result: queueResult,
+    inserted,
     counts: afterSummary.counts,
     blockers: afterSummary.blockers || [],
     warnings: afterSummary.warnings || [],
-    campaign: refreshed,
+    campaign: finalCampaign,
     proof_mode_cleared: afterSummary.execution?.proof_mode !== true,
+    auto_send_enabled: asBoolean(finalCampaign?.auto_send_enabled, false),
+    auto_reply_mode: clean(finalCampaign?.auto_reply_mode),
   }
 }
