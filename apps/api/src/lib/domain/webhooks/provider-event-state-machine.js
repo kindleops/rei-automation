@@ -71,13 +71,15 @@ export function extractProviderEventTimestamp(row = {}) {
 export function normalizeProviderEventPayload(row = {}) {
   const payload = row.payload && typeof row.payload === 'object' ? row.payload : {}
   const status = extractProviderStatus(row)
+  const carrier_raw =
+    payload.raw && typeof payload.raw === 'object' ? payload.raw : {}
+
   const normalized_failure = normalizeTextGridFailure({
-    ...payload,
     status: payload.status || status,
     error_message: payload.error_message,
     error_status: payload.error_status,
     reason: payload.reason,
-    raw: payload.raw || payload,
+    raw: carrier_raw,
     metadata: payload.metadata,
   })
 

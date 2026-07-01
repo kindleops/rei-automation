@@ -3569,11 +3569,14 @@ export async function syncDeliveryEvent(payload, options = {}) {
   const provider_status = lower(payload?.status || payload?.provider_delivery_status);
   const raw_carrier_status = clean(payload?.error_status || payload?.status || "");
   const normalized_failure = normalizeTextGridFailure({
-    ...ensureObject(payload),
     status: payload?.status || payload?.provider_delivery_status,
     error_message: payload?.error_message,
+    error_status: payload?.error_status,
     reason: payload?.reason,
-    raw: payload?.raw || payload,
+    raw:
+      payload?.raw && typeof payload.raw === "object" && !Array.isArray(payload.raw)
+        ? payload.raw
+        : {},
     metadata: payload?.metadata,
   });
   const provider_failure_reason =

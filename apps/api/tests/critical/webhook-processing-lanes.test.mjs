@@ -78,6 +78,19 @@ test('detectContradictoryTerminalStates flags delivered+failed combinations', ()
   assert.equal(result.contradictory, true)
 })
 
+test('normalizeProviderEventPayload ignores webhook signature metadata as delivery failure', () => {
+  const normalized = normalizeProviderEventPayload({
+    provider_message_sid: 'SM-delivered-sig',
+    payload: {
+      message_id: 'SM-delivered-sig',
+      status: 'delivered',
+      signature_failure_reason: 'no_mode_produced_matching_digest',
+      webhook_verification: { ok: false, reason: 'invalid_signature' },
+    },
+  })
+  assert.equal(normalized.canonical_status, 'delivered')
+})
+
 test('inboundProcessingPriority ranks STOP/opt-out above generic inbound', () => {
   const stop_row = {
     created_at: new Date().toISOString(),
