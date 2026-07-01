@@ -42,7 +42,12 @@ import {
   releaseCampaignExecutionLock,
   renewCampaignExecutionLock,
 } from '@/lib/domain/campaigns/campaign-execution-lock.js'
-import { mergeLaunchWriteModeIntoInput } from '@/lib/domain/campaigns/campaign-live-execution.js'
+import {
+  countLiveConfirmedQueueRows,
+  isCampaignLiveInconsistentWithQueue,
+  mergeLaunchWriteModeIntoInput,
+  reconcileCampaignLiveState,
+} from '@/lib/domain/campaigns/campaign-live-execution.js'
 
 const DEFAULT_CANDIDATE_SOURCE = 'v_feeder_candidates_fast'
 const DEFAULT_SCAN_LIMIT = 1000
@@ -7284,6 +7289,28 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
     !forceLive &&
     (campaign.activated_at || existingQueueRows > 0 || Number(campaign.queued_count || 0) > 0)
   ) {
+    // Reconcile split-brain (active + live rows + proof/disabled flags) instead of
+    // returning a stale idempotent "already active" that leaves execution broken.
+    const liveQueueRows = await countLiveConfirmedQueueRows(supabase, campaignId)
+    if (isCampaignLiveInconsistentWithQueue(campaign, { liveQueueRows })) {
+      const repair = await reconcileCampaignLiveState(campaignId, deps)
+      const { data: repairedCampaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+      return {
+        ok: true,
+        idempotent: true,
+        reconciled: true,
+        campaign_id: campaignId,
+        queue_result: null,
+        lifecycle_result: { ok: true, campaign: repairedCampaign || repair.campaign || campaign, from: status, to: status },
+        inserted: 0,
+        skipped: 0,
+        blockers: [],
+        from: status,
+        to: status,
+        outcome: repair.outcome,
+        campaign: repairedCampaign || repair.campaign || campaign,
+      }
+    }
     return {
       ok: true,
       idempotent: true,
