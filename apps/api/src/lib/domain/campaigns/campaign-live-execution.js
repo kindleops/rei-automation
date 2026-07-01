@@ -3,7 +3,7 @@
  * proof vs live launch mode derived from persisted campaign state.
  */
 
-import { asBoolean } from '@/lib/domain/queue/queue-control-safety.js'
+import { asBoolean, asPositiveInteger } from '@/lib/domain/queue/queue-control-safety.js'
 import {
   isLiveCampaignStatus,
   normalizeCampaignStatus,
@@ -168,4 +168,49 @@ export function mergeLaunchWriteModeIntoInput(campaign = {}, input = {}) {
     hydrate_canonical_queue: derived.proof_hydration ? true : false,
     create_send_queue_rows: input.create_send_queue_rows !== false && input.createSendQueueRows !== false,
   }
+}
+
+/**
+ * Align global queue safety rails with a production campaign's configured caps.
+ * Replaces stale canary/emergency-stop limits so cron dispatch can run at campaign scale.
+ */
+export function buildProductionQueueRailsPatch(campaign = {}) {
+  const batchMax = asPositiveInteger(campaign.batch_max, 50)
+  const dailyCap = asPositiveInteger(campaign.daily_cap, batchMax)
+  const marketCap = asPositiveInteger(campaign.market_cap, dailyCap)
+  const perSenderCap = asPositiveInteger(campaign.per_sender_cap, batchMax)
+  const market = clean(campaign.market)
+  const state = market.toLowerCase().includes(', fl') ? 'FL' : clean(campaign.metadata?.state)
+
+  return {
+    queue_emergency_stop_at: '',
+    queue_processor_mode: 'on',
+    queue_auto_enqueue_enabled: 'true',
+    queue_auto_send_enabled: 'true',
+    outbound_sms_enabled: 'true',
+    auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
+    campaign_mode: 'live_limited',
+    queue_execution_mode: 'normal',
+    queue_run_limit: String(Math.min(batchMax, 50)),
+    queue_hard_cap: String(batchMax),
+    queue_max_batch_size: String(batchMax),
+    queue_daily_send_cap: String(dailyCap),
+    queue_market_cap: String(marketCap),
+    queue_per_number_cap: String(perSenderCap),
+    ...(market ? { queue_market_filter: market } : {}),
+    ...(state ? { queue_state_filter: state } : {}),
+    queue_last_run_status: '',
+  }
+}
+
+export async function syncProductionQueueRailsFromCampaign(campaign = {}, deps = {}) {
+  if (!isCampaignProductionLaunch(campaign)) {
+    return { ok: false, skipped: true, reason: 'not_production_launch' }
+  }
+  const { setSystemValues } = await import('@/lib/system-control.js')
+  const setValues = deps.setSystemValues || setSystemValues
+  const supabase = deps.supabase
+  const patch = buildProductionQueueRailsPatch(campaign)
+  await setValues(patch, supabase ? { supabase } : {})
+  return { ok: true, patch }
 }

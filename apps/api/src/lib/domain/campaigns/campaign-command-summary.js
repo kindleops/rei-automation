@@ -248,7 +248,7 @@ async function loadQueueProcessorState(supabase) {
     feeder_heartbeat_at: settings.campaign_feeder_heartbeat_at || null,
     feeder_last_batch_at: settings.campaign_feeder_last_batch_at || null,
     recovery_worker_heartbeat_at: settings.recovery_worker_heartbeat_at || null,
-    followup_scheduler_heartbeat_at: settings.recovery_worker_heartbeat_at || settings.queue_processor_heartbeat_at || null,
+    followup_scheduler_heartbeat_at: settings.follow_up_scheduler_heartbeat_at || settings.recovery_worker_heartbeat_at || settings.queue_processor_heartbeat_at || null,
     auto_enqueue_enabled: asBoolean(settings.queue_auto_enqueue_enabled, false),
     auto_send_enabled: asBoolean(settings.queue_auto_send_enabled, false),
     emergency_stop_active: isEmergencyStopActive(settings.queue_emergency_stop_at),

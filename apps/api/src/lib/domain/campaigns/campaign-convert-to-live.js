@@ -18,6 +18,7 @@ import {
   isCampaignFullyLive,
   isCampaignLiveInconsistent,
   mergeLaunchWriteModeIntoInput,
+  syncProductionQueueRailsFromCampaign,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 
@@ -268,13 +269,11 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
   const setValuesFn = deps.setSystemValues || setSystemValues
   const getValueFn = deps.getSystemValue || ((key, opts) => getSystemValue(key, opts))
   if (asBoolean(input.enable_processor ?? input.enableProcessor, true)) {
-    await setValuesFn({
-      queue_emergency_stop_at: '',
-      queue_processor_mode: 'on',
-      queue_auto_enqueue_enabled: 'true',
-      outbound_sms_enabled: 'true',
-      auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
-    }, { supabase })
+    await (deps.syncProductionQueueRailsFromCampaign || syncProductionQueueRailsFromCampaign)(campaign, {
+      ...deps,
+      supabase,
+      setSystemValues: setValuesFn,
+    })
   }
 
   const queuePlanFn = deps.createCampaignQueuePlan || createCampaignQueuePlan

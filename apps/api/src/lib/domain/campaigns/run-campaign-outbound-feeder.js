@@ -14,6 +14,7 @@ import {
   isCampaignFullyLive,
   isCampaignProductionLaunch,
   mergeLaunchWriteModeIntoInput,
+  syncProductionQueueRailsFromCampaign,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 
@@ -176,6 +177,9 @@ export async function runCampaignOutboundFeeder(deps = {}) {
 
   for (const campaign of campaigns) {
     if (!isCampaignFullyLive(campaign) && !isCampaignProductionLaunch(campaign)) continue
+    if (isCampaignFullyLive(campaign)) {
+      await syncProductionQueueRailsFromCampaign(campaign, deps)
+    }
     const feedResult = await feedCampaignBatch(campaign, deps)
     results.push(feedResult)
     totalInserted += Number(feedResult.inserted || 0)

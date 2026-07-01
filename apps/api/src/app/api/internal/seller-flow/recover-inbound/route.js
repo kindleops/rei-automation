@@ -40,8 +40,10 @@ async function runRecovery(body = {}) {
   });
 
   if (!dryRun) {
+    const heartbeatAt = new Date().toISOString();
     await setSystemValues({
-      recovery_worker_heartbeat_at: new Date().toISOString(),
+      recovery_worker_heartbeat_at: heartbeatAt,
+      follow_up_scheduler_heartbeat_at: heartbeatAt,
       recovery_worker_last_processed: String(result.processed ?? result.recovered ?? 0),
     });
   }

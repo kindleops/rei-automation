@@ -2,12 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildProductionQueueRailsPatch,
   CANONICAL_FULL_AUTOPILOT_MODE,
   isCampaignFullyLive,
   isCampaignLiveInconsistent,
   mergeLaunchWriteModeIntoInput,
   resolveCampaignLaunchWriteMode,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
+import { validateLiveLimitedRails } from '@/lib/domain/queue/queue-control-safety.js'
+import { handleQueueRunRequest } from '@/lib/domain/queue/queue-run-request.js'
 import { convertTestCampaignToLive } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
 import { resolveCampaignQueueWriteMode } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { makeTerminalQuery } from '../helpers/chainable-supabase.mjs'
@@ -232,4 +235,78 @@ test('convert to live reconciles already-active auto-send-disabled campaign', as
   assert.ok(livePatch)
   assert.equal(livePatch.auto_reply_mode, 'live_limited')
   assert.equal(livePatch.metadata.production_launch, true)
+})
+
+test('production queue rails patch uses campaign caps not stale canary limits', () => {
+  const patch = buildProductionQueueRailsPatch({
+    batch_max: 50,
+    daily_cap: 750,
+    market_cap: 400,
+    per_sender_cap: 150,
+    market: 'Miami, FL',
+    metadata: { production_launch: true },
+  })
+  assert.equal(patch.queue_max_batch_size, '50')
+  assert.equal(patch.queue_daily_send_cap, '750')
+  assert.equal(patch.queue_market_cap, '400')
+  assert.equal(patch.queue_per_number_cap, '150')
+  assert.equal(patch.queue_run_limit, '50')
+  assert.equal(patch.queue_emergency_stop_at, '')
+  assert.equal(patch.auto_reply_mode, 'live_limited')
+})
+
+test('live limited rails auto-cap dispatch limit instead of rejecting cron default', () => {
+  const validation = validateLiveLimitedRails({
+    campaign_mode: 'live_limited',
+    limit: 50,
+    hard_cap: 5,
+    max_batch_size: 5,
+    daily_cap: 5,
+    market_cap: 5,
+    per_number_cap: 5,
+  }, { require_scope: false, require_send_caps: true })
+  assert.equal(validation.ok, true)
+  assert.equal(validation.effective_limit, 5)
+})
+
+test('internal queue run passes when request limit exceeds configured hard cap', async () => {
+  const runCalls = []
+  const responses = []
+  await handleQueueRunRequest(
+    { url: 'https://app.example.com/api/internal/queue/run', json: async () => ({}) },
+    'GET',
+    {
+      requireCronAuth: () => ({
+        authorized: true,
+        auth: { authenticated: true, is_vercel_cron: true },
+        response: null,
+      }),
+      getSystemValue: async (key) => {
+        const values = {
+          queue_processor_mode: 'on',
+          queue_execution_mode: 'normal',
+          campaign_mode: 'live_limited',
+          queue_hard_cap: '5',
+          queue_max_batch_size: '5',
+          queue_daily_send_cap: '5',
+          queue_market_cap: '5',
+          queue_per_number_cap: '5',
+          queue_run_limit: '5',
+          queue_emergency_stop_at: '',
+        }
+        return values[key] ?? null
+      },
+      runSendQueue: async (opts) => {
+        runCalls.push(opts)
+        return { ok: true, sent_count: 1, claimed_count: 1, results: [] }
+      },
+      logger: { info() {}, warn() {}, error() {} },
+      jsonResponse: (body, init) => {
+        responses.push({ body, status: init?.status ?? 200 })
+        return { body, status: init?.status ?? 200 }
+      },
+    },
+  )
+  assert.equal(responses[0]?.status, 200)
+  assert.equal(runCalls[0]?.limit, 5)
 })

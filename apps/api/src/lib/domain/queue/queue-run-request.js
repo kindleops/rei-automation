@@ -167,11 +167,12 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       if (!auth.authorized) return auth.response;
     }
 
+    const configured_run_limit = asNumber(await get_system_value("queue_run_limit"), 50);
     const limit = Math.max(
       1,
       Math.min(
         50,
-        asNumber(method === "POST" ? body?.limit : search_params.get("limit"), 50)
+        asNumber(method === "POST" ? body?.limit : search_params.get("limit"), configured_run_limit)
       )
     );
     const dry_run = asBoolean(
@@ -350,15 +351,17 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       }, { status: statusForResult(result) });
     }
 
+    let dispatch_limit = limit;
     if (!dry_run) {
       const validation = validateLiveLimitedRails(safety, { require_scope: false, require_send_caps: true });
       if (!validation.ok) {
         return json_response(blockedSafetyResult(validation, "queue_run"), { status: validation.status });
       }
+      dispatch_limit = validation.effective_limit || limit;
     }
 
     route_logger?.info?.("queue_run.before_run_send_queue", {
-      limit,
+      limit: dispatch_limit,
       dry_run,
       queue_processor_mode,
       dry_run_reason: dry_run ? "requested" : "disabled",
@@ -383,7 +386,7 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
     });
 
     const result = await run_send_queue({
-      limit: dry_run ? limit : Math.min(limit, safety.hard_cap || limit, safety.max_batch_size || limit),
+      limit: dispatch_limit,
       dry_run,
     });
 

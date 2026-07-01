@@ -127,14 +127,14 @@ export function validateLiveLimitedRails(input = {}, options = {}) {
   if (require_send_caps && !per_number_cap) missing.push("per_number_cap");
   if (require_scope && !market && !state && all_market_ack !== true) missing.push("market_or_state_filter_or_all_market_ack");
 
-  const effective_limit = Math.max(1, asPositiveInteger(limit, 1));
+  const requested_limit = Math.max(1, asPositiveInteger(limit, 1));
   const effective_max = Math.min(
     hard_cap || Number.POSITIVE_INFINITY,
     max_batch_size || Number.POSITIVE_INFINITY
   );
-  if (Number.isFinite(effective_max) && effective_limit > effective_max) {
-    missing.push("limit_within_hard_cap_and_max_batch_size");
-  }
+  const effective_limit = Number.isFinite(effective_max)
+    ? Math.min(requested_limit, effective_max)
+    : requested_limit;
 
   if (missing.length > 0) {
     return {
@@ -151,6 +151,7 @@ export function validateLiveLimitedRails(input = {}, options = {}) {
     ok: true,
     status: 200,
     effective_limit,
+    requested_limit,
     safety: input,
   };
 }
