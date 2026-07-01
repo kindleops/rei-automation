@@ -15,8 +15,9 @@ import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automat
 import {
   buildCanonicalLiveCampaignPatch,
   CANONICAL_FULL_AUTOPILOT_MODE,
+  detectCampaignImpossibleStates,
   isCampaignFullyLive,
-  isCampaignLiveInconsistent,
+  isCampaignLiveInconsistentWithQueue,
   mergeLaunchWriteModeIntoInput,
   syncProductionQueueRailsFromCampaign,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
@@ -239,7 +240,8 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
     }
   }
 
-  const inconsistent = isCampaignLiveInconsistent(campaign)
+  const liveRowsBefore = await countActiveLiveQueueRows(supabase, campaignId)
+  const inconsistent = isCampaignLiveInconsistentWithQueue(campaign, { liveQueueRows: liveRowsBefore })
   const outcome = inconsistent ? 'live_state_repaired' : 'successfully_converted'
 
   const purged = await cancelProofQueueRows(supabase, campaignId)
@@ -287,6 +289,12 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
   const queueBlockers = queueResult?.blockers || []
 
   const refreshedCampaign = await applyLiveCampaignState(supabase, campaign, schedule)
+
+  // Phase 3 guard: after the canonical live patch, an active campaign with live
+  // rows must not retain any proof/disabled execution flags. Surface violations
+  // rather than silently completing a half-converted (split-brain) launch.
+  const liveRowsAfter = await countActiveLiveQueueRows(supabase, campaignId)
+  const executionViolations = detectCampaignImpossibleStates(refreshedCampaign || {}, { liveQueueRows: liveRowsAfter })
 
   if (inserted === 0 && queueBlockers.length) {
     return {
@@ -369,5 +377,7 @@ export async function convertTestCampaignToLive(campaignId, input = {}, deps = {
     proof_mode_cleared: afterSummary.execution?.proof_mode !== true,
     auto_send_enabled: asBoolean(finalCampaign?.auto_send_enabled, false),
     auto_reply_mode: clean(finalCampaign?.auto_reply_mode),
+    execution_consistent: executionViolations.length === 0,
+    execution_violations: executionViolations,
   }
 }
