@@ -151,11 +151,34 @@ async function validateRecoveryCandidate(row = {}, campaign = {}, deps = {}) {
   const metadata = metadataObject(row.metadata);
   const candidateSnapshot = metadataObject(metadata.candidate_snapshot);
   const targetSnapshot = metadataObject(metadata.target_snapshot);
+  const outreachSnapshot = metadataObject(metadata.outreach_snapshot);
+  const rawCandidate = metadataObject(candidateSnapshot.raw);
 
   if (!phone) return { ok: false, reason: "missing_phone" };
   if (!clean(row.message_body)) return { ok: false, reason: "missing_message_body" };
   if (!clean(row.template_id)) return { ok: false, reason: "missing_template_id" };
   if (!clean(row.from_phone_number)) return { ok: false, reason: "missing_sender_number" };
+  if (outreachSnapshot.wrong_number === true) return { ok: false, reason: "wrong_number" };
+  if (outreachSnapshot.true_post_contact_suppression === true) {
+    return { ok: false, reason: "suppressed_post_contact" };
+  }
+
+  const campaignTargetId = clean(row.campaign_target_id || targetSnapshot.campaign_target_id);
+  if (campaignTargetId) {
+    const targetQuery = await supabase
+      .from("campaign_targets")
+      .select("id,target_status,suppression_status,routing_status,template_status,to_phone_number")
+      .eq("id", campaignTargetId)
+      .maybeSingle();
+    if (targetQuery.error) throw targetQuery.error;
+    if (!targetQuery.data) return { ok: false, reason: "campaign_target_missing" };
+    if (lower(targetQuery.data.target_status) !== "ready") {
+      return { ok: false, reason: `campaign_target_not_ready:${targetQuery.data.target_status}` };
+    }
+    if (clean(targetQuery.data.suppression_status)) {
+      return { ok: false, reason: "campaign_target_suppressed" };
+    }
+  }
 
   const senderQuery = await supabase
     .from("textgrid_numbers")
@@ -175,14 +198,26 @@ async function validateRecoveryCandidate(row = {}, campaign = {}, deps = {}) {
     }
   }
 
-  const eligibility = evaluatePreSendEligibility({
-    likely_owner: candidateSnapshot.likely_owner,
-    likely_renting: candidateSnapshot.likely_renting,
-    matching_flags: candidateSnapshot.matching_flags,
-    identity_status: targetSnapshot.identity_status,
-  });
-  if (!eligibility.eligible) {
-    return { ok: false, reason: eligibility.block_reason || "ineligible" };
+  const eligibility = evaluatePreSendEligibility(
+    {
+      ...rawCandidate,
+      ...candidateSnapshot,
+      likely_owner: rawCandidate.likely_owner ?? candidateSnapshot.likely_owner,
+      likely_renting: rawCandidate.likely_renting ?? candidateSnapshot.likely_renting,
+      matching_flags:
+        rawCandidate.matching_flags ||
+        candidateSnapshot.matching_flags ||
+        rawCandidate.prospect_matching_flags,
+      identity_status: targetSnapshot.identity_status || rawCandidate.identity_status,
+    },
+    {
+      allow_identity_unknown: true,
+      allow_weak_identity_outbound: true,
+      identity_gate_mode: clean(campaign.identity_policy) || "auto",
+    }
+  );
+  if (!eligibility.eligible && eligibility.block_reason === "RENTER_NOT_OWNER") {
+    return { ok: false, reason: eligibility.block_reason };
   }
 
   return { ok: true, phone, sender: senderQuery.data };
@@ -319,8 +354,10 @@ export async function recoverCampaignStaleExpiredTargets(campaignId, options = {
 
   const created = [];
   const validationSkipped = [];
+  let candidatesScanned = 0;
   for (const entry of analysis.replaceable) {
     if (created.length >= createLimit) break;
+    candidatesScanned += 1;
     const expiredRow = entry.row;
     const validation = await validateRecoveryCandidate(expiredRow, campaign, deps);
     if (!validation.ok) {
@@ -389,6 +426,7 @@ export async function recoverCampaignStaleExpiredTargets(campaignId, options = {
     replacement_rows_created: dryRun ? 0 : created.filter((row) => row.replacement_row_id).length,
     planned_replacements: created,
     validation_skipped: validationSkipped,
+    candidates_scanned: candidatesScanned,
     analysis,
   };
 }
