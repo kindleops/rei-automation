@@ -5,7 +5,7 @@
 import crypto from 'node:crypto'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
-import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { resolveLanguage, templateCatalogLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { expandTemplatePropertyScopes } from '@/lib/sms/property_scope.js'
 
 function clean(value) {
@@ -74,8 +74,9 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
   const languageResolved = resolveLanguage(languageRaw)
+  const catalogLanguage = templateCatalogLanguage(languageRaw)
 
-  if (languageResolved.unsupported) {
+  if (languageResolved.unsupported || catalogLanguage.unsupported) {
     return {
       ok: false,
       excluded: true,
@@ -86,7 +87,7 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
     }
   }
 
-  const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
+  const canonicalLanguage = catalogLanguage.language || languageResolved.canonical || languageRaw || 'English'
   const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
   const templateUseCase = clean(
     campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
