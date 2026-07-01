@@ -371,13 +371,13 @@ export async function processDeliveryProviderIds(provider_message_sids = [], opt
         continue
       }
 
-      const group = { provider_message_sid: sid, rows: payloadRows, events: [] }
+      const group = { provider_message_sid: sid, webhook_rows: payloadRows, events: [] }
       const outcome = await processDeliveryProviderGroup(group, { ...options, execution_id }, deps)
       results.push(outcome)
       continue
     }
 
-    const group = { provider_message_sid: sid, rows, events: [] }
+    const group = { provider_message_sid: sid, webhook_rows: rows, events: [] }
     const outcome = await processDeliveryProviderGroup(group, { ...options, execution_id }, deps)
     results.push(outcome)
   }
