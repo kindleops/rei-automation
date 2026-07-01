@@ -22,6 +22,12 @@ export function normalizeTimestamp(value) {
   const text = String(value).trim();
   if (!text) return null;
 
+  // Supabase/Postgres often emit "+00" offsets without a colon; Date.parse rejects them.
+  const normalized_text = text.replace(
+    /(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})$/,
+    "$1$2:00",
+  );
+
   const numeric = Number(text);
   if (Number.isFinite(numeric) && /^-?\d+(\.\d+)?$/.test(text)) {
     if (numeric > 0 && numeric < 1_000_000_000_000) {
@@ -30,7 +36,7 @@ export function normalizeTimestamp(value) {
     return Math.trunc(numeric);
   }
 
-  const parsed = Date.parse(text);
+  const parsed = Date.parse(normalized_text);
   return Number.isFinite(parsed) ? parsed : null;
 }
 

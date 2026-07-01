@@ -188,6 +188,24 @@ test("future scheduled rows are never eligible for stale expiration", () => {
   );
 });
 
+test("future scheduled rows with Supabase +00 offset timestamps stay protected", () => {
+  const row = {
+    queue_status: "scheduled",
+    created_at: "2026-07-01T02:36:08.475686+00",
+    updated_at: "2026-07-01T02:36:08.475686+00",
+    scheduled_for_utc: "2026-07-01T02:51:27.739+00",
+    scheduled_for: "2026-07-01 02:51:27.739+00",
+    metadata: {},
+  };
+  assert.equal(
+    isRowEligibleForStaleExpiration(row, {
+      now: "2026-07-01T02:45:51.000Z",
+      stale_minutes: 20,
+    }),
+    false,
+  );
+});
+
 test("past-due scheduled rows expire only after scheduled_for passes stale grace", () => {
   const row = {
     queue_status: "scheduled",

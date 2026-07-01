@@ -306,14 +306,19 @@ export function isRowEligibleForStaleExpiration(row = {}, options = {}) {
     return false;
   }
 
-  const schedule_at = row.scheduled_for_utc || row.scheduled_for;
-  const schedule_ts = toTimestamp(schedule_at);
+  const schedule_ts =
+    toTimestamp(row.scheduled_for_utc) ??
+    toTimestamp(row.scheduled_for) ??
+    null;
 
   if (schedule_ts !== null && schedule_ts > now_ts) {
     return false;
   }
 
-  if (status === "scheduled" && schedule_ts !== null) {
+  if (["scheduled", "queued"].includes(status)) {
+    if (schedule_ts === null) {
+      return false;
+    }
     return schedule_ts <= now_ts && schedule_ts <= stale_cutoff_ts;
   }
 
