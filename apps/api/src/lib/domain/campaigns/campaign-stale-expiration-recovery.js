@@ -176,7 +176,11 @@ async function validateRecoveryCandidate(row = {}, campaign = {}, deps = {}) {
     if (!RECOVERABLE_TARGET_STATUSES.has(lower(targetQuery.data.target_status))) {
       return { ok: false, reason: `campaign_target_not_recoverable:${targetQuery.data.target_status}` };
     }
-    if (clean(targetQuery.data.suppression_status)) {
+    const suppressionStatus = lower(targetQuery.data.suppression_status);
+    if (
+      suppressionStatus &&
+      !["clear", "none", "ok", "eligible"].includes(suppressionStatus)
+    ) {
       return { ok: false, reason: "campaign_target_suppressed" };
     }
   }
