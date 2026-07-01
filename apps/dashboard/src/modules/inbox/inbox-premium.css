@@ -4904,6 +4904,57 @@ center+right hidden */
   background: var(--nexus-panel-strong);
 }
 
+.nx-icm__map-diagnostics {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  z-index: 28;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--map-panel-border);
+  background: color-mix(in srgb, var(--map-panel-bg) 94%, transparent);
+  color: var(--map-text-main);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+  pointer-events: none;
+  backdrop-filter: blur(14px);
+}
+
+.nx-icm__map-diagnostics-title {
+  margin-bottom: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--map-text-muted, var(--text-2));
+}
+
+.nx-icm__map-diagnostics dl {
+  margin: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.nx-icm__map-diagnostics dl > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.nx-icm__map-diagnostics dt {
+  margin: 0;
+  color: var(--map-text-muted, var(--text-2));
+}
+
+.nx-icm__map-diagnostics dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
 .nx-icm--theme-light_street {
   --map-glass-top: var(--nx-glass-fill-top, rgba(255, 255, 255, 0.62));
   --map-glass-bottom: var(--nx-glass-fill-bottom, rgba(248, 250, 255, 0.52));

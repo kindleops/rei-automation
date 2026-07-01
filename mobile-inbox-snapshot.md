@@ -1,0 +1,500 @@
+- generic [active] [ref=f39e1]:
+  - generic [ref=f39e3]:
+    - main [ref=f39e4]:
+      - main [ref=f39e10]:
+        - complementary [ref=f39e14]:
+          - generic [ref=f39e16]:
+            - generic [ref=f39e17]:
+              - generic [ref=f39e18]:
+                - img [ref=f39e19]
+                - textbox "Search inbox threads" [ref=f39e22]:
+                  - /placeholder: Search operator inbox...
+              - generic [ref=f39e23]:
+                - button "Advanced filters" [ref=f39e24] [cursor=pointer]:
+                  - img [ref=f39e25]
+                - button "Clear filters" [ref=f39e27] [cursor=pointer]:
+                  - img [ref=f39e28]
+            - tablist "Inbox categories" [ref=f39e30]:
+              - tab "Priority 49" [ref=f39e31] [cursor=pointer]:
+                - generic [ref=f39e32]: 🔥
+                - generic "Priority" [ref=f39e33]
+                - generic [ref=f39e34]: "49"
+              - tab "New Replies 36 Unread replies" [ref=f39e35] [cursor=pointer]:
+                - generic [ref=f39e36]: 📥
+                - generic "New Replies" [ref=f39e37]
+                - generic [ref=f39e38]: "36"
+                - generic "Unread replies" [ref=f39e39]
+              - tab "Needs Review 111" [ref=f39e40] [cursor=pointer]:
+                - generic [ref=f39e41]: 🧠
+                - generic "Needs Review" [ref=f39e42]
+                - generic [ref=f39e43]: "111"
+              - tab "Waiting 0" [ref=f39e44] [cursor=pointer]:
+                - generic [ref=f39e45]: ⏳
+                - generic "Waiting" [ref=f39e46]
+                - generic [ref=f39e47]: "0"
+              - tab "All Threads 7957" [selected] [ref=f39e48] [cursor=pointer]:
+                - generic [ref=f39e49]: 📦
+                - generic "All Threads" [ref=f39e50]
+                - generic [ref=f39e51]: "7957"
+          - generic [ref=f39e52]:
+            - generic [ref=f39e53]:
+              - button "+ Save Current Filter" [ref=f39e54] [cursor=pointer]
+              - button "Manage Lists" [ref=f39e55] [cursor=pointer]
+            - generic [ref=f39e57]:
+              - 'button "Anthony Polk & Wesley Arije Jun 26 5502 Cottonwood Rd, Memphis, Tn 38115 STOP Inbound Memphis, TN · SFR Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e59] [cursor=pointer]':
+                - generic [ref=f39e62]:
+                  - generic [ref=f39e63]:
+                    - generic [ref=f39e66]: Anthony Polk & Wesley Arije
+                    - time [ref=f39e67]: Jun 26
+                  - generic [ref=f39e68]: 5502 Cottonwood Rd, Memphis, Tn 38115
+                  - generic [ref=f39e69]: STOP
+                  - generic "Inbound" [ref=f39e71]:
+                    - img [ref=f39e72]
+                    - generic [ref=f39e74]: Inbound
+                  - generic [ref=f39e76]: Memphis, TN · SFR
+                  - 'generic "Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e77]':
+                    - generic [ref=f39e78]:
+                      - generic [ref=f39e79]: Tax Delinquent
+                      - generic [ref=f39e80]: Absentee
+                      - generic [ref=f39e81]: Heavily Dated
+              - 'button "Adam C Olinick Jun 25 221 Nw 82nd Ter, Miami, Fl 33150 Fuck no Inbound Miami, FL · Multifamily Property flags: Tired Landlord, Absentee, Multifamily" [ref=f39e83] [cursor=pointer]':
+                - generic [ref=f39e86]:
+                  - generic [ref=f39e87]:
+                    - generic [ref=f39e90]: Adam C Olinick
+                    - time [ref=f39e91]: Jun 25
+                  - generic [ref=f39e92]: 221 Nw 82nd Ter, Miami, Fl 33150
+                  - generic [ref=f39e93]: Fuck no
+                  - generic "Inbound" [ref=f39e95]:
+                    - img [ref=f39e96]
+                    - generic [ref=f39e98]: Inbound
+                  - generic [ref=f39e100]: Miami, FL · Multifamily
+                  - 'generic "Property flags: Tired Landlord, Absentee, Multifamily" [ref=f39e101]':
+                    - generic [ref=f39e102]:
+                      - generic [ref=f39e103]: Tired Landlord
+                      - generic [ref=f39e104]: Absentee
+                      - generic [ref=f39e105]: Multifamily
+              - 'button "Pedro Trust Jun 25 8734 W Vale Dr, Phoenix, Az 85037 Yes but not interested in selling Inbound Phoenix, AZ · SFR Property flags: Senior Owner, Absentee, Heavily Dated" [ref=f39e107] [cursor=pointer]':
+                - generic [ref=f39e110]:
+                  - generic [ref=f39e111]:
+                    - generic [ref=f39e114]: Pedro Trust
+                    - time [ref=f39e115]: Jun 25
+                  - generic [ref=f39e116]: 8734 W Vale Dr, Phoenix, Az 85037
+                  - generic [ref=f39e117]: Yes but not interested in selling
+                  - generic "Inbound" [ref=f39e119]:
+                    - img [ref=f39e120]
+                    - generic [ref=f39e122]: Inbound
+                  - generic [ref=f39e124]: Phoenix, AZ · SFR
+                  - 'generic "Property flags: Senior Owner, Absentee, Heavily Dated" [ref=f39e125]':
+                    - generic [ref=f39e126]:
+                      - generic [ref=f39e127]: Senior Owner
+                      - generic [ref=f39e128]: Absentee
+                      - generic [ref=f39e129]: Heavily Dated
+              - 'button "Osvaldo M Raposo Jun 25 36 Holmes Ave, New Britain, Ct 06053 ? Inbound Hartford, CT · SFR Property flags: Probate, Absentee, Heavily Dated" [ref=f39e131] [cursor=pointer]':
+                - generic [ref=f39e134]:
+                  - generic [ref=f39e135]:
+                    - generic [ref=f39e138]: Osvaldo M Raposo
+                    - time [ref=f39e139]: Jun 25
+                  - generic [ref=f39e140]: 36 Holmes Ave, New Britain, Ct 06053
+                  - generic [ref=f39e141]: "?"
+                  - generic "Inbound" [ref=f39e143]:
+                    - img [ref=f39e144]
+                    - generic [ref=f39e146]: Inbound
+                  - generic [ref=f39e148]: Hartford, CT · SFR
+                  - 'generic "Property flags: Probate, Absentee, Heavily Dated" [ref=f39e149]':
+                    - generic [ref=f39e150]:
+                      - generic [ref=f39e151]: Probate
+                      - generic [ref=f39e152]: Absentee
+                      - generic [ref=f39e153]: Heavily Dated
+              - 'button "Lloyd W Bolden Jun 25 3835 Montgall Ave, Kansas City, Mo 64128 Stop Inbound Kansas City, MO · SFR Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e155] [cursor=pointer]':
+                - generic [ref=f39e158]:
+                  - generic [ref=f39e159]:
+                    - generic [ref=f39e162]: Lloyd W Bolden
+                    - time [ref=f39e163]: Jun 25
+                  - generic [ref=f39e164]: 3835 Montgall Ave, Kansas City, Mo 64128
+                  - generic [ref=f39e165]: Stop
+                  - generic "Inbound" [ref=f39e167]:
+                    - img [ref=f39e168]
+                    - generic [ref=f39e170]: Inbound
+                  - generic [ref=f39e172]: Kansas City, MO · SFR
+                  - 'generic "Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e173]':
+                    - generic [ref=f39e174]:
+                      - generic [ref=f39e175]: Tired Landlord
+                      - generic [ref=f39e176]: Absentee
+                      - generic [ref=f39e177]: Heavily Dated
+              - button "+1 (770) 203-3651 Jun 24 No Address Sorry about that, my system had an error. Are you open to a proposal on the property? Delivered Unknown" [ref=f39e179] [cursor=pointer]:
+                - generic [ref=f39e182]:
+                  - generic [ref=f39e183]:
+                    - generic [ref=f39e185]: +1 (770) 203-3651
+                    - time [ref=f39e186]: Jun 24
+                  - generic [ref=f39e187]: No Address
+                  - generic [ref=f39e188]: Sorry about that, my system had an error. Are you open to a proposal on the property?
+                  - generic "Delivered" [ref=f39e190]:
+                    - img [ref=f39e191]
+                    - generic [ref=f39e194]: Delivered
+                  - generic [ref=f39e196]: Unknown
+              - 'button "Moses F Martinez Jun 24 1944 S 109th Ave E, Tulsa, Ok 74128 Fuck off Inbound Tulsa, OK · SFR Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e198] [cursor=pointer]':
+                - generic [ref=f39e201]:
+                  - generic [ref=f39e202]:
+                    - generic [ref=f39e205]: Moses F Martinez
+                    - time [ref=f39e206]: Jun 24
+                  - generic [ref=f39e207]: 1944 S 109th Ave E, Tulsa, Ok 74128
+                  - generic [ref=f39e208]: Fuck off
+                  - generic "Inbound" [ref=f39e210]:
+                    - img [ref=f39e211]
+                    - generic [ref=f39e213]: Inbound
+                  - generic [ref=f39e215]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e216]':
+                    - generic [ref=f39e217]:
+                      - generic [ref=f39e218]: Tax Delinquent
+                      - generic [ref=f39e219]: Absentee
+                      - generic [ref=f39e220]: Heavily Dated
+              - button "+1 (555) 555-0202 Jun 24 No Address No latest message Delivered Unknown" [ref=f39e222] [cursor=pointer]:
+                - generic [ref=f39e225]:
+                  - generic [ref=f39e226]:
+                    - generic [ref=f39e229]: +1 (555) 555-0202
+                    - time [ref=f39e230]: Jun 24
+                  - generic [ref=f39e231]: No Address
+                  - generic [ref=f39e232]: No latest message
+                  - generic "Delivered" [ref=f39e234]:
+                    - img [ref=f39e235]
+                    - generic [ref=f39e238]: Delivered
+                  - generic [ref=f39e240]: Unknown
+              - 'button "Hector And Patricia Salazar Revocable Living Jun 24 8101 W Catalina Dr, Phoenix, Az 85033 Yes not looking to sell Inbound Phoenix, AZ · SFR Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e242] [cursor=pointer]':
+                - generic [ref=f39e245]:
+                  - generic [ref=f39e246]:
+                    - generic [ref=f39e249]: Hector And Patricia Salazar Revocable Living
+                    - time [ref=f39e250]: Jun 24
+                  - generic [ref=f39e251]: 8101 W Catalina Dr, Phoenix, Az 85033
+                  - generic [ref=f39e252]: Yes not looking to sell
+                  - generic "Inbound" [ref=f39e254]:
+                    - img [ref=f39e255]
+                    - generic [ref=f39e257]: Inbound
+                  - generic [ref=f39e259]: Phoenix, AZ · SFR
+                  - 'generic "Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e260]':
+                    - generic [ref=f39e261]:
+                      - generic [ref=f39e262]: Tired Landlord
+                      - generic [ref=f39e263]: Senior Owner
+                      - generic [ref=f39e264]: Absentee
+              - button "+1 (612) 743-3952 Jun 24 No Address Deployed verification inbound deployed-dzdevzuroh Inbound Minneapolis, MN" [ref=f39e266] [cursor=pointer]:
+                - generic [ref=f39e269]:
+                  - generic [ref=f39e270]:
+                    - generic [ref=f39e272]: +1 (612) 743-3952
+                    - time [ref=f39e273]: Jun 24
+                  - generic [ref=f39e274]: No Address
+                  - generic [ref=f39e275]: Deployed verification inbound deployed-dzdevzuroh
+                  - generic "Inbound" [ref=f39e277]:
+                    - img [ref=f39e278]
+                    - generic [ref=f39e280]: Inbound
+                  - generic [ref=f39e282]: Minneapolis, MN
+              - 'button "Rigoberto Medina & Catalina Guerra Jun 24 203 N 15th St, Kansas City, Ks 66102 Hi Carlos, I''ll make it easy for you since you don''t know how to find a real estate agent here is the info for you. They have plenty houses… Inbound Kansas City, MO · SFR Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e284] [cursor=pointer]':
+                - generic [ref=f39e287]:
+                  - generic [ref=f39e288]:
+                    - generic [ref=f39e291]: Rigoberto Medina & Catalina Guerra
+                    - time [ref=f39e292]: Jun 24
+                  - generic [ref=f39e293]: 203 N 15th St, Kansas City, Ks 66102
+                  - generic [ref=f39e294]: Hi Carlos, I'll make it easy for you since you don't know how to find a real estate agent here is the info for you. They have plenty houses…
+                  - generic "Inbound" [ref=f39e296]:
+                    - img [ref=f39e297]
+                    - generic [ref=f39e299]: Inbound
+                  - generic [ref=f39e301]: Kansas City, MO · SFR
+                  - 'generic "Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e302]':
+                    - generic [ref=f39e303]:
+                      - generic [ref=f39e304]: Tired Landlord
+                      - generic [ref=f39e305]: Absentee
+                      - generic [ref=f39e306]: Heavily Dated
+              - 'button "Jonathan H Buck Jun 24 4342 N Frankfort Ave, Tulsa, Ok 74106 No Inbound Tulsa, OK · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e308] [cursor=pointer]':
+                - generic [ref=f39e311]:
+                  - generic [ref=f39e312]:
+                    - generic [ref=f39e315]: Jonathan H Buck
+                    - time [ref=f39e316]: Jun 24
+                  - generic [ref=f39e317]: 4342 N Frankfort Ave, Tulsa, Ok 74106
+                  - generic [ref=f39e318]: "No"
+                  - generic "Inbound" [ref=f39e320]:
+                    - img [ref=f39e321]
+                    - generic [ref=f39e323]: Inbound
+                  - generic [ref=f39e325]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e326]':
+                    - generic [ref=f39e327]:
+                      - generic [ref=f39e328]: Tax Delinquent
+                      - generic [ref=f39e329]: Tired Landlord
+                      - generic [ref=f39e330]: Absentee
+              - 'button "Daisy M Cameron Jun 23 3245 Amhurst Dr Nw, Atlanta, Ga 30318 Please DO NOT contact me again! Inbound Atlanta, GA · SFR Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e332] [cursor=pointer]':
+                - generic [ref=f39e335]:
+                  - generic [ref=f39e336]:
+                    - generic [ref=f39e339]: Daisy M Cameron
+                    - time [ref=f39e340]: Jun 23
+                  - generic [ref=f39e341]: 3245 Amhurst Dr Nw, Atlanta, Ga 30318
+                  - generic [ref=f39e342]: Please DO NOT contact me again!
+                  - generic "Inbound" [ref=f39e344]:
+                    - img [ref=f39e345]
+                    - generic [ref=f39e347]: Inbound
+                  - generic [ref=f39e349]: Atlanta, GA · SFR
+                  - 'generic "Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e350]':
+                    - generic [ref=f39e351]:
+                      - generic [ref=f39e352]: Tired Landlord
+                      - generic [ref=f39e353]: Absentee
+                      - generic [ref=f39e354]: Heavily Dated
+              - 'button "Anita Williams Jun 23 750 E 34th St N, Tulsa, Ok 74106 Sold Inbound Tulsa, OK · SFR Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e356] [cursor=pointer]':
+                - generic [ref=f39e359]:
+                  - generic [ref=f39e360]:
+                    - generic [ref=f39e363]: Anita Williams
+                    - time [ref=f39e364]: Jun 23
+                  - generic [ref=f39e365]: 750 E 34th St N, Tulsa, Ok 74106
+                  - generic [ref=f39e366]: Sold
+                  - generic "Inbound" [ref=f39e368]:
+                    - img [ref=f39e369]
+                    - generic [ref=f39e371]: Inbound
+                  - generic [ref=f39e373]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e374]':
+                    - generic [ref=f39e375]:
+                      - generic [ref=f39e376]: Tax Delinquent
+                      - generic [ref=f39e377]: Absentee
+                      - generic [ref=f39e378]: Heavily Dated
+              - 'button "Erika L Griffin Jun 23 3408 Prospect Ave, Kansas City, Mo 64128 I''m not Erika Inbound Kansas City, MO · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e380] [cursor=pointer]':
+                - generic [ref=f39e383]:
+                  - generic [ref=f39e384]:
+                    - generic [ref=f39e387]: Erika L Griffin
+                    - time [ref=f39e388]: Jun 23
+                  - generic [ref=f39e389]: 3408 Prospect Ave, Kansas City, Mo 64128
+                  - generic [ref=f39e390]: I'm not Erika
+                  - generic "Inbound" [ref=f39e392]:
+                    - img [ref=f39e393]
+                    - generic [ref=f39e395]: Inbound
+                  - generic [ref=f39e397]: Kansas City, MO · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e398]':
+                    - generic [ref=f39e399]:
+                      - generic [ref=f39e400]: Tax Delinquent
+                      - generic [ref=f39e401]: Tired Landlord
+                      - generic [ref=f39e402]: Absentee
+              - 'button "Janet & Ruby Bayliss Jun 22 1309 Monroe St Ne, Minneapolis, Mn 55413 Not for sale. Inbound Minneapolis, MN · Multifamily Property flags: Active Lien, Tired Landlord, Senior Owner" [ref=f39e404] [cursor=pointer]':
+                - generic [ref=f39e407]:
+                  - generic [ref=f39e408]:
+                    - generic [ref=f39e411]: Janet & Ruby Bayliss
+                    - time [ref=f39e412]: Jun 22
+                  - generic [ref=f39e413]: 1309 Monroe St Ne, Minneapolis, Mn 55413
+                  - generic [ref=f39e414]: Not for sale.
+                  - generic "Inbound" [ref=f39e416]:
+                    - img [ref=f39e417]
+                    - generic [ref=f39e419]: Inbound
+                  - generic [ref=f39e421]: Minneapolis, MN · Multifamily
+                  - 'generic "Property flags: Active Lien, Tired Landlord, Senior Owner" [ref=f39e422]':
+                    - generic [ref=f39e423]:
+                      - generic [ref=f39e424]: Active Lien
+                      - generic [ref=f39e425]: Tired Landlord
+                      - generic [ref=f39e426]: Senior Owner
+              - 'button "Rafael Romo Jun 21 1330 N Toledo Ave, Tulsa, Ok 74115 ¿En qué condiciones se encuentra la propiedad? Delivered Tulsa, OK · SFR Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e428] [cursor=pointer]':
+                - generic [ref=f39e431]:
+                  - generic [ref=f39e432]:
+                    - generic [ref=f39e434]: Rafael Romo
+                    - time [ref=f39e435]: Jun 21
+                  - generic [ref=f39e436]: 1330 N Toledo Ave, Tulsa, Ok 74115
+                  - generic [ref=f39e437]: ¿En qué condiciones se encuentra la propiedad?
+                  - generic "Delivered" [ref=f39e439]:
+                    - img [ref=f39e440]
+                    - generic [ref=f39e443]: Delivered
+                  - generic [ref=f39e445]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e446]':
+                    - generic [ref=f39e447]:
+                      - generic [ref=f39e448]: Tax Delinquent
+                      - generic [ref=f39e449]: Absentee
+                      - generic [ref=f39e450]: Heavily Dated
+              - 'button "David Gilkey & Holly Williams Jun 21 1624 E Wabash Ave, Spokane, Wa 99207 No Inbound Spokane, WA · SFR Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e452] [cursor=pointer]':
+                - generic [ref=f39e455]:
+                  - generic [ref=f39e456]:
+                    - generic [ref=f39e459]: David Gilkey & Holly Williams
+                    - time [ref=f39e460]: Jun 21
+                  - generic [ref=f39e461]: 1624 E Wabash Ave, Spokane, Wa 99207
+                  - generic [ref=f39e462]: "No"
+                  - generic "Inbound" [ref=f39e464]:
+                    - img [ref=f39e465]
+                    - generic [ref=f39e467]: Inbound
+                  - generic [ref=f39e469]: Spokane, WA · SFR
+                  - 'generic "Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e470]':
+                    - generic [ref=f39e471]:
+                      - generic [ref=f39e472]: Tired Landlord
+                      - generic [ref=f39e473]: Senior Owner
+                      - generic [ref=f39e474]: Absentee
+              - 'button "Everett & Linda Bunker Jun 20 1550 E Emelita Ave, Mesa, Az 85204 Not for sale!!!! Inbound Phoenix, AZ · SFR Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e476] [cursor=pointer]':
+                - generic [ref=f39e479]:
+                  - generic [ref=f39e480]:
+                    - generic [ref=f39e483]: Everett & Linda Bunker
+                    - time [ref=f39e484]: Jun 20
+                  - generic [ref=f39e485]: 1550 E Emelita Ave, Mesa, Az 85204
+                  - generic [ref=f39e486]: Not for sale!!!!
+                  - generic "Inbound" [ref=f39e488]:
+                    - img [ref=f39e489]
+                    - generic [ref=f39e491]: Inbound
+                  - generic [ref=f39e493]: Phoenix, AZ · SFR
+                  - 'generic "Property flags: Tired Landlord, Senior Owner, Absentee" [ref=f39e494]':
+                    - generic [ref=f39e495]:
+                      - generic [ref=f39e496]: Tired Landlord
+                      - generic [ref=f39e497]: Senior Owner
+                      - generic [ref=f39e498]: Absentee
+              - 'button "Milstead James D & Irene F Milstead Family Trust Jun 19 1625 Buxton Ave, Memphis, Tn 38116 And we are Not interested in selling Inbound Memphis, TN · SFR Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e500] [cursor=pointer]':
+                - generic [ref=f39e503]:
+                  - generic [ref=f39e504]:
+                    - generic [ref=f39e507]: Milstead James D & Irene F Milstead Family Trust
+                    - time [ref=f39e508]: Jun 19
+                  - generic [ref=f39e509]: 1625 Buxton Ave, Memphis, Tn 38116
+                  - generic [ref=f39e510]: And we are Not interested in selling
+                  - generic "Inbound" [ref=f39e512]:
+                    - img [ref=f39e513]
+                    - generic [ref=f39e515]: Inbound
+                  - generic [ref=f39e517]: Memphis, TN · SFR
+                  - 'generic "Property flags: Tax Delinquent, Absentee, Heavily Dated" [ref=f39e518]':
+                    - generic [ref=f39e519]:
+                      - generic [ref=f39e520]: Tax Delinquent
+                      - generic [ref=f39e521]: Absentee
+                      - generic [ref=f39e522]: Heavily Dated
+              - 'button "Kevin L Goudeau Jun 19 4693 N Boston Pl, Tulsa, Ok 74126 What condition is the property in? Delivered Tulsa, OK · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e524] [cursor=pointer]':
+                - generic [ref=f39e527]:
+                  - generic [ref=f39e528]:
+                    - generic [ref=f39e530]: Kevin L Goudeau
+                    - time [ref=f39e531]: Jun 19
+                  - generic [ref=f39e532]: 4693 N Boston Pl, Tulsa, Ok 74126
+                  - generic [ref=f39e533]: What condition is the property in?
+                  - generic "Delivered" [ref=f39e535]:
+                    - img [ref=f39e536]
+                    - generic [ref=f39e539]: Delivered
+                  - generic [ref=f39e541]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e542]':
+                    - generic [ref=f39e543]:
+                      - generic [ref=f39e544]: Tax Delinquent
+                      - generic [ref=f39e545]: Tired Landlord
+                      - generic [ref=f39e546]: Absentee
+              - 'button "Marcus B Triplett Jun 19 680 Lucy Ave, Memphis, Tn 38106 Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St? Delivered Memphis, TN · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e548] [cursor=pointer]':
+                - generic [ref=f39e551]:
+                  - generic [ref=f39e552]:
+                    - generic [ref=f39e554]: Marcus B Triplett
+                    - time [ref=f39e555]: Jun 19
+                  - generic [ref=f39e556]: 680 Lucy Ave, Memphis, Tn 38106
+                  - generic [ref=f39e557]: Hello Marcus, this is Jake. I invest in Memphis. Are you still the owner of 1475 Havana St?
+                  - generic "Delivered" [ref=f39e559]:
+                    - img [ref=f39e560]
+                    - generic [ref=f39e563]: Delivered
+                  - generic [ref=f39e565]: Memphis, TN · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e566]':
+                    - generic [ref=f39e567]:
+                      - generic [ref=f39e568]: Tax Delinquent
+                      - generic [ref=f39e569]: Tired Landlord
+                      - generic [ref=f39e570]: Absentee
+              - 'button "Kim E Ingraham Jun 19 824 E Courtland Ave, Spokane, Wa 99207 Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave? Delivered Spokane, WA · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e572] [cursor=pointer]':
+                - generic [ref=f39e575]:
+                  - generic [ref=f39e576]:
+                    - generic [ref=f39e578]: Kim E Ingraham
+                    - time [ref=f39e579]: Jun 19
+                  - generic [ref=f39e580]: 824 E Courtland Ave, Spokane, Wa 99207
+                  - generic [ref=f39e581]: Hello Kim, this is Helen. I have been investing in Spokane. Just checking, do you own 824 E Courtland Ave?
+                  - generic "Delivered" [ref=f39e583]:
+                    - img [ref=f39e584]
+                    - generic [ref=f39e587]: Delivered
+                  - generic [ref=f39e589]: Spokane, WA · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e590]':
+                    - generic [ref=f39e591]:
+                      - generic [ref=f39e592]: Tax Delinquent
+                      - generic [ref=f39e593]: Tired Landlord
+                      - generic [ref=f39e594]: Absentee
+              - 'button "Bartolome Elizalde Jun 19 1843 N 22nd St, Kansas City, Ks 66104 Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours? Delivered Kansas City, MO · SFR Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e596] [cursor=pointer]':
+                - generic [ref=f39e599]:
+                  - generic [ref=f39e600]:
+                    - generic [ref=f39e602]: Bartolome Elizalde
+                    - time [ref=f39e603]: Jun 19
+                  - generic [ref=f39e604]: 1843 N 22nd St, Kansas City, Ks 66104
+                  - generic [ref=f39e605]: Hey Bartolome, this is Greg. I am a local real estate investor in Kansas City. Is 1843 N 22nd St yours?
+                  - generic "Delivered" [ref=f39e607]:
+                    - img [ref=f39e608]
+                    - generic [ref=f39e611]: Delivered
+                  - generic [ref=f39e613]: Kansas City, MO · SFR
+                  - 'generic "Property flags: Tired Landlord, Absentee, Heavily Dated" [ref=f39e614]':
+                    - generic [ref=f39e615]:
+                      - generic [ref=f39e616]: Tired Landlord
+                      - generic [ref=f39e617]: Absentee
+                      - generic [ref=f39e618]: Heavily Dated
+              - 'button "Eric D Brewer Jun 19 2204 N Madison Ave, Tulsa, Ok 74106 Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave? Delivered Tulsa, OK · SFR Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e620] [cursor=pointer]':
+                - generic [ref=f39e623]:
+                  - generic [ref=f39e624]:
+                    - generic [ref=f39e626]: Eric D Brewer
+                    - time [ref=f39e627]: Jun 19
+                  - generic [ref=f39e628]: 2204 N Madison Ave, Tulsa, Ok 74106
+                  - generic [ref=f39e629]: Hello Eric, this is Nathan. I have been investing in Tulsa. Just checking, do you own 2204 N Madison Ave?
+                  - generic "Delivered" [ref=f39e631]:
+                    - img [ref=f39e632]
+                    - generic [ref=f39e635]: Delivered
+                  - generic [ref=f39e637]: Tulsa, OK · SFR
+                  - 'generic "Property flags: Tax Delinquent, Tired Landlord, Absentee" [ref=f39e638]':
+                    - generic [ref=f39e639]:
+                      - generic [ref=f39e640]: Tax Delinquent
+                      - generic [ref=f39e641]: Tired Landlord
+                      - generic [ref=f39e642]: Absentee
+            - button "Load More" [ref=f39e644] [cursor=pointer]
+    - button "NEXUS Copilot" [ref=f39e645] [cursor=pointer]:
+      - generic: Standing by
+  - generic [ref=f39e646]:
+    - button "Open pinned apps" [ref=f39e647] [cursor=pointer]
+    - generic:
+      - generic [ref=f39e649]:
+        - strong [ref=f39e650]: Apps
+        - button "Done" [ref=f39e651] [cursor=pointer]
+      - tablist "Pinned applications" [ref=f39e652]:
+        - button "Inbox" [ref=f39e653] [cursor=pointer]:
+          - img [ref=f39e655]
+          - generic [ref=f39e658]: Inbox
+        - button "Map" [ref=f39e659] [cursor=pointer]:
+          - img [ref=f39e661]
+          - generic [ref=f39e663]: Map
+        - button "Pipeline" [ref=f39e664] [cursor=pointer]:
+          - img [ref=f39e666]
+          - generic [ref=f39e670]: Pipeline
+        - button "Campaign Command" [ref=f39e671] [cursor=pointer]:
+          - img [ref=f39e673]
+          - generic [ref=f39e675]: Campaign Command
+        - button "Queue" [ref=f39e676] [cursor=pointer]:
+          - img [ref=f39e678]
+          - generic [ref=f39e680]: Queue
+        - button "Workflow Studio" [ref=f39e681] [cursor=pointer]:
+          - img [ref=f39e683]
+          - generic [ref=f39e688]: Workflow Studio
+        - button "Closing Desk" [ref=f39e689] [cursor=pointer]:
+          - img [ref=f39e691]
+          - generic [ref=f39e694]: Closing Desk
+        - button "Deal Intelligence" [ref=f39e695] [cursor=pointer]:
+          - img [ref=f39e697]
+          - generic [ref=f39e701]: Deal Intelligence
+    - generic [ref=f39e702]:
+      - heading [level=4] [ref=f39e703]: Drag into dock
+      - generic [ref=f39e704]:
+        - button [ref=f39e705] [cursor=pointer]:
+          - img [ref=f39e707]
+          - generic [ref=f39e712]: Lists
+        - button [ref=f39e713] [cursor=pointer]:
+          - img [ref=f39e715]
+          - generic [ref=f39e718]: Email Command
+        - button [ref=f39e719] [cursor=pointer]:
+          - img [ref=f39e721]
+          - generic [ref=f39e726]: Buyer Match
+        - button [ref=f39e727] [cursor=pointer]:
+          - generic [ref=f39e728]:
+            - img [ref=f39e729]
+            - generic [ref=f39e731]: "2"
+          - generic [ref=f39e732]: Analytics
+        - button [ref=f39e733] [cursor=pointer]:
+          - img [ref=f39e735]
+          - generic [ref=f39e738]: Calendar
+  - navigation "Mobile command menu":
+    - generic [ref=f39e739]:
+      - button "KPI Intelligence" [ref=f39e742] [cursor=pointer]:
+        - img [ref=f39e745]
+      - button "Workspace launcher" [ref=f39e747] [cursor=pointer]:
+        - img [ref=f39e749]
+      - button "Queue operational intelligence" [ref=f39e751] [cursor=pointer]:
+        - img [ref=f39e754]
+      - button "Universal search" [ref=f39e756] [cursor=pointer]:
+        - img [ref=f39e758]
+      - button "Tasks" [ref=f39e761] [cursor=pointer]:
+        - img [ref=f39e763]
+        - generic [ref=f39e765]: 99+
+      - button "Live activity" [ref=f39e766] [cursor=pointer]:
+        - img [ref=f39e768]
+      - button "Notifications" [ref=f39e770] [cursor=pointer]:
+        - img [ref=f39e772]
+        - generic [ref=f39e775]: "2"

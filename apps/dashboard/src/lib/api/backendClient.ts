@@ -1600,7 +1600,8 @@ export function queueCampaignBatch(
 export interface MapPropertiesData {
   generated_at: string
   zoom: number
-  mode: 'clusters' | 'markers'
+  mode: 'national' | 'metro' | 'city' | 'street' | 'clusters' | 'markers'
+  source?: string
   bounds: { lat_min: number | null; lat_max: number | null; lng_min: number | null; lng_max: number | null }
   features: Array<{
     type: 'Feature'
@@ -1610,9 +1611,15 @@ export interface MapPropertiesData {
   counts: {
     returned: number
     clipped: boolean
-    by_asset_type: Record<string, number>
-    by_marker_state: Record<string, number>
-    by_state: Record<string, number>
+    total_canonical?: number
+    total_in_bounds?: number
+    cluster_sum?: number
+    pagination_boundary?: string | null
+    by_asset_type?: Record<string, number>
+    by_marker_key?: Record<string, number>
+    by_marker_state?: Record<string, number>
+    by_state?: Record<string, number>
+    unmapped_property_types?: string[]
   }
 }
 
@@ -1631,6 +1638,7 @@ export function fetchMapProperties(params: {
   limit?: number
   markets?: string
   states?: string
+  counts_only?: boolean
 }, signal?: AbortSignal): Promise<BackendResult<MapPropertiesResponse>> {
   const qs = new URLSearchParams(
     Object.fromEntries(
@@ -1638,6 +1646,41 @@ export function fetchMapProperties(params: {
     )
   ).toString()
   return callBackend<MapPropertiesResponse>(`/api/internal/dashboard/ops/map?${qs}`, { signal })
+}
+
+export interface MapAccountingData {
+  bounds: { lat_min: number; lat_max: number; lng_min: number; lng_max: number }
+  zoom: number
+  total_canonical: number
+  canonical_total_in_bounds: number
+  covering_tile_count: number
+  decoded_feature_count: number
+  unique_tile_property_ids: number
+  duplicate_property_id_count: number
+  difference: number
+  edge_rule: string
+  tile_backed: boolean
+}
+
+export interface MapAccountingResponse {
+  ok: boolean
+  route: string
+  data: MapAccountingData
+}
+
+export function fetchMapAccounting(params: {
+  lat_min: number
+  lat_max: number
+  lng_min: number
+  lng_max: number
+  zoom: number
+}, signal?: AbortSignal): Promise<BackendResult<MapAccountingResponse>> {
+  const qs = new URLSearchParams(
+    Object.fromEntries(
+      Object.entries(params).map(([k, v]) => [k, String(v)])
+    )
+  ).toString()
+  return callBackend<MapAccountingResponse>(`/api/internal/dashboard/ops/map/accounting?${qs}`, { signal })
 }
 
 export function queueCampaignPlan(campaignId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<QueueBatchResponse>> {

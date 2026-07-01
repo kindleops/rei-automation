@@ -18,7 +18,7 @@ describe('acquisition radar semantic state matrix', () => {
   it('maps uncontacted properties to cool blue ring color', () => {
     const key = resolveAcquisitionRadarSemanticKey({ markerState: 'not_contacted' })
     expect(key).toBe('uncontacted')
-    expect(ACQUISITION_RADAR_STATE_MATRIX[key].ring).toBe('#659BFF')
+    expect(ACQUISITION_RADAR_STATE_MATRIX[key].ring).toBe('#7A8FA8')
     expect(ACQUISITION_RADAR_STATE_MATRIX[key].haloOpacity).toBeGreaterThanOrEqual(0.1)
   })
 
@@ -68,7 +68,7 @@ describe('pin enrichment', () => {
       { properties: { property_id: 'p1', markerState: 'not_contacted', assetType: 'sfr', acquisitionScore: 72 } },
       'satellite',
     )
-    expect(props.ring_color).toBe('#659BFF')
+    expect(props.ring_color).toBe('#7A8FA8')
     expect(props.icon_color).toBe('#66B8FF')
     expect(props.glass_color).toBe(getMapPinThemeTokens('satellite').glassFill)
     expect(props.halo_scale).toBeGreaterThan(1)

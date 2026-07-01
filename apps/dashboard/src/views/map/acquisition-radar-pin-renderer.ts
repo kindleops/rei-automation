@@ -4,6 +4,8 @@
  */
 
 import type { CommandMapThemeId } from './commandMapThemes'
+import type { CommandMapIntelligenceModeId } from './command-map-intelligence-modes'
+import { computeAcquisitionRadarModeModifiers } from './acquisition-radar-mode-modifiers'
 import {
   ACQUISITION_RADAR_STATE_MATRIX,
   type AcquisitionRadarMotion,
@@ -13,11 +15,12 @@ import {
   resolveAcquisitionRadarSemanticKey,
 } from './acquisition-radar-state-matrix'
 import {
-  ASSET_TYPE_ICON_COLORS,
-  buildAssetIconColorExpr,
-  buildAssetIconImageExpr,
-  resolveAcquisitionAssetFamily,
-} from './acquisition-radar-asset-icons'
+  buildMarkerKeyIconColorExpr,
+  buildMarkerKeyIconImageExpr,
+  MARKER_KEY_ICON_COLORS,
+  resolveCanonicalMapMarkerKey,
+} from './canonical-map-asset-marker'
+import { resolveAcquisitionAssetFamily } from './acquisition-radar-asset-icons'
 import { PIN_ICON } from './pin-icons'
 import { getMapPinThemeTokens } from './map-pin-theme-tokens'
 
@@ -76,7 +79,11 @@ export const enrichAcquisitionRadarFeature = (
     properties: Record<string, unknown>
   },
   themeId: CommandMapThemeId,
-  options?: { selectedPropertyId?: string | null; hoveredPropertyId?: string | null },
+  options?: {
+    selectedPropertyId?: string | null
+    hoveredPropertyId?: string | null
+    modeId?: CommandMapIntelligenceModeId
+  },
 ): Record<string, unknown> => {
   const props = feature.properties
   const theme = getMapPinThemeTokens(themeId)
@@ -91,17 +98,32 @@ export const enrichAcquisitionRadarFeature = (
   const stateSpec = ACQUISITION_RADAR_STATE_MATRIX[semanticKey]
   const priorityTier = getPriorityGlowTier(score, unscored)
   const propertyId = String(props.property_id ?? props.propertyId ?? '')
+  const modeModifiers = computeAcquisitionRadarModeModifiers(
+    options?.modeId ?? 'acquisition',
+    semanticKey,
+    score,
+  )
 
   const assetFamily = resolveAcquisitionAssetFamily(String(props.assetType ?? props.asset_type ?? ''))
+  const markerKey = resolveCanonicalMapMarkerKey({
+    assetType: String(props.assetType ?? props.asset_type ?? ''),
+    propertyType: String(props.propertyType ?? props.property_type ?? ''),
+    marker_key: props.marker_key as string | null | undefined,
+  })
   const passiveUncontacted = semanticKey === 'uncontacted'
   const haloOpacity = Math.min(
-    passiveUncontacted ? 0.14 : 0.18,
-    stateSpec.haloOpacity * priorityTier.haloOpacityMultiplier,
+    passiveUncontacted ? 0.12 : 0.18,
+    stateSpec.haloOpacity
+      * priorityTier.haloOpacityMultiplier
+      * modeModifiers.haloOpacityMultiplier,
   )
-  const baseOpacity = stateSpec.baseOpacity * theme.inactiveOpacity / 0.82
-  const markerScale = semanticKey === 'uncontacted'
+  const baseOpacity = Math.min(
+    1,
+    stateSpec.baseOpacity * theme.inactiveOpacity / 0.82 * modeModifiers.baseOpacity,
+  )
+  const markerScale = (semanticKey === 'uncontacted'
     ? priorityTier.markerScale * 0.94
-    : priorityTier.markerScale
+    : priorityTier.markerScale) * modeModifiers.iconScale
   const isSelected = options?.selectedPropertyId && propertyId === options.selectedPropertyId ? 1 : 0
   const isHovered = options?.hoveredPropertyId && propertyId === options.hoveredPropertyId ? 1 : 0
 
@@ -110,18 +132,21 @@ export const enrichAcquisitionRadarFeature = (
     property_id: propertyId,
     semanticKey,
     asset_family: assetFamily,
+    marker_key: markerKey,
     ring_color: stateSpec.ring,
     ring_highlight: stateSpec.highlight,
     glass_color: theme.glassFill,
-    icon_color: ASSET_TYPE_ICON_COLORS[assetFamily],
+    icon_color: MARKER_KEY_ICON_COLORS[markerKey],
     halo_color: theme.ambientAccent,
     halo_scale: priorityTier.haloScale,
     halo_opacity: haloOpacity,
     marker_scale: markerScale,
     base_opacity: Math.min(1, baseOpacity),
-    ring_opacity: 0.92,
-    glass_opacity: stateSpec.baseOpacity * stateSpec.bodySaturation,
-    motion: stateSpec.motion,
+    ring_opacity: modeModifiers.ringOpacity,
+    glass_opacity: stateSpec.baseOpacity * stateSpec.bodySaturation * modeModifiers.glassOpacity,
+    motion: modeModifiers.showMotion ? stateSpec.motion : 'static',
+    motion_intensity: modeModifiers.motionIntensity,
+    simplify_pin: modeModifiers.simplifyPin ? 1 : 0,
     badge: stateSpec.badge,
     breakout: isPriorityBreakoutPin(semanticKey) || score >= 85 ? 1 : 0,
     priority_tier: priorityTier.min,
@@ -169,6 +194,33 @@ export const buildClusterHaloExpr = (clusterGlow: string): unknown[] => [
   clusterGlow,
 ]
 
+export const buildClusterSemanticCoreExpr = (baseCore: string): unknown[] => [
+  'case',
+  ['>', ['get', 'new_reply_count'], 0], 'rgba(34, 217, 255, 0.84)',
+  ['>', ['get', 'urgent_count'], 0], 'rgba(255, 77, 82, 0.86)',
+  ['>', ['get', 'negotiating_count'], 0], 'rgba(255, 138, 61, 0.82)',
+  ['>', ['get', 'follow_up_count'], 0], 'rgba(255, 79, 216, 0.80)',
+  ['>', ['get', 'active_comm_count'], 0], 'rgba(46, 229, 139, 0.78)',
+  baseCore,
+]
+
+export const buildClusterSemanticStrokeExpr = (baseStroke: string): unknown[] => [
+  'case',
+  ['>', ['get', 'new_reply_count'], 0], '#22D9FF',
+  ['>', ['get', 'urgent_count'], 0], '#FF4D52',
+  ['>', ['get', 'negotiating_count'], 0], '#FF8A3D',
+  ['>', ['get', 'follow_up_count'], 0], '#FF4FD8',
+  ['>', ['get', 'active_comm_count'], 0], '#2EE58B',
+  baseStroke,
+]
+
+/** Filter for animated motion halo — coupled to the same visibility as icon layers */
+export const MOTION_PIN_FILTER: unknown[] = [
+  'all',
+  ['!', ['has', 'point_count']],
+  ['!=', ['coalesce', ['get', 'motion'], 'static'], 'static'],
+]
+
 export const PIN_INTERACTION_SCALE_EXPR: unknown[] = [
   'case',
   ['==', ['coalesce', ['get', 'pin_selected'], 0], 1], 1.35,
@@ -190,13 +242,14 @@ export const PIN_HALO_RADIUS_EXPR: unknown[] = [
   ['+', PIN_GLASS_RADIUS_EXPR, ['interpolate', ['linear'], ['coalesce', ['get', 'halo_scale'], 1], 1, 5, 1.42, 8]],
 ]
 
+/** Restrained halo — asset icon must dominate, never read as a standalone orb */
 export const PIN_HALO_OPACITY_EXPR: unknown[] = [
   'min',
-  0.18,
+  0.10,
   ['*',
-    ['coalesce', ['get', 'halo_opacity'], 0.10],
+    ['coalesce', ['get', 'halo_opacity'], 0.06],
     ['coalesce', ['get', 'base_opacity'], 0.82],
-    ['case', ['==', ['coalesce', ['get', 'pin_selected'], 0], 1], 1.35, ['==', ['coalesce', ['get', 'pin_hovered'], 0], 1], 1.2, 1],
+    ['case', ['==', ['coalesce', ['get', 'pin_selected'], 0], 1], 1.2, ['==', ['coalesce', ['get', 'pin_hovered'], 0], 1], 1.1, 0.85],
   ],
 ]
 
@@ -217,11 +270,11 @@ export const PIN_ICON_SCALE_EXPR: unknown[] = [
   '*',
   ['coalesce', ['get', 'marker_scale'], 1],
   PIN_INTERACTION_SCALE_EXPR,
-  ['interpolate', ['linear'], ['zoom'], 8, 0.32, 11, 0.40, 13, 0.48, 16, 0.56],
+  ['interpolate', ['linear'], ['zoom'], 8, 0.42, 11, 0.52, 13, 0.62, 16, 0.72],
 ]
 
-export const PIN_ICON_IMAGE_EXPR = buildAssetIconImageExpr()
-export const PIN_ICON_COLOR_EXPR = buildAssetIconColorExpr()
+export const PIN_ICON_IMAGE_EXPR = buildMarkerKeyIconImageExpr()
+export const PIN_ICON_COLOR_EXPR = buildMarkerKeyIconColorExpr()
 
 export const PIN_HIT_RADIUS_EXPR: unknown[] = [
   'case',

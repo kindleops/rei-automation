@@ -34,8 +34,8 @@ export type AcquisitionRadarStateSpec = {
 export const ACQUISITION_RADAR_STATE_MATRIX: Record<AcquisitionRadarSemanticKey, AcquisitionRadarStateSpec> = {
   uncontacted: {
     key: 'uncontacted',
-    ring: '#659BFF',
-    highlight: '#AAC5FF',
+    ring: '#7A8FA8',
+    highlight: '#A8B8CC',
     baseOpacity: 0.82,
     haloOpacity: 0.10,
     bodySaturation: 1,

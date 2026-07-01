@@ -2,6 +2,7 @@ import { capReconcileBatch, getRolloutControls, resolveScopedId } from "@/lib/co
 import { reconcileSupabaseDeliveryStatuses } from "@/lib/domain/events/normalize-delivery-status.js";
 import { getQueueRouteDeploymentMeta } from "@/lib/domain/queue/queue-route-deployment-meta.js";
 import { buildDisabledResponse, getSystemFlag, setSystemValues } from "@/lib/system-control.js";
+import { reconcileCampaignExecutionHealth } from "@/lib/domain/queue/campaign-universal-reconciliation.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
 
 function asNumber(value, fallback = null) {
@@ -142,6 +143,16 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
     error: supabase_delivery_wrap.error || null,
   };
 
+  const universal_reconcile_result = await reconcileCampaignExecutionHealth({
+    limit: 25,
+    delivery_recovery_limit: 50,
+  }).catch((error) => {
+    logger?.warn?.("queue_reconcile.universal_reconcile_failed", {
+      error: serializeIntegrationError(error),
+    });
+    return { ok: false, error: serializeIntegrationError(error) };
+  });
+
   const podio_wrap = await runOptionalIntegration(
     "podio_queue_reconcile",
     () =>
@@ -191,6 +202,7 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
       heartbeat_at,
       duration_ms,
       canonical_lifecycle_reconcile: canonical_lifecycle_result,
+      universal_campaign_reconcile: universal_reconcile_result,
       supabase_delivery_reconcile: supabase_delivery_result,
       optional_integrations: {
         podio_queue_reconcile: podio_wrap,

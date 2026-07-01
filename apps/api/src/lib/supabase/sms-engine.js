@@ -2868,9 +2868,15 @@ export async function writeWebhookLog(options = {}) {
   throw last_error || new Error("webhook_log_write_failed");
 }
 
+function normalizeWebhookLogId(webhook_log_id) {
+  const id = clean(webhook_log_id);
+  if (!id) return null;
+  return id;
+}
+
 export async function markWebhookLogProcessed(webhook_log_id, options = {}) {
-  const id = Number(webhook_log_id);
-  if (!Number.isFinite(id) || id <= 0) return null;
+  const id = normalizeWebhookLogId(webhook_log_id);
+  if (!id) return null;
   const now = options.now || nowIso();
 
   if (typeof options.markWebhookLogProcessed === "function") {
@@ -2894,8 +2900,8 @@ export async function markWebhookLogProcessed(webhook_log_id, options = {}) {
 }
 
 export async function markWebhookLogFailed(webhook_log_id, error_message, options = {}) {
-  const id = Number(webhook_log_id);
-  if (!Number.isFinite(id) || id <= 0) return null;
+  const id = normalizeWebhookLogId(webhook_log_id);
+  if (!id) return null;
 
   if (typeof options.markWebhookLogFailed === "function") {
     return options.markWebhookLogFailed(id, error_message);
@@ -2953,7 +2959,7 @@ async function reconcileDeliveryReceiptViaRpc({
         : null,
     p_failure_metadata:
       incoming_delivery_status === "failed" ? textGridFailureMetadata(normalized_failure) : null,
-    p_webhook_log_id: webhook_log_id ? Number(webhook_log_id) : null,
+    p_webhook_log_id: normalizeWebhookLogId(webhook_log_id),
     p_now: now,
   };
 
@@ -4137,6 +4143,26 @@ export async function enqueueSendQueueItem(payload = {}, deps = {}) {
   const queue_status = lower(payload.queue_status || "queued");
   if (TERMINAL_ENQUEUE_STATUSES.has(queue_status)) {
     return insertSupabaseSendQueueRow(payload, deps);
+  }
+
+  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  const executionMode = clean(metadata.execution_mode);
+  const isProofRow =
+    metadata.no_send === true ||
+    metadata.proof_hydration === true ||
+    metadata.proof_no_send === true ||
+    clean(metadata.launch_mode) === "proof_hydration_no_send";
+  const isLiveRow =
+    metadata.confirm_live === true &&
+    metadata.no_send !== true &&
+    metadata.proof_hydration !== true;
+  if (isProofRow && isLiveRow) {
+    return { ok: false, reason: "contradictory_execution_mode_flags" };
+  }
+  if (executionMode === "immediate_live" || executionMode === "scheduled_live") {
+    if (isProofRow) {
+      return { ok: false, reason: "live_execution_mode_with_proof_flags" };
+    }
   }
 
   const validation = validateOutboundSmsPayload(payload);

@@ -56,16 +56,53 @@ import {
 import { loadPropertyIcons, normalizePropertyTypeSlug, PIN_ICON } from './pin-icons'
 import {
   ACQUISITION_RADAR_CLUSTER_PROPERTIES,
+  acquisitionRadarPulseOpacity,
+  acquisitionRadarPulseRadius,
+  buildClusterDominantIconExpr,
+  buildClusterHaloExpr,
+  buildClusterSemanticCoreExpr,
+  buildClusterSemanticStrokeExpr,
+  buildIndividualPinVisibilityFilter,
+  CLUSTER_HALO_RADIUS_EXPR,
+  CLUSTER_RADIUS_EXPR,
   enrichAcquisitionRadarFeature,
+  MOTION_PIN_FILTER,
   PIN_GLASS_RADIUS_EXPR,
   PIN_HALO_OPACITY_EXPR,
   PIN_HALO_RADIUS_EXPR,
+  PIN_HIT_RADIUS_EXPR,
   PIN_ICON_COLOR_EXPR,
   PIN_ICON_IMAGE_EXPR,
   PIN_ICON_SCALE_EXPR,
   PIN_RING_STROKE_EXPR,
   PIN_RING_WIDTH_EXPR,
 } from './acquisition-radar-pin-renderer'
+import { ACQUISITION_RADAR_ZOOM } from './acquisition-radar-state-matrix'
+import {
+  CLUSTER_COUNT_TEXT_EXPR,
+  getMapPropertyFetchMode,
+  getMapZoomBand,
+  shouldUseAggregateSource,
+  shouldUsePropertySource,
+  shouldUseVectorTileSource,
+} from './map-property-source'
+import {
+  ALL_PROPERTY_TILE_LAYER_IDS,
+  applyPropertyTileEnrichmentStates,
+  applyPropertyTileThemePaint,
+  ensurePropertyTileSourceAndLayers,
+} from './map-property-tile-integration'
+import { PROPERTY_TILES_LAYER_IDS, buildPropertyTileTransformRequest } from './map-property-tile-source'
+import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
+import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
+import {
+  computeTileAccountingDelta,
+  countVisualRepresentation,
+  getCoveringTileCoords,
+  queryUniqueTilePropertiesInBounds,
+} from './map-property-accounting'
+import { assertMapRenderInvariants, findDuplicateRenderedPropertyIds } from './map-render-invariants'
+
 import { ASSET_TYPE_ICON_COLORS, resolveAcquisitionAssetFamily } from './acquisition-radar-asset-icons'
 import { getMapPinThemeTokens } from './map-pin-theme-tokens'
 import {
@@ -77,7 +114,6 @@ import {
 import { buildThemeIdentityCssVars, getCommandMapThemeIdentity } from './command-map-theme-identity'
 import type { CommandMapIntelligenceModeId } from './command-map-intelligence-modes'
 import {
-  buildUniversalSellerPinVisuals,
   buildSellerClusterCoreExpr,
   buildSellerClusterRingExpr,
   buildSellerClusterStrokeExpr,
@@ -90,12 +126,7 @@ import {
   UNIVERSAL_PIN_RING_STROKE_EXPR,
   UNIVERSAL_PIN_RING_WIDTH_EXPR,
 } from './universal-pin-system'
-import {
-  getMapThemeTokens,
-  buildClusterRingExpr,
-  buildClusterCoreExpr,
-  buildClusterStrokeExpr,
-} from './map-theme-tokens'
+import { getMapThemeTokens } from './map-theme-tokens'
 import {
   applyVisualPresetBasemapPaint,
   buildPresetInterfaceCssVars,
@@ -192,19 +223,32 @@ const BUYER_DEMAND_SOURCE_ID = 'buyer-demand-source'
 const SOLD_COMPS_SOURCE_ID = 'sold-comps-source'
 const SELLER_PINS_SOURCE_ID = 'seller-pins-source'
 
-// Property universe — viewport-fetched full property database layer
+// SOURCE A — national/market aggregate clusters (canonical totals)
+const MARKET_AGGREGATE_SOURCE_ID = 'map-market-aggregates'
+const MARKET_AGGREGATE_LAYER_IDS = {
+  halo: 'map-agg-cluster-halo',
+  core: 'map-agg-cluster-core',
+  ring: 'map-agg-cluster-ring',
+  icon: 'map-agg-cluster-icon',
+  count: 'map-agg-cluster-count',
+} as const
+
+// SOURCE B — property-level vector source (canonical properties table)
 const PROPERTY_UNIVERSE_SOURCE_ID = 'inbox-property-universe'
 const PROPERTY_UNIVERSE_LAYER_IDS = {
   clusterRing:  'prop-univ-cluster-ring',
   clusterCore:  'prop-univ-cluster-core',
+  clusterIcon:  'prop-univ-cluster-icon',
   clusterCount: 'prop-univ-cluster-count',
+  markerHit:    'prop-univ-marker-hit',
   markerGlow:   'prop-univ-marker-glow',
   markerGlass:  'prop-univ-marker-glass',
   markerRing:   'prop-univ-marker-ring',
+  markerPulse:  'prop-univ-marker-pulse',
   markers:      'prop-univ-markers',
 } as const
 
-const PROPERTY_UNIVERSE_CLUSTER_MAX_ZOOM = 8
+const PROPERTY_UNIVERSE_CLUSTER_MAX_ZOOM = ACQUISITION_RADAR_ZOOM.clusterMaxZoom
 const SELLER_PINS_CLUSTER_MAX_ZOOM = 8
 
 const PIN_ASSET_GLOW_COLOR_EXPR = [
@@ -217,12 +261,13 @@ const enrichPropertyUniverseFeatures = (
   features: GeoJSON.Feature<Point>[],
   themeId: CommandMapThemeId,
   selectedPropertyId: string | null,
+  modeId: CommandMapIntelligenceModeId,
 ): GeoJSON.Feature<Point>[] => features.map((feature) => ({
   ...feature,
   properties: enrichAcquisitionRadarFeature(
     { properties: (feature.properties ?? {}) as Record<string, unknown> },
     themeId,
-    { selectedPropertyId },
+    { selectedPropertyId, modeId },
   ),
 }))
 
@@ -300,8 +345,6 @@ const commandMapPinToSellerCardRecord = (
   last_outbound_at: props.last_outbound_at,
   delivery_status: props.delivery_status,
 })
-const ALL_SELLER_PINS_LAYER_IDS = Object.values(SELLER_PINS_LAYER_IDS)
-
 const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v2'
 const SELECTED_STAR_SOURCE_ID = 'command-selected-star'
 const SELECTED_STAR_LAYER_ID = 'command-selected-star-layer'
@@ -1416,6 +1459,8 @@ const isCustomLayer = (id?: string) => !id ? false : (
   id.startsWith('buyer-demand-') ||
   id.startsWith('sold-comps-') ||
   id.startsWith('prop-univ-') ||
+  id.startsWith('prop-tiles-') ||
+  id.startsWith('map-agg-') ||
   id.startsWith('seller-pins-') ||
   id.startsWith('command-map-theme-') ||
   id.startsWith('nx-icm-hybrid-')
@@ -3623,6 +3668,9 @@ export function InboxCommandMap({
   const sellerPinsAbortRef = useRef<AbortController | null>(null)
   const propertyUniverseAbortRef = useRef<AbortController | null>(null)
   const propertyUniverseRawFeaturesRef = useRef<GeoJSON.Feature<Point>[]>([])
+  const marketAggregateRawFeaturesRef = useRef<GeoJSON.Feature<Point>[]>([])
+  const [mapPropertyDiagnostics, setMapPropertyDiagnostics] = useState<MapPropertyDiagnostics | null>(null)
+  const propTilesHandlersRegisteredRef = useRef(false)
 
   const styleLoadSeqRef = useRef(0)
   const styleLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -4754,12 +4802,25 @@ export function InboxCommandMap({
       }
 
       const puTokens = getMapThemeTokens(theme.id)
+      const puPinTokensForTheme = getMapPinThemeTokens(theme.id)
       if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)) {
-        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, 'circle-color', buildClusterRingExpr(puTokens) as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(
+          PROPERTY_UNIVERSE_LAYER_IDS.clusterRing,
+          'circle-color',
+          buildClusterHaloExpr(puPinTokensForTheme.clusterGlow) as maplibregl.ExpressionSpecification,
+        )
       }
       if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore)) {
-        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, 'circle-color', buildClusterCoreExpr(puTokens) as maplibregl.ExpressionSpecification)
-        map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, 'circle-stroke-color', buildClusterStrokeExpr(puTokens) as maplibregl.ExpressionSpecification)
+        map.setPaintProperty(
+          PROPERTY_UNIVERSE_LAYER_IDS.clusterCore,
+          'circle-color',
+          buildClusterSemanticCoreExpr(puPinTokensForTheme.clusterFill) as maplibregl.ExpressionSpecification,
+        )
+        map.setPaintProperty(
+          PROPERTY_UNIVERSE_LAYER_IDS.clusterCore,
+          'circle-stroke-color',
+          buildClusterSemanticStrokeExpr(puPinTokensForTheme.clusterBorder) as maplibregl.ExpressionSpecification,
+        )
       }
       if (map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount)) {
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.clusterCount, 'text-color', puTokens.clusterLabelColor)
@@ -4779,6 +4840,7 @@ export function InboxCommandMap({
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-color', ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification)
         map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markers, 'icon-halo-color', ['coalesce', ['get', 'ring_color'], puPinTokens.ambientAccent] as maplibregl.ExpressionSpecification)
       }
+      applyPropertyTileThemePaint(map, theme.id)
 
       const themeIdentity = getCommandMapThemeIdentity(theme.id)
       if (map.getLayer(SELLER_PINS_LAYER_IDS.glow)) {
@@ -5180,7 +5242,7 @@ export function InboxCommandMap({
           type: 'symbol',
           source: SELLER_PINS_SOURCE_ID,
           layout: {
-            'icon-image': PIN_ICON_IMAGE_BY_SLUG_EXPR,
+            'icon-image': PIN_ICON_IMAGE_EXPR as maplibregl.ExpressionSpecification,
             'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
             'icon-allow-overlap': true,
             'icon-ignore-placement': true,
@@ -5188,8 +5250,8 @@ export function InboxCommandMap({
             'icon-rotation-alignment': 'map',
           },
           paint: {
-            'icon-color': PIN_ICON_COLOR_COALESCED_EXPR,
-            'icon-opacity': ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1],
+            'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
+            'icon-opacity': ['max', 0.96, ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1]],
             'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
             'icon-halo-width': 1.4,
             'icon-halo-blur': 0.8,
@@ -5890,11 +5952,75 @@ export function InboxCommandMap({
           layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
         })
       }
-      // ── Property universe — acquisition radar pins (asset icon + state ring) ─
+      // ── SOURCE A: National / market aggregate clusters (canonical totals) ───
       const puTokens = getMapThemeTokens(activeThemeRef.current.id)
       const puPinTokens = getMapPinThemeTokens(activeThemeRef.current.id)
       const puAnchor = map.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
 
+      if (!map.getSource(MARKET_AGGREGATE_SOURCE_ID)) {
+        map.addSource(MARKET_AGGREGATE_SOURCE_ID, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+      }
+
+      if (!map.getLayer(MARKET_AGGREGATE_LAYER_IDS.halo)) {
+        map.addLayer({
+          id: MARKET_AGGREGATE_LAYER_IDS.halo,
+          type: 'circle',
+          source: MARKET_AGGREGATE_SOURCE_ID,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'property_count'], ['get', 'point_count'], 1],
+              100, 22, 1000, 34, 5000, 48, 20000, 64, 100000, 80],
+            'circle-color': buildClusterHaloExpr(puPinTokens.clusterGlow) as maplibregl.ExpressionSpecification,
+            'circle-blur': 0.7,
+            'circle-opacity': 0.82,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(MARKET_AGGREGATE_LAYER_IDS.core)) {
+        map.addLayer({
+          id: MARKET_AGGREGATE_LAYER_IDS.core,
+          type: 'circle',
+          source: MARKET_AGGREGATE_SOURCE_ID,
+          paint: {
+            'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'property_count'], ['get', 'point_count'], 1],
+              100, 14, 1000, 22, 5000, 30, 20000, 38, 100000, 48],
+            'circle-color': buildClusterSemanticCoreExpr(puPinTokens.clusterFill) as maplibregl.ExpressionSpecification,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': buildClusterSemanticStrokeExpr(puPinTokens.clusterBorder) as maplibregl.ExpressionSpecification,
+            'circle-opacity': 0.92,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(MARKET_AGGREGATE_LAYER_IDS.count)) {
+        map.addLayer({
+          id: MARKET_AGGREGATE_LAYER_IDS.count,
+          type: 'symbol',
+          source: MARKET_AGGREGATE_SOURCE_ID,
+          layout: {
+            'text-field': CLUSTER_COUNT_TEXT_EXPR as maplibregl.ExpressionSpecification,
+            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+            'text-size': ['interpolate', ['linear'], ['coalesce', ['get', 'property_count'], ['get', 'point_count'], 1], 100, 10, 1000, 12, 10000, 14],
+            'text-allow-overlap': true,
+            visibility: 'none',
+          },
+          paint: {
+            'text-color': puTokens.clusterLabelColor,
+            'text-halo-color': puTokens.clusterLabelHalo,
+            'text-halo-width': 1.2,
+          },
+        }, puAnchor)
+      }
+
+      // MVT property tiles must install before legacy GeoJSON universe layers.
+      ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, puAnchor)
+
+      // ── SOURCE B: Property universe — asset icon + status ring ─────────────
       if (!map.getSource(PROPERTY_UNIVERSE_SOURCE_ID)) {
         map.addSource(PROPERTY_UNIVERSE_SOURCE_ID, {
           type: 'geojson',
@@ -5913,9 +6039,10 @@ export function InboxCommandMap({
           source: PROPERTY_UNIVERSE_SOURCE_ID,
           filter: ['has', 'point_count'],
           paint: {
-            'circle-radius': ['step', ['get', 'point_count'], 22, 50, 30, 250, 38, 1000, 46],
-            'circle-color': buildClusterRingExpr(puTokens) as maplibregl.ExpressionSpecification,
-            'circle-blur': 0.8,
+            'circle-radius': CLUSTER_HALO_RADIUS_EXPR as maplibregl.ExpressionSpecification,
+            'circle-color': buildClusterHaloExpr(puPinTokens.clusterGlow) as maplibregl.ExpressionSpecification,
+            'circle-blur': 0.75,
+            'circle-opacity': 0.88,
           },
           layout: { visibility: 'none' },
         }, puAnchor)
@@ -5928,13 +6055,33 @@ export function InboxCommandMap({
           source: PROPERTY_UNIVERSE_SOURCE_ID,
           filter: ['has', 'point_count'],
           paint: {
-            'circle-radius': ['step', ['get', 'point_count'], 14, 50, 20, 250, 26, 1000, 32],
-            'circle-color': buildClusterCoreExpr(puTokens) as maplibregl.ExpressionSpecification,
-            'circle-stroke-width': 1.4,
-            'circle-stroke-color': buildClusterStrokeExpr(puTokens) as maplibregl.ExpressionSpecification,
-            'circle-opacity': 0.92,
+            'circle-radius': CLUSTER_RADIUS_EXPR as maplibregl.ExpressionSpecification,
+            'circle-color': buildClusterSemanticCoreExpr(puPinTokens.clusterFill) as maplibregl.ExpressionSpecification,
+            'circle-stroke-width': 2,
+            'circle-stroke-color': buildClusterSemanticStrokeExpr(puPinTokens.clusterBorder) as maplibregl.ExpressionSpecification,
+            'circle-opacity': 0.94,
           },
           layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterIcon)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.clusterIcon,
+          type: 'symbol',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['has', 'point_count'],
+          layout: {
+            'icon-image': buildClusterDominantIconExpr() as maplibregl.ExpressionSpecification,
+            'icon-size': ['step', ['get', 'point_count'], 0.18, 50, 0.22, 150, 0.26],
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            visibility: 'none',
+          },
+          paint: {
+            'icon-color': puPinTokens.neutralIcon,
+            'icon-opacity': 0.42,
+          },
         }, puAnchor)
       }
 
@@ -5962,6 +6109,21 @@ export function InboxCommandMap({
         }, puAnchor)
       }
 
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerHit)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.markerHit,
+          type: 'circle',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: ['!', ['has', 'point_count']],
+          paint: {
+            'circle-radius': PIN_HIT_RADIUS_EXPR as maplibregl.ExpressionSpecification,
+            'circle-color': 'rgba(0,0,0,0)',
+            'circle-opacity': 0,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
       if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerGlow)) {
         map.addLayer({
           id: PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
@@ -5972,7 +6134,23 @@ export function InboxCommandMap({
             'circle-radius': PIN_HALO_RADIUS_EXPR as maplibregl.ExpressionSpecification,
             'circle-blur': 0.62,
             'circle-opacity': PIN_HALO_OPACITY_EXPR as maplibregl.ExpressionSpecification,
-            'circle-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
+            'circle-color': ['coalesce', ['get', 'ring_color'], ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
+          },
+          layout: { visibility: 'none' },
+        }, puAnchor)
+      }
+
+      if (!map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse)) {
+        map.addLayer({
+          id: PROPERTY_UNIVERSE_LAYER_IDS.markerPulse,
+          type: 'circle',
+          source: PROPERTY_UNIVERSE_SOURCE_ID,
+          filter: MOTION_PIN_FILTER as maplibregl.FilterSpecification,
+          paint: {
+            'circle-radius': 12,
+            'circle-color': ['coalesce', ['get', 'ring_color'], ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
+            'circle-opacity': 0,
+            'circle-blur': 0.35,
           },
           layout: { visibility: 'none' },
         }, puAnchor)
@@ -6026,9 +6204,13 @@ export function InboxCommandMap({
           },
           paint: {
             'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
-            'icon-opacity': ['*', puTokens.markerIconOpacity, ['coalesce', ['get', 'base_opacity'], 1]] as maplibregl.ExpressionSpecification,
+            'icon-opacity': [
+              'max',
+              0.96,
+              ['*', puTokens.markerIconOpacity, ['coalesce', ['get', 'base_opacity'], 1]],
+            ] as maplibregl.ExpressionSpecification,
             'icon-halo-color': ['coalesce', ['get', 'ring_color'], puPinTokens.ambientAccent] as maplibregl.ExpressionSpecification,
-            'icon-halo-width': 0.8,
+            'icon-halo-width': 1.1,
           },
         }, puAnchor)
       }
@@ -6117,7 +6299,9 @@ export function InboxCommandMap({
         }
 
         map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, handlePropertyUniverseClusterClick)
+        map.on('click', PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, handlePropertyUniverseClusterClick)
         const propUnivPinLayers = [
+          PROPERTY_UNIVERSE_LAYER_IDS.markerHit,
           PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
           PROPERTY_UNIVERSE_LAYER_IDS.markerGlass,
           PROPERTY_UNIVERSE_LAYER_IDS.markerRing,
@@ -6126,11 +6310,95 @@ export function InboxCommandMap({
         for (const lid of propUnivPinLayers) {
           map.on('click', lid, handlePropertyUniversePinClick)
         }
-        map.on('mouseenter', PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, handlePropertyUniversePinHover)
-        map.on('mouseleave', PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, clearPropertyUniverseHover)
+        map.on('mouseenter', PROPERTY_UNIVERSE_LAYER_IDS.markerHit, handlePropertyUniversePinHover)
+        map.on('mouseleave', PROPERTY_UNIVERSE_LAYER_IDS.markerHit, clearPropertyUniverseHover)
         for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, ...propUnivPinLayers]) {
           map.on('mouseenter', lid, () => { map.getCanvas().style.cursor = 'pointer' })
           map.on('mouseleave', lid, () => { map.getCanvas().style.cursor = '' })
+        }
+      }
+
+      if (!propTilesHandlersRegisteredRef.current) {
+        propTilesHandlersRegisteredRef.current = true
+        const tilePinLayers = [
+          PROPERTY_TILES_LAYER_IDS.hit,
+          PROPERTY_TILES_LAYER_IDS.glass,
+          PROPERTY_TILES_LAYER_IDS.ring,
+          PROPERTY_TILES_LAYER_IDS.icon,
+        ]
+        const handlePropertyTilePinClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          ;(e as { _clickHandled?: boolean })._clickHandled = true
+          const feature = e.features?.[0]
+          if (!feature?.properties) return
+          const props = feature.properties as Record<string, unknown>
+          const propertyId = text(props.property_id || props.propertyId)
+          if (!propertyId) return
+          const coordinates = (feature.geometry as Point).coordinates as [number, number]
+          hoverPopupRef.current?.remove()
+          setSelectedClusterSummary(null)
+          setSelectedCensusFeature(null)
+          setSelectedBuyerPurchase(null)
+          setSelectedSoldComp(null)
+          const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+          const sellerPin = sellerPinsByPropertyIdRef.current.get(propertyId)
+          const masterOwnerId = text(sellerPin?.master_owner_id || props.master_owner_id || props.owner_id)
+          onSelectSellerContextRef.current?.({
+            propertyId,
+            masterOwnerId: masterOwnerId || undefined,
+            sourceView: 'map',
+            intent: 'open_seller',
+          })
+          setHoveredMapCard(null)
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            id: propertyId,
+            anchor,
+            coordinates,
+            feature: sellerPin ? { ...sellerPin, ...props } : props,
+            containerSize,
+          })
+          if (!map.getBounds().contains(coordinates)) map.easeTo({ center: coordinates, duration: 500 })
+        }
+        const handlePropertyTilePinHover = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+          const feature = e.features?.[0]
+          if (!feature?.properties || selectedMapCardRef.current?.kind === 'seller') return
+          const props = feature.properties as Record<string, unknown>
+          const propertyId = text(props.property_id || props.propertyId)
+          if (!propertyId) return
+          const coordinates = (feature.geometry as Point).coordinates as [number, number]
+          if (clearPinHoverTimerRef.current) {
+            clearTimeout(clearPinHoverTimerRef.current)
+            clearPinHoverTimerRef.current = null
+          }
+          const sellerPin = sellerPinsByPropertyIdRef.current.get(propertyId)
+          const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+          let pixelPoint = { x: anchor.x, y: anchor.y }
+          try { pixelPoint = map.project(coordinates) } catch { /* ignore */ }
+          map.getCanvas().style.cursor = 'pointer'
+          setHoveredMapCard({
+            kind: 'seller',
+            intent: 'hover',
+            id: propertyId,
+            anchor: { x: pixelPoint.x, y: pixelPoint.y },
+            coordinates,
+            feature: sellerPin ? { ...sellerPin, ...props } : props,
+            containerSize,
+          })
+        }
+
+        const clearPropertyTileHover = () => {
+          if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
+          clearPinHoverTimerRef.current = setTimeout(() => {
+            if (selectedMapCardRef.current?.kind === 'seller') return
+            setHoveredMapCard(null)
+          }, 120)
+        }
+
+        for (const lid of tilePinLayers) {
+          map.on('click', lid, handlePropertyTilePinClick)
+          map.on('mouseenter', lid, lid === PROPERTY_TILES_LAYER_IDS.hit ? handlePropertyTilePinHover : () => { map.getCanvas().style.cursor = 'pointer' })
+          map.on('mouseleave', lid, lid === PROPERTY_TILES_LAYER_IDS.hit ? clearPropertyTileHover : () => { map.getCanvas().style.cursor = '' })
         }
       }
 
@@ -6203,7 +6471,10 @@ export function InboxCommandMap({
       map.setStyle(resolveStyle(nextThemeId))
       map.once('style.load', () => {
         if (requestSeq !== styleLoadSeqRef.current) return
+        propUnivHandlersRegisteredRef.current = false
+        propTilesHandlersRegisteredRef.current = false
         try { addMapLayers(map) } catch { /* getSource/getLayer guards handle duplicates */ }
+        installPropertyTileStack(map)
         void syncBasemapPresentation(map)
         syncLayerVisibility(map, activityModeRef.current)
         scheduleMapResize()
@@ -6281,6 +6552,7 @@ export function InboxCommandMap({
         attributionControl: false,
         dragRotate: false,
         pitchWithRotate: false,
+        transformRequest: buildPropertyTileTransformRequest(),
         canvasContextAttributes: {
           antialias: false,
           preserveDrawingBuffer: false,
@@ -6307,6 +6579,9 @@ export function InboxCommandMap({
     }
 
     mapRef.current = map
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __nexusCommandMap?: maplibregl.Map }).__nexusCommandMap = map
+    }
     mapContextLostRef.current = false
     setMapInitError(null)
     setMapWebglBlocked(false)
@@ -6373,12 +6648,24 @@ export function InboxCommandMap({
       setMapStyleMode(fallbackTheme.id)
     }, 6500)
 
+    const installPropertyTileStack = (targetMap: maplibregl.Map) => {
+      const tileAnchor = targetMap.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
+      try {
+        ensurePropertyTileSourceAndLayers(targetMap, activeThemeRef.current.id, tileAnchor)
+      } catch (err) {
+        console.warn('[CommandMap] property tile source/layers failed to install', err)
+      }
+    }
+
     const handleStyleReady = () => {
+      propUnivHandlersRegisteredRef.current = false
+      propTilesHandlersRegisteredRef.current = false
       try {
         addMapLayers(map)
       } catch (err) {
         console.warn('[CommandMap] addMapLayers error during style.load — layers may be partially missing', err)
       }
+      installPropertyTileStack(map)
       void syncBasemapPresentation(map)
       scheduleMapResize()
       const styleLoadMs = styleLoadStartedAtRef.current ? Math.round(performance.now() - styleLoadStartedAtRef.current) : null
@@ -7146,6 +7433,58 @@ export function InboxCommandMap({
               0
             ])
           }
+
+          if (shouldAnimatePins && map.getLayer(PROPERTY_TILES_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
+            const motionRadius = (motion: string) => acquisitionRadarPulseRadius(motion, frame, 11)
+            const motionOpacity = (motion: string) => acquisitionRadarPulseOpacity(motion, frame, 0.28)
+            map.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-radius', [
+              'match', ['coalesce', ['feature-state', 'motion'], 'static'],
+              'breathing', motionRadius('breathing'),
+              'follow_up_pulse', motionRadius('follow_up_pulse'),
+              'reply_ripple', motionRadius('reply_ripple'),
+              'urgent_pulse', motionRadius('urgent_pulse'),
+              'failure_flicker', motionRadius('failure_flicker'),
+              0,
+            ])
+            map.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-opacity', [
+              '*',
+              ['coalesce', ['feature-state', 'base_opacity'], 1],
+              ['match', ['coalesce', ['feature-state', 'motion'], 'static'],
+                'breathing', motionOpacity('breathing'),
+                'follow_up_pulse', motionOpacity('follow_up_pulse'),
+                'reply_ripple', motionOpacity('reply_ripple'),
+                'urgent_pulse', motionOpacity('urgent_pulse'),
+                'failure_flicker', motionOpacity('failure_flicker'),
+                0,
+              ],
+            ])
+          }
+
+          if (shouldAnimatePins && map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse) && sellerPinLayers.sellerPins) {
+            const motionRadius = (motion: string) => acquisitionRadarPulseRadius(motion, frame, 11)
+            const motionOpacity = (motion: string) => acquisitionRadarPulseOpacity(motion, frame, 0.28)
+            map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-radius', [
+              'match', ['coalesce', ['get', 'motion'], 'static'],
+              'breathing', motionRadius('breathing'),
+              'follow_up_pulse', motionRadius('follow_up_pulse'),
+              'reply_ripple', motionRadius('reply_ripple'),
+              'urgent_pulse', motionRadius('urgent_pulse'),
+              'failure_flicker', motionRadius('failure_flicker'),
+              0,
+            ])
+            map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-opacity', [
+              '*',
+              ['coalesce', ['get', 'base_opacity'], 1],
+              ['match', ['coalesce', ['get', 'motion'], 'static'],
+                'breathing', motionOpacity('breathing'),
+                'follow_up_pulse', motionOpacity('follow_up_pulse'),
+                'reply_ripple', motionOpacity('reply_ripple'),
+                'urgent_pulse', motionOpacity('urgent_pulse'),
+                'failure_flicker', motionOpacity('failure_flicker'),
+                0,
+              ],
+            ])
+          }
           }
 
         } catch {
@@ -7159,7 +7498,7 @@ export function InboxCommandMap({
       // Symbol layer mouseenter triggers MapLibre hit detection on every mousemove
       // which crashes with "Out of bounds" when the symbol bucket string table is
       // not yet populated (race condition during tile loading).
-      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, ...SELLER_PIN_HOVER_LAYER_IDS, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.markerGlow, PROPERTY_UNIVERSE_LAYER_IDS.markerGlass, PROPERTY_UNIVERSE_LAYER_IDS.markerRing] as const).forEach((layerId) => {
+      ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, ...SELLER_PIN_HOVER_LAYER_IDS, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.markerHit, PROPERTY_UNIVERSE_LAYER_IDS.markerGlass, PROPERTY_UNIVERSE_LAYER_IDS.markerRing] as const).forEach((layerId) => {
         if (mapRef.current?.getLayer(layerId)) {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer' })
           map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = '' })
@@ -7184,6 +7523,7 @@ export function InboxCommandMap({
       hoverPopupRef.current?.remove()
       applyCommandMapThemeRef.current = null
       propUnivHandlersRegisteredRef.current = false
+      propTilesHandlersRegisteredRef.current = false
       try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
       mapRef.current = null
     }
@@ -7210,72 +7550,291 @@ export function InboxCommandMap({
     applyCommandMapThemeRef.current?.(map, mapStyleMode)
   }, [mapStyleMode])
 
-  // ── Property universe viewport fetch ─────────────────────────────────────
+  useEffect(() => {
+    if (!isMapVerificationMode()) return
+    const win = window as unknown as { __nexusSetMapTheme?: (themeId: MapStyleMode) => void }
+    win.__nexusSetMapTheme = (themeId) => setMapStyleMode(themeId)
+    return () => {
+      delete win.__nexusSetMapTheme
+    }
+  }, [])
+
+  // ── Two-scale property source fetch (SOURCE A aggregates + SOURCE B properties) ─
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
-    if (!viewportBounds || viewportZoom < 10) return
+    if (!viewportBounds) return
     if (!sellerPinLayers.sellerPins) return
 
     propertyUniverseAbortRef.current?.abort()
     propertyUniverseAbortRef.current = new AbortController()
     const signal = propertyUniverseAbortRef.current.signal
+    const fetchMode = getMapPropertyFetchMode(viewportZoom)
+    const tileBacked = shouldUseVectorTileSource(viewportZoom)
 
     void fetchMapProperties({
       lat_min: viewportBounds.south,
       lat_max: viewportBounds.north,
       lng_min: viewportBounds.west,
       lng_max: viewportBounds.east,
-      zoom: Math.round(viewportZoom),
+      zoom: Math.round(viewportZoom * 10) / 10,
+      ...(tileBacked ? { counts_only: true } : {}),
     }, signal).then((result) => {
       if (!result.ok || signal.aborted) return
-      propertyUniverseRawFeaturesRef.current = result.data.data.features as GeoJSON.Feature<Point>[]
-      const enriched = enrichPropertyUniverseFeatures(
-        propertyUniverseRawFeaturesRef.current,
-        activeThemeRef.current.id,
-        selectedPropertyId,
-      )
-      const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
-      src?.setData({ type: 'FeatureCollection', features: enriched })
+      const payload = result.data.data
+      const features = payload.features as GeoJSON.Feature<Point>[]
+
+      const aggregateTotal = shouldUseAggregateSource(viewportZoom)
+        ? (features.reduce((sum, f) => sum + Number((f.properties as Record<string, unknown>)?.property_count ?? 0), 0))
+        : undefined
+
+      setMapPropertyDiagnostics((current) => ({
+        mode: String(payload.mode ?? fetchMode),
+        fetchMode,
+        sourceMode: tileBacked ? 'mvt_tiles' : (shouldUseAggregateSource(viewportZoom) ? 'aggregates' : 'legacy_geojson'),
+        zoom: viewportZoom,
+        source: tileBacked ? 'canonical_property_tiles' : String(payload.source ?? fetchMode),
+        totalCanonical: payload.counts.total_canonical,
+        totalInBounds: payload.counts.total_in_bounds,
+        aggregateTotal,
+        returnedFeatures: tileBacked ? 0 : payload.counts.returned,
+        representedFeatures: current?.representedFeatures ?? 0,
+        representedPropertyTotal: current?.representedPropertyTotal,
+        clipped: Boolean(payload.counts.clipped),
+        paginationBoundary: payload.counts.pagination_boundary ?? null,
+        tileBacked: tileBacked || Boolean((payload.counts as { tile_backed?: boolean }).tile_backed),
+        coveringTiles: current?.coveringTiles,
+        decodedTileFeatures: current?.decodedTileFeatures,
+        uniqueTilePropertyIds: current?.uniqueTilePropertyIds,
+        duplicateIds: current?.duplicateIds,
+        tileCanonicalDifference: current?.tileCanonicalDifference,
+        renderedIndividualIcons: current?.renderedIndividualIcons,
+        renderedClusters: current?.renderedClusters,
+        clusteredPropertyTotal: current?.clusteredPropertyTotal,
+        renderedHalos: current?.renderedHalos,
+        collisionHiddenEstimate: current?.collisionHiddenEstimate,
+        selectedBreakouts: current?.selectedBreakouts,
+        liveBreakouts: current?.liveBreakouts,
+        invariantViolations: current?.invariantViolations,
+        duplicateRenderedMarkers: current?.duplicateRenderedMarkers,
+      }))
+
+      if (shouldUseAggregateSource(viewportZoom)) {
+        marketAggregateRawFeaturesRef.current = features
+        const aggSrc = map.getSource(MARKET_AGGREGATE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
+        aggSrc?.setData({ type: 'FeatureCollection', features })
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[MapSource:A] market aggregates', {
+            zoom: viewportZoom,
+            band: getMapZoomBand(viewportZoom),
+            markets: features.length,
+            totalCanonical: payload.counts.total_canonical ?? payload.counts.total_in_bounds,
+          })
+        }
+        return
+      }
+
+      if (tileBacked) {
+        propertyUniverseRawFeaturesRef.current = []
+        const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
+        src?.setData({ type: 'FeatureCollection', features: [] })
+        const enrichmentPins = Array.from(sellerPinsByPropertyIdRef.current.values())
+        if (enrichmentPins.length > 0) {
+          applyPropertyTileEnrichmentStates(
+            map,
+            enrichmentPins,
+            activeThemeRef.current.id,
+            mapMode,
+            selectedPropertyId,
+          )
+        }
+        return
+      }
     }).catch(() => { /* aborted or network error */ })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportBounds, viewportZoom, baseStyleLoading, sellerPinLayers.sellerPins, selectedPropertyId, mapStyleMode])
+  }, [viewportBounds, viewportZoom, baseStyleLoading, sellerPinLayers.sellerPins, selectedPropertyId, mapStyleMode, mapMode])
 
-  // ── Property universe zoom-gated visibility ───────────────────────────────
-  // zoom < 10      → hidden entirely (national view)
-  // zoom 10–11.75  → clusters only
-  // zoom 11.75–13  → clusters + priority individual markers
-  // zoom >= 13     → clusters + all individual markers
+  // ── Zoom-band layer visibility (no blank ranges) ──────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
 
-    const showPropertyField = sellerPinLayers.sellerPins
-    const markerRevealZoom = isMobile ? 9.5 : 10.5
-    const showClusters = showPropertyField && viewportZoom >= 10
-    const showMarkers = showPropertyField && viewportZoom >= markerRevealZoom
-    const vis = (v: boolean) => v ? 'visible' : 'none'
+    const applyZoomBandVisibility = () => {
+      const zoom = map.getZoom()
+      const showPropertyField = sellerPinLayers.sellerPins
+      const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
+      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom)
+      const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !showTiles
+      const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
+      const showPropertyMarkers = showPropertyLevel && (
+        zoom >= ACQUISITION_RADAR_ZOOM.streetMin
+        || zoom >= (isMobile ? 11.5 : 11.5)
+      )
+      const vis = (v: boolean) => v ? 'visible' : 'none'
 
-    for (const lid of [PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterCount]) {
-      if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showClusters))
-    }
-    const markerLayerIds = [
-      PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
-      PROPERTY_UNIVERSE_LAYER_IDS.markerGlass,
-      PROPERTY_UNIVERSE_LAYER_IDS.markerRing,
-      PROPERTY_UNIVERSE_LAYER_IDS.markers,
-    ]
-    for (const lid of markerLayerIds) {
-      if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showMarkers))
-    }
+      for (const lid of Object.values(MARKET_AGGREGATE_LAYER_IDS)) {
+        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showAggregates))
+      }
 
-    if (showMarkers) {
-      const baseFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
+      for (const lid of ALL_PROPERTY_TILE_LAYER_IDS) {
+        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showTiles))
+      }
+
+      for (const lid of [
+        PROPERTY_UNIVERSE_LAYER_IDS.clusterRing,
+        PROPERTY_UNIVERSE_LAYER_IDS.clusterCore,
+        PROPERTY_UNIVERSE_LAYER_IDS.clusterIcon,
+        PROPERTY_UNIVERSE_LAYER_IDS.clusterCount,
+      ]) {
+        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showPropertyClusters))
+      }
+      const markerLayerIds = [
+        PROPERTY_UNIVERSE_LAYER_IDS.markerHit,
+        PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
+        PROPERTY_UNIVERSE_LAYER_IDS.markerGlass,
+        PROPERTY_UNIVERSE_LAYER_IDS.markerRing,
+        PROPERTY_UNIVERSE_LAYER_IDS.markerPulse,
+        PROPERTY_UNIVERSE_LAYER_IDS.markers,
+      ]
       for (const lid of markerLayerIds) {
-        if (map.getLayer(lid)) map.setFilter(lid, baseFilter)
+        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showPropertyMarkers))
+      }
+
+      if (showPropertyMarkers) {
+        const pinVisibilityFilter = buildIndividualPinVisibilityFilter(selectedPropertyId) as maplibregl.FilterSpecification
+        const motionFilter = [
+          'all',
+          pinVisibilityFilter,
+          ['!=', ['coalesce', ['get', 'motion'], 'static'], 'static'],
+        ] as maplibregl.FilterSpecification
+        for (const lid of markerLayerIds) {
+          if (!map.getLayer(lid)) continue
+          if (lid === PROPERTY_UNIVERSE_LAYER_IDS.markerPulse) {
+            map.setFilter(lid, motionFilter)
+          } else {
+            map.setFilter(lid, pinVisibilityFilter)
+          }
+        }
       }
     }
-  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, viewportZoom])
+
+    applyZoomBandVisibility()
+    map.on('moveend', applyZoomBandVisibility)
+    map.on('zoomend', applyZoomBandVisibility)
+    return () => {
+      map.off('moveend', applyZoomBandVisibility)
+      map.off('zoomend', applyZoomBandVisibility)
+    }
+  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, viewportZoom, selectedPropertyId])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!isStyleSafe(map) || baseStyleLoading) return
+
+    const updateMapAccounting = () => {
+      const zoom = map.getZoom()
+      const bounds = map.getBounds()
+      const boundsBox = {
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+      }
+
+      const visual = countVisualRepresentation(map, zoom)
+      const violations = assertMapRenderInvariants(map)
+      const duplicateMarkers = findDuplicateRenderedPropertyIds(map)
+
+      let represented = 0
+      let representedPropertyTotal = 0
+      let coveringTiles: number | undefined
+      let decodedTileFeatures: number | undefined
+      let uniqueTilePropertyIds: number | undefined
+      let duplicateIds: number | undefined
+      let tileCanonicalDifference: number | undefined
+
+      if (shouldUseVectorTileSource(zoom)) {
+        const tileQuery = queryUniqueTilePropertiesInBounds(map, boundsBox)
+        coveringTiles = getCoveringTileCoords(boundsBox, zoom).length
+        decodedTileFeatures = tileQuery.decodedFeatureCount
+        uniqueTilePropertyIds = tileQuery.uniquePropertyIds.size
+        duplicateIds = tileQuery.duplicatePropertyIdCount
+        represented = visual.renderedIndividualIcons
+        representedPropertyTotal = tileQuery.uniquePropertyIds.size
+        const canonicalInBounds = mapPropertyDiagnostics?.totalInBounds
+        if (canonicalInBounds != null) {
+          tileCanonicalDifference = computeTileAccountingDelta(canonicalInBounds, tileQuery.uniquePropertyIds.size)
+        }
+      } else if (shouldUseAggregateSource(zoom)) {
+        represented = visual.clusteredPropertyTotal
+        representedPropertyTotal = visual.clusteredPropertyTotal
+      } else {
+        represented = visual.renderedIndividualIcons + visual.clusteredPropertyTotal
+        representedPropertyTotal = represented
+      }
+
+      setMapPropertyDiagnostics((current) => {
+        const base = current ?? {
+          mode: 'accounting',
+          zoom,
+          source: shouldUseVectorTileSource(zoom) ? 'canonical_property_tiles' : 'canonical_spatial_clusters',
+          returnedFeatures: 0,
+          representedFeatures: represented,
+          representedPropertyTotal,
+          clipped: false,
+        }
+        const canonicalInBounds = base.totalInBounds
+        const tileDelta = (
+          shouldUseVectorTileSource(zoom)
+          && canonicalInBounds != null
+          && uniqueTilePropertyIds != null
+        )
+          ? computeTileAccountingDelta(canonicalInBounds, uniqueTilePropertyIds)
+          : tileCanonicalDifference
+
+        const next: MapPropertyDiagnostics = {
+          ...base,
+          zoom,
+          sourceMode: shouldUseVectorTileSource(zoom)
+            ? 'mvt_tiles'
+            : (shouldUseAggregateSource(zoom) ? 'aggregates' : 'legacy_geojson'),
+          tileBacked: shouldUseVectorTileSource(zoom),
+          aggregateTotal: shouldUseAggregateSource(zoom) ? visual.clusteredPropertyTotal : base.aggregateTotal,
+          representedFeatures: represented,
+          representedPropertyTotal,
+          coveringTiles,
+          decodedTileFeatures,
+          uniqueTilePropertyIds,
+          duplicateIds,
+          tileCanonicalDifference: tileDelta,
+          renderedIndividualIcons: visual.renderedIndividualIcons,
+          renderedClusters: visual.renderedClusters,
+          clusteredPropertyTotal: visual.clusteredPropertyTotal,
+          renderedHalos: visual.renderedHalos,
+          collisionHiddenEstimate: visual.collisionHiddenEstimate,
+          selectedBreakouts: visual.selectedBreakouts,
+          liveBreakouts: visual.liveBreakouts,
+          invariantViolations: violations.length,
+          duplicateRenderedMarkers: duplicateMarkers.length,
+        }
+        if (import.meta.env.DEV || isMapVerificationMode()) {
+          ;(window as unknown as { __nexusMapDiagnostics?: MapPropertyDiagnostics | null }).__nexusMapDiagnostics = next
+          ;(window as unknown as { __nexusMapInvariantViolations?: typeof violations }).__nexusMapInvariantViolations = violations
+          ;(window as unknown as { __nexusMapDuplicateMarkers?: string[] }).__nexusMapDuplicateMarkers = duplicateMarkers
+        }
+        return next
+      })
+    }
+
+    map.on('idle', updateMapAccounting)
+    map.on('moveend', updateMapAccounting)
+    updateMapAccounting()
+    return () => {
+      map.off('idle', updateMapAccounting)
+      map.off('moveend', updateMapAccounting)
+    }
+  }, [baseStyleLoading, viewportZoom, viewportBounds, sellerPinLayers.sellerPins])
 
   useEffect(() => {
     const map = mapRef.current
@@ -7311,10 +7870,11 @@ export function InboxCommandMap({
       propertyUniverseRawFeaturesRef.current,
       activeThemeRef.current.id,
       selectedPropertyId,
+      mapMode,
     )
     const src = map.getSource(PROPERTY_UNIVERSE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined
     src?.setData({ type: 'FeatureCollection', features: enriched })
-  }, [selectedPropertyId, mapStyleMode, baseStyleLoading])
+  }, [selectedPropertyId, mapStyleMode, baseStyleLoading, mapMode])
 
   useEffect(() => {
     const map = mapRef.current
@@ -7942,40 +8502,30 @@ export function InboxCommandMap({
     const normalizedFilteredPins = nextFilteredPins.map((pin) => sanitizeSellerPinRecord(pin))
     const themeId = activeThemeRef.current.id
     const dataKey = `${mapStyleMode}:${mapMode}:${normalizedFilteredPins.length}:${normalizedFilteredPins[0]?.property_id || ''}:${normalizedFilteredPins[normalizedFilteredPins.length - 1]?.property_id || ''}`
-    setSellerPins(normalizedFilteredPins)
-    if (dataKey === lastSellerPinsDataKeyRef.current) return
-    const features = normalizedFilteredPins.map((normalizedPin) => {
-      const visuals = buildUniversalSellerPinVisuals(normalizedPin, themeId, mapMode)
-      const propTypeSlug = normalizePropertyTypeSlug(normalizedPin.property_type ?? 'default')
-      const assetFamily = resolveAcquisitionAssetFamily(normalizedPin.property_type ?? '')
-      return ({
-        type: 'Feature' as const,
-        id: `seller-pin-${normalizedPin.property_id}`,
-        geometry: { type: 'Point' as const, coordinates: [normalizedPin.lng, normalizedPin.lat] as [number, number] },
-        properties: {
-          ...normalizedPin,
-          id: `seller-pin-${normalizedPin.property_id}`,
-          seller_state: resolveEffectiveSellerState(normalizedPin),
-          priority_score: normalizedPin.priority_score ?? normalizedPin.final_acquisition_score ?? 0,
-          ...visuals,
-          asset_family: assetFamily,
-          propTypeSlug,
-          icon_color: ASSET_TYPE_ICON_COLORS[assetFamily],
-        },
-      })
+    const enrichmentByPropertyId = new Map<string, CommandMapSellerPin>()
+    normalizedFilteredPins.forEach((pin) => {
+      const key = text(pin.property_id)
+      if (key) enrichmentByPropertyId.set(key, pin)
     })
-    setSellerPinsGeojson({ type: 'FeatureCollection', features })
-    lastSellerPinsDataKeyRef.current = dataKey
-    setSellerPinsPerf((current) => ({ ...current, shown: normalizedFilteredPins.length }))
-    
-    console.log(`[CommandMap] 📍 Diagnostics Report:
-      Raw Seller Pins (Viewport): ${mergedPins.length}
-      Filtered-Out Seller Pins: ${mergedPins.length - normalizedFilteredPins.length}
-      Rendered Seller Pins: ${normalizedFilteredPins.length}
-      Rendered Buyer Comps: ${soldCompsGeojsonRef.current?.features?.length ?? 0}
-      Current Zoom: ${mapRef.current?.getZoom()?.toFixed(2) ?? 'Unknown'}
-    `)
-  }, [mapMode, mapStyleMode, pinPipeline.mapped, sellerPinLayers, sellerPinsRaw])
+    sellerPinsByPropertyIdRef.current = enrichmentByPropertyId
+    setSellerPins(normalizedFilteredPins)
+    if (dataKey !== lastSellerPinsDataKeyRef.current) {
+      lastSellerPinsDataKeyRef.current = dataKey
+      setSellerPinsPerf((current) => ({ ...current, shown: normalizedFilteredPins.length }))
+    }
+    // Seller pins are enrichment only — never a competing property-universe source.
+    setSellerPinsGeojson(EMPTY_GEOJSON)
+    const map = mapRef.current
+    if (isStyleSafe(map) && shouldUseVectorTileSource(map.getZoom())) {
+      applyPropertyTileEnrichmentStates(
+        map,
+        normalizedFilteredPins,
+        themeId,
+        mapMode,
+        selectedPropertyId,
+      )
+    }
+  }, [mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
 
   // ── Push census + buyer demand GeoJSON to map sources ─────────────────────
   useEffect(() => {
@@ -8002,20 +8552,34 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map)) return
     const visible = sellerPinLayers.sellerPins
+    const enrichmentOnly = shouldUseVectorTileSource(viewportZoom) || shouldUseAggregateSource(viewportZoom)
     const spIconLayerId = 'seller-pins-icon'
     const spGlowLayerId = `${SOLD_COMPS_LAYER_IDS.marker}-glow`
-    const allSpLayers = [...ALL_SELLER_PINS_LAYER_IDS, spIconLayerId]
-    allSpLayers.forEach((layerId) => {
+    const duplicateUniverseLayers = [
+      SELLER_PINS_LAYER_IDS.hit,
+      SELLER_PINS_LAYER_IDS.core,
+      SELLER_PINS_LAYER_IDS.icon,
+      SELLER_PINS_LAYER_IDS.glow,
+      SELLER_PINS_LAYER_IDS.ring,
+      SELLER_PINS_LAYER_IDS.clusterGlow,
+      SELLER_PINS_LAYER_IDS.clusterCore,
+      SELLER_PINS_LAYER_IDS.clusterCount,
+      spIconLayerId,
+    ]
+    duplicateUniverseLayers.forEach((layerId) => {
       if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none')
+        map.setLayoutProperty(layerId, 'visibility', visible && !enrichmentOnly ? 'visible' : 'none')
       }
     })
+    if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
+      map.setLayoutProperty(SELLER_PINS_LAYER_IDS.pulse, 'visibility', 'none')
+    }
     // Keep comp glow aligned with comp marker visibility
     if (map.getLayer(spGlowLayerId)) {
       const compVisible = map.getLayoutProperty(SOLD_COMPS_LAYER_IDS.marker, 'visibility') ?? 'none'
       map.setLayoutProperty(spGlowLayerId, 'visibility', compVisible)
     }
-  }, [sellerPinLayers.sellerPins, baseStyleLoading])
+  }, [sellerPinLayers.sellerPins, baseStyleLoading, viewportZoom])
 
   useEffect(() => {
     const map = mapRef.current
@@ -8031,7 +8595,11 @@ export function InboxCommandMap({
     if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCore)) map.setFilter(SELLER_PINS_LAYER_IDS.clusterCore, clusterFilter)
     if (map.getLayer(SELLER_PINS_LAYER_IDS.clusterCount)) map.setFilter(SELLER_PINS_LAYER_IDS.clusterCount, clusterFilter)
     if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
-      map.setFilter(SELLER_PINS_LAYER_IDS.pulse, ['in', ['coalesce', ['get', 'pulse_style'], 'none'], ['literal', ['pulse_strong', 'pulse_warning', 'pulse_rotating']]])
+      map.setFilter(SELLER_PINS_LAYER_IDS.pulse, [
+        'all',
+        pointFilter,
+        ['in', ['coalesce', ['get', 'pulse_style'], 'none'], ['literal', ['pulse_strong', 'pulse_soft', 'pulse_warning', 'pulse_rotating']]],
+      ])
     }
   }, [sellerPinLayers.sellerPins, viewportZoom, baseStyleLoading])
 
@@ -8071,6 +8639,7 @@ export function InboxCommandMap({
   }, [buyerDemandLayers])
 
   useEffect(() => {
+    if (isMapVerificationMode()) return
     if (!mapRef.current || !selectedThread?.id) return
     if (!focusPin || !isMappableCoord(focusPin.lat, focusPin.lng)) return
     const selectionKey = [
@@ -9012,6 +9581,11 @@ export function InboxCommandMap({
           </div>
         </aside>
       )}
+
+      <MapPropertyDiagnosticsOverlay
+        diagnostics={mapPropertyDiagnostics}
+        visible={isMapDiagnosticsDebugEnabled() && Boolean(mapPropertyDiagnostics)}
+      />
 
       {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning) && (
         <div className="nx-icm__map-status" aria-live="polite">

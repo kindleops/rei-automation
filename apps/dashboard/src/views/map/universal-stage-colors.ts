@@ -4,7 +4,7 @@
  */
 
 export const UNIVERSAL_STAGE_RING_COLORS = {
-  uncontacted: '#659BFF',
+  uncontacted: '#7A8FA8',
   ownership_check: '#42C4FF',
   needs_review: '#FFB84C',
   active_communication: '#29E68B',

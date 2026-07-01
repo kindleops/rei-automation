@@ -5,11 +5,10 @@ import { getSystemFlag } from "@/lib/system-control.js";
 import { supabase } from "@/lib/supabase/client.js";
 import { normalizeMapAssetType } from "@/lib/domain/map/map-asset-type.js";
 import { deriveMapMarkerState } from "@/lib/domain/map/map-marker-state.js";
+import { resolveCanonicalMapMarkerKey, drainUnmappedPropertyTypes } from "@/lib/domain/map/canonical-map-marker-key.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function asNumber(value, fallback = null) {
   const parsed = Number(value);
@@ -22,13 +21,14 @@ function asLimit(value, fallback, max) {
   return Math.min(Math.trunc(parsed), max);
 }
 
-function zoomToMode(zoom) {
-  if (zoom >= 13) return "markers";
-  return "clusters";
+/** Zoom band → server fetch mode (not client pagination). */
+function zoomToFetchMode(zoom) {
+  if (zoom < 6) return "national";
+  if (zoom < 9) return "metro";
+  if (zoom < 13.5) return "city";
+  return "street";
 }
 
-// Fields needed to compute asset type + marker state classifications.
-// Kept lean for cluster mode to reduce payload.
 const CLUSTER_FIELDS = [
   "property_id",
   "latitude",
@@ -71,7 +71,6 @@ const CLUSTER_FIELDS = [
   "mls_sold_date",
 ].join(",");
 
-// Extra fields added only for high-zoom individual marker mode.
 const MARKER_EXTRA_FIELDS = [
   "property_address_full",
   "owner_name",
@@ -82,8 +81,6 @@ const MARKER_EXTRA_FIELDS = [
   "equity_percent",
   "sale_price",
   "saleprice",
-  "mls_sold_price",
-  "mls_sold_date",
   "market_status_label",
   "mls_market_status",
   "building_square_feet",
@@ -103,15 +100,15 @@ const MARKER_EXTRA_FIELDS = [
   "highlighted",
 ].join(",");
 
-// ─── GeoJSON feature builder ──────────────────────────────────────────────────
-
-function toFeature(row, mode) {
+function toPropertyFeature(row, fetchMode) {
   const assetType = normalizeMapAssetType(row);
   const markerState = deriveMapMarkerState(row);
+  const markerKey = resolveCanonicalMapMarkerKey(row, assetType);
 
   const baseProps = {
     property_id: row.property_id,
     assetType,
+    marker_key: markerKey,
     markerState,
     acquisitionScore: Number(row.final_acquisition_score) || 0,
     motivationScore: Number(row.structured_motivation_score) || 0,
@@ -126,7 +123,7 @@ function toFeature(row, mode) {
   };
 
   const markerProps =
-    mode === "markers"
+    fetchMode === "street"
       ? {
           address: row.property_address_full ?? null,
           ownerName: row.owner_name ?? row.owner_display_name ?? null,
@@ -167,7 +164,52 @@ function toFeature(row, mode) {
   };
 }
 
-// ─── Route handler ────────────────────────────────────────────────────────────
+function marketAggregateToFeature(row) {
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [Number(row.centroid_lng), Number(row.centroid_lat)],
+    },
+    properties: {
+      aggregate_type: "market",
+      market: row.market,
+      state: row.state_code,
+      property_count: Number(row.property_count),
+      point_count: Number(row.property_count),
+      uncontacted_count: Number(row.uncontacted_count ?? 0),
+      hot_count: Number(row.hot_count ?? 0),
+      new_reply_count: Number(row.new_reply_count ?? 0),
+      contacted_count: Number(row.contacted_count ?? 0),
+    },
+  };
+}
+
+function spatialClusterToFeature(row) {
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: [Number(row.centroid_lng), Number(row.centroid_lat)],
+    },
+    properties: {
+      aggregate_type: "spatial",
+      cluster_key: row.cluster_key,
+      market: row.market,
+      property_count: Number(row.property_count),
+      point_count: Number(row.property_count),
+      uncontacted_count: Number(row.uncontacted_count ?? 0),
+      hot_count: Number(row.hot_count ?? 0),
+      new_reply_count: Number(row.new_reply_count ?? 0),
+    },
+  };
+}
+
+function propertyLimitForMode(fetchMode, zoom) {
+  if (fetchMode === "street") return 8000;
+  if (fetchMode === "city") return zoom >= 11.5 ? 6000 : 4000;
+  return 3000;
+}
 
 export async function GET(request) {
   try {
@@ -194,62 +236,192 @@ export async function GET(request) {
     const lng_min = asNumber(searchParams.get("lng_min"), null);
     const lng_max = asNumber(searchParams.get("lng_max"), null);
     const zoom = asNumber(searchParams.get("zoom"), 8);
-    const mode = zoomToMode(zoom);
+    const fetchMode = zoomToFetchMode(zoom);
 
-    // Zoom-aware limits: tight at low zoom to avoid huge payloads,
-    // larger at mid zoom for client-side clustering, capped at street level.
-    const defaultLimit = mode === "markers" ? 500 : zoom >= 9 ? 2500 : 1500;
-    const maxLimit = mode === "markers" ? 500 : 3000;
-    const limit = asLimit(searchParams.get("limit"), defaultLimit, maxLimit);
-
-    // Optional layer/filter params
     const marketsFilter = searchParams.get("markets") ?? "";
     const statesFilter = searchParams.get("states") ?? "";
+    const markets = marketsFilter ? marketsFilter.split(",").map((s) => s.trim()).filter(Boolean) : null;
+    const states = statesFilter ? statesFilter.split(",").map((s) => s.trim()).filter(Boolean) : null;
+
+    // ── SOURCE A: National market aggregates (zoom 0–5.99) ─────────────────
+    if (fetchMode === "national") {
+      const { data: rows, error } = await supabase.rpc("get_map_market_aggregates", {
+        p_markets: markets,
+        p_states: states,
+      });
+      if (error) throw error;
+
+      const features = (rows ?? []).map(marketAggregateToFeature);
+      const totalCanonical = features.reduce((sum, f) => sum + (f.properties.property_count || 0), 0);
+
+      return NextResponse.json({
+        ok: true,
+        route: "internal/dashboard/ops/map",
+        data: {
+          generated_at: new Date().toISOString(),
+          zoom,
+          mode: "national",
+          source: "canonical_market_aggregates",
+          bounds: { lat_min, lat_max, lng_min, lng_max },
+          features,
+          counts: {
+            returned: features.length,
+            total_canonical: totalCanonical,
+            clipped: false,
+            pagination_boundary: null,
+          },
+        },
+      });
+    }
+
+    // ── SOURCE A: Metro spatial clusters (zoom 6–8.99) ─────────────────────
+    if (fetchMode === "metro") {
+      if (lat_min === null || lat_max === null || lng_min === null || lng_max === null) {
+        return NextResponse.json({ ok: false, error: "missing_bounds_for_metro" }, { status: 400 });
+      }
+
+      const gridDegrees = zoom < 7 ? 0.6 : zoom < 8 ? 0.35 : 0.2;
+      const [{ data: clusters, error: clusterError }, { data: exactCount, error: countError }] = await Promise.all([
+        supabase.rpc("get_map_spatial_clusters", {
+          p_lat_min: lat_min,
+          p_lat_max: lat_max,
+          p_lng_min: lng_min,
+          p_lng_max: lng_max,
+          p_grid_degrees: gridDegrees,
+        }),
+        supabase.rpc("get_map_bounds_property_count", {
+          p_lat_min: lat_min,
+          p_lat_max: lat_max,
+          p_lng_min: lng_min,
+          p_lng_max: lng_max,
+          p_markets: markets,
+          p_states: states,
+        }),
+      ]);
+      if (clusterError) throw clusterError;
+      if (countError) throw countError;
+
+      const features = (clusters ?? []).map(spatialClusterToFeature);
+      const clusterSum = features.reduce((sum, f) => sum + (f.properties.property_count || 0), 0);
+
+      return NextResponse.json({
+        ok: true,
+        route: "internal/dashboard/ops/map",
+        data: {
+          generated_at: new Date().toISOString(),
+          zoom,
+          mode: "metro",
+          source: "canonical_spatial_clusters",
+          bounds: { lat_min, lat_max, lng_min, lng_max },
+          features,
+          counts: {
+            returned: features.length,
+            total_in_bounds: Number(exactCount ?? 0),
+            cluster_sum: clusterSum,
+            clipped: false,
+            pagination_boundary: null,
+          },
+        },
+      });
+    }
+
+    // ── SOURCE B: Property-level (zoom 9+) — tile-backed; GeoJSON sample optional ─
+    if (lat_min === null || lat_max === null || lng_min === null || lng_max === null) {
+      return NextResponse.json({ ok: false, error: "missing_bounds_for_properties" }, { status: 400 });
+    }
+
+    const countsOnly = searchParams.get("counts_only") === "true";
+    const maxLimit = propertyLimitForMode(fetchMode, zoom);
+    const limit = asLimit(searchParams.get("limit"), maxLimit, maxLimit);
+
+    if (countsOnly) {
+      const [{ data: exactCount, error: countError }, { data: marketRows, error: marketError }] = await Promise.all([
+        supabase.rpc("get_map_bounds_property_count", {
+          p_lat_min: lat_min,
+          p_lat_max: lat_max,
+          p_lng_min: lng_min,
+          p_lng_max: lng_max,
+          p_markets: markets,
+          p_states: states,
+        }),
+        supabase.rpc("get_map_market_aggregates", {
+          p_markets: markets,
+          p_states: states,
+        }),
+      ]);
+      if (countError) throw countError;
+      if (marketError) throw marketError;
+      const totalCanonical = (marketRows ?? []).reduce((sum, row) => sum + Number(row.property_count || 0), 0);
+
+      return NextResponse.json({
+        ok: true,
+        route: "internal/dashboard/ops/map",
+        data: {
+          generated_at: new Date().toISOString(),
+          zoom,
+          mode: fetchMode,
+          source: "canonical_property_tiles",
+          bounds: { lat_min, lat_max, lng_min, lng_max },
+          features: [],
+          counts: {
+            returned: 0,
+            total_canonical: totalCanonical,
+            total_in_bounds: Number(exactCount ?? 0),
+            clipped: false,
+            pagination_boundary: null,
+            tile_backed: true,
+          },
+        },
+      });
+    }
 
     const selectFields =
-      mode === "markers"
+      fetchMode === "street"
         ? `${CLUSTER_FIELDS},${MARKER_EXTRA_FIELDS}`
         : CLUSTER_FIELDS;
 
-    let query = supabase
-      .from("properties")
-      .select(selectFields)
-      .not("latitude", "is", null)
-      .not("longitude", "is", null)
-      // Prioritize highest-value properties when the limit clips results.
-      .order("final_acquisition_score", { ascending: false, nullsFirst: false })
-      .limit(limit);
+    const [{ data: exactCount, error: countError }, queryResult] = await Promise.all([
+      supabase.rpc("get_map_bounds_property_count", {
+        p_lat_min: lat_min,
+        p_lat_max: lat_max,
+        p_lng_min: lng_min,
+        p_lng_max: lng_max,
+        p_markets: markets,
+        p_states: states,
+      }),
+      (() => {
+        let query = supabase
+          .from("properties")
+          .select(selectFields)
+          .not("latitude", "is", null)
+          .not("longitude", "is", null)
+          .gte("latitude", lat_min)
+          .lte("latitude", lat_max)
+          .gte("longitude", lng_min)
+          .lte("longitude", lng_max)
+          .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+          .limit(limit);
+        if (markets?.length) query = query.in("market", markets);
+        if (states?.length) query = query.in("property_address_state", states);
+        return query;
+      })(),
+    ]);
 
-    // Bounding box — only apply if all four coords are present
-    if (lat_min !== null) query = query.gte("latitude", lat_min);
-    if (lat_max !== null) query = query.lte("latitude", lat_max);
-    if (lng_min !== null) query = query.gte("longitude", lng_min);
-    if (lng_max !== null) query = query.lte("longitude", lng_max);
-
-    // Optional market/state filters
-    if (marketsFilter) {
-      const markets = marketsFilter.split(",").map((s) => s.trim()).filter(Boolean);
-      if (markets.length) query = query.in("market", markets);
-    }
-    if (statesFilter) {
-      const states = statesFilter.split(",").map((s) => s.trim()).filter(Boolean);
-      if (states.length) query = query.in("property_address_state", states);
-    }
-
-    const { data: rows, error } = await query;
+    if (countError) throw countError;
+    const { data: rows, error } = queryResult;
     if (error) throw error;
 
-    const features = (rows ?? []).map((row) => toFeature(row, mode));
+    const features = (rows ?? []).map((row) => toPropertyFeature(row, fetchMode));
+    const unmappedTypes = drainUnmappedPropertyTypes();
 
-    // Aggregate counts from returned features
     const byAssetType = {};
-    const byState = {};
+    const byMarkerKey = {};
     const byMarkerState = {};
     for (const f of features) {
-      const { assetType, markerState, state } = f.properties;
+      const { assetType, marker_key: markerKey, markerState } = f.properties;
       byAssetType[assetType] = (byAssetType[assetType] ?? 0) + 1;
+      byMarkerKey[markerKey] = (byMarkerKey[markerKey] ?? 0) + 1;
       byMarkerState[markerState] = (byMarkerState[markerState] ?? 0) + 1;
-      if (state) byState[state] = (byState[state] ?? 0) + 1;
     }
 
     return NextResponse.json({
@@ -258,15 +430,19 @@ export async function GET(request) {
       data: {
         generated_at: new Date().toISOString(),
         zoom,
-        mode,
+        mode: fetchMode,
+        source: "canonical_properties_table",
         bounds: { lat_min, lat_max, lng_min, lng_max },
         features,
         counts: {
           returned: features.length,
-          clipped: features.length >= limit,
+          total_in_bounds: Number(exactCount ?? 0),
+          clipped: features.length >= limit && Number(exactCount ?? 0) > features.length,
+          pagination_boundary: `properties.limit=${limit} (previous bug: hard cap 500 markers / 3000 clusters)`,
           by_asset_type: byAssetType,
+          by_marker_key: byMarkerKey,
           by_marker_state: byMarkerState,
-          by_state: byState,
+          unmapped_property_types: unmappedTypes,
         },
       },
     });

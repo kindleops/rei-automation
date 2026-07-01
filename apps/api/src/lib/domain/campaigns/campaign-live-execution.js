@@ -3,6 +3,7 @@
  * proof vs live launch mode derived from persisted campaign state.
  */
 
+import { buildProductionLiveCampaignPersistencePatch } from '@/lib/domain/campaigns/campaign-canonical-write.js'
 import { asBoolean, asPositiveInteger } from '@/lib/domain/queue/queue-control-safety.js'
 import {
   isLiveCampaignStatus,
@@ -62,27 +63,12 @@ export function isCampaignLiveInconsistent(campaign = {}) {
   )
 }
 
-export function buildCanonicalLiveCampaignPatch(campaign = {}, schedule = {}) {
-  const metadata = metadataObject(campaign.metadata)
-  const now = new Date().toISOString()
-  return {
-    auto_queue_enabled: true,
-    auto_send_enabled: true,
-    auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
-    scheduled_for: schedule.scheduled_for || campaign.scheduled_for || null,
-    activated_at: campaign.activated_at || now,
-    execution_heartbeat_at: now,
-    metadata: {
-      ...metadata,
-      converted_to_live_at: metadata.converted_to_live_at || now,
-      production_launch: true,
-      test_mode_cleared: true,
-      launch_timezone: schedule.timezone || metadata.launch_timezone || null,
-      launch_window: schedule.window_start
-        ? { start: schedule.window_start, end: schedule.window_end }
-        : metadata.launch_window || null,
-    },
-  }
+export function buildCanonicalLiveCampaignPatch(campaign = {}, schedule = {}, input = {}) {
+  return buildProductionLiveCampaignPersistencePatch(campaign, schedule, {
+    ...input,
+    production_live_write: true,
+    confirm_live: true,
+  })
 }
 
 export function isProductionLiveWriteContext(campaign = {}, input = {}) {

@@ -356,16 +356,27 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     template_readiness: templateMissing === 0 && launchReadyTotal ? 'resolved' : templateMissing === sampleSize ? 'missing' : 'partial',
     template_sample: { resolved: templateResolved, missing: templateMissing, sampled: sampleSize },
     counts: {
-      candidates_discovered: Number(campaign.metadata?.candidate_count || campaign.metadata?.preview_ready_to_queue || 0) || null,
-      persisted_targets: persistedTargetCount,
+      candidates_discovered:
+        Number(campaign.metadata?.candidate_count || campaign.metadata?.preview_ready_to_queue || 0) || null,
+      targets_persisted: persistedTargetCount,
+      deduplicated: persistedTargetCount,
       routing_ready: routingReadyTotal,
+      template_ready: templateReadyTotal,
       template_assigned: templateReadyTotal,
       sender_covered: senderCoveredTotal,
+      contactable: Math.max(0, routingReadyTotal - suppressedTotal),
       launch_ready: launchReadyTotal,
       awaiting_template: awaitingTemplateTotal,
       unsupported_language: unsupportedLanguageTotal,
       outside_sender_capacity: outsideSenderCapacityTotal,
       suppressed: suppressedTotal,
+      previously_contacted: targets.filter((row) => {
+        const meta = metadataObject(row.metadata)
+        return meta.never_contacted === false || Number(meta.touch_count || 0) > 0
+      }).length,
+      blocked: suppressedTotal + (routingReadyTotal === 0 && readyTotal > 0 ? readyTotal - routingReadyTotal : 0),
+      warnings_count: warnings.length,
+      hard_blockers_count: uniqueBlockers.length,
       excluded: unsupportedLanguageTotal + suppressedTotal,
     },
     ready_recipient_count: readyTotal,

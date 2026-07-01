@@ -1,0 +1,63 @@
+{
+  "status": "verification_in_progress",
+  "updatedAt": "2026-07-01T06:16:00Z",
+  "canonicalBaseline": {
+    "totalMappable": 124046,
+    "markets": 494,
+    "marketCounts": {
+      "Miami, FL": 11756,
+      "Dallas, TX": 5682,
+      "Los Angeles, CA": 4848,
+      "Memphis, TN": 3360
+    }
+  },
+  "migrations": [
+    "20260630120000_map_property_aggregates.sql",
+    "20260630130000_map_property_vector_tiles.sql"
+  ],
+  "sessionFixes": [
+    "MVT-safe layer expressions (no multiplied zoom radius, no feature-state filters on vector layers)",
+    "Absolute tile URLs against window.location.origin",
+    "Verification mode disables selected-thread auto-navigation",
+    "MVT tile pin hover handlers for peek SellerMapCard",
+    "Handler re-registration on style.load (propUniv + propTiles refs reset)",
+    "__nexusSetMapTheme verification hook for in-app theme switching",
+    "Diagnostics window export in verification mode",
+    "Accounting diagnostics no longer null when fetch pending"
+  ],
+  "playwrightSuites": {
+    "map-property-diagnostics": "passed",
+    "map-asset-icon-matrix": "passed",
+    "map-theme-matrix": "passed_including_cycle",
+    "map-footprint-proof": "passed",
+    "map-render-invariants": "passed_isolated_degrades_in_long_batch",
+    "map-zoom-continuity": "passed_below_9_isolated",
+    "map-dense-accounting": "zoom_8_passed_mvt_zooms_need_stable_api",
+    "map-desktop-interactions": "pending_stable_dev",
+    "map-mobile-verification": "iphone_14_passed_pixel_7_partial"
+  },
+  "proofArtifacts": {
+    "assets": "proof/map-assets/ (10 canonical marker types)",
+    "themes": "proof/map-themes/ (10 presets + theme-cycle-final-satellite)",
+    "footprint": "proof/map-footprint/ (national + 6 markets)",
+    "diagnostics": "proof/map-diagnostics/ (5 zoom bands)",
+    "mobile": "proof/map-mobile/ (iphone-14 national/metro/dense/single-family)",
+    "accounting": "proof/map-accounting/ (pending MVT zoom captures)"
+  },
+  "unitTests": {
+    "mapUnitSuites": 36,
+    "status": "passed"
+  },
+  "diagnosticsDebug": {
+    "localStorageKey": "nx.map.diagnostics.debug",
+    "queryParam": "mapDiagnostics=1",
+    "verificationModeKey": "nx.map.verification.mode"
+  },
+  "knownGaps": [
+    "Long sequential Playwright batches (>30 tests) degrade when API cold-starts or map context is recycled",
+    "Production build blocked by pre-existing vite.config.ts proxy configure typing (unrelated to map work)",
+    "Office asset type has 0 production properties — sprite registered, visual proof uses manifest note",
+    "Section 12 legacy cleanup deferred until desktop + mobile interaction suites pass green in isolation"
+  ],
+  "acceptanceCriteriaProgress": "22/30 verified in isolation; 8 require stable API re-run (dense accounting MVT, desktop SMS, pixel-7 mobile, production build)"
+}

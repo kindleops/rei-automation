@@ -615,6 +615,25 @@ function resolveDevGitIdentity() {
   return { commitSha, branch, worktreeId }
 }
 
+function createDevApiProxy(target: string, env: Record<string, string>) {
+  const opsSecret = (env.VITE_OPS_DASHBOARD_SECRET || env.OPS_DASHBOARD_SECRET || '').trim()
+  return {
+    target,
+    changeOrigin: true,
+    secure: false,
+    configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const request = req as { url?: string }
+        const outbound = proxyReq as { getHeader: (name: string) => string | undefined; setHeader: (name: string, value: string) => void }
+        if (!opsSecret) return
+        if (request.url?.includes('/ops/map/tiles/') && !outbound.getHeader('x-ops-dashboard-secret')) {
+          outbound.setHeader('x-ops-dashboard-secret', opsSecret)
+        }
+      })
+    },
+  }
+}
+
 function resolveBackendProxyTarget(env: Record<string, string>, mode: string): string {
   const configured = (env.VITE_BACKEND_API_URL || '').trim()
   if (mode !== 'development') {
@@ -710,11 +729,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
-        '/api/internal': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/internal': createDevApiProxy(backendProxyTarget, env),
         '/api/workflows': {
           target: backendProxyTarget,
           changeOrigin: true,
@@ -739,11 +754,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
-        '/api/internal': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/internal': createDevApiProxy(backendProxyTarget, env),
         '/api/workflows': {
           target: backendProxyTarget,
           changeOrigin: true,
