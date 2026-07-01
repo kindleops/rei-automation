@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildProductionQueueRailsPatch,
+  finalizeOperatorLiveActivation,
   CANONICAL_FULL_AUTOPILOT_MODE,
   isCampaignFullyLive,
   isCampaignLiveInconsistent,
@@ -267,6 +268,76 @@ test('live limited rails auto-cap dispatch limit instead of rejecting cron defau
   }, { require_scope: false, require_send_caps: true })
   assert.equal(validation.ok, true)
   assert.equal(validation.effective_limit, 5)
+})
+
+test('finalizeOperatorLiveActivation applies live patch and kicks processor', async () => {
+  const updates = []
+  const supabase = {
+    from(table) {
+      if (table !== 'campaigns') throw new Error(`unexpected table ${table}`)
+      return {
+        select() {
+          return {
+            eq() {
+              return {
+                maybeSingle: async () => ({
+                  data: {
+                    id: 'la-1',
+                    status: 'active',
+                    batch_max: 5,
+                    daily_cap: 750,
+                    market_cap: 400,
+                    per_sender_cap: 150,
+                    market: 'Los Angeles, CA',
+                    metadata: { production_launch: true },
+                  },
+                  error: null,
+                }),
+              }
+            },
+          }
+        },
+        update(patch) {
+          updates.push(patch)
+          return {
+            eq() {
+              return {
+                select() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: {
+                        id: 'la-1',
+                        status: 'active',
+                        auto_send_enabled: true,
+                        auto_reply_mode: 'live_limited',
+                        batch_max: 5,
+                        daily_cap: 750,
+                        market_cap: 400,
+                        per_sender_cap: 150,
+                        market: 'Los Angeles, CA',
+                        metadata: { production_launch: true },
+                      },
+                      error: null,
+                    }),
+                  }
+                },
+              }
+            },
+          }
+        },
+      }
+    },
+  }
+
+  const result = await finalizeOperatorLiveActivation('la-1', { batch_max: 5 }, {
+    supabase,
+    setSystemValues: async () => ({}),
+    runSendQueue: async () => ({ ok: true, sent_count: 2, claimed_count: 2, results: [] }),
+  })
+
+  assert.equal(result.ok, true)
+  assert.ok(updates.some((patch) => patch.auto_send_enabled === true))
+  assert.equal(result.processor_result?.ok, true)
 })
 
 test('internal queue run passes when request limit exceeds configured hard cap', async () => {

@@ -214,3 +214,44 @@ export async function syncProductionQueueRailsFromCampaign(campaign = {}, deps =
   await setValues(patch, supabase ? { supabase } : {})
   return { ok: true, patch }
 }
+
+/**
+ * After guarded live activation: persist live flags, sync queue rails, run processor immediately.
+ */
+export async function finalizeOperatorLiveActivation(campaignId, input = {}, deps = {}) {
+  const supabase = deps.supabase || (await import('@/lib/supabase/client.js')).supabase
+  const { computeNextValidSendInstant } = await import('@/lib/domain/campaigns/campaign-convert-to-live.js')
+  const { runSendQueue } = await import('@/lib/domain/queue/run-send-queue.js')
+
+  const { data: campaign, error } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
+  if (error) throw error
+  if (!campaign) return { ok: false, error: 'campaign_not_found' }
+
+  const schedule = computeNextValidSendInstant(campaign)
+  const patch = buildCanonicalLiveCampaignPatch(campaign, schedule)
+  const { data: refreshed, error: updateError } = await supabase
+    .from('campaigns')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', campaignId)
+    .select('*')
+    .maybeSingle()
+  if (updateError) throw updateError
+
+  const liveCampaign = refreshed || campaign
+  await syncProductionQueueRailsFromCampaign(liveCampaign, { ...deps, supabase })
+
+  const batchMax = asPositiveInteger(
+    input.batch_max ?? input.batchMax ?? input.limit ?? liveCampaign.batch_max,
+    5,
+  )
+  const runQueue = deps.runSendQueue || runSendQueue
+  const processorResult = await runQueue({ limit: batchMax }, { ...deps, supabaseClient: supabase, supabase })
+
+  return {
+    ok: true,
+    schedule,
+    processor_result: processorResult,
+    sent_count: Number(processorResult?.sent_count || 0),
+    claimed_count: Number(processorResult?.claimed_count || 0),
+  }
+}

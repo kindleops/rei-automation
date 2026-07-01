@@ -448,6 +448,22 @@
   border-radius: 12px;
 }
 
+.cmp-mobile-launch-id {
+  display: block;
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--text-1, #a1a1aa);
+}
+
+.cmp-readiness-reasons--blockers span {
+  color: var(--danger, #f87171);
+}
+
+.cmp-mobile-launch {
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+}
+
 /* Bottom chrome */
 .cmp-mobile-builder-chrome {
   position: fixed;
@@ -523,6 +539,14 @@
 .cmp-mobile-builder-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cmp-mobile-builder-actions__launch-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
 }
 
 .cmp-mobile-builder-actions__primary,

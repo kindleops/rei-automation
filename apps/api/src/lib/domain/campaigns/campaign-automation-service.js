@@ -142,6 +142,20 @@ function getTargetFilters(input = {}) {
   return metadataObject(input.target_filters || input.filters || metadata.target_filters || input)
 }
 
+function extractMarketFromCatalogFilters(filters = {}) {
+  const domains = ['properties', 'prospects', 'master_owners', 'phones', 'outreach', 'sender_coverage']
+  for (const domain of domains) {
+    for (const filter of Array.isArray(filters[domain]) ? filters[domain] : []) {
+      const field = clean(filter.field_key || filter.fieldKey || filter.field).toLowerCase()
+      if (field === 'properties.market' || field.endsWith('.market')) {
+        const values = asArray(filter.value)
+        if (values.length) return values[0]
+      }
+    }
+  }
+  return firstArrayValue(filters.markets)
+}
+
 function getCampaignFilterValue(filters = {}, key, fallback = null) {
   if (filters[key] !== undefined && filters[key] !== null && clean(filters[key]) !== '') return filters[key]
   return fallback
@@ -166,7 +180,7 @@ function normalizeCampaignInput(payload = {}, existing = {}) {
     status: clean(payload.status || existing.status || 'draft') || 'draft',
     objective: objective || null,
     candidate_source: candidateSource,
-    market: clean(payload.market || firstArrayValue(filters.markets) || existing.market) || null,
+    market: clean(payload.market || extractMarketFromCatalogFilters(filters) || firstArrayValue(filters.markets) || existing.market) || null,
     state: clean(payload.state || firstArrayValue(filters.states) || existing.state) || null,
     language_policy: clean(payload.language_policy || filters.language || existing.language_policy || 'auto') || 'auto',
     agent_persona: clean(payload.agent_persona || filters.agent_persona || existing.agent_persona) || null,
@@ -191,6 +205,8 @@ function normalizeCampaignInput(payload = {}, existing = {}) {
       campaign_type: clean(payload.campaign_type || metadata.campaign_type) || null,
       template_use_case: clean(payload.template_use_case || filters.template_use_case || 'ownership_check') || 'ownership_check',
       stage_code: clean(payload.stage_code || filters.stage_code || 'S1') || 'S1',
+      launch_timezone: clean(payload.metadata?.launch_timezone || payload.launch_timezone || metadata.launch_timezone || existing.metadata?.launch_timezone) || null,
+      timezone: clean(payload.metadata?.timezone || payload.timezone || metadata.timezone || existing.metadata?.timezone) || null,
     },
   }
 
@@ -7547,6 +7563,8 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
       degraded: Boolean(result.lifecycle_result?.degraded),
       proof_hydration: Boolean(result.proof_hydration),
       activation_mode: result.activation_mode || (result.proof_hydration ? 'test' : 'live'),
+      processor_kickoff: result.processor_kickoff || null,
+      sent_count: result.sent_count ?? result.processor_kickoff?.sent_count ?? 0,
     }
   }
 

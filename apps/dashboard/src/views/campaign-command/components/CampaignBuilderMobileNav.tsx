@@ -12,8 +12,10 @@ interface CampaignBuilderMobileNavProps {
   onPreview: () => void
   onSaveDraft: () => void
   onSchedule: () => void
+  onActivate?: () => void
   canSaveDraft: boolean
   canSchedule: boolean
+  canActivate?: boolean
   isSaving: boolean
   isLaunching: boolean
 }
@@ -27,8 +29,10 @@ export function CampaignBuilderMobileNav({
   onPreview,
   onSaveDraft,
   onSchedule,
+  onActivate,
   canSaveDraft,
   canSchedule,
+  canActivate = false,
   isSaving,
   isLaunching,
 }: CampaignBuilderMobileNavProps) {
@@ -103,24 +107,32 @@ export function CampaignBuilderMobileNav({
           </button>
         )}
         {phase === 'launch' && (
-          <>
+          <div className="cmp-mobile-builder-actions__launch-row">
             <button
               type="button"
               className="cmp-mobile-builder-actions__secondary"
               disabled={isSaving || !canSaveDraft}
               onClick={onSaveDraft}
             >
-              Save draft
+              Save Draft
+            </button>
+            <button
+              type="button"
+              className="cmp-mobile-builder-actions__secondary"
+              disabled={isLaunching || !canSchedule}
+              onClick={onSchedule}
+            >
+              Schedule
             </button>
             <button
               type="button"
               className="cmp-mobile-builder-actions__primary"
-              disabled={isLaunching || !canSchedule}
-              onClick={onSchedule}
+              disabled={isLaunching || !canActivate}
+              onClick={onActivate}
             >
-              {isLaunching ? 'Working…' : 'Schedule'}
+              {isLaunching ? 'Activating…' : 'Activate Now'}
             </button>
-          </>
+          </div>
         )}
       </div>
     </div>

@@ -164,6 +164,24 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
 
     recordStep('activating_campaign')
     await recomputeCampaignProgress(campaignId, deps)
+
+    let processorKickoff = null
+    const shouldFinalizeLive =
+      !proofNoSend &&
+      launchMode.confirm_live === true &&
+      (input.trigger_immediate_processor === true ||
+        input.triggerImmediateProcessor === true ||
+        asBoolean(input.explicit_operator_action ?? input.explicitOperatorAction, false))
+
+    if (shouldFinalizeLive && !result.idempotent) {
+      const { finalizeOperatorLiveActivation } = await import('@/lib/domain/campaigns/campaign-live-execution.js')
+      processorKickoff = await finalizeOperatorLiveActivation(campaignId, input, deps)
+      recordStep('processor_kickoff', {
+        sent_count: processorKickoff?.sent_count ?? 0,
+        claimed_count: processorKickoff?.claimed_count ?? 0,
+      })
+    }
+
     recordStep('complete', { inserted: result.inserted, skipped: result.skipped })
 
     const { data: refreshedCampaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
@@ -183,6 +201,8 @@ export async function runCanonicalCampaignActivation(campaignId, input = {}, dep
       to: result.to || 'active',
       lifecycle_result: result.lifecycle_result || null,
       queue_result: result.queue_result || null,
+      processor_kickoff: processorKickoff,
+      sent_count: processorKickoff?.sent_count ?? 0,
       readiness,
       readiness_context: resolveLaunchReadinessContext({
         ...input,

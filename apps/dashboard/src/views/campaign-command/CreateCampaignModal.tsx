@@ -1,7 +1,20 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, CreateCampaignPayload } from './campaigns.types'
-import { buildCampaignTargetSnapshots, createCampaign, launchCampaign } from './campaigns.adapter'
+import {
+  activateCampaignWithReview,
+  buildCampaignTargetSnapshots,
+  createCampaign,
+  launchCampaign,
+  updateCampaignDraft,
+} from './campaigns.adapter'
+import {
+  buildActivateNowPayload,
+  buildCampaignPersistPayload,
+  extractMarketFromFilterDraft,
+  isInsideContactWindow,
+  resolveCampaignTimezone,
+} from './campaign-builder-launch'
 import { getCampaignBackend } from '../../lib/api/backendClient'
 import {
   CAMPAIGN_FIELD_KEY_ALIASES,
@@ -216,8 +229,8 @@ const createDefaultLaunchSettings = (): LaunchSettings => {
     per_market_cap: preset.per_market_cap,
     first_scheduled_at: getDefaultFutureDateTimeLocal(),
     spread_interval_seconds: preset.spread_interval_seconds,
-    contact_window_start: '09:00',
-    contact_window_end: '20:00',
+    contact_window_start: '08:00',
+    contact_window_end: '21:00',
   }
 }
 
@@ -654,6 +667,10 @@ export const CreateCampaignModal = ({
   const { isMobile } = useBreakpoint()
   const [mobilePhase, setMobilePhase] = useState<CampaignBuilderPhase>('build')
   const [setupExpanded, setSetupExpanded] = useState(false)
+  const [isPersistingLaunch, setIsPersistingLaunch] = useState(false)
+  const [persistLaunchError, setPersistLaunchError] = useState<string | null>(null)
+  const [activationProgress, setActivationProgress] = useState<string | null>(null)
+  const [activationBlockers, setActivationBlockers] = useState<string[]>([])
 
   const activeFilterDraft = useMemo(
     () => buildActiveFilterDraft(draft, filterStatuses),
@@ -668,6 +685,46 @@ export const CreateCampaignModal = ({
       stage_code: activeFilterDraft.stage_code,
     })
   }, [activeFilterDraft])
+
+  const launchPersistRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!isMobile || mobilePhase !== 'launch' || !draft.name.trim()) return
+    const persistKey = `${activePreviewKey}:${savedCampaignId || 'new'}`
+    if (launchPersistRef.current === persistKey) return
+    let cancelled = false
+    setIsPersistingLaunch(true)
+    setPersistLaunchError(null)
+    void (async () => {
+      const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups)
+      try {
+        if (savedCampaignId) {
+          await updateCampaignDraft(savedCampaignId, payload)
+          if (!cancelled) {
+            launchPersistRef.current = persistKey
+            setPersistLaunchError(null)
+          }
+          return
+        }
+        const newCampaignId = await createCampaign({
+          ...buildCreatePayload(activeFilterDraft),
+          ...payload,
+          status: 'draft',
+        } as CreateCampaignPayload)
+        if (!cancelled) {
+          setSavedCampaignId(newCampaignId)
+          launchPersistRef.current = persistKey
+          setPersistLaunchError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPersistLaunchError(error instanceof Error ? error.message : String(error))
+        }
+      } finally {
+        if (!cancelled) setIsPersistingLaunch(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isMobile, mobilePhase, activePreviewKey, draft.name, activeFilterDraft, launchSettings, savedCampaignId])
 
   useEffect(() => {
     let cancelled = false
@@ -961,19 +1018,42 @@ export const CreateCampaignModal = ({
     return String(filter.value ?? '').trim() || '—'
   }
 
-  const saveCampaign = async () => {
+  const persistCampaignDraft = async (): Promise<string | null> => {
     if (!draft.name.trim()) {
-      emitNotification({ title: 'Campaign name required', detail: 'Add a campaign name before saving.', severity: 'warning' })
-      return
+      setPersistLaunchError('Campaign name required')
+      return null
     }
+    const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups)
+    try {
+      if (savedCampaignId) {
+        await updateCampaignDraft(savedCampaignId, payload)
+        setPersistLaunchError(null)
+        return savedCampaignId
+      }
+      const newCampaignId = await createCampaign({
+        ...buildCreatePayload(activeFilterDraft),
+        ...payload,
+        status: 'draft',
+      } as CreateCampaignPayload)
+      setSavedCampaignId(newCampaignId)
+      setPersistLaunchError(null)
+      return newCampaignId
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setPersistLaunchError(message)
+      return null
+    }
+  }
+
+  const saveCampaign = async () => {
     try {
       setIsSaving(true)
-      const newCampaignId = await createCampaign(buildCreatePayload(activeFilterDraft))
-      setSavedCampaignId(newCampaignId)
-      emitNotification({ title: 'Campaign Draft Created', detail: 'The approved targeting catalog was saved with the draft.', severity: 'success' })
-      onSuccess(newCampaignId)
+      const campaignId = await persistCampaignDraft()
+      if (!campaignId) return
+      emitNotification({ title: 'Campaign Draft Saved', detail: 'Campaign configuration persisted to the server.', severity: 'success' })
+      onSuccess(campaignId)
     } catch (error) {
-      emitNotification({ title: 'Creation Failed', detail: String(error), severity: 'critical' })
+      emitNotification({ title: 'Save Failed', detail: String(error), severity: 'critical' })
     } finally {
       setIsSaving(false)
     }
@@ -1019,15 +1099,62 @@ export const CreateCampaignModal = ({
   }
 
   const ensureCampaignForLaunch = async (): Promise<string | null> => {
-    if (savedCampaignId) return savedCampaignId
-    if (!draft.name.trim()) {
-      emitNotification({ title: 'Campaign name required', detail: 'Add a campaign name before launch execution.', severity: 'warning' })
-      return null
+    if (savedCampaignId) {
+      await persistCampaignDraft()
+      return savedCampaignId
     }
-    const newCampaignId = await createCampaign(buildCreatePayload(activeFilterDraft))
-    setSavedCampaignId(newCampaignId)
-    emitNotification({ title: 'Campaign draft saved', detail: 'Launch execution is now attached to the saved campaign.', severity: 'success' })
-    return newCampaignId
+    return persistCampaignDraft()
+  }
+
+  const executeActivateNow = async () => {
+    setActivationBlockers([])
+    try {
+      setIsLaunching(true)
+      setActivationProgress('Saving campaign…')
+      const campaignId = await persistCampaignDraft()
+      if (!campaignId) {
+        setActivationBlockers([persistLaunchError || 'Campaign not persisted'])
+        return
+      }
+
+      const { market } = extractMarketFromFilterDraft(activeFilterDraft)
+      const timezone = resolveCampaignTimezone(market)
+
+      setActivationProgress('Building eligible targets…')
+      await buildCampaignTargetSnapshots(campaignId, {
+        limit: parsePositiveInt(launchSettings.max_targets, 50),
+      })
+
+      setActivationProgress('Activating live campaign…')
+      const activationPayload = buildActivateNowPayload(launchSettings, campaignId, timezone)
+      const result = await activateCampaignWithReview(campaignId, activationPayload)
+
+      if (!result.ok) {
+        const blockers = result.blockers?.length
+          ? result.blockers
+          : [result.message || result.error || 'Activation failed']
+        setActivationBlockers(blockers)
+        emitNotification({ title: 'Activation blocked', detail: blockers.join(' · '), severity: 'warning' })
+        return
+      }
+
+      setActivationProgress('Queue processor started…')
+      const inserted = result.inserted ?? 0
+      const sent = (result as { sent_count?: number }).sent_count ?? 0
+      emitNotification({
+        title: 'Campaign activated',
+        detail: `${inserted} queue rows created · ${sent} messages sent`,
+        severity: 'success',
+      })
+      onSuccess(campaignId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setActivationBlockers([message])
+      emitNotification({ title: 'Activation failed', detail: message, severity: 'critical' })
+    } finally {
+      setIsLaunching(false)
+      setActivationProgress(null)
+    }
   }
 
   const executeLaunch = async (payload: CampaignLaunchPayload, mode: CampaignLaunchMode) => {
@@ -1080,7 +1207,13 @@ export const CreateCampaignModal = ({
 
   const requestPreview = () => runLaunch('dry_run')
   const requestSchedule = () => runLaunch('live', {}, 'schedule')
-  const requestActivate = () => runLaunch('live', { first_scheduled_at: toLocalDateTimeInput(new Date(Date.now() + 60_000)) }, 'activate')
+  const requestActivate = () => {
+    if (isMobile) {
+      void executeActivateNow()
+      return
+    }
+    runLaunch('live', { first_scheduled_at: toLocalDateTimeInput(new Date(Date.now() + 60_000)) }, 'activate')
+  }
 
   const renderValueControl = (filter: CampaignFilterCondition, field: CampaignFieldDefinition) => {
     const options = getCachedOptions(filter)
@@ -1380,9 +1513,36 @@ export const CreateCampaignModal = ({
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
   const launchEstimates = computeLaunchEstimates(preview, launchSettings)
   const launchReadiness = computeLaunchReadiness(preview, isPreviewLoading, totalDraftCount, launchEstimates)
-  // Schedule/Activate require a live backend preview. Degraded (local-fallback) state or no
-  // preview mean counts are unknown — block the action rather than let operators launch blind.
-  const canScheduleNow = canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
+  const { market: draftMarket } = extractMarketFromFilterDraft(activeFilterDraft)
+  const campaignTimezone = resolveCampaignTimezone(draftMarket)
+  const insideContactWindow = isInsideContactWindow(
+    campaignTimezone,
+    launchSettings.contact_window_start,
+    launchSettings.contact_window_end,
+  )
+  const mobileHardBlockers = isMobile && mobilePhase === 'launch'
+    ? [
+        ...(isPersistingLaunch ? ['Saving campaign to server…'] : []),
+        ...(persistLaunchError ? [persistLaunchError] : []),
+        ...(!savedCampaignId && !isPersistingLaunch ? ['Campaign not persisted yet'] : []),
+        ...(!draft.name.trim() ? ['Campaign name required'] : []),
+        ...(isPreviewLoading ? ['Preview still loading'] : []),
+        ...(!preview ? ['Run preview to validate targeting'] : []),
+        ...(backendDegraded ? [backendDegradedMessage] : []),
+        ...(launchEstimates.deliverable === 0 ? ['No eligible targets'] : []),
+        ...(launchEstimates.senderCovered === 0 ? ['No valid sender coverage for selected market'] : []),
+        ...(launchReadiness.status === 'blocked' ? launchReadiness.reasons : []),
+        ...activationBlockers,
+      ].filter((value, index, list) => value && list.indexOf(value) === index)
+    : []
+  const mobileActivationWarnings = isMobile && mobilePhase === 'launch' && launchReadiness.status === 'warning'
+    ? launchReadiness.reasons
+    : []
+  const mobileActivationBlockers = [...mobileHardBlockers, ...mobileActivationWarnings]
+  const canScheduleNow = isMobile
+    ? Boolean(savedCampaignId) && canRunLaunch && !isPreviewLoading && preview !== null && launchEstimates.deliverable > 0 && !isPersistingLaunch
+    : canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
+  const canActivateNow = canScheduleNow && !isLaunching && mobileHardBlockers.length === 0
 
   const setupSummary = [
     draft.name.trim() || 'Untitled campaign',
@@ -1785,6 +1945,37 @@ export const CreateCampaignModal = ({
 
           {isMobile && mobilePhase === 'launch' && (
             <div className="cmp-mobile-launch">
+              {isPersistingLaunch && (
+                <div className="cmp-draft-filter-warn">
+                  <Icon name="clock" size={12} />
+                  <span>Saving campaign before launch…</span>
+                </div>
+              )}
+              {savedCampaignId && (
+                <div className="cmp-mobile-launch-card">
+                  <h4>Campaign ID</h4>
+                  <code className="cmp-mobile-launch-id">{savedCampaignId}</code>
+                </div>
+              )}
+              {mobileActivationBlockers.length > 0 && (
+                <div className="cmp-readiness-reasons cmp-readiness-reasons--blockers">
+                  {mobileActivationBlockers.map((blocker) => (
+                    <span key={blocker}>{blocker}</span>
+                  ))}
+                </div>
+              )}
+              {!insideContactWindow && (
+                <div className="cmp-draft-filter-warn">
+                  <Icon name="clock" size={12} />
+                  <span>Outside {campaignTimezone} contact window — execution begins at the next valid window opening.</span>
+                </div>
+              )}
+              {activationProgress && (
+                <div className="cmp-draft-filter-warn">
+                  <Icon name="activity" size={12} />
+                  <span>{activationProgress}</span>
+                </div>
+              )}
               {launchReadiness.graphPartial && (
                 <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
                   <Icon name="alert" size={12} />
@@ -1883,19 +2074,27 @@ export const CreateCampaignModal = ({
               <div className="cmp-mobile-launch-actions">
                 <button
                   type="button"
-                  className="cmp-launch-btn cmp-launch-btn--ghost"
-                  disabled={isLaunching || !canRunLaunch}
-                  onClick={requestPreview}
+                  className="cmp-launch-btn is-accent"
+                  disabled={isLaunching || isPersistingLaunch || !canActivateNow}
+                  onClick={requestActivate}
                 >
-                  Preview targeting
+                  {isLaunching ? 'Activating…' : 'Activate Now'}
                 </button>
                 <button
                   type="button"
-                  className="cmp-launch-btn is-accent"
-                  disabled={isLaunching || !canScheduleNow}
-                  onClick={requestActivate}
+                  className="cmp-launch-btn"
+                  disabled={isLaunching || isPersistingLaunch || !canScheduleNow}
+                  onClick={requestSchedule}
                 >
-                  {isLaunching ? 'Working…' : 'Activate now'}
+                  Schedule for Later
+                </button>
+                <button
+                  type="button"
+                  className="cmp-launch-btn cmp-launch-btn--ghost"
+                  disabled={isSaving || isPersistingLaunch || !canSaveDraft}
+                  onClick={saveCampaign}
+                >
+                  {isSaving ? 'Saving…' : 'Save Draft'}
                 </button>
               </div>
             </div>
@@ -2108,8 +2307,10 @@ export const CreateCampaignModal = ({
             onPreview={() => runPreview('manual')}
             onSaveDraft={saveCampaign}
             onSchedule={requestSchedule}
+            onActivate={requestActivate}
             canSaveDraft={canSaveDraft}
             canSchedule={canScheduleNow}
+            canActivate={canActivateNow}
             isSaving={isSaving}
             isLaunching={isLaunching}
           />
