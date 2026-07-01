@@ -385,9 +385,17 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       throttle_window_seconds: 60,
     });
 
+    const deployment_meta =
+      deps.getQueueRouteDeploymentMeta?.(request) ||
+      (await import("@/lib/domain/queue/queue-route-deployment-meta.js")).getQueueRouteDeploymentMeta(
+        request
+      );
+
     const result = await run_send_queue({
       limit: dispatch_limit,
       dry_run,
+      caller_route: "internal/queue/run",
+      deploy_sha: deployment_meta.git_sha,
     });
 
     if (result?.skipped) {
@@ -482,6 +490,7 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         failed_count: result?.failed_count ?? 0,
         results: result?.results ?? [],
         route: "internal/queue/run",
+        deployment: deployment_meta,
         result,
       },
       { status: statusForResult(result) }

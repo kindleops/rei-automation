@@ -206,7 +206,7 @@ test("future scheduled rows with Supabase +00 offset timestamps stay protected",
   );
 });
 
-test("past-due scheduled rows expire only after scheduled_for passes stale grace", () => {
+test("scheduled rows are never eligible for stale expiration even when past due", () => {
   const row = {
     queue_status: "scheduled",
     created_at: "2026-07-01T01:57:52.000Z",
@@ -220,7 +220,50 @@ test("past-due scheduled rows expire only after scheduled_for passes stale grace
       now: "2026-07-01T02:45:00.000Z",
       stale_minutes: 20,
     }),
-    true,
+    false,
+  );
+});
+
+test("production timestamp shapes many hours in the future remain ineligible", () => {
+  const shapes = [
+    { scheduled_for: "2026-07-01T15:24:15+00" },
+    { scheduled_for: "2026-07-01T15:24:15+00:00" },
+    { scheduled_for: "2026-07-01 15:24:15+00" },
+    { scheduled_for_utc: "2026-07-01T15:24:15+00", scheduled_for: "2026-07-01 15:24:15+00" },
+  ];
+  for (const schedule of shapes) {
+    const row = {
+      queue_status: "scheduled",
+      created_at: "2026-07-01T04:36:08.475686+00",
+      updated_at: "2026-07-01T04:36:08.475686+00",
+      metadata: {},
+      ...schedule,
+    };
+    assert.equal(
+      isRowEligibleForStaleExpiration(row, {
+        now: "2026-07-01T04:45:50.000Z",
+        stale_minutes: 20,
+      }),
+      false,
+      `expected ineligible for ${JSON.stringify(schedule)}`,
+    );
+  }
+});
+
+test("queued rows are never eligible for stale expiration", () => {
+  const row = {
+    queue_status: "queued",
+    created_at: "2026-06-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+    scheduled_for: "2026-06-01T01:00:00.000Z",
+    metadata: {},
+  };
+  assert.equal(
+    isRowEligibleForStaleExpiration(row, {
+      now: "2026-07-01T04:45:50.000Z",
+      stale_minutes: 20,
+    }),
+    false,
   );
 });
 

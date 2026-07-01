@@ -41,7 +41,10 @@ const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
 const WEBHOOK_LOG_TABLE = "webhook_log";
+export const QUEUE_RECONCILE_LIFECYCLE_VERSION = "stale-expiration-containment-v3";
+
 const CANONICAL_ACTIVE_QUEUE_STATUSES = ["queued", "pending", "approval", "scheduled", "processing"];
+const STALE_RUNNABLE_FAILED_REASON = "stale_runnable_row_expired";
 const CANONICAL_TERMINAL_QUEUE_STATUSES = [
   "sent",
   "delivered",
@@ -290,40 +293,100 @@ export function isReplaceableStaleExpiredQueueRow(row = {}) {
 
 export function isRowEligibleForStaleExpiration(row = {}, options = {}) {
   const now = options.now || nowIso();
-  const stale_minutes = Math.max(Number(options.stale_minutes ?? 180), 1);
-  const stale_cutoff_ts =
-    options.stale_cutoff_ts ??
-    (toTimestamp(
-      new Date((toTimestamp(now) ?? Date.now()) - stale_minutes * 60 * 1000).toISOString()
-    ) ?? 0);
   const now_ts = toTimestamp(now) ?? Date.now();
   const status = lowerStatus(row.queue_status);
 
-  if (status === "processing" && row.is_locked) {
-    return false;
-  }
   if (rowHasSendEvidence(row)) {
     return false;
   }
 
-  const schedule_ts =
-    toTimestamp(row.scheduled_for_utc) ??
-    toTimestamp(row.scheduled_for) ??
-    null;
-
-  if (schedule_ts !== null && schedule_ts > now_ts) {
+  // Containment: never stale-expire scheduled or queued rows from created/updated age.
+  if (["scheduled", "queued"].includes(status)) {
     return false;
   }
 
-  if (["scheduled", "queued"].includes(status)) {
-    if (schedule_ts === null) {
-      return false;
-    }
-    return schedule_ts <= now_ts && schedule_ts <= stale_cutoff_ts;
+  // Only allow stale_runnable expiration for processing rows whose lease has expired.
+  if (status !== "processing") {
+    return false;
   }
 
-  const activity_ts = toTimestamp(row.updated_at || row.created_at) ?? 0;
-  return activity_ts <= stale_cutoff_ts;
+  if (row.is_locked) {
+    return false;
+  }
+
+  const lease_minutes = Math.max(Number(options.lease_minutes ?? 10), 1);
+  const lease_cutoff_ts =
+    options.lease_cutoff_ts ??
+    (now_ts - lease_minutes * 60 * 1000);
+  const timeout_at =
+    toTimestamp(row.metadata?.processing_timeout_at) ??
+    toTimestamp(row.locked_at) ??
+    toTimestamp(row.updated_at);
+
+  if (timeout_at === null) {
+    return false;
+  }
+
+  return timeout_at <= lease_cutoff_ts;
+}
+
+function emitFutureRowExpirationBlocked(row = {}, context = {}) {
+  const schedule_at = row.scheduled_for || row.scheduled_for_utc || null;
+  warn("queue.lifecycle.FUTURE_ROW_EXPIRATION_BLOCKED", {
+    event: "FUTURE_ROW_EXPIRATION_BLOCKED",
+    row_id: row.id,
+    queue_status: row.queue_status,
+    scheduled_for: schedule_at,
+    now: context.now || nowIso(),
+    caller_route: context.caller_route || null,
+    deploy_sha: context.deploy_sha || null,
+    reconcile_lifecycle_version: QUEUE_RECONCILE_LIFECYCLE_VERSION,
+  });
+}
+
+async function applySendQueueLifecyclePatch(supabase, { id, patch, context = {} }) {
+  const is_stale_runnable_expire =
+    lowerStatus(patch.queue_status) === "expired" &&
+    clean(patch.failed_reason) === STALE_RUNNABLE_FAILED_REASON;
+
+  if (is_stale_runnable_expire) {
+    const stale_cutoff =
+      context.stale_cutoff ||
+      new Date(
+        (toTimestamp(context.now || nowIso()) ?? Date.now()) -
+          Math.max(Number(context.stale_minutes ?? 180), 1) * 60 * 1000
+      ).toISOString();
+    const metadata = {
+      ...(patch.metadata || {}),
+      lifecycle_caller_route: context.caller_route || null,
+      lifecycle_deploy_sha: context.deploy_sha || null,
+    };
+
+    const { data, error } = await supabase.rpc("apply_send_queue_stale_expiration", {
+      p_row_id: id,
+      p_stale_cutoff: stale_cutoff,
+      p_caller_route: context.caller_route || null,
+      p_deploy_sha: context.deploy_sha || null,
+      p_metadata: metadata,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (data?.blocked) {
+      emitFutureRowExpirationBlocked({ id, ...patch }, context);
+      return { applied: false, blocked: true };
+    }
+
+    return { applied: Boolean(data?.applied), blocked: false };
+  }
+
+  const { error } = await supabase.from(SEND_QUEUE_TABLE).update(patch).eq("id", id);
+  if (error) {
+    throw error;
+  }
+  return { applied: true, blocked: false };
 }
 
 function toIsoOrNull(value) {
@@ -2069,6 +2132,13 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   const stale_minutes = Math.max(Number(options.stale_minutes ?? 180), 1);
   const lease_minutes = Math.max(Number(options.lease_minutes ?? 10), 1);
   const stale_cutoff = new Date(new Date(now).getTime() - stale_minutes * 60 * 1000).toISOString();
+  const lifecycle_context = {
+    now,
+    stale_minutes,
+    stale_cutoff,
+    caller_route: clean(options.caller_route) || null,
+    deploy_sha: clean(options.deploy_sha) || null,
+  };
   const lease_cutoff = new Date(new Date(now).getTime() - lease_minutes * 60 * 1000).toISOString();
   const max_rows = Math.max(Number(options.max_rows ?? 500), 1);
   const dry_run = Boolean(options.dry_run);
@@ -2161,7 +2231,13 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   }
 
   let brake_held_rows = 0;
+  let future_row_expiration_blocked = 0;
   for (const row of stale_rows) {
+    if (["scheduled", "queued"].includes(lower(row.queue_status))) {
+      future_row_expiration_blocked += 1;
+      emitFutureRowExpirationBlocked(row, lifecycle_context);
+      continue;
+    }
     if (shouldPreserveAutopilotReplyRow(row)) {
       continue;
     }
@@ -2318,12 +2394,21 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     new Map(updates.map((entry) => [String(entry.id), entry])).values()
   );
 
+  let blocked_expiration_count = 0;
+  let applied_patch_count = 0;
+
   if (!dry_run) {
     for (const { id, patch } of deduped_updates) {
-      await supabase
-        .from(SEND_QUEUE_TABLE)
-        .update(patch)
-        .eq("id", id);
+      const patch_result = await applySendQueueLifecyclePatch(supabase, {
+        id,
+        patch,
+        context: lifecycle_context,
+      });
+      if (patch_result.blocked) {
+        blocked_expiration_count += 1;
+      } else if (patch_result.applied) {
+        applied_patch_count += 1;
+      }
     }
   }
 
@@ -2333,13 +2418,16 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     dry_run,
     stale_minutes,
     lease_minutes,
+    lifecycle_version: QUEUE_RECONCILE_LIFECYCLE_VERSION,
     scanned_active_rows: rows.length,
     stale_rows: stale_rows.length,
     past_due_scheduled_rows: past_due_scheduled.length,
     expired_processing_leases: expired_leases.length,
     duplicate_fingerprint_count: duplicate_fingerprints.length,
     retried_gt_one_count: retried_gt_one.length,
-    reconciled_rows: deduped_updates.length,
+    reconciled_rows: dry_run ? deduped_updates.length : applied_patch_count,
+    blocked_expiration_count,
+    future_row_expiration_blocked,
     lock_conflicts: 0,
     send_brake_state: brakeState,
     brake_held_rows,

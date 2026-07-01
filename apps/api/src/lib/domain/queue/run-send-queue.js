@@ -236,6 +236,8 @@ export async function runSendQueue(
       max_rows: 1000,
       supabaseClient: supabase,
       supabase,
+      caller_route: deps.caller_route || "internal/queue/run",
+      deploy_sha: deps.deploy_sha || null,
     });
     log_info("queue.lifecycle_reconcile", reconcile);
   } catch (reconcile_error) {

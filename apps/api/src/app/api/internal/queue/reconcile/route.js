@@ -11,6 +11,7 @@ import { requireCronOrEngineAuth } from "@/lib/security/cron-auth.js";
 import { runQueueReconcileRunner } from "@/lib/workers/queue-reconcile-runner.js";
 import { reconcileSupabaseDeliveryStatuses } from "@/lib/domain/events/normalize-delivery-status.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
+import { getQueueRouteDeploymentMeta } from "@/lib/domain/queue/queue-route-deployment-meta.js";
 import { buildDisabledResponse, getSystemFlag } from "@/lib/system-control.js";
 
 export const runtime = "nodejs";
@@ -81,11 +82,14 @@ export async function GET(request) {
       logger.warn("queue_reconcile.supabase_delivery_reconcile_failed", { error: err?.message });
       return { ok: false, total_normalized: 0 };
     });
+    const deployment_meta = getQueueRouteDeploymentMeta(request);
     const canonical_lifecycle_result = await reconcileCanonicalQueueLifecycle({
       limit,
       stale_minutes: stale_after_minutes,
       lease_minutes: 10,
       dry_run: false,
+      caller_route: "internal/queue/reconcile",
+      deploy_sha: deployment_meta.git_sha,
     }).catch((err) => {
       logger.warn("queue_reconcile.canonical_lifecycle_failed", { error: err?.message });
       return { ok: false, reconciled_rows: 0 };
@@ -107,6 +111,7 @@ export async function GET(request) {
       {
         ok: result?.ok !== false,
         route: "internal/queue/reconcile",
+        deployment: deployment_meta,
         result,
         supabase_delivery_reconcile: supabase_delivery_result,
         canonical_lifecycle_reconcile: canonical_lifecycle_result,
@@ -206,11 +211,14 @@ export async function POST(request) {
       logger.warn("queue_reconcile.supabase_delivery_reconcile_failed", { error: err?.message });
       return { ok: false, total_normalized: 0 };
     });
+    const deployment_meta = getQueueRouteDeploymentMeta(request);
     const canonical_lifecycle_result = await reconcileCanonicalQueueLifecycle({
       limit,
       stale_minutes: stale_after_minutes,
       lease_minutes: 10,
       dry_run: false,
+      caller_route: "internal/queue/reconcile",
+      deploy_sha: deployment_meta.git_sha,
     }).catch((err) => {
       logger.warn("queue_reconcile.canonical_lifecycle_failed", { error: err?.message });
       return { ok: false, reconciled_rows: 0 };
@@ -232,6 +240,7 @@ export async function POST(request) {
       {
         ok: result?.ok !== false,
         route: "internal/queue/reconcile",
+        deployment: deployment_meta,
         result,
         supabase_delivery_reconcile: supabase_delivery_result,
         canonical_lifecycle_reconcile: canonical_lifecycle_result,
