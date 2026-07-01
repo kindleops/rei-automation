@@ -1,27 +1,23 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 
-function resolveDeploySha() {
-  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
-  if (process.env.DEPLOY_GIT_SHA) return process.env.DEPLOY_GIT_SHA;
-  try {
-    const fromFile = readFileSync(join(process.cwd(), '.deploy-sha'), 'utf8').trim();
-    if (fromFile && fromFile !== 'unknown') return fromFile;
-  } catch {
-    // fall through
-  }
-  return 'local';
-}
+import {
+  resolveDeployBuildTimestamp,
+  resolveDeployGitSha,
+} from '@/lib/domain/deploy/resolve-deploy-sha.js';
+import { QUEUE_RECONCILE_LIFECYCLE_VERSION } from '@/lib/supabase/sms-engine.js';
 
 export async function GET() {
-  const commit = resolveDeploySha();
+  const commit = resolveDeployGitSha();
   return NextResponse.json({
     service: 'api',
     project: process.env.VERCEL_PROJECT_NAME || 'rei-automation-api',
     commit,
+    git_sha: commit,
     env: process.env.VERCEL_ENV || 'development',
     deployment_id: process.env.VERCEL_DEPLOYMENT_ID || null,
+    hostname: process.env.VERCEL_URL || null,
+    build_timestamp: resolveDeployBuildTimestamp(),
+    reconcile_lifecycle_version: QUEUE_RECONCILE_LIFECYCLE_VERSION,
     timestamp: new Date().toISOString(),
   });
 }

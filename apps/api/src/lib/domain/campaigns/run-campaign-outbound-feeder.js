@@ -29,7 +29,7 @@ function asPositiveInteger(value, fallback = 0) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback
 }
 
-async function countActiveLiveQueueRows(supabase, campaignId) {
+export async function countActiveLiveQueueRows(supabase, campaignId) {
   const { data, error } = await supabase
     .from('send_queue')
     .select('id,metadata')

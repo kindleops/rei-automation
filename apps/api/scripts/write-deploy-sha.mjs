@@ -19,5 +19,8 @@ function resolveSha() {
 }
 
 const sha = resolveSha();
+const buildTimestamp = new Date().toISOString();
 writeFileSync(resolve(API_ROOT, ".deploy-sha"), `${sha}\n`);
+writeFileSync(resolve(API_ROOT, ".deploy-build-timestamp"), `${buildTimestamp}\n`);
 console.log(`[deploy-sha] ${sha}`);
+console.log(`[deploy-build-timestamp] ${buildTimestamp}`);
