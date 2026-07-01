@@ -15,6 +15,7 @@ import { normalizePhone } from "@/lib/providers/textgrid.js";
 
 const STALE_FAILED_REASON = "stale_runnable_row_expired";
 const SUPERSESSION_REASON = "premature_stale_expiration_recovery";
+const RECOVERABLE_TARGET_STATUSES = new Set(["ready", "planned", "queued", "active"]);
 const ACTIVE_QUEUE_STATUSES = [
   "queued",
   "scheduled",
@@ -172,8 +173,8 @@ async function validateRecoveryCandidate(row = {}, campaign = {}, deps = {}) {
       .maybeSingle();
     if (targetQuery.error) throw targetQuery.error;
     if (!targetQuery.data) return { ok: false, reason: "campaign_target_missing" };
-    if (lower(targetQuery.data.target_status) !== "ready") {
-      return { ok: false, reason: `campaign_target_not_ready:${targetQuery.data.target_status}` };
+    if (!RECOVERABLE_TARGET_STATUSES.has(lower(targetQuery.data.target_status))) {
+      return { ok: false, reason: `campaign_target_not_recoverable:${targetQuery.data.target_status}` };
     }
     if (clean(targetQuery.data.suppression_status)) {
       return { ok: false, reason: "campaign_target_suppressed" };
