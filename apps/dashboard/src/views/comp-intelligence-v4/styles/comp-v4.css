@@ -177,6 +177,16 @@
 .civ4-map__canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.civ4-map__canvas .maplibregl-map,
+.civ4-map__canvas .maplibregl-canvas-container,
+.civ4-map__canvas .maplibregl-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
 }
 .civ4-map__controls {
   position: absolute;

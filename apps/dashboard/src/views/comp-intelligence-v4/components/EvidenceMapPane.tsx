@@ -118,6 +118,7 @@ export function EvidenceMapPane(props: EvidenceMapPaneProps) {
     map.on('load', () => {
       readyRef.current = true
       setReady(true)
+      scheduleMapResize()
     })
     return () => {
       readyRef.current = false
@@ -133,12 +134,37 @@ export function EvidenceMapPane(props: EvidenceMapPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const scheduleMapResize = () => {
+    const map = mapRef.current
+    if (!map) return
+    const run = () => {
+      try {
+        map.resize()
+        map.triggerRepaint()
+      } catch {
+        // Ignore transient layout/style races.
+      }
+    }
+    requestAnimationFrame(() => requestAnimationFrame(run))
+    window.setTimeout(run, 120)
+    window.setTimeout(run, 360)
+  }
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => scheduleMapResize())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
   // ── style switch ─────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!map || !readyRef.current) return
     map.setStyle(styleFor(mapStyle, isLightTheme))
     map.once('styledata', () => {
+      scheduleMapResize()
       applyRadius(map, subject, radiusMiles, accent)
       renderMarkers()
     })
