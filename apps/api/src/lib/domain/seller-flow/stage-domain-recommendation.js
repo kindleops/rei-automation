@@ -56,6 +56,12 @@ function mapEngineAction(decision = {}, relationship = null) {
 }
 
 function runStageEngine(universal_stage, input) {
+  // Persisted ADE authority + negotiation state feed the price/negotiation
+  // engines — without them every band is "unknown" and counters dead-end in
+  // review. Loaded by the orchestrator BEFORE the intelligence phase.
+  const underwriting = input.underwriting || {};
+  const negotiation_state = input.deal_state?.negotiation_state || {};
+
   switch (universal_stage) {
     case "ownership_confirmation":
       return {
@@ -81,6 +87,9 @@ function runStageEngine(universal_stage, input) {
         stage_decision: classifyStage3AskingPrice({
           message: input.message,
           context: input.context,
+          seller_asking_price:
+            negotiation_state.current_asking_price ?? negotiation_state.current_ask ?? null,
+          underwriting,
         }),
       };
     case "condition_justification":
@@ -96,7 +105,21 @@ function runStageEngine(universal_stage, input) {
       return {
         engine: STAGE_AUTHORITY.offer_negotiation,
         universal_stage,
-        stage_decision: classifyStage5Negotiation(input),
+        stage_decision: classifyStage5Negotiation({
+          ...input,
+          recommended_cash_offer:
+            input.recommended_cash_offer ?? underwriting.recommended_cash_offer ?? null,
+          max_allowable_offer:
+            input.max_allowable_offer ?? underwriting.max_allowable_offer ?? null,
+          seller_asking_price:
+            input.seller_asking_price ??
+            negotiation_state.current_asking_price ??
+            negotiation_state.current_ask ??
+            null,
+          repair_estimate: input.repair_estimate ?? underwriting.repair_estimate ?? null,
+          lowest_relevant_comp:
+            input.lowest_relevant_comp ?? underwriting.lowest_relevant_comp ?? null,
+        }),
       };
     case "seller_contract":
       return {
@@ -205,6 +228,8 @@ export function resolveStageDomainRecommendation({
   semantic_intent = null,
   follow_up_recommendation = null,
   route = null,
+  underwriting = null,
+  deal_state = null,
 } = {}) {
   const invocation_stage = normalizeUniversalStage(
     clean(context?.summary?.conversation_stage) ||
@@ -220,6 +245,8 @@ export function resolveStageDomainRecommendation({
     relationship,
     semantic_intent,
     seller_message: message,
+    underwriting,
+    deal_state,
   });
 
   const recommendation = buildRecommendationFromEngine({

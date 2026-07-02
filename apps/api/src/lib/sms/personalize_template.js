@@ -22,6 +22,8 @@ const KNOWN_PLACEHOLDERS = Object.freeze([
   "property_city",
   "city",
   "offer_price",
+  "smart_cash_offer_display",
+  "comp_anchor_statement",
   "repair_cost",
   "closing_date",
   "unit_count",
@@ -34,13 +36,15 @@ const KNOWN_SET = new Set(KNOWN_PLACEHOLDERS);
 // ══════════════════════════════════════════════════════════════════════════
 
 function formatCurrency(value) {
-  if (value == null) return null;
+  // Blank/zero must stay missing so the render fails closed — a "$0" offer
+  // coined from an empty authority value can never reach a seller.
+  if (value == null || String(value).trim() === "") return null;
   const safe_value = typeof value === "number" ? value : sanitizeSmsTextValue(value);
   const num =
     typeof safe_value === "number"
       ? safe_value
       : Number(String(safe_value).replace(/[^0-9.-]/g, ""));
-  if (!Number.isFinite(num)) return null;
+  if (!Number.isFinite(num) || num <= 0) return null;
   // No decimals for round numbers, 2 decimals otherwise
   const formatted = num % 1 === 0
     ? `$${num.toLocaleString("en-US")}`
@@ -146,6 +150,13 @@ function buildValueMap(context = {}) {
     cleanText(safe_context.city) || cleanText(safe_context.property_city)
   );
   map.set("offer_price", formatCurrency(safe_context.offer_price));
+  map.set(
+    "smart_cash_offer_display",
+    formatCurrency(safe_context.smart_cash_offer_display ?? safe_context.offer_price)
+  );
+  // Exact policy-authorized comp sentence — passed through verbatim, never
+  // composed at render time.
+  map.set("comp_anchor_statement", cleanText(safe_context.comp_anchor_statement));
   map.set("repair_cost", formatCurrency(safe_context.repair_cost));
   map.set("closing_date", formatDate(context.closing_date));
   map.set("unit_count", formatInteger(safe_context.unit_count));

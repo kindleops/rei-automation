@@ -190,6 +190,8 @@ export async function runInboundIntelligencePhase({
   legacy_plan = null,
   auto_reply_mode = "disabled",
   execution_allowed = false,
+  underwriting = null,
+  deal_state = null,
   supabaseClient = null,
 } = {}) {
   const relationship = resolveInboundRelationship({
@@ -335,6 +337,8 @@ export async function runInboundIntelligencePhase({
     semantic_intent,
     follow_up_recommendation,
     route,
+    underwriting,
+    deal_state,
   });
 
   const domain_recommendation = stage_domain.recommendation;

@@ -360,6 +360,139 @@ async function recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now })
 }
 
 /**
+ * Gap 6 — negotiation-state integrity (spec §17): price captured but no
+ * negotiation state; ADE snapshot present but authority never persisted into
+ * the state; accepted terms without locked economics. Re-applies the canonical
+ * reducer with no new inputs — pure state repair, never an outbound send.
+ */
+async function recoverNegotiationStateIntegrity(supabase, { limit, dryRun }) {
+  const outcome = { gap: "negotiation_state_integrity", scanned: 0, repaired: 0, results: [] };
+  const { data, error } = await supabase
+    .from("acquisition_opportunities")
+    .select("id,primary_thread_key,primary_property_id,asking_price,acquisition_stage,metadata,updated_at")
+    .not("asking_price", "is", null)
+    .limit(limit);
+  if (error) return { ...outcome, error: error.message };
+
+  const { applyNegotiationTurn } = await import("@/lib/domain/seller-flow/negotiation-state.js");
+
+  for (const opp of data || []) {
+    const metadata = opp.metadata && typeof opp.metadata === "object" ? opp.metadata : {};
+    const state = metadata.negotiation_state || null;
+    const ade = metadata.ade_snapshot || null;
+
+    const missingState = !state || (state.current_asking_price == null && state.current_ask == null);
+    const missingAuthority = Boolean(ade) && state && state.recommended_offer == null;
+    const unlockedAcceptance = Boolean(state?.terms_accepted) && state?.accepted_price == null;
+    if (!missingState && !missingAuthority && !unlockedAcceptance) continue;
+
+    outcome.scanned += 1;
+    if (dryRun) {
+      outcome.repaired += 1;
+      outcome.results.push({ opportunity_id: opp.id, ok: true, dry_run: true, missingState, missingAuthority, unlockedAcceptance });
+      continue;
+    }
+    try {
+      const repaired = applyNegotiationTurn(state, {
+        price_signal: missingState && Number(opp.asking_price) > 0
+          ? { asking_price: { value: Number(opp.asking_price), price_type: "exact", confidence: null }, is_counter: false }
+          : null,
+        ade_snapshot: ade,
+        facts: metadata.seller_facts || null,
+        now: new Date().toISOString(),
+      });
+      repaired.deal_id = repaired.deal_id || opp.id;
+      repaired.thread_key = repaired.thread_key || opp.primary_thread_key || null;
+      repaired.property_id = repaired.property_id || opp.primary_property_id || null;
+      await supabase
+        .from("acquisition_opportunities")
+        .update({
+          metadata: { ...metadata, negotiation_state: repaired },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", opp.id);
+      await emitRecoveryEvent(supabase, {
+        type: "RECOVERY_NEGOTIATION_STATE_REPAIRED",
+        subjectId: opp.primary_thread_key || opp.id,
+        payload: { gap_key: opp.id, missingState, missingAuthority, unlockedAcceptance },
+      });
+      outcome.repaired += 1;
+      outcome.results.push({ opportunity_id: opp.id, ok: true });
+    } catch (repair_error) {
+      outcome.results.push({ opportunity_id: opp.id, ok: false, reason: repair_error?.message });
+    }
+  }
+  return outcome;
+}
+
+/**
+ * Gap 7 — offer authorized but never queued, or seller counter persisted with
+ * no response decision (spec §17). Recovery NEVER re-sends an offer — it
+ * surfaces the deal for review with an explicit reason.
+ */
+async function recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }) {
+  const outcome = { gap: "offer_authorized_never_queued", scanned: 0, repaired: 0, results: [] };
+  const { data, error } = await supabase
+    .from("acquisition_opportunities")
+    .select("id,primary_thread_key,next_action,metadata,updated_at")
+    .eq("next_action", "generate_offer")
+    .lt("updated_at", hoursAgoIso(2))
+    .limit(limit);
+  if (error) return { ...outcome, error: error.message };
+
+  for (const opp of data || []) {
+    const state = opp.metadata?.negotiation_state || {};
+    const offers = Array.isArray(state.offers_made) ? state.offers_made : [];
+    const lastOffer = offers[offers.length - 1] || null;
+    const offerQueued = Boolean(lastOffer?.queue_row_id);
+    // Confirm against the canonical queue when the ledger looks queued.
+    if (offerQueued) {
+      const { data: rows } = await supabase
+        .from("send_queue")
+        .select("id,queue_status")
+        .eq("id", lastOffer.queue_row_id)
+        .limit(1);
+      if (rows?.[0]) continue;
+    }
+
+    outcome.scanned += 1;
+    if (dryRun) {
+      outcome.repaired += 1;
+      outcome.results.push({ opportunity_id: opp.id, ok: true, dry_run: true });
+      continue;
+    }
+    try {
+      await supabase
+        .from("acquisition_opportunities")
+        .update({ next_action: NEXT_ACTIONS.HUMAN_REVIEW, updated_at: new Date().toISOString() })
+        .eq("id", opp.id);
+      if (opp.primary_thread_key) {
+        await patchUniversalLeadState({
+          threadKey: opp.primary_thread_key,
+          patch: { next_action: NEXT_ACTIONS.HUMAN_REVIEW, operational_status: "needs_review" },
+          supabase,
+          meta: {
+            change_source: STATE_SOURCE_CODES.SYSTEM,
+            source_view: "seller_execution_gap_recovery",
+            reason: "offer_authorized_never_queued",
+          },
+        }).catch(() => {});
+      }
+      await emitRecoveryEvent(supabase, {
+        type: "RECOVERY_OFFER_NEVER_QUEUED_REVIEW",
+        subjectId: opp.primary_thread_key || opp.id,
+        payload: { gap_key: opp.id },
+      });
+      outcome.repaired += 1;
+      outcome.results.push({ opportunity_id: opp.id, ok: true });
+    } catch (patch_error) {
+      outcome.results.push({ opportunity_id: opp.id, ok: false, reason: patch_error?.message });
+    }
+  }
+  return outcome;
+}
+
+/**
  * Run all execution-gap sweeps. Each sweep is isolated; one failing sweep
  * never blocks the others.
  */
@@ -379,6 +512,8 @@ export async function recoverSellerExecutionGaps({
     () => recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }),
     () => recoverTransitionWithoutStatePatch(supabase, { limit, dryRun, now }),
     () => recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now }),
+    () => recoverNegotiationStateIntegrity(supabase, { limit, dryRun }),
+    () => recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }),
   ];
 
   const outcomes = [];

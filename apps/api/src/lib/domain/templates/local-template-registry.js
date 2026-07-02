@@ -769,6 +769,166 @@ export const LOCAL_TEMPLATE_CANDIDATES = Object.freeze([
     text:
       "Checking back on {{property_address}}. Any updates on your end?",
   }),
+
+  // ── Negotiation loop (spec §12) ─────────────────────────────────────────────
+  // Monetary tokens ({{offer_price}}) render exclusively from persisted ADE
+  // authority and fail closed without it. Comp statements render only the
+  // policy-authorized sentence. Timing language follows the closing-term
+  // policy — no calendar-day promises, no repetitive "cash" wording.
+  createLocalTemplate({
+    item_id: "local-template:condition_probe:v1",
+    use_case: "condition_probe",
+    variant_group: "Negotiation — Condition Probe",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Thanks for the details on {{property_address}}. How would you describe the overall condition — move-in ready, needs some updating, or bigger repairs?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:condition_probe:v2",
+    use_case: "condition_probe",
+    variant_group: "Negotiation — Condition Probe",
+    sequence_position: "V2",
+    category_secondary: "Negotiation",
+    text:
+      "Got it. Anything on {{property_address}} that would need attention — roof, HVAC, plumbing, or is it in solid shape?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:occupancy_probe:v1",
+    use_case: "occupancy_probe",
+    variant_group: "Negotiation — Occupancy Probe",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Is {{property_address}} currently vacant, owner-occupied, or rented out?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:repair_clarification:v1",
+    use_case: "repair_clarification",
+    variant_group: "Negotiation — Repair Clarification",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Appreciate that. On the repairs you mentioned for {{property_address}} — roughly how extensive are they? Even a ballpark helps me be accurate.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:flexibility_probe:v1",
+    use_case: "flexibility_probe",
+    variant_group: "Negotiation — Flexibility Probe",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Understood on the number for {{property_address}}. If we handled everything as-is with no repairs on your end and covered the customary closing costs, is there any flexibility there?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:best_price_request:v1",
+    use_case: "best_price_request",
+    variant_group: "Negotiation — Best Price Request",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "I want to make sure I'm working with your real number on {{property_address}} — what's the best price you'd be comfortable with if we kept everything simple and as-is?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:expectation_reset:v1",
+    use_case: "expectation_reset",
+    variant_group: "Negotiation — Expectation Reset",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "I hear you on {{property_address}}. To be straight with you, that number is above where we could responsibly land as a direct purchase with no repairs or fees on your side. If anything changes on price or timing, I'd still like to make this work.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:comp_anchor:v1",
+    use_case: "comp_anchor",
+    variant_group: "Negotiation — Comp Anchor",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "For context on {{property_address}}: {{comp_anchor_statement}} That's a big part of how I have to look at the numbers. Does that change anything on your end?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:repair_anchor:v1",
+    use_case: "repair_anchor",
+    variant_group: "Negotiation — Repair Anchor",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Factoring in the work {{property_address}} needs, I have to budget the repairs before resale. That's what drives my number — I'm not discounting it arbitrarily.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:initial_offer:v1",
+    use_case: "initial_offer",
+    variant_group: "Negotiation — Initial Offer",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Based on everything you've shared about {{property_address}}, I can purchase it directly, as-is, for {{offer_price}} — no repairs on your end, and we handle the customary closing costs. Would that work for you?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:conditional_offer:v1",
+    use_case: "conditional_offer",
+    variant_group: "Negotiation — Conditional Offer",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Here's where I can be on {{property_address}}: {{offer_price}}, buying directly and as-is, with no repairs needed before closing. If the condition checks out the way you described, I can stand on that number.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:counter_offer:v1",
+    use_case: "counter_offer",
+    variant_group: "Negotiation — Counter Offer",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "I appreciate you working with me on {{property_address}}. I can come up to {{offer_price}} — as-is, no repairs on your side, and we work around your preferred timing. Can we make that work?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:final_offer:v1",
+    use_case: "final_offer",
+    variant_group: "Negotiation — Final Authorized Offer",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "I want to be upfront with you on {{property_address}}: {{offer_price}} is the very top of what I can do as a direct as-is purchase. If that works, I'm ready to move forward on your timeline. If not, no hard feelings — I'd rather be honest than waste your time.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:accept_terms:v1",
+    use_case: "accept_terms",
+    variant_group: "Negotiation — Accept Terms",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "That works — {{offer_price}} for {{property_address}}, purchased directly and as-is, no repairs on your end, and we handle the customary closing costs. To get the paperwork right, I just need a few details from you.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:seller_finance_probe:v1",
+    use_case: "seller_finance_probe",
+    variant_group: "Negotiation — Seller Finance Probe",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "One thought on {{property_address}}: if getting closer to your number matters more than getting everything at closing, would you be open to receiving part of it as monthly payments? It can often get you a better total price.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:future_nurture:v1",
+    use_case: "future_nurture",
+    variant_group: "Negotiation — Future Nurture",
+    sequence_position: "V1",
+    category_secondary: "Follow-Up",
+    tone: "Warm",
+    text:
+      "Totally understand — sounds like we're not lined up on {{property_address}} right now. I'll check back down the road; if your plans or price change sooner, I'm easy to reach at this number.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:contract_information_request:v1",
+    use_case: "contract_information_request",
+    variant_group: "Negotiation — Contract Information",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    text:
+      "Great — to draw up the agreement for {{property_address}} I need: everyone who's on the title, the best email for documents, whether anyone lives there now, and your preferred closing timing. Whenever you're ready.",
+  }),
 ]);
 
 export default LOCAL_TEMPLATE_CANDIDATES;
