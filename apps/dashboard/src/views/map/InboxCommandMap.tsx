@@ -3262,6 +3262,100 @@ const shouldPresentSellerPinGeojsonField = (
   && geojsonFeatureCount > 0
 )
 
+const isSellerPinIconLayerReady = (map: maplibregl.Map | null | undefined): boolean => {
+  if (!map) return false
+  try {
+    return Boolean(map.getLayer(SELLER_PINS_LAYER_IDS.icon))
+  } catch {
+    return false
+  }
+}
+
+const safeAddMapLayer = (map: maplibregl.Map, layer: maplibregl.LayerSpecification): boolean => {
+  if (map.getLayer(layer.id)) return true
+  try {
+    map.addLayer(layer)
+    return Boolean(map.getLayer(layer.id))
+  } catch (error) {
+    console.warn('[CommandMap] layer install failed', layer.id, error)
+    return false
+  }
+}
+
+const ensureSellerPinIconLayer = (
+  map: maplibregl.Map,
+  geojson: FeatureCollection<Point, Record<string, unknown>> = EMPTY_GEOJSON,
+): void => {
+  loadPropertyIcons(map)
+  if (!map.getSource(SELLER_PINS_SOURCE_ID)) {
+    try {
+      map.addSource(SELLER_PINS_SOURCE_ID, {
+        type: 'geojson',
+        data: geojson,
+        cluster: true,
+        clusterRadius: 42,
+        clusterMaxZoom: SELLER_PINS_CLUSTER_MAX_ZOOM,
+        clusterProperties: SELLER_PIN_CLUSTER_PROPERTIES as Record<string, maplibregl.ExpressionSpecification>,
+      })
+    } catch (error) {
+      console.warn('[CommandMap] seller pins source install failed', error)
+    }
+  }
+  const pointFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
+
+  safeAddMapLayer(map, {
+    id: SELLER_PINS_LAYER_IDS.hit,
+    type: 'circle',
+    source: SELLER_PINS_SOURCE_ID,
+    filter: pointFilter,
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 14, 12, 20],
+      'circle-color': '#000000',
+      'circle-opacity': 0,
+    },
+    layout: { visibility: 'none' },
+  })
+
+  safeAddMapLayer(map, {
+    id: SELLER_PINS_LAYER_IDS.ring,
+    type: 'circle',
+    source: SELLER_PINS_SOURCE_ID,
+    filter: pointFilter,
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 14],
+      'circle-color': 'rgba(0,0,0,0)',
+      'circle-stroke-color': UNIVERSAL_PIN_RING_STROKE_EXPR as maplibregl.ExpressionSpecification,
+      'circle-stroke-width': UNIVERSAL_PIN_RING_WIDTH_EXPR as maplibregl.ExpressionSpecification,
+      'circle-opacity': 0,
+      'circle-stroke-opacity': ['*', ['coalesce', ['get', 'ring_opacity'], 0.92], ['coalesce', ['get', 'focus_opacity'], 1]],
+    },
+    layout: { visibility: 'none' },
+  })
+
+  safeAddMapLayer(map, {
+    id: SELLER_PINS_LAYER_IDS.icon,
+    type: 'symbol',
+    source: SELLER_PINS_SOURCE_ID,
+    filter: pointFilter,
+    layout: {
+      'icon-image': PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification,
+      'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-pitch-alignment': 'map',
+      'icon-rotation-alignment': 'map',
+      visibility: 'none',
+    },
+    paint: {
+      'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
+      'icon-opacity': ['max', 0.96, ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1]],
+      'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
+      'icon-halo-width': 1.4,
+      'icon-halo-blur': 0.8,
+    },
+  })
+}
+
 const applySellerPinFieldPresentation = (
   map: maplibregl.Map,
   options: {
@@ -3272,10 +3366,13 @@ const applySellerPinFieldPresentation = (
 ): void => {
   const { sellerPinsEnabled, viewportZoom, geojson } = options
   const geojsonFeatureCount = geojson?.features?.length ?? 0
-  const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(
-    sellerPinsEnabled,
-    viewportZoom,
-    geojsonFeatureCount,
+  ensureSellerPinIconLayer(map, geojson)
+  if (geojson) {
+    safeSetGeoJsonSourceData(map, SELLER_PINS_SOURCE_ID, geojson)
+  }
+  const sellerPinFieldActive = (
+    shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom, geojsonFeatureCount)
+    && isSellerPinIconLayerReady(map)
   )
   const showMarkers = sellerPinFieldActive
     && shouldUsePropertySource(viewportZoom)
@@ -3283,9 +3380,6 @@ const applySellerPinFieldPresentation = (
   const vis = (on: boolean) => on ? 'visible' : 'none'
 
   loadPropertyIcons(map)
-  if (geojson) {
-    safeSetGeoJsonSourceData(map, SELLER_PINS_SOURCE_ID, geojson)
-  }
 
   for (const layerId of SELLER_PIN_ASSET_LAYER_IDS) {
     if (!map.getLayer(layerId)) continue
@@ -5445,29 +5539,7 @@ export function InboxCommandMap({
       // Property type icon — SDF symbol drawn over existing command-pin circles.
       // Uses RAW_SOURCE_ID so it shares the same data as the circle layers
       // and propTypeSlug is available via featureCollectionForPins.
-      const spIconLayerId = SELLER_PINS_LAYER_IDS.icon
-      if (!map.getLayer(spIconLayerId)) {
-        map.addLayer({
-          id: spIconLayerId,
-          type: 'symbol',
-          source: SELLER_PINS_SOURCE_ID,
-          layout: {
-            'icon-image': PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification,
-            'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
-            'icon-allow-overlap': true,
-            'icon-ignore-placement': true,
-            'icon-pitch-alignment': 'map',
-            'icon-rotation-alignment': 'map',
-          },
-          paint: {
-            'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
-            'icon-opacity': ['max', 0.96, ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1]],
-            'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
-            'icon-halo-width': 1.4,
-            'icon-halo-blur': 0.8,
-          },
-        } as maplibregl.LayerSpecification)
-      }
+      ensureSellerPinIconLayer(map, sellerPinsGeojsonRef.current)
 
       if (!map.getLayer(SELLER_PINS_LAYER_IDS.clusterGlow)) {
         const clusterIdentity = getCommandMapThemeIdentity(activeThemeRef.current.id)
@@ -6694,6 +6766,11 @@ export function InboxCommandMap({
         propTilesHandlersRegisteredRef.current = false
         try { addMapLayers(map) } catch { /* getSource/getLayer guards handle duplicates */ }
         installPropertyTileStack(map)
+        applySellerPinFieldPresentation(map, {
+          sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
+          viewportZoom: map.getZoom(),
+          geojson: sellerPinsGeojsonRef.current,
+        })
         void syncBasemapPresentation(map)
         syncLayerVisibility(map, activityModeRef.current)
         scheduleMapResize(true)
@@ -7911,10 +7988,9 @@ export function InboxCommandMap({
       const zoom = map.getZoom()
       const showPropertyField = sellerPinLayers.sellerPins
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
-      const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(
-        showPropertyField,
-        zoom,
-        sellerPinsGeojsonRef.current.features.length,
+      const sellerPinFieldActive = (
+        shouldPresentSellerPinGeojsonField(showPropertyField, zoom, sellerPinsGeojsonRef.current.features.length)
+        && isSellerPinIconLayerReady(map)
       )
       const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !sellerPinFieldActive
       const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !sellerPinFieldActive
