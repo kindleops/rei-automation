@@ -222,6 +222,8 @@ const CENSUS_SOURCE_ID = 'census-geo-source'
 const BUYER_DEMAND_SOURCE_ID = 'buyer-demand-source'
 const SOLD_COMPS_SOURCE_ID = 'sold-comps-source'
 const SELLER_PINS_SOURCE_ID = 'seller-pins-source'
+/** Unclustered mirror for symbol/icon rendering — MapLibre rejects some icon stacks on clustered parents */
+const SELLER_PINS_ICON_SOURCE_ID = 'seller-pins-icon-source'
 
 // SOURCE A — national/market aggregate clusters (canonical totals)
 const MARKET_AGGREGATE_SOURCE_ID = 'map-market-aggregates'
@@ -3301,13 +3303,21 @@ const ensureSellerPinIconLayer = (
       console.warn('[CommandMap] seller pins source install failed', error)
     }
   }
+  if (!map.getSource(SELLER_PINS_ICON_SOURCE_ID)) {
+    try {
+      map.addSource(SELLER_PINS_ICON_SOURCE_ID, { type: 'geojson', data: geojson })
+    } catch (error) {
+      console.warn('[CommandMap] seller pin icon source install failed', error)
+    }
+  } else {
+    safeSetGeoJsonSourceData(map, SELLER_PINS_ICON_SOURCE_ID, geojson)
+  }
   const pointFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
 
   safeAddMapLayer(map, {
     id: SELLER_PINS_LAYER_IDS.hit,
     type: 'circle',
-    source: SELLER_PINS_SOURCE_ID,
-    filter: pointFilter,
+    source: SELLER_PINS_ICON_SOURCE_ID,
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 14, 12, 20],
       'circle-color': '#000000',
@@ -3319,8 +3329,7 @@ const ensureSellerPinIconLayer = (
   safeAddMapLayer(map, {
     id: SELLER_PINS_LAYER_IDS.ring,
     type: 'circle',
-    source: SELLER_PINS_SOURCE_ID,
-    filter: pointFilter,
+    source: SELLER_PINS_ICON_SOURCE_ID,
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 14],
       'circle-color': 'rgba(0,0,0,0)',
@@ -3335,8 +3344,7 @@ const ensureSellerPinIconLayer = (
   safeAddMapLayer(map, {
     id: SELLER_PINS_LAYER_IDS.icon,
     type: 'symbol',
-    source: SELLER_PINS_SOURCE_ID,
-    filter: pointFilter,
+    source: SELLER_PINS_ICON_SOURCE_ID,
     layout: {
       'icon-image': PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification,
       'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
@@ -3369,6 +3377,7 @@ const applySellerPinFieldPresentation = (
   ensureSellerPinIconLayer(map, geojson)
   if (geojson) {
     safeSetGeoJsonSourceData(map, SELLER_PINS_SOURCE_ID, geojson)
+    safeSetGeoJsonSourceData(map, SELLER_PINS_ICON_SOURCE_ID, geojson)
   }
   const sellerPinFieldActive = (
     shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom, geojsonFeatureCount)
@@ -8883,6 +8892,7 @@ export function InboxCommandMap({
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
     safeSetGeoJsonSourceData(mapRef.current, SELLER_PINS_SOURCE_ID, sellerPinsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
+    safeSetGeoJsonSourceData(mapRef.current, SELLER_PINS_ICON_SOURCE_ID, sellerPinsGeojson as Parameters<maplibregl.GeoJSONSource['setData']>[0])
   }, [sellerPinsGeojson])
 
   useEffect(() => {
