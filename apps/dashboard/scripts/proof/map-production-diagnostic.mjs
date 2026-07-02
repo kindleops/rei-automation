@@ -129,6 +129,11 @@ const report = await page.evaluate(() => {
     tileFeatures = map.querySourceFeatures('property-map-tiles', { sourceLayer: 'properties' }).length
   } catch { /* ignore */ }
 
+  let commandPinsFeatureCount = 0
+  try {
+    commandPinsFeatureCount = map.querySourceFeatures('command-pins-raw').length
+  } catch { /* ignore */ }
+
   const rendered = {}
   for (const id of ['prop-tiles-icon', 'seller-pins-icon', 'command-pin-icon-raw']) {
     try {
@@ -146,6 +151,7 @@ const report = await page.evaluate(() => {
     iconState,
     sellerFeatures,
     tileFeatures,
+    commandPinsFeatureCount,
     rendered,
     styleLoaded: map.isStyleLoaded(),
   }

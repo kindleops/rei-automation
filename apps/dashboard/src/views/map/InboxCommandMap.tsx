@@ -3298,7 +3298,7 @@ const buildCommandMapPinsWithSellerLeads = (
 
 const syncCommandPinSourcesWithSellerFallback = (
   map: maplibregl.Map,
-  sellerLeads: CommandMapSellerPin[],
+  sellerGeojson: FeatureCollection<Point, Record<string, unknown>>,
   threadPins: CommandMapPin[],
   options: {
     sellerPinsEnabled: boolean
@@ -3307,15 +3307,40 @@ const syncCommandPinSourcesWithSellerFallback = (
     styleMode: MapStyleMode
   },
 ): void => {
-  if (!options.sellerPinsEnabled || sellerLeads.length === 0) return
+  if (!options.sellerPinsEnabled || sellerGeojson.features.length === 0) return
   if (isSellerPinIconLayerReady(map)) return
-  const mergedPins = buildCommandMapPinsWithSellerLeads(threadPins, sellerLeads, true)
-  const mergedGeojson = featureCollectionForPins(
-    mergedPins,
+  const threadGeojson = featureCollectionForPins(
+    threadPins,
     options.selectedConversationId,
     options.activeKpiFilter,
     options.styleMode,
   )
+  const covered = new Set(
+    threadPins.map((pin) => text(pin.property_id)).filter(Boolean),
+  )
+  const sellerFeatures = sellerGeojson.features.filter((feature) => {
+    const propertyId = text((feature.properties as Record<string, unknown> | undefined)?.property_id)
+    return propertyId && !covered.has(propertyId)
+  })
+  const mergedGeojson: FeatureCollection<Point, PinFeatureProps> = {
+    type: 'FeatureCollection',
+    features: [
+      ...threadGeojson.features,
+      ...sellerFeatures.map((feature) => ({
+        ...feature,
+        properties: {
+          ...(feature.properties as PinFeatureProps),
+          featureType: 'pin' as const,
+          selected: 0 as const,
+          focusOpacity: 1,
+          propTypeSlug: normalizePropertyTypeSlug(
+            text((feature.properties as Record<string, unknown> | undefined)?.property_type)
+            || text((feature.properties as Record<string, unknown> | undefined)?.asset_class),
+          ),
+        },
+      })),
+    ],
+  }
   safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
   safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, mergedGeojson)
 }
@@ -9070,7 +9095,7 @@ export function InboxCommandMap({
       })
       syncCommandPinSourcesWithSellerFallback(
         map,
-        normalizedFilteredPins,
+        nextSellerPinsGeojson,
         visiblePinsRef.current,
         {
           sellerPinsEnabled: sellerPinLayers.sellerPins,
