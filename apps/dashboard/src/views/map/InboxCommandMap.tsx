@@ -3322,15 +3322,21 @@ const syncCommandPinSourcesWithSellerFallback = (
     const propertyId = text((feature.properties as Record<string, unknown> | undefined)?.property_id)
     return propertyId && !covered.has(propertyId)
   })
-  const mergedGeojson: FeatureCollection<Point, PinFeatureProps> = {
+  const mergedGeojson = {
     type: 'FeatureCollection',
-    features: [
-      ...threadGeojson.features,
-      ...(sellerFeatures as FeatureCollection<Point, PinFeatureProps>['features']),
-    ],
+    features: [...threadGeojson.features, ...sellerFeatures],
+  } as FeatureCollection<Point, PinFeatureProps>
+  const wroteRaw = safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
+  const wroteCluster = safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, mergedGeojson)
+  if ((import.meta.env.DEV || isMapVerificationMode()) && (!wroteRaw || !wroteCluster)) {
+    console.warn('[CommandMap] seller pin fallback sync failed', {
+      wroteRaw,
+      wroteCluster,
+      mergedFeatures: mergedGeojson.features.length,
+      sellerFeatures: sellerFeatures.length,
+      threadFeatures: threadGeojson.features.length,
+    })
   }
-  safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
-  safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, mergedGeojson)
 }
 
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
