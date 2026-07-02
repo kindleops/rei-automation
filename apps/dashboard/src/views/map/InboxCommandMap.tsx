@@ -3296,6 +3296,30 @@ const buildCommandMapPinsWithSellerLeads = (
   return extras.length > 0 ? [...threadPins, ...extras] : threadPins
 }
 
+const syncCommandPinSourcesWithSellerFallback = (
+  map: maplibregl.Map,
+  sellerLeads: CommandMapSellerPin[],
+  threadPins: CommandMapPin[],
+  options: {
+    sellerPinsEnabled: boolean
+    selectedConversationId: string | null
+    activeKpiFilter: MapKpiFilterKey | null
+    styleMode: MapStyleMode
+  },
+): void => {
+  if (!options.sellerPinsEnabled || sellerLeads.length === 0) return
+  if (isSellerPinIconLayerReady(map)) return
+  const mergedPins = buildCommandMapPinsWithSellerLeads(threadPins, sellerLeads, true)
+  const mergedGeojson = featureCollectionForPins(
+    mergedPins,
+    options.selectedConversationId,
+    options.activeKpiFilter,
+    options.styleMode,
+  )
+  safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
+  safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, mergedGeojson)
+}
+
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
 type MapWebGLErrorDetails = {
   message: string
@@ -8424,9 +8448,13 @@ export function InboxCommandMap({
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map)) return
-    const clusteredMode =
+    const sellerPinFallbackActive = sellerPinLayers.sellerPins
+      && sellerPinsGeojsonRef.current.features.length > 0
+      && !isSellerPinIconLayerReady(map)
+    let clusteredMode =
       (activityMode !== 'sends' && !activeKpiFilter)
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
+    if (sellerPinFallbackActive) clusteredMode = false
     const sellerPinFieldReady = sellerPinLayers.sellerPins
       && sellerPinsGeojsonRef.current.features.length > 0
       && isSellerPinIconLayerReady(map)
@@ -9025,6 +9053,17 @@ export function InboxCommandMap({
         viewportZoom: map.getZoom(),
         geojson: nextSellerPinsGeojson,
       })
+      syncCommandPinSourcesWithSellerFallback(
+        map,
+        normalizedFilteredPins,
+        toActivityPins(pinPipeline.mapped, activityModeRef.current),
+        {
+          sellerPinsEnabled: sellerPinLayers.sellerPins,
+          selectedConversationId: selectedThreadRef.current?.id ?? null,
+          activeKpiFilter: activeKpiFilterRef.current,
+          styleMode: mapStyleModeRef.current,
+        },
+      )
     }
   }, [mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
 
