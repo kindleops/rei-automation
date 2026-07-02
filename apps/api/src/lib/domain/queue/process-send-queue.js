@@ -54,6 +54,10 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
 import { isManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import {
+  isDeferredQueueRow,
+  resolveDeferredQueueMessage,
+} from "@/lib/domain/queue/resolve-deferred-queue-message.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -1469,6 +1473,83 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
           now,
         })
       );
+    }
+
+    // ── Deferred follow-up resolution ────────────────────────────────────
+    // Nurture follow-ups are written body-less with deferred_message_resolution;
+    // resolve their template at send time. Unresolvable rows pause for review —
+    // they must never hard-fail the run or send blank.
+    if (isDeferredQueueRow(queue_row)) {
+      const deferred = await resolveDeferredQueueMessage(queue_row, {
+        supabase: getSupabase(deps),
+      });
+      if (deferred.ok && deferred.resolved) {
+        const deferred_metadata = {
+          ...(queue_row.metadata ?? {}),
+          deferred_message_resolution: false,
+          deferred_resolved_at: now,
+          deferred_resolved_use_case: deferred.use_case,
+          deferred_resolved_template_id: deferred.template_id,
+        };
+        await getSupabase(deps)
+          .from(QUEUE_TABLE)
+          .update({
+            message_body: deferred.message_body,
+            message_text: deferred.message_body,
+            rendered_message: deferred.message_body,
+            template_id: deferred.template_id,
+            selected_template_id: deferred.template_id,
+            use_case_template: deferred.use_case || queue_row.use_case_template,
+            character_count: deferred.message_body.length,
+            metadata: deferred_metadata,
+            updated_at: now,
+          })
+          .eq("id", queue_row_id);
+        queue_row = normalizeSendQueueRow({
+          ...queue_row,
+          message_body: deferred.message_body,
+          message_text: deferred.message_body,
+          rendered_message: deferred.message_body,
+          template_id: deferred.template_id,
+          selected_template_id: deferred.template_id,
+          use_case_template: deferred.use_case || queue_row.use_case_template,
+          metadata: deferred_metadata,
+        });
+      } else {
+        await getSupabase(deps)
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "paused_deferred_unresolved",
+            guard_status: "blocked",
+            guard_reason: deferred.reason || "deferred_message_unresolved",
+            last_guard_checked_at: now,
+            paused_reason: deferred.reason || "deferred_message_unresolved",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              skip_reason: deferred.reason || "deferred_message_unresolved",
+              final_queue_status: "paused_deferred_unresolved",
+              finalized_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+
+        info("send.blocked_deferred_unresolved", {
+          queue_row_id,
+          intent: deferred.intent || null,
+          reason: deferred.reason || "deferred_message_unresolved",
+        });
+
+        return {
+          ok: false,
+          skipped: true,
+          queue_row_id,
+          reason: deferred.reason || "deferred_message_unresolved",
+        };
+      }
     }
 
     const message_fields = {

@@ -505,6 +505,8 @@ export async function runInboundIntelligencePhase({
     ok: true,
     intelligence_snapshot,
     canonical_decision,
+    stage_domain,
+    condition_signal,
     seller_stage_reply: {
       ok: true,
       queued: false,

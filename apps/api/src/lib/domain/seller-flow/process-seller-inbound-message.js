@@ -14,6 +14,11 @@ import {
   buildSellerFlowDecision,
   decisionToUniversalLeadStatePatch,
 } from "@/lib/domain/seller-flow/seller-flow-decision-contract.js";
+import { resolveSellerStageTransition } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import {
+  persistSellerTransitionArtifacts,
+  loadSellerDealState,
+} from "@/lib/domain/seller-flow/persist-seller-transition.js";
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
@@ -416,6 +421,62 @@ export async function processSellerInboundMessage({
     }
   }
 
+  // Deterministic lifecycle transition — the classifier/engines only feed
+  // facts and intents; this resolver alone decides stage/status/next action.
+  let transition = null;
+  try {
+    const stage_engine_decision =
+      intelligence?.stage_domain?.engine_result?.stage_decision || null;
+    const extracted = contract.extracted_facts || {};
+    const summary = context?.summary || {};
+    const deal_state = await loadSellerDealState({
+      threadKey: threadKey || inboundFrom,
+      propertyId,
+      ownerId,
+      supabaseClient: supabase,
+    });
+    transition = resolveSellerStageTransition({
+      stage_before: stageBefore || summary.conversation_stage || null,
+      known_facts: {
+        ...(deal_state?.known_facts || {}),
+        ownership_status: summary.ownership_status || deal_state?.known_facts?.ownership_status || null,
+        asking_price: deal_state?.known_facts?.asking_price || summary.asking_price || null,
+        occupancy_status: summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
+      },
+      new_facts: {
+        asking_price:
+          stage_engine_decision?.seller_asking_price ?? extracted.asking_price ?? null,
+        condition_summary:
+          typeof extracted.condition === "string" ? extracted.condition : null,
+        condition_disclosed:
+          contract.normalized_intent === "condition_disclosed" ||
+          Boolean(extracted.condition) ||
+          undefined,
+        occupancy_status: extracted.tenant_occupied
+          ? "tenant_occupied"
+          : stage_engine_decision?.occupancy_status || null,
+        timeline: extracted.timeline || null,
+      },
+      intent:
+        intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
+      classification_confidence: classification?.confidence ?? null,
+      current_temperature: summary.lead_temperature || summary.temperature || null,
+      current_disposition: summary.disposition || null,
+      automation_mode: effective_auto_reply_mode,
+      negotiation_state:
+        underwritingSignals?.negotiation_state || deal_state?.negotiation_state || null,
+      ade_result: underwritingSignals?.ade_result || deal_state?.ade_result || null,
+      contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
+      engine_decision: stage_engine_decision,
+      source_message_id: providerMessageId || inboundEventId,
+    });
+  } catch (transition_error) {
+    runtimeDeps.warn("[SELLER_INBOUND_TRANSITION_RESOLVER_FAILED]", {
+      thread_key: threadKey || inboundFrom,
+      error: transition_error?.message || "transition_resolver_failed",
+    });
+  }
+
   const decision = buildSellerFlowDecision({
     contract,
     intelligence,
@@ -427,6 +488,7 @@ export async function processSellerInboundMessage({
     execution_allowed,
     selected_participant_id: prospectId,
     selected_sender_number: inboundTo,
+    transition,
   });
 
   let universal_state_patch = null;
@@ -450,8 +512,11 @@ export async function processSellerInboundMessage({
           meta: {
             change_source: STATE_SOURCE_CODES.AUTOPILOT,
             source_view: "seller_inbound_orchestrator",
-            reason: decision.immediate_next_action,
+            reason: decision.reasoning_code || decision.immediate_next_action,
             executed_next_action: Boolean(execution?.queued),
+            metadata: decision.reasoning_code
+              ? { reasoning_code: decision.reasoning_code, next_action: decision.next_action }
+              : {},
           },
         });
       } catch (state_error) {
@@ -461,6 +526,22 @@ export async function processSellerInboundMessage({
         });
       }
     }
+  }
+
+  // Deal-record persistence: asking-price facts, negotiation state, canonical
+  // ADE execution + snapshot, monotonic acquisition-stage advancement.
+  let deal_persistence = null;
+  if (transition && supabase) {
+    deal_persistence = await persistSellerTransitionArtifacts({
+      transition,
+      threadKey: threadKey || inboundFrom,
+      propertyId,
+      ownerId,
+      intent: contract.normalized_intent,
+      inboundEventId,
+      dryRun: writes_suppressed,
+      supabaseClient: supabase,
+    });
   }
 
   const dispatch_side_effects = !skipNotifications && !writes_suppressed;
@@ -596,6 +677,8 @@ export async function processSellerInboundMessage({
       queue_row_id: execution?.queue_row_id || null,
     },
     seller_automation_execution,
+    transition,
+    deal_persistence,
   };
 }
 

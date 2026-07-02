@@ -2,6 +2,7 @@ import {
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
+  isAllowedLifecycleTransition,
   UNIVERSAL_LEAD_STATE_PATCH_FIELDS,
 } from '@/lib/domain/lead-state/universal-lead-state-registry.js';
 import { isCanonicalThreadKey } from '@/lib/cockpit/cockpit-service.js';
@@ -26,6 +27,7 @@ const TRACKED_FIELDS = new Set([
   'lead_temperature',
   'disposition',
   'contactability_status',
+  'next_action',
   'is_starred',
   'is_pinned',
   'is_archived',
@@ -190,6 +192,10 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     rowPatch.archive_reason = clean(canonicalPatch.archive_reason) || null;
   }
 
+  if ('next_action' in canonicalPatch) rowPatch.next_action = clean(canonicalPatch.next_action) || null;
+  if ('next_action_at' in canonicalPatch) rowPatch.next_action_at = canonicalPatch.next_action_at || null;
+  if ('follow_up_at' in canonicalPatch) rowPatch.follow_up_at = canonicalPatch.follow_up_at || null;
+
   if ('paused_reason' in canonicalPatch) rowPatch.paused_reason = clean(canonicalPatch.paused_reason) || null;
   if ('is_read' in canonicalPatch) {
     rowPatch.is_read = asBoolean(canonicalPatch.is_read, false);
@@ -220,13 +226,42 @@ export async function patchUniversalLeadState({
   }
 
   const previous = await fetchCurrentLeadState(supabase, key);
+
+  // Lifecycle stage is monotonic for automated writers: autopilot/AI/system can
+  // only hold or advance, and never override an operator's manual stage lock.
+  // Operators (change_source=manual) may still move a lead anywhere.
+  const stageGuards = [];
+  const changeSource = meta.change_source || STATE_SOURCE_CODES.MANUAL;
+  if ('lifecycle_stage' in canonicalPatch && previous && changeSource !== STATE_SOURCE_CODES.MANUAL) {
+    if (previous.manual_stage_lock === true) {
+      delete canonicalPatch.lifecycle_stage;
+      stageGuards.push('manual_stage_lock_blocked_stage_write');
+    } else if (
+      previous.lifecycle_stage &&
+      !isAllowedLifecycleTransition(previous.lifecycle_stage, canonicalPatch.lifecycle_stage)
+    ) {
+      delete canonicalPatch.lifecycle_stage;
+      stageGuards.push('monotonic_stage_guard_blocked_regression');
+    }
+  }
+  if (!Object.keys(canonicalPatch).length) {
+    return {
+      ok: true,
+      blocked: true,
+      reason: stageGuards[0] || 'no_allowed_patch_fields',
+      stage_guards: stageGuards,
+      thread_key: key,
+      previous,
+    };
+  }
+
   const rowPatch = {
     thread_key: key,
     ...buildRowPatch(canonicalPatch, meta),
   };
 
   if (dryRun) {
-    return { ok: true, dry_run: true, thread_key: key, patch: rowPatch, previous };
+    return { ok: true, dry_run: true, thread_key: key, patch: rowPatch, previous, stage_guards: stageGuards };
   }
 
   const { data, error } = await supabase
@@ -255,6 +290,7 @@ export async function patchUniversalLeadState({
     ok: true,
     thread_key: key,
     row: data,
+    stage_guards: stageGuards,
     audit_event_ids: auditRows.map((row) => row.id),
     user_preferences: userPrefs,
     realtime_event: {

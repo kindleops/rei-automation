@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server.js";
 
 import { recoverUnprocessedInboundMessages } from "@/lib/domain/seller-flow/recover-unprocessed-inbound-messages.js";
+import { recoverSellerExecutionGaps } from "@/lib/domain/seller-flow/recover-seller-execution-gaps.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { requireSharedSecretAuth } from "@/lib/security/shared-secret.js";
 import { requireCronAuth } from "@/lib/security/cron-auth.js";
@@ -39,16 +40,32 @@ async function runRecovery(body = {}) {
     detectedIntent: body.detected_intent || body.detectedIntent || null,
   });
 
+  // Execution-gap sweeps: state patches, ADE backfill, contract-action repair,
+  // stale-follow-up cancellation. Failure-isolated from inbound reprocessing.
+  let execution_gaps = null;
+  if (!proofCases) {
+    try {
+      execution_gaps = await recoverSellerExecutionGaps({
+        supabaseClient: getDefaultSupabaseClient(),
+        limit,
+        dryRun,
+      });
+    } catch (gap_error) {
+      execution_gaps = { ok: false, error: gap_error?.message || "gap_recovery_failed" };
+    }
+  }
+
   if (!dryRun) {
     const heartbeatAt = new Date().toISOString();
     await setSystemValues({
       recovery_worker_heartbeat_at: heartbeatAt,
       follow_up_scheduler_heartbeat_at: heartbeatAt,
       recovery_worker_last_processed: String(result.processed ?? result.recovered ?? 0),
+      execution_gap_recovery_last_repaired: String(execution_gaps?.total_repaired ?? 0),
     });
   }
 
-  return result;
+  return { ...result, execution_gaps };
 }
 
 export async function GET(request) {

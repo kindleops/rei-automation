@@ -81,6 +81,7 @@ export function buildSellerFlowDecision({
   execution_allowed = false,
   selected_participant_id = null,
   selected_sender_number = null,
+  transition = null,
 } = {}) {
   const snapshot = intelligence?.intelligence_snapshot || {};
   const ownership_probe = contract?.ownership_probe_transition || null;
@@ -111,28 +112,45 @@ export function buildSellerFlowDecision({
     (execution_mode !== "full_autopilot" ? execution_mode : null) ||
     null;
 
+  // The deterministic transition resolver is the lifecycle authority when
+  // present: stage, temperature, disposition, contactability and next action
+  // all come from it. Legacy derivations remain the fallback contract.
   return {
     decision_version: "seller_flow_decision_v1",
-    stage_before: mapUniversalStage(stage_before),
-    stage_after: mapUniversalStage(stage_after),
-    operational_status: deriveOperationalStatus({
-      ownership_probe,
-      automation_decision,
-      execution,
-      follow_up,
-    }),
+    stage_before: transition?.stage_before || mapUniversalStage(stage_before),
+    stage_after: transition?.stage_after || mapUniversalStage(stage_after),
+    operational_status:
+      transition?.operational_status ||
+      deriveOperationalStatus({
+        ownership_probe,
+        automation_decision,
+        execution,
+        follow_up,
+      }),
     temperature:
+      transition?.lead_temperature ||
       ownership_probe?.lead_temperature ||
       contract?.raw_classification?.lead_temperature ||
       contract?.raw_classification?.seller_state?.lead_temperature ||
       null,
     disposition:
+      transition?.disposition ||
       ownership_probe?.disposition ||
       (contract?.interest_signal === "not_interested" ? "not_interested" : null),
-    contactability: deriveContactability(automation_decision, contract),
-    ownership_state: contract?.ownership_signal || "unknown",
-    extracted_facts: contract?.extracted_facts || {},
+    contactability:
+      transition?.contactability_patch?.contactability_status ||
+      deriveContactability(automation_decision, contract),
+    ownership_state:
+      transition?.ownership_patch?.ownership_status || contract?.ownership_signal || "unknown",
+    extracted_facts: transition?.facts_patch || contract?.extracted_facts || {},
     immediate_next_action: immediate_action,
+    next_action: transition?.next_action || null,
+    next_action_due_at: transition?.next_action_due_at || null,
+    reasoning_code: transition?.reasoning_code || null,
+    ade_action: transition?.ade_action || null,
+    review_required: Boolean(transition?.review_required),
+    stages_advanced: transition?.stages_advanced ?? null,
+    transition,
     follow_up_action,
     template_key,
     selected_participant: selected_participant_id || contract?.participant_id || null,
@@ -146,11 +164,16 @@ export function buildSellerFlowDecision({
       ownership_probe,
       stage_before,
       stage_after,
+      transition,
     }),
     notification_events: buildNotificationEvents({ contract, automation_decision, execution }),
     rendered_message: execution?.rendered_message_text || null,
     queue_row_id: execution?.queue_row_id || null,
-    follow_up_at: ownership_probe?.follow_up_at || follow_up?.scheduled_for || null,
+    follow_up_at:
+      ownership_probe?.follow_up_at ||
+      follow_up?.scheduled_for ||
+      (transition?.follow_up?.create ? transition.follow_up.due_at : null) ||
+      null,
     persisted_at: new Date().toISOString(),
     intelligence_snapshot: snapshot,
     automation_decision,
@@ -164,9 +187,21 @@ function buildWorkflowEvents({
   ownership_probe = null,
   stage_before = null,
   stage_after = null,
+  transition = null,
 } = {}) {
   const events = [];
   const intent = contract?.normalized_intent;
+
+  for (const type of transition?.workflow_event_types || []) {
+    events.push({
+      type,
+      stage_before: transition.stage_before,
+      stage_after: transition.stage_after,
+      reasoning_code: transition.reasoning_code,
+      next_action: transition.next_action,
+      ade_action: transition.ade_action,
+    });
+  }
 
   if (intent === "ownership_confirmed" || contract?.ownership_signal === "confirmed") {
     events.push({ type: "OWNER_CONFIRMED", stage_before, stage_after });
@@ -203,7 +238,12 @@ function buildWorkflowEvents({
       reason: automation_decision.human_review_reason || automation_decision.audit_reason,
     });
   }
-  return events;
+  const seen = new Set();
+  return events.filter((event) => {
+    if (seen.has(event.type)) return false;
+    seen.add(event.type);
+    return true;
+  });
 }
 
 function buildNotificationEvents({ contract = null, automation_decision = null, execution = null } = {}) {
@@ -233,6 +273,8 @@ export function decisionToUniversalLeadStatePatch(decision = {}) {
   if (decision.disposition) patch.disposition = decision.disposition;
   if (decision.contactability) patch.contactability_status = decision.contactability;
   if (decision.follow_up_at) patch.follow_up_at = decision.follow_up_at;
+  if (decision.next_action) patch.next_action = decision.next_action;
+  if (decision.next_action_due_at) patch.next_action_at = decision.next_action_due_at;
   return patch;
 }
 
