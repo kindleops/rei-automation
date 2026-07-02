@@ -146,6 +146,7 @@ export interface CampaignPreviewResult {
   total_scanned: number
   clean_targets: number
   ready_to_queue: number
+  built_target_count?: number
   queueable_today: number
   addressable_properties?: number | null
   addressable_properties_approximate?: boolean

@@ -65,6 +65,8 @@ export interface CampaignSummary {
   launch_readiness?: LaunchReadinessLevel
   launch_blockers?: string[]
   launch_blocker_codes?: string[]
+  routable_recipient_count?: number
+  launch_ready_recipient_count?: number
   recipient_metrics?: CampaignRecipientMetrics | null
   execution_proof?: CampaignExecutionProof | null
   sent_count: number
