@@ -139,6 +139,22 @@ export const countVisualRepresentation = (
     liveBreakouts: 0,
   }
 
+  const sellerIconLayer = 'seller-pins-icon'
+  const sellerIconsVisible = map.getLayer(sellerIconLayer)
+    && map.getLayoutProperty(sellerIconLayer, 'visibility') !== 'none'
+
+  if (sellerIconsVisible) {
+    const sellerRendered = map.queryRenderedFeatures(undefined, { layers: [sellerIconLayer] })
+    const sellerIds = new Set<string>()
+    for (const f of sellerRendered) {
+      const id = String(f.properties?.property_id ?? f.id ?? '')
+      if (id) sellerIds.add(id)
+    }
+    result.renderedIndividualIcons = sellerIds.size
+    result.renderedHalos = map.queryRenderedFeatures(undefined, { layers: ['seller-pins-ring'] }).length
+    return result
+  }
+
   if (shouldUseVectorTileSource(zoom)) {
     const iconRendered = map.queryRenderedFeatures(undefined, { layers: [PROPERTY_TILES_LAYER_IDS.icon] })
     const haloRendered = map.queryRenderedFeatures(undefined, { layers: [PROPERTY_TILES_LAYER_IDS.halo] })

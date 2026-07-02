@@ -6805,7 +6805,7 @@ export function InboxCommandMap({
 
       const mapInstance = map
       mapRef.current = mapInstance
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV || isMapVerificationMode() || isMapDiagnosticsDebugEnabled()) {
       ;(window as unknown as { __nexusCommandMap?: maplibregl.Map }).__nexusCommandMap = mapInstance
     }
     mapContextLostRef.current = false
@@ -8188,7 +8188,9 @@ export function InboxCommandMap({
     const clusteredMode =
       (activityMode !== 'sends' && !activeKpiFilter)
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
-    const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinLayers.sellerPins
+    const sellerPinFieldReady = sellerPinLayers.sellerPins
+      && sellerPinsGeojsonRef.current.features.length > 0
+    const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinFieldReady
     RAW_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
     })
@@ -8198,7 +8200,7 @@ export function InboxCommandMap({
     CLUSTER_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
     })
-  }, [activeKpiFilter, activityMode, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, baseStyleLoading])
+  }, [activeKpiFilter, activityMode, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, sellerPinsGeojson, baseStyleLoading])
 
   useEffect(() => {
     const map = mapRef.current

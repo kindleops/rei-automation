@@ -30,13 +30,29 @@
     }
   ],
   "rewrites": [
-    {
-      "source": "/version",
-      "destination": "/api/version"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/version", "destination": "/api/version" },
+    { "source": "/api/internal/dashboard/:path*", "destination": "https://api-steel-three-96.vercel.app/api/internal/dashboard/:path*" },
+    { "source": "/api/cockpit/inbox/live", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/inbox/live" },
+    { "source": "/api/cockpit/inbox/counts", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/inbox/counts" },
+    { "source": "/api/cockpit/inbox/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/inbox/:path*" },
+    { "source": "/api/cockpit/health", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/health" },
+    { "source": "/api/cockpit/queue/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/queue/:path*" },
+    { "source": "/api/cockpit/ops/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/ops/:path*" },
+    { "source": "/api/cockpit/deal-intelligence/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/deal-intelligence/:path*" },
+    { "source": "/api/cockpit/deal-context/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/deal-context/:path*" },
+    { "source": "/api/cockpit/entity-graph/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/entity-graph/:path*" },
+    { "source": "/api/cockpit/campaigns/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/campaigns/:path*" },
+    { "source": "/api/cockpit/workflows/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/workflows/:path*" },
+    { "source": "/api/cockpit/templates/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/templates/:path*" },
+    { "source": "/api/cockpit/metrics/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/metrics/:path*" },
+    { "source": "/api/cockpit/email/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/email/:path*" },
+    { "source": "/api/cockpit/calendar/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/calendar/:path*" },
+    { "source": "/api/cockpit/threads/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/threads/:path*" },
+    { "source": "/api/cockpit/lead-state/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/lead-state/:path*" },
+    { "source": "/api/cockpit/notifications/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/notifications/:path*" },
+    { "source": "/api/intel/:path*", "destination": "https://api-steel-three-96.vercel.app/api/intel/:path*" },
+    { "source": "/api/ops/:path*", "destination": "https://api-steel-three-96.vercel.app/api/ops/:path*" },
+    { "source": "/api/workflows/:path*", "destination": "https://api-steel-three-96.vercel.app/api/workflows/:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
