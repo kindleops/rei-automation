@@ -4069,6 +4069,7 @@ export function InboxCommandMap({
   const censusOverlayFeaturesRef = useRef<CensusOverlayFeature[]>([])
   const activeCensusMetricRef = useRef<CensusOverlayMetric | null>(null)
   const geojsonRef = useRef<FeatureCollection<Point, PinFeatureProps>>(featureCollectionForPins([], null, null, initialMapStyleMode))
+  const visiblePinsRef = useRef<CommandMapPin[]>([])
   const buyerPurchasesGeojsonRef = useRef<FeatureCollection<Point, BuyerFeatureProps>>(EMPTY_GEOJSON as FeatureCollection<Point, BuyerFeatureProps>)
   const buyerProfilesGeojsonRef = useRef<FeatureCollection<Point, BuyerFeatureProps>>(EMPTY_GEOJSON as FeatureCollection<Point, BuyerFeatureProps>)
   const buyerTrailGeojsonRef = useRef<FeatureCollection<LineString, GeoJsonProperties>>({ type: 'FeatureCollection', features: [] })
@@ -4568,9 +4569,16 @@ export function InboxCommandMap({
   const activeSellerCardHydrationKey = activeSellerMapCard
     ? `${activeSellerMapCard.kind}|${activeSellerMapCard.intent}|${activeSellerMapCard.id}`
     : null
+  const sellerLeadsForCommandPins = useMemo(() => {
+    if (!sellerPinLayers.sellerPins) return []
+    if (sellerPins.length > 0) return sellerPins
+    return sellerPinsGeojson.features
+      .map((feature) => sanitizeSellerPinRecord((feature.properties ?? {}) as Partial<CommandMapSellerPin>))
+      .filter((pin) => text(pin.property_id))
+  }, [sellerPinLayers.sellerPins, sellerPins, sellerPinsGeojson])
   const commandMapPins = useMemo(
-    () => buildCommandMapPinsWithSellerLeads(visiblePins, sellerPins, sellerPinLayers.sellerPins),
-    [sellerPinLayers.sellerPins, sellerPins, visiblePins],
+    () => buildCommandMapPinsWithSellerLeads(visiblePins, sellerLeadsForCommandPins, sellerPinLayers.sellerPins),
+    [sellerLeadsForCommandPins, sellerPinLayers.sellerPins, visiblePins],
   )
   const geojson = useMemo(
     () => featureCollectionForPins(
@@ -4771,6 +4779,7 @@ export function InboxCommandMap({
   }, [sellerPinsGeojson])
 
   geojsonRef.current = geojson
+  visiblePinsRef.current = visiblePins
   activityModeRef.current = activityMode
   activeKpiFilterRef.current = activeKpiFilter
   performanceSettingsRef.current = performanceSettings
@@ -8043,12 +8052,18 @@ export function InboxCommandMap({
 
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
-    safeSetGeoJsonSourceData(mapRef.current, RAW_SOURCE_ID, geojson)
-    safeSetGeoJsonSourceData(mapRef.current, CLUSTER_SOURCE_ID, geojson)
-    safeSetGeoJsonSourceData(mapRef.current, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
-    safeSetGeoJsonSourceData(mapRef.current, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
-    safeSetGeoJsonSourceData(mapRef.current, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
-  }, [buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson])
+    const map = mapRef.current!
+    const sellerFallbackActive = sellerPinLayers.sellerPins
+      && sellerPinsGeojson.features.length > 0
+      && !isSellerPinIconLayerReady(map)
+    if (!sellerFallbackActive) {
+      safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, geojson)
+      safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, geojson)
+    }
+    safeSetGeoJsonSourceData(map, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
+    safeSetGeoJsonSourceData(map, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
+    safeSetGeoJsonSourceData(map, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
+  }, [buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson, sellerPinLayers.sellerPins, sellerPinsGeojson])
 
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
@@ -9056,7 +9071,7 @@ export function InboxCommandMap({
       syncCommandPinSourcesWithSellerFallback(
         map,
         normalizedFilteredPins,
-        toActivityPins(pinPipeline.mapped, activityModeRef.current),
+        visiblePinsRef.current,
         {
           sellerPinsEnabled: sellerPinLayers.sellerPins,
           selectedConversationId: selectedThreadRef.current?.id ?? null,
