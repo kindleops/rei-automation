@@ -418,6 +418,7 @@ const TERMINAL_QUEUE_STATUSES = new Set([
   "failed",
   "blocked",
   "paused_name_missing",
+  "paused_deferred_unresolved",
   "paused_invalid_queue_row",
   "paused_duplicate",
   "paused_global_lock",
