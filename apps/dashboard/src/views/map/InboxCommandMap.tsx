@@ -3233,6 +3233,73 @@ function safeSetGeoJsonSourceData(
   }
 }
 
+const SELLER_PIN_ASSET_LAYER_IDS = [
+  SELLER_PINS_LAYER_IDS.hit,
+  SELLER_PINS_LAYER_IDS.icon,
+  SELLER_PINS_LAYER_IDS.ring,
+  SELLER_PINS_LAYER_IDS.clusterGlow,
+  SELLER_PINS_LAYER_IDS.clusterCore,
+  SELLER_PINS_LAYER_IDS.clusterCount,
+] as const
+
+const SELLER_PIN_ORB_LAYER_IDS = [
+  SELLER_PINS_LAYER_IDS.core,
+  SELLER_PINS_LAYER_IDS.glow,
+  SELLER_PINS_LAYER_IDS.pulse,
+] as const
+
+const shouldPresentSellerPinGeojsonField = (
+  sellerPinsEnabled: boolean,
+  zoom: number,
+): boolean => sellerPinsEnabled && shouldUseVectorTileSource(zoom)
+
+const applySellerPinFieldPresentation = (
+  map: maplibregl.Map,
+  options: {
+    sellerPinsEnabled: boolean
+    viewportZoom: number
+    geojson?: FeatureCollection<Point, Record<string, unknown>>
+  },
+): void => {
+  const { sellerPinsEnabled, viewportZoom, geojson } = options
+  const showMarkers = sellerPinsEnabled
+    && shouldUsePropertySource(viewportZoom)
+    && !shouldUseAggregateSource(viewportZoom)
+  const vis = (on: boolean) => on ? 'visible' : 'none'
+
+  loadPropertyIcons(map)
+  if (geojson) {
+    safeSetGeoJsonSourceData(map, SELLER_PINS_SOURCE_ID, geojson)
+  }
+
+  for (const layerId of SELLER_PIN_ASSET_LAYER_IDS) {
+    if (!map.getLayer(layerId)) continue
+    map.setLayoutProperty(layerId, 'visibility', vis(showMarkers))
+    if (layerId === SELLER_PINS_LAYER_IDS.icon) {
+      map.setLayoutProperty(layerId, 'icon-image', PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification)
+      map.setPaintProperty(
+        layerId,
+        'icon-color',
+        ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
+      )
+    }
+  }
+  for (const layerId of SELLER_PIN_ORB_LAYER_IDS) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', 'none')
+    }
+  }
+
+  if (!shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom)) return
+
+  for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+  for (const layerId of Object.values(PROPERTY_UNIVERSE_LAYER_IDS)) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+}
+
 // Only query layers that actually exist in the current style, and always
 // return [] on any error — never propagate MapLibre internal crashes.
 function safeQueryRenderedFeatures(
@@ -3742,6 +3809,10 @@ export function InboxCommandMap({
   useEffect(() => {
     localStorage.setItem(SELLER_PINS_SETTINGS_KEY, JSON.stringify(sellerPinLayers))
   }, [sellerPinLayers])
+  const sellerPinLayersRef = useRef(sellerPinLayers)
+  useEffect(() => {
+    sellerPinLayersRef.current = sellerPinLayers
+  }, [sellerPinLayers])
 
   const [sellerPinsGeojson, setSellerPinsGeojson] = useState<FeatureCollection<Point, Record<string, unknown>>>(EMPTY_GEOJSON)
   const [sellerPinsRaw, setSellerPinsRaw] = useState<CommandMapSellerPin[]>([])
@@ -3871,6 +3942,10 @@ export function InboxCommandMap({
   const [activeKpiFilter, setActiveKpiFilter] = useState<MapKpiFilterKey | null>(null)
   const [viewportBounds, setViewportBounds] = useState<CommandMapBounds | null>(null)
   const [viewportZoom, setViewportZoom] = useState(zoomedIn ? 10.5 : 4.4)
+  const viewportZoomRef = useRef(viewportZoom)
+  useEffect(() => {
+    viewportZoomRef.current = viewportZoom
+  }, [viewportZoom])
   const [viewportWidth, setViewportWidth] = useState(0)
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
   const preferredDockTier = layoutMode === 'compact' ? 'mini' : layoutMode === 'medium' ? 'compact' : 'full'
@@ -5346,7 +5421,7 @@ export function InboxCommandMap({
           type: 'symbol',
           source: SELLER_PINS_SOURCE_ID,
           layout: {
-            'icon-image': PIN_ICON_IMAGE_EXPR as maplibregl.ExpressionSpecification,
+            'icon-image': PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification,
             'icon-size': UNIVERSAL_PIN_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
             'icon-allow-overlap': true,
             'icon-ignore-placement': true,
@@ -5354,7 +5429,7 @@ export function InboxCommandMap({
             'icon-rotation-alignment': 'map',
           },
           paint: {
-            'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_EXPR] as unknown as maplibregl.ExpressionSpecification,
+            'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
             'icon-opacity': ['max', 0.96, ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1]],
             'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
             'icon-halo-width': 1.4,
@@ -6777,9 +6852,11 @@ export function InboxCommandMap({
         console.warn('[CommandMap] addMapLayers error during style.load — layers may be partially missing', err)
       }
       installPropertyTileStack(mapInstance)
-      if (sellerPinsGeojsonRef.current.features.length > 0) {
-        safeSetGeoJsonSourceData(mapInstance, SELLER_PINS_SOURCE_ID, sellerPinsGeojsonRef.current)
-      }
+      applySellerPinFieldPresentation(mapInstance, {
+        sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
+        viewportZoom: mapInstance.getZoom(),
+        geojson: sellerPinsGeojsonRef.current,
+      })
       void syncBasemapPresentation(mapInstance)
       scheduleMapResize(true)
       const styleLoadMs = styleLoadStartedAtRef.current ? Math.round(performance.now() - styleLoadStartedAtRef.current) : null
@@ -7625,6 +7702,22 @@ export function InboxCommandMap({
       handleStyleReady()
     })
 
+    let sellerPinIdleSyncTimer: ReturnType<typeof setTimeout> | null = null
+    mapInstance.on('idle', () => {
+      if (!sellerPinLayersRef.current.sellerPins || sellerPinsGeojsonRef.current.features.length === 0) return
+      if (sellerPinIdleSyncTimer) clearTimeout(sellerPinIdleSyncTimer)
+      sellerPinIdleSyncTimer = setTimeout(() => {
+        sellerPinIdleSyncTimer = null
+        const liveMap = mapRef.current
+        if (!isStyleSafe(liveMap)) return
+        applySellerPinFieldPresentation(liveMap, {
+          sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
+          viewportZoom: liveMap.getZoom(),
+          geojson: sellerPinsGeojsonRef.current,
+        })
+      }, 96)
+    })
+
       scheduleMapResize(true)
     }
 
@@ -7787,9 +7880,9 @@ export function InboxCommandMap({
       const zoom = map.getZoom()
       const showPropertyField = sellerPinLayers.sellerPins
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
-      const showSellerPinGeojson = showPropertyField && shouldUseVectorTileSource(zoom)
-      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !showSellerPinGeojson
-      const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !showTiles
+      const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(showPropertyField, zoom)
+      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !sellerPinFieldActive
+      const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !sellerPinFieldActive
       const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
       const showPropertyMarkers = showPropertyLevel && (
         zoom >= ACQUISITION_RADAR_ZOOM.streetMin
@@ -8643,16 +8736,15 @@ export function InboxCommandMap({
       mapMode,
       selectedPropertyId,
     )
+    sellerPinsGeojsonRef.current = nextSellerPinsGeojson
     setSellerPinsGeojson(nextSellerPinsGeojson)
     const map = mapRef.current
-    if (isStyleSafe(map) && shouldUseVectorTileSource(map.getZoom())) {
-      applyPropertyTileEnrichmentStates(
-        map,
-        normalizedFilteredPins,
-        themeId,
-        mapMode,
-        selectedPropertyId,
-      )
+    if (isStyleSafe(map)) {
+      applySellerPinFieldPresentation(map, {
+        sellerPinsEnabled: sellerPinLayers.sellerPins,
+        viewportZoom: map.getZoom(),
+        geojson: nextSellerPinsGeojson,
+      })
     }
   }, [mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
 
@@ -8680,33 +8772,12 @@ export function InboxCommandMap({
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map)) return
-    const visible = sellerPinLayers.sellerPins
-    const showSellerPinMarkers = visible && shouldUsePropertySource(viewportZoom) && !shouldUseAggregateSource(viewportZoom)
-    const vis = (v: boolean) => v ? 'visible' : 'none'
+    applySellerPinFieldPresentation(map, {
+      sellerPinsEnabled: sellerPinLayers.sellerPins,
+      viewportZoom,
+      geojson: sellerPinsGeojsonRef.current,
+    })
     const spGlowLayerId = `${SOLD_COMPS_LAYER_IDS.marker}-glow`
-    const assetPinLayerIds = [
-      SELLER_PINS_LAYER_IDS.hit,
-      SELLER_PINS_LAYER_IDS.icon,
-      SELLER_PINS_LAYER_IDS.ring,
-      SELLER_PINS_LAYER_IDS.clusterGlow,
-      SELLER_PINS_LAYER_IDS.clusterCore,
-      SELLER_PINS_LAYER_IDS.clusterCount,
-    ]
-    assetPinLayerIds.forEach((layerId) => {
-      if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', vis(showSellerPinMarkers))
-      }
-    })
-    const circleOnlyLayerIds = [
-      SELLER_PINS_LAYER_IDS.core,
-      SELLER_PINS_LAYER_IDS.glow,
-      SELLER_PINS_LAYER_IDS.pulse,
-    ]
-    circleOnlyLayerIds.forEach((layerId) => {
-      if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', 'none')
-      }
-    })
     // Keep comp glow aligned with comp marker visibility
     if (map.getLayer(spGlowLayerId)) {
       const compVisible = map.getLayoutProperty(SOLD_COMPS_LAYER_IDS.marker, 'visibility') ?? 'none'

@@ -179,11 +179,15 @@
 }
 
 /* Desktop liquid glass — keep translucent stack; ignore opaque map-card-bg cascade */
+.nx-icm .smc-shell:not(.is-mobile),
 .smc-shell:not(.is-mobile) {
+  --map-card-bg: linear-gradient(180deg, var(--smc-glass-top), var(--smc-glass-bottom));
   background:
     radial-gradient(ellipse 120% 90% at 100% 0%, color-mix(in srgb, var(--smc-accent) 14%, transparent), transparent 48%),
     radial-gradient(ellipse 70% 50% at 0% 100%, color-mix(in srgb, var(--smc-accent) 8%, transparent), transparent 52%),
     linear-gradient(180deg, var(--smc-glass-top), var(--smc-glass-bottom)) !important;
+  backdrop-filter: blur(22px) saturate(1.45) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.45) !important;
 }
 
 .smc-shell:not(.is-mobile).is-conversation {
