@@ -805,18 +805,26 @@ export async function selectSafeAutoReplyTemplate({
   }
 }
 
+function formatUsd(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0
+    ? `$${Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+    : null;
+}
+
 function buildPersonalizationContext({
   message = "",
   inboundFrom = "",
   inboundTo = "",
   classification = null,
   context = null,
+  dealAuthority = null,
 } = {}) {
   const price_mentioned = classification?.seller_state?.price_mentioned ?? null;
-  const formatted_price =
-    Number.isFinite(Number(price_mentioned))
-      ? `$${Number(price_mentioned).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
-      : null;
+  const formatted_price = formatUsd(price_mentioned);
+  // Monetary offer values may ONLY come from persisted ADE authority — never
+  // from the seller's own mentioned price. With no authority the placeholder
+  // stays empty and the render fails closed (no send, human review).
+  const authorized_offer = formatUsd(dealAuthority?.recommended_offer);
 
   return {
     message_body: clean(message) || null,
@@ -840,8 +848,8 @@ function buildPersonalizationContext({
     property_type:
       clean(context?.summary?.property_type_scope || context?.summary?.property_type) || null,
     asking_price: formatted_price,
-    offer_price: formatted_price,
-    smart_cash_offer_display: formatted_price,
+    offer_price: authorized_offer,
+    smart_cash_offer_display: authorized_offer,
   };
 }
 
@@ -852,6 +860,7 @@ function renderSafeTemplate({
   inboundTo = "",
   classification = null,
   context = null,
+  dealAuthority = null,
 } = {}) {
   if (!clean(template?.template_body)) {
     return { ok: false, reason: "template_body_missing", rendered_message_text: null };
@@ -865,6 +874,7 @@ function renderSafeTemplate({
       inboundTo,
       classification,
       context,
+      dealAuthority,
     })
   );
 
@@ -1216,6 +1226,7 @@ export async function executeInboundAutomationDecision({
   scheduleDelaySeconds = 0,
   timezoneOverride = null,
   contactWindowOverride = null,
+  dealAuthority = null,
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
@@ -1544,6 +1555,7 @@ export async function executeInboundAutomationDecision({
     inboundTo,
     classification,
     context: context || latestThreadContext,
+    dealAuthority,
   });
 
   if (!render_result.ok) {

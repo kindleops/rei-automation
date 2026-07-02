@@ -333,6 +333,23 @@ export async function processSellerInboundMessage({
       (canonical_decision?.should_queue_reply ?? legacy_plan?.should_queue_reply)
   );
 
+  // Persisted deal state (negotiation authority, ADE snapshot, contract
+  // evidence) — loaded once; feeds template personalization (monetary values
+  // are ADE-bound only) and the transition resolver.
+  const deal_state = await loadSellerDealState({
+    threadKey: threadKey || inboundFrom,
+    propertyId,
+    ownerId,
+    supabaseClient: supabase,
+  });
+  const deal_authority = {
+    recommended_offer:
+      underwritingSignals?.ade_result?.recommended_offer ??
+      deal_state?.ade_result?.recommended_offer ??
+      deal_state?.negotiation_state?.recommended_offer ??
+      null,
+  };
+
   const execution = await runtimeDeps.executeInboundAutomationDecision({
     message,
     threadKey: threadKey || inboundFrom,
@@ -355,6 +372,7 @@ export async function processSellerInboundMessage({
     scheduleDelaySeconds: inboundAutopilotDelaySeconds,
     timezoneOverride,
     contactWindowOverride,
+    dealAuthority: deal_authority,
     supabaseClient: supabase,
     getSystemValue,
   });
@@ -429,12 +447,6 @@ export async function processSellerInboundMessage({
       intelligence?.stage_domain?.engine_result?.stage_decision || null;
     const extracted = contract.extracted_facts || {};
     const summary = context?.summary || {};
-    const deal_state = await loadSellerDealState({
-      threadKey: threadKey || inboundFrom,
-      propertyId,
-      ownerId,
-      supabaseClient: supabase,
-    });
     transition = resolveSellerStageTransition({
       stage_before: stageBefore || summary.conversation_stage || null,
       known_facts: {
