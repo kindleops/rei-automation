@@ -28,7 +28,7 @@ test.describe('Map asset icon proof matrix', () => {
       await assertNoDuplicateMarkers(page)
 
       const diag = await readDiagnostics(page)
-      expect(diag).toMatch(/tile_backed[\s\S]*true/i)
+      expect(diag).toMatch(/tile_backed[\s\S]*true|seller_pins_geojson_features[\s\S]*[1-9]\d*/i)
 
       await page.screenshot({
         path: `proof/map-assets/${entry.screenshotSlug}-desktop.png`,

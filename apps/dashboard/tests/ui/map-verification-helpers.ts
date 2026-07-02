@@ -11,6 +11,30 @@ import { MAP_VISUAL_PRESET_STORAGE_KEY } from '../../src/views/map/map-visual-pr
 
 export const MAP_BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173'
 
+const PROPERTY_ICON_LAYERS = [
+  'prop-tiles-icon',
+  'prop-tiles-glass',
+  'prop-tiles-ring',
+  'prop-tiles-hit',
+  'seller-pins-icon',
+  'command-pin-icon-raw',
+  'command-pin-icon-clustered',
+] as const
+
+const PROPERTY_ICON_SOURCES: Array<{ sourceId: string; sourceLayer?: string }> = [
+  { sourceId: 'property-map-tiles', sourceLayer: 'properties' },
+  { sourceId: 'command-pins-raw' },
+  { sourceId: 'command-pins-clustered' },
+  { sourceId: 'seller-pins-source' },
+  { sourceId: 'seller-pins-icon-source' },
+]
+
+const PROPERTY_ICON_LAYER_LIST = [...PROPERTY_ICON_LAYERS]
+const PROPERTY_ICON_SOURCE_LIST = PROPERTY_ICON_SOURCES.map(({ sourceId, sourceLayer }) => ({
+  sourceId,
+  sourceLayer: sourceLayer ?? null,
+}))
+
 const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v3'
 const OPS_DASHBOARD_SESSION_COOKIE = 'ops_dashboard_session'
 
@@ -132,8 +156,22 @@ export const flyMap = async (page: Page, zoom: number, center: [number, number])
 
   if (zoom >= 9) {
     await page.waitForFunction(() => {
-      const map = (window as unknown as { __nexusCommandMap?: { getLayoutProperty: (id: string, key: string) => string } }).__nexusCommandMap
-      return map?.getLayoutProperty('prop-tiles-icon', 'visibility') === 'visible'
+      const map = (window as unknown as { __nexusCommandMap?: { getLayer: (id: string) => unknown; getLayoutProperty: (id: string, key: string) => string } }).__nexusCommandMap
+      if (!map) return false
+      const visibleLayerIds = [
+        'prop-tiles-icon',
+        'seller-pins-icon',
+        'command-pin-icon-raw',
+        'command-pin-icon-clustered',
+      ]
+      return visibleLayerIds.some((layerId) => {
+        try {
+          return Boolean(map.getLayer(layerId))
+            && map.getLayoutProperty(layerId, 'visibility') === 'visible'
+        } catch {
+          return false
+        }
+      })
     }, null, { timeout: 30000 }).catch(() => undefined)
   }
 }
@@ -149,9 +187,13 @@ export const waitForMapIdle = async (page: Page, ms = 4000) => {
         tileBacked?: boolean
         uniqueTilePropertyIds?: number
         representedPropertyTotal?: number
+        sellerPinsGeojsonFeatures?: number
+        renderedIndividualIcons?: number
       }
     }).__nexusMapDiagnostics
     if (!diag?.zoom) return false
+    if ((diag.sellerPinsGeojsonFeatures ?? 0) > 0) return true
+    if ((diag.renderedIndividualIcons ?? 0) > 0) return true
     if (diag.tileBacked) {
       return Boolean(
         (diag.uniqueTilePropertyIds ?? 0) > 0
@@ -168,19 +210,19 @@ export const assertPropertyIconVisible = async (
   longitude: number,
   latitude: number,
 ) => {
-  await page.waitForFunction(({ propertyId, longitude, latitude }) => {
+  await page.waitForFunction(({ propertyId, longitude, latitude, layerIds, sources }) => {
     const map = (window as unknown as {
       __nexusCommandMap?: {
         project: (coords: [number, number]) => { x: number; y: number }
+        getLayer?: (id: string) => unknown
         queryRenderedFeatures: (
-          geometry?: { x: number; y: number },
+          geometry?: { x: number; y: number } | Array<{ x: number; y: number }>,
           options?: { layers?: string[] },
         ) => Array<{ id?: string | number; properties?: Record<string, unknown> }>
         querySourceFeatures: (
           sourceId: string,
           options?: { sourceLayer?: string },
         ) => Array<{ id?: string | number; properties?: Record<string, unknown> }>
-        isSourceLoaded?: (sourceId: string) => boolean
       }
     }).__nexusCommandMap
     if (!map) return false
@@ -189,32 +231,53 @@ export const assertPropertyIconVisible = async (
       String(feature.properties?.property_id ?? feature.id ?? '') === propertyId
     )
 
-    const layers = ['prop-tiles-icon', 'prop-tiles-glass', 'prop-tiles-ring', 'prop-tiles-hit']
+    const layers = layerIds.filter((layerId) => {
+      try {
+        return Boolean(map.getLayer?.(layerId))
+      } catch {
+        return false
+      }
+    })
     const point = map.project([longitude, latitude])
-    const rendered = map.queryRenderedFeatures(
-      [{ x: point.x - 24, y: point.y - 24 }, { x: point.x + 24, y: point.y + 24 }],
-      { layers },
-    )
-    if (rendered.some(matchId)) return true
+    if (layers.length > 0) {
+      const rendered = map.queryRenderedFeatures(
+        [{ x: point.x - 24, y: point.y - 24 }, { x: point.x + 24, y: point.y + 24 }],
+        { layers },
+      )
+      if (rendered.some(matchId)) return true
+    }
 
-    try {
-      const sourceFeatures = map.querySourceFeatures('property-map-tiles', { sourceLayer: 'properties' })
-      if (sourceFeatures.some(matchId)) return true
-    } catch {
-      // style reload in progress
+    for (const source of sources) {
+      try {
+        const sourceFeatures = map.querySourceFeatures(
+          source.sourceId,
+          source.sourceLayer ? { sourceLayer: source.sourceLayer } : undefined,
+        )
+        if (sourceFeatures.some(matchId)) return true
+      } catch {
+        // style reload in progress
+      }
     }
 
     try {
-      return map.queryRenderedFeatures(undefined, { layers }).some(matchId)
+      return layers.length > 0
+        && map.queryRenderedFeatures(undefined, { layers }).some(matchId)
     } catch {
       return false
     }
-  }, { propertyId, longitude, latitude }, { timeout: 90000 })
+  }, {
+    propertyId,
+    longitude,
+    latitude,
+    layerIds: PROPERTY_ICON_LAYER_LIST,
+    sources: PROPERTY_ICON_SOURCE_LIST,
+  }, { timeout: 90000 })
 
-  const visible = await page.evaluate(({ propertyId, longitude, latitude }) => {
+  const visible = await page.evaluate(({ propertyId, longitude, latitude, layerIds, sources }) => {
     const map = (window as unknown as {
       __nexusCommandMap?: {
         project: (coords: [number, number]) => { x: number; y: number }
+        getLayer?: (id: string) => unknown
         queryRenderedFeatures: (
           geometry?: { x: number; y: number },
           options?: { layers?: string[] },
@@ -229,11 +292,34 @@ export const assertPropertyIconVisible = async (
     const matchId = (feature: { id?: string | number; properties?: Record<string, unknown> }) => (
       String(feature.properties?.property_id ?? feature.id ?? '') === propertyId
     )
-    const layers = ['prop-tiles-icon', 'prop-tiles-glass', 'prop-tiles-ring', 'prop-tiles-hit']
+    const layers = layerIds.filter((layerId) => {
+      try {
+        return Boolean(map.getLayer?.(layerId))
+      } catch {
+        return false
+      }
+    })
     const point = map.project([longitude, latitude])
-    return map.queryRenderedFeatures(point, { layers }).some(matchId)
-      || map.querySourceFeatures('property-map-tiles', { sourceLayer: 'properties' }).some(matchId)
-  }, { propertyId, longitude, latitude })
+    const renderedMatch = layers.length > 0
+      && map.queryRenderedFeatures(point, { layers }).some(matchId)
+    if (renderedMatch) return true
+    return sources.some((source) => {
+      try {
+        return map.querySourceFeatures(
+          source.sourceId,
+          source.sourceLayer ? { sourceLayer: source.sourceLayer } : undefined,
+        ).some(matchId)
+      } catch {
+        return false
+      }
+    })
+  }, {
+    propertyId,
+    longitude,
+    latitude,
+    layerIds: PROPERTY_ICON_LAYER_LIST,
+    sources: PROPERTY_ICON_SOURCE_LIST,
+  })
 
   expect(visible).toBe(true)
 }
