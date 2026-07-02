@@ -3157,6 +3157,145 @@ const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
   seller_phone: text((pin as any).seller_phone || pin.phone) || null,
 })
 
+const sellerPinToCommandMapPin = (pin: CommandMapSellerPin): CommandMapPin => {
+  const propertyId = text(pin.property_id)
+  const sellerState = text(pin.seller_state) || 'not_contacted'
+  const address = resolveSellerPinAddress(pin)
+  const displayName = resolveSellerPinDisplayName(pin)
+  const lastActivityAt = text(pin.latest_message_at) || new Date(0).toISOString()
+  const latestDirection = text(pin.latest_direction)
+  return {
+    id: propertyId,
+    conversation_id: text(pin.thread_key) || propertyId,
+    property_id: propertyId,
+    master_owner_id: text(pin.master_owner_id) || '',
+    seller_name: displayName,
+    address,
+    city: text(pin.property_address_city) || '',
+    state: text(pin.property_address_state) || '',
+    zip: text(pin.property_address_zip) || '',
+    lat: Number(pin.lat ?? pin.latitude ?? 0),
+    lng: Number(pin.lng ?? pin.longitude ?? 0),
+    market: text(pin.market) || text(pin.filter_market) || '',
+    property_type: text(pin.property_type) || text(pin.asset_class) || '—',
+    beds: pin.total_bedrooms ?? null,
+    baths: pin.total_baths ?? null,
+    sqft: pin.building_square_feet ?? null,
+    units: pin.units_count ?? null,
+    estimated_value: pin.estimated_value ?? null,
+    equity_percent: pin.equity_percent ?? null,
+    repair_estimate: pin.estimated_repair_cost ?? null,
+    streetview_image: text(pin.streetview_image) || null,
+    last_message: text(pin.last_inbound_text) || text(pin.last_outbound_text) || '',
+    last_message_direction: latestDirection === 'inbound'
+      ? 'inbound'
+      : latestDirection === 'outbound'
+        ? 'outbound'
+        : 'unknown',
+    last_activity_at: lastActivityAt,
+    unread: false,
+    conversation_stage: text(pin.lifecycle_stage) || 'prospect',
+    conversation_status: 'open',
+    lifecycle_stage: text(pin.lifecycle_stage) || 'prospect',
+    operational_status: text(pin.operational_status) || sellerState,
+    disposition: 'unknown',
+    contactability_status: text(pin.contactability_status) || 'unknown',
+    is_archived: false,
+    snoozed_until: null,
+    stage_short_label: sellerState === 'not_contacted' ? 'NC' : 'SL',
+    inbox_bucket: text(pin.inbox_category) || (sellerState === 'not_contacted' ? 'not_contacted' : 'new_replies'),
+    lead_temperature: text(pin.lead_temperature) || 'cold',
+    priority_score: Number(pin.priority_score ?? pin.final_acquisition_score ?? 0) || 0,
+    automation_status: 'none',
+    suppression_status: sellerState === 'blocked' ? 'suppressed' : 'clear',
+    next_action: '',
+    offer_status: 'none',
+    contract_status: 'none',
+    next_follow_up_at: text(pin.follow_up_due_at) || null,
+    review_reason: null,
+    confidence: 0,
+    last_inbound_at: text(pin.last_inbound_at) || null,
+    last_outbound_at: text(pin.last_outbound_at) || null,
+    last_reply_at: null,
+    queue_status: null,
+    delivery_status: text(pin.delivery_status) || null,
+    map_image: text(pin.map_image) || null,
+    satellite_image: text(pin.satellite_image) || null,
+    property_address_full: address,
+    property_address_city: text(pin.property_address_city) || null,
+    property_address_state: text(pin.property_address_state) || null,
+    property_address_zip: text(pin.property_address_zip) || null,
+    owner_name: text(pin.owner_name) || null,
+    owner_display_name: text(pin.owner_display_name) || null,
+    owner_full_name: text(pin.owner_full_name) || null,
+    owner_type: text(pin.owner_type) || null,
+    is_corporate_owner: null,
+    corporate_owner: null,
+    owner_occupied: null,
+    out_of_state_owner: pin.out_of_state_owner ?? null,
+    absentee_owner: pin.absentee_owner ?? null,
+    ownership_years: pin.ownership_years ?? null,
+    last_sale_date: text(pin.last_sale_date) || null,
+    sale_date: null,
+    sale_price: null,
+    last_sale_price: null,
+    latest_message_body: text(pin.last_inbound_text) || text(pin.last_outbound_text) || null,
+    last_outreach_message: text(pin.last_outbound_text) || null,
+    reply_status: null,
+    seller_stage: text(pin.seller_status) || null,
+    seller_state: sellerState,
+    execution_state: text(pin.execution_state) || 'none',
+    pipeline_stage: null,
+    contact_status: sellerState,
+    sms_eligible: null,
+    language: null,
+    phone: text(pin.seller_phone) || text(pin.canonical_e164) || null,
+    motivation_score: pin.motivation_score ?? null,
+    final_acquisition_score: pin.final_acquisition_score ?? null,
+    seller_persona: null,
+    ai_seller_persona: null,
+    market_status_label: null,
+    mls_market_status: null,
+    market_sub_status_label: null,
+    building_condition: text(pin.building_condition) || null,
+    building_quality: null,
+    construction_type: text(pin.construction_type) || null,
+    year_built: pin.year_built ?? null,
+    effective_year_built: pin.effective_year_built ?? null,
+    total_bedrooms: pin.total_bedrooms ?? null,
+    total_baths: pin.total_baths ?? null,
+    building_square_feet: pin.building_square_feet ?? null,
+    units_count: pin.units_count ?? null,
+    lot_square_feet: pin.lot_square_feet ?? null,
+    lot_acreage: pin.lot_acreage ?? null,
+    estimated_repair_cost: pin.estimated_repair_cost ?? null,
+    equity_amount: pin.equity_amount ?? null,
+    tax_delinquent: pin.tax_delinquent ?? null,
+    active_lien: pin.active_lien ?? null,
+    property_flags_json: pin.property_flags_json ?? null,
+    property_flags_text: text(pin.property_flags_text) || null,
+    activity_mode: 'threads',
+    activity_state: 'new_replies',
+    activity_label: sellerState === 'not_contacted' ? 'Not Contacted' : 'Seller Lead',
+  }
+}
+
+const buildCommandMapPinsWithSellerLeads = (
+  threadPins: CommandMapPin[],
+  sellerLeads: CommandMapSellerPin[],
+  sellerPinsEnabled: boolean,
+): CommandMapPin[] => {
+  if (!sellerPinsEnabled || sellerLeads.length === 0) return threadPins
+  const covered = new Set(threadPins.map((pin) => text(pin.property_id)).filter(Boolean))
+  const extras = sellerLeads
+    .filter((pin) => {
+      const propertyId = text(pin.property_id)
+      return propertyId && !covered.has(propertyId)
+    })
+    .map(sellerPinToCommandMapPin)
+  return extras.length > 0 ? [...threadPins, ...extras] : threadPins
+}
+
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
 type MapWebGLErrorDetails = {
   message: string
@@ -3312,7 +3451,6 @@ const ensureSellerPinIconLayer = (
   } else {
     safeSetGeoJsonSourceData(map, SELLER_PINS_ICON_SOURCE_ID, geojson)
   }
-  const pointFilter: maplibregl.FilterSpecification = ['!', ['has', 'point_count']]
 
   safeAddMapLayer(map, {
     id: SELLER_PINS_LAYER_IDS.hit,
@@ -3355,7 +3493,7 @@ const ensureSellerPinIconLayer = (
       visibility: 'none',
     },
     paint: {
-      'icon-color': ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
+      'icon-color': PIN_ICON_COLOR_COALESCED_EXPR as maplibregl.ExpressionSpecification,
       'icon-opacity': ['max', 0.96, ['coalesce', ['get', 'focus_opacity'], ['get', 'focusOpacity'], 1]],
       'icon-halo-color': PIN_ASSET_GLOW_COLOR_EXPR,
       'icon-halo-width': 1.4,
@@ -3405,6 +3543,18 @@ const applySellerPinFieldPresentation = (
   for (const layerId of SELLER_PIN_ORB_LAYER_IDS) {
     if (map.getLayer(layerId)) {
       map.setLayoutProperty(layerId, 'visibility', 'none')
+    }
+  }
+
+  if (sellerPinFieldActive) {
+    for (const layerId of RAW_LAYER_IDS) {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+    }
+    for (const layerId of CLUSTER_POINT_LAYER_IDS) {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+    }
+    for (const layerId of CLUSTER_LAYER_IDS) {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
     }
   }
 
@@ -4394,14 +4544,18 @@ export function InboxCommandMap({
   const activeSellerCardHydrationKey = activeSellerMapCard
     ? `${activeSellerMapCard.kind}|${activeSellerMapCard.intent}|${activeSellerMapCard.id}`
     : null
+  const commandMapPins = useMemo(
+    () => buildCommandMapPinsWithSellerLeads(visiblePins, sellerPins, sellerPinLayers.sellerPins),
+    [sellerPinLayers.sellerPins, sellerPins, visiblePins],
+  )
   const geojson = useMemo(
     () => featureCollectionForPins(
-      visiblePins,
+      commandMapPins,
       selectedThread?.id ?? selectedPin?.conversation_id ?? null,
       activeKpiFilter,
       mapStyleMode,
     ),
-    [activeKpiFilter, mapStyleMode, selectedPin?.conversation_id, selectedThread?.id, visiblePins],
+    [activeKpiFilter, commandMapPins, mapStyleMode, selectedPin?.conversation_id, selectedThread?.id],
   )
   const filteredBuyerPurchases = useMemo(() => {
     const purchases = buyerCommandData?.recentPurchases ?? []
@@ -8275,6 +8429,7 @@ export function InboxCommandMap({
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
     const sellerPinFieldReady = sellerPinLayers.sellerPins
       && sellerPinsGeojsonRef.current.features.length > 0
+      && isSellerPinIconLayerReady(map)
     const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinFieldReady
     RAW_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
