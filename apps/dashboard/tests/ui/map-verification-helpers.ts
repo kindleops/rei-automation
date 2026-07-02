@@ -11,7 +11,7 @@ import { MAP_VISUAL_PRESET_STORAGE_KEY } from '../../src/views/map/map-visual-pr
 
 export const MAP_BASE = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:5173'
 
-const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v2'
+const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v3'
 const OPS_DASHBOARD_SESSION_COOKIE = 'ops_dashboard_session'
 
 const resolveOpsDashboardSecret = (): string => {

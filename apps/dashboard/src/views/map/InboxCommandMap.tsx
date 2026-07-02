@@ -347,7 +347,11 @@ const commandMapPinToSellerCardRecord = (
   last_outbound_at: props.last_outbound_at,
   delivery_status: props.delivery_status,
 })
-const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v2'
+const SELLER_PINS_SETTINGS_KEY = 'nexus.commandMap.sellerPinSettings.v3'
+const LEGACY_SELLER_PINS_SETTINGS_KEYS = [
+  'nexus.commandMap.sellerPinSettings.v2',
+  'nexus.commandMap.sellerPinSettings.v1',
+] as const
 const SELECTED_STAR_SOURCE_ID = 'command-selected-star'
 const SELECTED_STAR_LAYER_ID = 'command-selected-star-layer'
 export type MapOverlayToggles = {
@@ -3251,7 +3255,12 @@ const SELLER_PIN_ORB_LAYER_IDS = [
 const shouldPresentSellerPinGeojsonField = (
   sellerPinsEnabled: boolean,
   zoom: number,
-): boolean => sellerPinsEnabled && shouldUseVectorTileSource(zoom)
+  geojsonFeatureCount = 0,
+): boolean => (
+  sellerPinsEnabled
+  && shouldUseVectorTileSource(zoom)
+  && geojsonFeatureCount > 0
+)
 
 const applySellerPinFieldPresentation = (
   map: maplibregl.Map,
@@ -3262,7 +3271,13 @@ const applySellerPinFieldPresentation = (
   },
 ): void => {
   const { sellerPinsEnabled, viewportZoom, geojson } = options
-  const showMarkers = sellerPinsEnabled
+  const geojsonFeatureCount = geojson?.features?.length ?? 0
+  const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(
+    sellerPinsEnabled,
+    viewportZoom,
+    geojsonFeatureCount,
+  )
+  const showMarkers = sellerPinFieldActive
     && shouldUsePropertySource(viewportZoom)
     && !shouldUseAggregateSource(viewportZoom)
   const vis = (on: boolean) => on ? 'visible' : 'none'
@@ -3290,7 +3305,7 @@ const applySellerPinFieldPresentation = (
     }
   }
 
-  if (!shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom)) return
+  if (!sellerPinFieldActive) return
 
   for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
@@ -3794,11 +3809,27 @@ export function InboxCommandMap({
   const [sellerPinLayers, setSellerPinLayers] = useState<SellerPinLayerToggles>(() => {
     try {
       const stored = localStorage.getItem(SELLER_PINS_SETTINGS_KEY)
-      if (!stored) return defaultSellerPinLayers
-      // Merge stored with defaults so any missing keys (e.g. notContacted from
-      // an old save before the key existed) fall back to defaultSellerPinLayers
-      // instead of being undefined (which is falsy and hides pins).
-      return { ...defaultSellerPinLayers, ...JSON.parse(stored) }
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<SellerPinLayerToggles>
+        return { ...defaultSellerPinLayers, ...parsed, sellerPins: parsed.sellerPins !== false }
+      }
+
+      for (const legacyKey of LEGACY_SELLER_PINS_SETTINGS_KEYS) {
+        const legacyStored = localStorage.getItem(legacyKey)
+        if (!legacyStored) continue
+        const legacyParsed = JSON.parse(legacyStored) as Partial<SellerPinLayerToggles>
+        const migrated = {
+          ...defaultSellerPinLayers,
+          ...legacyParsed,
+          sellerPins: true,
+          notContacted: legacyParsed.notContacted !== false,
+        }
+        localStorage.setItem(SELLER_PINS_SETTINGS_KEY, JSON.stringify(migrated))
+        localStorage.removeItem(legacyKey)
+        return migrated
+      }
+
+      return defaultSellerPinLayers
     } catch {
       return defaultSellerPinLayers
     }
@@ -7880,7 +7911,11 @@ export function InboxCommandMap({
       const zoom = map.getZoom()
       const showPropertyField = sellerPinLayers.sellerPins
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
-      const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(showPropertyField, zoom)
+      const sellerPinFieldActive = shouldPresentSellerPinGeojsonField(
+        showPropertyField,
+        zoom,
+        sellerPinsGeojsonRef.current.features.length,
+      )
       const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !sellerPinFieldActive
       const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !sellerPinFieldActive
       const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
@@ -7943,7 +7978,7 @@ export function InboxCommandMap({
       map.off('moveend', applyZoomBandVisibility)
       map.off('zoomend', applyZoomBandVisibility)
     }
-  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, viewportZoom, selectedPropertyId])
+  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, sellerPinsGeojson, viewportZoom, selectedPropertyId])
 
   useEffect(() => {
     const map = mapRef.current
@@ -8034,6 +8069,9 @@ export function InboxCommandMap({
           liveBreakouts: visual.liveBreakouts,
           invariantViolations: violations.length,
           duplicateRenderedMarkers: duplicateMarkers.length,
+          sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
+          sellerPinsRpcReturned: sellerPinsPerf.pinsReturned,
+          sellerPinsGeojsonFeatures: sellerPinsGeojsonRef.current.features.length,
         }
         if (import.meta.env.DEV || isMapVerificationMode()) {
           ;(window as unknown as { __nexusMapDiagnostics?: MapPropertyDiagnostics | null }).__nexusMapDiagnostics = next
@@ -8051,7 +8089,7 @@ export function InboxCommandMap({
       map.off('idle', updateMapAccounting)
       map.off('moveend', updateMapAccounting)
     }
-  }, [baseStyleLoading, viewportZoom, viewportBounds, sellerPinLayers.sellerPins])
+  }, [baseStyleLoading, sellerPinsPerf.pinsReturned, sellerPinsGeojson, viewportZoom, viewportBounds, sellerPinLayers.sellerPins])
 
   useEffect(() => {
     const map = mapRef.current

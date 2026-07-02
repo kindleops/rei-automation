@@ -14,8 +14,24 @@ import { logDataLayerQueryDone, logDataLayerQueryStart } from '../data/dashboard
 import { getSupabaseClient, hasSupabaseEnv } from '../supabaseClient'
 import { buildRequestCacheKey, cachedGetRequest, readCachedRequest } from './requestCache'
 
+const shouldUseSameOriginBackendProxy = (hostname: string): boolean => (
+  hostname === 'localhost'
+  || hostname === '127.0.0.1'
+  || hostname.endsWith('leadcommand.ai')
+  || hostname.includes('vercel.app')
+)
+
 export const getBackendBaseUrl = (): string => {
   const isBrowser = typeof window !== 'undefined'
+
+  // Production/preview dashboard browsers proxy /api/* through same-origin Vercel
+  // functions — avoids MapLibre MVT CORS failures on cross-origin tile fetches.
+  if (import.meta.env.PROD && isBrowser) {
+    const hostname = window.location.hostname
+    if (shouldUseSameOriginBackendProxy(hostname)) {
+      return ''
+    }
+  }
 
   // In local dev, prefer the local API server over a remote Vercel URL.
   // This keeps the dashboard pointed at the checked-out backend code instead of

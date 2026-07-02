@@ -29,6 +29,9 @@ export type MapPropertyDiagnostics = {
   liveBreakouts?: number
   invariantViolations?: number
   duplicateRenderedMarkers?: number
+  sellerPinsGeojsonFeatures?: number
+  sellerPinsRpcReturned?: number
+  sellerPinsEnabled?: boolean
 }
 
 type Props = {
@@ -88,6 +91,15 @@ export function MapPropertyDiagnosticsOverlay({ diagnostics, visible = true }: P
         ) : null}
         <div><dt>clipped</dt><dd>{diagnostics.clipped ? 'true' : 'false'}</dd></div>
         <div><dt>tile_backed</dt><dd>{diagnostics.tileBacked ? 'true' : 'false'}</dd></div>
+        {diagnostics.sellerPinsEnabled != null ? (
+          <div><dt>seller_pins_enabled</dt><dd>{diagnostics.sellerPinsEnabled ? 'true' : 'false'}</dd></div>
+        ) : null}
+        {diagnostics.sellerPinsRpcReturned != null ? (
+          <div><dt>seller_pins_rpc_returned</dt><dd>{diagnostics.sellerPinsRpcReturned}</dd></div>
+        ) : null}
+        {diagnostics.sellerPinsGeojsonFeatures != null ? (
+          <div><dt>seller_pins_geojson_features</dt><dd>{diagnostics.sellerPinsGeojsonFeatures}</dd></div>
+        ) : null}
         {diagnostics.invariantViolations != null ? (
           <div><dt>invariant_violations</dt><dd>{diagnostics.invariantViolations}</dd></div>
         ) : null}
