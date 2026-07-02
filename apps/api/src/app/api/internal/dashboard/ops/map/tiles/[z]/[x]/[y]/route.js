@@ -33,8 +33,14 @@ export async function GET(request, { params }) {
     const x = parseTileParam(params.x, "x");
     const y = parseTileParam(params.y, "y");
 
+    const emptyTileHeaders = {
+      "Content-Type": "application/vnd.mapbox-vector-tile",
+      "Cache-Control": "public, max-age=120",
+    };
+    const emptyTile = () => new NextResponse(new Uint8Array(0), { status: 200, headers: emptyTileHeaders });
+
     if (z < 9 || z > 16) {
-      return new NextResponse(null, { status: 204 });
+      return emptyTile();
     }
 
     const { data, error } = await supabase.rpc("get_property_map_vector_tile", { z, x, y });
@@ -43,10 +49,7 @@ export async function GET(request, { params }) {
     const bytes = decodeSupabaseBytea(data);
 
     if (!bytes.length) {
-      return new NextResponse(new Uint8Array(0), {
-        status: 204,
-        headers: { "Content-Type": "application/vnd.mapbox-vector-tile" },
-      });
+      return emptyTile();
     }
 
     return new NextResponse(bytes, {
