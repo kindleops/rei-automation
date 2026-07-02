@@ -1260,6 +1260,8 @@ function isManualSendHardBlockReason(reason = "") {
     "missing_routing",
     "invalid_payload",
     "invalid_number",
+    "provider_configuration_missing",
+    "outbound_sms_disabled",
   ]).has(clean(reason).toLowerCase());
 }
 
@@ -1318,6 +1320,28 @@ function mapProcessedManualSendFailure(reason = "", error_message = "") {
       detail_reason: normalized_reason || normalized_error || "content_guard_blocked",
       hard_block: false,
       operator_override_allowed: true,
+    };
+  }
+
+  if (
+    combined.includes("provider_configuration_missing") ||
+    combined.includes("sms provider is not configured") ||
+    combined.includes("missing required env vars")
+  ) {
+    return {
+      reason: "provider_configuration_missing",
+      detail_reason: "SMS provider is not configured on the server.",
+      hard_block: true,
+      operator_override_allowed: false,
+    };
+  }
+
+  if (combined.includes("outbound_sms_enabled flag is false")) {
+    return {
+      reason: "outbound_sms_disabled",
+      detail_reason: "Outbound SMS is currently disabled.",
+      hard_block: true,
+      operator_override_allowed: false,
     };
   }
 
@@ -1455,8 +1479,14 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
 
   logger.info("inbox_send_now.dispatching_to_provider", {
     queue_row_id,
+    thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
+    property_id: clean(normalized_row.property_id) || null,
+    master_owner_id: clean(normalized_row.master_owner_id) || null,
+    message_intent_id: clean(normalized_row.idempotency_key || normalized_row.queue_key) || null,
+    provider: "textgrid",
     to: to_phone,
     from: from_phone,
+    textgrid_number_id: clean(normalized_row.textgrid_number_id) || null,
   });
 
   let send_result = null;
@@ -1486,6 +1516,16 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     provider_error = error;
     logger.error("inbox_send_now.dispatch_failed", {
       queue_row_id,
+      thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
+      property_id: clean(normalized_row.property_id) || null,
+      master_owner_id: clean(normalized_row.master_owner_id) || null,
+      message_intent_id: clean(normalized_row.idempotency_key || normalized_row.queue_key) || null,
+      provider: "textgrid",
+      failure_category:
+        clean(error?.data?.code) ||
+        (String(error?.message || "").toLowerCase().includes("provider is not configured")
+          ? "provider_configuration_missing"
+          : "provider_send_failed"),
       message: error.message,
     });
   }

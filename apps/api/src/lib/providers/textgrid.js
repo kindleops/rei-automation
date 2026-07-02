@@ -2,6 +2,12 @@
 import crypto from "node:crypto";
 
 import ENV from "@/lib/config/env.js";
+import {
+  buildTextgridConfigurationError,
+  getValidatedTextgridConfig,
+  getTextgridProviderReadiness,
+  loadTextgridConfig,
+} from "@/lib/config/textgrid-config.js";
 import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { warn, info } from "@/lib/logging/logger.js";
@@ -156,18 +162,12 @@ function safeEqual(left, right) {
 }
 
 function getTextgridSendCredentials() {
-  const account_sid = clean(ENV.TEXTGRID_ACCOUNT_SID || process.env.TEXTGRID_ACCOUNT_SID);
-  const auth_token = clean(ENV.TEXTGRID_AUTH_TOKEN || process.env.TEXTGRID_AUTH_TOKEN);
-  const missing = [];
-
-  if (!account_sid) missing.push("TEXTGRID_ACCOUNT_SID");
-  if (!auth_token) missing.push("TEXTGRID_AUTH_TOKEN");
-
+  const config = getValidatedTextgridConfig();
   return {
-    account_sid,
-    auth_token,
-    configured: missing.length === 0,
-    missing,
+    account_sid: config.account_sid,
+    auth_token: config.auth_token,
+    configured: config.configured,
+    missing: config.missing,
   };
 }
 
@@ -180,13 +180,19 @@ export function getTextgridProviderCapabilities() {
 }
 
 export function getTextgridSendCredentialStatus() {
+  const readiness = getTextgridProviderReadiness();
   const credentials = getTextgridSendCredentials();
 
   return {
-    configured: credentials.configured,
+    provider: readiness.provider,
+    configured: readiness.configured,
     missing: credentials.missing,
-    account_sid_present: Boolean(credentials.account_sid),
-    auth_token_present: Boolean(credentials.auth_token),
+    account_sid_present: readiness.account_sid_present,
+    auth_token_present: readiness.auth_token_present,
+    sending_identity_configured: readiness.sending_identity_configured,
+    webhook_configured: readiness.webhook_configured,
+    status_callback_enabled: readiness.status_callback_enabled,
+    status_callback_configured: readiness.status_callback_configured,
     base_url: TEXTGRID_BASE_URL,
     send_endpoint: getTextgridSendEndpoint(credentials.account_sid),
   };
@@ -211,7 +217,7 @@ export function getTextgridSendEndpoint(account_sid = null) {
 }
 
 export function getTextgridWebhookSecret() {
-  return clean(ENV.TEXTGRID_WEBHOOK_SECRET || process.env.TEXTGRID_WEBHOOK_SECRET);
+  return clean(loadTextgridConfig().webhook_secret);
 }
 
 export function hasTextgridWebhookSecret() {
@@ -219,8 +225,8 @@ export function hasTextgridWebhookSecret() {
 }
 
 export function buildTextgridBearerToken({
-  account_sid = ENV.TEXTGRID_ACCOUNT_SID || process.env.TEXTGRID_ACCOUNT_SID,
-  auth_token = ENV.TEXTGRID_AUTH_TOKEN || process.env.TEXTGRID_AUTH_TOKEN,
+  account_sid = getValidatedTextgridConfig().account_sid,
+  auth_token = getValidatedTextgridConfig().auth_token,
 } = {}) {
   const normalized_account_sid = clean(account_sid);
   const normalized_auth_token = clean(auth_token);
@@ -531,15 +537,29 @@ export async function sendTextgridSMS({
 
   try {
     if (!credentials.configured) {
-      throw new TextGridError(
-        `[TextGrid] Missing required env vars: ${credentials.missing.join(", ")}`,
-        {
-          endpoint: getTextgridSendEndpoint(),
-          to: normalized_to,
-          from: normalized_from,
-          body: trimmed_body,
-        }
+      const configuration_error = buildTextgridConfigurationError(
+        loadTextgridConfig()
       );
+      warn("textgrid.configuration_missing", {
+        provider: configuration_error.provider,
+        missing: configuration_error.missing,
+        to_input: to,
+        from_input: from,
+        client_reference_id,
+        source: send_context.source,
+        send_source: send_context.send_source,
+      });
+      throw new TextGridError(configuration_error.message, {
+        endpoint: getTextgridSendEndpoint(),
+        to: normalized_to,
+        from: normalized_from,
+        body: trimmed_body,
+        data: {
+          code: configuration_error.code,
+          provider: configuration_error.provider,
+          missing: configuration_error.missing,
+        },
+      });
     }
 
     const send_endpoint = getTextgridSendEndpoint(credentials.account_sid);

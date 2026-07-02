@@ -1,5 +1,6 @@
 import ENV from "@/lib/config/env.js";
 import { getAlertDeliveryConfig } from "@/lib/domain/alerts/alert-delivery.js";
+import { getTextgridProviderReadiness } from "@/lib/config/textgrid-config.js";
 import {
   getTextgridProviderCapabilities,
   getTextgridSendCredentialStatus,
@@ -77,6 +78,7 @@ export function buildVerificationReadinessSnapshot(env = process.env) {
     podio,
     textgrid: {
       ...textgrid,
+      ...getTextgridProviderReadiness(env),
       webhook_secret_present: hasTextgridWebhookSecret(),
       provider_capabilities: textgrid_capabilities,
     },
