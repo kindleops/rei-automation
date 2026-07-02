@@ -4849,8 +4849,10 @@ center+right hidden */
 .nx-icm__canvas .maplibregl-map,
 .nx-icm__canvas .maplibregl-canvas-container,
 .nx-icm__canvas .maplibregl-canvas {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .nx-icm__canvas .maplibregl-canvas {

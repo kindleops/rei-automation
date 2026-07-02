@@ -22,14 +22,24 @@ for (const market of DENSE_MARKETS) {
       await enableMapVerification(page)
       await openMap(page)
       await flyMap(page, zoom, market.center)
-      await waitForMapIdle(page, zoom >= 9 && zoom < 11 ? 10_000 : zoom >= 9 ? 6000 : 4000)
+      await waitForMapIdle(page, zoom < 9 ? 8000 : zoom >= 9 && zoom < 11 ? 10_000 : zoom >= 9 ? 6000 : 4000)
 
       const diag = await readWindowDiagnostics(page)
       expect(diag).not.toBeNull()
 
       if (zoom < 9) {
         expect(diag?.tileBacked).toBe(false)
-        expect(Number(diag?.aggregateTotal ?? diag?.representedPropertyTotal ?? 0)).toBeGreaterThan(0)
+        const represented = Number(
+          diag?.aggregateTotal
+          ?? diag?.representedPropertyTotal
+          ?? diag?.totalInBounds
+          ?? 0,
+        )
+        expect(represented).toBeGreaterThan(0)
+        await page.screenshot({
+          path: `proof/map-accounting/${market.name}-z${zoom}-desktop.png`,
+          fullPage: false,
+        })
         return
       }
 

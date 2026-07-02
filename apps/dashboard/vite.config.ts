@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
-import type { Plugin } from 'vite'
+import type { Plugin, ProxyOptions } from 'vite'
 import { createClient } from '@supabase/supabase-js'
 import { fetchCensusZcta, fetchCensusCounty } from './src/lib/census/censusClient'
 import { transformCensusRow } from './src/lib/census/censusTransform'
@@ -615,13 +615,13 @@ function resolveDevGitIdentity() {
   return { commitSha, branch, worktreeId }
 }
 
-function createDevApiProxy(target: string, env: Record<string, string>) {
+function createDevApiProxy(target: string, env: Record<string, string>): ProxyOptions {
   const opsSecret = (env.VITE_OPS_DASHBOARD_SECRET || env.OPS_DASHBOARD_SECRET || '').trim()
   return {
     target,
     changeOrigin: true,
     secure: false,
-    configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
+    configure(proxy) {
       proxy.on('proxyReq', (proxyReq, req) => {
         const request = req as { url?: string }
         const outbound = proxyReq as { getHeader: (name: string) => string | undefined; setHeader: (name: string, value: string) => void }

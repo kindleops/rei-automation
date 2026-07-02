@@ -178,6 +178,40 @@
   background: transparent;
 }
 
+/* Desktop liquid glass — keep translucent stack; ignore opaque map-card-bg cascade */
+.smc-shell:not(.is-mobile) {
+  background:
+    radial-gradient(ellipse 120% 90% at 100% 0%, color-mix(in srgb, var(--smc-accent) 14%, transparent), transparent 48%),
+    radial-gradient(ellipse 70% 50% at 0% 100%, color-mix(in srgb, var(--smc-accent) 8%, transparent), transparent 52%),
+    linear-gradient(180deg, var(--smc-glass-top), var(--smc-glass-bottom)) !important;
+}
+
+.smc-shell:not(.is-mobile).is-conversation {
+  background:
+    radial-gradient(ellipse 120% 90% at 100% 0%, color-mix(in srgb, var(--smc-accent) 14%, transparent), transparent 48%),
+    radial-gradient(ellipse 70% 50% at 0% 100%, color-mix(in srgb, var(--smc-accent) 8%, transparent), transparent 52%),
+    linear-gradient(180deg, var(--smc-glass-top), var(--smc-glass-bottom)) !important;
+}
+
+.smc-shell:not(.is-mobile).is-flipped-shell .smc-flip__back--sms {
+  background:
+    radial-gradient(ellipse 120% 90% at 100% 0%, color-mix(in srgb, var(--smc-accent) 12%, transparent), transparent 50%),
+    linear-gradient(180deg, var(--smc-glass-top), var(--smc-glass-bottom));
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+}
+
+.smc-shell:not(.is-mobile).is-flipped-shell .smc-flip__back--sms .smc-conversation__head,
+.smc-shell:not(.is-mobile).is-flipped-shell .smc-flip__back--sms .smc-composer-wrap {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--smc-glass-top) 58%, transparent),
+    color-mix(in srgb, var(--smc-glass-bottom) 48%, transparent)
+  );
+  backdrop-filter: blur(20px) saturate(1.45);
+  -webkit-backdrop-filter: blur(20px) saturate(1.45);
+}
+
 .smc-flip.is-flipped {
   transform: rotateY(180deg);
 }

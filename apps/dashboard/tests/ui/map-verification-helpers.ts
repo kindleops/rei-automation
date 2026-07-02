@@ -339,10 +339,36 @@ const readActiveMapThemeId = async (page: Page): Promise<string | null> => page.
   return match?.[1] ?? null
 })
 
+export const assertMapCanvasFillsContainer = async (page: Page) => {
+  const footprint = await page.evaluate(() => {
+    const container = document.querySelector('.nx-icm__canvas')
+    const canvas = container?.querySelector('.maplibregl-canvas') as HTMLCanvasElement | null
+    if (!container || !canvas) return null
+    const containerRect = container.getBoundingClientRect()
+    const canvasRect = canvas.getBoundingClientRect()
+    return {
+      containerWidth: containerRect.width,
+      containerHeight: containerRect.height,
+      canvasWidth: canvasRect.width,
+      canvasHeight: canvasRect.height,
+      canvasAttrWidth: canvas.width,
+      canvasAttrHeight: canvas.height,
+    }
+  })
+  expect(footprint).not.toBeNull()
+  if (!footprint) return
+
+  expect(footprint.containerWidth).toBeGreaterThan(200)
+  expect(footprint.containerHeight).toBeGreaterThan(200)
+  expect(footprint.canvasWidth).toBeGreaterThan(footprint.containerWidth * 0.92)
+  expect(footprint.canvasHeight).toBeGreaterThan(footprint.containerHeight * 0.92)
+}
+
 export const switchThemeInApp = async (page: Page, themeId: string) => {
   const activeThemeId = await readActiveMapThemeId(page)
   if (activeThemeId === themeId) {
     await waitForThemeLayers(page, 15_000)
+    await assertMapCanvasFillsContainer(page)
     return
   }
 
@@ -352,23 +378,46 @@ export const switchThemeInApp = async (page: Page, themeId: string) => {
       __nexusCommandMap?: {
         once: (event: string, handler: () => void) => void
         off: (event: string, handler: () => void) => void
+        isStyleLoaded?: () => boolean
       }
     }).__nexusCommandMap
     if (!setter) {
       reject(new Error('__nexusSetMapTheme unavailable — enable map verification mode'))
       return
     }
-    const timer = window.setTimeout(resolve, 12_000)
-    const onStyleLoad = () => {
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
       window.clearTimeout(timer)
+      window.clearTimeout(paintTimer)
       map?.off('style.load', onStyleLoad)
+      map?.off('styledata', onStyleData)
       resolve()
     }
+    const timer = window.setTimeout(settle, 8_000)
+    const onStyleLoad = () => settle()
+    const onStyleData = () => {
+      if (map?.isStyleLoaded?.()) settle()
+    }
     map?.once('style.load', onStyleLoad)
+    map?.once('styledata', onStyleData)
     setter(nextThemeId)
+    // Paint-only theme swaps (same vector basemap) never emit style.load.
+    window.setTimeout(() => {
+      if (map?.isStyleLoaded?.()) settle()
+    }, 450)
+    const paintTimer = window.setTimeout(settle, 2_500)
   }), themeId)
-  await waitForThemeLayers(page)
-  await waitForMapIdle(page, 3000)
+
+  await waitForThemeLayers(page, 12_000)
+  await page.waitForTimeout(600)
+  await page.evaluate(() => {
+    const map = (window as unknown as { __nexusCommandMap?: { resize: () => void; triggerRepaint: () => void } }).__nexusCommandMap
+    map?.resize()
+    map?.triggerRepaint()
+  })
+  await assertMapCanvasFillsContainer(page)
 }
 
 export const buildOpsDashboardAuthHeaders = (): Record<string, string> => {

@@ -98,7 +98,7 @@ export const resolveFollowUpEligibility = (
     return {
       visible: true,
       canExecute: !blocked,
-      label: 'Send Message',
+      label: 'Send Ownership Check',
       disabledReason: blocked ? resolveIneligibleReason(record, state) : null,
       isUncontacted: true,
     }

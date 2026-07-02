@@ -332,6 +332,8 @@ const commandMapPinToSellerCardRecord = (
   property_address: props.address,
   owner_display_name: props.owner_display_name || props.owner_name || props.seller_name,
   owner_name: props.owner_name || props.seller_name,
+  canonical_e164: text(props.phone) || text((props as { canonical_e164?: string }).canonical_e164) || null,
+  seller_phone: text(props.phone) || text((props as { seller_phone?: string }).seller_phone) || null,
   total_bedrooms: props.beds,
   total_baths: props.baths,
   building_square_feet: props.sqft,
@@ -1992,6 +1994,62 @@ const featureCollectionForPins = (
   return { type: 'FeatureCollection', features }
 }
 
+const buildSellerPinsFeatureCollection = (
+  pins: CommandMapSellerPin[],
+  themeId: CommandMapThemeId,
+  modeId: CommandMapIntelligenceModeId,
+  selectedPropertyId: string | null,
+): FeatureCollection<Point, Record<string, unknown>> => {
+  const features: FeatureCollection<Point, Record<string, unknown>>['features'] = []
+
+  pins.forEach((pin) => {
+    const lat = Number(pin.lat ?? pin.latitude)
+    const lng = Number(pin.lng ?? pin.longitude)
+    if (!isValidCoord(lat, lng)) return
+
+    const propertyId = text(pin.property_id)
+    if (!propertyId) return
+
+    const enriched = enrichAcquisitionRadarFeature(
+      {
+        properties: {
+          ...pin,
+          property_id: propertyId,
+          assetType: pin.property_type ?? pin.asset_class ?? '',
+          markerState: pin.seller_state ?? pin.seller_status ?? 'uncontacted',
+          acquisitionScore: Number(pin.final_acquisition_score ?? pin.priority_score ?? pin.owner_priority_score) || 0,
+          contactStatus: pin.seller_state ?? pin.seller_status,
+          activityStatus: pin.inbox_category ?? pin.execution_state,
+        },
+      },
+      themeId,
+      { selectedPropertyId, modeId },
+    )
+
+    const semanticKey = String(enriched.semanticKey ?? '')
+    const motion = semanticKey === 'uncontacted' ? 'static' : enriched.motion
+
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [lng, lat] },
+      properties: {
+        ...pin,
+        ...enriched,
+        property_id: propertyId,
+        propTypeSlug: normalizePropertyTypeSlug(pin.property_type ?? pin.asset_class ?? ''),
+        marker_key: enriched.marker_key,
+        pulse_style: pin.pulse_style ?? 'none',
+        motion,
+        focus_opacity: 1,
+        base_opacity: 1,
+        pin_selected: selectedPropertyId === propertyId ? 1 : 0,
+      },
+    })
+  })
+
+  return { type: 'FeatureCollection', features }
+}
+
 const matchesKpiFilter = (pin: CommandMapPin, filter: MapKpiFilterKey | null): boolean => {
   if (!filter) return true
   if (filter === 'contract_active') return lower(pin.contract_status).includes('active')
@@ -2111,6 +2169,47 @@ const canvasFilterForTheme = (styleMode: MapStyleMode): string => {
   if (styleMode === 'terrain') return 'saturate(1.08) contrast(1.04)'
   return 'none'
 }
+
+const MIN_MAP_CONTAINER_PX = 48
+
+const readMapContainerDimensions = (el: HTMLElement | null) => {
+  if (!el) return { width: 0, height: 0 }
+  const rect = el.getBoundingClientRect()
+  return { width: rect.width, height: rect.height }
+}
+
+const waitForMapContainerReady = (
+  el: HTMLElement,
+  isCancelled: () => boolean,
+  timeoutMs = 12_000,
+): Promise<void> => new Promise((resolve) => {
+  const isReady = () => {
+    const { width, height } = readMapContainerDimensions(el)
+    return width >= MIN_MAP_CONTAINER_PX && height >= MIN_MAP_CONTAINER_PX
+  }
+  if (isCancelled()) {
+    resolve()
+    return
+  }
+  if (isReady()) {
+    resolve()
+    return
+  }
+
+  let observer: ResizeObserver | undefined
+  const finish = () => {
+    observer?.disconnect()
+    window.clearTimeout(timer)
+    resolve()
+  }
+  const timer = window.setTimeout(finish, timeoutMs)
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(() => {
+      if (isCancelled() || isReady()) finish()
+    })
+    observer.observe(el)
+  }
+})
 
 const countBuyerFilters = (filters: BuyerMapFilters | undefined): number => {
   if (!filters) return 0
@@ -3048,6 +3147,8 @@ const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
   pulse_style: null,
   execution_ring_color: null,
   render_priority: (pin as any).render_priority ?? null,
+  canonical_e164: text((pin as any).canonical_e164 || pin.phone) || null,
+  seller_phone: text((pin as any).seller_phone || pin.phone) || null,
 })
 
 // ── WebGL / style safety helpers ──────────────────────────────────────────────
@@ -3741,12 +3842,13 @@ export function InboxCommandMap({
   const [mapWebglBlocked, setMapWebglBlocked] = useState(false)
   const [mapContainerKey, setMapContainerKey] = useState(0)
 
-  const scheduleMapResize = () => {
+  const scheduleMapResize = (aggressive = false) => {
     const map = mapRef.current
     if (!map) return
     const runResize = () => {
       try {
         map.resize()
+        map.triggerRepaint()
       } catch {
         // Keep map resilient during transient layout/style transitions.
       }
@@ -3757,6 +3859,10 @@ export function InboxCommandMap({
       setTimeout(runResize, 0)
     }
     setTimeout(runResize, 120)
+    if (aggressive) {
+      setTimeout(runResize, THEME_TRANSITION_MS)
+      setTimeout(runResize, THEME_TRANSITION_MS + 160)
+    }
   }
   const [mapDimension, setMapDimension] = useState<'2d' | '3d'>('2d')
   const [mapOverlays, setMapOverlays] = useState<MapOverlayToggles>({ ...defaultMapOverlays, ...initialMapOverlays })
@@ -4419,34 +4525,32 @@ export function InboxCommandMap({
   }, [])
 
   useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
-    const onWindowResize = () => scheduleMapResize()
+    const onWindowResize = () => scheduleMapResize(true)
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') scheduleMapResize()
+      if (document.visibilityState === 'visible') scheduleMapResize(true)
     }
     window.addEventListener('resize', onWindowResize)
     document.addEventListener('visibilitychange', onVisibilityChange)
-    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(() => {
+
+    let containerObserver: ResizeObserver | undefined
+    const containerEl = containerRef.current
+    if (containerEl && typeof ResizeObserver !== 'undefined') {
+      containerObserver = new ResizeObserver(() => {
         scheduleMapResize()
       })
-      observer.observe(containerRef.current)
-      return () => {
-        window.removeEventListener('resize', onWindowResize)
-        document.removeEventListener('visibilitychange', onVisibilityChange)
-        observer.disconnect()
-      }
+      containerObserver.observe(containerEl)
     }
+
     return () => {
       window.removeEventListener('resize', onWindowResize)
       document.removeEventListener('visibilitychange', onVisibilityChange)
+      containerObserver?.disconnect()
     }
-  }, [])
+  }, [mapContainerKey])
 
   useEffect(() => {
-    scheduleMapResize()
-  }, [filtersOpen, layoutMode, dockTier, fullHeight, commandMode])
+    scheduleMapResize(true)
+  }, [filtersOpen, layoutMode, dockTier, fullHeight, commandMode, mapStyleMode])
 
   useEffect(() => {
     const handleFlyTo = (e: Event) => {
@@ -6418,6 +6522,15 @@ export function InboxCommandMap({
       syncLayerVisibility(map, activityModeRef.current)
     }
 
+    const installPropertyTileStack = (targetMap: maplibregl.Map) => {
+      const tileAnchor = targetMap.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
+      try {
+        ensurePropertyTileSourceAndLayers(targetMap, activeThemeRef.current.id, tileAnchor)
+      } catch (err) {
+        console.warn('[CommandMap] property tile source/layers failed to install', err)
+      }
+    }
+
     const applyCommandMapTheme = (map: maplibregl.Map, nextThemeId: MapStyleMode) => {
       const theme = getCommandMapTheme(nextThemeId)
       const nextBaseStyleId = getCommandMapBaseStyleId(nextThemeId)
@@ -6437,7 +6550,7 @@ export function InboxCommandMap({
           }
           map.on('styledata', applyOnce)
         }
-        scheduleMapResize()
+        scheduleMapResize(true)
         setBaseStyleLoading(false)
         setStyleFallbackWarning(null)
         if (import.meta.env.DEV) {
@@ -6477,7 +6590,7 @@ export function InboxCommandMap({
         installPropertyTileStack(map)
         void syncBasemapPresentation(map)
         syncLayerVisibility(map, activityModeRef.current)
-        scheduleMapResize()
+        scheduleMapResize(true)
         if (styleLoadTimerRef.current) {
           clearTimeout(styleLoadTimerRef.current)
           styleLoadTimerRef.current = null
@@ -6486,10 +6599,6 @@ export function InboxCommandMap({
         setBaseStyleLoading(false)
         setStyleFallbackWarning(null)
         activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
-        requestAnimationFrame(() => {
-          map.resize()
-          map.triggerRepaint()
-        })
         if (import.meta.env.DEV) {
           const styleLoadMs = styleLoadStartedAtRef.current
             ? Math.round(performance.now() - styleLoadStartedAtRef.current)
@@ -6519,68 +6628,79 @@ export function InboxCommandMap({
     }
     applyCommandMapThemeRef.current = applyCommandMapTheme
 
-    const center: [number, number] = selectedPin ? [selectedPin.lng, selectedPin.lat] : [-96, 37.8]
-    setBaseStyleLoading(true)
-    styleLoadStartedAtRef.current = performance.now()
+    let initCancelled = false
+    let map: maplibregl.Map | null = null
+    let canvas: HTMLCanvasElement | null = null
+    let handleContextLost: ((event: Event) => void) | null = null
+    let handleContextRestored: (() => void) | null = null
 
-    const webglProbe = probeWebGLAvailability()
-    if (!webglProbe.ok) {
-      console.error('[CommandMap] WebGL preflight failed', webglProbe)
-      mapContextLostRef.current = true
-      setMapWebglBlocked(webglProbe.blocked)
-      setMapInitError(webglProbe.reason)
-      setMapContextLost(true)
-      setBaseStyleLoading(false)
-      if (styleLoadTimerRef.current) {
-        clearTimeout(styleLoadTimerRef.current)
-        styleLoadTimerRef.current = null
-      }
-      return () => {
-        if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
-      }
-    }
+    const bootMap = async () => {
+      const containerEl = containerRef.current
+      if (!containerEl || initCancelled) return
 
-    let map: maplibregl.Map
-    try {
-      map = new maplibregl.Map({
-        container: containerRef.current,
-        style: resolveStyle(mapStyleModeRef.current),
-        center,
-        zoom: zoomedIn ? 10.5 : 4.4,
-        minZoom: 2,
-        maxZoom: 18,
-        attributionControl: false,
-        dragRotate: false,
-        pitchWithRotate: false,
-        transformRequest: buildPropertyTileTransformRequest(),
-        canvasContextAttributes: {
-          antialias: false,
-          preserveDrawingBuffer: false,
-          powerPreference: 'default',
-          failIfMajorPerformanceCaveat: false,
-          desynchronized: false,
-        },
-      })
-    } catch (error) {
-      const parsed = parseMapWebGLError(error)
-      console.error('[CommandMap] WebGL initialization failed', error)
-      mapContextLostRef.current = true
-      setMapWebglBlocked(parsed.blocked)
-      setMapInitError(webglBlockedUserMessage(parsed))
-      setMapContextLost(true)
-      setBaseStyleLoading(false)
-      if (styleLoadTimerRef.current) {
-        clearTimeout(styleLoadTimerRef.current)
-        styleLoadTimerRef.current = null
-      }
-      return () => {
-        if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
-      }
-    }
+      await waitForMapContainerReady(containerEl, () => initCancelled)
+      if (initCancelled || mapRef.current) return
 
-    mapRef.current = map
+      const center: [number, number] = selectedPin ? [selectedPin.lng, selectedPin.lat] : [-96, 37.8]
+      setBaseStyleLoading(true)
+      styleLoadStartedAtRef.current = performance.now()
+
+      const webglProbe = probeWebGLAvailability()
+      if (!webglProbe.ok) {
+        console.error('[CommandMap] WebGL preflight failed', webglProbe)
+        mapContextLostRef.current = true
+        setMapWebglBlocked(webglProbe.blocked)
+        setMapInitError(webglProbe.reason)
+        setMapContextLost(true)
+        setBaseStyleLoading(false)
+        if (styleLoadTimerRef.current) {
+          clearTimeout(styleLoadTimerRef.current)
+          styleLoadTimerRef.current = null
+        }
+        return
+      }
+
+      try {
+        map = new maplibregl.Map({
+          container: containerEl,
+          style: resolveStyle(mapStyleModeRef.current),
+          center,
+          zoom: zoomedIn ? 10.5 : 4.4,
+          minZoom: 2,
+          maxZoom: 18,
+          attributionControl: false,
+          dragRotate: false,
+          pitchWithRotate: false,
+          transformRequest: buildPropertyTileTransformRequest(),
+          canvasContextAttributes: {
+            antialias: false,
+            preserveDrawingBuffer: false,
+            powerPreference: 'default',
+            failIfMajorPerformanceCaveat: false,
+            desynchronized: false,
+          },
+        })
+      } catch (error) {
+        const parsed = parseMapWebGLError(error)
+        console.error('[CommandMap] WebGL initialization failed', error)
+        mapContextLostRef.current = true
+        setMapWebglBlocked(parsed.blocked)
+        setMapInitError(webglBlockedUserMessage(parsed))
+        setMapContextLost(true)
+        setBaseStyleLoading(false)
+        if (styleLoadTimerRef.current) {
+          clearTimeout(styleLoadTimerRef.current)
+          styleLoadTimerRef.current = null
+        }
+        return
+      }
+
+      if (!map || initCancelled) return
+
+      const mapInstance = map
+      mapRef.current = mapInstance
     if (import.meta.env.DEV) {
-      ;(window as unknown as { __nexusCommandMap?: maplibregl.Map }).__nexusCommandMap = map
+      ;(window as unknown as { __nexusCommandMap?: maplibregl.Map }).__nexusCommandMap = mapInstance
     }
     mapContextLostRef.current = false
     setMapInitError(null)
@@ -6588,7 +6708,7 @@ export function InboxCommandMap({
     activeBaseStyleIdRef.current = getCommandMapBaseStyleId(mapStyleModeRef.current)
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
-    map.on('error', (event) => {
+    mapInstance.on('error', (event) => {
       const err = (event as { error?: Error & { type?: string; statusMessage?: string } }).error
       if (!err) return
       const parsed = parseMapWebGLError(err)
@@ -6603,8 +6723,8 @@ export function InboxCommandMap({
       }
     })
 
-    const canvas = map.getCanvas?.()
-    const handleContextLost = (event: Event) => {
+    canvas = mapInstance.getCanvas?.() ?? null
+    handleContextLost = (event: Event) => {
       console.warn('[CommandMap] WebGL context lost')
       event.preventDefault()
       if (mapContextLossOverlayTimerRef.current) clearTimeout(mapContextLossOverlayTimerRef.current)
@@ -6621,7 +6741,7 @@ export function InboxCommandMap({
         setMapContextLost(true)
       }, 800)
     }
-    const handleContextRestored = () => {
+    handleContextRestored = () => {
       console.info('[CommandMap] WebGL context restored')
       if (mapContextLossOverlayTimerRef.current) {
         clearTimeout(mapContextLossOverlayTimerRef.current)
@@ -6637,8 +6757,8 @@ export function InboxCommandMap({
         } catch { /* ignore */ }
       })
     }
-    canvas?.addEventListener('webglcontextlost', handleContextLost, false)
-    canvas?.addEventListener('webglcontextrestored', handleContextRestored, false)
+    if (handleContextLost) canvas?.addEventListener('webglcontextlost', handleContextLost, false)
+    if (handleContextRestored) canvas?.addEventListener('webglcontextrestored', handleContextRestored, false)
     if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
     styleLoadTimerRef.current = setTimeout(() => {
       if (styleFallbackGuardRef.current) return
@@ -6648,28 +6768,22 @@ export function InboxCommandMap({
       setMapStyleMode(fallbackTheme.id)
     }, 6500)
 
-    const installPropertyTileStack = (targetMap: maplibregl.Map) => {
-      const tileAnchor = targetMap.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
-      try {
-        ensurePropertyTileSourceAndLayers(targetMap, activeThemeRef.current.id, tileAnchor)
-      } catch (err) {
-        console.warn('[CommandMap] property tile source/layers failed to install', err)
-      }
-    }
-
     const handleStyleReady = () => {
       propUnivHandlersRegisteredRef.current = false
       propTilesHandlersRegisteredRef.current = false
       try {
-        addMapLayers(map)
+        addMapLayers(mapInstance)
       } catch (err) {
         console.warn('[CommandMap] addMapLayers error during style.load — layers may be partially missing', err)
       }
-      installPropertyTileStack(map)
-      void syncBasemapPresentation(map)
-      scheduleMapResize()
+      installPropertyTileStack(mapInstance)
+      if (sellerPinsGeojsonRef.current.features.length > 0) {
+        safeSetGeoJsonSourceData(mapInstance, SELLER_PINS_SOURCE_ID, sellerPinsGeojsonRef.current)
+      }
+      void syncBasemapPresentation(mapInstance)
+      scheduleMapResize(true)
       const styleLoadMs = styleLoadStartedAtRef.current ? Math.round(performance.now() - styleLoadStartedAtRef.current) : null
-      const reattachCount = customAttachmentCount(map)
+      const reattachCount = customAttachmentCount(mapInstance)
       if (styleLoadTimerRef.current) {
         clearTimeout(styleLoadTimerRef.current)
         styleLoadTimerRef.current = null
@@ -6690,7 +6804,7 @@ export function InboxCommandMap({
         })
         console.log('[CommandMapPerf]', {
           theme: mapStyleModeRef.current,
-          zoom: Number(map.getZoom().toFixed(2)),
+          zoom: Number(mapInstance.getZoom().toFixed(2)),
           boundsKey: 'style-load',
           rpcMs: null,
           pinsReturned: sellerPinsRaw.length,
@@ -6702,13 +6816,13 @@ export function InboxCommandMap({
       }
     }
 
-    map.on('styleimagemissing', (event) => {
+    mapInstance.on('styleimagemissing', (event) => {
       if (Object.values(PIN_ICON).includes(event.id as (typeof PIN_ICON)[keyof typeof PIN_ICON])) {
-        loadPropertyIcons(map)
+        loadPropertyIcons(mapInstance)
       }
     })
 
-    map.on('load', () => {
+    mapInstance.on('load', () => {
       handleStyleReady()
 
       const handlePinClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
@@ -6729,7 +6843,7 @@ export function InboxCommandMap({
           || null
         const sellerRecord = commandMapPinToSellerCardRecord(props, hydratedThread as Record<string, unknown> | null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+        const { anchor, containerSize } = buildMapCardContainerContext(mapInstance, containerRef.current, coordinates)
         const mobile = isMobileRef.current
         const existingSeller = selectedMapCardRef.current?.kind === 'seller'
           ? selectedMapCardRef.current
@@ -6766,9 +6880,9 @@ export function InboxCommandMap({
           })
         }
 
-        const bounds = map.getBounds()
+        const bounds = mapInstance.getBounds()
         if (!bounds.contains(coordinates)) {
-          map.easeTo({ center: coordinates, duration: 500 })
+          mapInstance.easeTo({ center: coordinates, duration: 500 })
         }
       }
 
@@ -6789,7 +6903,7 @@ export function InboxCommandMap({
         if (!source?.getClusterExpansionZoom || !Number.isFinite(clusterId)) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
-          map.easeTo({
+          mapInstance.easeTo({
             center: coordinates,
             zoom,
             duration: 500,
@@ -6828,7 +6942,7 @@ export function InboxCommandMap({
 
         let pixelPoint = { x: 0, y: 0 }
         try {
-          pixelPoint = map.project(coordinates)
+          pixelPoint = mapInstance.project(coordinates)
         } catch {
           return
         }
@@ -6836,7 +6950,7 @@ export function InboxCommandMap({
         const containerBounds = containerEl?.getBoundingClientRect()
         const containerWidth = containerBounds?.width ?? window.innerWidth
         const containerHeight = containerBounds?.height ?? window.innerHeight
-        map.getCanvas().style.cursor = 'pointer'
+        mapInstance.getCanvas().style.cursor = 'pointer'
         setHoveredMapCard({
           kind: 'seller',
           intent: 'hover',
@@ -6946,7 +7060,7 @@ export function InboxCommandMap({
         if (!source?.getClusterExpansionZoom || clusterId === undefined) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
-          map.easeTo({ center: coordinates, zoom: Math.max(zoom, map.getZoom() + 1), duration: 500 })
+          mapInstance.easeTo({ center: coordinates, zoom: Math.max(zoom, mapInstance.getZoom() + 1), duration: 500 })
         })
       }
 
@@ -6964,7 +7078,7 @@ export function InboxCommandMap({
         setSelectedBuyerPurchase(null)
         setSelectedSoldComp(null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const { anchor, containerSize } = buildMapCardContainerContext(map, containerRef.current, coordinates)
+        const { anchor, containerSize } = buildMapCardContainerContext(mapInstance, containerRef.current, coordinates)
 
         const matchedThread = hydratedThreadsByPropertyIdRef.current.get(propertyId)
           || visibleHydratedThreadsRef.current.find((thread) => text((thread as any).propertyId || (thread as any).property_id) === propertyId)
@@ -7023,9 +7137,9 @@ export function InboxCommandMap({
           setSelectedMapCard(nextCard)
         }
 
-        const bounds = map.getBounds()
+        const bounds = mapInstance.getBounds()
         if (!bounds.contains(coordinates)) {
-          map.easeTo({ center: coordinates, duration: 500 })
+          mapInstance.easeTo({ center: coordinates, duration: 500 })
         }
       }
 
@@ -7060,7 +7174,7 @@ export function InboxCommandMap({
         popup
           .setLngLat(coordinates)
           .setHTML(buildBuyerHoverMarkup(props, mapStyleModeRef.current))
-          .addTo(map)
+          .addTo(mapInstance)
         hoverPopupRef.current = popup
       }
 
@@ -7080,7 +7194,7 @@ export function InboxCommandMap({
         setSelectedBuyerPurchase(exactPurchase)
         onSelectBuyerKeyRef.current?.(props.buyerKey || null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 11.8), duration: 560 })
+        mapInstance.easeTo({ center: coordinates, zoom: Math.max(mapInstance.getZoom(), 11.8), duration: 560 })
       }
 
       const handleSoldCompHover = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
@@ -7103,7 +7217,7 @@ export function InboxCommandMap({
         cancelClearPinHover()
         let pixelPoint = { x: 0, y: 0 }
         try {
-          pixelPoint = map.project(coordinates)
+          pixelPoint = mapInstance.project(coordinates)
         } catch {
           return
         }
@@ -7113,7 +7227,7 @@ export function InboxCommandMap({
         const containerHeight = containerBounds?.height ?? window.innerHeight
         hoverPopupRef.current?.remove()
         hoverPopupRef.current = null
-        map.getCanvas().style.cursor = 'pointer'
+        mapInstance.getCanvas().style.cursor = 'pointer'
         if (DEBUG_MAP_CARDS) console.debug('[MapCard] comp hover', { id: props.property_id, feature: props })
 
         const rawComp = soldComps.find((item) => String(item.property_id) === String(props.property_id)) || props
@@ -7142,7 +7256,7 @@ export function InboxCommandMap({
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
-        const pixelPoint = map.project(coordinates)
+        const pixelPoint = mapInstance.project(coordinates)
         const containerEl = containerRef.current
         const containerBounds = containerEl?.getBoundingClientRect()
         const containerWidth = containerBounds?.width ?? window.innerWidth
@@ -7160,7 +7274,7 @@ export function InboxCommandMap({
           feature: rawComp as unknown as Record<string, unknown>,
           containerSize: { width: containerWidth, height: containerHeight },
         })
-        map.easeTo({ center: coordinates, zoom: Math.max(map.getZoom(), 11.8), duration: 560 })
+        mapInstance.easeTo({ center: coordinates, zoom: Math.max(mapInstance.getZoom(), 11.8), duration: 560 })
       }
 
       const handleBuyerClusterClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
@@ -7174,7 +7288,7 @@ export function InboxCommandMap({
         if (!source?.getClusterExpansionZoom || !Number.isFinite(clusterId)) return
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
-          map.easeTo({
+          mapInstance.easeTo({
             center: (feature.geometry as Point).coordinates as [number, number],
             zoom,
             duration: 500,
@@ -7221,7 +7335,7 @@ export function InboxCommandMap({
         popup
           .setLngLat(event.lngLat)
           .setHTML(renderCensusTooltip(overlayFeature, String(hovered?.properties?.metric || activeCensusMetricRef.current), String(hovered?.properties?.displayValue || '—')))
-          .addTo(map)
+          .addTo(mapInstance)
         hoverPopupRef.current = popup
       }
 
@@ -7252,34 +7366,34 @@ export function InboxCommandMap({
         source.getClusterExpansionZoom(clusterId, (error, zoom) => {
           if (error) return
           const coordinates = (feature.geometry as Point).coordinates as [number, number]
-          map.easeTo({ center: coordinates, zoom: zoom + 0.5, duration: 420 })
+          mapInstance.easeTo({ center: coordinates, zoom: zoom + 0.5, duration: 420 })
         })
       }
 
-      map.on('click', 'command-pin-core-raw', handlePinClick)
-      map.on('click', 'command-pin-core-clustered', handlePinClick)
-      map.on('click', 'command-pin-icon-raw', handlePinClick)
-      map.on('click', 'command-pin-icon-clustered', handlePinClick)
-      map.on('click', 'command-pin-cluster-core', handleClusterClick)
-      map.on('click', CENSUS_LAYER_IDS.fill, handleCensusClick)
-      map.on('click', 'command-buyer-purchase-core', handleBuyerClick)
-      map.on('click', 'command-buyer-profile-core', handleBuyerClick)
-      map.on('click', 'command-buyer-cluster-core', handleBuyerClusterClick)
-      map.on('click', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompClick)
-      map.on('click', SOLD_COMPS_LAYER_IDS.marker, handleSoldCompClick)
-      map.on('click', SOLD_COMPS_LAYER_IDS.label, handleSoldCompClick)
-      map.on('click', SOLD_COMPS_CLUSTER_LAYER_IDS.core, handleSoldCompClusterClick)
-      map.on('click', SELLER_PINS_LAYER_IDS.hit, handleSellerPinClick)
-      map.on('click', SELLER_PINS_LAYER_IDS.core, handleSellerPinClick)
-      map.on('click', SELLER_PINS_LAYER_IDS.icon, handleSellerPinClick)
-      map.on('click', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterClick)
-      map.on('click', (event) => {
+      mapInstance.on('click', 'command-pin-core-raw', handlePinClick)
+      mapInstance.on('click', 'command-pin-core-clustered', handlePinClick)
+      mapInstance.on('click', 'command-pin-icon-raw', handlePinClick)
+      mapInstance.on('click', 'command-pin-icon-clustered', handlePinClick)
+      mapInstance.on('click', 'command-pin-cluster-core', handleClusterClick)
+      mapInstance.on('click', CENSUS_LAYER_IDS.fill, handleCensusClick)
+      mapInstance.on('click', 'command-buyer-purchase-core', handleBuyerClick)
+      mapInstance.on('click', 'command-buyer-profile-core', handleBuyerClick)
+      mapInstance.on('click', 'command-buyer-cluster-core', handleBuyerClusterClick)
+      mapInstance.on('click', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompClick)
+      mapInstance.on('click', SOLD_COMPS_LAYER_IDS.marker, handleSoldCompClick)
+      mapInstance.on('click', SOLD_COMPS_LAYER_IDS.label, handleSoldCompClick)
+      mapInstance.on('click', SOLD_COMPS_CLUSTER_LAYER_IDS.core, handleSoldCompClusterClick)
+      mapInstance.on('click', SELLER_PINS_LAYER_IDS.hit, handleSellerPinClick)
+      mapInstance.on('click', SELLER_PINS_LAYER_IDS.core, handleSellerPinClick)
+      mapInstance.on('click', SELLER_PINS_LAYER_IDS.icon, handleSellerPinClick)
+      mapInstance.on('click', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterClick)
+      mapInstance.on('click', (event) => {
         if ((event as any)._clickHandled) return
         if (mapContextLostRef.current || !isStyleSafe(map)) return
         // Use circle/fill layers only for background-click detection — exclude symbol
         // layers (icon, label) which can crash MapLibre's hit detection when the
         // symbol bucket string table is not yet populated.
-        const rendered = safeQueryRenderedFeatures(map, event.point, [
+        const rendered = safeQueryRenderedFeatures(mapInstance, event.point, [
           'command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core',
           'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core',
           SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core,
@@ -7300,28 +7414,28 @@ export function InboxCommandMap({
           onBackgroundClickRef.current?.()
         }
       })
-      map.on('mouseenter', 'command-pin-core-raw', handlePinHover)
-      map.on('mouseenter', 'command-pin-core-clustered', handlePinHover)
+      mapInstance.on('mouseenter', 'command-pin-core-raw', handlePinHover)
+      mapInstance.on('mouseenter', 'command-pin-core-clustered', handlePinHover)
       // Do NOT register mouseenter on symbol layers (command-pin-icon-*) — see cursor
       // comment above. The circle core layers provide sufficient hover coverage.
-      map.on('mouseenter', 'command-pin-cluster-core', handleClusterHover)
-      map.on('mouseenter', CENSUS_LAYER_IDS.fill, handleCensusHover)
-      map.on('mouseenter', 'command-buyer-purchase-core', handleBuyerHover)
-      map.on('mouseenter', 'command-buyer-profile-core', handleBuyerHover)
-      map.on('mouseenter', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompHover)
+      mapInstance.on('mouseenter', 'command-pin-cluster-core', handleClusterHover)
+      mapInstance.on('mouseenter', CENSUS_LAYER_IDS.fill, handleCensusHover)
+      mapInstance.on('mouseenter', 'command-buyer-purchase-core', handleBuyerHover)
+      mapInstance.on('mouseenter', 'command-buyer-profile-core', handleBuyerHover)
+      mapInstance.on('mouseenter', SOLD_COMPS_LAYER_IDS.hit, handleSoldCompHover)
       // sold-comps-marker/label are symbol layers — hit layer covers hover without layer churn
       // Single wide hit layer avoids rapid mouseenter/mouseleave churn across ring/glow/pulse.
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.hit, handleSellerPinHover)
-      map.on('mouseenter', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterHover)
-      map.on('mouseleave', 'command-pin-core-raw', clearPinHover)
-      map.on('mouseleave', 'command-pin-core-clustered', clearPinHover)
-      map.on('mouseleave', 'command-pin-cluster-core', clearClusterHover)
-      map.on('mouseleave', CENSUS_LAYER_IDS.fill, clearCensusHover)
-      map.on('mouseleave', 'command-buyer-purchase-core', clearPinHover)
-      map.on('mouseleave', 'command-buyer-profile-core', clearPinHover)
-      map.on('mouseleave', SOLD_COMPS_LAYER_IDS.hit, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.hit, clearPinHover)
-      map.on('mouseleave', SELLER_PINS_LAYER_IDS.clusterCore, clearPinHover)
+      mapInstance.on('mouseenter', SELLER_PINS_LAYER_IDS.hit, handleSellerPinHover)
+      mapInstance.on('mouseenter', SELLER_PINS_LAYER_IDS.clusterCore, handleSellerPinClusterHover)
+      mapInstance.on('mouseleave', 'command-pin-core-raw', clearPinHover)
+      mapInstance.on('mouseleave', 'command-pin-core-clustered', clearPinHover)
+      mapInstance.on('mouseleave', 'command-pin-cluster-core', clearClusterHover)
+      mapInstance.on('mouseleave', CENSUS_LAYER_IDS.fill, clearCensusHover)
+      mapInstance.on('mouseleave', 'command-buyer-purchase-core', clearPinHover)
+      mapInstance.on('mouseleave', 'command-buyer-profile-core', clearPinHover)
+      mapInstance.on('mouseleave', SOLD_COMPS_LAYER_IDS.hit, clearPinHover)
+      mapInstance.on('mouseleave', SELLER_PINS_LAYER_IDS.hit, clearPinHover)
+      mapInstance.on('mouseleave', SELLER_PINS_LAYER_IDS.clusterCore, clearPinHover)
 
       const pulseConfig: Record<PinFeatureProps['pulseTier'], { baseRadius: number; maxAdd: number; baseOpacity: number; speed: number }> = {
         fast: { baseRadius: 13, maxAdd: 8, baseOpacity: 0.26, speed: 1.65 },
@@ -7335,7 +7449,8 @@ export function InboxCommandMap({
       let frame = 0
       let pulsesSuppressed = false
       const animate = () => {
-        if (!mapRef.current) return
+        const activeMap = mapRef.current
+        if (!activeMap) return
         frame = (frame + 1) % 360
         const shouldAnimatePins =
           !reducedMotionRef.current
@@ -7345,8 +7460,8 @@ export function InboxCommandMap({
           if (!pulsesSuppressed) {
             try {
               ;(['command-pin-pulse-raw', 'command-pin-pulse-clustered'] as const).forEach((layerId) => {
-                if (!map.getLayer(layerId)) return
-                map.setPaintProperty(layerId, 'circle-opacity', 0)
+                if (!activeMap.getLayer(layerId)) return
+                activeMap.setPaintProperty(layerId, 'circle-opacity', 0)
               })
             } catch {
               // Keep map resilient.
@@ -7381,8 +7496,8 @@ export function InboxCommandMap({
         try {
           if (shouldAnimatePins) {
           ;(['command-pin-pulse-raw', 'command-pin-pulse-clustered'] as const).forEach((layerId) => {
-            if (!map.getLayer(layerId)) return
-            map.setPaintProperty(layerId, 'circle-radius', [
+            if (!activeMap.getLayer(layerId)) return
+            activeMap.setPaintProperty(layerId, 'circle-radius', [
               'case',
               ['==', ['get', 'pulseMode'], 'none'], 8,
               ['==', ['get', 'pulseMode'], 'ripple'], makeRadiusExpr('medium_fast', 'ripple'),
@@ -7396,7 +7511,7 @@ export function InboxCommandMap({
                 makeRadiusExpr('none', 'continuous'),
               ],
             ])
-            map.setPaintProperty(layerId, 'circle-opacity', [
+            activeMap.setPaintProperty(layerId, 'circle-opacity', [
               '*',
               ['case',
                 ['==', ['get', 'pulseMode'], 'none'], 0,
@@ -7415,8 +7530,8 @@ export function InboxCommandMap({
             ])
           })
 
-          if (shouldAnimatePins && map.getLayer(SELLER_PINS_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
-            map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-radius', [
+          if (shouldAnimatePins && activeMap.getLayer(SELLER_PINS_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
+            activeMap.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-radius', [
               'match', ['coalesce', ['get', 'pulse_style'], 'none'],
               'pulse_strong', makeRadiusExpr('fast', 'continuous'),
               'pulse_soft', makeRadiusExpr('slow', 'continuous'),
@@ -7424,7 +7539,7 @@ export function InboxCommandMap({
               'pulse_rotating', makeRadiusExpr('medium', 'triple'),
               makeRadiusExpr('none', 'continuous')
             ])
-            map.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-opacity', [
+            activeMap.setPaintProperty(SELLER_PINS_LAYER_IDS.pulse, 'circle-opacity', [
               'match', ['coalesce', ['get', 'pulse_style'], 'none'],
               'pulse_strong', makeOpacityExpr('fast', 'continuous'),
               'pulse_soft', makeOpacityExpr('slow', 'continuous'),
@@ -7434,10 +7549,10 @@ export function InboxCommandMap({
             ])
           }
 
-          if (shouldAnimatePins && map.getLayer(PROPERTY_TILES_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
+          if (shouldAnimatePins && activeMap.getLayer(PROPERTY_TILES_LAYER_IDS.pulse) && sellerPinLayers.sellerPins) {
             const motionRadius = (motion: string) => acquisitionRadarPulseRadius(motion, frame, 11)
             const motionOpacity = (motion: string) => acquisitionRadarPulseOpacity(motion, frame, 0.28)
-            map.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-radius', [
+            activeMap.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-radius', [
               'match', ['coalesce', ['feature-state', 'motion'], 'static'],
               'breathing', motionRadius('breathing'),
               'follow_up_pulse', motionRadius('follow_up_pulse'),
@@ -7446,7 +7561,7 @@ export function InboxCommandMap({
               'failure_flicker', motionRadius('failure_flicker'),
               0,
             ])
-            map.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-opacity', [
+            activeMap.setPaintProperty(PROPERTY_TILES_LAYER_IDS.pulse, 'circle-opacity', [
               '*',
               ['coalesce', ['feature-state', 'base_opacity'], 1],
               ['match', ['coalesce', ['feature-state', 'motion'], 'static'],
@@ -7460,10 +7575,10 @@ export function InboxCommandMap({
             ])
           }
 
-          if (shouldAnimatePins && map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse) && sellerPinLayers.sellerPins) {
+          if (shouldAnimatePins && activeMap.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse) && sellerPinLayers.sellerPins) {
             const motionRadius = (motion: string) => acquisitionRadarPulseRadius(motion, frame, 11)
             const motionOpacity = (motion: string) => acquisitionRadarPulseOpacity(motion, frame, 0.28)
-            map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-radius', [
+            activeMap.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-radius', [
               'match', ['coalesce', ['get', 'motion'], 'static'],
               'breathing', motionRadius('breathing'),
               'follow_up_pulse', motionRadius('follow_up_pulse'),
@@ -7472,7 +7587,7 @@ export function InboxCommandMap({
               'failure_flicker', motionRadius('failure_flicker'),
               0,
             ])
-            map.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-opacity', [
+            activeMap.setPaintProperty(PROPERTY_UNIVERSE_LAYER_IDS.markerPulse, 'circle-opacity', [
               '*',
               ['coalesce', ['get', 'base_opacity'], 1],
               ['match', ['coalesce', ['get', 'motion'], 'static'],
@@ -7499,24 +7614,30 @@ export function InboxCommandMap({
       // which crashes with "Out of bounds" when the symbol bucket string table is
       // not yet populated (race condition during tile loading).
       ;(['command-pin-core-raw', 'command-pin-core-clustered', 'command-pin-cluster-core', 'command-buyer-purchase-core', 'command-buyer-profile-core', 'command-buyer-cluster-core', SOLD_COMPS_LAYER_IDS.hit, SOLD_COMPS_LAYER_IDS.marker, SOLD_COMPS_CLUSTER_LAYER_IDS.core, ...SELLER_PIN_HOVER_LAYER_IDS, PROPERTY_UNIVERSE_LAYER_IDS.clusterCore, PROPERTY_UNIVERSE_LAYER_IDS.clusterRing, PROPERTY_UNIVERSE_LAYER_IDS.markerHit, PROPERTY_UNIVERSE_LAYER_IDS.markerGlass, PROPERTY_UNIVERSE_LAYER_IDS.markerRing] as const).forEach((layerId) => {
-        if (mapRef.current?.getLayer(layerId)) {
-          map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer' })
-          map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = '' })
-        }
+        const hoverMap = mapRef.current
+        if (!hoverMap?.getLayer(layerId)) return
+        hoverMap.on('mouseenter', layerId, () => { hoverMap.getCanvas().style.cursor = 'pointer' })
+        hoverMap.on('mouseleave', layerId, () => { hoverMap.getCanvas().style.cursor = '' })
       })
     })
 
-    map.on('style.load', () => {
+    mapInstance.on('style.load', () => {
       handleStyleReady()
     })
 
+      scheduleMapResize(true)
+    }
+
+    void bootMap()
+
     return () => {
+      initCancelled = true
       if (mapContextLossOverlayTimerRef.current) {
         clearTimeout(mapContextLossOverlayTimerRef.current)
         mapContextLossOverlayTimerRef.current = null
       }
-      canvas?.removeEventListener('webglcontextlost', handleContextLost)
-      canvas?.removeEventListener('webglcontextrestored', handleContextRestored)
+      if (handleContextLost) canvas?.removeEventListener('webglcontextlost', handleContextLost)
+      if (handleContextRestored) canvas?.removeEventListener('webglcontextrestored', handleContextRestored)
       if (animationRef.current !== null) cancelAnimationFrame(animationRef.current)
       if (styleLoadTimerRef.current) clearTimeout(styleLoadTimerRef.current)
       if (clearPinHoverTimerRef.current) clearTimeout(clearPinHoverTimerRef.current)
@@ -7524,7 +7645,9 @@ export function InboxCommandMap({
       applyCommandMapThemeRef.current = null
       propUnivHandlersRegisteredRef.current = false
       propTilesHandlersRegisteredRef.current = false
-      try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
+      if (map) {
+        try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
+      }
       mapRef.current = null
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7664,7 +7787,8 @@ export function InboxCommandMap({
       const zoom = map.getZoom()
       const showPropertyField = sellerPinLayers.sellerPins
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
-      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom)
+      const showSellerPinGeojson = showPropertyField && shouldUseVectorTileSource(zoom)
+      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !showSellerPinGeojson
       const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !showTiles
       const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
       const showPropertyMarkers = showPropertyLevel && (
@@ -8513,8 +8637,13 @@ export function InboxCommandMap({
       lastSellerPinsDataKeyRef.current = dataKey
       setSellerPinsPerf((current) => ({ ...current, shown: normalizedFilteredPins.length }))
     }
-    // Seller pins are enrichment only — never a competing property-universe source.
-    setSellerPinsGeojson(EMPTY_GEOJSON)
+    const nextSellerPinsGeojson = buildSellerPinsFeatureCollection(
+      normalizedFilteredPins,
+      themeId,
+      mapMode,
+      selectedPropertyId,
+    )
+    setSellerPinsGeojson(nextSellerPinsGeojson)
     const map = mapRef.current
     if (isStyleSafe(map) && shouldUseVectorTileSource(map.getZoom())) {
       applyPropertyTileEnrichmentStates(
@@ -8552,28 +8681,32 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map)) return
     const visible = sellerPinLayers.sellerPins
-    const enrichmentOnly = shouldUseVectorTileSource(viewportZoom) || shouldUseAggregateSource(viewportZoom)
-    const spIconLayerId = 'seller-pins-icon'
+    const showSellerPinMarkers = visible && shouldUsePropertySource(viewportZoom) && !shouldUseAggregateSource(viewportZoom)
+    const vis = (v: boolean) => v ? 'visible' : 'none'
     const spGlowLayerId = `${SOLD_COMPS_LAYER_IDS.marker}-glow`
-    const duplicateUniverseLayers = [
+    const assetPinLayerIds = [
       SELLER_PINS_LAYER_IDS.hit,
-      SELLER_PINS_LAYER_IDS.core,
       SELLER_PINS_LAYER_IDS.icon,
-      SELLER_PINS_LAYER_IDS.glow,
       SELLER_PINS_LAYER_IDS.ring,
       SELLER_PINS_LAYER_IDS.clusterGlow,
       SELLER_PINS_LAYER_IDS.clusterCore,
       SELLER_PINS_LAYER_IDS.clusterCount,
-      spIconLayerId,
     ]
-    duplicateUniverseLayers.forEach((layerId) => {
+    assetPinLayerIds.forEach((layerId) => {
       if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', visible && !enrichmentOnly ? 'visible' : 'none')
+        map.setLayoutProperty(layerId, 'visibility', vis(showSellerPinMarkers))
       }
     })
-    if (map.getLayer(SELLER_PINS_LAYER_IDS.pulse)) {
-      map.setLayoutProperty(SELLER_PINS_LAYER_IDS.pulse, 'visibility', 'none')
-    }
+    const circleOnlyLayerIds = [
+      SELLER_PINS_LAYER_IDS.core,
+      SELLER_PINS_LAYER_IDS.glow,
+      SELLER_PINS_LAYER_IDS.pulse,
+    ]
+    circleOnlyLayerIds.forEach((layerId) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', 'none')
+      }
+    })
     // Keep comp glow aligned with comp marker visibility
     if (map.getLayer(spGlowLayerId)) {
       const compVisible = map.getLayoutProperty(SOLD_COMPS_LAYER_IDS.marker, 'visibility') ?? 'none'

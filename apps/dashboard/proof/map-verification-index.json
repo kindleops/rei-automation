@@ -1,6 +1,6 @@
 {
   "status": "verification_in_progress",
-  "updatedAt": "2026-07-01T06:16:00Z",
+  "updatedAt": "2026-07-01T08:05:00Z",
   "canonicalBaseline": {
     "totalMappable": 124046,
     "markets": 494,
@@ -23,18 +23,40 @@
     "Handler re-registration on style.load (propUniv + propTiles refs reset)",
     "__nexusSetMapTheme verification hook for in-app theme switching",
     "Diagnostics window export in verification mode",
-    "Accounting diagnostics no longer null when fetch pending"
+    "Accounting diagnostics no longer null when fetch pending",
+    "Production build: vite ProxyOptions typing + CampaignSummary/CampaignPreviewResult fields"
   ],
+  "productionBuild": {
+    "status": "passed",
+    "command": "npm run build",
+    "fixes": [
+      "vite.config.ts createDevApiProxy returns ProxyOptions with inferred configure(proxy)",
+      "campaigns.types.ts routable_recipient_count + launch_ready_recipient_count on CampaignSummary",
+      "campaignWizardAdapter.ts built_target_count on CampaignPreviewResult"
+    ]
+  },
   "playwrightSuites": {
     "map-property-diagnostics": "passed",
-    "map-asset-icon-matrix": "passed",
+    "map-asset-icon-matrix": "passed_isolated_batch_partial",
     "map-theme-matrix": "passed_including_cycle",
-    "map-footprint-proof": "passed",
-    "map-render-invariants": "passed_isolated_degrades_in_long_batch",
-    "map-zoom-continuity": "passed_below_9_isolated",
-    "map-dense-accounting": "zoom_8_passed_mvt_zooms_need_stable_api",
-    "map-desktop-interactions": "pending_stable_dev",
-    "map-mobile-verification": "iphone_14_passed_pixel_7_partial"
+    "map-footprint-proof": "passed_isolated_batch_partial",
+    "map-render-invariants": "passed_isolated_batch_partial",
+    "map-zoom-continuity": "passed_isolated_batch_partial",
+    "map-dense-accounting": "passed_isolated_batch_partial",
+    "map-desktop-interactions": "passed",
+    "map-mobile-verification": "passed_iphone_14_and_pixel_7",
+    "map-visual-presets": "passed_isolated_batch_failed_under_load"
+  },
+  "playwrightFullBatch": {
+    "status": "partial",
+    "ranAt": "2026-07-01T08:03:41Z",
+    "duration": "1.3h",
+    "passed": 47,
+    "failed": 29,
+    "skipped": 1,
+    "total": 77,
+    "rootCause": "Supabase get_property_map_vector_tile RPC statement timeout under sustained sequential load; late-batch openMap layer gates also time out when API is saturated",
+    "recommendation": "Run suites in isolation (workers=1) after warm dev:all:detached; do not use single 77-test batch as release gate until tile RPC timeout is tuned or tiles are pre-warmed"
   },
   "proofArtifacts": {
     "assets": "proof/map-assets/ (10 canonical marker types)",
@@ -42,7 +64,7 @@
     "footprint": "proof/map-footprint/ (national + 6 markets)",
     "diagnostics": "proof/map-diagnostics/ (5 zoom bands)",
     "mobile": "proof/map-mobile/ (iphone-14 national/metro/dense/single-family)",
-    "accounting": "proof/map-accounting/ (pending MVT zoom captures)"
+    "accounting": "proof/map-accounting/ (LA+Miami z8-14)"
   },
   "unitTests": {
     "mapUnitSuites": 36,
@@ -54,10 +76,10 @@
     "verificationModeKey": "nx.map.verification.mode"
   },
   "knownGaps": [
-    "Long sequential Playwright batches (>30 tests) degrade when API cold-starts or map context is recycled",
-    "Production build blocked by pre-existing vite.config.ts proxy configure typing (unrelated to map work)",
-    "Office asset type has 0 production properties — sprite registered, visual proof uses manifest note",
-    "Section 12 legacy cleanup deferred until desktop + mobile interaction suites pass green in isolation"
+    "Full 77-test Playwright batch degrades: tile RPC returns map_tile_failed / statement timeout when API is under sustained MVT load",
+    "Office asset type has 0 production properties — sprite registered via registration matrix test; no production-backed screenshot",
+    "Section 12 legacy cleanup deferred until isolated interaction + accounting suites stay green without tile timeouts",
+    "map-visual-presets.spec.ts not in prior isolated pass matrix; fails in batch when openMap layer gate times out (~35s)"
   ],
-  "acceptanceCriteriaProgress": "22/30 verified in isolation; 8 require stable API re-run (dense accounting MVT, desktop SMS, pixel-7 mobile, production build)"
+  "acceptanceCriteriaProgress": "29/30 verified; remaining: section-12 legacy cleanup + reliable full-batch green (blocked on tile RPC timeout under load, not map rendering logic)"
 }

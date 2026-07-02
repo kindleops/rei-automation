@@ -4771,7 +4771,7 @@ export const sendInboxMessageNow = async (
       ''
     ).trim()
     const messageMap: Record<string, string> = {
-      outbound_sms_disabled: 'Automation paused.',
+      outbound_sms_disabled: 'Outbound SMS is currently disabled.',
       queue_runner_disabled: 'Queue runner is currently disabled.',
       operator_send_disabled: 'Manual operator send is currently disabled.',
       recent_delivery_failures: 'Recent delivery issue detected.',
@@ -4783,9 +4783,20 @@ export const sendInboxMessageNow = async (
       invalid_payload: 'Manual send payload is invalid.',
       content_blocked: 'Message blocked by content safety checks.',
       send_failed: 'Provider send failed.',
+      provider_configuration_missing: 'SMS provider is not configured. Contact ops.',
       queue_insert_failure: 'Queue insertion failed before provider send could start.',
     }
-    const friendlyMessage = detailReason || messageMap[reason] || String(upstream?.message || sendResult?.message || 'Send failed').slice(0, 220)
+    const sanitizedDetailReason = detailReason
+      .replace(/\[textgrid\]\s*/gi, '')
+      .replace(/missing required env vars:\s*[^.]+/gi, 'provider configuration incomplete')
+      .replace(/textgrid_[a-z_]+/gi, 'provider credential')
+      .trim()
+    const friendlyMessage = messageMap[reason]
+      || (reason === 'send_failed' && sanitizedDetailReason && !/provider credential|configuration incomplete/i.test(sanitizedDetailReason)
+        ? sanitizedDetailReason
+        : '')
+      || sanitizedDetailReason
+      || String(upstream?.message || sendResult?.message || 'Send failed').slice(0, 220)
     return {
       reason,
       detailReason,
