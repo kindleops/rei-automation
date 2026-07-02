@@ -5508,6 +5508,28 @@ center+right hidden */
   color: var(--map-text-main);
 }
 
+/* SellerMapCard (.smc-shell) — liquid glass over WebGL; excluded from opaque --map-card-bg */
+.nx-icm .smc-shell:not(.is-mobile) {
+  --map-card-bg: linear-gradient(180deg, var(--map-glass-top), var(--map-glass-bottom));
+  border-color: var(--map-card-border) !important;
+  background:
+    radial-gradient(ellipse 120% 90% at 100% 0%, color-mix(in srgb, var(--map-accent) 16%, transparent), transparent 48%),
+    radial-gradient(ellipse 70% 50% at 0% 100%, color-mix(in srgb, var(--map-accent) 10%, transparent), transparent 52%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--map-glass-top) 68%, transparent),
+      color-mix(in srgb, var(--map-glass-bottom) 62%, transparent)
+    ) !important;
+  box-shadow:
+    var(--map-card-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+  -webkit-backdrop-filter: blur(48px) saturate(1.85) !important;
+  backdrop-filter: blur(48px) saturate(1.85) !important;
+  isolation: auto !important;
+  color: var(--map-text-main);
+}
+
 .nx-icm .nx-seller-card__badge,
 .nx-icm .nx-seller-card__tag,
 .nx-icm .nx-seller-card__pill,
