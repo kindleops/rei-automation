@@ -3326,19 +3326,7 @@ const syncCommandPinSourcesWithSellerFallback = (
     type: 'FeatureCollection',
     features: [
       ...threadGeojson.features,
-      ...sellerFeatures.map((feature) => ({
-        ...feature,
-        properties: {
-          ...(feature.properties as PinFeatureProps),
-          featureType: 'pin' as const,
-          selected: 0 as const,
-          focusOpacity: 1,
-          propTypeSlug: normalizePropertyTypeSlug(
-            text((feature.properties as Record<string, unknown> | undefined)?.property_type)
-            || text((feature.properties as Record<string, unknown> | undefined)?.asset_class),
-          ),
-        },
-      })),
+      ...(sellerFeatures as FeatureCollection<Point, PinFeatureProps>['features']),
     ],
   }
   safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
@@ -8081,7 +8069,19 @@ export function InboxCommandMap({
     const sellerFallbackActive = sellerPinLayers.sellerPins
       && sellerPinsGeojson.features.length > 0
       && !isSellerPinIconLayerReady(map)
-    if (!sellerFallbackActive) {
+    if (sellerFallbackActive) {
+      syncCommandPinSourcesWithSellerFallback(
+        map,
+        sellerPinsGeojson,
+        visiblePinsRef.current,
+        {
+          sellerPinsEnabled: sellerPinLayers.sellerPins,
+          selectedConversationId: selectedThreadRef.current?.id ?? null,
+          activeKpiFilter: activeKpiFilterRef.current,
+          styleMode: mapStyleModeRef.current,
+        },
+      )
+    } else {
       safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, geojson)
       safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, geojson)
     }
