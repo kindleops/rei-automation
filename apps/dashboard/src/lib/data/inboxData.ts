@@ -1,5 +1,6 @@
 import { formatRelativeTime } from '../../shared/formatters'
 import type { InboxModel, InboxThread } from '../../domain/inbox/inbox-model-types'
+import { resolveCanonicalThreadStateKey } from '../../domain/inbox/resolveCanonicalThreadStateKey'
 import type { InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 import type { InboxWorkflowThread } from './inboxWorkflowData'
 import type { SmsTemplate } from './templateData'
@@ -4930,8 +4931,15 @@ export const sendInboxMessageNow = async (
     }
   }
 
+  const canonicalThreadKey = resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>)
+    || sellerPhone
+    || toPhone
+  const routingThread: InboxThread = canonicalThreadKey && canonicalThreadKey !== thread.threadKey
+    ? { ...thread, threadKey: canonicalThreadKey, id: canonicalThreadKey }
+    : thread
+
   const now = new Date().toISOString()
-  const queueKey = `inbox:send_now:${thread.threadKey ?? thread.id}:${Date.now()}`
+  const queueKey = `inbox:send_now:${routingThread.threadKey ?? routingThread.id}:${Date.now()}`
 
   const insertPayload: Record<string, unknown> = {
     queue_status: 'queued',    // processor selects WHERE queue_status = 'queued'
@@ -4949,10 +4957,10 @@ export const sendInboxMessageNow = async (
     message_text: personalization.messageText,
     to_phone_number: sellerPhone,
     from_phone_number: fromPhone,
-    thread_key: thread.threadKey || sellerPhone,
-    property_id: thread.propertyId || options?.threadContext?.property?.id || null,
-    master_owner_id: thread.ownerId || options?.threadContext?.seller?.id || null,
-    prospect_id: thread.prospectId || null,
+    thread_key: routingThread.threadKey || sellerPhone,
+    property_id: routingThread.propertyId || options?.threadContext?.property?.id || null,
+    master_owner_id: routingThread.ownerId || options?.threadContext?.seller?.id || null,
+    prospect_id: routingThread.prospectId || null,
     phone_number_id: thread.phoneNumberId || null,
     character_count: personalization.messageText.length,
     touch_number: 1,
@@ -4962,14 +4970,14 @@ export const sendInboxMessageNow = async (
     metadata: {
       source: 'inbox',
       action: 'send_now',
-      thread_key: thread.threadKey || sellerPhone,
-      selected_thread_id: thread.id,
+      thread_key: routingThread.threadKey || sellerPhone,
+      selected_thread_id: routingThread.id,
       created_from: 'leadcommand_inbox',
       our_number: fromPhone,
       seller_phone: sellerPhone,
       note: 'queued_ready_for_processor',
       ...(options?.clientSendId ? { client_send_id: options.clientSendId } : {}),
-      ...buildQueueRoutingMetadata(thread),
+      ...buildQueueRoutingMetadata(routingThread),
       template_variables: personalization.renderVariables,
       candidate_snapshot: personalization.candidateSnapshot,
       personalization: personalization.personalizationMeta,
@@ -4996,7 +5004,7 @@ export const sendInboxMessageNow = async (
     insertPayload.selected_template_id = templateAttachment.templateId
   }
   if (isValidUUID(asString(textgridNumberId, ''))) insertPayload.textgrid_number_id = textgridNumberId
-  Object.assign(insertPayload, buildQueueRoutingColumns(thread))
+  Object.assign(insertPayload, buildQueueRoutingColumns(routingThread))
   const requestPayload = {
     ...insertPayload,
     metadata: { ...((insertPayload.metadata as AnyRecord | undefined) || {}) },
@@ -5006,7 +5014,7 @@ export const sendInboxMessageNow = async (
   const insertPayloadKeys = Object.keys(insertPayload)
 
   if (DEV) {
-    console.log('[sendInboxMessageNow] routing to backend', { keys: insertPayloadKeys, toPhone, fromPhone, queueKey })
+    console.log('[sendInboxMessageNow] routing to backend', { keys: insertPayloadKeys, toPhone, fromPhone, queueKey, canonicalThreadKey })
   } else {
     console.log('[sendInboxMessageNow] routing to backend | toPhone:', toPhone, '| fromPhone:', fromPhone)
   }

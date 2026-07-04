@@ -5,6 +5,7 @@ import {
   queueReplyFromInbox,
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
+import { resolveCanonicalThreadStateKey } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
 import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
 import {
   buildTemplateContextFromThread,
@@ -150,18 +151,37 @@ export const useSellerMapCardActions = ({
     setFollowUpState('sending')
     try {
       let sendThread = thread
-      if (!resolveMapThreadPhone(record)) {
+      const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
+        let candidate = sendThread
+        let canonicalKey = resolveCanonicalThreadStateKey(candidate as unknown as Record<string, unknown>)
+        if (canonicalKey) {
+          return canonicalKey === candidate.threadKey
+            ? candidate
+            : { ...candidate, threadKey: canonicalKey, id: canonicalKey }
+        }
+
         const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
           prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
           masterOwnerId: viewModel.masterOwner.id,
         })
-        if (resolved.phone) {
-          sendThread = buildThreadFromViewModel(viewModel, record, {
-            phone: resolved.phone,
-            prospectId: resolved.prospectId,
-          })
-        }
+        if (!resolved.phone) return null
+
+        candidate = buildThreadFromViewModel(viewModel, record, {
+          phone: resolved.phone,
+          prospectId: resolved.prospectId,
+        })
+        canonicalKey = resolveCanonicalThreadStateKey(candidate as unknown as Record<string, unknown>)
+        if (!canonicalKey) return null
+        return { ...candidate, threadKey: canonicalKey, id: canonicalKey }
       }
+
+      const resolvedSendThread = await ensureCanonicalSendThread()
+      if (!resolvedSendThread) {
+        setFollowUpState('blocked')
+        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        return
+      }
+      sendThread = resolvedSendThread
 
       let followUpTemplate: SmsTemplate | null = null
       if (eligibility.isUncontacted) {

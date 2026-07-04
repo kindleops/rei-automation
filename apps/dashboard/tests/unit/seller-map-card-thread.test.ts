@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { resolveCanonicalThreadStateKey } from '../../src/domain/inbox/resolveCanonicalThreadStateKey'
 import { buildSellerMapCardViewModel } from '../../src/views/map/seller-card/seller-map-card-view-model'
 import {
   buildThreadFromViewModel,
@@ -77,5 +78,19 @@ describe('seller map card thread builder', () => {
 
     expect(thread.canonicalE164).toBe('+19015550001')
     expect(thread.prospectId).toBe('prospect-hydrated')
+  })
+
+  it('resolves canonical E.164 send key from synthetic property thread', () => {
+    const viewModel = buildSellerMapCardViewModel({
+      ...baseRecord,
+      prospect_best_phone: '+19015551234',
+    })
+    const thread = buildThreadFromViewModel(viewModel, {
+      ...baseRecord,
+      prospect_best_phone: '+19015551234',
+    })
+
+    expect(thread.threadKey).toBe('property:prop-123')
+    expect(resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>)).toBe('+19015551234')
   })
 })
