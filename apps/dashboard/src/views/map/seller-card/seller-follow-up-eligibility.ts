@@ -73,8 +73,16 @@ const resolveIneligibleReason = (
 
   if (!isFollowUpDue(record, state.status)) return 'Follow-up not due'
 
-  const phone = text(firstDefined(record, ['canonical_e164', 'seller_phone', 'phone_number']))
-  if (!phone) return 'Invalid contact'
+  const phone = text(firstDefined(record, [
+    'canonical_e164',
+    'seller_phone',
+    'phone_number',
+    'prospect_best_phone',
+    'display_phone',
+    'best_phone',
+    'phone',
+  ]))
+  if (!phone || phone.toLowerCase() === 'no phone') return 'Invalid contact'
 
   return 'Follow-up unavailable'
 }

@@ -150,6 +150,8 @@ export type CommandMapSellerPin = {
   next_action_at?: string | null
   canonical_e164?: string | null
   seller_phone?: string | null
+  prospect_best_phone?: string | null
+  display_phone?: string | null
   property_count?: number | null
   property_tags_text: string | null
   property_tags_json: unknown | null
@@ -714,6 +716,106 @@ export const loadCommandMapSellerPins = async (
   return data as CommandMapSellerPin[]
 }
 
+const SELLER_WORK_ITEM_PHONE_SELECT = 'prospect_id,prospect_best_phone,display_phone,canonical_e164,seller_phone'
+
+const pickSellerContactPhone = (row: Record<string, unknown> | null | undefined): string | null => {
+  if (!row) return null
+  const candidates = [
+    row.canonical_e164,
+    row.prospect_best_phone,
+    row.display_phone,
+    row.seller_phone,
+  ]
+  for (const candidate of candidates) {
+    const phone = String(candidate ?? '').trim()
+    if (!phone || phone.toLowerCase() === 'no phone') continue
+    return phone
+  }
+  return null
+}
+
+export const resolveCommandMapSellerPhone = async (
+  propertyId: string,
+  options: {
+    prospectId?: string | null
+    masterOwnerId?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<{ phone: string | null; prospectId: string | null }> => {
+  if (!propertyId) return { phone: null, prospectId: options.prospectId ?? null }
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('v_seller_work_items')
+    .select(SELLER_WORK_ITEM_PHONE_SELECT)
+    .eq('property_id', propertyId)
+  if (options.signal) query = query.abortSignal(options.signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (!error && data) {
+    const row = data as Record<string, unknown>
+    const phone = pickSellerContactPhone(row)
+    if (phone) {
+      return {
+        phone,
+        prospectId: String(row.prospect_id ?? options.prospectId ?? '').trim() || null,
+      }
+    }
+  }
+
+  const ownerId = String(options.masterOwnerId ?? '').trim()
+  if (ownerId) {
+    let phoneQuery = supabase
+      .from('phones')
+      .select('canonical_e164,phone,phone_number,sort_rank')
+      .eq('master_owner_id', ownerId)
+      .order('sort_rank', { ascending: true })
+    if (options.signal) phoneQuery = phoneQuery.abortSignal(options.signal)
+    const { data: phoneRows } = await phoneQuery.limit(3)
+    for (const row of (phoneRows ?? []) as Record<string, unknown>[]) {
+      const phone = pickSellerContactPhone({
+        canonical_e164: row.canonical_e164,
+        seller_phone: row.phone_number ?? row.phone,
+      })
+      if (phone) {
+        return { phone, prospectId: options.prospectId ?? null }
+      }
+    }
+  }
+
+  return { phone: null, prospectId: options.prospectId ?? null }
+}
+
+const readSellerWorkItemContact = async (
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<Partial<CommandMapSellerPin> | null> => {
+  if (!propertyId) return null
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('v_seller_work_items')
+    .select(SELLER_WORK_ITEM_PHONE_SELECT)
+    .eq('property_id', propertyId)
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error) {
+    if (!isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] seller work item contact lookup failed:', error)
+    }
+    return null
+  }
+  if (!data) return null
+  const row = data as Record<string, unknown>
+  const phone = pickSellerContactPhone(row)
+  return {
+    prospect_id: String(row.prospect_id ?? '').trim() || null,
+    prospect_best_phone: String(row.prospect_best_phone ?? '').trim() || null,
+    display_phone: String(row.display_phone ?? '').trim() || null,
+    canonical_e164: phone,
+    seller_phone: phone,
+  }
+}
+
 const mapCanonicalThreadRow = (row: Record<string, unknown> | null): Partial<CommandMapSellerPin> | null => {
   if (!row) return null
   const latestBody = String(row.latest_message_body ?? '').trim()
@@ -863,9 +965,10 @@ export const loadCommandMapSellerPinDetail = async (
     return mapPropertyEnrichmentRow(propertyData, masterOwner)
   }
 
-  const [sellerWorkItem, canonicalThread] = await Promise.all([
+  const [sellerWorkItem, canonicalThread, sellerWorkItemContact] = await Promise.all([
     readFeed(),
     readCanonicalThread(),
+    readSellerWorkItemContact(propertyId, options.signal),
   ])
 
   const resolvedPropertyId = canonicalThread?.property_id
@@ -885,11 +988,12 @@ export const loadCommandMapSellerPinDetail = async (
   const merged = {
     ...(sellerWorkItem ?? {}),
     ...(canonicalThread ?? {}),
+    ...(sellerWorkItemContact ?? {}),
     ...(propertyEnrichment ?? {}),
     property_id: resolvedPropertyId,
     thread_key: canonicalThread?.thread_key ?? sellerWorkItem?.thread_key ?? options.threadKey ?? null,
     master_owner_id: resolvedMasterOwnerId,
-    prospect_id: sellerWorkItem?.prospect_id ?? options.prospectId ?? null,
+    prospect_id: sellerWorkItemContact?.prospect_id ?? sellerWorkItem?.prospect_id ?? options.prospectId ?? null,
     owner_priority_score:
       propertyEnrichment?.owner_priority_score
       ?? sellerWorkItem?.priority_score
