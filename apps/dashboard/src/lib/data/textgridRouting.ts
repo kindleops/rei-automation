@@ -31,28 +31,29 @@ interface RoutingResult {
   route_rejected_reasons?: string[]
 }
 
+/** Mirrors apps/api market-sending-zones STATE_CLUSTER_MAP for first-touch routing. */
 const APPROVED_TEXTGRID_CLUSTERS = [
   {
     cluster_key: 'WEST_COAST',
-    allowed_seller_states: ['CA', 'AZ', 'NV'],
-    preferred_sender_markets: ['los angeles, ca'],
+    allowed_seller_states: ['CA', 'AZ', 'NV', 'NM', 'UT', 'CO', 'ID', 'WA', 'OR'],
+    preferred_sender_markets: ['los angeles, ca', 'riverside, ca', 'stockton, ca', 'sacramento, ca'],
     fallback_sender_states: ['CA']
   },
   {
     cluster_key: 'TEXAS_OK',
     allowed_seller_states: ['TX', 'OK'],
-    preferred_sender_markets: ['dallas, tx', 'houston, tx'],
+    preferred_sender_markets: ['dallas, tx', 'houston, tx', 'oklahoma city, ok', 'tulsa, ok'],
     fallback_sender_states: ['TX']
   },
   {
     cluster_key: 'SOUTHEAST_EAST',
-    allowed_seller_states: ['GA', 'NC', 'SC', 'FL'],
-    preferred_sender_markets: ['atlanta, ga', 'charlotte, nc', 'jacksonville, fl', 'miami, fl'],
+    allowed_seller_states: ['GA', 'NC', 'SC', 'FL', 'TN', 'AL', 'LA', 'VA'],
+    preferred_sender_markets: ['atlanta, ga', 'charlotte, nc', 'jacksonville, fl', 'miami, fl', 'tampa, fl', 'orlando, fl'],
     fallback_sender_states: ['GA', 'NC', 'FL']
   },
   {
     cluster_key: 'MIDWEST',
-    allowed_seller_states: ['MN', 'WI', 'IA', 'ND', 'SD'],
+    allowed_seller_states: ['MN', 'WI', 'IA', 'ND', 'SD', 'MI', 'IL', 'IN', 'MO', 'KS', 'OH', 'KY', 'NE', 'PA', 'MD'],
     preferred_sender_markets: ['minneapolis, mn'],
     fallback_sender_states: ['MN']
   }
@@ -81,7 +82,8 @@ const normalizeState = (value: string | null | undefined): string => {
   if (!token) return ''
   if (token === 'north carolina') return 'nc'
   if (token === 'south carolina') return 'sc'
-  if (token.length === 2) return token
+  if (token === 'tennessee') return 'tn'
+  if (token.length === 2) return token.toLowerCase()
   return token
 }
 

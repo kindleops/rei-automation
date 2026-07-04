@@ -55,6 +55,11 @@ const resolveMapThreadKey = (
   return ''
 }
 
+const parseStateFromAddress = (address: string): string | undefined => {
+  const match = address.match(/,\s*([A-Za-z]{2})\s*(?:\d{5}(?:-\d{4})?)?\s*$/)
+  return match?.[1]?.toUpperCase()
+}
+
 const pickOwnershipCheckTemplate = (templates: SmsTemplate[]): SmsTemplate | null => {
   if (!templates.length) return null
   const english = templates.find((template) => template.language?.toLowerCase() === 'english')
@@ -71,7 +76,9 @@ export const buildThreadFromViewModel = (
   const ownerId = text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || vm.masterOwner.id || undefined
   const prospectId = text(overrides.prospectId) || text(firstDefined(record, ['prospect_id', 'prospectId'])) || undefined
   const market = text(firstDefined(record, ['market', 'filter_market', 'display_market'])) || 'unknown'
-  const propertyState = text(firstDefined(record, ['property_address_state', 'propertyAddressState', 'state'])) || undefined
+  const propertyState = text(firstDefined(record, ['property_address_state', 'propertyAddressState', 'state']))
+    || parseStateFromAddress(vm.property.address)
+    || undefined
 
   return {
     id: threadKey || vm.propertyId,
@@ -133,6 +140,7 @@ export const useSellerMapCardActions = ({
   onMessagesRefresh?: () => void
 }) => {
   const [followUpState, setFollowUpState] = useState<FollowUpButtonState>('idle')
+  const [followUpError, setFollowUpError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false)
 
@@ -149,6 +157,7 @@ export const useSellerMapCardActions = ({
     }
 
     setFollowUpState('sending')
+    setFollowUpError(null)
     try {
       let sendThread = thread
       const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
@@ -177,8 +186,12 @@ export const useSellerMapCardActions = ({
 
       const resolvedSendThread = await ensureCanonicalSendThread()
       if (!resolvedSendThread) {
+        setFollowUpError('No valid seller phone on file')
         setFollowUpState('blocked')
-        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        window.setTimeout(() => {
+          setFollowUpState('idle')
+          setFollowUpError(null)
+        }, 2400)
         return
       }
       sendThread = resolvedSendThread
@@ -195,16 +208,24 @@ export const useSellerMapCardActions = ({
       }
 
       if (!followUpTemplate) {
+        setFollowUpError('Ownership check template unavailable')
         setFollowUpState('failed')
-        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        window.setTimeout(() => {
+          setFollowUpState('idle')
+          setFollowUpError(null)
+        }, 4000)
         return
       }
 
       const context = buildTemplateContextFromThread(sendThread, threadContext ?? null)
       const { renderedText: messageText } = renderTemplate(followUpTemplate, context)
       if (!messageText.trim()) {
+        setFollowUpError('Template rendered empty message')
         setFollowUpState('failed')
-        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        window.setTimeout(() => {
+          setFollowUpState('idle')
+          setFollowUpError(null)
+        }, 4000)
         return
       }
 
@@ -214,8 +235,12 @@ export const useSellerMapCardActions = ({
       })
 
       if (!result.ok) {
+        setFollowUpError(result.errorMessage || result.guardReason || 'Send failed')
         setFollowUpState(result.suppressionBlocked ? 'blocked' : 'failed')
-        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        window.setTimeout(() => {
+          setFollowUpState('idle')
+          setFollowUpError(null)
+        }, 4000)
         return
       }
 
@@ -223,9 +248,13 @@ export const useSellerMapCardActions = ({
       onActivityRefresh?.()
       onMessagesRefresh?.()
       window.setTimeout(() => setFollowUpState('idle'), 2400)
-    } catch {
+    } catch (error) {
+      setFollowUpError(error instanceof Error ? error.message : 'Send failed')
       setFollowUpState('failed')
-      window.setTimeout(() => setFollowUpState('idle'), 2400)
+      window.setTimeout(() => {
+        setFollowUpState('idle')
+        setFollowUpError(null)
+      }, 4000)
     }
   }, [
     followUpState,
@@ -289,6 +318,7 @@ export const useSellerMapCardActions = ({
   return {
     thread,
     followUpState,
+    followUpError,
     isSending,
     isTranslatingDraft,
     executeFollowUp,

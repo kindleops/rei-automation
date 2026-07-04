@@ -4877,16 +4877,24 @@ export const sendInboxMessageNow = async (
     ? preferredTextgridNumberIdCandidate
     : null
 
+  const canonicalThreadKey = resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>)
+    || sellerPhone
+    || toPhone
+  const routingThread: InboxThread = canonicalThreadKey && canonicalThreadKey !== thread.threadKey
+    ? { ...thread, threadKey: canonicalThreadKey, id: canonicalThreadKey }
+    : thread
+
   const resolveSendNowRoute = async (preferFreshRoute = false) => {
     return resolveOutboundTextgridNumber({
-      marketId: thread.marketId,
-      market: thread.market || thread.marketName,
+      marketId: routingThread.marketId,
+      market: routingThread.market || routingThread.marketName,
       ourNumber: preferFreshRoute ? undefined : (preferredFromPhone || undefined),
       phoneNumber: sellerPhone,
       textgridNumberId: preferredTextgridNumberId || undefined,
-      property_address_state: thread.property_address_state,
-      propertyId: thread.propertyId,
-      threadKey: thread.threadKey,
+      property_address_state: routingThread.property_address_state,
+      propertyId: routingThread.propertyId,
+      threadKey: routingThread.threadKey,
+      allow_cluster_routing: true,
     }, false)
   }
 
@@ -4912,7 +4920,7 @@ export const sendInboxMessageNow = async (
     routingResolutionSource = 'backend_thread_history_fallback'
   }
 
-  if (!fromPhone && !thread.threadKey) {
+  if (!fromPhone) {
     return {
       ok: false,
       clientSendId: options?.clientSendId ?? null,
@@ -4920,9 +4928,11 @@ export const sendInboxMessageNow = async (
       messageEventId: null,
       providerMessageSid: null,
       deliveryStatus: null,
-      errorMessage: 'No reply route was resolved for this thread.',
+      errorMessage: routingResult.ok
+        ? 'No reply route was resolved for this thread.'
+        : (routingResult.error || routingResult.routing_reason || 'No valid sender number for this market.'),
       guardReason: 'missing_routing',
-      backendReason: null,
+      backendReason: routingResult.error || null,
       insertPayloadKeys: [],
       suppressionBlocked: false,
       sendRouteUsed: 'none',
@@ -4930,13 +4940,6 @@ export const sendInboxMessageNow = async (
       proof: null,
     }
   }
-
-  const canonicalThreadKey = resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>)
-    || sellerPhone
-    || toPhone
-  const routingThread: InboxThread = canonicalThreadKey && canonicalThreadKey !== thread.threadKey
-    ? { ...thread, threadKey: canonicalThreadKey, id: canonicalThreadKey }
-    : thread
 
   const now = new Date().toISOString()
   const queueKey = `inbox:send_now:${routingThread.threadKey ?? routingThread.id}:${Date.now()}`
