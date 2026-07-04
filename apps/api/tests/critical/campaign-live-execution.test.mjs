@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildProductionQueueRailsPatch,
+  syncProductionQueueRailsFromCampaign,
   finalizeOperatorLiveActivation,
   CANONICAL_FULL_AUTOPILOT_MODE,
   isCampaignFullyLive,
@@ -10,6 +11,7 @@ import {
   mergeLaunchWriteModeIntoInput,
   resolveCampaignLaunchWriteMode,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
+import { buildProductionLiveCampaignPersistencePatch } from '@/lib/domain/campaigns/campaign-canonical-write.js'
 import { validateLiveLimitedRails } from '@/lib/domain/queue/queue-control-safety.js'
 import { handleQueueRunRequest } from '@/lib/domain/queue/queue-run-request.js'
 import { convertTestCampaignToLive } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
@@ -253,7 +255,170 @@ test('production queue rails patch uses campaign caps not stale canary limits', 
   assert.equal(patch.queue_per_number_cap, '150')
   assert.equal(patch.queue_run_limit, '50')
   assert.equal(patch.queue_emergency_stop_at, '')
-  assert.equal(patch.auto_reply_mode, 'live_limited')
+  // Global inbound auto-reply containment is decoupled from outbound rails:
+  // the rails patch must NEVER carry auto_reply_mode (see decoupling tests below).
+  assert.equal(patch.auto_reply_mode, undefined)
+  assert.equal('auto_reply_mode' in patch, false)
+})
+
+// ── auto_reply_mode decoupling (global inbound containment must not be ────────
+//    overwritten by outbound campaign queue-rail synchronization) ─────────────
+
+const OUTBOUND_RAILS_KEYS = [
+  'queue_processor_mode',
+  'queue_auto_enqueue_enabled',
+  'queue_auto_send_enabled',
+  'outbound_sms_enabled',
+  'campaign_mode',
+  'queue_execution_mode',
+  'queue_run_limit',
+  'queue_hard_cap',
+  'queue_max_batch_size',
+  'queue_daily_send_cap',
+  'queue_market_cap',
+  'queue_per_number_cap',
+]
+
+function liveProductionCampaign(overrides = {}) {
+  return {
+    id: 'camp-1',
+    status: 'active',
+    auto_queue_enabled: true,
+    auto_send_enabled: true,
+    auto_reply_mode: 'live_limited',
+    batch_max: 50,
+    daily_cap: 750,
+    market_cap: 400,
+    per_sender_cap: 150,
+    market: 'Miami, FL',
+    metadata: { production_launch: true },
+    ...overrides,
+  }
+}
+
+test('buildProductionQueueRailsPatch omits auto_reply_mode but keeps outbound rails', () => {
+  const patch = buildProductionQueueRailsPatch(liveProductionCampaign())
+  assert.equal('auto_reply_mode' in patch, false)
+  // All legitimate outbound rails are still present.
+  for (const key of OUTBOUND_RAILS_KEYS) {
+    assert.ok(key in patch, `expected rails patch to still set ${key}`)
+  }
+  assert.equal(patch.campaign_mode, 'live_limited')
+  assert.equal(patch.queue_processor_mode, 'on')
+  assert.equal(patch.queue_auto_send_enabled, 'true')
+  assert.equal(patch.queue_market_filter, 'Miami, FL')
+})
+
+test('syncProductionQueueRailsFromCampaign never writes auto_reply_mode to system_control', async () => {
+  const writes = []
+  const res = await syncProductionQueueRailsFromCampaign(liveProductionCampaign(), {
+    setSystemValues: async (payload) => {
+      writes.push(payload)
+      return { ok: true }
+    },
+  })
+  assert.equal(res.ok, true)
+  assert.equal(writes.length, 1)
+  assert.equal('auto_reply_mode' in writes[0], false)
+  // Outbound rails still synchronized.
+  assert.equal(writes[0].queue_auto_send_enabled, 'true')
+  assert.equal(writes[0].campaign_mode, 'live_limited')
+})
+
+test('campaign rails sync leaves an existing internal_only mode unchanged', async () => {
+  // Simulate the global containment already set to internal_only. The rails sync
+  // must not include auto_reply_mode, so the persisted value survives intact.
+  let systemAutoReplyMode = 'internal_only'
+  await syncProductionQueueRailsFromCampaign(liveProductionCampaign(), {
+    setSystemValues: async (payload) => {
+      if ('auto_reply_mode' in payload) systemAutoReplyMode = payload.auto_reply_mode
+      return { ok: true }
+    },
+  })
+  assert.equal(systemAutoReplyMode, 'internal_only')
+})
+
+test('campaign rails sync leaves an existing live_limited mode unchanged', async () => {
+  let systemAutoReplyMode = 'live_limited'
+  await syncProductionQueueRailsFromCampaign(liveProductionCampaign(), {
+    setSystemValues: async (payload) => {
+      if ('auto_reply_mode' in payload) systemAutoReplyMode = payload.auto_reply_mode
+      return { ok: true }
+    },
+  })
+  assert.equal(systemAutoReplyMode, 'live_limited')
+})
+
+test('multiple active campaigns and repeated 5-min feed ticks cannot change auto_reply_mode', async () => {
+  // Model the campaigns/feed + activate-due crons re-running the rails sync for
+  // several live campaigns across many ticks. internal_only must survive all of them.
+  let systemAutoReplyMode = 'internal_only'
+  const campaigns = [
+    liveProductionCampaign({ id: 'tax-delinquent', market: 'Nashville, TN' }),
+    liveProductionCampaign({ id: 'miami-test', market: 'Miami, FL' }),
+    liveProductionCampaign({ id: 'la-multifamily', market: 'Los Angeles, CA' }),
+  ]
+  for (let tick = 0; tick < 5; tick += 1) {
+    for (const campaign of campaigns) {
+      await syncProductionQueueRailsFromCampaign(campaign, {
+        setSystemValues: async (payload) => {
+          if ('auto_reply_mode' in payload) systemAutoReplyMode = payload.auto_reply_mode
+          return { ok: true }
+        },
+      })
+    }
+  }
+  assert.equal(systemAutoReplyMode, 'internal_only')
+})
+
+test('finalizeOperatorLiveActivation (activate-due path) never writes auto_reply_mode to system_control', async () => {
+  const systemWrites = []
+  const supabase = {
+    from(table) {
+      if (table !== 'campaigns') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: liveProductionCampaign({ id: 'la-1' }), error: null }),
+          }),
+        }),
+        update: (patch) => ({
+          eq: () => ({
+            select: () => ({
+              maybeSingle: async () => ({
+                data: { ...liveProductionCampaign({ id: 'la-1' }), ...patch, metadata: { production_launch: true } },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }
+    },
+  }
+  const result = await finalizeOperatorLiveActivation('la-1', { batch_max: 50 }, {
+    supabase,
+    setSystemValues: async (payload) => {
+      systemWrites.push(payload)
+      return { ok: true }
+    },
+    runSendQueue: async () => ({ ok: true, sent_count: 0, claimed_count: 0, results: [] }),
+  })
+  assert.equal(result.ok, true)
+  assert.ok(systemWrites.length >= 1, 'expected at least one system_control write (queue rails)')
+  for (const payload of systemWrites) {
+    assert.equal('auto_reply_mode' in payload, false, 'no system_control write may carry auto_reply_mode')
+  }
+})
+
+test('campaign row still carries its own auto_reply_mode (campaign-level field is NOT removed)', () => {
+  // Decoupling removes ONLY the system_control global write. The campaign row's
+  // own auto_reply_mode (persistence patch) remains live_limited when going live.
+  const patch = buildProductionLiveCampaignPersistencePatch(
+    liveProductionCampaign(),
+    { scheduled_for: '2026-07-05T13:00:00.000Z' },
+    { status: 'active', execution_mode: 'immediate_live' },
+  )
+  assert.equal(patch.auto_reply_mode, CANONICAL_FULL_AUTOPILOT_MODE)
 })
 
 test('live limited rails auto-cap dispatch limit instead of rejecting cron default', () => {
