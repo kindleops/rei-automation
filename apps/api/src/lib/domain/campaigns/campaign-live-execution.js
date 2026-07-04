@@ -313,7 +313,15 @@ export function buildProductionQueueRailsPatch(campaign = {}) {
     queue_auto_enqueue_enabled: 'true',
     queue_auto_send_enabled: 'true',
     outbound_sms_enabled: 'true',
-    auto_reply_mode: CANONICAL_FULL_AUTOPILOT_MODE,
+    // NOTE: auto_reply_mode is intentionally NOT set here. Global inbound
+    // auto-reply containment (system_control.auto_reply_mode) is decoupled from
+    // outbound campaign queue-rail synchronization. Campaign feed/activation/
+    // recovery/cron paths must never create, overwrite, promote, or downgrade
+    // the global auto_reply_mode; it is controlled ONLY via the explicit
+    // operator/control-plane path (/api/cockpit/queue/control). Setting it here
+    // let a live campaign's every-5-min rails sync silently override inbound
+    // containment. See buildProductionLiveCampaignPersistencePatch() for the
+    // campaign row's own auto_reply_mode, which is a separate, legitimate field.
     campaign_mode: 'live_limited',
     queue_execution_mode: 'normal',
     queue_run_limit: String(Math.min(batchMax, 50)),
