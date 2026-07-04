@@ -235,7 +235,9 @@ export const useSellerMapCardActions = ({
 
         const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
           prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
-          masterOwnerId: viewModel.masterOwner.id,
+          masterOwnerId: viewModel.masterOwner.id
+            || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
+            || null,
         })
         if (!resolved.phone) return null
 

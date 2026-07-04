@@ -344,6 +344,10 @@ const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'pulse_style',
   'execution_ring_color',
   'render_priority',
+  'prospect_best_phone',
+  'display_phone',
+  'canonical_e164',
+  'seller_phone',
 ].join(',')
 
 /** Canonical thread state from canonical_inbox_threads. */
@@ -716,22 +720,89 @@ export const loadCommandMapSellerPins = async (
   return data as CommandMapSellerPin[]
 }
 
-const SELLER_WORK_ITEM_PHONE_SELECT = 'prospect_id,prospect_best_phone,display_phone'
+const SELLER_WORK_ITEM_PHONE_SELECT = 'prospect_id,prospect_best_phone,display_phone,master_owner_id'
 
-const pickSellerContactPhone = (row: Record<string, unknown> | null | undefined): string | null => {
+export const pickSellerContactPhone = (row: Record<string, unknown> | null | undefined): string | null => {
   if (!row) return null
   const candidates = [
     row.canonical_e164,
     row.prospect_best_phone,
     row.display_phone,
     row.seller_phone,
+    row.best_phone_1,
+    row.phone,
   ]
   for (const candidate of candidates) {
     const phone = String(candidate ?? '').trim()
     if (!phone || phone.toLowerCase() === 'no phone') continue
+    if (/^ph_[a-z0-9_]+$/i.test(phone)) continue
     return phone
   }
   return null
+}
+
+const readMasterOwnerBestPhone = async (
+  masterOwnerId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  const ownerId = String(masterOwnerId ?? '').trim()
+  if (!ownerId) return null
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('master_owners')
+    .select('best_phone_1')
+    .eq('master_owner_id', ownerId)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error) {
+    if (!isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] master owner phone lookup failed:', error)
+    }
+    return null
+  }
+  return pickSellerContactPhone(data as Record<string, unknown>)
+}
+
+const readProspectBestPhone = async (
+  prospectId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  const id = String(prospectId ?? '').trim()
+  if (!id) return null
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('prospects')
+    .select('best_phone')
+    .eq('prospect_id', id)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error) {
+    if (!isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] prospect phone lookup failed:', error)
+    }
+    return null
+  }
+  return pickSellerContactPhone(data as Record<string, unknown>)
+}
+
+const resolveMasterOwnerIdForProperty = async (
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('properties')
+    .select('master_owner_id')
+    .eq('property_id', propertyId)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error || !data) return null
+  return String((data as Record<string, unknown>).master_owner_id ?? '').trim() || null
 }
 
 export const resolveCommandMapSellerPhone = async (
@@ -752,41 +823,34 @@ export const resolveCommandMapSellerPhone = async (
   if (options.signal) query = query.abortSignal(options.signal)
 
   const { data, error } = await query.limit(1).maybeSingle()
+  let resolvedProspectId = String(options.prospectId ?? '').trim() || null
+  let resolvedOwnerId = String(options.masterOwnerId ?? '').trim() || null
+
   if (!error && data) {
     const row = data as Record<string, unknown>
     const phone = pickSellerContactPhone(row)
+    resolvedProspectId = resolvedProspectId || String(row.prospect_id ?? '').trim() || null
+    resolvedOwnerId = resolvedOwnerId || String(row.master_owner_id ?? '').trim() || null
     if (phone) {
-      return {
-        phone,
-        prospectId: String(row.prospect_id ?? '').trim() || String(options.prospectId ?? '').trim() || null,
-      }
+      return { phone, prospectId: resolvedProspectId }
     }
   }
 
-  const ownerId = String(options.masterOwnerId ?? '').trim()
-  if (ownerId) {
-    let phoneQuery = supabase
-      .from('phones')
-      .select('canonical_e164,phone,sort_rank')
-      .eq('master_owner_id', ownerId)
-      .order('sort_rank', { ascending: true })
-    if (options.signal) phoneQuery = phoneQuery.abortSignal(options.signal)
-    const { data: phoneRows, error: phoneError } = await phoneQuery.limit(3)
-    if (phoneError && !isAbortError(phoneError) && import.meta.env.DEV) {
-      console.warn('[CommandMap] phones fallback lookup failed:', phoneError)
-    }
-    for (const row of (phoneRows ?? []) as Record<string, unknown>[]) {
-      const phone = pickSellerContactPhone({
-        canonical_e164: row.canonical_e164,
-        seller_phone: row.phone,
-      })
-      if (phone) {
-        return { phone, prospectId: options.prospectId ?? null }
-      }
-    }
+  if (!resolvedOwnerId) {
+    resolvedOwnerId = await resolveMasterOwnerIdForProperty(propertyId, options.signal)
   }
 
-  return { phone: null, prospectId: options.prospectId ?? null }
+  const ownerPhone = await readMasterOwnerBestPhone(resolvedOwnerId, options.signal)
+  if (ownerPhone) {
+    return { phone: ownerPhone, prospectId: resolvedProspectId }
+  }
+
+  const prospectPhone = await readProspectBestPhone(resolvedProspectId, options.signal)
+  if (prospectPhone) {
+    return { phone: prospectPhone, prospectId: resolvedProspectId }
+  }
+
+  return { phone: null, prospectId: resolvedProspectId }
 }
 
 const readSellerWorkItemContact = async (
@@ -809,11 +873,15 @@ const readSellerWorkItemContact = async (
   }
   if (!data) return null
   const row = data as Record<string, unknown>
-  const phone = pickSellerContactPhone(row)
+  let phone = pickSellerContactPhone(row)
+  const masterOwnerId = String(row.master_owner_id ?? '').trim() || null
+  if (!phone && masterOwnerId) {
+    phone = await readMasterOwnerBestPhone(masterOwnerId, signal)
+  }
   return {
     prospect_id: String(row.prospect_id ?? '').trim() || null,
-    prospect_best_phone: String(row.prospect_best_phone ?? '').trim() || null,
-    display_phone: String(row.display_phone ?? '').trim() || null,
+    prospect_best_phone: phone || String(row.prospect_best_phone ?? '').trim() || null,
+    display_phone: phone || String(row.display_phone ?? '').trim() || null,
     canonical_e164: phone,
     seller_phone: phone,
   }

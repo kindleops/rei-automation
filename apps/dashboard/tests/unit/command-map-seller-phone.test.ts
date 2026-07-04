@@ -13,4 +13,12 @@ describe.skipIf(!hasSupabase)('resolveCommandMapSellerPhone', () => {
     expect(result.phone).toBe('+12522921121')
     expect(result.prospectId).toBe('pros0_43018c9a1e0372e67c70b44c')
   })
+
+  it('falls back to master_owners.best_phone_1 when work item shows No Phone', async () => {
+    const result = await resolveCommandMapSellerPhone('213394469', {
+      masterOwnerId: 'mo_c39918deab8b4155d76ef6ad',
+    })
+
+    expect(result.phone).toBe('+13235287969')
+  })
 })
