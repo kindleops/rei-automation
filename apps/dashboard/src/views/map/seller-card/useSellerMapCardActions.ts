@@ -5,7 +5,7 @@ import {
   queueReplyFromInbox,
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
-import { resolveCanonicalThreadStateKey } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
+import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
 import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
@@ -226,28 +226,37 @@ export const useSellerMapCardActions = ({
       let sendThread = thread
       const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
         let candidate = sendThread
-        let canonicalKey = resolveCanonicalThreadStateKey(candidate as unknown as Record<string, unknown>)
-        if (canonicalKey) {
-          return canonicalKey === candidate.threadKey
-            ? candidate
-            : { ...candidate, threadKey: canonicalKey, id: canonicalKey }
+        let dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
+
+        if (!dialablePhone) {
+          const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
+            prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
+            masterOwnerId: viewModel.masterOwner.id
+              || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
+              || null,
+          })
+          if (!resolved.phone) return null
+
+          candidate = buildThreadFromViewModel(viewModel, record, {
+            phone: resolved.phone,
+            prospectId: resolved.prospectId,
+          })
+          dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
         }
 
-        const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
-          prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
-          masterOwnerId: viewModel.masterOwner.id
-            || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
-            || null,
-        })
-        if (!resolved.phone) return null
+        if (!dialablePhone) return null
 
-        candidate = buildThreadFromViewModel(viewModel, record, {
-          phone: resolved.phone,
-          prospectId: resolved.prospectId,
-        })
-        canonicalKey = resolveCanonicalThreadStateKey(candidate as unknown as Record<string, unknown>)
-        if (!canonicalKey) return null
-        return { ...candidate, threadKey: canonicalKey, id: canonicalKey }
+        return {
+          ...candidate,
+          threadKey: dialablePhone,
+          id: dialablePhone,
+          phoneNumber: dialablePhone,
+          canonicalE164: dialablePhone,
+          sellerPhone: dialablePhone,
+          bestPhone: dialablePhone,
+          display_phone: dialablePhone,
+          prospect_best_phone: dialablePhone,
+        }
       }
 
       const resolvedSendThread = await ensureCanonicalSendThread()

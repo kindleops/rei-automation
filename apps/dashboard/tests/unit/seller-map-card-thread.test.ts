@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveCanonicalThreadStateKey } from '../../src/domain/inbox/resolveCanonicalThreadStateKey'
+import {
+  resolveCanonicalThreadStateKey,
+  resolveDialablePhoneFromThread,
+} from '../../src/domain/inbox/resolveCanonicalThreadStateKey'
 import { buildSellerMapCardViewModel } from '../../src/views/map/seller-card/seller-map-card-view-model'
 import {
   buildThreadFromViewModel,
@@ -92,5 +95,17 @@ describe('seller map card thread builder', () => {
 
     expect(thread.threadKey).toBe('property:prop-123')
     expect(resolveCanonicalThreadStateKey(thread as unknown as Record<string, unknown>)).toBe('+19015551234')
+  })
+
+  it('does not treat numeric property ids as dialable phones', () => {
+    const syntheticThread = {
+      threadKey: 'property:2100277008',
+      id: 'property:2100277008',
+      phoneNumber: '',
+      canonicalE164: '',
+    }
+
+    expect(resolveDialablePhoneFromThread(syntheticThread)).toBeNull()
+    expect(resolveCanonicalThreadStateKey(syntheticThread)).toBeNull()
   })
 })
