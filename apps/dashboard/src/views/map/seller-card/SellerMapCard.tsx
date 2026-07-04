@@ -57,60 +57,6 @@ const followUpButtonLabel = (
   return eligibilityLabel
 }
 
-const SectionHeader = ({ label, accent = 'default' }: { label: string; accent?: 'default' | 'prospect' | 'owner' }) => (
-  <div className={cls('smc-section-head', accent !== 'default' && `is-${accent}`)}>
-    <span className="smc-section-head__accent" aria-hidden="true" />
-    <h4>{label}</h4>
-  </div>
-)
-
-const FieldGrid = ({
-  fields,
-  variant = 'kv',
-}: {
-  fields: Array<{ label: string; value: string }>
-  variant?: 'kv' | 'dossier'
-}) => {
-  if (fields.length === 0) return null
-  return (
-    <div className={cls(variant === 'dossier' ? 'smc-dossier-grid' : 'smc-kv-grid')}>
-      {fields.map((field) => (
-        <div key={field.label} className={variant === 'dossier' ? 'smc-dossier-cell' : 'smc-kv'}>
-          <span>{field.label}</span>
-          <strong title={field.value}>{field.value}</strong>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const EntityPanel = ({
-  role,
-  name,
-  meta,
-  fields,
-}: {
-  role: 'prospect' | 'owner'
-  name: string
-  meta?: string | null
-  fields: Array<{ label: string; value: string }>
-}) => {
-  if (fields.length === 0) return null
-  return (
-    <section className={cls('smc-section', 'smc-section--entity', `is-${role}`)}>
-      <SectionHeader label={role === 'prospect' ? 'Prospect' : 'Master Owner'} accent={role} />
-      <div className="smc-entity-panel">
-        <div className="smc-entity-panel__hero">
-          <span className="smc-entity-panel__role">{role === 'prospect' ? 'Contact' : 'Title Holder'}</span>
-          <strong className="smc-entity-panel__name">{name}</strong>
-          {meta ? <span className="smc-entity-panel__meta">{meta}</span> : null}
-        </div>
-        <FieldGrid fields={fields} />
-      </div>
-    </section>
-  )
-}
-
 export const SellerMapCard = ({
   record,
   mode,
@@ -305,35 +251,14 @@ export const SellerMapCard = ({
     </div>
   )
 
-  const marketBadge = viewModel.peekDossierFields.find((field) => field.label === 'Market')?.value
-
   const identityHeader = (
-    <header className="smc-identity smc-identity--elite">
+    <header className="smc-identity">
       <div className="smc-identity__copy">
-        <p className="smc-identity__eyebrow">
-          {viewModel.property.assetType}
-          {marketBadge ? <span className="smc-identity__market">{marketBadge}</span> : null}
-        </p>
-        <h3 className="smc-identity__name" title={viewModel.property.address}>{viewModel.property.address}</h3>
-        <div className="smc-identity__owner-line">
-          <span className="smc-identity__owner-label">Master Owner</span>
-          <span className="smc-identity__owner-name">{viewModel.masterOwner.displayName}</span>
-        </div>
-        {viewModel.prospect.differsFromOwner ? (
-          <div className="smc-identity__prospect-line">
-            <span className="smc-identity__prospect-label">Prospect</span>
-            <span className="smc-identity__prospect-name">{viewModel.prospect.displayName}</span>
-          </div>
-        ) : null}
+        <h3 className="smc-identity__name">{viewModel.masterOwner.displayName}</h3>
+        <p className="smc-identity__address" title={viewModel.property.address}>{viewModel.property.address}</p>
       </div>
     </header>
   )
-
-  const peekDossierBlock = viewModel.peekDossierFields.length > 0 ? (
-    <section className="smc-peek-dossier" aria-label="Property dossier">
-      <FieldGrid fields={viewModel.peekDossierFields} variant="dossier" />
-    </section>
-  ) : null
 
   const metricsBlock = (metrics: typeof viewModel.peekMetrics, variant: 'peek' | 'focus') => (
     <div className={cls('smc-metrics', variant === 'focus' && 'smc-metrics--focus')} aria-label="Primary metrics">
@@ -345,10 +270,6 @@ export const SellerMapCard = ({
       ))}
     </div>
   )
-
-  const intelFields = viewModel.intelligenceStrip
-    .filter((field) => field.label !== 'Priority')
-    .slice(0, isPeek ? 3 : 4)
 
   const intelligenceSection = (
     <section className="smc-intel-section" aria-label="Property intelligence">
@@ -363,8 +284,8 @@ export const SellerMapCard = ({
         </svg>
         <span className="smc-intel-head__label">Property Intelligence</span>
       </div>
-      <div className={cls('smc-intel-strip', isPeek && 'is-peek')}>
-        {intelFields.map((field) => (
+      <div className="smc-intel-strip">
+        {viewModel.intelligenceStrip.slice(0, 3).map((field) => (
           <div key={field.label} className="smc-intel-strip__cell">
             <span>{field.label}</span>
             <strong>{field.value}</strong>
@@ -446,8 +367,7 @@ export const SellerMapCard = ({
       <div className="smc-body smc-body--peek">
         {stateBadges}
         {identityHeader}
-        <p className="smc-summary smc-summary--physical">{viewModel.assetSummaryLine}</p>
-        {peekDossierBlock}
+        <p className="smc-summary">{viewModel.assetSummaryLine}</p>
         {metricsBlock(viewModel.peekMetrics, 'peek')}
         {intelligenceSection}
         {contextualLine}
@@ -473,36 +393,41 @@ export const SellerMapCard = ({
   const focusSections = (
     <div className="smc-focus-scroll">
       <section className="smc-section">
-        <SectionHeader label="Property Profile" />
-        <FieldGrid fields={viewModel.focusProfileFields} />
+        <h4>Property Profile</h4>
+        <div className="smc-kv-grid">
+          {viewModel.focusProfileFields.map((field) => (
+            <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+          ))}
+        </div>
       </section>
       {viewModel.focusFinancialFields.length > 0 ? (
         <section className="smc-section">
-          <SectionHeader label="Financial Profile" />
-          <FieldGrid fields={viewModel.focusFinancialFields} />
+          <h4>Financial Profile</h4>
+          <div className="smc-kv-grid">
+            {viewModel.focusFinancialFields.map((field) => (
+              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+            ))}
+          </div>
         </section>
       ) : null}
-      {(viewModel.prospect.id
-        || viewModel.prospect.phone
-        || viewModel.prospect.differsFromOwner
-        || viewModel.focusProspectFields.length > 0) ? (
-        <EntityPanel
-          role="prospect"
-          name={viewModel.prospect.displayName}
-          meta={viewModel.prospect.phone}
-          fields={viewModel.focusProspectFields}
-        />
+      {viewModel.focusOwnerFields.length > 0 ? (
+        <section className="smc-section">
+          <h4>Master Owner</h4>
+          <div className="smc-kv-grid">
+            {viewModel.focusOwnerFields.map((field) => (
+              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+            ))}
+          </div>
+        </section>
       ) : null}
-      <EntityPanel
-        role="owner"
-        name={viewModel.masterOwner.displayName}
-        meta={viewModel.masterOwner.contactability}
-        fields={viewModel.focusOwnerFields.filter((field) => field.label !== 'Owner Name')}
-      />
       {viewModel.focusOperationFields.length > 0 ? (
         <section className="smc-section">
-          <SectionHeader label="Conversation & Automation" />
-          <FieldGrid fields={viewModel.focusOperationFields} />
+          <h4>Conversation & Automation</h4>
+          <div className="smc-kv-grid">
+            {viewModel.focusOperationFields.map((field) => (
+              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+            ))}
+          </div>
         </section>
       ) : null}
     </div>
@@ -510,7 +435,6 @@ export const SellerMapCard = ({
 
   const mobileExpandedSections = (
     <>
-      {peekDossierBlock}
       {metricsBlock(viewModel.focusMetrics, 'focus')}
       {intelligenceSection}
       {contextualLine}

@@ -26,45 +26,9 @@ describe('buildSellerMapCardViewModel', () => {
 
     expect(vm.masterOwner.displayName).toBe('Anthony Polk')
     expect(vm.masterOwner.displayName).not.toContain('Prospect')
-    expect(vm.prospect.displayName).toBe('Prospect Person')
-    expect(vm.prospect.differsFromOwner).toBe(true)
     expect(vm.masterOwner.priorityScore).toBe(78)
     expect(vm.operations.stageLabel).not.toBe('Active')
     expect(vm.operations.statusLabel).not.toBe('ACTIVE')
-  })
-
-  it('builds peek dossier and expanded prospect/owner fields', () => {
-    const vm = buildSellerMapCardViewModel({
-      prospect_id: 'prospect_abc123456789',
-      prospect_name: 'Jamie Prospect',
-      prospect_first_name: 'Jamie',
-      canonical_e164: '+19015551234',
-      master_owner_id: 'owner_xyz987654321',
-      owner_display_name: 'Anthony Polk',
-      owner_type: 'individual',
-      property_address_full: '5502 Cottonwood Rd, Memphis, TN 38115',
-      market: 'Memphis',
-      property_type: 'Single Family',
-      total_bedrooms: 4,
-      total_baths: 3,
-      building_square_feet: 2486,
-      year_built: 1978,
-      lot_acreage: 0.24,
-      estimated_value: 285000,
-      equity_amount: 198000,
-      equity_percent: 69,
-      owner_priority_score: 78,
-      owner_priority_tier: 'A',
-      occupancy_code: 'Owner Occupied',
-    })
-
-    expect(vm.peekDossierFields.some((field) => field.label === 'Market' && field.value === 'Memphis')).toBe(true)
-    expect(vm.peekDossierFields.some((field) => field.label === 'Equity $')).toBe(true)
-    expect(vm.focusProspectFields.some((field) => field.label === 'Prospect Name' && field.value === 'Jamie Prospect')).toBe(true)
-    expect(vm.focusProspectFields.some((field) => field.label === 'Phone' && field.value === '+19015551234')).toBe(true)
-    expect(vm.focusOwnerFields.some((field) => field.label === 'Owner Name' && field.value === 'Anthony Polk')).toBe(true)
-    expect(vm.focusOwnerFields.some((field) => field.label === 'Master Owner ID' && field.value.startsWith('owner_xy'))).toBe(true)
-    expect(vm.intelligenceStrip.some((field) => field.label === 'Occupancy')).toBe(true)
   })
 
   it('does not fabricate priority score from motivation_score', () => {

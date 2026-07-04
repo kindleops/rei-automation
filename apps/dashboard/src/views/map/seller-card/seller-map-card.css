@@ -398,65 +398,6 @@
   font-weight: 700;
   line-height: 1.2;
 }
-.smc-identity--elite .smc-identity__eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 4px;
-  font-size: 7.5px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--smc-muted);
-}
-.smc-identity__market {
-  padding: 2px 6px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--smc-accent) 28%, transparent);
-  background: color-mix(in srgb, var(--smc-accent) 10%, rgba(255, 255, 255, 0.03));
-  color: color-mix(in srgb, var(--smc-accent) 82%, var(--smc-text));
-  letter-spacing: 0.08em;
-}
-.smc-identity--elite .smc-identity__name {
-  font-size: 14.5px;
-  line-height: 1.25;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.smc-identity__owner-line,
-.smc-identity__prospect-line {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 5px;
-  min-width: 0;
-}
-.smc-identity__owner-label,
-.smc-identity__prospect-label {
-  flex-shrink: 0;
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--smc-muted);
-}
-.smc-identity__owner-name,
-.smc-identity__prospect-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: color-mix(in srgb, var(--smc-text) 90%, transparent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.smc-identity__prospect-line .smc-identity__prospect-label {
-  color: color-mix(in srgb, #a5b4fc 88%, var(--smc-muted));
-}
-.smc-identity__prospect-name {
-  color: color-mix(in srgb, #c7d2fe 88%, var(--smc-text));
-}
 .smc-identity__address {
   margin: 2px 0 0;
   font-size: 11px;
@@ -472,40 +413,6 @@
   font-size: 11px;
   color: color-mix(in srgb, var(--smc-text) 86%, transparent);
   line-height: 1.35;
-}
-.smc-peek-dossier {
-  padding: 7px 8px;
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.028);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.smc-dossier-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
-}
-.smc-dossier-cell {
-  min-height: 42px;
-  padding: 5px 6px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-.smc-dossier-cell span {
-  display: block;
-  font-size: 6.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--smc-muted);
-}
-.smc-dossier-cell strong {
-  display: block;
-  margin-top: 2px;
-  font-size: 10.5px;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .smc-metrics {
@@ -572,16 +479,13 @@
 }
 .smc-intel-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) 48px;
-  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 48px;
+  gap: 6px;
   align-items: end;
   padding: 7px 8px;
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.smc-intel-strip.is-peek {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 44px;
 }
 .smc-intel-section {
   display: flex;
@@ -705,73 +609,12 @@
 .smc-activity.is-suppressed .smc-activity__head { color: #94a3b8; }
 
 .smc-focus-scroll { display: flex; flex-direction: column; gap: 10px; }
-.smc-section-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 7px;
-}
-.smc-section-head__accent {
-  width: 3px;
-  height: 12px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--smc-accent) 72%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--smc-accent) 24%, transparent);
-}
-.smc-section-head.is-prospect .smc-section-head__accent {
-  background: color-mix(in srgb, #a5b4fc 72%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, #818cf8 20%, transparent);
-}
-.smc-section-head.is-owner .smc-section-head__accent {
-  background: color-mix(in srgb, #6ee7b7 72%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, #34d399 20%, transparent);
-}
-.smc-section-head h4,
 .smc-section h4 {
-  margin: 0;
+  margin: 0 0 6px;
   font-size: 8.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--smc-muted);
-}
-.smc-section--entity .smc-entity-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.028);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.smc-section--entity.is-prospect .smc-entity-panel {
-  border-color: color-mix(in srgb, #818cf8 18%, rgba(255, 255, 255, 0.06));
-  background: color-mix(in srgb, #312e81 10%, rgba(255, 255, 255, 0.028));
-}
-.smc-section--entity.is-owner .smc-entity-panel {
-  border-color: color-mix(in srgb, #34d399 16%, rgba(255, 255, 255, 0.06));
-  background: color-mix(in srgb, #064e3b 10%, rgba(255, 255, 255, 0.028));
-}
-.smc-entity-panel__hero {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.smc-entity-panel__role {
-  font-size: 7px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--smc-muted);
-}
-.smc-entity-panel__name {
-  font-size: 13px;
-  line-height: 1.2;
-}
-.smc-entity-panel__meta {
-  font-size: 10px;
-  color: color-mix(in srgb, var(--smc-text) 72%, transparent);
-  letter-spacing: 0.02em;
 }
 .smc-kv-grid {
   display: grid;
@@ -1064,15 +907,9 @@
 [data-nexus-theme="light"] .smc-metric,
 [data-nexus-theme="light"] .smc-intel-strip,
 [data-nexus-theme="light"] .smc-activity,
-[data-nexus-theme="light"] .smc-kv,
-[data-nexus-theme="light"] .smc-peek-dossier,
-[data-nexus-theme="light"] .smc-dossier-cell,
-[data-nexus-theme="light"] .smc-entity-panel {
+[data-nexus-theme="light"] .smc-kv {
   background: rgba(255, 255, 255, 0.42);
   border-color: rgba(12, 25, 48, 0.08);
-}
-[data-nexus-theme="light"] .smc-identity__prospect-name {
-  color: #4338ca;
 }
 [data-nexus-theme="light"] .smc-close,
 [data-nexus-theme="light"] .smc-icon-btn {
@@ -1142,10 +979,7 @@
 [data-nexus-theme="red_ops"] .smc-metric,
 [data-nexus-theme="red_ops"] .smc-intel-strip,
 [data-nexus-theme="red_ops"] .smc-activity,
-[data-nexus-theme="red_ops"] .smc-kv,
-[data-nexus-theme="red_ops"] .smc-peek-dossier,
-[data-nexus-theme="red_ops"] .smc-dossier-cell,
-[data-nexus-theme="red_ops"] .smc-entity-panel {
+[data-nexus-theme="red_ops"] .smc-kv {
   background: rgba(24, 6, 10, 0.55);
   border-color: rgba(220, 38, 60, 0.16);
 }
