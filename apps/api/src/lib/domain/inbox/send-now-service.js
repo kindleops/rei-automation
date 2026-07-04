@@ -21,6 +21,18 @@ import {
   writeOutboundFailureMessageEvent,
 } from "@/lib/supabase/sms-engine.js";
 import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
+import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
+
+// Final safety rail before provider dispatch: never let an SMS go out addressed to
+// an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
+// greeting-name slot, not the whole message body.
+const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i;
+
+function hasEntityNameInGreeting(message_body) {
+  const match = String(message_body || "").trim().match(GREETING_NAME_PATTERN);
+  if (!match) return false;
+  return detectEntityOwner(match[1]);
+}
 
 const logger = child({ module: "domain.inbox.send_now_service" });
 
@@ -460,6 +472,10 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
 
   if (message_body.length < min_length) {
     return { ok: false, status: 400, error: "message_too_short" };
+  }
+
+  if (hasEntityNameInGreeting(message_body)) {
+    return { ok: false, status: 422, error: "entity_name_in_greeting" };
   }
 
   return {

@@ -19,6 +19,7 @@ import type { TemplateActionPayload } from '../../../modules/inbox/components/Te
 import { translateText } from '../../../modules/inbox/translate.api'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import { asNumber, firstDefined, text } from './seller-map-card-formatters'
+import { isEntityName, safeHumanName } from '../../../lib/identity/entityDetection'
 
 export type FollowUpButtonState = 'idle' | 'sending' | 'sent' | 'blocked' | 'failed'
 
@@ -66,7 +67,8 @@ const parseStateFromMarket = (market: string): string | undefined => {
   return match?.[1]?.toUpperCase()
 }
 
-const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<string, string> => {
+export const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<string, string> => {
+  // Master Owner / entity name — ownership context only, never the SMS greeting name.
   const ownerName = text(firstDefined(record, [
     'owner_display_name',
     'owner_name',
@@ -75,17 +77,16 @@ const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<s
     'seller_display_name',
     'seller_name',
   ]))
-  const prospectName = text(firstDefined(record, [
+  const prospectName = safeHumanName(text(firstDefined(record, [
     'prospect_full_name',
     'prospect_name',
     'prospect_first_name',
-  ]))
-  const resolvedName = ownerName || prospectName
-  const first = resolvedName.split(/\s+/).filter(Boolean)[0] ?? resolvedName
+  ])))
+  const first = prospectName ? (prospectName.split(/\s+/).filter(Boolean)[0] ?? prospectName) : ''
   return {
-    seller_name: resolvedName,
+    seller_name: prospectName,
     seller_first_name: first,
-    owner_name: resolvedName,
+    owner_name: ownerName,
     agent_name: 'Chris',
     agent_first_name: 'Chris',
   }
@@ -96,6 +97,16 @@ const hasBlankGreeting = (message: string): boolean =>
 
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
+
+// Final safety rail: never send a greeting addressed to an entity/LLC/trust name,
+// regardless of which upstream field it leaked in through.
+const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i
+
+const hasEntityGreeting = (message: string): boolean => {
+  const match = message.trim().match(GREETING_NAME_PATTERN)
+  if (!match) return false
+  return isEntityName(match[1])
+}
 
 export const buildThreadFromViewModel = (
   vm: SellerMapCardViewModel,
@@ -282,7 +293,12 @@ export const useSellerMapCardActions = ({
         .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
         .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
         .trim()
-      if (!messageText.trim() || hasBlankGreeting(messageText) || hasUnresolvedTemplateTokens(messageText)) {
+      if (
+        !messageText.trim()
+        || hasBlankGreeting(messageText)
+        || hasUnresolvedTemplateTokens(messageText)
+        || hasEntityGreeting(messageText)
+      ) {
         setFollowUpError('Template missing seller name or property details')
         setFollowUpState('failed')
         window.setTimeout(() => {

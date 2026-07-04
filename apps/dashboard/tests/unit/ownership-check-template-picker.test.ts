@@ -3,6 +3,7 @@ import type { SmsTemplate } from '../../src/lib/data/templateData'
 import {
   buildOwnershipTemplatePool,
   canonicalizeOwnerLanguage,
+  evaluateOwnershipTemplate,
   filterOwnershipTemplatesForLanguage,
   languagesMatchForTemplate,
   pickRandomOwnershipCheckTemplate,
@@ -82,5 +83,47 @@ describe('ownership check template picker', () => {
       { weight: 99, id: 'b' },
     ] as Array<{ weight: number; id: string }>)
     expect(winner?.id).toBeDefined()
+  })
+
+  describe('entity-name greeting guard (launch blocker: Master Owner as SMS recipient)', () => {
+    const entityTemplate = makeTemplate({
+      id: 'en-entity',
+      language: 'English',
+      templateText: 'Hey {{seller_first_name}}, is this still your property at {{property_address}}?',
+    })
+
+    it('rejects a rendered template whose greeting resolves to an LLC name', () => {
+      const result = evaluateOwnershipTemplate(entityTemplate, {
+        seller_first_name: 'West 7th Apartments LLC',
+        property_address: '2246 7th St W, Bradenton, FL',
+      })
+      expect(result).toBeNull()
+    })
+
+    it('rejects a rendered template whose greeting resolves to a trust/estate name', () => {
+      const result = evaluateOwnershipTemplate(entityTemplate, {
+        seller_first_name: 'D & D Divide Trust',
+        property_address: '100 Main St, Austin, TX',
+      })
+      expect(result).toBeNull()
+    })
+
+    it('accepts a rendered template whose greeting resolves to a real human name', () => {
+      const result = evaluateOwnershipTemplate(entityTemplate, {
+        seller_first_name: 'Maria',
+        property_address: '2246 7th St W, Bradenton, FL',
+      })
+      expect(result).not.toBeNull()
+      expect(result?.repaired).toContain('Hey Maria,')
+    })
+
+    it('never keeps an entity name as the sole ownership-check candidate for a first-touch pool', () => {
+      const pool = buildOwnershipTemplatePool(
+        [entityTemplate],
+        { seller_first_name: '88 Cleveland - M LLC', property_address: '88 Cleveland Ave' },
+        'English',
+      )
+      expect(pool).toHaveLength(0)
+    })
   })
 })

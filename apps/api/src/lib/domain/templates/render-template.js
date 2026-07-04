@@ -1,5 +1,6 @@
 import { normalizeSellerFlowUseCase } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { sanitizeSmsTextMap } from "@/lib/sms/sanitize.js";
+import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
 
 export const ALLOWED_TEMPLATE_PLACEHOLDERS = Object.freeze(
   new Set([
@@ -89,21 +90,23 @@ export function buildVariableMap(context = {}, overrides = {}) {
   const summary = sanitizeSmsTextMap(context?.summary || {});
   const safe_overrides = sanitizeSmsTextMap(overrides);
 
+  // owner_name is a generic upstream field that may carry a Master Owner/entity
+  // display name (LLC, trust, estate). It must never seed seller_first_name/
+  // seller_last_name unless it has already been proven to be a human name.
+  const owner_name_raw = String(summary.owner_name ?? "").trim();
+  const owner_name_is_entity = detectEntityOwner(owner_name_raw);
+
   const seller_first_name = firstNonEmpty(
     safe_overrides.seller_first_name,
     summary.seller_first_name,
-    summary.owner_name ? String(summary.owner_name).trim().split(" ")[0] : ""
+    !owner_name_is_entity && owner_name_raw ? owner_name_raw.split(" ")[0] : ""
   );
 
   const seller_last_name = firstNonEmpty(
     safe_overrides.seller_last_name,
     summary.seller_last_name,
-    summary.owner_name
-      ? String(summary.owner_name)
-          .trim()
-          .split(/\s+/)
-          .slice(1)
-          .join(" ")
+    !owner_name_is_entity && owner_name_raw
+      ? owner_name_raw.split(/\s+/).slice(1).join(" ")
       : ""
   );
 
@@ -306,6 +309,17 @@ const CRITICAL_PLACEHOLDERS = new Set([
   "offer_price",
 ]);
 
+// Final safety rail: reject a rendered preview if the greeting name is entity-shaped
+// (LLC, trust, estate, ...), regardless of which variable it arrived through. Checks
+// only the greeting-name slot, not the whole message body.
+const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i;
+
+function hasEntityGreeting(rendered_message) {
+  const match = String(rendered_message || "").trim().match(GREETING_NAME_PATTERN);
+  if (!match) return false;
+  return detectEntityOwner(match[1]);
+}
+
 export function evaluateTemplatePlaceholders({
   template_text,
   use_case = null,
@@ -363,11 +377,13 @@ export function evaluateTemplatePlaceholders({
     rendered_preview.includes("undefined") || rendered_preview.includes("null");
   const bad_greetings = ["Hi ,", "Hey ,", "Hello ,", "Hi {{", "Hey {{"];
   const has_bad_greeting = bad_greetings.some((g) => rendered_preview.startsWith(g));
+  const has_entity_greeting = hasEntityGreeting(rendered_preview);
 
-  const ok = 
-    missing_required_placeholders.length === 0 && 
-    !has_token_leak && 
-    !has_bad_greeting;
+  const ok =
+    missing_required_placeholders.length === 0 &&
+    !has_token_leak &&
+    !has_bad_greeting &&
+    !has_entity_greeting;
 
   return {
     ok,
@@ -378,7 +394,8 @@ export function evaluateTemplatePlaceholders({
     missing_optional_placeholders,
     safety_violations: {
       has_token_leak,
-      has_bad_greeting
+      has_bad_greeting,
+      has_entity_greeting
     }
   };
 }

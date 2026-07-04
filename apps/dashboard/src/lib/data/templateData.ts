@@ -2,6 +2,7 @@ import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import type { ThreadContext } from './inboxData'
 import { fetchSmsTemplatesFromApi } from '../api/backendClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'
+import { safeHumanName } from '../identity/entityDetection'
 
 export interface SmsTemplate {
   id: string
@@ -314,6 +315,9 @@ export const buildTemplateContextFromThread = (
   manualValues: Record<string, string> = {},
 ): Record<string, string> => {
   const threadRecord = (thread ?? {}) as AnyRecord
+  // Master Owner / entity display name — ownership context only. Never used to
+  // populate seller_first_name/seller_name: it may be an LLC, trust, estate, or
+  // household entity, not the human being who will receive this SMS.
   const ownerName = asString(
     threadContext?.seller?.name
     ?? thread?.ownerName
@@ -323,20 +327,19 @@ export const buildTemplateContextFromThread = (
     ?? threadRecord.entity_name,
     '',
   )
-  const prospectName = asString(
+  const prospectName = safeHumanName(asString(
     threadRecord.prospect_full_name
     ?? threadRecord.prospect_name
     ?? threadRecord.prospect_first_name,
     '',
-  )
-  const resolvedOwnerName = ownerName || prospectName
+  ))
   const address = asString(threadContext?.property?.address ?? thread?.propertyAddress ?? thread?.subject, '')
   const cityStateZip = address.split(',').map((part) => part.trim())
 
   return {
-    seller_first_name: firstName(resolvedOwnerName),
-    seller_name: resolvedOwnerName,
-    owner_name: resolvedOwnerName,
+    seller_first_name: firstName(prospectName),
+    seller_name: prospectName,
+    owner_name: ownerName,
     property_address: address,
     property_city: asString(cityStateZip[1], ''),
     property_state: asString(cityStateZip[2], ''),

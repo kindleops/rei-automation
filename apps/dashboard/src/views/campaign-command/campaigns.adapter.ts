@@ -264,7 +264,9 @@ function mapTargetRow(row: Record<string, unknown>, campaignId: string): Campaig
       property_id: (row.property_id as string | null) ?? null,
       phone_id: (row.phone_id as string | null) ?? null,
       canonical_e164: (row.to_phone_number ?? row.canonical_e164 ?? null) as string | null,
-      seller_first_name: ownerName?.split(' ')[0] ?? null,
+      // owner_name is the Master Owner/entity label — ownership context only. It has no
+      // proven relationship to the phone recipient, so it must never seed seller_first_name.
+      seller_first_name: null,
       seller_full_name: ownerName,
       property_address_full: (row.property_address as string | null) ?? null,
       property_address_city: null,

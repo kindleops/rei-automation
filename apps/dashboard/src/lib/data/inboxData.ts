@@ -22,6 +22,7 @@ import {
   type AnyRecord,
 } from './shared'
 import { emitNotification } from '../../shared/NotificationToast'
+import { isEntityName } from '../identity/entityDetection'
 import { getDealContextByThread, normalizeDealContext, type DealContext } from './dealContext'
 import { commitDashboardMessages, commitDashboardThreads } from './dashboardEntityStore'
 import { dataLayerNow, loadDashboardViewModel, logHydrationPhaseDone } from './dashboardDataLayer'
@@ -960,22 +961,24 @@ const cleanFirstToken = (value: unknown): string => {
   return firstToken.replace(/^[^A-Za-z\u00C0-\u024F]+|[^A-Za-z\u00C0-\u024F'-]+$/g, '')
 }
 
+// Master Owner / entity / property-owner fields (owner_display_name, master_owner_display_name,
+// property_owner_name, owner_name, primary_display_name) are intentionally excluded from this
+// list. They represent ownership identity — an LLC, trust, estate, or household — not a proven
+// human contact, and must never populate the SMS greeting name. See launch-blocker: Master
+// Owner names leaking into SMS recipient personalization.
 export const resolveSellerFirstName = (candidate: PersonalizationCandidate): SellerFirstNameResolution => {
   const ordered: Array<{ value: unknown; source: string }> = [
     { value: candidate.seller_first_name, source: 'candidate.seller_first_name' },
     { value: candidate.prospect_first_name, source: 'prospects.first_name' },
     { value: candidate.phone_first_name, source: 'phones.first_name' },
     { value: candidate.first_name, source: 'candidate.first_name' },
-    { value: candidate.primary_display_name, source: 'candidate.primary_display_name' },
-    { value: candidate.phone_full_name, source: 'phones.full_name' },
     { value: candidate.prospect_full_name, source: 'prospects.full_name' },
-    { value: candidate.owner_display_name, source: 'owners.display_name' },
-    { value: candidate.master_owner_display_name, source: 'master_owners.display_name' },
-    { value: candidate.property_owner_name, source: 'properties.owner_name' },
-    { value: candidate.owner_name, source: 'candidate.owner_name' },
+    { value: candidate.phone_full_name, source: 'phones.full_name' },
   ]
 
   for (const item of ordered) {
+    const raw = asString(item.value, '').trim()
+    if (raw && isEntityName(raw)) continue
     const token = cleanFirstToken(item.value)
     if (token) return { value: token, source: item.source }
   }
@@ -1001,19 +1004,25 @@ const applyRenderGuard = (renderedMessage: string): RenderGuardResult => {
 }
 
 const buildPersonalizationCandidate = (thread: InboxThread): PersonalizationCandidate => {
-  const owner = asString(thread.ownerName, '')
+  const threadRecord = thread as unknown as AnyRecord
+  const owner = asString(thread.ownerName || thread.ownerDisplayName, '')
+  const prospectFirstName = asString(threadRecord.prospect_first_name, '')
+  const prospectFullName = asString(threadRecord.prospect_full_name || thread.prospect_name, '')
   return {
     seller_first_name: null,
-    seller_full_name: owner || null,
-    seller_name_source: owner ? 'thread.ownerName' : null,
+    // seller_full_name/owner_display_name carry the Master Owner as ownership *context*
+    // (e.g. for record-keeping/UI), never as the resolved greeting name — that's gated
+    // entirely through resolveSellerFirstName's prospect-only candidate list below.
+    seller_full_name: prospectFullName || owner || null,
+    seller_name_source: prospectFullName ? 'thread.prospect_full_name' : owner ? 'thread.ownerName' : null,
     owner_display_name: owner || null,
-    prospect_first_name: null,
-    prospect_full_name: null,
+    prospect_first_name: prospectFirstName || null,
+    prospect_full_name: prospectFullName || null,
     phone_first_name: null,
     phone_full_name: null,
-    primary_display_name: owner || null,
+    primary_display_name: null,
     master_owner_display_name: owner || null,
-    property_owner_name: owner || null,
+    property_owner_name: null,
     owner_name: owner || null,
     first_name: null,
   }
@@ -1132,15 +1141,19 @@ if (DEV) {
   const check1 = resolveSellerFirstName({ prospect_first_name: 'Jose' })
   const msg1 = applyRenderGuard(`Hello ${check1.value}, this is Chris...`)
 
+  // owner_display_name/master_owner_display_name must NEVER resolve to a greeting name —
+  // an entity/household owner string is not a proven human contact for this phone.
   const check2 = resolveSellerFirstName({ owner_display_name: 'Jose A Valdizon & Rocio Mendoza' })
-  const msg2 = applyRenderGuard(`Hello ${check2.value}, this is Chris...`)
+  const check2Entity = resolveSellerFirstName({ master_owner_display_name: 'West 7th Apartments LLC' })
+  const msg2 = applyRenderGuard(`Hello ${check2.value || 'there'}, this is Chris...`)
 
   const check3 = resolveSellerFirstName({})
   const msg3 = applyRenderGuard('Hello , this is Chris...')
 
   console.debug('[personalization-check]', {
     case_prospect_first_name: msg1.messageText,
-    case_owner_display_name: msg2.messageText,
+    case_owner_display_name_ignored: check2.source === 'none',
+    case_entity_owner_ignored: check2Entity.source === 'none',
     case_missing_name_source: check3.source,
     case_missing_name: msg3.messageText,
     guard_pattern_blocked: !/^(hi|hey|hello|hola|ola|marhaba)\s+,/i.test(msg1.messageText) &&
@@ -4790,6 +4803,7 @@ export const sendInboxMessageNow = async (
       invalid_number: 'The destination phone number is invalid.',
       invalid_payload: 'Manual send payload is invalid.',
       content_blocked: 'Message blocked by content safety checks.',
+      entity_name_in_greeting: 'Message greeting resolved to an entity/LLC name instead of the contact — send blocked.',
       send_failed: 'Provider send failed.',
       provider_configuration_missing: 'SMS provider is not configured. Contact ops.',
       queue_insert_failure: 'Queue insertion failed before provider send could start.',

@@ -96,3 +96,47 @@ test("RISK-029: same input → same verdict in both manual and auto contexts", (
   assert.equal(auto.ok, true);
   assert.equal(manual.reason, auto.reason);
 });
+
+// Launch blocker: a Master Owner / entity name must never go out as the SMS greeting name.
+test("RISK-029: Hey West 7th Apartments LLC, → entity_name_in_greeting", () => {
+  const r = validateOutboundSmsPayload({
+    to_phone_number: "+15005550001",
+    message_body: "Hey West 7th Apartments LLC, do you still own this property?",
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "entity_name_in_greeting");
+});
+
+test("RISK-029: Hi 88 Cleveland - M LLC, → entity_name_in_greeting", () => {
+  const r = validateOutboundSmsPayload({
+    to_phone_number: "+15005550001",
+    message_body: "Hi 88 Cleveland - M LLC, quick question about your property.",
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "entity_name_in_greeting");
+});
+
+test("RISK-029: Hi D & D Divide LLC, → entity_name_in_greeting", () => {
+  const r = validateOutboundSmsPayload({
+    to_phone_number: "+15005550001",
+    message_body: "Hi D & D Divide LLC, are you still the owner?",
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "entity_name_in_greeting");
+});
+
+test("RISK-029: a real human first name in the greeting is unaffected", () => {
+  const r = validateOutboundSmsPayload({
+    to_phone_number: "+15005550001",
+    message_body: "Hi Maria, are you still the owner of this property?",
+  });
+  assert.equal(r.ok, true);
+});
+
+test("RISK-029: an entity name mentioned mid-message (not the greeting) is not blocked", () => {
+  const r = validateOutboundSmsPayload({
+    to_phone_number: "+15005550001",
+    message_body: "Hi Maria, we noticed West 7th Apartments LLC owns this property. Still true?",
+  });
+  assert.equal(r.ok, true);
+});

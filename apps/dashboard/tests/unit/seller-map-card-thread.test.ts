@@ -5,6 +5,7 @@ import {
 } from '../../src/domain/inbox/resolveCanonicalThreadStateKey'
 import { buildSellerMapCardViewModel } from '../../src/views/map/seller-card/seller-map-card-view-model'
 import {
+  buildMapTemplateManualValues,
   buildThreadFromViewModel,
   resolveMapThreadPhone,
 } from '../../src/views/map/seller-card/useSellerMapCardActions'
@@ -107,5 +108,39 @@ describe('seller map card thread builder', () => {
 
     expect(resolveDialablePhoneFromThread(syntheticThread)).toBeNull()
     expect(resolveCanonicalThreadStateKey(syntheticThread)).toBeNull()
+  })
+
+  describe('map SMS personalization never uses the Master Owner name as the greeting (launch blocker)', () => {
+    it('never populates seller_first_name/seller_name from an LLC master owner name', () => {
+      const values = buildMapTemplateManualValues({
+        owner_display_name: 'West 7th Apartments LLC',
+        master_owner_id: 'owner-456',
+      })
+      expect(values.seller_first_name).toBe('')
+      expect(values.seller_name).toBe('')
+      // owner_name is preserved as ownership *context*, never as the greeting name.
+      expect(values.owner_name).toBe('West 7th Apartments LLC')
+    })
+
+    it('never populates seller_first_name/seller_name from a trust/estate master owner name', () => {
+      const values = buildMapTemplateManualValues({ owner_display_name: 'D & D Divide LLC' })
+      expect(values.seller_first_name).toBe('')
+      expect(values.seller_name).toBe('')
+    })
+
+    it('uses the resolved prospect name when one is present, ignoring the owner entity name', () => {
+      const values = buildMapTemplateManualValues({
+        owner_display_name: '88 Cleveland - M LLC',
+        prospect_full_name: 'Maria Lopez',
+      })
+      expect(values.seller_first_name).toBe('Maria')
+      expect(values.seller_name).toBe('Maria Lopez')
+    })
+
+    it('leaves seller_first_name empty (never entity-derived) when only an individual-named owner exists and no prospect is linked', () => {
+      const values = buildMapTemplateManualValues({ owner_display_name: 'Jose A Valdizon' })
+      expect(values.seller_first_name).toBe('')
+      expect(values.seller_name).toBe('')
+    })
   })
 })
