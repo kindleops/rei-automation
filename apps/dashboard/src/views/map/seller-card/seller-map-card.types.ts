@@ -32,9 +32,22 @@ export type SellerMapCardActivityKind =
   | 'suppressed'
   | 'none'
 
+export type SellerMapCardField = {
+  label: string
+  value: string
+}
+
 export type SellerMapCardViewModel = {
   propertyId: string
   threadKey: string | null
+
+  prospect: {
+    id: string | null
+    displayName: string
+    firstName: string | null
+    phone: string | null
+    differsFromOwner: boolean
+  }
 
   masterOwner: {
     id: string | null
@@ -126,12 +139,14 @@ export type SellerMapCardViewModel = {
   contextualLine: string | null
   peekMetrics: SellerMapCardMetric[]
   focusMetrics: SellerMapCardMetric[]
+  peekDossierFields: SellerMapCardField[]
   intelligenceStrip: SellerMapCardIntelligenceField[]
   followUpEligibility: FollowUpEligibilityView
-  focusProfileFields: Array<{ label: string; value: string }>
-  focusFinancialFields: Array<{ label: string; value: string }>
-  focusOwnerFields: Array<{ label: string; value: string }>
-  focusOperationFields: Array<{ label: string; value: string }>
+  focusProfileFields: SellerMapCardField[]
+  focusFinancialFields: SellerMapCardField[]
+  focusProspectFields: SellerMapCardField[]
+  focusOwnerFields: SellerMapCardField[]
+  focusOperationFields: SellerMapCardField[]
 
   activity: {
     kind: SellerMapCardActivityKind

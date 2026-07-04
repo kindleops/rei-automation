@@ -17,7 +17,7 @@ export const getSellerCardDimensions = (
     }
     return { width: 0, maxHeight: Math.round(window.innerHeight * 0.75), imageHeight: 124 }
   }
-  if (layoutMode === 'peek') return { width: 384, maxHeight: 455, imageHeight: 112 }
+  if (layoutMode === 'peek') return { width: 408, maxHeight: 492, imageHeight: 112 }
   return {
     width: 448,
     maxHeight: Math.min(Math.round(window.innerHeight * 0.76), 650),
