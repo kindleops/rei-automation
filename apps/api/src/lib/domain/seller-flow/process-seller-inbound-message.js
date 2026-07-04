@@ -14,11 +14,21 @@ import {
   buildSellerFlowDecision,
   decisionToUniversalLeadStatePatch,
 } from "@/lib/domain/seller-flow/seller-flow-decision-contract.js";
-import { resolveSellerStageTransition } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import { resolveSellerStageTransition, NEXT_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import {
   persistSellerTransitionArtifacts,
   loadSellerDealState,
 } from "@/lib/domain/seller-flow/persist-seller-transition.js";
+import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import {
+  NEGOTIATION_ZONES,
+  resolveNegotiationPolicy,
+  classifyNegotiationZone,
+  evaluateUnderwritingSufficiency,
+} from "@/lib/domain/seller-flow/negotiation-policy.js";
+import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { routeNegotiationStrategy } from "@/lib/domain/seller-flow/negotiation-strategy-router.js";
+import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-policy.js";
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
@@ -47,6 +57,9 @@ const defaultDeps = {
   scheduleFollowUp,
   patchUniversalLeadState,
   emitAutomationEvent,
+  // Canonical ADE runner — injectable for tests/proofs; defaults to the lazy
+  // import inside the pre-reply underwriting step.
+  scoreProperty: null,
   getSupabaseClient: getDefaultSupabaseClient,
   info,
   warn,
@@ -64,6 +77,166 @@ export function __resetSellerInboundOrchestratorDeps() {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+/** Map router next-action vocabulary onto the resolver's canonical set. */
+function mapStrategyNextAction(action) {
+  switch (String(action ?? "")) {
+    case "send_message_now":
+    case "collect_contract_facts":
+      return NEXT_ACTIONS.SEND_MESSAGE_NOW;
+    case "generate_offer":
+      return NEXT_ACTIONS.GENERATE_OFFER;
+    case "generate_contract":
+      return NEXT_ACTIONS.GENERATE_CONTRACT;
+    case "schedule_follow_up":
+      return NEXT_ACTIONS.SCHEDULE_FOLLOW_UP;
+    case "human_review":
+      return NEXT_ACTIONS.HUMAN_REVIEW;
+    default:
+      return null;
+  }
+}
+
+const BLOCKING_NEGOTIATION_INTENTS = new Set([
+  "opt_out",
+  "wrong_number",
+  "wrong_person",
+  "hostile_or_legal",
+]);
+
+/**
+ * One deterministic negotiation turn: preview state → policy → sufficiency →
+ * zone → comp anchor → strategy. Runs only when the deal is negotiation-
+ * relevant (S5+, an in-authority ask, or already-locked terms) and the message
+ * is not a blocking intent. Pure — persistence re-applies the same reducer
+ * with execution results included. Exported so shadow evaluation replays the
+ * EXACT production decision path.
+ */
+export function resolveNegotiationTurn({
+  transition = null,
+  priceSignal = null,
+  priorState = null,
+  adeSnapshot = null,
+  engineDecision = null,
+  intent = null,
+  classificationConfidence = null,
+  contextSummary = {},
+  sourceMessageId = null,
+} = {}) {
+  if (!transition) return null;
+  if (BLOCKING_NEGOTIATION_INTENTS.has(String(intent ?? ""))) return null;
+  if (transition.contactability_patch) return null;
+
+  const now = transition.resolved_at || new Date().toISOString();
+  const state_preview = applyNegotiationTurn(priorState, {
+    price_signal: priceSignal,
+    ade_snapshot: adeSnapshot,
+    transition,
+    engine_decision: engineDecision,
+    facts: transition.facts_patch || null,
+    intent,
+    classification_confidence: classificationConfidence,
+    source_message_id: sourceMessageId,
+    now,
+  });
+
+  const policy = resolveNegotiationPolicy({
+    property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
+    unit_count: contextSummary.unit_count || null,
+    market: contextSummary.market_name || contextSummary.market || null,
+    reference_value: state_preview.arv ?? state_preview.current_asking_price ?? null,
+    liquidity_score: adeSnapshot?.liquidity_score ?? null,
+  });
+
+  const sufficiency = evaluateUnderwritingSufficiency({
+    property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
+    unit_count: contextSummary.unit_count || null,
+    facts: transition.facts_patch || {},
+    ade_snapshot: adeSnapshot,
+    policy,
+  });
+
+  const zone = classifyNegotiationZone({
+    current_ask: state_preview.current_asking_price,
+    recommended_offer: state_preview.recommended_offer,
+    authorized_offer_ceiling: state_preview.authorized_offer_ceiling,
+    valuation_confidence: state_preview.comp_confidence,
+    asking_price_confidence: state_preview.asking_price_confidence,
+    policy,
+  });
+
+  const stage_after_number = Number(transition.stage_after_number || 0);
+  const negotiation_relevant =
+    stage_after_number >= 5 ||
+    state_preview.terms_accepted === true ||
+    (zone.zone === NEGOTIATION_ZONES.WITHIN_AUTHORITY && sufficiency.sufficient === true);
+
+  if (!negotiation_relevant) {
+    return { state_preview, policy, sufficiency, zone, comp_anchor: null, strategy_decision: null };
+  }
+
+  const comp_anchor = selectCredibleCompAnchor({
+    comps: adeSnapshot?.evidence?.selected_comps || [],
+    subject: {
+      asset_type:
+        adeSnapshot?.evidence?.subject?.asset_type ||
+        contextSummary.property_type_scope ||
+        contextSummary.property_type ||
+        null,
+      sqft: adeSnapshot?.evidence?.subject?.normalized_features?.sqft ?? null,
+    },
+    valuation_mid: adeSnapshot?.valuation_mid ?? null,
+    previously_disclosed: state_preview.comp_anchors_used,
+  });
+
+  const strategy_decision = routeNegotiationStrategy({
+    zone,
+    state: state_preview,
+    sufficiency,
+    flags: {
+      firm: Boolean(engineDecision?.negotiation_posture === "anchored"),
+      accept: engineDecision?.outcome === "seller_accepts_offer",
+      counter_verb: engineDecision?.counter_offer != null,
+      subject_to: engineDecision?.outcome === "subject_to_candidate",
+      seller_finance: engineDecision?.outcome === "seller_finance_candidate",
+      novation: engineDecision?.outcome === "novation_candidate",
+      creative_generic: engineDecision?.outcome === "creative_finance_candidate",
+      refuses_condition: engineDecision?.outcome === "refuses_condition_info",
+      challenge_repair: engineDecision?.outcome === "challenges_repair_estimate",
+    },
+    facts: transition.facts_patch || {},
+    policy,
+    comp_anchor,
+    engine_decision: engineDecision,
+    property_value: state_preview.arv ?? null,
+  });
+
+  // Apply the strategy back through the reducer so acceptance locks/round
+  // bookkeeping are visible to the caller before anything is queued.
+  const state_with_strategy = applyNegotiationTurn(priorState, {
+    price_signal: priceSignal,
+    ade_snapshot: adeSnapshot,
+    strategy_decision,
+    zone,
+    transition,
+    engine_decision: engineDecision,
+    facts: transition.facts_patch || null,
+    intent,
+    classification_confidence: classificationConfidence,
+    comp_anchor,
+    source_message_id: sourceMessageId,
+    now,
+  });
+
+  return {
+    state_preview: state_with_strategy,
+    policy,
+    sufficiency,
+    zone,
+    comp_anchor,
+    strategy_decision,
+  };
 }
 
 async function emitSellerNotifications({
@@ -243,6 +416,35 @@ export async function processSellerInboundMessage({
   }
 
   const contract = contractResult.contract;
+
+  // Persisted deal state (negotiation authority, ADE snapshot, contract
+  // evidence) — loaded BEFORE the intelligence phase so the stage engines and
+  // strategy router see real underwriting instead of "unknown" bands.
+  const deal_state = await loadSellerDealState({
+    threadKey: threadKey || inboundFrom,
+    propertyId,
+    ownerId,
+    supabaseClient: supabase,
+  });
+  const persisted_ade = deal_state?.ade_snapshot || null;
+  const underwriting = {
+    recommended_cash_offer:
+      underwritingSignals?.ade_result?.recommended_offer ??
+      deal_state?.ade_result?.recommended_offer ??
+      null,
+    max_allowable_offer:
+      underwritingSignals?.ade_result?.investor_ceiling_mid ??
+      deal_state?.ade_result?.investor_ceiling_mid ??
+      null,
+    minimum_acceptable_offer:
+      underwritingSignals?.ade_result?.minimum_acceptable_offer ??
+      deal_state?.ade_result?.minimum_acceptable_offer ??
+      null,
+    repair_estimate: persisted_ade?.estimated_repairs ?? null,
+    valuation_mid: persisted_ade?.valuation_mid ?? null,
+    valuation_confidence: persisted_ade?.valuation_confidence ?? null,
+  };
+
   const legacy_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
     inbound_event: {
       item_id: inboundEventId,
@@ -281,6 +483,8 @@ export async function processSellerInboundMessage({
     legacy_plan,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
+    underwriting,
+    deal_state,
     supabaseClient: supabase,
   });
 
@@ -333,21 +537,209 @@ export async function processSellerInboundMessage({
       (canonical_decision?.should_queue_reply ?? legacy_plan?.should_queue_reply)
   );
 
-  // Persisted deal state (negotiation authority, ADE snapshot, contract
-  // evidence) — loaded once; feeds template personalization (monetary values
-  // are ADE-bound only) and the transition resolver.
-  const deal_state = await loadSellerDealState({
-    threadKey: threadKey || inboundFrom,
-    propertyId,
-    ownerId,
-    supabaseClient: supabase,
+  // ── Monetary understanding (spec §3): classify every number BEFORE any
+  // negotiation decision. Low-confidence money asks for clarification and
+  // never drives an offer.
+  const stage_engine_decision =
+    intelligence?.stage_domain?.engine_result?.stage_decision || null;
+  const prior_negotiation_state = deal_state?.negotiation_state || null;
+  const negotiation_active = Boolean(
+    (Array.isArray(prior_negotiation_state?.offers_made)
+      ? prior_negotiation_state.offers_made.length > 0
+      : Number(prior_negotiation_state?.offers_made) > 0) ||
+      prior_negotiation_state?.latest_offer != null
+  );
+  const price_signal = resolveAskingPriceSignal(message, {
+    reference:
+      prior_negotiation_state?.current_asking_price ??
+      prior_negotiation_state?.current_ask ??
+      underwriting.recommended_cash_offer ??
+      underwriting.valuation_mid ??
+      null,
+    negotiationActive: negotiation_active,
+    sourceMessageId: providerMessageId || inboundEventId,
   });
+
+  // ── Deterministic lifecycle transition (resolved BEFORE the reply is
+  // queued so ADE + strategy shape the outbound instead of trailing it).
+  let transition = null;
+  try {
+    const extracted = contract.extracted_facts || {};
+    const summary = context?.summary || {};
+    transition = resolveSellerStageTransition({
+      stage_before: stageBefore || summary.conversation_stage || null,
+      known_facts: {
+        ...(deal_state?.known_facts || {}),
+        ownership_status:
+          summary.ownership_status || deal_state?.known_facts?.ownership_status || null,
+        asking_price: deal_state?.known_facts?.asking_price || summary.asking_price || null,
+        occupancy_status:
+          summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
+      },
+      new_facts: {
+        asking_price:
+          price_signal.asking_price ??
+          stage_engine_decision?.seller_asking_price ??
+          extracted.asking_price ??
+          null,
+        condition_summary:
+          typeof extracted.condition === "string" ? extracted.condition : null,
+        condition_disclosed:
+          contract.normalized_intent === "condition_disclosed" ||
+          Boolean(extracted.condition) ||
+          undefined,
+        occupancy_status: extracted.tenant_occupied
+          ? "tenant_occupied"
+          : stage_engine_decision?.occupancy_status || null,
+        timeline: extracted.timeline || null,
+      },
+      intent:
+        intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
+      classification_confidence: classification?.confidence ?? null,
+      current_temperature: summary.lead_temperature || summary.temperature || null,
+      current_disposition: summary.disposition || null,
+      automation_mode: effective_auto_reply_mode,
+      negotiation_state: underwritingSignals?.negotiation_state || prior_negotiation_state || null,
+      ade_result: underwritingSignals?.ade_result || deal_state?.ade_result || null,
+      contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
+      engine_decision: stage_engine_decision,
+      source_message_id: providerMessageId || inboundEventId,
+    });
+  } catch (transition_error) {
+    runtimeDeps.warn("[SELLER_INBOUND_TRANSITION_RESOLVER_FAILED]", {
+      thread_key: threadKey || inboundFrom,
+      error: transition_error?.message || "transition_resolver_failed",
+    });
+  }
+
+  // ── Pre-reply canonical ADE: when the resolver requests underwriting and no
+  // usable persisted authority exists, run it NOW so the strategy router and
+  // the outbound template see fresh authority (spec §4 — preliminary ADE runs
+  // as soon as price is captured; example 2 — one message can carry price +
+  // condition and advance straight to S5).
+  let fresh_ade_snapshot = null;
+  const ade_requested = transition && transition.ade_action && transition.ade_action !== "none";
+  const authority_missing =
+    underwriting.recommended_cash_offer == null || transition?.ade_action === "rerun_material_facts";
+  if (ade_requested && authority_missing && !writes_suppressed && clean(propertyId)) {
+    try {
+      const runner =
+        runtimeDeps.scoreProperty ||
+        (await import("@/lib/acquisition/acquisitionDecisionEngine.js")).scoreProperty;
+      // Bounded inline scoring (same pattern as persistence): a hung ADE must
+      // degrade to the no-authority path, never stall the webhook.
+      let timeoutHandle = null;
+      const timeout = new Promise((resolve) => {
+        timeoutHandle = setTimeout(() => resolve({ ok: false, error: "ade_timeout" }), 8000);
+        if (typeof timeoutHandle?.unref === "function") timeoutHandle.unref();
+      });
+      const ade = await Promise.race([runner(propertyId, { supabase }), timeout]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (ade?.ok && ade.score) fresh_ade_snapshot = ade.score;
+      else if (ade?.error) {
+        runtimeDeps.warn("[SELLER_INBOUND_PRE_ADE_FAILED]", {
+          thread_key: threadKey || inboundFrom,
+          error: ade.error,
+        });
+      }
+    } catch (ade_error) {
+      runtimeDeps.warn("[SELLER_INBOUND_PRE_ADE_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: ade_error?.message || "ade_failed",
+      });
+    }
+  }
+  const effective_ade_snapshot = fresh_ade_snapshot || persisted_ade || null;
+
+  // ── Negotiation strategy (spec §6/§7): deterministic zone + single strategy.
+  const negotiation = resolveNegotiationTurn({
+    transition,
+    priceSignal: price_signal,
+    priorState: prior_negotiation_state,
+    adeSnapshot: effective_ade_snapshot,
+    engineDecision: stage_engine_decision,
+    intent: contract.normalized_intent,
+    classificationConfidence: classification?.confidence ?? null,
+    contextSummary: context?.summary || {},
+    sourceMessageId: providerMessageId || inboundEventId,
+  });
+
+  // Accepted terms resolve the S5 milestone — re-resolve the lifecycle so the
+  // same message advances toward S6 (spec example 3, stage monotonicity kept).
+  if (negotiation?.state_preview?.terms_accepted && !prior_negotiation_state?.terms_accepted && transition) {
+    try {
+      transition = resolveSellerStageTransition({
+        stage_before: transition.stage_before,
+        known_facts: transition.facts_patch,
+        new_facts: {},
+        intent: contract.normalized_intent,
+        classification_confidence: classification?.confidence ?? null,
+        current_temperature: transition.lead_temperature,
+        current_disposition: transition.disposition,
+        automation_mode: effective_auto_reply_mode,
+        negotiation_state: negotiation.state_preview,
+        ade_result:
+          underwritingSignals?.ade_result || deal_state?.ade_result || {
+            sufficient_facts: true,
+            underwriting_ready: true,
+          },
+        contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
+        engine_decision: stage_engine_decision,
+        source_message_id: providerMessageId || inboundEventId,
+      });
+    } catch {
+      // keep the original transition on re-resolution failure
+    }
+  }
+
+  // Strategy refines the transition's outbound plan — resolver stays the only
+  // stage authority; the router only shapes template/next action at S5+.
+  if (negotiation?.strategy_decision && transition) {
+    const mapped_next_action = mapStrategyNextAction(negotiation.strategy_decision.next_action);
+    transition = {
+      ...transition,
+      required_template_use_case:
+        negotiation.strategy_decision.template_use_case || transition.required_template_use_case,
+      next_action: mapped_next_action || transition.next_action,
+      review_required: transition.review_required || Boolean(negotiation.strategy_decision.review_required),
+      review_reason: transition.review_reason || negotiation.strategy_decision.review_reason || null,
+      negotiation_strategy: negotiation.strategy_decision.strategy,
+      negotiation_zone: negotiation.zone?.zone || null,
+    };
+  }
+
+  // ── Monetary authority for template rendering (spec §12): fail closed.
+  // Offer tokens render ONLY from this persisted/derived ADE authority — never
+  // from the seller's own price and never above the ceiling.
+  const authorized_ceiling =
+    negotiation?.state_preview?.authorized_offer_ceiling ??
+    underwriting.max_allowable_offer ??
+    null;
+  let authorized_amount = negotiation?.strategy_decision?.monetary?.amount ?? null;
+  if (
+    authorized_amount != null &&
+    authorized_ceiling != null &&
+    Number(authorized_amount) > Number(authorized_ceiling)
+  ) {
+    runtimeDeps.warn("[NEGOTIATION_AUTHORITY_CLAMP]", {
+      thread_key: threadKey || inboundFrom,
+      attempted_amount: authorized_amount,
+      ceiling: authorized_ceiling,
+    });
+    authorized_amount = null; // fail closed → renderer blocks monetary sends
+  }
   const deal_authority = {
     recommended_offer:
       underwritingSignals?.ade_result?.recommended_offer ??
+      (effective_ade_snapshot?.recommended_cash_offer != null
+        ? Number(effective_ade_snapshot.recommended_cash_offer)
+        : null) ??
       deal_state?.ade_result?.recommended_offer ??
       deal_state?.negotiation_state?.recommended_offer ??
       null,
+    authorized_offer_amount: authorized_amount,
+    authorized_offer_ceiling: authorized_ceiling,
+    comp_anchor_statement: negotiation?.comp_anchor?.authorized_statement || null,
   };
 
   const execution = await runtimeDeps.executeInboundAutomationDecision({
@@ -373,6 +765,17 @@ export async function processSellerInboundMessage({
     timezoneOverride,
     contactWindowOverride,
     dealAuthority: deal_authority,
+    strategyDirective: negotiation?.strategy_decision
+      ? {
+          strategy: negotiation.strategy_decision.strategy,
+          reason_code: negotiation.strategy_decision.reason_code,
+          template_use_case: negotiation.strategy_decision.template_use_case,
+          allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
+          review_required: negotiation.strategy_decision.review_required,
+          review_reason: negotiation.strategy_decision.review_reason,
+          monetary_amount: authorized_amount,
+        }
+      : null,
     supabaseClient: supabase,
     getSystemValue,
   });
@@ -439,56 +842,6 @@ export async function processSellerInboundMessage({
     }
   }
 
-  // Deterministic lifecycle transition — the classifier/engines only feed
-  // facts and intents; this resolver alone decides stage/status/next action.
-  let transition = null;
-  try {
-    const stage_engine_decision =
-      intelligence?.stage_domain?.engine_result?.stage_decision || null;
-    const extracted = contract.extracted_facts || {};
-    const summary = context?.summary || {};
-    transition = resolveSellerStageTransition({
-      stage_before: stageBefore || summary.conversation_stage || null,
-      known_facts: {
-        ...(deal_state?.known_facts || {}),
-        ownership_status: summary.ownership_status || deal_state?.known_facts?.ownership_status || null,
-        asking_price: deal_state?.known_facts?.asking_price || summary.asking_price || null,
-        occupancy_status: summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
-      },
-      new_facts: {
-        asking_price:
-          stage_engine_decision?.seller_asking_price ?? extracted.asking_price ?? null,
-        condition_summary:
-          typeof extracted.condition === "string" ? extracted.condition : null,
-        condition_disclosed:
-          contract.normalized_intent === "condition_disclosed" ||
-          Boolean(extracted.condition) ||
-          undefined,
-        occupancy_status: extracted.tenant_occupied
-          ? "tenant_occupied"
-          : stage_engine_decision?.occupancy_status || null,
-        timeline: extracted.timeline || null,
-      },
-      intent:
-        intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
-      classification_confidence: classification?.confidence ?? null,
-      current_temperature: summary.lead_temperature || summary.temperature || null,
-      current_disposition: summary.disposition || null,
-      automation_mode: effective_auto_reply_mode,
-      negotiation_state:
-        underwritingSignals?.negotiation_state || deal_state?.negotiation_state || null,
-      ade_result: underwritingSignals?.ade_result || deal_state?.ade_result || null,
-      contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
-      engine_decision: stage_engine_decision,
-      source_message_id: providerMessageId || inboundEventId,
-    });
-  } catch (transition_error) {
-    runtimeDeps.warn("[SELLER_INBOUND_TRANSITION_RESOLVER_FAILED]", {
-      thread_key: threadKey || inboundFrom,
-      error: transition_error?.message || "transition_resolver_failed",
-    });
-  }
-
   const decision = buildSellerFlowDecision({
     contract,
     intelligence,
@@ -540,10 +893,30 @@ export async function processSellerInboundMessage({
     }
   }
 
-  // Deal-record persistence: asking-price facts, negotiation state, canonical
-  // ADE execution + snapshot, monotonic acquisition-stage advancement.
+  // Deal-record persistence: asking-price facts, full negotiation state (§2),
+  // canonical ADE snapshot, monotonic stage advancement, §16 workflow events.
   let deal_persistence = null;
   if (transition && supabase) {
+    const offer_use_cases = new Set([
+      "initial_offer",
+      "conditional_offer",
+      "counter_offer",
+      "final_offer",
+      "offer_reveal_cash",
+    ]);
+    const queued_use_case = clean(execution?.selected_template?.use_case) || null;
+    const offer_execution = execution?.queued
+      ? {
+          queued: true,
+          amount:
+            authorized_amount != null && queued_use_case && offer_use_cases.has(queued_use_case)
+              ? authorized_amount
+              : null,
+          template_use_case: queued_use_case,
+          queue_row_id: execution?.queue_row_id || null,
+        }
+      : null;
+
     deal_persistence = await persistSellerTransitionArtifacts({
       transition,
       threadKey: threadKey || inboundFrom,
@@ -553,6 +926,14 @@ export async function processSellerInboundMessage({
       inboundEventId,
       dryRun: writes_suppressed,
       supabaseClient: supabase,
+      priceSignal: price_signal,
+      strategyDecision: negotiation?.strategy_decision || null,
+      zone: negotiation?.zone || null,
+      engineDecision: stage_engine_decision,
+      offerExecution: offer_execution,
+      compAnchor: negotiation?.comp_anchor || null,
+      classificationConfidence: classification?.confidence ?? null,
+      adeSnapshotPrecomputed: fresh_ade_snapshot,
     });
   }
 

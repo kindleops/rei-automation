@@ -715,11 +715,74 @@ function compareTemplateRank(left = {}, right = {}) {
   return right_updated - left_updated;
 }
 
+// §12 negotiation use cases that may auto-reply from the local registry when
+// no sms_templates row exists yet. Deliberately excludes first-touch/cold
+// outbound use cases — this fallback can never widen cold outreach.
+const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
+  "condition_probe",
+  "occupancy_probe",
+  "repair_clarification",
+  "flexibility_probe",
+  "best_price_request",
+  "expectation_reset",
+  "comp_anchor",
+  "repair_anchor",
+  "initial_offer",
+  "conditional_offer",
+  "counter_offer",
+  "final_offer",
+  "accept_terms",
+  "novation_probe",
+  "seller_finance_probe",
+  "future_nurture",
+  "contract_information_request",
+]);
+
+async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null } = {}) {
+  try {
+    const { LOCAL_TEMPLATE_CANDIDATES, verifyLocalAutoReplyApproval, isLocalTemplateFallbackKilled } =
+      await import("@/lib/domain/templates/local-template-registry.js");
+    // Immediate kill switch: fallback can be revoked globally without a deploy.
+    if (isLocalTemplateFallbackKilled()) return null;
+    for (const row of LOCAL_TEMPLATE_CANDIDATES) {
+      if (!LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES.has(lower(row.use_case))) continue;
+      if (!allowed_matches.includes(lower(row.use_case))) continue;
+      if (lower(row.active) !== "yes") continue;
+      // A local template is auto-sendable only with a verified approval record:
+      // pinned content hash, approved environment, allowed strategy, no kill.
+      const verification = verifyLocalAutoReplyApproval(row, { strategy });
+      if (!verification.approved) continue;
+      return {
+        template_id: row.item_id,
+        use_case: row.use_case,
+        // Canonical lifecycle stage from the approval record (S4/S5/S6) —
+        // never the template use case.
+        stage_code: verification.approval.stage_code,
+        language: row.language || "English",
+        template_body: row.text,
+        safe_for_auto_reply: true,
+        source: "local_registry",
+        approval: {
+          approval_status: verification.approval.approval_status,
+          approval_version: verification.approval.approval_version,
+          content_hash: verification.approval.content_hash,
+          allowed_strategies: [...verification.approval.allowed_strategies],
+        },
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
   decision = null,
   context = null,
+  threadKey = null,
+  inboundEventId = null,
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
@@ -766,11 +829,49 @@ export async function selectSafeAutoReplyTemplate({
       .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
       .sort(compareTemplateRank);
 
-    const selected =
+    let selected =
       candidates.find((row) => lower(row.language) === lower(language)) ||
       candidates.find((row) => lower(row.language) === "english") ||
       candidates[0] ||
       null;
+
+    // Negotiation strategies fall back to the canonical local registry so a
+    // deterministic strategy is never silently downgraded to review just
+    // because the DB catalog lags the strategy vocabulary. DB-approved
+    // templates always take precedence; the fallback requires a verified
+    // approval record and is audited below.
+    if (!selected) {
+      selected = await selectLocalNegotiationTemplate(allowed_matches, {
+        strategy: decision?.negotiation_strategy || null,
+      });
+      if (selected) {
+        try {
+          const { emitAutomationEvent } = await import(
+            "@/lib/domain/automation/automation-events.js"
+          );
+          await emitAutomationEvent(
+            {
+              event_type: "LOCAL_TEMPLATE_FALLBACK_USED",
+              source: "seller_inbound_orchestrator",
+              dedupe_key: `local-template-fallback:${inboundEventId || threadKey || ""}:${selected.template_id}`,
+              conversation_thread_id: clean(threadKey) || null,
+              payload: {
+                template_id: selected.template_id,
+                use_case: selected.use_case,
+                stage_code: selected.stage_code,
+                approval_version: selected.approval?.approval_version ?? null,
+                content_hash: selected.approval?.content_hash ?? null,
+                strategy: decision?.negotiation_strategy || null,
+                inbound_event_id: inboundEventId || null,
+              },
+            },
+            supabase ? { supabaseClient: supabase } : {}
+          );
+        } catch {
+          // Audit emission is observability — never blocks template selection.
+        }
+      }
+    }
 
     if (!selected) {
       return { ok: false, reason: "no_safe_template", template: null };
@@ -824,7 +925,20 @@ function buildPersonalizationContext({
   // Monetary offer values may ONLY come from persisted ADE authority — never
   // from the seller's own mentioned price. With no authority the placeholder
   // stays empty and the render fails closed (no send, human review).
-  const authorized_offer = formatUsd(dealAuthority?.recommended_offer);
+  // A strategy-authorized amount (already ceiling-bounded by the router) takes
+  // precedence over the bare recommended offer; any amount above the persisted
+  // ceiling is discarded so the render fails closed instead of over-offering.
+  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  const pickAuthorized = (value) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
+    return amount;
+  };
+  const authorized_offer = formatUsd(
+    pickAuthorized(dealAuthority?.authorized_offer_amount) ??
+      pickAuthorized(dealAuthority?.recommended_offer)
+  );
 
   return {
     message_body: clean(message) || null,
@@ -850,6 +964,9 @@ function buildPersonalizationContext({
     asking_price: formatted_price,
     offer_price: authorized_offer,
     smart_cash_offer_display: authorized_offer,
+    // Comp statements render ONLY the exact policy-authorized sentence — the
+    // template/renderer never composes its own comp claim (spec §10).
+    comp_anchor_statement: clean(dealAuthority?.comp_anchor_statement) || null,
   };
 }
 
@@ -1227,6 +1344,7 @@ export async function executeInboundAutomationDecision({
   timezoneOverride = null,
   contactWindowOverride = null,
   dealAuthority = null,
+  strategyDirective = null,
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
@@ -1241,7 +1359,7 @@ export async function executeInboundAutomationDecision({
     inboundFrom,
     threadKey,
   });
-  const base_decision = applyInboundAutomationDecision({
+  let base_decision = applyInboundAutomationDecision({
     message,
     threadKey,
     propertyId,
@@ -1252,6 +1370,35 @@ export async function executeInboundAutomationDecision({
     conversationBrain,
     latestThreadContext,
   });
+
+  // Deterministic negotiation strategy directive (spec §7/§12): the router's
+  // template selection overrides the intent-profile route at S5+. Suppression
+  // and opt-out handling above/below always win — the directive never
+  // reactivates a suppressed contact, and a review-tier strategy blocks
+  // queueing outright.
+  if (strategyDirective && typeof strategyDirective === "object" && !base_decision.should_suppress_contact) {
+    if (strategyDirective.review_required) {
+      base_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: strategyDirective.review_reason || "negotiation_strategy_review",
+        audit_reason: strategyDirective.reason_code || "negotiation_strategy_review",
+      };
+    } else if (clean(strategyDirective.template_use_case)) {
+      base_decision = {
+        ...base_decision,
+        route_hint: clean(strategyDirective.template_use_case),
+        allowed_template_stages: uniq([
+          clean(strategyDirective.template_use_case),
+          ...asArray(strategyDirective.allowed_template_use_cases).map(clean),
+        ]).filter(Boolean),
+        negotiation_strategy: strategyDirective.strategy || null,
+        audit_reason: strategyDirective.reason_code || base_decision.audit_reason,
+      };
+    }
+  }
 
   info("[AUTO_REPLY_DECISION]", {
     thread_key: threadKey || null,
@@ -1500,6 +1647,8 @@ export async function executeInboundAutomationDecision({
     classification,
     decision: base_decision,
     context: context || latestThreadContext,
+    threadKey,
+    inboundEventId,
   });
 
   if (!template_result.ok || !template_result.template) {

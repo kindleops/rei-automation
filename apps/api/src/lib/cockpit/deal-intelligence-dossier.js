@@ -476,6 +476,45 @@ async function queryMaybe(table, select, filters = {}, abortSignal) {
   throw error
 }
 
+const TERMINAL_OPPORTUNITY_STATUSES = new Set(['won', 'lost', 'dead', 'suppressed', 'archived'])
+
+/**
+ * Deterministically select the canonical opportunity for a thread's
+ * Negotiation Intelligence projection: active/non-archived deals win, then a
+ * deal on the same property, then the deal carrying the current accepted-term
+ * version, with the latest updated_at only as the final tie-breaker. State
+ * from an older or unrelated opportunity must never be displayed.
+ */
+async function selectNegotiationOpportunityRow({ threadKey, propertyId = null, abortSignal }) {
+  if (!threadKey) return null
+  let query = supabase
+    .from('acquisition_opportunities')
+    .select('id,acquisition_stage,opportunity_status,primary_property_id,asking_price,recommended_offer,current_offer,seller_counter,next_action,next_action_due,updated_at,metadata')
+    .eq('primary_thread_key', threadKey)
+    .order('updated_at', { ascending: false })
+    .limit(20)
+  if (abortSignal) query = query.abortSignal(abortSignal)
+  const { data, error } = await query
+  if (error) {
+    if (/does not exist|column/i.test(error.message || '')) {
+      console.warn(`[DEAL_INTEL_QUERY] acquisition_opportunities select failed: ${error.message}`)
+      return null
+    }
+    throw error
+  }
+  const rows = Array.isArray(data) ? data : []
+  if (!rows.length) return null
+
+  const rank = (row) => {
+    const active = TERMINAL_OPPORTUNITY_STATUSES.has(String(row.opportunity_status ?? '').trim().toLowerCase()) ? 0 : 1
+    const propertyMatch = propertyId && row.primary_property_id === propertyId ? 1 : 0
+    const acceptedTerms = row.metadata?.negotiation_state?.terms_accepted === true ? 1 : 0
+    return active * 4 + propertyMatch * 2 + acceptedTerms
+  }
+  // Rows arrive newest-first, so on rank ties the latest updated_at wins.
+  return rows.reduce((best, row) => (rank(row) > rank(best) ? row : best), rows[0])
+}
+
 async function queryHydratedThread({ thread_key, property_id }, abortSignal) {
   if (thread_key) {
     let query = supabase.from('inbox_threads_hydrated').select('*').eq('thread_key', thread_key).limit(1)
@@ -1152,6 +1191,92 @@ function buildConversationIntelligence(hydrated, acquisition, compliance) {
   }
 }
 
+/**
+ * Negotiation Intelligence projection (spec §15) — read-only view of the
+ * persisted negotiation state on the canonical deal record. The UI projects
+ * backend truth; nothing here participates in execution.
+ */
+function buildNegotiationIntelligence(opportunityRow) {
+  if (!opportunityRow) return { status: 'no_tracked_deal' }
+  const metadata = opportunityRow.metadata && typeof opportunityRow.metadata === 'object'
+    ? opportunityRow.metadata
+    : {}
+  const state = metadata.negotiation_state && typeof metadata.negotiation_state === 'object'
+    ? metadata.negotiation_state
+    : null
+  const ade = metadata.ade_snapshot && typeof metadata.ade_snapshot === 'object'
+    ? metadata.ade_snapshot
+    : null
+  if (!state && !ade) return { status: 'no_negotiation_state', opportunity_id: opportunityRow.id }
+
+  const gap = state?.gap_metrics || {}
+  return {
+    status: 'available',
+    opportunity_id: opportunityRow.id,
+    acquisition_stage: opportunityRow.acquisition_stage || null,
+    seller_position: {
+      initial_ask: num(state?.initial_asking_price ?? state?.initial_ask),
+      current_ask: num(state?.current_asking_price ?? state?.current_ask ?? opportunityRow.asking_price),
+      lowest_indication: num(state?.lowest_seller_indication),
+      net_requirement: num(state?.seller_net_requirement),
+      asking_price_history: state?.asking_price_history || [],
+      concessions: state?.seller_concessions || [],
+      cumulative_concession_amount: num(state?.cumulative_concession_amount),
+      price_confidence: num(state?.asking_price_confidence),
+    },
+    property_facts: {
+      occupancy: state?.occupancy || null,
+      condition: state?.condition_summary || null,
+      repairs: state?.repair_facts || [],
+      timeline: state?.timeline || null,
+      motivation: state?.motivation_signals || [],
+      closing_preference: state?.closing_preference || null,
+    },
+    acquisition_authority: {
+      ade_confidence: num(ade?.confidence ?? ade?.valuation_confidence),
+      recommended_offer: num(state?.recommended_offer ?? ade?.recommended_cash_offer),
+      floor: num(state?.authorized_offer_floor ?? ade?.minimum_acceptable_offer),
+      ceiling: num(state?.authorized_offer_ceiling ?? ade?.investor_ceiling_mid),
+      direct_purchase_maximum: num(state?.direct_purchase_maximum ?? ade?.investor_ceiling_high),
+      alternative_strategy_eligibility: state?.alternate_strategy_eligibility || null,
+      repair_estimate: num(state?.repair_estimate ?? ade?.estimated_repairs),
+      arv: num(state?.arv ?? ade?.valuation_mid),
+      comp_anchor: state?.selected_comp_anchor || null,
+      ade_snapshot_at: metadata.ade_snapshot_at || null,
+    },
+    negotiation: {
+      zone: state?.negotiation_zone || null,
+      strategy: state?.current_strategy || state?.strategy || null,
+      prior_strategies: state?.prior_strategies || [],
+      round: num(state?.negotiation_round ?? state?.negotiation_turn) ?? 0,
+      offers_made: state?.offers_made || [],
+      latest_offer: num(state?.latest_offer),
+      counters: state?.seller_counters || [],
+      remaining_gap: num(gap.absolute_gap),
+      gap_pct_of_ask: num(gap.gap_pct_of_ask),
+      movement_available: num(gap.remaining_authorized_movement),
+      seller_sentiment: state?.seller_sentiment || state?.last_seller_sentiment || null,
+      resistance_type: state?.resistance_type || null,
+      terms_accepted: state?.terms_accepted === true,
+      accepted_price: num(state?.accepted_price),
+      terms_accepted_at: state?.terms_accepted_at || state?.accepted_at || null,
+      next_action: state?.next_action || state?.next_move || opportunityRow.next_action || null,
+      next_action_due_at: state?.next_action_due_at || opportunityRow.next_action_due || null,
+      contract_readiness: state?.contract_readiness || null,
+      unresolved_contract_fields: state?.unresolved_contract_fields || [],
+    },
+    explanation: {
+      transition_reason: metadata.last_reasoning_code || null,
+      strategy_reason: state?.human_review_reason || null,
+      authority_source: ade ? 'persisted_ade_snapshot' : 'none',
+      review_reason: state?.human_review_reason || null,
+      automation_confidence: num(state?.automation_confidence),
+      updated_at: state?.updated_at || opportunityRow.updated_at || null,
+      updated_from_message_id: state?.updated_from_message_id || null,
+    },
+  }
+}
+
 function normalizeProperty(propertyRow, hydrated, location) {
   if (!propertyRow && !hydrated) return { status: 'missing' }
   const flags = parsePropertyFlags(
@@ -1530,6 +1655,17 @@ export async function buildDealIntelligenceDossier({
   const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164, ownerRow, compliance)
   const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance)
 
+  // Negotiation Intelligence (spec §15) — persisted negotiation state on the
+  // canonical deal record, projected read-only.
+  const opportunityRow = identity.thread_key
+    ? await selectNegotiationOpportunityRow({
+      threadKey: identity.thread_key,
+      propertyId: identity.property_id || null,
+      abortSignal,
+    })
+    : null
+  const negotiation_intelligence = buildNegotiationIntelligence(opportunityRow)
+
   const census = summary_only
     ? { status: 'lazy', label: 'Census loads on expand' }
     : (censusRow
@@ -1569,6 +1705,7 @@ export async function buildDealIntelligenceDossier({
         acquisition_decision: acquisition,
         decision_snapshot: decisionSnapshot,
         conversation_intelligence,
+        negotiation_intelligence,
         compliance,
         freshness: {
           property_current: Boolean(propertyRow || hydrated),
@@ -1594,6 +1731,7 @@ export async function buildDealIntelligenceDossier({
         buyer_matches: buyerMatches,
         census,
         conversation_intelligence,
+        negotiation_intelligence,
         activity_timeline: activity,
         compliance,
         freshness: {

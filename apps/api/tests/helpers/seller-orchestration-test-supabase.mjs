@@ -58,19 +58,23 @@ export function makeSellerOrchestrationSupabase({
           }),
         }),
       }),
-      insert: (row) => ({
-        select: () => ({
-          single: async () => {
-            const inserted = {
-              id: `queue-${insertedQueueRows.length + 1}`,
-              ...row,
-              queue_status: "queued",
-            };
-            insertedQueueRows.push(inserted);
-            return { data: inserted, error: null };
-          },
-        }),
-      }),
+      insert: (row) => {
+        const doInsert = async () => {
+          const inserted = {
+            id: `queue-${insertedQueueRows.length + 1}`,
+            ...row,
+            queue_status: "queued",
+          };
+          insertedQueueRows.push(inserted);
+          return { data: inserted, error: null };
+        };
+        return {
+          select: () => ({
+            single: doInsert,
+            maybeSingle: doInsert,
+          }),
+        };
+      },
     },
     message_events: {
       select: () => makeTerminalQuery({ data: [], error: null }),

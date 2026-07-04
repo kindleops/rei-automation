@@ -30,6 +30,7 @@
     "proof:template-coverage": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --env-file=.env.local scripts/proof/template-coverage-audit.mjs",
     "proof:conversation-memory": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/conversation-memory.proof.mjs",
     "proof:seller-state-persistence": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/seller-state-persistence.proof.mjs",
+    "proof:negotiation-shadow": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs scripts/proof/negotiation-shadow-eval.mjs",
     "proof:memory-idempotency": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/memory-idempotency.proof.mjs",
     "proof:memory-aware-routing": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/memory-aware-routing.proof.mjs",
     "proof:no-repeated-questions": "PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test node --import ./tests/register-aliases.mjs tests/automation/no-repeated-questions.proof.mjs",

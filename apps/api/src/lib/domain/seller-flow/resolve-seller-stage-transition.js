@@ -407,7 +407,13 @@ export function resolveSellerStageTransition({
   }
 
   // ── 2. Disengaging intents: nurture without stage regression ─────────────
-  if (NURTURE_DAYS[intentKey] != null) {
+  // A tenant-occupancy disclosure that ARRIVES WITH a price (or an existing
+  // captured price) is engagement — occupancy is an underwriting fact, not a
+  // brush-off. Only a bare "tenants live there" reply nurtures.
+  const tenantDisclosureWithPrice =
+    intentKey === "tenant_occupied" &&
+    (Boolean(normalizeAskingPriceFact(new_facts?.asking_price)?.value) || facts.asking_price?.value > 0);
+  if (NURTURE_DAYS[intentKey] != null && !tenantDisclosureWithPrice) {
     // "Not for sale" at S1 implies ownership — advance to S2 and nurture there.
     if (intentKey === "not_interested" && beforeIdx === 0) {
       facts.ownership_status = facts.ownership_status || "inferred";

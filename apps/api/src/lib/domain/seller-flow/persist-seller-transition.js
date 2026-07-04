@@ -21,6 +21,8 @@ import {
   normalizeLifecycleStage,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const TABLE = "acquisition_opportunities";
@@ -136,10 +138,12 @@ export async function loadSellerDealState({ threadKey = null, propertyId = null,
     const ade = metadata.ade_snapshot || null;
     return {
       opportunity_id: opportunity.id,
+      property_id: opportunity.primary_property_id || null,
       acquisition_stage: opportunity.acquisition_stage || null,
       negotiation_state: {
         ...(metadata.negotiation_state || {}),
-        offers_made: metadata.negotiation_state?.offers_made ?? (opportunity.current_offer != null ? 1 : 0),
+        offers_made:
+          metadata.negotiation_state?.offers_made ?? (opportunity.current_offer != null ? 1 : 0),
       },
       ade_result: ade
         ? {
@@ -150,6 +154,9 @@ export async function loadSellerDealState({ threadKey = null, propertyId = null,
             investor_ceiling_mid: num(ade.investor_ceiling_mid),
           }
         : null,
+      // Full persisted snapshot for zone/strategy/comp-anchor resolution.
+      ade_snapshot: ade,
+      ade_snapshot_at: metadata.ade_snapshot_at || null,
       contract_state: metadata.contract_state || null,
       known_facts: metadata.seller_facts || {},
     };
@@ -160,6 +167,125 @@ export async function loadSellerDealState({ threadKey = null, propertyId = null,
     });
     return null;
   }
+}
+
+/** Derive the spec §16 negotiation event list for one persisted turn. */
+export function deriveNegotiationWorkflowEvents({
+  transition = null,
+  negotiationState = null,
+  previousState = null,
+  strategyDecision = null,
+  offerExecution = null,
+  compAnchor = null,
+  adeSnapshot = null,
+} = {}) {
+  const events = [];
+  const state = negotiationState || {};
+  const prev = previousState || {};
+  const history = Array.isArray(state.asking_price_history) ? state.asking_price_history : [];
+  const prevHistory = Array.isArray(prev.asking_price_history) ? prev.asking_price_history : [];
+
+  if (history.length > prevHistory.length) {
+    const latest = history[history.length - 1];
+    events.push(latest.kind === "initial" ? "asking_price_captured" : "asking_price_changed");
+    if (latest.kind === "counter") events.push("seller_counter_received");
+  }
+  const concessions = Array.isArray(state.seller_concessions) ? state.seller_concessions.length : 0;
+  const prevConcessions = Array.isArray(prev.seller_concessions) ? prev.seller_concessions.length : 0;
+  if (concessions > prevConcessions) events.push("seller_concession_detected");
+
+  if (adeSnapshot) {
+    events.push(prev.recommended_offer != null ? "underwriting_recalculated" : "underwriting_completed");
+  }
+  if (strategyDecision?.strategy) {
+    events.push("strategy_selected");
+    if (strategyDecision.strategy === "final_authorized_offer") events.push("final_offer_reached");
+    if (["novation_probe", "seller_finance_probe"].includes(strategyDecision.strategy)) {
+      events.push("alternate_strategy_selected");
+    }
+    if (String(strategyDecision.reason_code || "").includes("CONCESSION_AUTHORIZED")) {
+      events.push("concession_authorized");
+    }
+    if (strategyDecision.review_required) events.push("review_required");
+  }
+  if (transition?.facts_patch?.condition_disclosed === true) events.push("condition_fact_captured");
+  if (compAnchor?.eligible) events.push("comp_anchor_selected");
+  const monetaryAmount = Number(strategyDecision?.monetary?.amount);
+  if (Number.isFinite(monetaryAmount) && monetaryAmount > 0) events.push("offer_authorized");
+  if (offerExecution?.queued) events.push("offer_queued");
+  if (state.terms_accepted === true && prev.terms_accepted !== true) events.push("terms_accepted");
+  if (state.terms_accepted === true && state.contract_readiness === "ready") events.push("contract_ready");
+  else if (state.terms_accepted === true && (state.unresolved_contract_fields || []).length > 0) {
+    events.push("contract_information_requested");
+  }
+  if (transition?.review_required) events.push("review_required");
+
+  return [...new Set(events)];
+}
+
+async function emitNegotiationWorkflowEvents({
+  supabase,
+  opportunity,
+  transition,
+  negotiationState,
+  previousState,
+  strategyDecision,
+  offerExecution,
+  compAnchor,
+  adeSnapshot,
+  inboundEventId,
+  threadKey,
+  propertyId,
+  ownerId,
+}) {
+  const events = deriveNegotiationWorkflowEvents({
+    transition,
+    negotiationState,
+    previousState,
+    strategyDecision,
+    offerExecution,
+    compAnchor,
+    adeSnapshot,
+  });
+
+  let emitted = 0;
+  for (const eventType of events) {
+    try {
+      await emitAutomationEvent(
+        {
+          event_type: eventType,
+          source: "seller_negotiation_engine",
+          dedupe_key: `negotiation:${opportunity.id}:${eventType}:${inboundEventId || transition?.resolved_at || ""}`,
+          conversation_thread_id: threadKey,
+          property_id: propertyId || null,
+          master_owner_id: ownerId || null,
+          payload: {
+            stage_before: transition?.stage_before || null,
+            stage_after: transition?.stage_after || null,
+            asking_price_history: negotiationState?.asking_price_history || [],
+            ade_snapshot_id: negotiationState?.ade_snapshot_id || null,
+            authority_floor: negotiationState?.authorized_offer_floor ?? null,
+            authority_ceiling: negotiationState?.authorized_offer_ceiling ?? null,
+            recommended_offer: negotiationState?.recommended_offer ?? null,
+            strategy: strategyDecision?.strategy || negotiationState?.current_strategy || null,
+            reason_code: strategyDecision?.reason_code || transition?.reasoning_code || null,
+            selected_comp: compAnchor?.anchor || null,
+            template_use_case:
+              offerExecution?.template_use_case || strategyDecision?.template_use_case || null,
+            next_action: negotiationState?.next_action || transition?.next_action || null,
+            confidence: negotiationState?.automation_confidence ?? null,
+            negotiation_zone: negotiationState?.negotiation_zone || null,
+            queue_row_id: offerExecution?.queue_row_id || null,
+          },
+        },
+        supabase ? { supabaseClient: supabase } : {}
+      );
+      emitted += 1;
+    } catch {
+      // Event emission is observability — never a persistence blocker.
+    }
+  }
+  return emitted;
 }
 
 /**
@@ -176,6 +302,16 @@ export async function persistSellerTransitionArtifacts({
   dryRun = false,
   supabaseClient = null,
   deps = {},
+  // Negotiation-loop inputs (spec §2/§7/§16) — all optional for legacy callers.
+  priceSignal = null,
+  strategyDecision = null,
+  zone = null,
+  engineDecision = null,
+  offerExecution = null,
+  contractFacts = null,
+  compAnchor = null,
+  classificationConfidence = null,
+  adeSnapshotPrecomputed = null,
 } = {}) {
   const summary = {
     ok: true,
@@ -185,6 +321,7 @@ export async function persistSellerTransitionArtifacts({
     stage_advanced: false,
     facts_persisted: false,
     negotiation_state_updated: false,
+    workflow_events_emitted: 0,
     ade: { requested: transition?.ade_action || ADE_ACTIONS.NONE, ran: false, error: null },
   };
 
@@ -226,8 +363,13 @@ export async function persistSellerTransitionArtifacts({
     summary.opportunity_id = opportunity.id;
 
     // ── Canonical ADE execution (spec §5/§6/§7) ─────────────────────────
-    let adeSnapshot = null;
-    if (
+    // A snapshot precomputed by the orchestrator (pre-reply, so the strategy
+    // router saw fresh authority) is reused — ADE never runs twice per turn.
+    let adeSnapshot = adeSnapshotPrecomputed || null;
+    if (adeSnapshot) {
+      summary.ade.ran = true;
+      summary.ade.precomputed = true;
+    } else if (
       transition.ade_action &&
       transition.ade_action !== ADE_ACTIONS.NONE &&
       clean(propertyId || opportunity.primary_property_id)
@@ -247,6 +389,59 @@ export async function persistSellerTransitionArtifacts({
         summary.ade.error = ade_error?.message || "ade_failed";
       }
     }
+
+    // ── Canonical negotiation state (spec §2) ───────────────────────────
+    const previousMetadata =
+      opportunity.metadata && typeof opportunity.metadata === "object" ? opportunity.metadata : {};
+    const previousState = previousMetadata.negotiation_state || null;
+    const nowIso = transition.resolved_at || new Date().toISOString();
+
+    // Legacy callers pass no price signal — derive one from resolver facts so
+    // history/counter bookkeeping still runs through the single reducer.
+    const priceFact = transition.facts_patch?.asking_price || null;
+    const previousAsk = num(previousState?.current_asking_price ?? previousState?.current_ask);
+    const effectivePriceSignal =
+      priceSignal ||
+      (num(priceFact?.value) > 0
+        ? {
+            asking_price: {
+              value: num(priceFact.value),
+              currency: priceFact.currency || "USD",
+              price_type: priceFact.price_type || "exact",
+              confidence: priceFact.confidence ?? null,
+              extracted_text: priceFact.extracted_text || null,
+              source_message_id: priceFact.source_message_id || null,
+              captured_at: priceFact.captured_at || nowIso,
+            },
+            is_counter:
+              Number(transition.stage_after_number || 0) >= 5 &&
+              previousAsk !== null &&
+              num(priceFact.value) !== previousAsk,
+          }
+        : null);
+
+    const negotiationState = applyNegotiationTurn(previousState, {
+      price_signal: effectivePriceSignal,
+      ade_snapshot: adeSnapshot || previousMetadata.ade_snapshot || null,
+      strategy_decision: strategyDecision,
+      zone,
+      transition,
+      engine_decision: engineDecision,
+      facts: transition.facts_patch || null,
+      intent,
+      classification_confidence: classificationConfidence,
+      offer_execution: offerExecution,
+      contract_facts: contractFacts,
+      comp_anchor: compAnchor,
+      source_message_id:
+        priceFact?.source_message_id || transition.source_message_id || inboundEventId || null,
+      now: nowIso,
+    });
+    negotiationState.deal_id = negotiationState.deal_id || opportunity.id;
+    negotiationState.property_id =
+      negotiationState.property_id || propertyId || opportunity.primary_property_id || null;
+    negotiationState.owner_id = negotiationState.owner_id || ownerId || null;
+    negotiationState.thread_key = negotiationState.thread_key || threadKey;
 
     // ── Column-level facts + next action ────────────────────────────────
     const columnPatch = {
@@ -275,6 +470,10 @@ export async function persistSellerTransitionArtifacts({
           columnPatch.offer_to_ask_gap = ask - columnPatch.recommended_offer;
         }
       }
+    }
+    if (num(adeSnapshot?.valuation_mid) != null) columnPatch.arv = num(adeSnapshot.valuation_mid);
+    if (num(negotiationState.latest_offer) != null) {
+      columnPatch.current_offer = num(negotiationState.latest_offer);
     }
 
     try {
@@ -317,14 +516,6 @@ export async function persistSellerTransitionArtifacts({
 
     // ── Metadata: seller facts, negotiation state, ADE snapshot ─────────
     try {
-      const previousMetadata =
-        opportunity.metadata && typeof opportunity.metadata === "object" ? opportunity.metadata : {};
-      const negotiationState = buildNegotiationStatePatch(previousMetadata.negotiation_state, {
-        transition,
-        intent,
-        adeSnapshot,
-        now: transition.resolved_at || new Date().toISOString(),
-      });
       const metadata = {
         ...previousMetadata,
         seller_facts: { ...(previousMetadata.seller_facts || {}), ...(transition.facts_patch || {}) },
@@ -353,6 +544,30 @@ export async function persistSellerTransitionArtifacts({
       warn("[SELLER_TRANSITION_METADATA_FAILED]", {
         opportunity_id: opportunity.id,
         error: metadata_error?.message || "metadata_update_failed",
+      });
+    }
+
+    // ── Workflow Studio negotiation events (spec §16) ───────────────────
+    try {
+      summary.workflow_events_emitted = await emitNegotiationWorkflowEvents({
+        supabase,
+        opportunity,
+        transition,
+        negotiationState,
+        previousState,
+        strategyDecision,
+        offerExecution,
+        compAnchor,
+        adeSnapshot,
+        inboundEventId,
+        threadKey,
+        propertyId: propertyId || opportunity.primary_property_id || null,
+        ownerId,
+      });
+    } catch (event_error) {
+      warn("[SELLER_TRANSITION_EVENT_EMIT_FAILED]", {
+        opportunity_id: opportunity.id,
+        error: event_error?.message || "event_emit_failed",
       });
     }
 
