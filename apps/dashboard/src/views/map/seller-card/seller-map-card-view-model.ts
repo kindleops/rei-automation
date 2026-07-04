@@ -13,7 +13,6 @@ import {
   classifyPriorityScore,
   firstDefined,
   formatDate,
-  formatDecimal,
   formatInteger,
   formatMoney,
   formatPercent,
@@ -50,32 +49,6 @@ const resolveMasterOwnerName = (record: Record<string, unknown>): string => {
     'mo_display_name',
   ]))
   return name || 'Unknown Owner'
-}
-
-const resolveProspectName = (record: Record<string, unknown>): string => (
-  text(firstDefined(record, [
-    'prospect_full_name',
-    'prospect_name',
-    'prospect_display_name',
-    'prospectDisplayName',
-  ]))
-)
-
-const resolveProspectPhone = (record: Record<string, unknown>): string | null => (
-  text(firstDefined(record, [
-    'canonical_e164',
-    'seller_phone',
-    'display_phone',
-    'prospect_phone',
-    'prospect_phone_number',
-    'phone',
-  ])) || null
-)
-
-const truncateId = (value: string | null, visible = 8): string => {
-  if (!value) return '—'
-  if (value.length <= visible + 3) return value
-  return `${value.slice(0, visible)}…`
 }
 
 const resolvePropertyImage = (record: Record<string, unknown>, address: string): string | null => {
@@ -227,31 +200,7 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Last Sale Date', value: formatDate(text(firstDefined(record, ['last_sale_date', 'lastSaleDate', 'sale_date']))) },
   ].filter((field) => field.value !== '—')
 
-  const masterOwnerName = resolveMasterOwnerName(record)
-  const prospectName = resolveProspectName(record)
-  const prospectFirstName = text(firstDefined(record, ['prospect_first_name', 'prospectFirstName'])) || null
-  const prospectPhone = resolveProspectPhone(record)
-  const prospectId = text(firstDefined(record, ['prospect_id', 'prospectId'])) || null
-  const masterOwnerId = text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || null
-  const ownerType = text(firstDefined(record, ['owner_type', 'ownerType'])) || null
-  const entityName = text(firstDefined(record, ['entity_name', 'entityName'])) || null
-  const marketLabel = text(firstDefined(record, ['filter_market', 'market'])) || null
-
-  const focusProspectFields = [
-    { label: 'Prospect Name', value: prospectName || '—' },
-    { label: 'First Name', value: prospectFirstName || '—' },
-    { label: 'Phone', value: prospectPhone || '—' },
-    { label: 'Prospect ID', value: truncateId(prospectId) },
-    { label: 'Contactability', value: canonical.contactabilityLabel },
-  ].filter((field) => field.value !== '—')
-
   const focusOwnerFields = [
-    { label: 'Owner Name', value: masterOwnerName },
-    { label: 'Owner Type', value: ownerType ? titleize(ownerType) : '—' },
-    { label: 'Entity', value: entityName || '—' },
-    { label: 'Master Owner ID', value: truncateId(masterOwnerId) },
-    { label: 'Priority Tier', value: text(firstDefined(record, ['owner_priority_tier', 'priority_tier', 'priorityTier'])) || '—' },
-    { label: 'Priority Score', value: priorityScore != null ? String(Math.round(priorityScore)) : '—' },
     { label: 'Mailing Address', value: text(firstDefined(record, ['mailing_address_full', 'owner_mailing_address', 'mailing_address'])) || '—' },
     { label: 'Years Owned', value: yearsOwned != null ? `${formatInteger(yearsOwned)} yrs` : '—' },
     { label: 'Absentee', value: asBoolean(firstDefined(record, ['absentee_owner'])) === true ? 'Yes' : asBoolean(firstDefined(record, ['absentee_owner'])) === false ? 'No' : '—' },
@@ -279,21 +228,8 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Condition', value: text(assetInput.condition) || '—' },
     { label: 'Effective Built', value: formatInteger(assetInput.effectiveYearBuilt) },
     { label: 'Construction', value: text(assetInput.constructionType) ? titleize(text(assetInput.constructionType)) : '—' },
-    { label: 'Occupancy', value: assetInput.occupancyLabel ? titleize(assetInput.occupancyLabel) : '—' },
     { label: 'Priority', value: priorityScore != null ? String(Math.round(priorityScore)) : 'UNSCORED' },
   ]
-
-  const peekDossierFields = [
-    { label: 'Market', value: marketLabel || '—' },
-    { label: 'Year Built', value: formatInteger(assetInput.yearBuilt) },
-    assetInput.acreage != null
-      ? { label: 'Lot Size', value: `${formatDecimal(assetInput.acreage, 2)} ac` }
-      : { label: 'Lot Sqft', value: formatInteger(assetInput.lotSqft) },
-    { label: 'Price / Sqft', value: formatMoney(assetInput.pricePerSqft) },
-    { label: 'Equity $', value: formatMoney(assetInput.equityAmount) },
-    { label: 'Zoning', value: text(assetInput.zoning) ? titleize(text(assetInput.zoning)) : '—' },
-    { label: 'Land Use', value: text(assetInput.landUse) ? titleize(text(assetInput.landUse)) : '—' },
-  ].filter((field) => field.value !== '—')
 
   const threadKey = text(firstDefined(record, ['thread_key', 'threadKey', 'conversation_id'])) || null
   const suppressionReason = text(firstDefined(record, ['suppression_reason'])) || null
@@ -320,25 +256,12 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Delivery', value: text(firstDefined(record, ['delivery_status', 'latest_delivery_status'])) || '—' },
   ].filter((field) => field.value !== '—')
 
-  const differsFromOwner = Boolean(
-    prospectName
-    && masterOwnerName
-    && prospectName.toLowerCase() !== masterOwnerName.toLowerCase(),
-  )
-
   return {
     propertyId: text(firstDefined(record, ['property_id', 'propertyId', 'id'])),
     threadKey,
-    prospect: {
-      id: prospectId,
-      displayName: prospectName || prospectFirstName || 'Unknown Prospect',
-      firstName: prospectFirstName,
-      phone: prospectPhone,
-      differsFromOwner,
-    },
     masterOwner: {
-      id: masterOwnerId,
-      displayName: masterOwnerName,
+      id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || null,
+      displayName: resolveMasterOwnerName(record),
       mailingAddress: text(firstDefined(record, ['mailing_address_full', 'owner_mailing_address', 'mailing_address'])) || null,
       yearsOwned,
       absentee: asBoolean(firstDefined(record, ['absentee_owner', 'absenteeOwner'])),
@@ -421,12 +344,10 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     contextualLine: buildContextualLine(record) || null,
     peekMetrics: presentation.buildPeekMetrics(assetInput),
     focusMetrics,
-    peekDossierFields,
     intelligenceStrip,
     followUpEligibility,
     focusProfileFields: presentation.buildFocusProfileFields(assetInput).filter((field) => field.value !== '—'),
     focusFinancialFields,
-    focusProspectFields,
     focusOwnerFields,
     focusOperationFields,
     activity,
