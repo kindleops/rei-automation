@@ -107,7 +107,7 @@ const pickOwnershipCheckTemplate = (
       let score = 0
       if (template.language?.toLowerCase() === 'english') score += 40
       if (template.isFirstTouch) score += 20
-      score -= missingVariables.size * 10
+      score -= missingVariables.length * 10
       if (!repaired) score -= 100
       if (hasBlankGreeting(repaired)) score -= 100
       if (hasUnresolvedTemplateTokens(repaired)) score -= 100
