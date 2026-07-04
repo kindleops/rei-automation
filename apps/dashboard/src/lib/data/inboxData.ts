@@ -984,12 +984,19 @@ export const resolveSellerFirstName = (candidate: PersonalizationCandidate): Sel
 }
 
 const applyRenderGuard = (renderedMessage: string): RenderGuardResult => {
-  const greetingCommaPattern = /^(\s*(?:hi|hey|hello|hola|ola|marhaba))\s+,/i
-  const repaired = renderedMessage.replace(greetingCommaPattern, '$1,')
+  let repaired = renderedMessage
+  const greetingWithBlankName = /^(\s*(?:hi|hey|hello|hola|ola|marhaba))\s+,/i
+  const greetingWithoutName = /^(\s*(?:hi|hey|hello|hola|ola|marhaba))\s*,/i
+  if (greetingWithBlankName.test(repaired)) {
+    repaired = repaired.replace(greetingWithBlankName, '$1 there,')
+  } else if (greetingWithoutName.test(repaired)) {
+    repaired = repaired.replace(greetingWithoutName, '$1 there,')
+  }
+  repaired = repaired.replace(/\[\[[a-z0-9_]+\]\]/gi, '')
   return {
-    messageText: repaired,
-    repaired: repaired !== renderedMessage,
-    passed: !/^(hi|hey|hello|hola|ola|marhaba)\s+,/i.test(repaired.trim()),
+    messageText: repaired.trim(),
+    repaired: repaired.trim() !== renderedMessage.trim(),
+    passed: !/^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(repaired.trim()),
   }
 }
 

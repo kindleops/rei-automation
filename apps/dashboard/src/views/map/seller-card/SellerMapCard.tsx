@@ -49,11 +49,12 @@ const cardModeFromSnap = (snap: BottomSheetSnap, current: SellerMapCardMode): Se
 const followUpButtonLabel = (
   state: string,
   eligibilityLabel: string,
+  errorMessage?: string | null,
 ): string => {
   if (state === 'sending') return 'Sending…'
   if (state === 'sent') return 'Sent ✓'
-  if (state === 'blocked') return eligibilityLabel
-  if (state === 'failed') return 'Failed'
+  if (state === 'blocked') return errorMessage || eligibilityLabel
+  if (state === 'failed') return errorMessage ? errorMessage.slice(0, 42) : 'Failed'
   return eligibilityLabel
 }
 
@@ -343,7 +344,7 @@ export const SellerMapCard = ({
           title={followUpError || followUpEligibility.disabledReason || undefined}
           onClick={() => void executeFollowUp()}
         >
-          {followUpButtonLabel(followUpState, followUpEligibility.label)}
+          {followUpButtonLabel(followUpState, followUpEligibility.label, followUpError)}
         </button>
       ) : (
         <span className="smc-action smc-action--spacer" aria-hidden="true" />

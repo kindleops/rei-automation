@@ -716,7 +716,7 @@ export const loadCommandMapSellerPins = async (
   return data as CommandMapSellerPin[]
 }
 
-const SELLER_WORK_ITEM_PHONE_SELECT = 'prospect_id,prospect_best_phone,display_phone,canonical_e164,seller_phone'
+const SELLER_WORK_ITEM_PHONE_SELECT = 'prospect_id,prospect_best_phone,display_phone'
 
 const pickSellerContactPhone = (row: Record<string, unknown> | null | undefined): string | null => {
   if (!row) return null
@@ -758,7 +758,7 @@ export const resolveCommandMapSellerPhone = async (
     if (phone) {
       return {
         phone,
-        prospectId: String(row.prospect_id ?? options.prospectId ?? '').trim() || null,
+        prospectId: String(row.prospect_id ?? '').trim() || String(options.prospectId ?? '').trim() || null,
       }
     }
   }
@@ -767,15 +767,18 @@ export const resolveCommandMapSellerPhone = async (
   if (ownerId) {
     let phoneQuery = supabase
       .from('phones')
-      .select('canonical_e164,phone,phone_number,sort_rank')
+      .select('canonical_e164,phone,sort_rank')
       .eq('master_owner_id', ownerId)
       .order('sort_rank', { ascending: true })
     if (options.signal) phoneQuery = phoneQuery.abortSignal(options.signal)
-    const { data: phoneRows } = await phoneQuery.limit(3)
+    const { data: phoneRows, error: phoneError } = await phoneQuery.limit(3)
+    if (phoneError && !isAbortError(phoneError) && import.meta.env.DEV) {
+      console.warn('[CommandMap] phones fallback lookup failed:', phoneError)
+    }
     for (const row of (phoneRows ?? []) as Record<string, unknown>[]) {
       const phone = pickSellerContactPhone({
         canonical_e164: row.canonical_e164,
-        seller_phone: row.phone_number ?? row.phone,
+        seller_phone: row.phone,
       })
       if (phone) {
         return { phone, prospectId: options.prospectId ?? null }

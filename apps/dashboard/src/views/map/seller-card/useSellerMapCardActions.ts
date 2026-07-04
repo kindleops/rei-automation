@@ -60,10 +60,63 @@ const parseStateFromAddress = (address: string): string | undefined => {
   return match?.[1]?.toUpperCase()
 }
 
-const pickOwnershipCheckTemplate = (templates: SmsTemplate[]): SmsTemplate | null => {
+const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<string, string> => {
+  const ownerName = text(firstDefined(record, [
+    'owner_display_name',
+    'owner_name',
+    'owner_full_name',
+    'entity_name',
+    'seller_display_name',
+    'seller_name',
+  ]))
+  const prospectName = text(firstDefined(record, [
+    'prospect_full_name',
+    'prospect_name',
+    'prospect_first_name',
+  ]))
+  const resolvedName = ownerName || prospectName
+  const first = resolvedName.split(/\s+/).filter(Boolean)[0] ?? resolvedName
+  return {
+    seller_name: resolvedName,
+    seller_first_name: first,
+    owner_name: resolvedName,
+    agent_name: 'Chris',
+    agent_first_name: 'Chris',
+  }
+}
+
+const hasBlankGreeting = (message: string): boolean =>
+  /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
+
+const hasUnresolvedTemplateTokens = (message: string): boolean =>
+  /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
+
+const pickOwnershipCheckTemplate = (
+  templates: SmsTemplate[],
+  context: Record<string, string>,
+): SmsTemplate | null => {
   if (!templates.length) return null
-  const english = templates.find((template) => template.language?.toLowerCase() === 'english')
-  return english || templates.find((template) => template.isFirstTouch) || templates[0]
+  const ranked = templates
+    .map((template) => {
+      const { renderedText, missingVariables } = renderTemplate(template, context)
+      const repaired = renderedText
+        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
+        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
+        .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
+        .trim()
+      let score = 0
+      if (template.language?.toLowerCase() === 'english') score += 40
+      if (template.isFirstTouch) score += 20
+      score -= missingVariables.size * 10
+      if (!repaired) score -= 100
+      if (hasBlankGreeting(repaired)) score -= 100
+      if (hasUnresolvedTemplateTokens(repaired)) score -= 100
+      return { template, score, repaired }
+    })
+    .sort((left, right) => right.score - left.score)
+
+  const winner = ranked.find((entry) => entry.score > 0 && entry.repaired)
+  return winner?.template ?? ranked[0]?.template ?? null
 }
 
 export const buildThreadFromViewModel = (
@@ -113,6 +166,10 @@ export const buildThreadFromViewModel = (
     propertyAddress: vm.property.address,
     property_address_state: propertyState,
     ownerDisplayName: vm.masterOwner.displayName,
+    seller_name: vm.masterOwner.displayName,
+    prospect_full_name: text(firstDefined(record, ['prospect_full_name', 'prospect_name'])),
+    prospect_first_name: text(firstDefined(record, ['prospect_first_name'])),
+    owner_display_name: vm.masterOwner.displayName,
     lifecycle_stage: vm.operations.stage,
     operational_status: vm.operations.status,
     lead_temperature: vm.operations.temperature,
@@ -197,8 +254,17 @@ export const useSellerMapCardActions = ({
       sendThread = resolvedSendThread
 
       let followUpTemplate: SmsTemplate | null = null
+      const manualTemplateValues = buildMapTemplateManualValues(record)
+      const templateContext = {
+        ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
+        ...manualTemplateValues,
+      }
+
       if (eligibility.isUncontacted) {
-        followUpTemplate = pickOwnershipCheckTemplate(await fetchTemplatesByUseCase('ownership_check'))
+        followUpTemplate = pickOwnershipCheckTemplate(
+          await fetchTemplatesByUseCase('ownership_check'),
+          templateContext,
+        )
       } else {
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
         followUpTemplate = templates.find((template) => template.isFollowUp)
@@ -217,10 +283,14 @@ export const useSellerMapCardActions = ({
         return
       }
 
-      const context = buildTemplateContextFromThread(sendThread, threadContext ?? null)
-      const { renderedText: messageText } = renderTemplate(followUpTemplate, context)
-      if (!messageText.trim()) {
-        setFollowUpError('Template rendered empty message')
+      const { renderedText: rawMessageText } = renderTemplate(followUpTemplate, templateContext)
+      let messageText = rawMessageText
+        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
+        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
+        .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
+        .trim()
+      if (!messageText.trim() || hasBlankGreeting(messageText) || hasUnresolvedTemplateTokens(messageText)) {
+        setFollowUpError('Template missing seller name or property details')
         setFollowUpState('failed')
         window.setTimeout(() => {
           setFollowUpState('idle')
