@@ -1001,21 +1001,38 @@ const applyRenderGuard = (renderedMessage: string): RenderGuardResult => {
 }
 
 const buildPersonalizationCandidate = (thread: InboxThread): PersonalizationCandidate => {
+  const threadRecord = thread as unknown as Record<string, unknown>
   const owner = asString(thread.ownerName, '')
+  const ownerDisplay = asString(thread.ownerDisplayName ?? owner, '')
+  const prospectFull = asString(
+    threadRecord.prospect_full_name
+    ?? thread.prospect_name
+    ?? thread.full_name
+    ?? threadRecord.prospect_name,
+    '',
+  )
+  const prospectFirst = asString(
+    threadRecord.prospect_first_name
+    ?? thread.first_name
+    ?? threadRecord.prospect_first_name,
+    '',
+  )
+  const sellerFirst = asString(threadRecord.seller_first_name, '')
+
   return {
-    seller_first_name: null,
-    seller_full_name: owner || null,
-    seller_name_source: owner ? 'thread.ownerName' : null,
-    owner_display_name: owner || null,
-    prospect_first_name: null,
-    prospect_full_name: null,
+    seller_first_name: sellerFirst || prospectFirst || null,
+    seller_full_name: prospectFull || owner || null,
+    seller_name_source: prospectFull ? 'thread.prospect_full_name' : owner ? 'thread.ownerName' : null,
+    owner_display_name: ownerDisplay || null,
+    prospect_first_name: prospectFirst || null,
+    prospect_full_name: prospectFull || null,
     phone_first_name: null,
     phone_full_name: null,
-    primary_display_name: owner || null,
-    master_owner_display_name: owner || null,
+    primary_display_name: asString(thread.sellerName ?? threadRecord.seller_name, '') || prospectFull || null,
+    master_owner_display_name: ownerDisplay || null,
     property_owner_name: owner || null,
     owner_name: owner || null,
-    first_name: null,
+    first_name: prospectFirst || null,
   }
 }
 

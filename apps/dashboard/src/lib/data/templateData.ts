@@ -1,4 +1,5 @@
 import type { InboxThread } from '../../domain/inbox/inbox-model-types'
+import { buildSellerGreetingFromThread } from '../../domain/inbox/seller-greeting'
 import type { ThreadContext } from './inboxData'
 import { fetchSmsTemplatesFromApi } from '../api/backendClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'
@@ -313,30 +314,14 @@ export const buildTemplateContextFromThread = (
   threadContext: ThreadContext | null,
   manualValues: Record<string, string> = {},
 ): Record<string, string> => {
-  const threadRecord = (thread ?? {}) as AnyRecord
-  const ownerName = asString(
-    threadContext?.seller?.name
-    ?? thread?.ownerName
-    ?? thread?.ownerDisplayName
-    ?? threadRecord.owner_display_name
-    ?? threadRecord.seller_name
-    ?? threadRecord.entity_name,
-    '',
-  )
-  const prospectName = asString(
-    threadRecord.prospect_full_name
-    ?? threadRecord.prospect_name
-    ?? threadRecord.prospect_first_name,
-    '',
-  )
-  const resolvedOwnerName = ownerName || prospectName
+  const greeting = buildSellerGreetingFromThread(thread)
   const address = asString(threadContext?.property?.address ?? thread?.propertyAddress ?? thread?.subject, '')
   const cityStateZip = address.split(',').map((part) => part.trim())
 
   return {
-    seller_first_name: firstName(resolvedOwnerName),
-    seller_name: resolvedOwnerName,
-    owner_name: resolvedOwnerName,
+    seller_first_name: greeting.seller_first_name,
+    seller_name: greeting.seller_name,
+    owner_name: greeting.owner_name,
     property_address: address,
     property_city: asString(cityStateZip[1], ''),
     property_state: asString(cityStateZip[2], ''),

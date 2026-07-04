@@ -17,6 +17,10 @@ import { pickOwnershipCheckTemplateForMap } from './ownership-check-template-pic
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
 import { translateText } from '../../../modules/inbox/translate.api'
+import {
+  buildMapTemplateManualValues,
+  buildSellerGreetingValues,
+} from '../../../domain/inbox/seller-greeting'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import { asNumber, firstDefined, text } from './seller-map-card-formatters'
 
@@ -66,31 +70,6 @@ const parseStateFromMarket = (market: string): string | undefined => {
   return match?.[1]?.toUpperCase()
 }
 
-const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<string, string> => {
-  const ownerName = text(firstDefined(record, [
-    'owner_display_name',
-    'owner_name',
-    'owner_full_name',
-    'entity_name',
-    'seller_display_name',
-    'seller_name',
-  ]))
-  const prospectName = text(firstDefined(record, [
-    'prospect_full_name',
-    'prospect_name',
-    'prospect_first_name',
-  ]))
-  const resolvedName = ownerName || prospectName
-  const first = resolvedName.split(/\s+/).filter(Boolean)[0] ?? resolvedName
-  return {
-    seller_name: resolvedName,
-    seller_first_name: first,
-    owner_name: resolvedName,
-    agent_name: 'Chris',
-    agent_first_name: 'Chris',
-  }
-}
-
 const hasBlankGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
 
@@ -111,6 +90,13 @@ export const buildThreadFromViewModel = (
     || parseStateFromAddress(vm.property.address)
     || parseStateFromMarket(market)
   const propertyState = propertyStateRaw ? normalizeState(propertyStateRaw).toUpperCase() : undefined
+  const greeting = buildSellerGreetingValues({
+    ...record,
+    owner_display_name: vm.masterOwner.displayName,
+    master_owner_display_name: vm.masterOwner.displayName,
+    owner_name: vm.masterOwner.displayName,
+  })
+  const sellerDisplayName = greeting.seller_name || vm.masterOwner.displayName
 
   return {
     id: threadKey || vm.propertyId,
@@ -119,7 +105,7 @@ export const buildThreadFromViewModel = (
     market,
     marketName: market,
     ownerName: vm.masterOwner.displayName,
-    sellerName: vm.masterOwner.displayName,
+    sellerName: sellerDisplayName,
     subject: vm.property.address,
     preview: vm.activity.detail || '',
     status: 'read',
@@ -145,9 +131,9 @@ export const buildThreadFromViewModel = (
     propertyAddress: vm.property.address,
     property_address_state: propertyState,
     ownerDisplayName: vm.masterOwner.displayName,
-    seller_name: vm.masterOwner.displayName,
-    prospect_full_name: text(firstDefined(record, ['prospect_full_name', 'prospect_name'])),
-    prospect_first_name: text(firstDefined(record, ['prospect_first_name'])),
+    seller_name: sellerDisplayName,
+    prospect_full_name: text(firstDefined(record, ['prospect_full_name', 'prospect_name', 'prospectFullName'])),
+    prospect_first_name: text(firstDefined(record, ['prospect_first_name', 'prospectFirstName'])),
     owner_display_name: vm.masterOwner.displayName,
     lifecycle_stage: vm.operations.stage,
     operational_status: vm.operations.status,

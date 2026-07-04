@@ -56,6 +56,23 @@ describe('seller map card thread builder', () => {
     expect(thread.market).toBe('memphis, tn')
   })
 
+  it('uses prospect name for seller greeting when entity is master owner', () => {
+    const entityRecord = {
+      ...baseRecord,
+      owner_display_name: 'Tooless Properties LLC',
+      prospect_full_name: 'Daniel Martinez',
+      prospect_first_name: 'Daniel',
+      prospect_best_phone: '+19015551234',
+    }
+
+    const viewModel = buildSellerMapCardViewModel(entityRecord)
+    const thread = buildThreadFromViewModel(viewModel, entityRecord)
+
+    expect(thread.ownerName).toBe('Tooless Properties LLC')
+    expect(thread.sellerName).toBe('Daniel Martinez')
+    expect(thread.seller_name).toBe('Daniel Martinez')
+  })
+
   it('synthesizes property thread key when missing from record', () => {
     const viewModel = buildSellerMapCardViewModel({
       ...baseRecord,
