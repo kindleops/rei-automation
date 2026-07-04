@@ -10,10 +10,10 @@ import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
-  fetchTemplatesByUseCase,
   getRecommendedTemplates,
   renderTemplate,
 } from '../../../lib/data/templateData'
+import { pickOwnershipCheckTemplateForMap } from './ownership-check-template-picker'
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
 import { translateText } from '../../../modules/inbox/translate.api'
@@ -96,34 +96,6 @@ const hasBlankGreeting = (message: string): boolean =>
 
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
-
-const pickOwnershipCheckTemplate = (
-  templates: SmsTemplate[],
-  context: Record<string, string>,
-): SmsTemplate | null => {
-  if (!templates.length) return null
-  const ranked = templates
-    .map((template) => {
-      const { renderedText, missingVariables } = renderTemplate(template, context)
-      const repaired = renderedText
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
-        .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
-        .trim()
-      let score = 0
-      if (template.language?.toLowerCase() === 'english') score += 40
-      if (template.isFirstTouch) score += 20
-      score -= missingVariables.length * 10
-      if (!repaired) score -= 100
-      if (hasBlankGreeting(repaired)) score -= 100
-      if (hasUnresolvedTemplateTokens(repaired)) score -= 100
-      return { template, score, repaired }
-    })
-    .sort((left, right) => right.score - left.score)
-
-  const winner = ranked.find((entry) => entry.score > 0 && entry.repaired)
-  return winner?.template ?? ranked[0]?.template ?? null
-}
 
 export const buildThreadFromViewModel = (
   vm: SellerMapCardViewModel,
@@ -279,9 +251,12 @@ export const useSellerMapCardActions = ({
       }
 
       if (eligibility.isUncontacted) {
-        followUpTemplate = pickOwnershipCheckTemplate(
-          await fetchTemplatesByUseCase('ownership_check'),
+        followUpTemplate = await pickOwnershipCheckTemplateForMap(
+          record,
           templateContext,
+          viewModel.masterOwner.id
+            || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
+            || null,
         )
       } else {
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)

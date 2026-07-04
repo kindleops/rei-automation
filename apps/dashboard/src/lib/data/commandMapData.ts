@@ -152,6 +152,7 @@ export type CommandMapSellerPin = {
   seller_phone?: string | null
   prospect_best_phone?: string | null
   display_phone?: string | null
+  best_language?: string | null
   property_count?: number | null
   property_tags_text: string | null
   property_tags_json: unknown | null
@@ -955,6 +956,7 @@ const mapPropertyEnrichmentRow = (
     last_sale_date: String(row.sale_date ?? '').trim() || null,
     owner_priority_score: Number.isFinite(Number(masterOwner?.priority_score)) ? Number(masterOwner?.priority_score) : null,
     owner_priority_tier: String(masterOwner?.priority_tier ?? '').trim() || null,
+    best_language: String(masterOwner?.best_language ?? '').trim() || null,
     mailing_address_full: String(masterOwner?.primary_owner_address ?? '').trim() || null,
     property_count: Number.isFinite(Number(masterOwner?.property_count)) ? Number(masterOwner?.property_count) : null,
   }
@@ -1026,7 +1028,7 @@ export const loadCommandMapSellerPinDetail = async (
     if (ownerId) {
       let ownerQuery = supabase
         .from('master_owners')
-        .select('master_owner_id,priority_score,priority_tier,primary_owner_address,property_count')
+        .select('master_owner_id,priority_score,priority_tier,primary_owner_address,property_count,best_language')
         .eq('master_owner_id', ownerId)
       if (options.signal) ownerQuery = ownerQuery.abortSignal(options.signal)
       const { data: ownerRow } = await ownerQuery.limit(1).maybeSingle()
