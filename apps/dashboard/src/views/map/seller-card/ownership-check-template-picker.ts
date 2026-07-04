@@ -5,6 +5,7 @@ import {
   type SmsTemplate,
 } from '../../../lib/data/templateData'
 import { asString, type AnyRecord } from '../../../lib/data/shared'
+import { isEntityName } from '../../../lib/identity/entityDetection'
 
 const OWNERSHIP_CHECK_USE_CASE = 'ownership_check'
 
@@ -58,6 +59,18 @@ const hasBlankGreeting = (message: string): boolean =>
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
 
+// Final safety rail: even if an entity name reaches this point through some other
+// path, never let it go out addressed to "Hey West 7th Apartments LLC,". Checks the
+// literal greeting-name slot, not the whole message (which may legitimately mention
+// an LLC/company later in the body).
+const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i
+
+const hasEntityGreeting = (message: string): boolean => {
+  const match = message.trim().match(GREETING_NAME_PATTERN)
+  if (!match) return false
+  return isEntityName(match[1])
+}
+
 const repairRenderedTemplate = (message: string): string =>
   message
     .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
@@ -80,6 +93,7 @@ export const evaluateOwnershipTemplate = (
   if (!repaired) return null
   if (hasBlankGreeting(repaired)) return null
   if (hasUnresolvedTemplateTokens(repaired)) return null
+  if (hasEntityGreeting(repaired)) return null
   if (missingVariables.length > 0) return null
 
   const raw = template.raw as AnyRecord

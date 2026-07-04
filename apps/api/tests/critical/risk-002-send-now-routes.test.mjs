@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { canSend } from "@/lib/domain/inbox/send-now-service.js";
 import { createInboxSendNowQueueRow } from "@/lib/domain/inbox/send-now-service.js";
+import { validateInboxSendNowPayload } from "@/lib/domain/inbox/send-now-service.js";
 import { buildAndSendNow } from "@/lib/domain/outbound/send-now-request.js";
 
 // ─── canSend unit tests ───────────────────────────────────────────────────────
@@ -117,6 +118,41 @@ test("RISK-002/canSend: healthy thread + valid message → ok:true", async () =>
     { to_phone_number: "+15005550001", thread_key: "+15005550001", message_body: "Hi John, are you interested in selling?" },
     { supabase: makeCleanSupabase() }
   );
+  assert.equal(r.ok, true);
+});
+
+// Launch blocker: Master Owner / entity names must never be sent as the SMS greeting name.
+test("RISK-002/canSend: Master Owner LLC name in greeting → entity_name_in_greeting", async () => {
+  const r = await canSend(
+    {
+      to_phone_number: "+15005550001",
+      thread_key: "+15005550001",
+      message_body: "Hey West 7th Apartments LLC, do you still own this property?",
+    },
+    { supabase: makeCleanSupabase() }
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "entity_name_in_greeting");
+});
+
+test("RISK-002: validateInboxSendNowPayload rejects an entity-name greeting", () => {
+  const r = validateInboxSendNowPayload({
+    thread_key: "+15005550001",
+    to_phone_number: "+15005550001",
+    from_phone_number: "+15005550002",
+    message_body: "Hi D & D Divide LLC, are you still the owner?",
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, "entity_name_in_greeting");
+});
+
+test("RISK-002: validateInboxSendNowPayload accepts a resolved human first name", () => {
+  const r = validateInboxSendNowPayload({
+    thread_key: "+15005550001",
+    to_phone_number: "+15005550001",
+    from_phone_number: "+15005550002",
+    message_body: "Hi Maria, are you still the owner?",
+  });
   assert.equal(r.ok, true);
 });
 

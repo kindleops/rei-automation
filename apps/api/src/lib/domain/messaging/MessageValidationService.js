@@ -1,7 +1,20 @@
 import { normalizePhone } from "@/lib/utils/phones.js";
+import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
 
 function clean(v) {
   return String(v ?? "").trim();
+}
+
+// Final safety rail before provider dispatch: never let an SMS go out addressed to
+// an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
+// greeting-name slot, not the whole message body, since the body may legitimately
+// reference a company/property name elsewhere (e.g. in the property address).
+const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i;
+
+function hasEntityNameInGreeting(message_body) {
+  const match = String(message_body || "").trim().match(GREETING_NAME_PATTERN);
+  if (!match) return false;
+  return detectEntityOwner(match[1]);
 }
 
 /**
@@ -28,6 +41,9 @@ export function validateOutboundSmsPayload(payload = {}) {
 
     if (/^(hi|hey|hello|hola)\s+,/i.test(message_body))
       return { ok: false, reason: "blank_greeting_message_body" };
+
+    if (hasEntityNameInGreeting(message_body))
+      return { ok: false, reason: "entity_name_in_greeting" };
 
     if (/<\s*script/i.test(message_body))
       return { ok: false, reason: "html_content_blocked" };
