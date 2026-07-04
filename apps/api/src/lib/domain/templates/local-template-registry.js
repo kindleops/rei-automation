@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 function createLocalTemplate({
   item_id,
   use_case,
@@ -930,5 +932,186 @@ export const LOCAL_TEMPLATE_CANDIDATES = Object.freeze([
       "Great — to draw up the agreement for {{property_address}} I need: everyone who's on the title, the best email for documents, whether anyone lives there now, and your preferred closing timing. Whenever you're ready.",
   }),
 ]);
+
+// ── Local auto-reply approval controls (spec §12 release gate) ───────────────
+// A local template is never auto-sendable merely because it exists in source.
+// Every auto-reply-eligible negotiation template carries an explicit approval
+// record: status, immutable version, pinned content hash (the approval binds
+// to the exact wording — editing the text without re-approving revokes it),
+// approved environments, the strategies allowed to select it, and the
+// CANONICAL lifecycle stage code (S4 discovery / S5 negotiation / S6 contract
+// — never a use case). A kill switch revokes fallback instantly via env:
+//   LOCAL_TEMPLATE_FALLBACK_DISABLED=1        → all local auto-reply fallback off
+//   LOCAL_TEMPLATE_KILL_LIST=id1,id2|use_case → listed templates/use cases off
+
+function negotiationApproval({ stage_code, allowed_strategies, content_hash }) {
+  return Object.freeze({
+    approval_status: "approved",
+    approval_version: 1,
+    content_hash,
+    approved_environments: Object.freeze(["production", "preview", "development", "test"]),
+    allowed_strategies: Object.freeze(allowed_strategies),
+    stage_code,
+  });
+}
+
+export const LOCAL_NEGOTIATION_AUTO_REPLY_APPROVALS = Object.freeze({
+  // S4 — condition / occupancy / repair discovery
+  "local-template:condition_probe:v1": negotiationApproval({
+    stage_code: "S4",
+    allowed_strategies: ["condition_discovery"],
+    content_hash: "99c8f62c84128933d16757c6981cf43d722e1850706ec3caa4731e05f17e56b6",
+  }),
+  "local-template:condition_probe:v2": negotiationApproval({
+    stage_code: "S4",
+    allowed_strategies: ["condition_discovery"],
+    content_hash: "22342a905f027db8900762b214254fe2e4aadc57b3161866d25136910c28415a",
+  }),
+  "local-template:occupancy_probe:v1": negotiationApproval({
+    stage_code: "S4",
+    allowed_strategies: ["occupancy_discovery"],
+    content_hash: "dd6fd839b2c072b041fbe35108b2d00820cb125ab785d26d5a9c5f15f51566bb",
+  }),
+  "local-template:repair_clarification:v1": negotiationApproval({
+    stage_code: "S4",
+    allowed_strategies: ["condition_discovery"],
+    content_hash: "e3917f4005cb51381af901b64c55f9a272b5ffe9d8430cfe241d4df0b71df841",
+  }),
+  // S5 — negotiation and offer actions
+  "local-template:flexibility_probe:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["flexibility_probe"],
+    content_hash: "b50e9c6bbc85150361af94a2b4e976547f2574e62201d7a57b420888b54d5d4b",
+  }),
+  "local-template:best_price_request:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["best_price_request"],
+    content_hash: "472e3d03ef578247b3b2f852bc271ca6a3346d39f8f6f4937a51f7b060351779",
+  }),
+  "local-template:expectation_reset:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["expectation_reset"],
+    content_hash: "ff001f7bb99aa78d803cd73ff2c1db30625eb48bad87756922157a872f870804",
+  }),
+  "local-template:comp_anchor:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["comp_anchor"],
+    content_hash: "6cf9d9a44bbc82d0313eafc2978b58358fff1d474969d0101cf7937e83f5bbaf",
+  }),
+  "local-template:repair_anchor:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["repair_anchor"],
+    content_hash: "b570910f8d4d49ae22f7fa0b33b6e55f89a250a82e576fd09e33227471c4b6cb",
+  }),
+  "local-template:initial_offer:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["initial_offer", "direct_purchase"],
+    content_hash: "1df8a6dd1b51a40985a22940641ab576f91c5b711c43597baaac630dedd10261",
+  }),
+  "local-template:conditional_offer:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["conditional_offer"],
+    content_hash: "1160a9bfd688887ce624e86a17464c75f745308e63c00d311dad958c63ffc9a8",
+  }),
+  "local-template:counter_offer:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["counter_offer"],
+    content_hash: "2ec4c35050d703794f51525edcef77d1afbdfaf551fe60ff51eb8d293f72112a",
+  }),
+  "local-template:final_offer:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["final_authorized_offer"],
+    content_hash: "ebc5422d0fa52a47cea5aea96556bdeaa7122378c82d1e12558bd115e13acaa9",
+  }),
+  "local-template:accept_terms:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["accept_seller_terms"],
+    content_hash: "31f6d2b63d22edbfdbd927ff4e704456d5a67869313e4d3eeddb425ff9b2e86e",
+  }),
+  "local-template:novation_probe:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["novation_probe"],
+    content_hash: "c7b905b38ea54387ab187d8ba929d229f4d3f781157cc39e359f0e6eb48a7c2f",
+  }),
+  "local-template:novation_probe:v2": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["novation_probe"],
+    content_hash: "d905f24f4990c1eba5b323b461810b7cf0bc6fb2f226d8f4f9cbb8093ab0f80e",
+  }),
+  "local-template:seller_finance_probe:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["seller_finance_probe"],
+    content_hash: "d37267dbb20a9bbacd2592ba0a03b08585f351c61a9f700f47811de51691aec8",
+  }),
+  "local-template:future_nurture:v1": negotiationApproval({
+    stage_code: "S5",
+    allowed_strategies: ["future_nurture"],
+    content_hash: "1bd461908c54b39aed6a8d045b18b8d651630ff546e899ae012f7de0ef5f0aa7",
+  }),
+  // S6 — contract-information collection
+  "local-template:contract_information_request:v1": negotiationApproval({
+    stage_code: "S6",
+    allowed_strategies: ["accept_seller_terms"],
+    content_hash: "55062d2167284cff395d1b0d3b4dc586fcf0c247b69665c5f88a86680ec6ee19",
+  }),
+});
+
+export function hashLocalTemplateContent(text) {
+  return createHash("sha256").update(String(text ?? ""), "utf8").digest("hex");
+}
+
+export function resolveLocalTemplateEnvironment(env = process.env) {
+  const vercelEnv = String(env?.VERCEL_ENV ?? "").trim().toLowerCase();
+  if (["production", "preview", "development"].includes(vercelEnv)) return vercelEnv;
+  const nodeEnv = String(env?.NODE_ENV ?? "").trim().toLowerCase();
+  if (nodeEnv === "production") return "production";
+  if (nodeEnv === "test") return "test";
+  return "development";
+}
+
+export function isLocalTemplateFallbackKilled(itemIdOrUseCase = null, env = process.env) {
+  const globalKill = String(env?.LOCAL_TEMPLATE_FALLBACK_DISABLED ?? "").trim().toLowerCase();
+  if (globalKill === "1" || globalKill === "true" || globalKill === "yes") return true;
+  if (!itemIdOrUseCase) return false;
+  const killList = String(env?.LOCAL_TEMPLATE_KILL_LIST ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  return killList.includes(String(itemIdOrUseCase).trim().toLowerCase());
+}
+
+/**
+ * Verify a local template is approved for auto-reply right now: explicit
+ * approval record, content hash matching the exact current text, current
+ * environment approved, the active strategy allowed, and no kill switch.
+ * Fails closed — any missing/failed gate returns approved:false.
+ */
+export function verifyLocalAutoReplyApproval(template = {}, { strategy = null, env = process.env } = {}) {
+  const reasons = [];
+  const approval = LOCAL_NEGOTIATION_AUTO_REPLY_APPROVALS[template?.item_id] || null;
+
+  if (!approval || approval.approval_status !== "approved") {
+    return { approved: false, reasons: ["no_approval_record"], approval: null };
+  }
+  if (hashLocalTemplateContent(template?.text) !== approval.content_hash) {
+    reasons.push("content_hash_mismatch");
+  }
+  const environment = resolveLocalTemplateEnvironment(env);
+  if (!approval.approved_environments.includes(environment)) {
+    reasons.push("environment_not_approved");
+  }
+  const activeStrategy = String(strategy ?? "").trim().toLowerCase();
+  if (activeStrategy && !approval.allowed_strategies.includes(activeStrategy)) {
+    reasons.push("strategy_not_allowed");
+  }
+  if (
+    isLocalTemplateFallbackKilled(template?.item_id, env) ||
+    isLocalTemplateFallbackKilled(template?.use_case, env)
+  ) {
+    reasons.push("kill_switch_active");
+  }
+
+  return { approved: reasons.length === 0, reasons, approval };
+}
 
 export default LOCAL_TEMPLATE_CANDIDATES;

@@ -35,16 +35,18 @@ const KNOWN_SET = new Set(KNOWN_PLACEHOLDERS);
 // VALUE FORMATTING
 // ══════════════════════════════════════════════════════════════════════════
 
-function formatCurrency(value) {
-  // Blank/zero must stay missing so the render fails closed — a "$0" offer
-  // coined from an empty authority value can never reach a seller.
+function formatCurrency(value, { allowZero = false } = {}) {
+  // Offer fields fail closed on blank/zero — a "$0" offer coined from an empty
+  // authority value can never reach a seller. Non-offer monetary fields may
+  // carry a policy-authorized explicit zero (zero seller-paid repairs, zero
+  // balances, zero closing-cost contribution) via allowZero.
   if (value == null || String(value).trim() === "") return null;
   const safe_value = typeof value === "number" ? value : sanitizeSmsTextValue(value);
   const num =
     typeof safe_value === "number"
       ? safe_value
       : Number(String(safe_value).replace(/[^0-9.-]/g, ""));
-  if (!Number.isFinite(num) || num <= 0) return null;
+  if (!Number.isFinite(num) || num < 0 || (num === 0 && !allowZero)) return null;
   // No decimals for round numbers, 2 decimals otherwise
   const formatted = num % 1 === 0
     ? `$${num.toLocaleString("en-US")}`
@@ -157,7 +159,8 @@ function buildValueMap(context = {}) {
   // Exact policy-authorized comp sentence — passed through verbatim, never
   // composed at render time.
   map.set("comp_anchor_statement", cleanText(safe_context.comp_anchor_statement));
-  map.set("repair_cost", formatCurrency(safe_context.repair_cost));
+  // Not an offer field: an explicit $0 (zero seller-paid repairs) is valid.
+  map.set("repair_cost", formatCurrency(safe_context.repair_cost, { allowZero: true }));
   map.set("closing_date", formatDate(context.closing_date));
   map.set("unit_count", formatInteger(safe_context.unit_count));
   return map;

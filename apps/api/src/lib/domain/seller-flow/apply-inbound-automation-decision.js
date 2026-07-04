@@ -738,27 +738,39 @@ const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "contract_information_request",
 ]);
 
-async function selectLocalNegotiationTemplate(allowed_matches = []) {
+async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null } = {}) {
   try {
-    const { LOCAL_TEMPLATE_CANDIDATES } = await import(
-      "@/lib/domain/templates/local-template-registry.js"
-    );
-    const candidate = LOCAL_TEMPLATE_CANDIDATES.find(
-      (row) =>
-        LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES.has(lower(row.use_case)) &&
-        allowed_matches.includes(lower(row.use_case)) &&
-        lower(row.active) === "yes"
-    );
-    if (!candidate) return null;
-    return {
-      template_id: candidate.item_id,
-      use_case: candidate.use_case,
-      stage_code: candidate.use_case,
-      language: candidate.language || "English",
-      template_body: candidate.text,
-      safe_for_auto_reply: true,
-      source: "local_registry",
-    };
+    const { LOCAL_TEMPLATE_CANDIDATES, verifyLocalAutoReplyApproval, isLocalTemplateFallbackKilled } =
+      await import("@/lib/domain/templates/local-template-registry.js");
+    // Immediate kill switch: fallback can be revoked globally without a deploy.
+    if (isLocalTemplateFallbackKilled()) return null;
+    for (const row of LOCAL_TEMPLATE_CANDIDATES) {
+      if (!LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES.has(lower(row.use_case))) continue;
+      if (!allowed_matches.includes(lower(row.use_case))) continue;
+      if (lower(row.active) !== "yes") continue;
+      // A local template is auto-sendable only with a verified approval record:
+      // pinned content hash, approved environment, allowed strategy, no kill.
+      const verification = verifyLocalAutoReplyApproval(row, { strategy });
+      if (!verification.approved) continue;
+      return {
+        template_id: row.item_id,
+        use_case: row.use_case,
+        // Canonical lifecycle stage from the approval record (S4/S5/S6) —
+        // never the template use case.
+        stage_code: verification.approval.stage_code,
+        language: row.language || "English",
+        template_body: row.text,
+        safe_for_auto_reply: true,
+        source: "local_registry",
+        approval: {
+          approval_status: verification.approval.approval_status,
+          approval_version: verification.approval.approval_version,
+          content_hash: verification.approval.content_hash,
+          allowed_strategies: [...verification.approval.allowed_strategies],
+        },
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -769,6 +781,8 @@ export async function selectSafeAutoReplyTemplate({
   classification = null,
   decision = null,
   context = null,
+  threadKey = null,
+  inboundEventId = null,
 } = {}) {
   if (!canUseSupabase(supabaseClient)) {
     return { ok: false, reason: "missing_supabase", template: null };
@@ -823,9 +837,40 @@ export async function selectSafeAutoReplyTemplate({
 
     // Negotiation strategies fall back to the canonical local registry so a
     // deterministic strategy is never silently downgraded to review just
-    // because the DB catalog lags the strategy vocabulary.
+    // because the DB catalog lags the strategy vocabulary. DB-approved
+    // templates always take precedence; the fallback requires a verified
+    // approval record and is audited below.
     if (!selected) {
-      selected = await selectLocalNegotiationTemplate(allowed_matches);
+      selected = await selectLocalNegotiationTemplate(allowed_matches, {
+        strategy: decision?.negotiation_strategy || null,
+      });
+      if (selected) {
+        try {
+          const { emitAutomationEvent } = await import(
+            "@/lib/domain/automation/automation-events.js"
+          );
+          await emitAutomationEvent(
+            {
+              event_type: "LOCAL_TEMPLATE_FALLBACK_USED",
+              source: "seller_inbound_orchestrator",
+              dedupe_key: `local-template-fallback:${inboundEventId || threadKey || ""}:${selected.template_id}`,
+              conversation_thread_id: clean(threadKey) || null,
+              payload: {
+                template_id: selected.template_id,
+                use_case: selected.use_case,
+                stage_code: selected.stage_code,
+                approval_version: selected.approval?.approval_version ?? null,
+                content_hash: selected.approval?.content_hash ?? null,
+                strategy: decision?.negotiation_strategy || null,
+                inbound_event_id: inboundEventId || null,
+              },
+            },
+            supabase ? { supabaseClient: supabase } : {}
+          );
+        } catch {
+          // Audit emission is observability — never blocks template selection.
+        }
+      }
     }
 
     if (!selected) {
@@ -1602,6 +1647,8 @@ export async function executeInboundAutomationDecision({
     classification,
     decision: base_decision,
     context: context || latestThreadContext,
+    threadKey,
+    inboundEventId,
   });
 
   if (!template_result.ok || !template_result.template) {

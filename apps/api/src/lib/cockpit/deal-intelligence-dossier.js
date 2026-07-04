@@ -476,6 +476,45 @@ async function queryMaybe(table, select, filters = {}, abortSignal) {
   throw error
 }
 
+const TERMINAL_OPPORTUNITY_STATUSES = new Set(['won', 'lost', 'dead', 'suppressed', 'archived'])
+
+/**
+ * Deterministically select the canonical opportunity for a thread's
+ * Negotiation Intelligence projection: active/non-archived deals win, then a
+ * deal on the same property, then the deal carrying the current accepted-term
+ * version, with the latest updated_at only as the final tie-breaker. State
+ * from an older or unrelated opportunity must never be displayed.
+ */
+async function selectNegotiationOpportunityRow({ threadKey, propertyId = null, abortSignal }) {
+  if (!threadKey) return null
+  let query = supabase
+    .from('acquisition_opportunities')
+    .select('id,acquisition_stage,opportunity_status,primary_property_id,asking_price,recommended_offer,current_offer,seller_counter,next_action,next_action_due,updated_at,metadata')
+    .eq('primary_thread_key', threadKey)
+    .order('updated_at', { ascending: false })
+    .limit(20)
+  if (abortSignal) query = query.abortSignal(abortSignal)
+  const { data, error } = await query
+  if (error) {
+    if (/does not exist|column/i.test(error.message || '')) {
+      console.warn(`[DEAL_INTEL_QUERY] acquisition_opportunities select failed: ${error.message}`)
+      return null
+    }
+    throw error
+  }
+  const rows = Array.isArray(data) ? data : []
+  if (!rows.length) return null
+
+  const rank = (row) => {
+    const active = TERMINAL_OPPORTUNITY_STATUSES.has(String(row.opportunity_status ?? '').trim().toLowerCase()) ? 0 : 1
+    const propertyMatch = propertyId && row.primary_property_id === propertyId ? 1 : 0
+    const acceptedTerms = row.metadata?.negotiation_state?.terms_accepted === true ? 1 : 0
+    return active * 4 + propertyMatch * 2 + acceptedTerms
+  }
+  // Rows arrive newest-first, so on rank ties the latest updated_at wins.
+  return rows.reduce((best, row) => (rank(row) > rank(best) ? row : best), rows[0])
+}
+
 async function queryHydratedThread({ thread_key, property_id }, abortSignal) {
   if (thread_key) {
     let query = supabase.from('inbox_threads_hydrated').select('*').eq('thread_key', thread_key).limit(1)
@@ -1619,12 +1658,11 @@ export async function buildDealIntelligenceDossier({
   // Negotiation Intelligence (spec §15) — persisted negotiation state on the
   // canonical deal record, projected read-only.
   const opportunityRow = identity.thread_key
-    ? await queryMaybe(
-      'acquisition_opportunities',
-      'id,acquisition_stage,asking_price,recommended_offer,current_offer,seller_counter,next_action,next_action_due,updated_at,metadata',
-      { primary_thread_key: identity.thread_key },
+    ? await selectNegotiationOpportunityRow({
+      threadKey: identity.thread_key,
+      propertyId: identity.property_id || null,
       abortSignal,
-    )
+    })
     : null
   const negotiation_intelligence = buildNegotiationIntelligence(opportunityRow)
 
