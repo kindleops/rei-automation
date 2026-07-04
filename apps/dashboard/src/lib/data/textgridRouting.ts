@@ -31,33 +31,122 @@ interface RoutingResult {
   route_rejected_reasons?: string[]
 }
 
+export type ApprovedTextgridCluster = {
+  cluster_key: string
+  allowed_seller_states: string[]
+  preferred_sender_markets: string[]
+  fallback_sender_states: string[]
+}
+
+/** All US states + DC — every entry must appear in APPROVED_TEXTGRID_CLUSTERS. */
+export const US_STATE_CODES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM',
+  'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA',
+  'WV', 'WI', 'WY',
+] as const
+
 /** Mirrors apps/api market-sending-zones STATE_CLUSTER_MAP for first-touch routing. */
-const APPROVED_TEXTGRID_CLUSTERS = [
+export const APPROVED_TEXTGRID_CLUSTERS: ApprovedTextgridCluster[] = [
   {
     cluster_key: 'WEST_COAST',
-    allowed_seller_states: ['CA', 'AZ', 'NV', 'NM', 'UT', 'CO', 'ID', 'WA', 'OR'],
+    allowed_seller_states: ['CA', 'AZ', 'NV', 'NM', 'UT', 'CO', 'ID', 'WA', 'OR', 'MT', 'WY', 'AK', 'HI'],
     preferred_sender_markets: ['los angeles, ca', 'riverside, ca', 'stockton, ca', 'sacramento, ca'],
-    fallback_sender_states: ['CA']
+    fallback_sender_states: ['CA', 'AZ', 'NV'],
   },
   {
     cluster_key: 'TEXAS_OK',
-    allowed_seller_states: ['TX', 'OK'],
+    allowed_seller_states: ['TX', 'OK', 'AR'],
     preferred_sender_markets: ['dallas, tx', 'houston, tx', 'oklahoma city, ok', 'tulsa, ok'],
-    fallback_sender_states: ['TX']
+    fallback_sender_states: ['TX', 'OK'],
   },
   {
     cluster_key: 'SOUTHEAST_EAST',
-    allowed_seller_states: ['GA', 'NC', 'SC', 'FL', 'TN', 'AL', 'LA', 'VA'],
+    allowed_seller_states: ['GA', 'NC', 'SC', 'FL', 'TN', 'AL', 'LA', 'VA', 'MS', 'WV', 'DC', 'DE'],
     preferred_sender_markets: ['atlanta, ga', 'charlotte, nc', 'jacksonville, fl', 'miami, fl', 'tampa, fl', 'orlando, fl'],
-    fallback_sender_states: ['GA', 'NC', 'FL']
+    fallback_sender_states: ['GA', 'NC', 'FL'],
+  },
+  {
+    cluster_key: 'NORTHEAST',
+    allowed_seller_states: ['NY', 'NJ', 'CT', 'MA', 'RI', 'VT', 'NH', 'ME'],
+    preferred_sender_markets: ['charlotte, nc', 'atlanta, ga'],
+    fallback_sender_states: ['NC', 'GA', 'PA'],
   },
   {
     cluster_key: 'MIDWEST',
     allowed_seller_states: ['MN', 'WI', 'IA', 'ND', 'SD', 'MI', 'IL', 'IN', 'MO', 'KS', 'OH', 'KY', 'NE', 'PA', 'MD'],
     preferred_sender_markets: ['minneapolis, mn'],
-    fallback_sender_states: ['MN']
-  }
+    fallback_sender_states: ['MN', 'IL', 'OH'],
+  },
 ]
+
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  alabama: 'al',
+  alaska: 'ak',
+  arizona: 'az',
+  arkansas: 'ar',
+  california: 'ca',
+  colorado: 'co',
+  connecticut: 'ct',
+  delaware: 'de',
+  'district of columbia': 'dc',
+  florida: 'fl',
+  georgia: 'ga',
+  hawaii: 'hi',
+  idaho: 'id',
+  illinois: 'il',
+  indiana: 'in',
+  iowa: 'ia',
+  kansas: 'ks',
+  kentucky: 'ky',
+  louisiana: 'la',
+  maine: 'me',
+  maryland: 'md',
+  massachusetts: 'ma',
+  michigan: 'mi',
+  minnesota: 'mn',
+  mississippi: 'ms',
+  missouri: 'mo',
+  montana: 'mt',
+  nebraska: 'ne',
+  nevada: 'nv',
+  'new hampshire': 'nh',
+  'new jersey': 'nj',
+  'new mexico': 'nm',
+  'new york': 'ny',
+  'north carolina': 'nc',
+  'north dakota': 'nd',
+  ohio: 'oh',
+  oklahoma: 'ok',
+  oregon: 'or',
+  pennsylvania: 'pa',
+  'rhode island': 'ri',
+  'south carolina': 'sc',
+  'south dakota': 'sd',
+  tennessee: 'tn',
+  texas: 'tx',
+  utah: 'ut',
+  vermont: 'vt',
+  virginia: 'va',
+  washington: 'wa',
+  'west virginia': 'wv',
+  wisconsin: 'wi',
+  wyoming: 'wy',
+}
+
+export const resolveApprovedClusterForState = (
+  state: string | null | undefined,
+): ApprovedTextgridCluster | null => {
+  const normalized = normalizeState(state)
+  if (!normalized) return null
+  const code = normalized.toUpperCase()
+  return APPROVED_TEXTGRID_CLUSTERS.find((cluster) => cluster.allowed_seller_states.includes(code)) ?? null
+}
+
+export const uncoveredUsStates = (): string[] => {
+  const covered = new Set(APPROVED_TEXTGRID_CLUSTERS.flatMap((cluster) => cluster.allowed_seller_states))
+  return US_STATE_CODES.filter((state) => !covered.has(state))
+}
 
 const normalizePhone = (phone: string | null | undefined): string | null => {
   if (!phone) return null
@@ -77,12 +166,10 @@ const normalizeToken = (value: string | null | undefined): string => {
     .replace(/\s+/g, ' ')
 }
 
-const normalizeState = (value: string | null | undefined): string => {
+export const normalizeState = (value: string | null | undefined): string => {
   const token = normalizeToken(value)
   if (!token) return ''
-  if (token === 'north carolina') return 'nc'
-  if (token === 'south carolina') return 'sc'
-  if (token === 'tennessee') return 'tn'
+  if (STATE_NAME_TO_CODE[token]) return STATE_NAME_TO_CODE[token]
   if (token.length === 2) return token.toLowerCase()
   return token
 }
@@ -192,6 +279,35 @@ const chooseBestCandidate = (
   }
 }
 
+const chooseLeastUsedSender = (rows: TextgridNumberRow[]): TextgridNumberRow | null => {
+  if (!rows.length) return null
+  const sorted = [...rows].sort(
+    (left, right) => Number(left.messages_sent_today ?? 0) - Number(right.messages_sent_today ?? 0),
+  )
+  return sorted[0] ?? null
+}
+
+const resolveClusterSender = (
+  cluster: ApprovedTextgridCluster,
+  activeRows: TextgridNumberRow[],
+): TextgridNumberRow | null => {
+  for (const prefMarket of cluster.preferred_sender_markets) {
+    const prefMatch = chooseBestCandidate(activeRows, prefMarket, '')
+    if (prefMatch.row?.id && prefMatch.reasons.some((reason) => reason.startsWith('market:'))) {
+      return prefMatch.row
+    }
+  }
+
+  for (const fbState of cluster.fallback_sender_states) {
+    const fbMatch = chooseBestCandidate(activeRows, '', fbState)
+    if (fbMatch.row?.id && fbMatch.reasons.some((reason) => reason.startsWith('state:'))) {
+      return fbMatch.row
+    }
+  }
+
+  return null
+}
+
 export const resolveOutboundTextgridNumber = async (
   thread: RoutingInput,
   _allowEnvFallback = false,
@@ -262,7 +378,7 @@ export const resolveOutboundTextgridNumber = async (
 
   const match = chooseBestCandidate(activeRows, routeInputMarket, routeInputState)
   if (match.row?.id) {
-    const isTier1 = match.reasons.some(r => r.startsWith('market:'))
+    const isTier1 = match.reasons.some((reason) => reason.startsWith('market:'))
     return {
       ok: true,
       from_phone_number: normalizePhone(match.row.phone_number),
@@ -278,34 +394,13 @@ export const resolveOutboundTextgridNumber = async (
     }
   }
 
-  // Tier 3: Approved Cluster Fallback
+  // Tier 3: Approved cluster fallback
   const allowCluster = thread.allow_cluster_routing !== false
   if (allowCluster && routeInputState) {
-    const rawState = routeInputState.toUpperCase()
-    const cluster = APPROVED_TEXTGRID_CLUSTERS.find(c => c.allowed_seller_states.includes(rawState))
-    
+    const cluster = resolveApprovedClusterForState(routeInputState)
+
     if (cluster) {
-      let clusterMatchRow: TextgridNumberRow | null = null
-      
-      // Try preferred sender markets first
-      for (const prefMarket of cluster.preferred_sender_markets) {
-        const prefMatch = chooseBestCandidate(activeRows, prefMarket, '')
-        if (prefMatch.row?.id && prefMatch.reasons.some(r => r.startsWith('market:'))) {
-          clusterMatchRow = prefMatch.row
-          break
-        }
-      }
-      
-      // Try fallback sender states if no market matched
-      if (!clusterMatchRow) {
-        for (const fbState of cluster.fallback_sender_states) {
-          const fbMatch = chooseBestCandidate(activeRows, '', fbState)
-          if (fbMatch.row?.id && fbMatch.reasons.some(r => r.startsWith('state:'))) {
-            clusterMatchRow = fbMatch.row
-            break
-          }
-        }
-      }
+      const clusterMatchRow = resolveClusterSender(cluster, activeRows)
 
       if (clusterMatchRow?.id) {
         return {
@@ -326,7 +421,29 @@ export const resolveOutboundTextgridNumber = async (
     }
   }
 
-  // Tier 4: Block (No valid sender)
+  // Tier 4: Nationwide fallback — least-used active sender
+  if (allowCluster) {
+    const fallbackRow = chooseLeastUsedSender(activeRows)
+    if (fallbackRow?.id) {
+      return {
+        ok: true,
+        from_phone_number: normalizePhone(fallbackRow.phone_number),
+        textgrid_number_id: fallbackRow.id ?? null,
+        market_id: fallbackRow.market ?? null,
+        routing_tier: 4,
+        routing_reason: routeInputState
+          ? 'nationwide_fallback'
+          : 'nationwide_fallback_missing_state',
+        route_input_state: routeInputState || null,
+        route_input_market: routeInputMarket || null,
+        route_input_property_id: routeInputPropertyId,
+        route_candidate_count: activeRows.length,
+        route_rejected_reasons: match.reasons,
+      }
+    }
+  }
+
+  // Tier 5: Block (No valid sender)
   return {
     ok: false,
     from_phone_number: null,

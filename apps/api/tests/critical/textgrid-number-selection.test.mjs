@@ -51,6 +51,19 @@ test("market sending profile normalizes aliases before routing", () => {
   assert.equal(result.primary_cluster, "minneapolis_cluster");
 });
 
+test("market sending profile maps nationwide states through regional clusters", () => {
+  const newYork = resolveMarketSendingProfile("Buffalo, NY");
+  const oregon = resolveMarketSendingProfile("Portland, OR");
+  const southCarolina = resolveMarketSendingProfile("Charleston, SC");
+
+  assert.equal(newYork.ok, true);
+  assert.equal(newYork.primary_cluster, "charlotte_cluster");
+  assert.equal(oregon.ok, true);
+  assert.equal(oregon.primary_cluster, "los_angeles_cluster");
+  assert.equal(southCarolina.ok, true);
+  assert.equal(southCarolina.primary_cluster, "charlotte_cluster");
+});
+
 test("TextGrid number selection uses exact market match first", async () => {
   const selected = await chooseTextgridNumber({
     context: {

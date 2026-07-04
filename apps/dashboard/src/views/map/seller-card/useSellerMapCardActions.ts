@@ -7,6 +7,7 @@ import {
 } from '../../../lib/data/inboxData'
 import { resolveCanonicalThreadStateKey } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
 import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
+import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
   fetchTemplatesByUseCase,
@@ -57,6 +58,11 @@ const resolveMapThreadKey = (
 
 const parseStateFromAddress = (address: string): string | undefined => {
   const match = address.match(/,\s*([A-Za-z]{2})\s*(?:\d{5}(?:-\d{4})?)?\s*$/)
+  return match?.[1]?.toUpperCase()
+}
+
+const parseStateFromMarket = (market: string): string | undefined => {
+  const match = market.match(/,\s*([A-Za-z]{2})\s*$/i)
   return match?.[1]?.toUpperCase()
 }
 
@@ -129,9 +135,10 @@ export const buildThreadFromViewModel = (
   const ownerId = text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || vm.masterOwner.id || undefined
   const prospectId = text(overrides.prospectId) || text(firstDefined(record, ['prospect_id', 'prospectId'])) || undefined
   const market = text(firstDefined(record, ['market', 'filter_market', 'display_market'])) || 'unknown'
-  const propertyState = text(firstDefined(record, ['property_address_state', 'propertyAddressState', 'state']))
+  const propertyStateRaw = text(firstDefined(record, ['property_address_state', 'propertyAddressState', 'state']))
     || parseStateFromAddress(vm.property.address)
-    || undefined
+    || parseStateFromMarket(market)
+  const propertyState = propertyStateRaw ? normalizeState(propertyStateRaw).toUpperCase() : undefined
 
   return {
     id: threadKey || vm.propertyId,
