@@ -103,6 +103,25 @@ const firstAgentToken = (value: string): string => {
   return trimmed.split(/\s+/).filter(Boolean)[0] ?? ''
 }
 
+const parseLinkedPropertyIds = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => text(entry)).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((entry) => text(entry)).filter(Boolean)
+      }
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 const parseLinkedProspectIds = (value: unknown): string[] => {
   if (Array.isArray(value)) {
     return value.map((entry) => text(entry)).filter(Boolean).sort()
@@ -259,6 +278,36 @@ const confirmHydratedMasterOwner = async (
   return checks.some(({ data, error }) => !error && Boolean(data))
 }
 
+const validateHydratedMapIdentity = async (
+  supabase: SupabaseClient,
+  propertyId: string,
+  property: AnyRecord,
+  hints: MapOwnershipCheckHints,
+): Promise<boolean> => {
+  const masterOwnerId = text(hints.masterOwnerId)
+  if (!masterOwnerId) return false
+
+  const { data: ownerRow, error: ownerError } = await supabase
+    .from('master_owners')
+    .select('master_owner_id')
+    .eq('master_owner_id', masterOwnerId)
+    .limit(1)
+    .maybeSingle()
+
+  if (ownerError || !ownerRow) return false
+  if (text(property.master_owner_id) === masterOwnerId) return true
+
+  const prospectId = text(hints.prospectId)
+  if (
+    prospectId
+    && await validateProspectBelongsToOwner(supabase, propertyId, masterOwnerId, prospectId)
+  ) {
+    return true
+  }
+
+  return confirmHydratedMasterOwner(supabase, propertyId, masterOwnerId)
+}
+
 const validateProspectBelongsToOwner = async (
   supabase: SupabaseClient,
   propertyId: string,
@@ -283,13 +332,17 @@ const validateProspectBelongsToOwner = async (
 
   const { data: prospectRow, error: prospectError } = await supabase
     .from('prospects')
-    .select('prospect_id, master_owner_id')
+    .select('prospect_id, master_owner_id, linked_property_ids_json')
     .eq('prospect_id', normalizedProspectId)
     .limit(1)
     .maybeSingle()
 
   if (prospectError || !prospectRow) return false
-  const prospectOwnerId = text((prospectRow as AnyRecord).master_owner_id)
+  const prospect = prospectRow as AnyRecord
+  const prospectOwnerId = text(prospect.master_owner_id)
+  if (prospectOwnerId && prospectOwnerId !== normalizedOwnerId) return false
+  const linkedProperties = parseLinkedPropertyIds(prospect.linked_property_ids_json)
+  if (linkedProperties.includes(propertyId)) return true
   return prospectOwnerId === normalizedOwnerId
 }
 
@@ -297,6 +350,7 @@ const loadPropertyOwnerProspects = async (
   supabase: SupabaseClient,
   propertyId: string,
   masterOwnerId: string,
+  hints: MapOwnershipCheckHints = {},
 ): Promise<string[]> => {
   const { data: linkRows, error } = await supabase
     .from('map_filter_property_prospect_links')
@@ -304,8 +358,19 @@ const loadPropertyOwnerProspects = async (
     .eq('property_id', propertyId)
     .eq('master_owner_id', masterOwnerId)
 
-  if (error || !Array.isArray(linkRows)) return []
-  return [...new Set((linkRows as AnyRecord[]).map((row) => text(row.prospect_id)).filter(Boolean))]
+  if (!error && Array.isArray(linkRows) && linkRows.length > 0) {
+    return [...new Set((linkRows as AnyRecord[]).map((row) => text(row.prospect_id)).filter(Boolean))]
+  }
+
+  const hintProspectId = text(hints.prospectId)
+  if (
+    hintProspectId
+    && await validateProspectBelongsToOwner(supabase, propertyId, masterOwnerId, hintProspectId)
+  ) {
+    return [hintProspectId]
+  }
+
+  return []
 }
 
 const phoneLinksToProspect = (phoneRow: AnyRecord, prospectId: string): boolean => {
@@ -335,7 +400,7 @@ const resolveProspectForPropertyOwner = async (
     }
   }
 
-  const linkedProspects = await loadPropertyOwnerProspects(supabase, propertyId, masterOwnerId)
+  const linkedProspects = await loadPropertyOwnerProspects(supabase, propertyId, masterOwnerId, hints)
   if (linkedProspects.length === 1) {
     return linkedProspects[0]
   }
@@ -397,7 +462,7 @@ const collectOwnerCandidates = async (
 
   const hydratedMasterOwnerId = text(hints.masterOwnerId)
   if (hydratedMasterOwnerId) {
-    const confirmed = await confirmHydratedMasterOwner(supabase, propertyId, hydratedMasterOwnerId)
+    const confirmed = await validateHydratedMapIdentity(supabase, propertyId, property, hints)
     if (confirmed) {
       addCandidate(candidates, seen, {
         masterOwnerId: hydratedMasterOwnerId,

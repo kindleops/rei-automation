@@ -128,8 +128,6 @@ export const SellerMapCard = ({
     thread,
     followUpState,
     followUpError,
-    ownershipCheckCanExecute,
-    ownershipCheckBlockReason,
     isSending,
     isTranslatingDraft,
     executeFollowUp,
@@ -341,15 +339,9 @@ export const SellerMapCard = ({
           )}
           disabled={
             !followUpEligibility.canExecute
-            || !ownershipCheckCanExecute
             || followUpState === 'sending'
           }
-          title={
-            followUpError
-            || ownershipCheckBlockReason
-            || followUpEligibility.disabledReason
-            || undefined
-          }
+          title={followUpError || followUpEligibility.disabledReason || undefined}
           onClick={() => void executeFollowUp()}
         >
           {followUpButtonLabel(followUpState, followUpEligibility.label, followUpError)}

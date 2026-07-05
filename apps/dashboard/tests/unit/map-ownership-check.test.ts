@@ -257,7 +257,30 @@ describe('map ownership check canonical resolver', () => {
     expect(result.identity.phoneId).toBe('ph-david')
   })
 
-  it('2. resolves null direct owner via validated hydrated masterOwnerId', async () => {
+  it('2. resolves null direct owner via hydrated hints and prospect linked_property_ids_json', async () => {
+    const fixture = {
+      ...davidFixture,
+      properties: {
+        property_id: 'prop-hydrated',
+        master_owner_id: null,
+        property_address_full: '100 Hydrated Ave',
+      },
+      prospects: {
+        ...davidFixture.prospects,
+        linked_property_ids_json: ['prop-hydrated'],
+      },
+    }
+    const result = await resolveMapOwnershipCheckIdentity('prop-hydrated', {
+      supabase: makeSupabase(fixture),
+      hints: { masterOwnerId: 'mo-david', prospectId: 'pros-david' },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.resolutionSource).toBe('hydrated_map_identity')
+    expect(result.identity.masterOwnerId).toBe('mo-david')
+  })
+
+  it('2b. resolves null direct owner via validated hydrated masterOwnerId and link table', async () => {
     const fixture = {
       ...davidFixture,
       properties: {
