@@ -163,7 +163,6 @@ export const evaluateOwnershipTemplate = (
   if (hasEntityGreeting(rendered)) return null
   if (missingVariables.length > 0) return null
   const sellerFirstName = asString(context.seller_first_name, '').trim()
-  const agentFirstName = asString(context.agent_first_name, '').trim()
   if (
     requireSellerNameInGreeting
     && sellerFirstName
