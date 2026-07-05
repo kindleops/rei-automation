@@ -5,6 +5,7 @@ export const TABLE_ROW_BASELINES = {
   properties: 124046,
   prospects: 149798,
   master_owners: 102157,
+  phones: 121000,
 };
 
 export function computeCoveragePercent(populatedRows, totalRows) {
@@ -106,6 +107,7 @@ function field(def) {
 const P = TABLE_ROW_BASELINES.properties;
 const R = TABLE_ROW_BASELINES.prospects;
 const O = TABLE_ROW_BASELINES.master_owners;
+const H = TABLE_ROW_BASELINES.phones;
 
 /** @type {import('./active-field-registry.js').RawMapFilterFieldDefinition[]} */
 export const RAW_MAP_FILTER_FIELD_DEFINITIONS = [
@@ -318,4 +320,35 @@ export const RAW_MAP_FILTER_FIELD_DEFINITIONS = [
   field({ key: "master_owner.agent_persona", entity: "master_owner", table: "master_owners", column: "agent_persona", label: "Agent Persona (Owner)", description: "System routing agent persona.", category: "System Routing", dataType: "text", populatedRows: O, valueSource: "distinct" }),
   field({ key: "master_owner.agent_family", entity: "master_owner", table: "master_owners", column: "agent_family", label: "Agent Family (Owner)", description: "System routing agent family.", category: "System Routing", dataType: "text", populatedRows: O, valueSource: "distinct" }),
   field({ key: "master_owner.split_test_cohort", entity: "master_owner", table: "master_owners", column: "split_test_cohort", label: "Split-Test Cohort", description: "System routing split-test cohort.", category: "System Routing", dataType: "text", populatedRows: O, valueSource: "distinct" }),
+
+  // ── 13 Phones — identity & linkage ────────────────────────────────────────
+  field({ key: "phone.has_canonical_phone", entity: "phone", table: "phones", column: "canonical_e164", label: "Has Canonical Phone", description: "Phone record has a normalized E.164 number.", category: "Identity & Linkage", dataType: "derived_presence", populatedRows: 118000, valueSource: "derived_presence", presenceStrategy: "has_data", synonyms: ["has phone", "canonical phone"] }),
+  field({ key: "phone.phone_type", entity: "phone", table: "phones", column: "phone_type", label: "Phone Type", description: "Line type classification (Mobile, VoIP, etc.).", category: "Identity & Linkage", dataType: "text", populatedRows: H, valueSource: "distinct", synonyms: ["line type", "mobile", "voip"] }),
+  field({ key: "phone.is_sms_capable", entity: "phone", table: "phones", column: "phone_type", label: "SMS Capable Line", description: "Phone line type supports SMS (Mobile, VoIP, Wireless).", category: "Identity & Linkage", dataType: "text", populatedRows: H, valueSource: "distinct", synonyms: ["sms capable", "textable"] }),
+  field({ key: "phone.is_best_phone_for_owner", entity: "phone", table: "phones", column: "is_best_phone_for_owner", label: "Best Phone for Owner", description: "Marked as best phone for the linked Master Owner.", category: "Identity & Linkage", dataType: "boolean", populatedRows: 45000, valueSource: "boolean", synonyms: ["primary phone", "best phone"] }),
+  field({ key: "phone.is_best_phone_for_slot", entity: "phone", table: "phones", column: "is_best_phone_for_slot", label: "Best Phone for Slot", description: "Marked as best phone for its contact slot.", category: "Identity & Linkage", dataType: "boolean", populatedRows: 45000, valueSource: "boolean" }),
+  field({ key: "phone.phone_slot", entity: "phone", table: "phones", column: "phone_slot", label: "Phone Slot", description: "Contact slot index for this phone.", category: "Identity & Linkage", dataType: "number", populatedRows: 80000, valueSource: "range" }),
+
+  // ── 13B Phones — status & compliance ──────────────────────────────────────
+  field({ key: "phone.activity_status", entity: "phone", table: "phones", column: "activity_status", label: "Activity Status", description: "Phone activity status from Podio/campaign graph.", category: "Status & Compliance", dataType: "text", populatedRows: H, valueSource: "distinct", synonyms: ["status", "active", "inactive"] }),
+  field({ key: "phone.phone_contact_status", entity: "phone", table: "phones", column: "phone_contact_status", label: "Contact Status", description: "Phone contact restriction status.", category: "Status & Compliance", dataType: "text", populatedRows: 5000, valueSource: "distinct", synonyms: ["wrong number", "suppressed"] }),
+  field({ key: "phone.is_wrong_number", entity: "phone", table: "phones", column: "wrong_number_at", label: "Wrong Number", description: "Phone flagged as wrong number.", category: "Status & Compliance", dataType: "derived_presence", populatedRows: 3000, valueSource: "derived_presence", presenceStrategy: "has_data" }),
+  field({ key: "phone.do_not_call", entity: "phone", table: "phones", column: "do_not_call", label: "Do Not Call", description: "Phone is on do-not-call list.", category: "Status & Compliance", dataType: "boolean", populatedRows: 2000, valueSource: "boolean", synonyms: ["dnc"] }),
+  field({ key: "phone.phone_owner", entity: "phone", table: "phones", column: "phone_owner", label: "Carrier / Phone Owner", description: "Carrier or line owner label.", category: "Status & Compliance", dataType: "text", populatedRows: 90000, valueSource: "distinct", synonyms: ["carrier", "att", "t-mobile", "verizon"] }),
+
+  // ── 13C Phones — usage & scoring ──────────────────────────────────────────
+  field({ key: "phone.usage_12_months", entity: "phone", table: "phones", column: "usage_12_months", label: "Usage (12 Months)", description: "Phone usage signal over 12 months.", category: "Usage & Scoring", dataType: "text", populatedRows: 70000, valueSource: "distinct" }),
+  field({ key: "phone.usage_2_months", entity: "phone", table: "phones", column: "usage_2_months", label: "Usage (2 Months)", description: "Phone usage signal over 2 months.", category: "Usage & Scoring", dataType: "text", populatedRows: 70000, valueSource: "distinct" }),
+  field({ key: "phone.best_phone_score", entity: "phone", table: "phones", column: "best_phone_score", label: "Best Phone Score", description: "Best phone quality score.", category: "Usage & Scoring", dataType: "number", populatedRows: 90000, valueSource: "range", synonyms: ["phone score"] }),
+  field({ key: "phone.contact_score_final", entity: "phone", table: "phones", column: "contact_score_final", label: "Contact Score", description: "Final contact score for this phone.", category: "Usage & Scoring", dataType: "number", populatedRows: H, valueSource: "range", synonyms: ["contact score"] }),
+  field({ key: "phone.raw_phone_score", entity: "phone", table: "phones", column: "raw_phone_score", label: "Raw Phone Score", description: "Raw phone quality score.", category: "Usage & Scoring", dataType: "number", populatedRows: H, valueSource: "range" }),
+  field({ key: "phone.phone_score_final", entity: "phone", table: "phones", column: "phone_score_final", label: "Final Phone Score", description: "Final phone quality score.", category: "Usage & Scoring", dataType: "number", populatedRows: H, valueSource: "range" }),
+  field({ key: "phone.sort_rank", entity: "phone", table: "phones", column: "sort_rank", label: "Sort Rank", description: "Phone sort rank within owner/prospect.", category: "Usage & Scoring", dataType: "number", populatedRows: H, valueSource: "range" }),
+
+  // ── 13D Phones — routing ──────────────────────────────────────────────────
+  field({ key: "phone.timezone", entity: "phone", table: "phones", column: "timezone", label: "Time Zone (Phone)", description: "Phone time zone.", category: "Routing", dataType: "text", populatedRows: 100000, valueSource: "distinct" }),
+  field({ key: "phone.contact_window", entity: "phone", table: "phones", column: "contact_window", label: "Contact Window (Phone)", description: "Phone contact window.", category: "Routing", dataType: "text", populatedRows: 80000, valueSource: "distinct" }),
+  field({ key: "phone.primary_market", entity: "phone", table: "phones", column: "primary_market", label: "Primary Market (Phone)", description: "Phone primary market.", category: "Routing", dataType: "text", populatedRows: 90000, valueSource: "distinct" }),
+  field({ key: "phone.linked_languages_json", entity: "phone", table: "phones", column: "linked_languages_json", label: "Linked Languages", description: "Languages linked to this phone.", category: "Routing", dataType: "json_text_array", populatedRows: 50000, valueSource: "distinct", jsonStorageShape: "text_array", presenceStrategy: "membership" }),
+  field({ key: "phone.has_linked_prospect", entity: "phone", table: "phones", column: "linked_prospect_ids_json", label: "Has Linked Prospect", description: "Phone has at least one linked prospect.", category: "Routing", dataType: "derived_presence", populatedRows: 95000, valueSource: "derived_presence", presenceStrategy: "has_data" }),
 ];

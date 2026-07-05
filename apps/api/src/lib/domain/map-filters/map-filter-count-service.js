@@ -8,6 +8,7 @@ import {
   buildOwnerCountFromMatchingSql,
   buildPropertyCountFromMatchingSql,
   buildProspectCountFromMatchingSql,
+  buildPhoneCountFromMatchingSql,
   buildPropertyEligibilitySql,
   hasEntityRules,
 } from "./map-filter-predicate-sql.js";
@@ -27,6 +28,7 @@ function mapQueryError(error, phase) {
     if (phase === "property") return MAP_FILTER_ERRORS.property_count_timeout;
     if (phase === "prospect") return MAP_FILTER_ERRORS.prospect_count_timeout;
     if (phase === "owner") return MAP_FILTER_ERRORS.owner_count_timeout;
+    if (phase === "phone") return MAP_FILTER_ERRORS.phone_count_timeout;
     return MAP_FILTER_ERRORS.count_query_timeout;
   }
   return MAP_FILTER_ERRORS.count_query_failed;
@@ -34,7 +36,7 @@ function mapQueryError(error, phase) {
 
 export async function countMapFilterEntities(
   compiled,
-  { bounds = null, includeProspects = true, includeOwners = true } = {},
+  { bounds = null, includeProspects = true, includeOwners = true, includePhones = true } = {},
 ) {
   if (!hasDatabaseUrl()) {
     throw new Error("database_url_missing");
@@ -62,6 +64,7 @@ export async function countMapFilterEntities(
     propertyCountMs: 0,
     prospectCountMs: 0,
     ownerCountMs: 0,
+    phoneCountMs: 0,
     countQueryMs: 0,
     totalMs: 0,
   };
@@ -78,6 +81,7 @@ export async function countMapFilterEntities(
     let matchingProperties = 0;
     let matchingProspects = 0;
     let matchingMasterOwners = 0;
+    let matchingPhones = 0;
 
     try {
       const propStart = Date.now();
@@ -129,10 +133,27 @@ export async function countMapFilterEntities(
       }
     }
 
+    if (includePhones) {
+      try {
+        const phStart = Date.now();
+        const phoneSql = buildPhoneCountFromMatchingSql()
+          .replace(/matching_properties/g, "_map_filter_matching_properties");
+        const phoneRes = await client.query(phoneSql);
+        timing.phoneCountMs = Date.now() - phStart;
+        matchingPhones = Number(phoneRes.rows[0]?.count || 0);
+      } catch (error) {
+        const code = mapQueryError(error, "phone");
+        const err = new Error(code);
+        err.code = code;
+        err.phase = "phone";
+        throw err;
+      }
+    }
+
     await client.query("COMMIT");
 
     timing.countQueryMs =
-      timing.propertyCountMs + timing.prospectCountMs + timing.ownerCountMs;
+      timing.propertyCountMs + timing.prospectCountMs + timing.ownerCountMs + timing.phoneCountMs;
     timing.totalMs = Date.now() - totalStarted;
 
     return {
@@ -140,6 +161,7 @@ export async function countMapFilterEntities(
         matchingProperties,
         matchingProspects,
         matchingMasterOwners,
+        matchingPhones,
         propertiesInBounds: parsedBounds ? matchingProperties : null,
         representedProperties: null,
       },
@@ -148,8 +170,10 @@ export async function countMapFilterEntities(
       meta: {
         hasProspectRules: hasEntityRules(compiled.compiledPredicateAst, "prospect"),
         hasOwnerRules: hasEntityRules(compiled.compiledPredicateAst, "master_owner"),
+        hasPhoneRules: hasEntityRules(compiled.compiledPredicateAst, "phone"),
         boundsApplied: Boolean(parsedBounds),
         usesProspectLinkBridge: true,
+        usesPhoneLinkBridge: true,
       },
     };
   } catch (error) {

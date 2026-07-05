@@ -43,6 +43,19 @@ test("one prospect rule compiles to prospect_rule AST", () => {
   assert.deepEqual(collectAstRuleTypes(result.compiled.compiledPredicateAst), ["prospect_rule"]);
 });
 
+test("one phone rule compiles to phone_rule AST", () => {
+  const result = compileMapFilter(
+    group("root", "AND", [
+      rule("r", "phone.phone_type", "equals", "Mobile", { relationshipMatch: "any_linked" }),
+    ]),
+  );
+  assert.equal(result.ok, true);
+  const ast = result.compiled.compiledPredicateAst;
+  assert.equal(ast.type, "phone_rule");
+  assert.equal(ast.relationshipMatch, "any_linked");
+  assert.equal(ast.fieldKey, "phone.phone_type");
+});
+
 test("one master owner rule compiles to owner_rule AST", () => {
   const result = compileMapFilter(
     group("root", "AND", [rule("r1", "master_owner.property_count", "greater_than_or_equal", 5)]),

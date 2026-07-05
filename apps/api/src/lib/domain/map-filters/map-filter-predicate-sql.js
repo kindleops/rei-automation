@@ -3,11 +3,17 @@ import {
   MAP_FILTER_PROSPECT_LINKS_ALIAS,
   MAP_FILTER_PROSPECT_LINKS_TABLE,
 } from "./map-filter-prospect-links.js";
+import {
+  MAP_FILTER_PHONE_LINKS_ALIAS,
+  MAP_FILTER_PHONE_LINKS_TABLE,
+} from "./map-filter-phone-links.js";
 
 const PROPERTY_ALIAS = "p";
 const PROSPECT_ALIAS = "pr";
 const OWNER_ALIAS = "mo";
+const PHONE_ALIAS = "ph";
 const LINK_ALIAS = MAP_FILTER_PROSPECT_LINKS_ALIAS;
+const PHONE_LINK_ALIAS = MAP_FILTER_PHONE_LINKS_ALIAS;
 
 /**
  * Build parameterized SQL for property eligibility from CompiledPredicateNode AST.
@@ -70,7 +76,58 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
     return compileProspectRelationship(node, ctx, outerProspectAlias);
   }
 
+  if (node.type === "phone_rule") {
+    return compilePhoneRelationship(node, ctx);
+  }
+
   return "TRUE";
+}
+
+function compilePhoneRelationship(node, ctx) {
+  const rel = node.relationshipMatch || "any_linked";
+  const predicate = compileFieldPredicate(node, ctx, PHONE_ALIAS);
+
+  const linkedPhoneExists = (extra = "") => `EXISTS (
+    SELECT 1
+    FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
+    INNER JOIN phones ${PHONE_ALIAS}
+      ON ${PHONE_ALIAS}.phone_id = ${PHONE_LINK_ALIAS}.phone_id
+    WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+      ${extra}
+      AND (${predicate})
+  )`;
+
+  if (rel === "any_linked") {
+    return linkedPhoneExists();
+  }
+
+  if (rel === "primary_only") {
+    return linkedPhoneExists(`AND ${PHONE_LINK_ALIAS}.is_primary_link IS TRUE`);
+  }
+
+  if (rel === "none_linked") {
+    return `NOT (${linkedPhoneExists()})`;
+  }
+
+  if (rel === "all_linked") {
+    return `(
+      EXISTS (
+        SELECT 1
+        FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
+        WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
+        INNER JOIN phones ${PHONE_ALIAS}
+          ON ${PHONE_ALIAS}.phone_id = ${PHONE_LINK_ALIAS}.phone_id
+        WHERE ${PHONE_LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+          AND NOT (${predicate})
+      )
+    )`;
+  }
+
+  return linkedPhoneExists();
 }
 
 function compileProspectRelationship(node, ctx, outerProspectAlias) {
@@ -244,6 +301,7 @@ export function hasEntityRules(ast, entityType) {
   const walk = (node) => {
     if (!node || found) return;
     if (node.type === "prospect_rule") { if (entityType === "prospect") found = true; return; }
+    if (node.type === "phone_rule") { if (entityType === "phone") found = true; return; }
     if (node.type === "owner_rule") { if (entityType === "master_owner") found = true; return; }
     if (node.type === "group") (node.children || []).forEach(walk);
   };
@@ -284,6 +342,14 @@ export function buildProspectCountFromMatchingSql() {
     SELECT COUNT(DISTINCT ${LINK_ALIAS}.prospect_id)::bigint AS count
     FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
     INNER JOIN matching_properties mp ON mp.property_id = ${LINK_ALIAS}.property_id
+  `;
+}
+
+export function buildPhoneCountFromMatchingSql() {
+  return `
+    SELECT COUNT(DISTINCT ${PHONE_LINK_ALIAS}.phone_id)::bigint AS count
+    FROM ${MAP_FILTER_PHONE_LINKS_TABLE} ${PHONE_LINK_ALIAS}
+    INNER JOIN matching_properties mp ON mp.property_id = ${PHONE_LINK_ALIAS}.property_id
   `;
 }
 
@@ -356,7 +422,8 @@ export function buildUnifiedCountSql(propertyPredicateSql, bounds = null, predic
       SELECT
         (${buildPropertyCountFromMatchingSql().trim()}) AS matching_properties,
         (${buildProspectCountFromMatchingSql().trim()}) AS matching_prospects,
-        (${buildOwnerCountFromMatchingSql().trim()}) AS matching_master_owners
+        (${buildOwnerCountFromMatchingSql().trim()}) AS matching_master_owners,
+        (${buildPhoneCountFromMatchingSql().trim()}) AS matching_phones
     `,
     extraParams: cte.extraParams,
   };

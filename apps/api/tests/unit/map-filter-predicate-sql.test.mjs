@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { compileMapFilter } from "../../src/lib/domain/map-filters/map-filter-compiler.js";
 import { MAP_FILTER_PROSPECT_LINKS_TABLE } from "../../src/lib/domain/map-filters/map-filter-prospect-links.js";
+import { MAP_FILTER_PHONE_LINKS_TABLE } from "../../src/lib/domain/map-filters/map-filter-phone-links.js";
 import {
   buildOwnerCountSql,
   buildPropertyCountSql,
@@ -146,6 +147,33 @@ test("owner count SQL uses properties.master_owner_id not joined_property_ids_js
   const ownerSql = buildOwnerCountSql(sql, params.length);
   assert.match(ownerSql, /master_owner_id/i);
   assert.doesNotMatch(ownerSql, /joined_property_ids_json/i);
+});
+
+test("phone any_linked uses bridge EXISTS", () => {
+  const { sql } = compileSql(
+    group("root", "AND", [
+      rule("ph", "phone.activity_status", "equals", "active", { relationshipMatch: "any_linked" }),
+    ]),
+  );
+  assert.match(sql, /EXISTS/i);
+  assert.match(sql, new RegExp(MAP_FILTER_PHONE_LINKS_TABLE));
+  assert.doesNotMatch(sql, /linked_prospect_ids_json/i);
+});
+
+test("phone primary_only requires primary link via bridge", () => {
+  const { sql } = compileSql(
+    group("root", "AND", [
+      rule("ph", "phone.has_canonical_phone", "has_data", true, { relationshipMatch: "primary_only" }),
+    ]),
+  );
+  assert.match(sql, /is_primary_link IS TRUE/i);
+  assert.match(sql, new RegExp(MAP_FILTER_PHONE_LINKS_TABLE));
+});
+
+test("unified count SQL includes matching_phones", () => {
+  const { sql, params } = compileSql(group("root", "AND", [rule("r", "property.property_type", "equals", "SFR")]));
+  const unified = buildUnifiedCountSql(sql, null, params.length);
+  assert.match(unified.sql, /AS matching_phones/i);
 });
 
 test("property count with bounds offsets parameter indices after predicate params", () => {

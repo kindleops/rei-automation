@@ -29,6 +29,13 @@ export function compileExpressionTree(node, state = { params: [], nextIndex: 0 }
         ...base,
       };
     }
+    if (field.entity === "phone") {
+      return {
+        type: "phone_rule",
+        relationshipMatch: node.relationshipMatch || "any_linked",
+        ...base,
+      };
+    }
     if (field.entity === "master_owner") {
       return { type: "owner_rule", ...base };
     }

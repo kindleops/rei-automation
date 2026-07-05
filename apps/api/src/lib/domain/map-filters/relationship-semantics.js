@@ -9,6 +9,9 @@ export const RELATIONSHIP_MATCH_MODES = [
   "none_linked",
 ];
 
+/** Prospect and phone rules share the same relationship modes. */
+export const PHONE_RELATIONSHIP_MATCH_MODES = RELATIONSHIP_MATCH_MODES;
+
 export const RELATIONSHIP_MATCH_SEMANTICS = {
   any_linked: {
     id: "any_linked",

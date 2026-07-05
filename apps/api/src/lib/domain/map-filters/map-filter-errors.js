@@ -15,4 +15,5 @@ export const MAP_FILTER_ERRORS = {
   property_count_timeout: "property_count_timeout",
   prospect_count_timeout: "prospect_count_timeout",
   owner_count_timeout: "owner_count_timeout",
+  phone_count_timeout: "phone_count_timeout",
 };

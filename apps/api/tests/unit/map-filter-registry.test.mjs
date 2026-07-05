@@ -19,6 +19,14 @@ import { MAP_FILTER_COUNT_SEMANTICS } from "../../src/lib/domain/map-filters/cou
 import { RELATIONSHIP_MATCH_SEMANTICS } from "../../src/lib/domain/map-filters/relationship-semantics.js";
 import { buildFilterTokenDigest, exposeFilterTokenDigest } from "../../src/lib/domain/map-filters/filter-scope.js";
 
+test("phone entity fields are registered", () => {
+  const phoneFields = getActiveMapFilterFields().filter((f) => f.entity === "phone");
+  assert.ok(phoneFields.length >= 20, `expected phone fields, got ${phoneFields.length}`);
+  assert.ok(phoneFields.some((f) => f.key === "phone.phone_type"));
+  assert.ok(phoneFields.some((f) => f.key === "phone.activity_status"));
+  assert.ok(!phoneFields.some((f) => f.key === "phone.sms_eligible"));
+});
+
 test("registry integrity passes with no empty or sensitive exposures", () => {
   const errors = assertRegistryIntegrity();
   assert.deepEqual(errors, [], `integrity errors: ${errors.join(", ")}`);
@@ -137,7 +145,7 @@ test("filter token digest uses scope inputs and exposes 128-bit url token", () =
     organizationId: "org-1",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-05.1",
+    registryVersion: "2026-07-06.1",
     normalizedExpression: { id: "root", type: "group", combinator: "AND", negated: false, enabled: true, children: [] },
   });
   assert.equal(digest.length, 64);
@@ -147,7 +155,7 @@ test("filter token digest uses scope inputs and exposes 128-bit url token", () =
     organizationId: "org-2",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-05.1",
+    registryVersion: "2026-07-06.1",
     normalizedExpression: { id: "root", type: "group", combinator: "AND", negated: false, enabled: true, children: [] },
   });
   assert.notEqual(digest, digestB);
