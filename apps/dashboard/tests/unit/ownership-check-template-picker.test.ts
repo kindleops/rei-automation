@@ -139,11 +139,17 @@ describe('ownership check template picker', () => {
   })
 
   it('rejects blank or Hi there greetings instead of repairing them', () => {
-    const templates = [
-      makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' }),
-      makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' }),
-    ]
-    const pool = buildOwnershipTemplatePool(templates, context, 'English')
+    const blankGreeting = makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' })
+    const hiThere = makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' })
+
+    expect(evaluateOwnershipTemplate(blankGreeting, context)).toBeNull()
+    expect(evaluateOwnershipTemplate(hiThere, context)).toBeNull()
+
+    const pool = buildOwnershipTemplatePool(
+      [hiThere],
+      { ...context, seller_first_name: '', seller_name: '' },
+      'English',
+    )
     expect(pool.length).toBe(0)
   })
 
@@ -236,6 +242,47 @@ describe('ownership check template picker', () => {
       expect(pool[0].rendered).not.toContain('William')
       expect(pool[0].rendered).not.toContain('Ludwig')
       expect(pool[0].rendered).toContain('Andre')
+    })
+
+    it('accepts templates that greet with the human seller full name via {{seller_name}}', () => {
+      const result = evaluateOwnershipTemplate(
+        makeTemplate({
+          id: 'en-full-name',
+          language: 'English',
+          templateText: 'Hi {{seller_name}}, this is {{agent_first_name}} about {{property_address}}.',
+        }),
+        {
+          seller_first_name: 'Amanda',
+          seller_name: 'Amanda L Tallen',
+          owner_name: 'mo_804d2f26377bee1f43019235 Trust',
+          property_address: '983 Edmund Ave, Saint Paul, MN 55104',
+          agent_name: 'Andre',
+          agent_first_name: 'Andre',
+        },
+      )
+      expect(result?.rendered).toContain('Hi Amanda L Tallen')
+      expect(result?.rendered).not.toContain('Trust')
+    })
+
+    it('falls back to a generic template when a prospect name is resolved but only generic templates render', () => {
+      const resolvedContext = {
+        seller_first_name: 'Amanda',
+        seller_name: 'Amanda L Tallen',
+        owner_name: 'mo_804d2f26377bee1f43019235 Trust',
+        property_address: '983 Edmund Ave, Saint Paul, MN 55104',
+        agent_name: 'Andre',
+        agent_first_name: 'Andre',
+      }
+
+      const pool = buildOwnershipTemplatePool(
+        [genericFirstTouch],
+        resolvedContext,
+        'English',
+      )
+
+      expect(pool).toHaveLength(1)
+      expect(pool[0].template.id).toBe('en-generic')
+      expect(pool[0].rendered).not.toContain('Trust')
     })
 
     it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {

@@ -256,15 +256,33 @@ export const useSellerMapCardActions = ({
 
         const identity = identityResult.identity
         const ownerLanguage = await resolveMapOwnerLanguage(record, identity.masterOwnerId)
-        const templateContext = buildOwnershipCheckTemplateContext(identity)
-        const templateSelection = await pickOwnershipCheckTemplateForMap(
-          templateContext,
-          ownerLanguage,
-          {
-            propertyId: identity.propertyId,
-            recipientPhone: identity.recipientPhone,
-          },
-        )
+        const manualTemplateValues = buildMapTemplateManualValues(record)
+        const templateContext = {
+          ...buildOwnershipCheckTemplateContext(identity),
+          ...manualTemplateValues,
+          property_address: identity.propertyAddress || manualTemplateValues.property_address || '',
+        }
+
+        let templateSelection = null
+        try {
+          templateSelection = await pickOwnershipCheckTemplateForMap(
+            templateContext,
+            ownerLanguage,
+            {
+              propertyId: identity.propertyId,
+              recipientPhone: identity.recipientPhone,
+            },
+          )
+        } catch (templateError) {
+          const message = templateError instanceof Error ? templateError.message : 'ownership_check_templates_unavailable'
+          setFollowUpError(message.slice(0, 42))
+          setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
 
         if (!templateSelection) {
           setFollowUpError('ownership_template_missing')
