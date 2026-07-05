@@ -264,7 +264,7 @@ describe('ownership check template picker', () => {
       expect(result?.rendered).not.toContain('Trust')
     })
 
-    it('falls back to a generic template when a prospect name is resolved but only generic templates render', () => {
+    it('rejects generic templates when seller and agent are both resolved', () => {
       const resolvedContext = {
         seller_first_name: 'Amanda',
         seller_name: 'Amanda L Tallen',
@@ -280,9 +280,27 @@ describe('ownership check template picker', () => {
         'English',
       )
 
-      expect(pool).toHaveLength(1)
-      expect(pool[0].template.id).toBe('en-generic')
-      expect(pool[0].rendered).not.toContain('Trust')
+      expect(pool).toHaveLength(0)
+    })
+
+    it('rejects the generic "right person" ownership-check wording when seller and agent are resolved', () => {
+      const rightPersonTemplate = makeTemplate({
+        id: 'en-right-person',
+        language: 'English',
+        isFirstTouch: true,
+        templateText: 'Hi, I\'m trying to reach the right person regarding {{property_address}}. Would you happen to know who handles it?',
+      })
+
+      const result = evaluateOwnershipTemplate(rightPersonTemplate, {
+        seller_first_name: 'Maria',
+        seller_name: 'Maria Lopez',
+        owner_name: 'Some LLC',
+        property_address: '1195 Arona St, Saint Paul, MN 55108',
+        agent_name: 'Chris',
+        agent_first_name: 'Chris',
+      })
+
+      expect(result).toBeNull()
     })
 
     it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {

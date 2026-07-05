@@ -62,6 +62,11 @@ const hasBlankGreeting = (message: string): boolean =>
 const hasHiThereGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
 
+const hasGenericRightPersonWording = (message: string): boolean =>
+  /\bright person\b/i.test(message)
+  || /\bwho handles\b/i.test(message)
+  || /\btrying to reach\b/i.test(message)
+
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
 
@@ -145,11 +150,16 @@ export const evaluateOwnershipTemplate = (
   if (hasUnresolvedTemplateTokens(rendered)) return null
   if (hasEntityGreeting(rendered)) return null
   if (missingVariables.length > 0) return null
+  const sellerFirstName = asString(context.seller_first_name, '').trim()
+  const agentFirstName = asString(context.agent_first_name, '').trim()
   if (
     requireSellerNameInGreeting
-    && asString(context.seller_first_name, '').trim()
-    && !greetingIncludesSellerFirstName(rendered, context.seller_first_name)
+    && sellerFirstName
+    && !greetingIncludesSellerFirstName(rendered, sellerFirstName)
   ) {
+    return null
+  }
+  if (hasGenericRightPersonWording(rendered)) {
     return null
   }
   if (containsForbiddenEntityGreeting(rendered, context)) return null
@@ -215,31 +225,38 @@ export const buildOwnershipTemplatePool = (
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
   const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
   const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
+  const hasResolvedAgentName = Boolean(asString(context.agent_first_name, '').trim())
+  const hasPersonalizedContext = hasResolvedSellerName && hasResolvedAgentName
 
   // Prefer personalized first-touch templates when a human first name is known.
-  // Fall back to generic name-free templates when personalized variants do not
-  // render (missing variables, entity guards, etc.) so send is not blocked while
-  // an approved ownership_check template still exists in the catalog.
+  // When both seller + agent are resolved, never fall back to generic "right person"
+  // templates — only Supabase ownership_check rows that render with real placeholders.
   const personalizedFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: true })
   const genericFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: false })
   const personalizedLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true })
   const genericLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: false })
 
-  const pool = hasResolvedSellerName
+  const pool = hasPersonalizedContext
     ? (
       personalizedFirstTouch.length
         ? personalizedFirstTouch
-        : genericFirstTouch.length
+        : personalizedLanguageScoped
+    )
+    : hasResolvedSellerName
+      ? (
+        personalizedFirstTouch.length
+          ? personalizedFirstTouch
+          : genericFirstTouch.length
+            ? genericFirstTouch
+            : personalizedLanguageScoped.length
+              ? personalizedLanguageScoped
+              : genericLanguageScoped
+      )
+      : (
+        genericFirstTouch.length
           ? genericFirstTouch
-          : personalizedLanguageScoped.length
-            ? personalizedLanguageScoped
-            : genericLanguageScoped
-    )
-    : (
-      genericFirstTouch.length
-        ? genericFirstTouch
-        : genericLanguageScoped
-    )
+          : genericLanguageScoped
+      )
 
   let candidates = dedupeCandidates(pool)
   const excludeId = asString(options.excludeTemplateId, '').trim()

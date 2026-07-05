@@ -298,6 +298,14 @@ interface InboxSendOptions extends InboxTemplateSendOptions {
   fromPhoneNumber?: string
   clientSendId?: string | null
   operatorOverride?: boolean
+  /** Skip the inbox "Hi there" render guard — required for pre-rendered map ownership_check sends. */
+  skipRenderGuard?: boolean
+  messageType?: string
+  currentStage?: string
+  useCaseTemplate?: string
+  createdFrom?: string
+  sendSource?: string
+  action?: string
 }
 
 export interface QueueProcessorHealth {
@@ -4844,7 +4852,18 @@ export const sendInboxMessageNow = async (
     return { ok: false, clientSendId: null, queueId: null, messageEventId: null, providerMessageSid: null, deliveryStatus: null, errorMessage: 'Message text is required', guardReason: null, backendReason: null, insertPayloadKeys: [], suppressionBlocked: false, sendRouteUsed: 'none', queueProcessorEligible: false, proof: null }
   }
 
-  const personalization = buildQueuePersonalization(thread, trimmedText)
+  const personalization = options?.skipRenderGuard
+    ? {
+      messageText: trimmedText,
+      renderVariables: {},
+      candidateSnapshot: {},
+      personalizationMeta: {
+        render_guard_passed: true,
+        render_guard_repaired: false,
+        render_guard_skipped: true,
+      },
+    }
+    : buildQueuePersonalization(thread, trimmedText)
   const templateAttachment = buildSelectedTemplatePayload(options?.selectedTemplate, options?.threadContext)
 
   const toPhone = normalizePhone(thread.canonicalE164 || thread.phoneNumber)
@@ -4988,15 +5007,15 @@ export const sendInboxMessageNow = async (
     phone_number_id: thread.phoneNumberId || null,
     character_count: personalization.messageText.length,
     touch_number: 1,
-    current_stage: 'manual_reply',
-    message_type: 'manual_reply',
-    use_case_template: templateAttachment.useCaseTemplate,
+    current_stage: options?.currentStage || 'manual_reply',
+    message_type: options?.messageType || 'manual_reply',
+    use_case_template: options?.useCaseTemplate || templateAttachment.useCaseTemplate,
     metadata: {
-      source: 'inbox',
-      action: 'send_now',
+      source: options?.sendSource || 'inbox',
+      action: options?.action || 'send_now',
       thread_key: routingThread.threadKey || sellerPhone,
       selected_thread_id: routingThread.id,
-      created_from: 'leadcommand_inbox',
+      created_from: options?.createdFrom || 'leadcommand_inbox',
       our_number: fromPhone,
       seller_phone: sellerPhone,
       note: 'queued_ready_for_processor',

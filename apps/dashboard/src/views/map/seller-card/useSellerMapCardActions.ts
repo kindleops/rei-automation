@@ -124,6 +124,14 @@ export const buildMapTemplateManualValues = (record: Record<string, unknown>): R
 const hasBlankGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s*,\s*(?:\{\{|\[\[|$)/i.test(message.trim())
 
+const hasHiThereGreeting = (message: string): boolean =>
+  /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
+
+const hasGenericRightPersonWording = (message: string): boolean =>
+  /\bright person\b/i.test(message)
+  || /\bwho handles\b/i.test(message)
+  || /\btrying to reach\b/i.test(message)
+
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
 
@@ -297,12 +305,9 @@ export const useSellerMapCardActions = ({
         || await resolveMasterOwnerIdForProperty(viewModel.propertyId)
         || null
 
-      // Hydrated pins often omit agent_persona; resolve from master_owners on click
-      // (same fallback 1342100 used — 54e5e53 hardcoded Chris so this never surfaced).
-      if (
-        eligibility.isUncontacted
-        && (!manualTemplateValues.seller_first_name || !manualTemplateValues.agent_first_name)
-      ) {
+      // Always hydrate prospect + agent from Supabase on uncontacted sends — map pins
+      // often omit agent_persona and prospect names even when master_owners has them.
+      if (eligibility.isUncontacted) {
         const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
           || text(firstDefined(record, ['prospect_id', 'prospectId']))
           || null
@@ -381,7 +386,7 @@ export const useSellerMapCardActions = ({
         }
 
         followUpTemplate = templateSelection.template
-        messageText = templateSelection.renderedMessage
+        messageText = renderTemplate(followUpTemplate, templateContext).renderedText
       } else {
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
         followUpTemplate = templates.find((template) => template.isFollowUp)
@@ -405,6 +410,8 @@ export const useSellerMapCardActions = ({
       if (
         !messageText.trim()
         || hasBlankGreeting(messageText)
+        || hasHiThereGreeting(messageText)
+        || hasGenericRightPersonWording(messageText)
         || hasUnresolvedTemplateTokens(messageText)
         || hasEntityGreeting(messageText)
       ) {
@@ -417,9 +424,22 @@ export const useSellerMapCardActions = ({
         return
       }
 
+      const ownershipSendOptions = eligibility.isUncontacted
+        ? {
+          skipRenderGuard: true as const,
+          messageType: 'ownership_check',
+          currentStage: 'ownership_check',
+          useCaseTemplate: 'ownership_check',
+          createdFrom: 'leadcommand_map',
+          sendSource: 'map_command',
+          action: 'send_ownership_check',
+        }
+        : {}
+
       const result = await sendInboxMessageNow(sendThread, messageText, {
         selectedTemplate: followUpTemplate,
         threadContext: threadContext ?? null,
+        ...ownershipSendOptions,
       })
 
       if (!result.ok) {
