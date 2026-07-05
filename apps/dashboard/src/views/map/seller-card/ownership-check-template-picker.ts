@@ -119,6 +119,14 @@ export const filterOwnershipTemplatesForLanguage = (
   return templates.filter((template) => languagesMatchForTemplate('English', template.language))
 }
 
+const evaluateTemplates = (
+  templates: SmsTemplate[],
+  context: Record<string, string>,
+): OwnershipTemplateCandidate[] =>
+  templates
+    .map((template) => evaluateOwnershipTemplate(template, context))
+    .filter((entry): entry is OwnershipTemplateCandidate => Boolean(entry))
+
 export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
   context: Record<string, string>,
@@ -126,11 +134,16 @@ export const buildOwnershipTemplatePool = (
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
   const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
-  const scoped = firstTouch.length ? firstTouch : languageScoped
 
-  const pool = scoped
-    .map((template) => evaluateOwnershipTemplate(template, context))
-    .filter((entry): entry is OwnershipTemplateCandidate => Boolean(entry))
+  // Prefer personalized first-touch templates, but that preference must be based
+  // on whether one actually renders successfully with the resolved context — not
+  // merely whether one exists. When the recipient's name is unresolved (no linked
+  // prospect), every first-touch template requiring {{seller_first_name}} will
+  // fail to render; in that case fall through to the full language-scoped set so
+  // an approved generic (name-free) template can still be selected, instead of
+  // reporting no compatible template while one actually exists.
+  const firstTouchPool = evaluateTemplates(firstTouch, context)
+  const pool = firstTouchPool.length ? firstTouchPool : evaluateTemplates(languageScoped, context)
 
   const uniqueById = new Map<string, OwnershipTemplateCandidate>()
   for (const entry of pool) {

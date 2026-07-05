@@ -126,4 +126,74 @@ describe('ownership check template picker', () => {
       expect(pool).toHaveLength(0)
     })
   })
+
+  describe('falls back to a generic template when no prospect name is resolved (regression: William & Cheryl Ludwig / 665 Portland Ave)', () => {
+    const personalizedFirstTouch = makeTemplate({
+      id: 'en-personalized',
+      language: 'English',
+      isFirstTouch: true,
+      templateText: 'Hey {{seller_first_name}}, this is {{agent_first_name}}. Do you still own {{property_address}}?',
+    })
+    const genericFirstTouch = makeTemplate({
+      id: 'en-generic',
+      language: 'English',
+      // Deliberately NOT flagged is_first_touch in the catalog — mirrors a real
+      // template-catalog shape where only personalized variants are tagged
+      // first-touch, even though a generic ownership-check is semantically a
+      // first touch too.
+      isFirstTouch: false,
+      templateText: 'Hi, this is {{agent_first_name}}. I\'m reaching out about {{property_address}}. Are you the owner?',
+    })
+
+    it('selects the generic template when seller_first_name is unresolved and only personalized first-touch templates exist otherwise', () => {
+      const unresolvedContext = {
+        seller_first_name: '',
+        seller_name: '',
+        owner_name: 'William & Cheryl Ludwig',
+        property_address: '665 Portland Ave, Saint Paul, MN 55104',
+        agent_name: 'Andre',
+        agent_first_name: 'Andre',
+      }
+
+      const pool = buildOwnershipTemplatePool(
+        [personalizedFirstTouch, genericFirstTouch],
+        unresolvedContext,
+        'English',
+      )
+
+      expect(pool).toHaveLength(1)
+      expect(pool[0].template.id).toBe('en-generic')
+      expect(pool[0].repaired).not.toContain('William')
+      expect(pool[0].repaired).not.toContain('Ludwig')
+      expect(pool[0].repaired).toContain('Andre')
+    })
+
+    it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {
+      const resolvedContext = {
+        seller_first_name: 'Maria',
+        seller_name: 'Maria Lopez',
+        owner_name: 'William & Cheryl Ludwig',
+        property_address: '665 Portland Ave, Saint Paul, MN 55104',
+        agent_name: 'Andre',
+        agent_first_name: 'Andre',
+      }
+
+      const pool = buildOwnershipTemplatePool(
+        [personalizedFirstTouch, genericFirstTouch],
+        resolvedContext,
+        'English',
+      )
+
+      expect(pool.map((entry) => entry.template.id)).toContain('en-personalized')
+    })
+
+    it('reports no compatible template only when truly nothing renders (e.g. agent also unresolved)', () => {
+      const pool = buildOwnershipTemplatePool(
+        [personalizedFirstTouch, genericFirstTouch],
+        { seller_first_name: '', seller_name: '', owner_name: '', property_address: '665 Portland Ave', agent_name: '', agent_first_name: '' },
+        'English',
+      )
+      expect(pool).toHaveLength(0)
+    })
+  })
 })
