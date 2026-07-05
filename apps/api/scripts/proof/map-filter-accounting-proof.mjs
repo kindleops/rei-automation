@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../../..");
+const repoRoot = path.resolve(__dirname, "../..");
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -33,7 +33,7 @@ for (const [key, value] of Object.entries(env)) {
 
 const OFFLINE_MODE = process.argv.includes("--offline");
 
-const { hasDatabaseUrl (queryWithTimeout } = await import("../../src/lib/postgres/client.js");
+const { hasDatabaseUrl, queryWithTimeout } = await import("../../src/lib/postgres/client.js");
 const { compileMapFilter } = await import("../../src/lib/domain/map-filters/map-filter-compiler.js");
 const { countMapFilterEntities } = await import("../../src/lib/domain/map-filters/map-filter-count-service.js");
 const { getMapFilterPresets } = await import("../../src/lib/domain/map-filters/map-filter-presets.js");
