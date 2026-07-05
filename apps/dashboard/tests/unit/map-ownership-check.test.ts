@@ -539,6 +539,74 @@ describe('map ownership check canonical resolver', () => {
     expect(result.error).not.toBe('property has no master_owner_id')
   })
 
+  it('10b. resolves human prospect when best_phone_1 phone row points at entity prospect', async () => {
+    const fixture = {
+      properties: {
+        property_id: '274564949',
+        master_owner_id: 'mo_804d2f26377bee1f43019235',
+        property_address_full: '983 Edmund Ave, Saint Paul, MN 55104',
+      },
+      master_owners: {
+        master_owner_id: 'mo_804d2f26377bee1f43019235',
+        best_phone_1: '+16514428447',
+        primary_phone_id: 'ph_amanda',
+        display_name: 'mo_804d2f26377bee1f43019235 Trust',
+        best_language: 'English',
+        agent_persona: 'Andre Thompson',
+        agent_family: null,
+      },
+      map_filter_property_prospect_links: {
+        property_id: '274564949',
+        master_owner_id: 'mo_804d2f26377bee1f43019235',
+        prospect_id: 'pros1_5d2dfe5ae95f982c0941f648',
+      },
+      phones: {
+        phone_id: 'ph_amanda',
+        master_owner_id: 'mo_804d2f26377bee1f43019235',
+        canonical_e164: '+16514428447',
+        canonical_prospect_id: 'pros_trust_entity',
+        primary_prospect_id: null,
+        linked_prospect_ids_json: ['pros_trust_entity'],
+      },
+      prospects: [
+        {
+          prospect_id: 'pros1_5d2dfe5ae95f982c0941f648',
+          first_name: 'Amanda',
+          full_name: 'Amanda L Tallen',
+          sms_eligible: true,
+          master_owner_id: 'mo_804d2f26377bee1f43019235',
+        },
+        {
+          prospect_id: 'pros_trust_entity',
+          first_name: 'Trust',
+          full_name: 'mo_804d2f26377bee1f43019235 Trust',
+          sms_eligible: false,
+          master_owner_id: 'mo_804d2f26377bee1f43019235',
+        },
+      ],
+    }
+
+    const result = await resolveMapOwnershipCheckIdentity('274564949', {
+      supabase: makeSupabase(fixture),
+      hints: {
+        masterOwnerId: 'mo_804d2f26377bee1f43019235',
+        prospectId: 'pros1_5d2dfe5ae95f982c0941f648',
+        prospectFirstName: 'Amanda',
+        prospectFullName: 'Amanda L Tallen',
+        recipientPhone: '+16514428447',
+        agentPersona: 'Andre Thompson',
+        smsEligible: true,
+      },
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.prospectFirstName).toBe('Amanda')
+    expect(result.identity.recipientPhone).toBe('+16514428447')
+    expect(result.identity.phoneId).toBe('ph_amanda')
+    expect(result.identity.resolutionSource).toBe('hydrated_map_identity')
+  })
+
   it('11. greets linked human prospect for entity owner', async () => {
     const result = await resolveMapOwnershipCheckIdentity('prop-llc', {
       supabase: makeSupabase(llcFixture),
