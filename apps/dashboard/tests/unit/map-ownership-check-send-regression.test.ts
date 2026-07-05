@@ -27,6 +27,8 @@ vi.mock('../../src/lib/data/commandMapData', async (importOriginal) => {
   return {
     ...actual,
     resolveCommandMapSellerPhone: vi.fn(),
+    resolveCommandMapSellerIdentity: vi.fn(),
+    resolveMasterOwnerIdForProperty: vi.fn(),
   }
 })
 
@@ -347,10 +349,26 @@ describe('map ownership check send regression', () => {
     expect(selection?.selectionReason).toMatch(/random/)
   })
 
+  it('19. agent_persona on master_owners fills template context when pin omits it', () => {
+    const withoutAgent = buildMapTemplateManualValues({
+      ...amandaRecord,
+      agent_persona: undefined,
+      agent_family: undefined,
+    })
+    expect(withoutAgent.agent_first_name).toBe('')
+
+    const withAgent = buildMapTemplateManualValues({
+      ...amandaRecord,
+      agent_persona: 'Andre Thompson',
+    })
+    expect(withAgent.agent_first_name).toBe('Andre')
+  })
+
   it('20. map ownership check click path uses sendInboxMessageNow (54e5e53 send chain)', async () => {
     const actionsPath = fileURLToPath(new URL('../../src/views/map/seller-card/useSellerMapCardActions.ts', import.meta.url))
     const source = await readFile(actionsPath, 'utf8')
     expect(source).toContain('sendInboxMessageNow')
+    expect(source).toContain('resolveCommandMapSellerIdentity')
     expect(source).not.toContain('sendMapOwnershipCheck')
     expect(source).not.toContain('resolveMapOwnershipCheckForSend')
     expect(source).not.toContain('resolveMapOwnershipCheckIdentity')

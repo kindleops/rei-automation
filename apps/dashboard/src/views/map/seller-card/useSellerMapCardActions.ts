@@ -6,7 +6,11 @@ import {
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
 import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
-import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
+import {
+  resolveCommandMapSellerIdentity,
+  resolveCommandMapSellerPhone,
+  resolveMasterOwnerIdForProperty,
+} from '../../../lib/data/commandMapData'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
@@ -288,7 +292,42 @@ export const useSellerMapCardActions = ({
       }
       sendThread = resolvedSendThread
 
-      const manualTemplateValues = buildMapTemplateManualValues(record)
+      let manualTemplateValues = buildMapTemplateManualValues(record)
+      const masterOwnerId = resolveMasterOwnerId()
+        || await resolveMasterOwnerIdForProperty(viewModel.propertyId)
+        || null
+
+      // Hydrated pins often omit agent_persona; resolve from master_owners on click
+      // (same fallback 1342100 used — 54e5e53 hardcoded Chris so this never surfaced).
+      if (
+        eligibility.isUncontacted
+        && (!manualTemplateValues.seller_first_name || !manualTemplateValues.agent_first_name)
+      ) {
+        const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
+          || text(firstDefined(record, ['prospect_id', 'prospectId']))
+          || null
+        const liveIdentity = await resolveCommandMapSellerIdentity({
+          prospectId: resolvedProspectId,
+          masterOwnerId,
+        })
+        manualTemplateValues = buildMapTemplateManualValues({
+          ...record,
+          prospect_full_name: text(firstDefined(record, ['prospect_full_name', 'prospect_name']))
+            || liveIdentity.prospectFullName
+            || '',
+          prospect_first_name: text(firstDefined(record, ['prospect_first_name']))
+            || liveIdentity.prospectFirstName
+            || '',
+          sms_eligible: firstDefined(record, ['sms_eligible']) ?? liveIdentity.smsEligible,
+          agent_persona: text(firstDefined(record, ['agent_persona', 'agentPersona']))
+            || liveIdentity.agentPersona
+            || '',
+          agent_family: text(firstDefined(record, ['agent_family', 'agentFamily']))
+            || liveIdentity.agentFamily
+            || '',
+        })
+      }
+
       const templateContext = {
         ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
         ...manualTemplateValues,
@@ -301,7 +340,7 @@ export const useSellerMapCardActions = ({
       if (eligibility.isUncontacted) {
         if (!manualTemplateValues.agent_first_name) {
           setFollowUpError('No SMS agent available')
-          setFollowUpState('blocked')
+          setFollowUpState('failed')
           window.setTimeout(() => {
             setFollowUpState('idle')
             setFollowUpError(null)
@@ -309,7 +348,7 @@ export const useSellerMapCardActions = ({
           return
         }
 
-        const ownerLanguage = await resolveMapOwnerLanguage(record, resolveMasterOwnerId())
+        const ownerLanguage = await resolveMapOwnerLanguage(record, masterOwnerId)
         let templateSelection = null
         try {
           templateSelection = await pickOwnershipCheckTemplateForMap(
