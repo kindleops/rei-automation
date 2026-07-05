@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString, type AnyRecord } from '../../lib/data/shared'
+import { safeHumanName } from '../../lib/identity/entityDetection'
 
 /** Production-safe PostgREST select for master_owners (lcppdrmrdfblstpcbgpf). */
 export const MAP_OWNERSHIP_MASTER_OWNER_SELECT =
@@ -37,6 +38,7 @@ export type MapOwnershipCheckHints = {
   ownerDisplayName?: string | null
   agentPersona?: string | null
   agentFamily?: string | null
+  smsEligible?: boolean | null
 }
 
 export type MapOwnershipCheckIdentity = {
@@ -534,6 +536,15 @@ const collectOwnerCandidates = async (
   return candidates
 }
 
+const phoneMatchesOwnerBestContact = (
+  row: AnyRecord | null,
+  ownerBestPhone: string,
+): boolean => {
+  const normalizedBestPhone = toE164(ownerBestPhone)
+  if (!normalizedBestPhone || !row?.phone_id) return false
+  return toE164(row.canonical_e164) === normalizedBestPhone
+}
+
 const resolvePhoneRow = async (
   supabase: SupabaseClient,
   masterOwnerId: string,
@@ -541,11 +552,14 @@ const resolvePhoneRow = async (
   primaryPhoneId: string,
   hintPhoneId?: string | null,
   prospectId?: string | null,
+  ownerBestPhone?: string | null,
 ): Promise<AnyRecord | null> => {
   const normalizedProspectId = text(prospectId)
+  const normalizedOwnerBestPhone = toE164(ownerBestPhone || recipientPhone)
   const acceptPhone = (row: AnyRecord | null): AnyRecord | null => {
     if (!row?.phone_id) return null
     if (!normalizedProspectId || phoneLinksToProspect(row, normalizedProspectId)) return row
+    if (phoneMatchesOwnerBestContact(row, normalizedOwnerBestPhone)) return row
     return null
   }
   const normalizedPhone = toE164(recipientPhone)
@@ -640,7 +654,146 @@ export const buildMapOwnershipCheckHints = (
       || text(firstDefined(record.owner_display_name, record.owner_name)) || null,
     agentPersona: text(firstDefined(record.agent_persona, record.agentPersona)) || null,
     agentFamily: text(firstDefined(record.agent_family, record.agentFamily)) || null,
+    smsEligible: record.sms_eligible === false
+      ? false
+      : record.sms_eligible === true
+        ? true
+        : null,
   }
+}
+
+const buildIdentityFromResolvedParts = ({
+  propertyId,
+  property,
+  owner,
+  hints,
+  masterOwnerId,
+  prospectId,
+  prospectFirstName,
+  prospectFullName,
+  recipientPhone,
+  phoneId,
+  resolutionSource,
+  candidateCount,
+}: {
+  propertyId: string
+  property: AnyRecord
+  owner: AnyRecord
+  hints: MapOwnershipCheckHints
+  masterOwnerId: string
+  prospectId: string
+  prospectFirstName: string
+  prospectFullName: string
+  recipientPhone: string
+  phoneId: string
+  resolutionSource: OwnerResolutionSource
+  candidateCount: number
+}): MapOwnershipCheckResolveResult => {
+  const agentName = resolveAgentName(owner, hints)
+  const agentFirstName = firstAgentToken(agentName)
+  if (!agentName || !agentFirstName) {
+    return { ok: false, error: 'assigned_agent_missing' }
+  }
+
+  const ownerDisplayName = text(owner.display_name) || text(hints.ownerDisplayName)
+  const propertyAddress = text(property.property_address_full) || text(property.property_address)
+
+  return {
+    ok: true,
+    identity: {
+      propertyId,
+      masterOwnerId,
+      phoneId,
+      recipientPhone,
+      prospectId,
+      prospectFirstName,
+      prospectFullName,
+      smsEligible: true,
+      agentName,
+      agentFirstName,
+      ownerDisplayName,
+      ownerLanguage: text(owner.best_language) || 'English',
+      propertyAddress,
+      sellerDisplayName: prospectFullName || prospectFirstName,
+      smsAgentId: null,
+      selectedAgentId: null,
+      resolutionSource,
+      resolutionDiagnostics: {
+        candidateCount,
+        source: resolutionSource,
+      },
+    },
+  }
+}
+
+const tryResolveFromHydratedMapHints = async (
+  supabase: SupabaseClient,
+  propertyId: string,
+  property: AnyRecord,
+  hints: MapOwnershipCheckHints,
+): Promise<MapOwnershipCheckResolveResult | null> => {
+  const masterOwnerId = text(hints.masterOwnerId)
+  const prospectId = text(hints.prospectId)
+  if (!masterOwnerId || !prospectId) return null
+  if (hints.smsEligible === false) {
+    return { ok: false, error: 'prospect_not_sms_eligible' }
+  }
+
+  const propertyOwnerId = text(property.master_owner_id)
+  if (propertyOwnerId && propertyOwnerId !== masterOwnerId) return null
+
+  if (!propertyOwnerId) {
+    const confirmed = await confirmHydratedMasterOwner(supabase, propertyId, masterOwnerId)
+    if (!confirmed) return null
+  }
+
+  const { data: ownerRow, error: ownerError } = await supabase
+    .from('master_owners')
+    .select(MAP_OWNERSHIP_MASTER_OWNER_SELECT)
+    .eq('master_owner_id', masterOwnerId)
+    .limit(1)
+    .maybeSingle()
+
+  if (ownerError || !ownerRow) return null
+
+  const owner = ownerRow as AnyRecord
+  const recipientPhone = toE164(hints.recipientPhone) || toE164(owner.best_phone_1)
+  if (!recipientPhone) {
+    return { ok: false, error: 'master_owner_missing_best_phone' }
+  }
+
+  let phoneId = text(hints.phoneId) || text(owner.primary_phone_id)
+  if (!phoneId) {
+    const phoneRow = await resolvePhoneRow(
+      supabase,
+      masterOwnerId,
+      recipientPhone,
+      text(owner.primary_phone_id),
+      hints.phoneId,
+      prospectId,
+      recipientPhone,
+    )
+    phoneId = text(phoneRow?.phone_id)
+  }
+
+  if (!phoneId) return null
+
+  const prospectFirstName = text(hints.prospectFirstName)
+  const prospectFullName = text(hints.prospectFullName) || prospectFirstName
+  return buildIdentityFromResolvedParts({
+    propertyId,
+    property,
+    owner,
+    hints,
+    masterOwnerId,
+    prospectId,
+    prospectFirstName,
+    prospectFullName,
+    recipientPhone,
+    phoneId,
+    resolutionSource: 'hydrated_map_identity',
+    candidateCount: 1,
+  })
 }
 
 export const resolveMapOwnershipCheckIdentity = async (
@@ -670,6 +823,17 @@ export const resolveMapOwnershipCheckIdentity = async (
   }
 
   const property = propertyRow as AnyRecord
+
+  const hydratedResult = await tryResolveFromHydratedMapHints(
+    supabase,
+    normalizedPropertyId,
+    property,
+    hints,
+  )
+  if (hydratedResult) {
+    return hydratedResult
+  }
+
   const candidates = await collectOwnerCandidates(supabase, normalizedPropertyId, property, hints)
   const selection = selectOwnerCandidate(candidates)
   if (!selection.ok) {
@@ -709,6 +873,8 @@ export const resolveMapOwnershipCheckIdentity = async (
     recipientPhone,
     text(owner.primary_phone_id),
     candidate.phoneId || hints.phoneId,
+    null,
+    recipientPhone,
   )
 
   const prospectId = await resolveProspectForPropertyOwner(
@@ -722,7 +888,7 @@ export const resolveMapOwnershipCheckIdentity = async (
   )
 
   if (!prospectId) {
-    return { ok: false, error: 'phone_not_linked_to_human_prospect' }
+    return { ok: false, error: 'property_owner_link_missing' }
   }
 
   const phoneRow = await resolvePhoneRow(
@@ -732,10 +898,13 @@ export const resolveMapOwnershipCheckIdentity = async (
     text(owner.primary_phone_id),
     candidate.phoneId || hints.phoneId,
     prospectId,
+    recipientPhone,
   ) || initialPhoneRow
 
-  if (!phoneRow?.phone_id || !phoneLinksToProspect(phoneRow, prospectId)) {
-    return { ok: false, error: 'phone_not_linked_to_human_prospect' }
+  const phoneLinkedToProspect = Boolean(phoneRow?.phone_id && phoneLinksToProspect(phoneRow, prospectId))
+  const phoneIsOwnerBestContact = phoneMatchesOwnerBestContact(phoneRow, recipientPhone)
+  if (!phoneRow?.phone_id || (!phoneLinkedToProspect && !phoneIsOwnerBestContact)) {
+    return { ok: false, error: 'master_owner_missing_best_phone' }
   }
 
   const { data: prospectRow, error: prospectError } = await supabase
@@ -749,74 +918,50 @@ export const resolveMapOwnershipCheckIdentity = async (
     return { ok: false, error: prospectError.message || 'prospect_lookup_failed' }
   }
   if (!prospectRow) {
-    return { ok: false, error: 'phone_not_linked_to_human_prospect' }
+    return { ok: false, error: 'property_owner_link_missing' }
   }
 
   const prospect = prospectRow as AnyRecord
   const prospectFirstName = text(prospect.first_name) || text(hints.prospectFirstName)
-  if (!prospectFirstName) {
-    return { ok: false, error: 'phone_not_linked_to_human_prospect' }
-  }
+  const prospectFullName = text(prospect.full_name) || text(hints.prospectFullName) || prospectFirstName
 
   const prospectMasterOwnerId = text(prospect.master_owner_id)
   if (prospectMasterOwnerId && prospectMasterOwnerId !== masterOwnerId) {
     return { ok: false, error: 'property_owner_link_missing' }
   }
 
-  if (prospect.sms_eligible !== true) {
+  if (prospect.sms_eligible !== true && hints.smsEligible !== true) {
     return { ok: false, error: 'prospect_not_sms_eligible' }
   }
 
-  const agentName = resolveAgentName(owner, hints)
-  if (!agentName) {
-    return { ok: false, error: 'assigned_agent_missing' }
-  }
-
-  const agentFirstName = firstAgentToken(agentName)
-  if (!agentFirstName) {
-    return { ok: false, error: 'assigned_agent_missing' }
-  }
-
-  const ownerDisplayName = text(owner.display_name) || text(hints.ownerDisplayName)
-  const prospectFullName = text(prospect.full_name) || text(hints.prospectFullName) || prospectFirstName
-  const propertyAddress = text(property.property_address_full) || text(property.property_address)
-
-  return {
-    ok: true,
-    identity: {
-      propertyId: normalizedPropertyId,
-      masterOwnerId,
-      phoneId: text(phoneRow.phone_id),
-      recipientPhone,
-      prospectId,
-      prospectFirstName,
-      prospectFullName,
-      smsEligible: true,
-      agentName,
-      agentFirstName,
-      ownerDisplayName,
-      ownerLanguage: text(owner.best_language) || 'English',
-      propertyAddress,
-      sellerDisplayName: prospectFullName,
-      smsAgentId: null,
-      selectedAgentId: null,
-      resolutionSource: candidate.source,
-      resolutionDiagnostics: {
-        candidateCount: candidates.length,
-        source: candidate.source,
-      },
-    },
-  }
+  return buildIdentityFromResolvedParts({
+    propertyId: normalizedPropertyId,
+    property,
+    owner,
+    hints,
+    masterOwnerId,
+    prospectId,
+    prospectFirstName,
+    prospectFullName,
+    recipientPhone,
+    phoneId: text(phoneRow.phone_id),
+    resolutionSource: candidate.source,
+    candidateCount: candidates.length,
+  })
 }
 
 export const buildOwnershipCheckTemplateContext = (
   identity: MapOwnershipCheckIdentity,
-): Record<string, string> => ({
-  seller_first_name: identity.prospectFirstName,
-  seller_name: identity.prospectFullName,
-  seller_display_name: identity.sellerDisplayName,
-  owner_name: identity.ownerDisplayName,
-  property_address: identity.propertyAddress,
-  agent_name: identity.agentName,
-  agent_first_name: identity.agentFirstName,
-})
+): Record<string, string> => {
+  const sellerFirstName = safeHumanName(identity.prospectFirstName)
+  const sellerName = safeHumanName(identity.prospectFullName) || sellerFirstName
+  return {
+    seller_first_name: sellerFirstName,
+    seller_name: sellerName,
+    seller_display_name: sellerName,
+    owner_name: identity.ownerDisplayName,
+    property_address: identity.propertyAddress,
+    agent_name: identity.agentName,
+    agent_first_name: identity.agentFirstName,
+  }
+}

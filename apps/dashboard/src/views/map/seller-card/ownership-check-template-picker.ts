@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import {
-  normalizeSmsTemplate,
+  fetchTemplatesByUseCase,
   renderTemplate,
   type SmsTemplate,
 } from '../../../lib/data/templateData'
@@ -53,8 +53,11 @@ export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguag
   return false
 }
 
+// Block only greetings where the comma is not followed by substantive content
+// (e.g. "Hi," or "Hi, {{seller_first_name}}"), not natural name-free openers
+// such as "Hi, this is {{agent_first_name}} about {{property_address}}."
 const hasBlankGreeting = (message: string): boolean =>
-  /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
+  /^(hi|hey|hello|hola|ola|marhaba)\s*,\s*(?:\{\{|\[\[|$)/i.test(message.trim())
 
 const hasHiThereGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
@@ -260,25 +263,18 @@ export const pickRandomOwnershipCheckTemplate = (
 
 let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
 
+export const resetOwnershipCheckTemplateCacheForTests = (): void => {
+  ownershipTemplateCache = null
+}
+
+/** Active ownership_check rows from Supabase sms_templates (via template API). */
 export const fetchOwnershipCheckTemplates = async (): Promise<SmsTemplate[]> => {
   const now = Date.now()
   if (ownershipTemplateCache && ownershipTemplateCache.expiresAt > now) {
     return ownershipTemplateCache.templates
   }
 
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase
-    .from('sms_templates')
-    .select('*')
-    .eq('use_case', OWNERSHIP_CHECK_USE_CASE)
-    .eq('is_active', true)
-    .limit(2000)
-
-  if (error) {
-    throw new Error(error.message || 'ownership_check_templates_unavailable')
-  }
-
-  const templates = (Array.isArray(data) ? data : []).map((row) => normalizeSmsTemplate(row as AnyRecord))
+  const templates = await fetchTemplatesByUseCase(OWNERSHIP_CHECK_USE_CASE)
   ownershipTemplateCache = {
     templates,
     expiresAt: now + 60_000,
@@ -318,11 +314,14 @@ export const resolveMapOwnerLanguage = async (
   record: Record<string, unknown>,
   masterOwnerId: string | null,
 ): Promise<string> => {
+  // Prospect language wins over master-owner language for ownership-check template selection.
   const inline = asString(
-    record.best_language
-    ?? record.bestLanguage
+    record.prospect_language_preference
+    ?? record.prospectLanguagePreference
     ?? record.language_preference
     ?? record.languagePreference
+    ?? record.best_language
+    ?? record.bestLanguage
     ?? record.language
     ?? record.seller_language
     ?? record.sellerLanguage,

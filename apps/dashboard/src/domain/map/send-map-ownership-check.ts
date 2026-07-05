@@ -136,9 +136,6 @@ export const sendMapOwnershipCheck = async ({
   if (!text(selection.renderedMessage)) {
     return { ok: false, errorMessage: 'Missing rendered message', queueId: null, messageEventId: null, insertPayload: null }
   }
-  if (!text(identity.prospectFirstName)) {
-    return { ok: false, errorMessage: 'Missing seller first name', queueId: null, messageEventId: null, insertPayload: null }
-  }
   if (!text(identity.agentName)) {
     return { ok: false, errorMessage: 'No SMS agent assigned to this property', queueId: null, messageEventId: null, insertPayload: null }
   }

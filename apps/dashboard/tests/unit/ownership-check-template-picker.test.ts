@@ -1,14 +1,26 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SmsTemplate } from '../../src/lib/data/templateData'
 import {
   buildOwnershipTemplatePool,
   canonicalizeOwnerLanguage,
   evaluateOwnershipTemplate,
+  fetchOwnershipCheckTemplates,
+  resetOwnershipCheckTemplateCacheForTests,
   filterOwnershipTemplatesForLanguage,
   languagesMatchForTemplate,
+  pickOwnershipCheckTemplateForMap,
   pickRandomOwnershipCheckTemplate,
   pickWeightedRandom,
+  resolveMapOwnerLanguage,
 } from '../../src/views/map/seller-card/ownership-check-template-picker'
+
+vi.mock('../../src/lib/data/templateData', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/lib/data/templateData')>()
+  return {
+    ...actual,
+    fetchTemplatesByUseCase: vi.fn(actual.fetchTemplatesByUseCase),
+  }
+})
 
 const makeTemplate = (overrides: Partial<SmsTemplate> & { id: string; language: string; templateText: string }): SmsTemplate => ({
   templateId: overrides.id,
@@ -38,6 +50,55 @@ const context = {
 }
 
 describe('ownership check template picker', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    resetOwnershipCheckTemplateCacheForTests()
+  })
+
+  it('resolves prospect language preference ahead of master-owner best_language', async () => {
+    await expect(resolveMapOwnerLanguage({
+      language_preference: 'Spanish',
+      best_language: 'English',
+    }, 'mo-1')).resolves.toBe('Spanish')
+  })
+
+  it('randomizes ownership_check templates for the resolved prospect language', async () => {
+    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
+      makeTemplate({ id: 'es-1', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, pregunta sobre {{property_address}}' }),
+      makeTemplate({ id: 'es-2', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, ¿sigue siendo su propiedad en {{property_address}}?' }),
+    ]
+    vi.mocked(fetchTemplatesByUseCase).mockResolvedValue(templates)
+
+    const selection = await pickOwnershipCheckTemplateForMap(
+      context,
+      'Spanish',
+      { random: () => 0.99 },
+    )
+
+    expect(selection?.language).toBe('Spanish')
+    expect(['es-1', 'es-2']).toContain(selection?.templateId)
+    expect(selection?.selectionReason).toMatch(/random/)
+  })
+
+  it('loads active ownership_check templates from Supabase via fetchTemplatesByUseCase', async () => {
+    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+    const catalog = [
+      makeTemplate({
+        id: 'supabase-oc-1',
+        language: 'English',
+        templateText: 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.',
+      }),
+    ]
+    vi.mocked(fetchTemplatesByUseCase).mockResolvedValueOnce(catalog)
+
+    const templates = await fetchOwnershipCheckTemplates()
+    expect(fetchTemplatesByUseCase).toHaveBeenCalledWith('ownership_check')
+    expect(templates).toEqual(catalog)
+    expect(templates.every((template) => template.useCaseSlug === 'ownership_check')).toBe(true)
+  })
+
   it('canonicalizes owner language aliases', () => {
     expect(canonicalizeOwnerLanguage('spanish')).toBe('Spanish')
     expect(canonicalizeOwnerLanguage('Asian Indian (Hindi or Other)')).toBe('Indian (Hindi or Other)')
