@@ -72,9 +72,18 @@ describe('ownership check template picker', () => {
     const picks = new Set<string>()
     for (let i = 0; i < 30; i += 1) {
       const picked = pickRandomOwnershipCheckTemplate(templates, context, 'English')
-      if (picked?.id) picks.add(picked.id)
+      if (picked?.templateId) picks.add(picked.templateId)
     }
     expect(picks.size).toBeGreaterThan(1)
+  })
+
+  it('rejects blank or Hi there greetings instead of repairing them', () => {
+    const templates = [
+      makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' }),
+      makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' }),
+    ]
+    const pool = buildOwnershipTemplatePool(templates, context, 'English')
+    expect(pool.length).toBe(0)
   })
 
   it('supports weighted random selection', () => {
@@ -114,7 +123,7 @@ describe('ownership check template picker', () => {
         property_address: '2246 7th St W, Bradenton, FL',
       })
       expect(result).not.toBeNull()
-      expect(result?.repaired).toContain('Hey Maria,')
+      expect(result?.rendered).toContain('Hey Maria,')
     })
 
     it('never keeps an entity name as the sole ownership-check candidate for a first-touch pool', () => {
@@ -142,7 +151,7 @@ describe('ownership check template picker', () => {
       // first-touch, even though a generic ownership-check is semantically a
       // first touch too.
       isFirstTouch: false,
-      templateText: 'Hi, this is {{agent_first_name}}. I\'m reaching out about {{property_address}}. Are you the owner?',
+      templateText: 'This is {{agent_first_name}}. I\'m reaching out about {{property_address}}. Are you the owner?',
     })
 
     it('selects the generic template when seller_first_name is unresolved and only personalized first-touch templates exist otherwise', () => {
@@ -163,9 +172,9 @@ describe('ownership check template picker', () => {
 
       expect(pool).toHaveLength(1)
       expect(pool[0].template.id).toBe('en-generic')
-      expect(pool[0].repaired).not.toContain('William')
-      expect(pool[0].repaired).not.toContain('Ludwig')
-      expect(pool[0].repaired).toContain('Andre')
+      expect(pool[0].rendered).not.toContain('William')
+      expect(pool[0].rendered).not.toContain('Ludwig')
+      expect(pool[0].rendered).toContain('Andre')
     })
 
     it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {

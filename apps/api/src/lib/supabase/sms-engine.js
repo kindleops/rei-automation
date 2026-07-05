@@ -494,7 +494,8 @@ export function normalizeSendQueueRow(row) {
     master_owner_id: safe_row.master_owner_id || null,
     prospect_id: safe_row.prospect_id || null,
     property_id: safe_row.property_id || null,
-    phone_id: safe_row.phone_id || safe_row.phone_item_id || null,
+    phone_id: safe_row.phone_id || safe_row.phone_number_id || safe_row.phone_item_id || null,
+    phone_number_id: safe_row.phone_number_id || safe_row.phone_id || safe_row.phone_item_id || null,
     market_id: safe_row.market_id || null,
     sms_agent_id:
       safe_row.sms_agent_id ||
@@ -1431,7 +1432,20 @@ export async function incrementTextgridNumberUsage(selection, deps = {}) {
   return data || null;
 }
 
-function buildSuccessMessageEvent(row, send_result, options = {}) {
+function resolveOutboundMessageEventSourceApp(row_metadata = {}) {
+  if (row_metadata.proof) return "internal_test";
+  if (
+    clean(row_metadata.source) === "map_command" ||
+    clean(row_metadata.send_source) === "map_command" ||
+    clean(row_metadata.origin_surface) === "command_map" ||
+    clean(row_metadata.message_events_source_app) === "LeadCommand Map"
+  ) {
+    return "LeadCommand Map";
+  }
+  return "Send Queue";
+}
+
+export function buildSuccessMessageEvent(row, send_result, options = {}) {
   const normalized = normalizeSendQueueRow(row);
   const row_metadata = ensureObject(normalized.metadata);
   const event_timestamp = options.now || nowIso();
@@ -1456,7 +1470,7 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
     direction: "outbound",
     type: "outbound",
     event_type: "outbound_send",
-    source_app: row_metadata.proof ? "internal_test" : "Send Queue",
+    source_app: resolveOutboundMessageEventSourceApp(row_metadata),
     trigger_name: clean(row_metadata.proof_source) || "queue-send",
     triggered_by: clean(row_metadata.proof_source) || "queue_runner",
     processed_by: "Queue Runner",
@@ -1492,7 +1506,10 @@ function buildSuccessMessageEvent(row, send_result, options = {}) {
     language: normalized.language || null,
     classification_confidence: normalized.classification_confidence || null,
     metadata: {
-      source: "supabase_send_queue",
+      source:
+        clean(row_metadata.source) ||
+        clean(row_metadata.send_source) ||
+        "supabase_send_queue",
       queue_key,
       send_result,
       client_send_id: normalized.metadata?.client_send_id || null,
@@ -1558,7 +1575,7 @@ function buildFailureMessageEvent(row, error, options = {}) {
     direction: "outbound",
     type: "outbound",
     event_type: "outbound_send_failed",
-    source_app: row_metadata.proof ? "internal_test" : "Send Queue",
+    source_app: resolveOutboundMessageEventSourceApp(row_metadata),
     trigger_name: clean(row_metadata.proof_source) || "queue-send-failed",
     triggered_by: clean(row_metadata.proof_source) || "queue_runner",
     processed_by: "Queue Runner",
@@ -4068,7 +4085,7 @@ function insertPayloadForGuard(row = {}, now = null) {
 
 function isInboxSendNowRow(row = {}) {
   const queue_key = clean(row.queue_key || row.queue_id || "");
-  return queue_key.startsWith("inbox:send_now:");
+  return queue_key.startsWith("inbox:send_now:") || queue_key.startsWith("map:ownership_check:");
 }
 
 function metadataSourceValue(row = {}) {
@@ -4222,8 +4239,11 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     isInboxSendNowRow(row) ||
     metadataSourceValue(row) === "inbox" ||
     metadataSourceValue(row) === "manual_inbox" ||
+    metadataSourceValue(row) === "map_command" ||
     metadataActionValue(row) === "send_now" ||
-    metadataCreatedFromValue(row) === "leadcommand_inbox";
+    metadataActionValue(row) === "send_ownership_check" ||
+    metadataCreatedFromValue(row) === "leadcommand_inbox" ||
+    metadataCreatedFromValue(row) === "leadcommand_map";
 
   if (is_inbox_send_now && normalizeQueueStatusValue(row.queue_status) === "queued") {
     const has_message_body = Boolean(clean(row.message_body || row.message_text));
