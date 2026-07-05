@@ -870,6 +870,7 @@ export type CommandMapSellerIdentity = {
   prospectId: string | null
   prospectFirstName: string | null
   prospectFullName: string | null
+  prospectLanguagePreference: string | null
   smsEligible: boolean
   agentPersona: string | null
   agentFamily: string | null
@@ -878,14 +879,19 @@ export type CommandMapSellerIdentity = {
 const readProspectIdentity = async (
   prospectId: string | null | undefined,
   signal?: AbortSignal,
-): Promise<{ prospectFirstName: string | null; prospectFullName: string | null; smsEligible: boolean } | null> => {
+): Promise<{
+  prospectFirstName: string | null
+  prospectFullName: string | null
+  prospectLanguagePreference: string | null
+  smsEligible: boolean
+} | null> => {
   const id = String(prospectId ?? '').trim()
   if (!id) return null
 
   const supabase = getSupabaseClient()
   let query = supabase
     .from('prospects')
-    .select('first_name,full_name,sms_eligible')
+    .select('first_name,full_name,sms_eligible,language_preference')
     .eq('prospect_id', id)
   if (signal) query = query.abortSignal(signal)
 
@@ -900,6 +906,7 @@ const readProspectIdentity = async (
   return {
     prospectFirstName: String(row.first_name ?? '').trim() || null,
     prospectFullName: String(row.full_name ?? '').trim() || null,
+    prospectLanguagePreference: String(row.language_preference ?? '').trim() || null,
     smsEligible: row.sms_eligible === true,
   }
 }
@@ -956,6 +963,7 @@ export const resolveCommandMapSellerIdentity = async (params: {
     prospectId,
     prospectFirstName: prospectIdentity?.prospectFirstName ?? null,
     prospectFullName: prospectIdentity?.prospectFullName ?? null,
+    prospectLanguagePreference: prospectIdentity?.prospectLanguagePreference ?? null,
     smsEligible: prospectIdentity?.smsEligible ?? false,
     agentPersona: agentSignal?.agentPersona ?? null,
     agentFamily: agentSignal?.agentFamily ?? null,

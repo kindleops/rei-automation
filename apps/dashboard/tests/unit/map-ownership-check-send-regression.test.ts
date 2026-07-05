@@ -369,6 +369,8 @@ describe('map ownership check send regression', () => {
     const source = await readFile(actionsPath, 'utf8')
     expect(source).toContain('sendInboxMessageNow')
     expect(source).toContain('resolveCommandMapSellerIdentity')
+    expect(source).toContain('prospectLanguagePreference')
+    expect(source).toContain('languageRecord')
     expect(source).toContain('renderTemplate(followUpTemplate, templateContext)')
     expect(source).toContain('skipRenderGuard: true')
     expect(source).toContain('messageType: \'ownership_check\'')

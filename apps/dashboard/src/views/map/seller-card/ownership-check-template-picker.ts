@@ -27,7 +27,11 @@ const OWNER_LANGUAGE_ALIASES: Record<string, string> = {
   japanese: 'Japanese',
   korean: 'Korean',
   mandarin: 'Mandarin',
+  'mandarin chinese': 'Mandarin',
   chinese: 'Mandarin',
+  zh: 'Mandarin',
+  'zh-cn': 'Mandarin',
+  cn: 'Mandarin',
   hindi: 'Indian (Hindi or Other)',
   'indian (hindi or other)': 'Indian (Hindi or Other)',
   'asian indian (hindi or other)': 'Indian (Hindi or Other)',
@@ -50,8 +54,13 @@ export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguag
   const templateToken = template.toLowerCase()
   if (ownerToken.includes('hindi') && templateToken.includes('hindi')) return true
   if (ownerToken.includes('indian') && templateToken.includes('indian')) return true
+  const mandarinFamily = new Set(['mandarin', 'chinese', 'zh', 'zh-cn', 'cn'])
+  if (mandarinFamily.has(ownerToken) && mandarinFamily.has(templateToken)) return true
   return false
 }
+
+const usesNonLatinSellerNameMatching = (sellerFirstName: string): boolean =>
+  /[\u3040-\u9fff\u3400-\u4dbf\uac00-\ud7af\u0600-\u06ff\u0590-\u05ff]/.test(sellerFirstName)
 
 // Block only greetings where the comma is not followed by substantive content
 // (e.g. "Hi," or "Hi, {{seller_first_name}}"), not natural name-free openers
@@ -108,6 +117,9 @@ const containsForbiddenEntityGreeting = (
 const greetingIncludesSellerFirstName = (message: string, sellerFirstName: string): boolean => {
   const first = asString(sellerFirstName, '').trim()
   if (!first) return false
+  if (usesNonLatinSellerNameMatching(first)) {
+    return message.includes(first)
+  }
   const pattern = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i')
   return pattern.test(message)
 }
@@ -191,11 +203,16 @@ export const filterOwnershipTemplatesForLanguage = (
   templates: SmsTemplate[],
   ownerLanguage: string,
 ): SmsTemplate[] => {
+  const canonical = canonicalizeOwnerLanguage(ownerLanguage)
   const languageMatched = templates.filter((template) =>
-    languagesMatchForTemplate(ownerLanguage, template.language),
+    languagesMatchForTemplate(canonical, template.language),
   )
   if (languageMatched.length) return languageMatched
-  return templates.filter((template) => languagesMatchForTemplate('English', template.language))
+  // Never silently downgrade a Mandarin/Spanish/etc prospect to English templates.
+  if (canonical.toLowerCase() === 'english') {
+    return templates.filter((template) => languagesMatchForTemplate('English', template.language))
+  }
+  return []
 }
 
 const evaluateTemplates = (

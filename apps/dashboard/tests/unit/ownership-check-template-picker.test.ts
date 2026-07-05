@@ -117,7 +117,37 @@ describe('ownership check template picker', () => {
     ]
 
     expect(filterOwnershipTemplatesForLanguage(templates, 'Spanish').map((t) => t.id)).toEqual(['es-1'])
-    expect(filterOwnershipTemplatesForLanguage(templates, 'Vietnamese').map((t) => t.id)).toEqual(['en-1'])
+    expect(filterOwnershipTemplatesForLanguage(templates, 'English').map((t) => t.id)).toEqual(['en-1'])
+    expect(filterOwnershipTemplatesForLanguage(templates, 'Vietnamese')).toEqual([])
+  })
+
+  it('never downgrades a Mandarin prospect to English ownership_check templates', () => {
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
+      makeTemplate({ id: 'zh-1', language: 'Mandarin', templateText: '您好{{seller_first_name}}，关于{{property_address}}的问题。' }),
+    ]
+
+    expect(filterOwnershipTemplatesForLanguage(templates, 'Mandarin').map((t) => t.id)).toEqual(['zh-1'])
+    expect(filterOwnershipTemplatesForLanguage([templates[0]], 'Mandarin')).toEqual([])
+  })
+
+  it('selects Mandarin ownership_check templates for Mandarin prospects', () => {
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
+      makeTemplate({ id: 'zh-1', language: 'Mandarin', templateText: '您好{{seller_first_name}}，我是{{agent_first_name}}，关于{{property_address}}。' }),
+      makeTemplate({ id: 'zh-2', language: 'Chinese', templateText: '你好{{seller_first_name}}，{{property_address}}是您名下的房产吗？' }),
+    ]
+    const mandarinContext = {
+      ...context,
+      seller_first_name: '伟',
+      seller_name: '伟',
+      property_address: '1195 Arona St, Saint Paul, MN 55108',
+    }
+
+    const pool = buildOwnershipTemplatePool(templates, mandarinContext, 'Mandarin')
+    expect(pool.map((entry) => entry.template.id)).toEqual(['zh-1', 'zh-2'])
+    expect(pool.every((entry) => entry.rendered.includes('伟'))).toBe(true)
+    expect(pool.some((entry) => entry.rendered.includes('Hi'))).toBe(false)
   })
 
   it('builds a multi-template pool and randomizes selection', () => {

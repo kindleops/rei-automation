@@ -301,17 +301,17 @@ export const useSellerMapCardActions = ({
       sendThread = resolvedSendThread
 
       let manualTemplateValues = buildMapTemplateManualValues(record)
+      let liveIdentity: Awaited<ReturnType<typeof resolveCommandMapSellerIdentity>> | null = null
       const masterOwnerId = resolveMasterOwnerId()
         || await resolveMasterOwnerIdForProperty(viewModel.propertyId)
         || null
 
-      // Always hydrate prospect + agent from Supabase on uncontacted sends — map pins
-      // often omit agent_persona and prospect names even when master_owners has them.
+      // Always hydrate prospect + agent + language from Supabase on uncontacted sends.
       if (eligibility.isUncontacted) {
         const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
           || text(firstDefined(record, ['prospect_id', 'prospectId']))
           || null
-        const liveIdentity = await resolveCommandMapSellerIdentity({
+        liveIdentity = await resolveCommandMapSellerIdentity({
           prospectId: resolvedProspectId,
           masterOwnerId,
         })
@@ -353,7 +353,23 @@ export const useSellerMapCardActions = ({
           return
         }
 
-        const ownerLanguage = await resolveMapOwnerLanguage(record, masterOwnerId)
+        const hydratedProspectLanguage = text(firstDefined(record, [
+          'prospect_language_preference',
+          'prospectLanguagePreference',
+          'language_preference',
+          'languagePreference',
+          'language',
+          'detected_language',
+          'seller_language',
+          'sellerLanguage',
+        ])) || liveIdentity?.prospectLanguagePreference || ''
+        const languageRecord = {
+          ...record,
+          prospect_language_preference: hydratedProspectLanguage,
+          language_preference: hydratedProspectLanguage,
+          language: hydratedProspectLanguage,
+        }
+        const ownerLanguage = await resolveMapOwnerLanguage(languageRecord, masterOwnerId)
         let templateSelection = null
         try {
           templateSelection = await pickOwnershipCheckTemplateForMap(
