@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { InboxThread } from '../../../domain/inbox/inbox-model-types'
 import type { ThreadContext, ThreadMessage } from '../../../lib/data/inboxData'
 import {
@@ -14,8 +14,8 @@ import {
   renderTemplate,
 } from '../../../lib/data/templateData'
 import {
-  canonicalizeOwnerLanguage,
   pickOwnershipCheckTemplateForMap,
+  resolveMapOwnerLanguage,
 } from './ownership-check-template-picker'
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
@@ -219,65 +219,18 @@ export const useSellerMapCardActions = ({
 }) => {
   const [followUpState, setFollowUpState] = useState<FollowUpButtonState>('idle')
   const [followUpError, setFollowUpError] = useState<string | null>(null)
-  const [ownershipCheckReady, setOwnershipCheckReady] = useState<boolean | null>(null)
-  const [ownershipCheckBlockReason, setOwnershipCheckBlockReason] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false)
 
   const thread = buildThreadFromViewModel(viewModel, record)
   const ownershipHints = buildMapOwnershipCheckHints(viewModel, record)
 
-  useEffect(() => {
-    if (!viewModel.followUpEligibility.isUncontacted) {
-      setOwnershipCheckReady(true)
-      setOwnershipCheckBlockReason(null)
-      return
-    }
-
-    let cancelled = false
-    setOwnershipCheckReady(null)
-    setOwnershipCheckBlockReason(null)
-
-    void resolveMapOwnershipCheckIdentity(viewModel.propertyId, { hints: ownershipHints })
-      .then((result) => {
-        if (cancelled) return
-        if (result.ok) {
-          setOwnershipCheckReady(true)
-          setOwnershipCheckBlockReason(null)
-          return
-        }
-        setOwnershipCheckReady(false)
-        setOwnershipCheckBlockReason(result.error)
-      })
-      .catch((error) => {
-        if (cancelled) return
-        setOwnershipCheckReady(false)
-        setOwnershipCheckBlockReason(error instanceof Error ? error.message : 'property_owner_link_missing')
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    ownershipHints.agentFamily,
-    ownershipHints.agentPersona,
-    ownershipHints.masterOwnerId,
-    ownershipHints.phoneId,
-    ownershipHints.prospectId,
-    ownershipHints.recipientPhone,
-    viewModel.followUpEligibility.isUncontacted,
-    viewModel.propertyId,
-  ])
-
-  const ownershipCheckCanExecute = !viewModel.followUpEligibility.isUncontacted
-    || ownershipCheckReady === true
-
   const executeFollowUp = useCallback(async () => {
     if (followUpState === 'sending') return
 
     const eligibility = viewModel.followUpEligibility
-    if (!eligibility.canExecute || (eligibility.isUncontacted && !ownershipCheckCanExecute)) {
-      setFollowUpError(ownershipCheckBlockReason || eligibility.disabledReason)
+    if (!eligibility.canExecute) {
+      setFollowUpError(eligibility.disabledReason)
       setFollowUpState('blocked')
       window.setTimeout(() => {
         setFollowUpState('idle')
@@ -304,10 +257,11 @@ export const useSellerMapCardActions = ({
         }
 
         const identity = identityResult.identity
+        const ownerLanguage = await resolveMapOwnerLanguage(record, identity.masterOwnerId)
         const templateContext = buildOwnershipCheckTemplateContext(identity)
         const templateSelection = await pickOwnershipCheckTemplateForMap(
           templateContext,
-          canonicalizeOwnerLanguage(identity.ownerLanguage),
+          ownerLanguage,
           {
             propertyId: identity.propertyId,
             recipientPhone: identity.recipientPhone,
@@ -493,8 +447,6 @@ export const useSellerMapCardActions = ({
     record,
     thread,
     threadContext,
-    ownershipCheckCanExecute,
-    ownershipCheckBlockReason,
     ownershipHints,
     viewModel.followUpEligibility,
     viewModel.masterOwner.id,
@@ -552,9 +504,6 @@ export const useSellerMapCardActions = ({
     thread,
     followUpState,
     followUpError,
-    ownershipCheckCanExecute,
-    ownershipCheckBlockReason,
-    ownershipCheckReady,
     isSending,
     isTranslatingDraft,
     executeFollowUp,
