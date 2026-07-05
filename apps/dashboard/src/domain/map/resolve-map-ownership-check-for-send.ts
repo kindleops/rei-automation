@@ -1,6 +1,9 @@
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString } from '../../lib/data/shared'
-import { resolveCommandMapSellerPhone } from '../../lib/data/commandMapData'
+import {
+  resolveCommandMapSellerPhone,
+  resolveMasterOwnerIdForProperty,
+} from '../../lib/data/commandMapData'
 import { safeHumanName } from '../../lib/identity/entityDetection'
 import {
   buildMapOwnershipCheckHints,
@@ -92,6 +95,32 @@ const readMasterOwnerSendSignals = async (
   }
 }
 
+const readSellerWorkItemMasterOwnerId = async (propertyId: string): Promise<string> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('v_seller_work_items')
+    .select('master_owner_id')
+    .eq('property_id', propertyId)
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return ''
+  return text((data as Record<string, unknown>).master_owner_id)
+}
+
+const resolveMasterOwnerIdForSend = async (
+  propertyId: string,
+  hints: ReturnType<typeof buildMapOwnershipCheckHints>,
+): Promise<string> => {
+  const fromHints = text(hints.masterOwnerId)
+  if (fromHints) return fromHints
+
+  const fromProperty = await resolveMasterOwnerIdForProperty(propertyId)
+  if (fromProperty) return fromProperty
+
+  return readSellerWorkItemMasterOwnerId(propertyId)
+}
+
 /**
  * Browser send resolver: uses hydrated map-card identity first and never reads
  * protected prospects/phones tables. Phone and greeting name are resolved
@@ -108,7 +137,7 @@ export const resolveMapOwnershipCheckForSend = async (
   }
 
   const hints = buildMapOwnershipCheckHints(viewModel, record)
-  const masterOwnerId = text(hints.masterOwnerId)
+  const masterOwnerId = await resolveMasterOwnerIdForSend(normalizedPropertyId, hints)
   if (!masterOwnerId) {
     return { ok: false, error: 'property_owner_link_missing' }
   }

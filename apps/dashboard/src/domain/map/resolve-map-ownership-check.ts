@@ -638,7 +638,12 @@ export const buildMapOwnershipCheckHints = (
 
   return {
     masterOwnerId: viewModel.masterOwner.id
-      || text(firstDefined(record.master_owner_id, record.masterOwnerId))
+      || text(firstDefined(
+        record.master_owner_id,
+        record.masterOwnerId,
+        record.owner_id,
+        record.ownerId,
+      ))
       || null,
     prospectId: text(firstDefined(record.prospect_id, record.prospectId)) || null,
     phoneId: text(firstDefined(record.phone_id, record.resolved_phone_id)) || null,
