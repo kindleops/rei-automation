@@ -757,6 +757,71 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.mf-saved-library__save-row {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.mf-saved-library__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mf-saved-card {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  border: 1px solid var(--mf-border);
+  border-radius: var(--mf-radius-sm);
+  background: var(--mf-surface);
+}
+
+.mf-saved-card.is-favorite {
+  border-color: var(--mf-border-bright);
+  box-shadow: 0 0 0 1px var(--mf-glow);
+}
+
+.mf-saved-card__main {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mf-saved-card__name {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.mf-saved-card__summary,
+.mf-saved-card__meta {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--mf-text-muted);
+}
+
+.mf-saved-card__actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px;
+}
+
+.mf-icon-btn--danger {
+  color: var(--mf-danger);
+}
+
 .mf-workspace--mobile .mf-pane {
   min-height: auto;
 }

@@ -184,6 +184,34 @@ export interface MapFilterTokenRequest {
 
 export type MasterFiltersMobilePane = 'discover' | 'stack' | 'results' | 'saved'
 
+export interface MapFilterSavedFilter {
+  id: string
+  organizationId: string
+  createdBy: string
+  permissionScope: string
+  name: string
+  description: string
+  expression: AdvancedMapFilterGroup
+  summary: string
+  isFavorite: boolean
+  isSystem: boolean
+  scope: 'personal' | 'organization'
+  filterSchemaVersion: number
+  registryVersion: string
+  activeRuleCount: number
+  lastKnownPropertyCount: number | null
+  useCount: number
+  lastUsedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MapFilterSavedListResponse {
+  filterSchemaVersion: string
+  registryVersion: string
+  savedFilters: MapFilterSavedFilter[]
+}
+
 export const MAP_FILTER_ENTITIES: MapFilterEntity[] = [
   'property',
   'prospect',

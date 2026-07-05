@@ -8,6 +8,8 @@ import type {
   MapFilterRegistryResponse,
   MapFilterTokenRequest,
   MapFilterTokenResponse,
+  MapFilterSavedFilter,
+  MapFilterSavedListResponse,
   AdvancedMapFilterGroup,
 } from './types'
 
@@ -15,6 +17,7 @@ const REGISTRY_ROUTE = '/api/internal/dashboard/ops/map/filters/registry'
 const PREVIEW_ROUTE = '/api/internal/dashboard/ops/map/filters/preview'
 const TOKEN_ROUTE = '/api/internal/dashboard/ops/map/filters/token'
 const PRESETS_ROUTE = '/api/internal/dashboard/ops/map/filters/presets'
+const SAVED_ROUTE = '/api/internal/dashboard/ops/map/filters/saved'
 
 interface ApiEnvelope<T> {
   ok: boolean
@@ -114,4 +117,91 @@ export async function fetchMapFilterPresets() {
     }
   }
   return { ok: true as const, status: result.status, data: result.data.data }
+}
+
+export async function fetchMapFilterSavedFilters() {
+  const result = await callBackend<ApiEnvelope<MapFilterSavedListResponse>>(SAVED_ROUTE)
+  if (!result.ok) return result
+  if (!result.data?.ok || !result.data.data) {
+    return {
+      ok: false as const,
+      status: result.status,
+      error: result.data?.error || 'saved_list_failed',
+      message: result.data?.message || 'Failed to load saved filters',
+      upstream: result.data,
+    }
+  }
+  return { ok: true as const, status: result.status, data: result.data.data }
+}
+
+export async function saveMapFilterStack(payload: {
+  name: string
+  description?: string
+  expression: AdvancedMapFilterGroup
+  isFavorite?: boolean
+  scope?: 'personal' | 'organization'
+  lastKnownPropertyCount?: number | null
+}) {
+  const result = await callBackend<ApiEnvelope<{ savedFilter: MapFilterSavedFilter }>>(SAVED_ROUTE, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  if (!result.ok) return result
+  if (!result.data?.ok || !result.data.data?.savedFilter) {
+    return {
+      ok: false as const,
+      status: result.status,
+      error: result.data?.error || 'saved_create_failed',
+      message: result.data?.message || 'Failed to save filter',
+      upstream: result.data,
+    }
+  }
+  return { ok: true as const, status: result.status, data: result.data.data.savedFilter }
+}
+
+export async function updateMapFilterSaved(
+  id: string,
+  patch: Partial<{
+    name: string
+    description: string
+    isFavorite: boolean
+    scope: 'personal' | 'organization'
+    expression: AdvancedMapFilterGroup
+    lastKnownPropertyCount: number | null
+    action: 'duplicate' | 'record_use'
+  }>,
+) {
+  const result = await callBackend<ApiEnvelope<{ savedFilter?: MapFilterSavedFilter }>>(
+    `${SAVED_ROUTE}/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  )
+  if (!result.ok) return result
+  if (!result.data?.ok) {
+    return {
+      ok: false as const,
+      status: result.status,
+      error: result.data?.error || 'saved_update_failed',
+      message: result.data?.message || 'Failed to update saved filter',
+      upstream: result.data,
+    }
+  }
+  return { ok: true as const, status: result.status, data: result.data.data }
+}
+
+export async function deleteMapFilterSaved(id: string) {
+  const result = await callBackend<ApiEnvelope<Record<string, never>>>(
+    `${SAVED_ROUTE}/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+  if (!result.ok) return result
+  if (!result.data?.ok) {
+    return {
+      ok: false as const,
+      status: result.status,
+      error: result.data?.error || 'saved_delete_failed',
+      message: result.data?.message || 'Failed to delete saved filter',
+      upstream: result.data,
+    }
+  }
+  return { ok: true as const, status: result.status }
 }
