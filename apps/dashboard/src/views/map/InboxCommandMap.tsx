@@ -3490,6 +3490,11 @@ const applySellerPinFieldPresentation = (
     }
   }
 
+  if (masterFilterActive) {
+    applyMasterFilterMapLayerOverride(map, true)
+    return
+  }
+
   if (!sellerPinFieldActive) return
 
   for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
@@ -3497,6 +3502,40 @@ const applySellerPinFieldPresentation = (
   }
   for (const layerId of Object.values(PROPERTY_UNIVERSE_LAYER_IDS)) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+}
+
+/** Master Filters must show scoped MVT property-universe tiles, not seller/thread pin overlays. */
+const applyMasterFilterMapLayerOverride = (
+  map: maplibregl.Map,
+  active: boolean,
+): void => {
+  if (!active) return
+  const zoom = map.getZoom()
+  const showTiles = shouldUseVectorTileSource(zoom)
+  const vis = (on: boolean) => on ? 'visible' : 'none'
+
+  for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', vis(showTiles))
+  }
+  for (const layerId of SELLER_PIN_ASSET_LAYER_IDS) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+  for (const layerId of SELLER_PIN_ORB_LAYER_IDS) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+  for (const layerId of [...RAW_LAYER_IDS, ...CLUSTER_POINT_LAYER_IDS, ...CLUSTER_LAYER_IDS]) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+  for (const layerId of Object.values(PROPERTY_UNIVERSE_LAYER_IDS)) {
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  }
+
+  try {
+    const tileSource = map.getSource(PROPERTY_TILES_SOURCE_ID) as maplibregl.VectorTileSource | undefined
+    tileSource?.reload?.()
+  } catch {
+    // ignore reload errors during style transitions
   }
 }
 
@@ -7881,12 +7920,13 @@ export function InboxCommandMap({
 
     let sellerPinIdleSyncTimer: ReturnType<typeof setTimeout> | null = null
     mapInstance.on('idle', () => {
+      if (appliedMapFilterTokenRef.current) return
       if (!sellerPinLayersRef.current.sellerPins || sellerPinsGeojsonRef.current.features.length === 0) return
       if (sellerPinIdleSyncTimer) clearTimeout(sellerPinIdleSyncTimer)
       sellerPinIdleSyncTimer = setTimeout(() => {
         sellerPinIdleSyncTimer = null
         const liveMap = mapRef.current
-        if (!isStyleSafe(liveMap)) return
+        if (!isStyleSafe(liveMap) || appliedMapFilterTokenRef.current) return
         applySellerPinFieldPresentation(liveMap, {
           sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
           viewportZoom: liveMap.getZoom(),
@@ -7927,6 +7967,11 @@ export function InboxCommandMap({
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
     const map = mapRef.current!
+    if (appliedMapFilterToken) {
+      safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, EMPTY_GEOJSON)
+      safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, EMPTY_GEOJSON)
+      return
+    }
     const sellerFallbackActive = sellerPinLayers.sellerPins
       && sellerPinsGeojson.features.length > 0
       && !isSellerPinIconLayerReady(map)
@@ -7949,7 +7994,7 @@ export function InboxCommandMap({
     safeSetGeoJsonSourceData(map, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
-  }, [buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson, sellerPinLayers.sellerPins, sellerPinsGeojson])
+  }, [appliedMapFilterToken, buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson, sellerPinLayers.sellerPins, sellerPinsGeojson])
 
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
@@ -8076,6 +8121,9 @@ export function InboxCommandMap({
       ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
       : undefined
     ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterToken)
+    if (appliedMapFilterToken) {
+      applyMasterFilterMapLayerOverride(map, true)
+    }
   }, [appliedMapFilterToken, baseStyleLoading, viewportZoom])
 
   // ── Zoom-band layer visibility (no blank ranges) ──────────────────────────
@@ -8106,8 +8154,12 @@ export function InboxCommandMap({
         if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showAggregates))
       }
 
-      for (const lid of ALL_PROPERTY_TILE_LAYER_IDS) {
-        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showTiles))
+      if (masterFilterActive) {
+        applyMasterFilterMapLayerOverride(map, true)
+      } else {
+        for (const lid of ALL_PROPERTY_TILE_LAYER_IDS) {
+          if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showTiles))
+        }
       }
 
       for (const lid of [
@@ -8369,10 +8421,12 @@ export function InboxCommandMap({
       (activityMode !== 'sends' && !activeKpiFilter)
       || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
     if (sellerPinFallbackActive) clusteredMode = false
+    const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
     const sellerPinFieldReady = sellerPinLayers.sellerPins
       && sellerPinsGeojsonRef.current.features.length > 0
       && isSellerPinIconLayerReady(map)
-    const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinFieldReady
+      && !masterFilterActive
+    const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinFieldReady && !masterFilterActive
     RAW_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
     })
@@ -8382,7 +8436,7 @@ export function InboxCommandMap({
     CLUSTER_LAYER_IDS.forEach((layerId) => {
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
     })
-  }, [activeKpiFilter, activityMode, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, sellerPinsGeojson, baseStyleLoading])
+  }, [activeKpiFilter, activityMode, appliedMapFilterToken, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, sellerPinsGeojson, baseStyleLoading])
 
   useEffect(() => {
     const map = mapRef.current
@@ -8968,17 +9022,19 @@ export function InboxCommandMap({
         geojson: nextSellerPinsGeojson,
         masterFilterActive: Boolean(appliedMapFilterToken),
       })
-      syncCommandPinSourcesWithSellerFallback(
-        map,
-        nextSellerPinsGeojson,
-        visiblePinsRef.current,
-        {
-          sellerPinsEnabled: sellerPinLayers.sellerPins,
-          selectedConversationId: selectedThreadRef.current?.id ?? null,
-          activeKpiFilter: activeKpiFilterRef.current,
-          styleMode: mapStyleModeRef.current,
-        },
-      )
+      if (!appliedMapFilterToken) {
+        syncCommandPinSourcesWithSellerFallback(
+          map,
+          nextSellerPinsGeojson,
+          visiblePinsRef.current,
+          {
+            sellerPinsEnabled: sellerPinLayers.sellerPins,
+            selectedConversationId: selectedThreadRef.current?.id ?? null,
+            activeKpiFilter: activeKpiFilterRef.current,
+            styleMode: mapStyleModeRef.current,
+          },
+        )
+      }
     }
   }, [appliedMapFilterToken, mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
 
@@ -9259,13 +9315,36 @@ export function InboxCommandMap({
                 initialToken={appliedMapFilterToken}
                 onApply={({ token, activeRuleCount }) => {
                   propertyUniverseAbortRef.current?.abort()
+                  appliedMapFilterTokenRef.current = token
                   setAppliedMapFilterToken(token)
                   setAppliedMasterFilterRuleCount(activeRuleCount)
+                  const map = mapRef.current
+                  if (isStyleSafe(map)) {
+                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
+                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
+                      : undefined
+                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
+                    applyMasterFilterMapLayerOverride(map, true)
+                  }
                 }}
                 onClear={() => {
                   propertyUniverseAbortRef.current?.abort()
+                  appliedMapFilterTokenRef.current = null
                   setAppliedMapFilterToken(null)
                   setAppliedMasterFilterRuleCount(0)
+                  const map = mapRef.current
+                  if (isStyleSafe(map)) {
+                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
+                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
+                      : undefined
+                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, null)
+                    applySellerPinFieldPresentation(map, {
+                      sellerPinsEnabled: sellerPinLayers.sellerPins,
+                      viewportZoom: map.getZoom(),
+                      geojson: sellerPinsGeojsonRef.current,
+                      masterFilterActive: false,
+                    })
+                  }
                 }}
               />
             ) : (
