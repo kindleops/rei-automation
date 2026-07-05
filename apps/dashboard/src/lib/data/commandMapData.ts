@@ -349,6 +349,13 @@ const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'display_phone',
   'canonical_e164',
   'seller_phone',
+].join(',')
+
+// Queried separately from COMMAND_MAP_SELLER_PIN_FEED_SELECT (below) so that an
+// environment where the 20260705120000 migration hasn't been applied yet still
+// gets the rest of the card — a missing column here must never take down the
+// whole detail query.
+const COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT = [
   'prospect_full_name',
   'prospect_first_name',
   'sms_eligible',
@@ -1092,6 +1099,39 @@ export const loadCommandMapSellerPinDetail = async (
     return data as Partial<CommandMapSellerPin> | null
   }
 
+  // Isolated from readFeed() on purpose: a 400 here (e.g. migration
+  // 20260705120000 not yet applied to this Supabase project, so these columns
+  // don't exist on the view) must degrade to "no prospect identity/agent data"
+  // only — it must never fail the rest of the card.
+  const readIdentityFields = async () => {
+    let query = supabase.from('v_command_map_seller_pin_feed').select(COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT)
+    if (propertyId) {
+      query = query.eq('property_id', propertyId)
+    } else if (options.threadKey) {
+      query = query.eq('thread_key', options.threadKey)
+    } else if (options.masterOwnerId) {
+      query = query.eq('master_owner_id', options.masterOwnerId)
+    } else if (options.prospectId) {
+      query = query.eq('prospect_id', options.prospectId)
+    } else {
+      return null
+    }
+    if (options.signal) query = query.abortSignal(options.signal)
+    try {
+      const { data, error } = await query.limit(1).maybeSingle()
+      if (error) {
+        if (!isAbortError(error) && import.meta.env.DEV) {
+          console.warn('[CommandMap] seller pin identity fields unavailable (migration pending?):', error)
+        }
+        return null
+      }
+      return data as Partial<CommandMapSellerPin> | null
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[CommandMap] seller pin identity fields query threw:', err)
+      return null
+    }
+  }
+
   const readCanonicalThread = async () => {
     let query = supabase.from('canonical_inbox_threads').select(COMMAND_MAP_CANONICAL_THREAD_SELECT)
     if (propertyId) {
@@ -1139,8 +1179,9 @@ export const loadCommandMapSellerPinDetail = async (
     return mapPropertyEnrichmentRow(propertyData, masterOwner)
   }
 
-  const [sellerWorkItem, canonicalThread, sellerWorkItemContact] = await Promise.all([
+  const [sellerWorkItem, identityFields, canonicalThread, sellerWorkItemContact] = await Promise.all([
     readFeed(),
+    readIdentityFields(),
     readCanonicalThread(),
     readSellerWorkItemContact(propertyId, options.signal),
   ])
@@ -1161,6 +1202,7 @@ export const loadCommandMapSellerPinDetail = async (
 
   const merged = {
     ...(sellerWorkItem ?? {}),
+    ...(identityFields ?? {}),
     ...(canonicalThread ?? {}),
     ...(sellerWorkItemContact ?? {}),
     ...(propertyEnrichment ?? {}),
