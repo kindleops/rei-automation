@@ -20,7 +20,7 @@ test("map ownership check payload validates with ownership_check message_type", 
       property_id: "prop-1",
       master_owner_id: "mo-1",
       prospect_id: "pros-1",
-      phone_number_id: "ph-1",
+      phone_id: "ph_certfix_16124515970",
       seller_first_name: "David",
       template_id: "tpl-1",
       selected_template_id: "tpl-1",
@@ -41,6 +41,9 @@ test("map ownership check payload validates with ownership_check message_type", 
   assert.equal(validation.normalized.use_case_template, "ownership_check");
   assert.equal(validation.normalized.source, "map_command");
   assert.equal(validation.normalized.action, "send_ownership_check");
+  // Canonical ph_ text id preserved as phone_id; UUID column stays null.
+  assert.equal(validation.normalized.phone_id, "ph_certfix_16124515970");
+  assert.equal(validation.normalized.phone_number_id, null);
 });
 
 test("map ownership check payload does not default to manual_inbox", () => {

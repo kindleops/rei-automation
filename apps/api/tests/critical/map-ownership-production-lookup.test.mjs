@@ -75,3 +75,25 @@ test(
     assert.ok(Array.isArray(phones));
   },
 );
+
+test(
+  "production schema contract: phone id column types (phone_id text, phone_number_id uuid)",
+  { skip: !canRunLiveLookup },
+  async () => {
+    // PostgREST exposes the live column types via its OpenAPI schema (definitions.<table>.properties.<col>.format).
+    const specRes = await productionGet(`/rest/v1/`, {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      Accept: "application/openapi+json",
+    });
+    assert.equal(specRes.status, 200, specRes.body);
+    const spec = JSON.parse(specRes.body);
+    const defs = spec.definitions || {};
+    const fmt = (table, col) => defs?.[table]?.properties?.[col]?.format || null;
+
+    assert.equal(fmt("phones", "phone_id"), "text", "phones.phone_id must be text");
+    assert.equal(fmt("send_queue", "phone_id"), "text", "send_queue.phone_id must be text");
+    assert.equal(fmt("send_queue", "phone_number_id"), "uuid", "send_queue.phone_number_id must be uuid");
+    assert.equal(fmt("message_events", "phone_number_id"), "uuid", "message_events.phone_number_id must be uuid");
+  },
+);
