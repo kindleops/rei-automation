@@ -8,18 +8,18 @@
         "matchingProperties": 124046,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 299
+        "durationMs": 426
       },
       "compiler": {
         "matchingProperties": 124046,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 696
+        "durationMs": 1211
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 698,
+      "durationMs": 1213,
       "pass": true
     },
     {
@@ -29,18 +29,18 @@
         "matchingProperties": 89222,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 400
+        "durationMs": 494
       },
       "compiler": {
         "matchingProperties": 89222,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 400
+        "durationMs": 742
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 402,
+      "durationMs": 745,
       "pass": true
     },
     {
@@ -50,18 +50,18 @@
         "matchingProperties": 22624,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 199
+        "durationMs": 204
       },
       "compiler": {
         "matchingProperties": 22624,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 198
+        "durationMs": 369
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 199,
+      "durationMs": 369,
       "pass": true
     },
     {
@@ -71,18 +71,18 @@
         "matchingProperties": 10672,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 163
+        "durationMs": 161
       },
       "compiler": {
         "matchingProperties": 10672,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 162
+        "durationMs": 334
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 163,
+      "durationMs": 335,
       "pass": true
     },
     {
@@ -92,18 +92,18 @@
         "matchingProperties": 805,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 167
+        "durationMs": 174
       },
       "compiler": {
         "matchingProperties": 805,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 167
+        "durationMs": 314
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 168,
+      "durationMs": 315,
       "pass": true
     },
     {
@@ -113,18 +113,18 @@
         "matchingProperties": 376,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 141
+        "durationMs": 138
       },
       "compiler": {
         "matchingProperties": 376,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 140
+        "durationMs": 337
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 141,
+      "durationMs": 338,
       "pass": true
     },
     {
@@ -134,18 +134,18 @@
         "matchingProperties": 121444,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 338
+        "durationMs": 423
       },
       "compiler": {
         "matchingProperties": 121444,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 338
+        "durationMs": 630
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 338,
+      "durationMs": 630,
       "pass": true
     },
     {
@@ -155,18 +155,18 @@
         "matchingProperties": 13061,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 259
+        "durationMs": 245
       },
       "compiler": {
         "matchingProperties": 13061,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 259
+        "durationMs": 373
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 259,
+      "durationMs": 375,
       "pass": true
     },
     {
@@ -176,18 +176,18 @@
         "matchingProperties": 3450,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 249
+        "durationMs": 226
       },
       "compiler": {
         "matchingProperties": 3450,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 249
+        "durationMs": 352
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 249,
+      "durationMs": 352,
       "pass": true
     },
     {
@@ -197,18 +197,18 @@
         "matchingProperties": 8891,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 369
+        "durationMs": 326
       },
       "compiler": {
         "matchingProperties": 8891,
         "matchingProspects": 0,
         "matchingMasterOwners": 0,
-        "durationMs": 368
+        "durationMs": 528
       },
       "propertyDiff": 0,
       "prospectDiff": 0,
       "ownerDiff": 0,
-      "durationMs": 369,
+      "durationMs": 528,
       "pass": true
     }
   ],

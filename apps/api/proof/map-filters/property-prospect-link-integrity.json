@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-07-05T05:40:20.342Z",
+  "ok": true,
+  "issues": [],
+  "rebuild": {
+    "inserted": 187210,
+    "malformed": 0,
+    "duration_ms": 5866.517,
+    "json_entries": 187210,
+    "orphan_property_refs": 0
+  },
+  "totals": {
+    "totalProspects": 149798,
+    "prospectsWithLinkedProperties": 149798,
+    "jsonRelationshipEntries": 187210,
+    "bridgeRelationships": 187210,
+    "duplicatePairs": 0,
+    "orphanPropertyRefs": 0,
+    "masterOwnerMismatches": 0,
+    "durationMs": 7675,
+    "missingCanonicalLinks": 0
+  }
+}

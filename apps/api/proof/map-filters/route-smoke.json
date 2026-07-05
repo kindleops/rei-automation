@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "name": "preview_property",
+      "status": 200,
+      "ok": true,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "preview_prospect",
+      "status": 200,
+      "ok": true,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "preview_owner",
+      "status": 200,
+      "ok": true,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "preview_nested_mixed",
+      "status": 200,
+      "ok": true,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "preview_invalid_field",
+      "status": 400,
+      "ok": false,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "preview_invalid_operator",
+      "status": 400,
+      "ok": false,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "token_valid",
+      "status": 200,
+      "ok": true,
+      "pass": true,
+      "leaks": []
+    },
+    {
+      "name": "unauthenticated",
+      "status": 401,
+      "ok": false,
+      "pass": true,
+      "leaks": []
+    }
+  ],
+  "issues": [],
+  "dashboardLiveEnabled": true
+}

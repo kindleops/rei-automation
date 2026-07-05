@@ -1,0 +1,98 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "id": "rel_any_linked",
+      "label": "ANY_LINKED",
+      "direct": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "durationMs": 3798
+      },
+      "compiler": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "durationMs": 2367
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 3801,
+      "pass": true
+    },
+    {
+      "id": "rel_primary_only",
+      "label": "PRIMARY_ONLY",
+      "direct": {
+        "matchingProperties": 74049,
+        "matchingProspects": 93948,
+        "matchingMasterOwners": 19006,
+        "durationMs": 4303
+      },
+      "compiler": {
+        "matchingProperties": 74049,
+        "matchingProspects": 93948,
+        "matchingMasterOwners": 19006,
+        "durationMs": 2374
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 4303,
+      "pass": true
+    },
+    {
+      "id": "rel_none_linked",
+      "label": "NONE_LINKED",
+      "direct": {
+        "matchingProperties": 30551,
+        "matchingProspects": 25463,
+        "matchingMasterOwners": 12509,
+        "durationMs": 1708
+      },
+      "compiler": {
+        "matchingProperties": 30551,
+        "matchingProspects": 25463,
+        "matchingMasterOwners": 12509,
+        "durationMs": 1139
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1709,
+      "pass": true
+    },
+    {
+      "id": "rel_all_linked",
+      "label": "ALL_LINKED",
+      "direct": {
+        "matchingProperties": 63151,
+        "matchingProspects": 70442,
+        "matchingMasterOwners": 15845,
+        "durationMs": 2351
+      },
+      "compiler": {
+        "matchingProperties": 63151,
+        "matchingProspects": 70442,
+        "matchingMasterOwners": 15845,
+        "durationMs": 1592
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2351,
+      "pass": true
+    }
+  ],
+  "issues": [],
+  "suite": "relationshipSemantics",
+  "entities": [
+    "property",
+    "prospect",
+    "owner"
+  ],
+  "exactPropertyCount": 124046,
+  "mappablePropertyCount": 124046
+}

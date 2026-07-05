@@ -4,8 +4,8 @@
     {
       "name": "same_expression_same_scope_reuses_digest",
       "ok": true,
-      "digestA": "ac42303c86992546c44e2953a0017ccd65bae62f61a10dcbd319f179c4542d46",
-      "digestB": "ac42303c86992546c44e2953a0017ccd65bae62f61a10dcbd319f179c4542d46"
+      "digestA": "bf0d0dcabb08950db90bddf54ca3163ae4cf17144dab885454cfd6fb6aec41c1",
+      "digestB": "bf0d0dcabb08950db90bddf54ca3163ae4cf17144dab885454cfd6fb6aec41c1"
     },
     {
       "name": "different_org_different_token",
