@@ -14,7 +14,6 @@ import type { ViewLayoutMode } from '../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { SellerMapCard } from './seller-card/SellerMapCard'
 import {
-  defaultBuyerMapFilters,
   type BuyerCommandData,
   type BuyerMapFilters,
   type BuyerProfilePoint,
@@ -142,11 +141,7 @@ import { MasterFiltersWorkspace } from './master-filters'
 import type { MapFilterBounds } from './master-filters'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
-  CONTACTABILITY_ORDER,
-  DISPOSITION_ORDER,
   LIFECYCLE_STAGE_META,
-  LIFECYCLE_STAGE_ORDER,
-  OPERATIONAL_STATUS_ORDER,
   contactabilityBlocksSend,
   normalizeContactability,
   normalizeDisposition,
@@ -2150,49 +2145,6 @@ const waitForMapContainerReady = (
     observer.observe(el)
   }
 })
-
-const countBuyerFilters = (filters: BuyerMapFilters | undefined): number => {
-  if (!filters) return 0
-  let count = 0
-  const textKeys: Array<keyof BuyerMapFilters> = [
-    'buyerType', 'buyerTier', 'buyerName', 'entityName', 'mailingName', 'companyName', 'buyerPhone', 'buyerEmail',
-    'buyerMarket', 'buyerState', 'buyerZip', 'market', 'submarket', 'county', 'city', 'state', 'zip', 'neighborhood',
-    'schoolDistrict', 'censusTract', 'opportunityZone', 'propertyType', 'assetClass', 'condition', 'renovationLevel',
-    'occupancy', 'vacancy', 'lastPurchaseDateFrom', 'lastPurchaseDateTo', 'firstPurchaseDateFrom', 'firstPurchaseDateTo',
-    'soldDateFrom', 'soldDateTo', 'recordingDateFrom', 'recordingDateTo', 'exitStrategyMatch',
-  ]
-  const rangeKeys: Array<keyof BuyerMapFilters> = [
-    'maxPurchaseCount', 'maxMatchScore', 'maxDispoPriorityScore', 'minVelocityScore', 'maxVelocityScore',
-    'minAveragePurchasePrice', 'maxAveragePurchasePrice', 'minMedianPurchasePrice', 'maxMedianPurchasePrice',
-    'minHighestPurchasePrice', 'maxHighestPurchasePrice', 'minLowestPurchasePrice', 'maxLowestPurchasePrice',
-    'minTotalSpend', 'maxTotalSpend', 'minCashPurchasePercent', 'maxCashPurchasePercent', 'minDaysSinceLastBuy',
-    'maxDaysSinceLastBuy', 'minBeds', 'maxBeds', 'minBaths', 'maxBaths', 'minUnits', 'maxUnits', 'minSqft', 'maxSqft',
-    'minLotSqft', 'maxLotSqft', 'minAcreage', 'maxAcreage', 'yearBuiltMin', 'yearBuiltMax', 'effectiveYearBuiltMin',
-    'effectiveYearBuiltMax', 'minStories', 'maxStories', 'minSalePrice', 'maxSalePrice', 'minPricePerSqft', 'maxPricePerSqft',
-    'minPricePerUnit', 'maxPricePerUnit', 'minArv', 'maxArv', 'minDiscountPercent', 'maxDiscountPercent',
-    'minSpreadPotential', 'maxSpreadPotential', 'minEstimatedRehab', 'maxEstimatedRehab', 'minEquityPercent', 'maxEquityPercent',
-    'minDistanceFromSubject', 'maxDistanceFromSubject', 'minConfidenceScore', 'maxConfidenceScore', 'minDemandScore', 'maxDemandScore',
-  ]
-  textKeys.forEach((key) => {
-    if (typeof filters[key] === 'string' && text(filters[key])) count += 1
-  })
-  rangeKeys.forEach((key) => {
-    if (filters[key] !== '') count += 1
-  })
-  if (filters.activityWindowDays !== defaultBuyerMapFilters.activityWindowDays) count += 1
-  if (filters.radiusMiles !== defaultBuyerMapFilters.radiusMiles) count += 1
-  if (filters.minPurchaseCount !== defaultBuyerMapFilters.minPurchaseCount) count += 1
-  if (filters.minMatchScore !== defaultBuyerMapFilters.minMatchScore) count += 1
-  if (filters.minDispoPriorityScore !== defaultBuyerMapFilters.minDispoPriorityScore) count += 1
-  count += filters.buyerSourceTypes.length
-  count += filters.buyerRoles.length
-  count += filters.buyerIdentityTags.length
-  count += filters.assetTypes.length
-  count += filters.dealTypes.length
-  count += filters.locationTags.length
-  count += filters.matchTags.length
-  return count
-}
 
 const buildBuyerHoverMarkup = (buyer: BuyerFeatureProps, styleMode: MapStyleMode): string => `
   <article class="nx-icm-hover nx-icm-hover--buyer" style="${escapeHtml(cardThemeStyleAttr(styleMode))}">
@@ -4201,7 +4153,7 @@ export function InboxCommandMap({
   const [mapDimension, setMapDimension] = useState<'2d' | '3d'>('2d')
   const [mapOverlays, setMapOverlays] = useState<MapOverlayToggles>({ ...defaultMapOverlays, ...initialMapOverlays })
 
-  const [showKpiBadges, setShowKpiBadges] = useState(true)
+  const [showKpiBadges] = useState(true)
   const [activeKpiFilter, setActiveKpiFilter] = useState<MapKpiFilterKey | null>(null)
   const [viewportBounds, setViewportBounds] = useState<CommandMapBounds | null>(null)
   const [viewportZoom, setViewportZoom] = useState(zoomedIn ? 10.5 : 4.4)
@@ -4604,7 +4556,6 @@ export function InboxCommandMap({
     () => buyerCommandData?.profiles.find((profile) => profile.buyerKey === (selectedBuyerPurchase?.buyerKey || selectedBuyerKey)) ?? null,
     [buyerCommandData?.profiles, selectedBuyerKey, selectedBuyerPurchase?.buyerKey],
   )
-  const buyerFilterCount = useMemo(() => countBuyerFilters(buyerFilters), [buyerFilters])
   const activeFilterCount = appliedMasterFilterRuleCount
   const mapFilterBounds = useMemo<MapFilterBounds | null>(() => {
     if (!viewportBounds) return null
@@ -4619,31 +4570,6 @@ export function InboxCommandMap({
     type: 'FeatureCollection',
     features: [],
   }), [])
-  const buyerFilterOptions = useMemo(() => {
-    const profiles = buyerCommandData?.profiles ?? []
-    const purchases = buyerCommandData?.recentPurchases ?? []
-    return {
-      markets: Array.from(new Set([
-        ...profiles.flatMap((profile) => profile.topMarkets),
-        ...purchases.map((purchase) => purchase.market),
-      ].filter(Boolean))).sort(),
-      states: Array.from(new Set([
-        ...profiles.flatMap((profile) => profile.topStates),
-        ...purchases.map((purchase) => purchase.propertyAddressState),
-      ].filter(Boolean))).sort(),
-      zips: Array.from(new Set([
-        ...profiles.flatMap((profile) => profile.topZips),
-        ...purchases.map((purchase) => purchase.propertyAddressZip),
-      ].filter(Boolean))).sort(),
-      propertyTypes: Array.from(new Set([
-        ...profiles.flatMap((profile) => profile.propertyTypeFocus),
-        ...purchases.map((purchase) => purchase.propertyType),
-      ].filter(Boolean))).sort(),
-      assetClasses: Array.from(new Set(profiles.flatMap((profile) => profile.assetClassesBought).filter(Boolean))).sort(),
-      buyerNames: Array.from(new Set(profiles.map((profile) => profile.buyerName).filter(Boolean))).sort(),
-      exitStrategies: Array.from(new Set(profiles.map((profile) => profile.buyerExitStrategy).filter(Boolean))).sort(),
-    }
-  }, [buyerCommandData?.profiles, buyerCommandData?.recentPurchases])
   const activeThemeDefinition = useMemo(() => getCommandMapTheme(mapStyleMode), [mapStyleMode])
   const mapThemeStyle = useMemo(
     () => ({
@@ -4656,7 +4582,6 @@ export function InboxCommandMap({
     [activeThemeDefinition, mapStyleMode],
   )
 
-  const clearBuyerFilters = () => onBuyerFiltersChange?.(defaultBuyerMapFilters)
   const selectedPropertyId = useMemo(() => (
     text((selectedHydratedThread as any)?.propertyId)
       || text((selectedHydratedThread as any)?.property_id)
@@ -8141,8 +8066,8 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
     if (!shouldUseVectorTileSource(viewportZoom)) return
-    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusters)
-      ? PROPERTY_UNIVERSE_LAYER_IDS.clusters
+    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
+      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
       : undefined
     ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterToken)
   }, [appliedMapFilterToken, baseStyleLoading, viewportZoom])
@@ -9163,15 +9088,6 @@ export function InboxCommandMap({
     })
   }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn])
 
-  const markets = Array.from(new Set(allPins.map((pin) => pin.market).filter(Boolean))).sort()
-  const stages = LIFECYCLE_STAGE_ORDER.filter((code) =>
-    allPins.some((pin) => normalizeLifecycleStage(pin.lifecycle_stage || pin.conversation_stage) === code),
-  )
-  const statuses = OPERATIONAL_STATUS_ORDER.filter((code) =>
-    allPins.some((pin) => normalizeOperationalStatus(pin.operational_status || pin.conversation_status) === code),
-  )
-  const temperatures = Array.from(new Set(allPins.map((pin) => normalizeLeadTemperature(pin.lead_temperature)).filter(Boolean))).sort()
-  const automationStatuses = Array.from(new Set(allPins.map((pin) => pin.automation_status).filter(Boolean))).sort()
   const selectedUnmapped = useMemo(
     () => selectedHydratedThread ? buildMapPin(selectedHydratedThread).unmapped : null,
     [selectedHydratedThread],
@@ -9343,6 +9259,7 @@ export function InboxCommandMap({
                 }}
               />
             ) : (
+            <>
             <div className="nx-icm__controls-panel">
               {activeControlsTab === 'modes' && (
                 <>
@@ -9770,6 +9687,7 @@ export function InboxCommandMap({
                 Close
               </button>
             </div>
+            </>
             )}
           </div>
         )}
