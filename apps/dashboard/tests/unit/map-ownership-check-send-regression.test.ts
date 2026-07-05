@@ -5,11 +5,9 @@ import {
   buildThreadFromViewModel,
   resolveMapThreadPhone,
 } from '../../src/views/map/seller-card/useSellerMapCardActions'
-import { resolveMapOwnershipCheckForSend } from '../../src/domain/map/resolve-map-ownership-check-for-send'
-import {
-  buildMapOwnershipCheckQueuePayload,
-  sendMapOwnershipCheck,
-} from '../../src/domain/map/send-map-ownership-check'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { buildMapOwnershipCheckQueuePayload } from '../../src/domain/map/send-map-ownership-check'
 import {
   buildOwnershipCheckTemplateContext,
 } from '../../src/domain/map/resolve-map-ownership-check'
@@ -113,64 +111,12 @@ describe('map ownership check send regression', () => {
     expect(vi.mocked(getSupabaseClient)).not.toHaveBeenCalled()
   })
 
-  it('4b. resolves master_owner_id from properties when the card record omits it', async () => {
-    const recordWithoutOwner = {
-      ...amandaRecord,
-      master_owner_id: undefined,
-      masterOwnerId: undefined,
-      owner_id: undefined,
-    }
-    delete (recordWithoutOwner as Record<string, unknown>).master_owner_id
-
-    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabaseMock({
-      properties: {
-        data: { master_owner_id: 'mo_804d2f26377bee1f43019235' },
-        error: null,
-      },
-      master_owners: {
-        data: {
-          best_phone_1: '+16514428447',
-          primary_phone_id: 'ph_amanda',
-          agent_persona: 'Andre Thompson',
-          agent_family: null,
-          display_name: 'mo_804d2f26377bee1f43019235 Trust',
-          best_language: 'English',
-        },
-        error: null,
-      },
-    }) as never)
-
-    const viewModel = buildSellerMapCardViewModel(recordWithoutOwner)
-    expect(viewModel.masterOwner.id).toBeNull()
-
-    const result = await resolveMapOwnershipCheckForSend('274564949', viewModel, recordWithoutOwner)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.identity.masterOwnerId).toBe('mo_804d2f26377bee1f43019235')
-    expect(result.identity.recipientPhone).toBe('+16514428447')
-  })
-
-  it('4. existing working phone sends without requiring canonical phone/prospect match', async () => {
-    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabaseMock({
-      master_owners: {
-        data: {
-          best_phone_1: '+16514428447',
-          primary_phone_id: 'ph_amanda',
-          agent_persona: 'Andre Thompson',
-          agent_family: null,
-          display_name: 'mo_804d2f26377bee1f43019235 Trust',
-          best_language: 'English',
-        },
-        error: null,
-      },
-    }) as never)
-
+  it('4. card thread resolves phone from hydrated record without ownership resolver', () => {
     const viewModel = buildSellerMapCardViewModel(amandaRecord)
-    const result = await resolveMapOwnershipCheckForSend('274564949', viewModel, amandaRecord)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.identity.recipientPhone).toBe('+16514428447')
-    expect(result.identity.phoneId).toBe('ph_amanda')
+    const thread = buildThreadFromViewModel(viewModel, amandaRecord)
+    expect(resolveMapThreadPhone(amandaRecord)).toBe('+16514428447')
+    expect(thread.canonicalE164).toBe('+16514428447')
+    expect(thread.prospectId).toBe('pros1_5d2dfe5ae95f982c0941f648')
   })
 
   it('5. entity-owned property uses property-linked human first name', () => {
@@ -179,27 +125,11 @@ describe('map ownership check send regression', () => {
     expect(values.seller_first_name).not.toContain('Trust')
   })
 
-  it('6. Amanda / 274564949 resolves to Amanda and authoritative best phone', async () => {
-    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabaseMock({
-      master_owners: {
-        data: {
-          best_phone_1: '+16514428447',
-          primary_phone_id: 'ph_amanda',
-          agent_persona: 'Andre Thompson',
-          agent_family: null,
-          display_name: 'mo_804d2f26377bee1f43019235 Trust',
-          best_language: 'English',
-        },
-        error: null,
-      },
-    }) as never)
-
-    const viewModel = buildSellerMapCardViewModel(amandaRecord)
-    const result = await resolveMapOwnershipCheckForSend('274564949', viewModel, amandaRecord)
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.identity.prospectFirstName).toBe('Amanda')
-    expect(result.identity.recipientPhone).toBe('+16514428447')
+  it('6. Amanda / 274564949 greets the human prospect, not the trust owner', () => {
+    const values = buildMapTemplateManualValues(amandaRecord)
+    expect(values.seller_first_name).toBe('Amanda')
+    expect(values.owner_name).toContain('Trust')
+    expect(values.seller_first_name).not.toContain('Trust')
   })
 
   it('8. human name missing selects a name-free ownership-check template from the Supabase pool', () => {
@@ -417,68 +347,12 @@ describe('map ownership check send regression', () => {
     expect(selection?.selectionReason).toMatch(/random/)
   })
 
-  it('20. manual inbox send path is exercised via backend dispatch', async () => {
-    const routing = await import('../../src/lib/data/textgridRouting')
-    vi.spyOn(routing, 'resolveOutboundTextgridNumber').mockResolvedValue({
-      ok: true,
-      from_phone_number: '+16125559999',
-      textgrid_number_id: null,
-      error: null,
-    } as never)
-
-    const backend = await import('../../src/lib/api/backendClient')
-    const dispatch = vi.spyOn(backend, 'sendInboxMessageNow').mockResolvedValue({
-      ok: true,
-      data: { queue_audit_id: 'queue-1', message_event_id: 'evt-1' },
-    } as never)
-
-    const result = await sendMapOwnershipCheck({
-      identity: {
-        propertyId: '274564949',
-        masterOwnerId: 'mo_804d2f26377bee1f43019235',
-        phoneId: 'ph_amanda',
-        recipientPhone: '+16514428447',
-        prospectId: 'pros1_5d2dfe5ae95f982c0941f648',
-        prospectFirstName: 'Amanda',
-        prospectFullName: 'Amanda L Tallen',
-        smsEligible: true,
-        agentName: 'Andre Thompson',
-        agentFirstName: 'Andre',
-        ownerDisplayName: 'Trust',
-        ownerLanguage: 'English',
-        propertyAddress: '983 Edmund Ave',
-        sellerDisplayName: 'Amanda L Tallen',
-        smsAgentId: null,
-        selectedAgentId: null,
-        resolutionSource: 'hydrated_map_identity',
-        resolutionDiagnostics: { candidateCount: 1, source: 'hydrated_map_identity' },
-      },
-      selection: {
-        template: makeTemplate('tpl', 'Hi Amanda'),
-        renderedMessage: 'Hi Amanda, this is Andre.',
-        templateId: 'tpl',
-        templateKey: 'tpl',
-        language: 'English',
-        weight: 1,
-        selectionReason: 'uniform_random',
-        excludedRecentTemplateId: null,
-      },
-      thread: { id: '+16514428447', marketId: 'Minneapolis, MN', threadKey: '+16514428447' } as never,
-      dryRun: false,
-    })
-
-    expect(result.ok).toBe(true)
-    expect(dispatch).toHaveBeenCalledTimes(1)
-    const payload = dispatch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(payload.source).toBe('map_command')
-    expect(payload.to_phone_number).toBe('+16514428447')
-  })
-
-  it('maps Amanda record into thread with prospect phone', () => {
-    const viewModel = buildSellerMapCardViewModel(amandaRecord)
-    const thread = buildThreadFromViewModel(viewModel, amandaRecord)
-    expect(resolveMapThreadPhone(amandaRecord)).toBe('+16514428447')
-    expect(thread.prospectId).toBe('pros1_5d2dfe5ae95f982c0941f648')
-    expect(thread.canonicalE164).toBe('+16514428447')
+  it('20. map ownership check click path uses sendInboxMessageNow (54e5e53 send chain)', async () => {
+    const actionsPath = fileURLToPath(new URL('../../src/views/map/seller-card/useSellerMapCardActions.ts', import.meta.url))
+    const source = await readFile(actionsPath, 'utf8')
+    expect(source).toContain('sendInboxMessageNow')
+    expect(source).not.toContain('sendMapOwnershipCheck')
+    expect(source).not.toContain('resolveMapOwnershipCheckForSend')
+    expect(source).not.toContain('resolveMapOwnershipCheckIdentity')
   })
 })
