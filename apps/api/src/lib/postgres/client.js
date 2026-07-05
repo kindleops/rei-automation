@@ -1,5 +1,7 @@
 import pg from "pg";
 
+import { resolveDatabaseUrl } from "./resolve-database-url.js";
+
 const { Pool } = pg;
 
 let pool = null;
@@ -9,12 +11,7 @@ function clean(value) {
 }
 
 export function getDatabaseUrl() {
-  return (
-    clean(process.env.DATABASE_URL) ||
-    clean(process.env.SUPABASE_DB_URL) ||
-    clean(process.env.SUPABASE_URL_NO_POOL) ||
-    ""
-  );
+  return resolveDatabaseUrl();
 }
 
 export function hasDatabaseUrl() {

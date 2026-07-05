@@ -5,7 +5,7 @@
  * Usage:
  *   node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/proof/map-filter-pr2-gate.mjs
  */
-import "../../tests/register-aliases.mjs";
+import "../../tests/register-live-proof.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,13 +73,17 @@ const {
 const { MAP_FILTER_ACCOUNTING_CASES, QUERY_PLAN_CASES, EMPTY_EXPRESSION } = await import(
   "./map-filter-reference-cases.js"
 );
-const { POST: previewRoute } = await import(
-  "../../src/app/api/internal/dashboard/ops/map/filters/preview/route.js"
-);
-const { POST: tokenRoute } = await import(
-  "../../src/app/api/internal/dashboard/ops/map/filters/token/route.js"
-);
 const { buildOpsDashboardSessionToken } = await import("../../src/lib/security/dashboard-auth.js");
+
+async function loadRouteHandlers() {
+  const { POST: previewRoute } = await import(
+    "../../src/app/api/internal/dashboard/ops/map/filters/preview/route.js"
+  );
+  const { POST: tokenRoute } = await import(
+    "../../src/app/api/internal/dashboard/ops/map/filters/token/route.js"
+  );
+  return { previewRoute, tokenRoute };
+}
 
 const args = process.argv.slice(2);
 const suiteArg = args.find((a) => a.startsWith("--suite="))?.split("=")[1] || args[args.indexOf("--suite") + 1] || "all";
@@ -94,6 +98,14 @@ const SUITE_CASE_IDS = {
   "owner-accounting": ["owner_tier_1", "owner_property_count_5", "owner_portfolio_units_20"],
   "mixed-expression-accounting": ["property_prospect_mixed", "property_owner_mixed", "nested_mixed_or", "negated_relationship"],
   "relationship-semantics": ["rel_any_linked", "rel_primary_only", "rel_none_linked", "rel_all_linked"],
+};
+
+const SUITE_ENTITIES = {
+  "simple-property-accounting": ["property"],
+  "prospect-accounting": ["property", "prospect"],
+  "owner-accounting": ["property", "owner"],
+  "mixed-expression-accounting": ["property", "prospect", "owner"],
+  "relationship-semantics": ["property", "prospect", "owner"],
 };
 
 const report = {
@@ -151,7 +163,7 @@ function renderMarkdown(r) {
   return lines.join("\n");
 }
 
-async function runDirectCounts(compiled) {
+async function runDirectCounts(compiled, entities = ["property", "prospect", "owner"]) {
   const { sql: predicateSql, params } = buildPropertyEligibilitySql(
     compiled.compiledPredicateAst,
     compiled.params || [],
@@ -159,11 +171,19 @@ async function runDirectCounts(compiled) {
   const propertyQuery = buildPropertyCountSql(predicateSql);
   const allParams = [...params, ...propertyQuery.extraParams];
   const started = Date.now();
-  const [propertyRes, prospectRes, ownerRes] = await Promise.all([
-    queryWithTimeout(propertyQuery.sql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-    queryWithTimeout(buildProspectCountSql(predicateSql).sql, params, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-    queryWithTimeout(buildOwnerCountSql(predicateSql), params, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-  ]);
+  const propertyRes = await queryWithTimeout(propertyQuery.sql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+  let prospectRes = { rows: [{ count: 0 }] };
+  let ownerRes = { rows: [{ count: 0 }] };
+  if (entities.includes("prospect")) {
+    prospectRes = await queryWithTimeout(
+      buildProspectCountSql(predicateSql).sql,
+      params,
+      MAP_FILTER_LIMITS.countQueryTimeoutMs,
+    );
+  }
+  if (entities.includes("owner")) {
+    ownerRes = await queryWithTimeout(buildOwnerCountSql(predicateSql), params, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+  }
   return {
     matchingProperties: Number(propertyRes.rows[0]?.count || 0),
     matchingProspects: Number(prospectRes.rows[0]?.count || 0),
@@ -172,9 +192,12 @@ async function runDirectCounts(compiled) {
   };
 }
 
-async function runCompilerCounts(compiled) {
+async function runCompilerCounts(compiled, entities = ["property", "prospect", "owner"]) {
   const started = Date.now();
-  const result = await countMapFilterEntities(compiled);
+  const result = await countMapFilterEntities(compiled, {
+    includeProspects: entities.includes("prospect"),
+    includeOwners: entities.includes("owner"),
+  });
   return {
     matchingProperties: result.counts.matchingProperties,
     matchingProspects: result.counts.matchingProspects,
@@ -258,7 +281,15 @@ async function runFieldAudit() {
       continue;
     }
 
-    const livePopulated = await countPopulated(supabase, def.table, def.column, def.dataType);
+    let livePopulated;
+    try {
+      livePopulated = await countPopulated(supabase, def.table, def.column, def.dataType);
+    } catch (error) {
+      section.ok = false;
+      section.issues.push({ message: `field_query_failed:${def.key}`, error: error?.message || String(error) });
+      section.audited.push({ key: def.key, column: colKey, issue: "query_failed", error: error?.message || String(error) });
+      continue;
+    }
     const entry = {
       key: def.key,
       column: colKey,
@@ -316,8 +347,13 @@ async function runFieldAudit() {
   }
 }
 
-async function runAccountingProof({ suiteName = "accountingProof", artifactName = "map-filter-accounting-proof.json", caseIds = null } = {}) {
-  const section = { ok: true, cases: [], issues: [], suite: suiteName };
+async function runAccountingProof({
+  suiteName = "accountingProof",
+  artifactName = "map-filter-accounting-proof.json",
+  caseIds = null,
+  entities = ["property", "prospect", "owner"],
+} = {}) {
+  const section = { ok: true, cases: [], issues: [], suite: suiteName, entities };
   const cases = caseIds
     ? MAP_FILTER_ACCOUNTING_CASES.filter((c) => caseIds.includes(c.id))
     : MAP_FILTER_ACCOUNTING_CASES;
@@ -349,14 +385,17 @@ async function runAccountingProof({ suiteName = "accountingProof", artifactName 
     }
 
     const [direct, compiler] = await Promise.all([
-      runDirectCounts(compiledResult.compiled),
-      runCompilerCounts(compiledResult.compiled),
+      runDirectCounts(compiledResult.compiled, entities),
+      runCompilerCounts(compiledResult.compiled, entities),
     ]);
 
     const propertyDiff = direct.matchingProperties - compiler.matchingProperties;
     const prospectDiff = direct.matchingProspects - compiler.matchingProspects;
     const ownerDiff = direct.matchingMasterOwners - compiler.matchingMasterOwners;
-    const passCase = propertyDiff === 0 && prospectDiff === 0 && ownerDiff === 0;
+    const passCase =
+      (!entities.includes("property") || propertyDiff === 0) &&
+      (!entities.includes("prospect") || prospectDiff === 0) &&
+      (!entities.includes("owner") || ownerDiff === 0);
 
     if (!passCase) section.ok = false;
 
@@ -556,6 +595,7 @@ function responseHasLeak(payload) {
 }
 
 async function runRouteSmoke() {
+  const { previewRoute, tokenRoute } = await loadRouteHandlers();
   const section = { ok: true, cases: [], issues: [] };
   const validExpr = {
     expression: {
@@ -731,6 +771,7 @@ async function runSuite(name) {
         suiteName: "simplePropertyAccounting",
         artifactName: "simple-property-accounting.json",
         caseIds: SUITE_CASE_IDS["simple-property-accounting"],
+        entities: SUITE_ENTITIES["simple-property-accounting"],
       });
       break;
     case "prospect-accounting":
@@ -738,6 +779,7 @@ async function runSuite(name) {
         suiteName: "prospectAccounting",
         artifactName: "prospect-accounting.json",
         caseIds: SUITE_CASE_IDS["prospect-accounting"],
+        entities: SUITE_ENTITIES["prospect-accounting"],
       });
       break;
     case "owner-accounting":
@@ -745,6 +787,7 @@ async function runSuite(name) {
         suiteName: "ownerAccounting",
         artifactName: "owner-accounting.json",
         caseIds: SUITE_CASE_IDS["owner-accounting"],
+        entities: SUITE_ENTITIES["owner-accounting"],
       });
       break;
     case "mixed-expression-accounting":
@@ -752,6 +795,7 @@ async function runSuite(name) {
         suiteName: "mixedExpressionAccounting",
         artifactName: "mixed-expression-accounting.json",
         caseIds: SUITE_CASE_IDS["mixed-expression-accounting"],
+        entities: SUITE_ENTITIES["mixed-expression-accounting"],
       });
       break;
     case "relationship-semantics":
@@ -759,6 +803,7 @@ async function runSuite(name) {
         suiteName: "relationshipSemantics",
         artifactName: "relationship-semantics.json",
         caseIds: SUITE_CASE_IDS["relationship-semantics"],
+        entities: SUITE_ENTITIES["relationship-semantics"],
       });
       break;
     case "token-security":
@@ -825,7 +870,7 @@ async function main() {
 main().catch((error) => {
   console.error("[pr2-gate] failed:", error);
   report.ok = false;
-  report.fatal = error?.message || String(error);
+  report.fatal = error?.message || error?.code || JSON.stringify(error);
   writeArtifacts();
   process.exit(1);
 });

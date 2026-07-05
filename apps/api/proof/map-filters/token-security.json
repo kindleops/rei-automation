@@ -1,0 +1,77 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "same_expression_same_scope_reuses_digest",
+      "ok": true,
+      "digestA": "ac42303c86992546c44e2953a0017ccd65bae62f61a10dcbd319f179c4542d46",
+      "digestB": "ac42303c86992546c44e2953a0017ccd65bae62f61a10dcbd319f179c4542d46"
+    },
+    {
+      "name": "different_org_different_token",
+      "ok": true
+    },
+    {
+      "name": "different_permission_scope_different_token",
+      "ok": true
+    },
+    {
+      "name": "exposed_token_is_128_bit",
+      "ok": true
+    },
+    {
+      "name": "full_digest_is_256_bit",
+      "ok": true
+    },
+    {
+      "name": "expired_token_fails",
+      "ok": true
+    },
+    {
+      "name": "revoked_token_fails",
+      "ok": true
+    },
+    {
+      "name": "cross_organization_access_fails",
+      "ok": true
+    },
+    {
+      "name": "unsupported_registry_version_fails",
+      "ok": true
+    },
+    {
+      "name": "unsupported_schema_version_fails",
+      "ok": true
+    }
+  ],
+  "issues": [],
+  "table": {
+    "name": "public.map_filter_tokens",
+    "rlsEnabled": true,
+    "policyCount": 0,
+    "indexes": [
+      {
+        "indexname": "idx_map_filter_tokens_org_scope",
+        "indexdef": "CREATE INDEX idx_map_filter_tokens_org_scope ON public.map_filter_tokens USING btree (organization_id, permission_scope, expires_at DESC)"
+      },
+      {
+        "indexname": "map_filter_tokens_pkey",
+        "indexdef": "CREATE UNIQUE INDEX map_filter_tokens_pkey ON public.map_filter_tokens USING btree (filter_token_digest)"
+      },
+      {
+        "indexname": "idx_map_filter_tokens_exposed",
+        "indexdef": "CREATE INDEX idx_map_filter_tokens_exposed ON public.map_filter_tokens USING btree (filter_token_exposed)"
+      }
+    ],
+    "constraints": [
+      {
+        "conname": "map_filter_tokens_pkey",
+        "contype": "p"
+      }
+    ],
+    "storesFullDigest": true,
+    "storesExposedToken": true,
+    "revocationModel": "DELETE row (service_role); no client SELECT policy",
+    "expiryColumn": "expires_at"
+  }
+}

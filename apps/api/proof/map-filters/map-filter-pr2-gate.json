@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-07-05T04:55:20.545Z",
+  "gate": "PR2",
+  "suite": "prospect-accounting",
+  "ok": false,
+  "sections": {},
+  "fatal": "canceling statement due to statement timeout"
+}

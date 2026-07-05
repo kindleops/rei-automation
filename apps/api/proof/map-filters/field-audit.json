@@ -1,0 +1,1473 @@
+{
+  "generatedAt": "2026-07-05T04:49:23.172Z",
+  "mode": "live",
+  "supabaseConnected": true,
+  "tableBaselines": {
+    "properties": 124046,
+    "prospects": 149798,
+    "master_owners": 102157
+  },
+  "registryFieldCount": 174,
+  "integrityErrors": [],
+  "audited": [
+    {
+      "key": "property.property_id",
+      "table": "properties",
+      "column": "property_id",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_export_id",
+      "table": "properties",
+      "column": "property_export_id",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.master_owner_id",
+      "table": "properties",
+      "column": "master_owner_id",
+      "baselinePopulated": 124046,
+      "livePopulated": 41530,
+      "baselineCoverage": 100,
+      "liveCoverage": 33.5
+    },
+    {
+      "key": "property.apn_parcel_id",
+      "table": "properties",
+      "column": "apn_parcel_id",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_address_full",
+      "table": "properties",
+      "column": "property_address_full",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_address_city",
+      "table": "properties",
+      "column": "property_address_city",
+      "baselinePopulated": 124041,
+      "livePopulated": 124041,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_address_county_name",
+      "table": "properties",
+      "column": "property_address_county_name",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_address_state",
+      "table": "properties",
+      "column": "property_address_state",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_address_zip",
+      "table": "properties",
+      "column": "property_address_zip",
+      "baselinePopulated": 124025,
+      "livePopulated": 124025,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.market",
+      "table": "properties",
+      "column": "market",
+      "baselinePopulated": 124045,
+      "livePopulated": 124045,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.market_region",
+      "table": "properties",
+      "column": "market_region",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.subdivision_name",
+      "table": "properties",
+      "column": "subdivision_name",
+      "baselinePopulated": 103440,
+      "livePopulated": 103440,
+      "baselineCoverage": 83.4,
+      "liveCoverage": 83.4
+    },
+    {
+      "key": "property.school_district_name",
+      "table": "properties",
+      "column": "school_district_name",
+      "baselinePopulated": 116203,
+      "livePopulated": 116203,
+      "baselineCoverage": 93.7,
+      "liveCoverage": 93.7
+    },
+    {
+      "key": "property.situs_census_tract",
+      "table": "properties",
+      "column": "situs_census_tract",
+      "issue": "query_failed",
+      "error": "properties.situs_census_tract: "
+    },
+    {
+      "key": "property.latitude",
+      "table": "properties",
+      "column": "latitude",
+      "issue": "query_failed",
+      "error": "properties.latitude: "
+    },
+    {
+      "key": "property.longitude",
+      "table": "properties",
+      "column": "longitude",
+      "issue": "query_failed",
+      "error": "properties.longitude: "
+    },
+    {
+      "key": "geo.current_viewport",
+      "skipped": true,
+      "reason": "geo_virtual",
+      "baselinePopulated": 124046
+    },
+    {
+      "key": "geo.radius_from_point",
+      "skipped": true,
+      "reason": "geo_virtual",
+      "baselinePopulated": 124046
+    },
+    {
+      "key": "geo.drawn_polygon",
+      "skipped": true,
+      "reason": "geo_virtual",
+      "baselinePopulated": 124046
+    },
+    {
+      "key": "geo.exclusion_polygon",
+      "skipped": true,
+      "reason": "geo_virtual",
+      "baselinePopulated": 124046
+    },
+    {
+      "key": "property.property_type",
+      "table": "properties",
+      "column": "property_type",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.property_class",
+      "table": "properties",
+      "column": "property_class",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.units_count",
+      "table": "properties",
+      "column": "units_count",
+      "issue": "query_failed",
+      "error": "properties.units_count: "
+    },
+    {
+      "key": "property.asset_class",
+      "table": "properties",
+      "column": "asset_class",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.building_square_feet",
+      "table": "properties",
+      "column": "building_square_feet",
+      "issue": "query_failed",
+      "error": "properties.building_square_feet: "
+    },
+    {
+      "key": "property.year_built",
+      "table": "properties",
+      "column": "year_built",
+      "issue": "query_failed",
+      "error": "properties.year_built: "
+    },
+    {
+      "key": "property.effective_year_built",
+      "table": "properties",
+      "column": "effective_year_built",
+      "issue": "query_failed",
+      "error": "properties.effective_year_built: "
+    },
+    {
+      "key": "property.total_baths",
+      "table": "properties",
+      "column": "total_baths",
+      "issue": "query_failed",
+      "error": "properties.total_baths: "
+    },
+    {
+      "key": "property.total_bedrooms",
+      "table": "properties",
+      "column": "total_bedrooms",
+      "issue": "query_failed",
+      "error": "properties.total_bedrooms: "
+    },
+    {
+      "key": "property.lot_acreage",
+      "table": "properties",
+      "column": "lot_acreage",
+      "issue": "query_failed",
+      "error": "properties.lot_acreage: "
+    },
+    {
+      "key": "property.lot_square_feet",
+      "table": "properties",
+      "column": "lot_square_feet",
+      "issue": "query_failed",
+      "error": "properties.lot_square_feet: "
+    },
+    {
+      "key": "property.building_condition",
+      "table": "properties",
+      "column": "building_condition",
+      "baselinePopulated": 116217,
+      "livePopulated": 116217,
+      "baselineCoverage": 93.7,
+      "liveCoverage": 93.7
+    },
+    {
+      "key": "property.building_quality",
+      "table": "properties",
+      "column": "building_quality",
+      "baselinePopulated": 85663,
+      "livePopulated": 85663,
+      "baselineCoverage": 69.1,
+      "liveCoverage": 69.1
+    },
+    {
+      "key": "property.construction_type",
+      "table": "properties",
+      "column": "construction_type",
+      "baselinePopulated": 88586,
+      "livePopulated": 88586,
+      "baselineCoverage": 71.4,
+      "liveCoverage": 71.4
+    },
+    {
+      "key": "property.zoning",
+      "table": "properties",
+      "column": "zoning",
+      "baselinePopulated": 99605,
+      "livePopulated": 99605,
+      "baselineCoverage": 80.3,
+      "liveCoverage": 80.3
+    },
+    {
+      "key": "property.sum_buildings_nbr",
+      "table": "properties",
+      "column": "sum_buildings_nbr",
+      "issue": "query_failed",
+      "error": "properties.sum_buildings_nbr: "
+    },
+    {
+      "key": "property.rehab_level",
+      "table": "properties",
+      "column": "rehab_level",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.estimated_value",
+      "table": "properties",
+      "column": "estimated_value",
+      "issue": "query_failed",
+      "error": "properties.estimated_value: "
+    },
+    {
+      "key": "property.equity_amount",
+      "table": "properties",
+      "column": "equity_amount",
+      "issue": "query_failed",
+      "error": "properties.equity_amount: "
+    },
+    {
+      "key": "property.equity_percent",
+      "table": "properties",
+      "column": "equity_percent",
+      "issue": "query_failed",
+      "error": "properties.equity_percent: "
+    },
+    {
+      "key": "property.total_loan_balance",
+      "table": "properties",
+      "column": "total_loan_balance",
+      "issue": "query_failed",
+      "error": "properties.total_loan_balance: "
+    },
+    {
+      "key": "property.total_loan_payment",
+      "table": "properties",
+      "column": "total_loan_payment",
+      "issue": "query_failed",
+      "error": "properties.total_loan_payment: "
+    },
+    {
+      "key": "property.tax_amt",
+      "table": "properties",
+      "column": "tax_amt",
+      "issue": "query_failed",
+      "error": "properties.tax_amt: "
+    },
+    {
+      "key": "property.tax_year",
+      "table": "properties",
+      "column": "tax_year",
+      "issue": "query_failed",
+      "error": "properties.tax_year: "
+    },
+    {
+      "key": "property.sale_date",
+      "table": "properties",
+      "column": "sale_date",
+      "baselinePopulated": 120895,
+      "livePopulated": 120895,
+      "baselineCoverage": 97.5,
+      "liveCoverage": 97.5
+    },
+    {
+      "key": "property.sale_price",
+      "table": "properties",
+      "column": "sale_price",
+      "issue": "query_failed",
+      "error": "properties.sale_price: "
+    },
+    {
+      "key": "property.ownership_years",
+      "table": "properties",
+      "column": "ownership_years",
+      "issue": "query_failed",
+      "error": "properties.ownership_years: "
+    },
+    {
+      "key": "property.last_sale_doc_type",
+      "table": "properties",
+      "column": "last_sale_doc_type",
+      "baselinePopulated": 120895,
+      "livePopulated": 120895,
+      "baselineCoverage": 97.5,
+      "liveCoverage": 97.5
+    },
+    {
+      "key": "property.assd_improvement_value",
+      "table": "properties",
+      "column": "assd_improvement_value",
+      "issue": "query_failed",
+      "error": "properties.assd_improvement_value: "
+    },
+    {
+      "key": "property.assd_land_value",
+      "table": "properties",
+      "column": "assd_land_value",
+      "issue": "query_failed",
+      "error": "properties.assd_land_value: "
+    },
+    {
+      "key": "property.assd_total_value",
+      "table": "properties",
+      "column": "assd_total_value",
+      "issue": "query_failed",
+      "error": "properties.assd_total_value: "
+    },
+    {
+      "key": "property.assd_year",
+      "table": "properties",
+      "column": "assd_year",
+      "issue": "query_failed",
+      "error": "properties.assd_year: "
+    },
+    {
+      "key": "property.calculated_improvement_value",
+      "table": "properties",
+      "column": "calculated_improvement_value",
+      "issue": "query_failed",
+      "error": "properties.calculated_improvement_value: "
+    },
+    {
+      "key": "property.calculated_land_value",
+      "table": "properties",
+      "column": "calculated_land_value",
+      "issue": "query_failed",
+      "error": "properties.calculated_land_value: "
+    },
+    {
+      "key": "property.calculated_total_value",
+      "table": "properties",
+      "column": "calculated_total_value",
+      "issue": "query_failed",
+      "error": "properties.calculated_total_value: "
+    },
+    {
+      "key": "property.cash_offer",
+      "table": "properties",
+      "column": "cash_offer",
+      "issue": "query_failed",
+      "error": "properties.cash_offer: "
+    },
+    {
+      "key": "property.estimated_repair_cost",
+      "table": "properties",
+      "column": "estimated_repair_cost",
+      "issue": "query_failed",
+      "error": "properties.estimated_repair_cost: "
+    },
+    {
+      "key": "property.estimated_repair_cost_per_sqft",
+      "table": "properties",
+      "column": "estimated_repair_cost_per_sqft",
+      "issue": "query_failed",
+      "error": "properties.estimated_repair_cost_per_sqft: "
+    },
+    {
+      "key": "property.tax_delinquent",
+      "table": "properties",
+      "column": "tax_delinquent",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.tax_delinquent_year",
+      "table": "properties",
+      "column": "tax_delinquent_year",
+      "issue": "query_failed",
+      "error": "properties.tax_delinquent_year: "
+    },
+    {
+      "key": "property.active_lien",
+      "table": "properties",
+      "column": "active_lien",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.out_of_state_owner",
+      "table": "properties",
+      "column": "out_of_state_owner",
+      "baselinePopulated": 116217,
+      "livePopulated": 116217,
+      "baselineCoverage": 93.7,
+      "liveCoverage": 93.7
+    },
+    {
+      "key": "property.is_corporate_owner",
+      "table": "properties",
+      "column": "is_corporate_owner",
+      "baselinePopulated": 116217,
+      "livePopulated": 116217,
+      "baselineCoverage": 93.7,
+      "liveCoverage": 93.7
+    },
+    {
+      "key": "property.auction_date",
+      "table": "properties",
+      "column": "auction_date",
+      "issue": "query_failed",
+      "error": "properties.auction_date: "
+    },
+    {
+      "key": "property.seller_tags_json",
+      "table": "properties",
+      "column": "seller_tags_json",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.property_flags_json",
+      "table": "properties",
+      "column": "property_flags_json",
+      "baselinePopulated": 124046,
+      "livePopulated": 124046,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "property.ai_score",
+      "table": "properties",
+      "column": "ai_score",
+      "issue": "query_failed",
+      "error": "properties.ai_score: "
+    },
+    {
+      "key": "property.structured_motivation_score",
+      "table": "properties",
+      "column": "structured_motivation_score",
+      "issue": "query_failed",
+      "error": "properties.structured_motivation_score: "
+    },
+    {
+      "key": "property.deal_strength_score",
+      "table": "properties",
+      "column": "deal_strength_score",
+      "issue": "query_failed",
+      "error": "properties.deal_strength_score: "
+    },
+    {
+      "key": "property.tag_distress_score",
+      "table": "properties",
+      "column": "tag_distress_score",
+      "issue": "query_failed",
+      "error": "properties.tag_distress_score: "
+    },
+    {
+      "key": "property.final_acquisition_score",
+      "table": "properties",
+      "column": "final_acquisition_score",
+      "issue": "query_failed",
+      "error": "properties.final_acquisition_score: "
+    },
+    {
+      "key": "property.contact_status",
+      "table": "properties",
+      "column": "contact_status",
+      "baselinePopulated": 121182,
+      "livePopulated": 121182,
+      "baselineCoverage": 97.7,
+      "liveCoverage": 97.7
+    },
+    {
+      "key": "property.activity_status",
+      "table": "properties",
+      "column": "activity_status",
+      "baselinePopulated": 8021,
+      "livePopulated": 8021,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.sms_eligible",
+      "table": "properties",
+      "column": "sms_eligible",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.best_phone",
+      "table": "properties",
+      "column": "best_phone",
+      "baselinePopulated": 8021,
+      "livePopulated": 8021,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.has_best_phone",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 8021
+    },
+    {
+      "key": "property.phone_type",
+      "table": "properties",
+      "column": "phone_type",
+      "baselinePopulated": 8021,
+      "livePopulated": 8021,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.best_phone_score",
+      "table": "properties",
+      "column": "best_phone_score",
+      "issue": "query_failed",
+      "error": "properties.best_phone_score: "
+    },
+    {
+      "key": "property.best_email",
+      "table": "properties",
+      "column": "best_email",
+      "baselinePopulated": 7482,
+      "livePopulated": 7482,
+      "baselineCoverage": 6,
+      "liveCoverage": 6
+    },
+    {
+      "key": "property.has_best_email",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 7482
+    },
+    {
+      "key": "property.email_score_final",
+      "table": "properties",
+      "column": "email_score_final",
+      "issue": "query_failed",
+      "error": "properties.email_score_final: "
+    },
+    {
+      "key": "property.priority_tier",
+      "table": "properties",
+      "column": "priority_tier",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.follow_up_cadence",
+      "table": "properties",
+      "column": "follow_up_cadence",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.best_channel",
+      "table": "properties",
+      "column": "best_channel",
+      "baselinePopulated": 8021,
+      "livePopulated": 8021,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.best_language",
+      "table": "properties",
+      "column": "best_language",
+      "baselinePopulated": 8021,
+      "livePopulated": 8021,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.timezone",
+      "table": "properties",
+      "column": "timezone",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "property.contact_window",
+      "table": "properties",
+      "column": "contact_window",
+      "baselinePopulated": 8075,
+      "livePopulated": 8075,
+      "baselineCoverage": 6.5,
+      "liveCoverage": 6.5
+    },
+    {
+      "key": "prospect.prospect_id",
+      "table": "prospects",
+      "column": "prospect_id",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.canonical_prospect_id",
+      "table": "prospects",
+      "column": "canonical_prospect_id",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.master_owner_id",
+      "table": "prospects",
+      "column": "master_owner_id",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.source_slot",
+      "table": "prospects",
+      "column": "source_slot",
+      "issue": "query_failed",
+      "error": "prospects.source_slot: "
+    },
+    {
+      "key": "prospect.full_name",
+      "table": "prospects",
+      "column": "full_name",
+      "baselinePopulated": 148801,
+      "livePopulated": 148801,
+      "baselineCoverage": 99.3,
+      "liveCoverage": 99.3
+    },
+    {
+      "key": "prospect.first_name",
+      "table": "prospects",
+      "column": "first_name",
+      "baselinePopulated": 148801,
+      "livePopulated": 148801,
+      "baselineCoverage": 99.3,
+      "liveCoverage": 99.3
+    },
+    {
+      "key": "prospect.is_primary_prospect",
+      "table": "prospects",
+      "column": "is_primary_prospect",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.property_count",
+      "table": "prospects",
+      "column": "property_count",
+      "issue": "query_failed",
+      "error": "prospects.property_count: "
+    },
+    {
+      "key": "prospect.linked_property_ids_json",
+      "table": "prospects",
+      "column": "linked_property_ids_json",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.likely_owner",
+      "table": "prospects",
+      "column": "likely_owner",
+      "baselinePopulated": 142497,
+      "livePopulated": 142497,
+      "baselineCoverage": 95.1,
+      "liveCoverage": 95.1
+    },
+    {
+      "key": "prospect.likely_renting",
+      "table": "prospects",
+      "column": "likely_renting",
+      "baselinePopulated": 142497,
+      "livePopulated": 142497,
+      "baselineCoverage": 95.1,
+      "liveCoverage": 95.1
+    },
+    {
+      "key": "prospect.matching_flags",
+      "table": "prospects",
+      "column": "matching_flags",
+      "baselinePopulated": 147275,
+      "livePopulated": 147275,
+      "baselineCoverage": 98.3,
+      "liveCoverage": 98.3
+    },
+    {
+      "key": "prospect.person_flags_json",
+      "table": "prospects",
+      "column": "person_flags_json",
+      "baselinePopulated": 148252,
+      "livePopulated": 148252,
+      "baselineCoverage": 99,
+      "liveCoverage": 99
+    },
+    {
+      "key": "prospect.rank_position",
+      "table": "prospects",
+      "column": "rank_position",
+      "issue": "query_failed",
+      "error": "prospects.rank_position: "
+    },
+    {
+      "key": "prospect.rank_confidence",
+      "table": "prospects",
+      "column": "rank_confidence",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.phones_json",
+      "table": "prospects",
+      "column": "phones_json",
+      "baselinePopulated": 97351,
+      "livePopulated": 97351,
+      "baselineCoverage": 65,
+      "liveCoverage": 65
+    },
+    {
+      "key": "prospect.emails_json",
+      "table": "prospects",
+      "column": "emails_json",
+      "baselinePopulated": 120863,
+      "livePopulated": 120863,
+      "baselineCoverage": 80.7,
+      "liveCoverage": 80.7
+    },
+    {
+      "key": "prospect.has_phone",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 97351
+    },
+    {
+      "key": "prospect.has_no_phone",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 52447
+    },
+    {
+      "key": "prospect.phone_count",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 97351
+    },
+    {
+      "key": "prospect.has_email",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 120863
+    },
+    {
+      "key": "prospect.has_no_email",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 28935
+    },
+    {
+      "key": "prospect.email_count",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 120863
+    },
+    {
+      "key": "prospect.best_phone",
+      "table": "prospects",
+      "column": "best_phone",
+      "baselinePopulated": 97435,
+      "livePopulated": 97435,
+      "baselineCoverage": 65,
+      "liveCoverage": 65
+    },
+    {
+      "key": "prospect.best_email",
+      "table": "prospects",
+      "column": "best_email",
+      "baselinePopulated": 120863,
+      "livePopulated": 120863,
+      "baselineCoverage": 80.7,
+      "liveCoverage": 80.7
+    },
+    {
+      "key": "prospect.raw_contact_score",
+      "table": "prospects",
+      "column": "raw_contact_score",
+      "issue": "query_failed",
+      "error": "prospects.raw_contact_score: "
+    },
+    {
+      "key": "prospect.contact_score_final",
+      "table": "prospects",
+      "column": "contact_score_final",
+      "issue": "query_failed",
+      "error": "prospects.contact_score_final: "
+    },
+    {
+      "key": "prospect.raw_phone_score",
+      "table": "prospects",
+      "column": "raw_phone_score",
+      "issue": "query_failed",
+      "error": "prospects.raw_phone_score: "
+    },
+    {
+      "key": "prospect.phone_score_final",
+      "table": "prospects",
+      "column": "phone_score_final",
+      "issue": "query_failed",
+      "error": "prospects.phone_score_final: "
+    },
+    {
+      "key": "prospect.email_score_final",
+      "table": "prospects",
+      "column": "email_score_final",
+      "issue": "query_failed",
+      "error": "prospects.email_score_final: "
+    },
+    {
+      "key": "prospect.sms_eligible",
+      "table": "prospects",
+      "column": "sms_eligible",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.email_eligible",
+      "table": "prospects",
+      "column": "email_eligible",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.primary_market",
+      "table": "prospects",
+      "column": "primary_market",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.timezone",
+      "table": "prospects",
+      "column": "timezone",
+      "baselinePopulated": 149644,
+      "livePopulated": 149644,
+      "baselineCoverage": 99.9,
+      "liveCoverage": 99.9
+    },
+    {
+      "key": "prospect.contact_window",
+      "table": "prospects",
+      "column": "contact_window",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.priority_tier",
+      "table": "prospects",
+      "column": "priority_tier",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.master_owner_priority_score",
+      "table": "prospects",
+      "column": "master_owner_priority_score",
+      "issue": "query_failed",
+      "error": "prospects.master_owner_priority_score: "
+    },
+    {
+      "key": "prospect.agent_persona",
+      "table": "prospects",
+      "column": "agent_persona",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.agent_family",
+      "table": "prospects",
+      "column": "agent_family",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.owner_type_guess",
+      "table": "prospects",
+      "column": "owner_type_guess",
+      "baselinePopulated": 149798,
+      "livePopulated": 149798,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "prospect.seller_tags_json",
+      "table": "prospects",
+      "column": "seller_tags_json",
+      "baselinePopulated": 124804,
+      "livePopulated": 124804,
+      "baselineCoverage": 83.3,
+      "liveCoverage": 83.3
+    },
+    {
+      "key": "master_owner.master_owner_id",
+      "table": "master_owners",
+      "column": "master_owner_id",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.display_name",
+      "table": "master_owners",
+      "column": "display_name",
+      "baselinePopulated": 102156,
+      "livePopulated": 102156,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.owner_type_guess",
+      "table": "master_owners",
+      "column": "owner_type_guess",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.owner_entity_ids_json",
+      "table": "master_owners",
+      "column": "owner_entity_ids_json",
+      "baselinePopulated": 94102,
+      "livePopulated": 94102,
+      "baselineCoverage": 92.1,
+      "liveCoverage": 92.1
+    },
+    {
+      "key": "master_owner.owner_locations_json",
+      "table": "master_owners",
+      "column": "owner_locations_json",
+      "baselinePopulated": 102156,
+      "livePopulated": 102156,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.markets_json",
+      "table": "master_owners",
+      "column": "markets_json",
+      "baselinePopulated": 102156,
+      "livePopulated": 102156,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.zip_codes_json",
+      "table": "master_owners",
+      "column": "zip_codes_json",
+      "baselinePopulated": 102143,
+      "livePopulated": 102143,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.counties_json",
+      "table": "master_owners",
+      "column": "counties_json",
+      "baselinePopulated": 102156,
+      "livePopulated": 102156,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.routing_market",
+      "table": "master_owners",
+      "column": "routing_market",
+      "baselinePopulated": 102157,
+      "livePopulated": 102156,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.routing_timezone",
+      "table": "master_owners",
+      "column": "routing_timezone",
+      "baselinePopulated": 102057,
+      "livePopulated": 102057,
+      "baselineCoverage": 99.9,
+      "liveCoverage": 99.9
+    },
+    {
+      "key": "master_owner.joined_prospect_ids_json",
+      "table": "master_owners",
+      "column": "joined_prospect_ids_json",
+      "baselinePopulated": 99412,
+      "livePopulated": 99412,
+      "baselineCoverage": 97.3,
+      "liveCoverage": 97.3
+    },
+    {
+      "key": "master_owner.has_linked_prospect",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 99412
+    },
+    {
+      "key": "master_owner.linked_prospect_count",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 99412
+    },
+    {
+      "key": "master_owner.joined_phone_ids_json",
+      "table": "master_owners",
+      "column": "joined_phone_ids_json",
+      "baselinePopulated": 83521,
+      "livePopulated": 83521,
+      "baselineCoverage": 81.8,
+      "liveCoverage": 81.8
+    },
+    {
+      "key": "master_owner.has_linked_phone",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 83521
+    },
+    {
+      "key": "master_owner.linked_phone_count",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 83521
+    },
+    {
+      "key": "master_owner.joined_email_ids_json",
+      "table": "master_owners",
+      "column": "joined_email_ids_json",
+      "baselinePopulated": 90543,
+      "livePopulated": 90543,
+      "baselineCoverage": 88.6,
+      "liveCoverage": 88.6
+    },
+    {
+      "key": "master_owner.has_linked_email",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 90543
+    },
+    {
+      "key": "master_owner.linked_email_count",
+      "skipped": true,
+      "reason": "derived_presence",
+      "baselinePopulated": 90543
+    },
+    {
+      "key": "master_owner.best_contact_slot",
+      "table": "master_owners",
+      "column": "best_contact_slot",
+      "issue": "query_failed",
+      "error": "master_owners.best_contact_slot: "
+    },
+    {
+      "key": "master_owner.best_channel",
+      "table": "master_owners",
+      "column": "best_channel",
+      "baselinePopulated": 102102,
+      "livePopulated": 102102,
+      "baselineCoverage": 99.9,
+      "liveCoverage": 99.9
+    },
+    {
+      "key": "master_owner.best_contact_window",
+      "table": "master_owners",
+      "column": "best_contact_window",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.best_language",
+      "table": "master_owners",
+      "column": "best_language",
+      "baselinePopulated": 102102,
+      "livePopulated": 102102,
+      "baselineCoverage": 99.9,
+      "liveCoverage": 99.9
+    },
+    {
+      "key": "master_owner.best_phone_confidence",
+      "table": "master_owners",
+      "column": "best_phone_confidence",
+      "baselinePopulated": 102102,
+      "livePopulated": 102102,
+      "baselineCoverage": 99.9,
+      "liveCoverage": 99.9
+    },
+    {
+      "key": "master_owner.contactability_score",
+      "table": "master_owners",
+      "column": "contactability_score",
+      "issue": "query_failed",
+      "error": "master_owners.contactability_score: "
+    },
+    {
+      "key": "master_owner.financial_pressure_score",
+      "table": "master_owners",
+      "column": "financial_pressure_score",
+      "issue": "query_failed",
+      "error": "master_owners.financial_pressure_score: "
+    },
+    {
+      "key": "master_owner.urgency_score",
+      "table": "master_owners",
+      "column": "urgency_score",
+      "issue": "query_failed",
+      "error": "master_owners.urgency_score: "
+    },
+    {
+      "key": "master_owner.priority_score",
+      "table": "master_owners",
+      "column": "priority_score",
+      "issue": "query_failed",
+      "error": "master_owners.priority_score: "
+    },
+    {
+      "key": "master_owner.priority_tier",
+      "table": "master_owners",
+      "column": "priority_tier",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.follow_up_cadence",
+      "table": "master_owners",
+      "column": "follow_up_cadence",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.portfolio_total_value",
+      "table": "master_owners",
+      "column": "portfolio_total_value",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_value: "
+    },
+    {
+      "key": "master_owner.portfolio_total_equity",
+      "table": "master_owners",
+      "column": "portfolio_total_equity",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_equity: "
+    },
+    {
+      "key": "master_owner.portfolio_total_loan_balance",
+      "table": "master_owners",
+      "column": "portfolio_total_loan_balance",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_loan_balance: "
+    },
+    {
+      "key": "master_owner.portfolio_total_loan_payment",
+      "table": "master_owners",
+      "column": "portfolio_total_loan_payment",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_loan_payment: "
+    },
+    {
+      "key": "master_owner.portfolio_total_tax_amount",
+      "table": "master_owners",
+      "column": "portfolio_total_tax_amount",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_tax_amount: "
+    },
+    {
+      "key": "master_owner.portfolio_total_units",
+      "table": "master_owners",
+      "column": "portfolio_total_units",
+      "issue": "query_failed",
+      "error": "master_owners.portfolio_total_units: "
+    },
+    {
+      "key": "master_owner.property_count",
+      "table": "master_owners",
+      "column": "property_count",
+      "issue": "query_failed",
+      "error": "master_owners.property_count: "
+    },
+    {
+      "key": "master_owner.max_ownership_years",
+      "table": "master_owners",
+      "column": "max_ownership_years",
+      "issue": "query_failed",
+      "error": "master_owners.max_ownership_years: "
+    },
+    {
+      "key": "master_owner.tax_delinquent_count",
+      "table": "master_owners",
+      "column": "tax_delinquent_count",
+      "issue": "query_failed",
+      "error": "master_owners.tax_delinquent_count: "
+    },
+    {
+      "key": "master_owner.oldest_tax_delinquent_year",
+      "table": "master_owners",
+      "column": "oldest_tax_delinquent_year",
+      "issue": "query_failed",
+      "error": "master_owners.oldest_tax_delinquent_year: "
+    },
+    {
+      "key": "master_owner.active_lien_count",
+      "table": "master_owners",
+      "column": "active_lien_count",
+      "issue": "query_failed",
+      "error": "master_owners.active_lien_count: "
+    },
+    {
+      "key": "master_owner.seller_tags_json",
+      "table": "master_owners",
+      "column": "seller_tags_json",
+      "baselinePopulated": 86346,
+      "livePopulated": 86346,
+      "baselineCoverage": 84.5,
+      "liveCoverage": 84.5
+    },
+    {
+      "key": "master_owner.last_sale_doc_type",
+      "table": "master_owners",
+      "column": "last_sale_doc_type",
+      "baselinePopulated": 99602,
+      "livePopulated": 99602,
+      "baselineCoverage": 97.5,
+      "liveCoverage": 97.5
+    },
+    {
+      "key": "master_owner.agent_persona",
+      "table": "master_owners",
+      "column": "agent_persona",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.agent_family",
+      "table": "master_owners",
+      "column": "agent_family",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    },
+    {
+      "key": "master_owner.split_test_cohort",
+      "table": "master_owners",
+      "column": "split_test_cohort",
+      "baselinePopulated": 102157,
+      "livePopulated": 102157,
+      "baselineCoverage": 100,
+      "liveCoverage": 100
+    }
+  ],
+  "drift": [
+    {
+      "key": "property.master_owner_id",
+      "table": "properties",
+      "column": "master_owner_id",
+      "baselinePopulated": 124046,
+      "livePopulated": 41530,
+      "baselineCoverage": 100,
+      "liveCoverage": 33.5,
+      "kind": "field_population"
+    }
+  ],
+  "excludedEmptyFields": [
+    "properties.normalized_asset_class",
+    "properties.asset_type",
+    "properties.asset_subtype",
+    "properties.normalized_asset_subclass",
+    "properties.commercial_category",
+    "properties.commercial_subcategory",
+    "properties.commercial_property_type",
+    "properties.commercial_subtype",
+    "properties.property_use",
+    "properties.land_use",
+    "properties.building_class",
+    "properties.stories",
+    "properties.commercial_units",
+    "properties.storage_units",
+    "properties.multifamily_units",
+    "properties.strip_center_units",
+    "properties.recording_date",
+    "properties.arv_estimate",
+    "properties.arv_ppsf",
+    "properties.rent_estimate",
+    "properties.monthly_rent",
+    "properties.gross_monthly_income",
+    "properties.gross_annual_income",
+    "properties.noi_estimate",
+    "properties.cap_rate",
+    "properties.ppsf",
+    "properties.ppu",
+    "properties.ppbd",
+    "properties.sqft_per_unit",
+    "properties.price_off_value",
+    "properties.percent_off",
+    "properties.potential_spread",
+    "properties.past_due_amount",
+    "properties.foreclosure_status",
+    "properties.foreclosure_stage",
+    "properties.preforeclosure_status",
+    "properties.preforeclosure_stage",
+    "properties.is_preforeclosure",
+    "properties.is_foreclosure",
+    "properties.is_auction",
+    "properties.default_amount",
+    "properties.lien_type",
+    "properties.lien_recording_date",
+    "properties.judgment_amount",
+    "properties.renovation_level_classification"
+  ],
+  "excludedSensitiveFields": [
+    "prospects.gender",
+    "prospects.marital_status",
+    "prospects.education",
+    "prospects.education_model",
+    "prospects.est_household_income",
+    "prospects.net_asset_value",
+    "prospects.occupation_group",
+    "prospects.occupation"
+  ],
+  "aliases": {
+    "property.saleprice": "property.sale_price",
+    "property.total_loan_amt": "property.total_loan_balance",
+    "prospects.person_flags_text": "prospect.person_flags_json",
+    "prospect.seller_tags_text": "prospect.seller_tags_json",
+    "master_owner.seller_tags_text": "master_owner.seller_tags_json"
+  },
+  "ok": false
+}

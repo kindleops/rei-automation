@@ -7,7 +7,7 @@ export const MAP_FILTER_LIMITS = {
   maxParams: 256,
   maxParamStringLength: 500,
   maxParamArrayLength: 100,
-  countQueryTimeoutMs: 30_000,
+  countQueryTimeoutMs: Number(process.env.MAP_FILTER_PROOF_TIMEOUT_MS) || 30_000,
   tokenTtlHours: 24,
   tokenMaxTtlHours: 168,
   previewRateLimitPerMinute: 60,

@@ -20,7 +20,10 @@ function parseBounds(bounds) {
   return { lat_min, lat_max, lng_min, lng_max };
 }
 
-export async function countMapFilterEntities(compiled, { bounds = null } = {}) {
+export async function countMapFilterEntities(
+  compiled,
+  { bounds = null, includeProspects = true, includeOwners = true } = {},
+) {
   if (!hasDatabaseUrl()) {
     throw new Error("database_url_missing");
   }
@@ -39,11 +42,15 @@ export async function countMapFilterEntities(compiled, { bounds = null } = {}) {
   const prospectQuery = buildProspectCountSql(predicateSql);
   const ownerSql = buildOwnerCountSql(predicateSql);
 
-  const [propertyRes, prospectRes, ownerRes] = await Promise.all([
-    queryWithTimeout(propertyQuery.sql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-    queryWithTimeout(prospectQuery.sql, params, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-    queryWithTimeout(ownerSql, params, MAP_FILTER_LIMITS.countQueryTimeoutMs),
-  ]);
+  const propertyRes = await queryWithTimeout(propertyQuery.sql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+  let prospectRes = { rows: [{ count: 0 }] };
+  let ownerRes = { rows: [{ count: 0 }] };
+  if (includeProspects) {
+    prospectRes = await queryWithTimeout(prospectQuery.sql, params, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+  }
+  if (includeOwners) {
+    ownerRes = await queryWithTimeout(ownerSql, params, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+  }
 
   const matchingProperties = Number(propertyRes.rows[0]?.count || 0);
   const matchingProspects = Number(prospectRes.rows[0]?.count || 0);
