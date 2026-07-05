@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import {
-  normalizeSmsTemplate,
+  fetchTemplatesByUseCase,
   renderTemplate,
   type SmsTemplate,
 } from '../../../lib/data/templateData'
@@ -53,8 +53,11 @@ export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguag
   return false
 }
 
+// Block only greetings where the comma is not followed by substantive content
+// (e.g. "Hi," or "Hi, {{seller_first_name}}"), not natural name-free openers
+// such as "Hi, this is {{agent_first_name}} about {{property_address}}."
 const hasBlankGreeting = (message: string): boolean =>
-  /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
+  /^(hi|hey|hello|hola|ola|marhaba)\s*,\s*(?:\{\{|\[\[|$)/i.test(message.trim())
 
 const hasHiThereGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
@@ -83,10 +86,12 @@ const containsForbiddenEntityGreeting = (
     if (lowered.includes(ownerName.toLowerCase())) return true
   }
 
+  // Reject only when the resolved seller full name is itself an entity/LLC/trust
+  // (a leaked master-owner display name), not ordinary human full names such as
+  // "Amanda L Tallen" that templates may legitimately use via {{seller_name}}.
   if (
     sellerFullName
-    && sellerFirstName
-    && sellerFullName.toLowerCase() !== sellerFirstName.toLowerCase()
+    && isEntityName(sellerFullName)
     && lowered.includes(sellerFullName.toLowerCase())
   ) {
     return true
@@ -121,10 +126,17 @@ export type OwnershipTemplateSelection = {
   excludedRecentTemplateId: string | null
 }
 
+export type EvaluateOwnershipTemplateOptions = {
+  /** When true and seller_first_name is resolved, reject templates that omit it from the greeting. */
+  requireSellerNameInGreeting?: boolean
+}
+
 export const evaluateOwnershipTemplate = (
   template: SmsTemplate,
   context: Record<string, string>,
+  options: EvaluateOwnershipTemplateOptions = {},
 ): OwnershipTemplateCandidate | null => {
+  const requireSellerNameInGreeting = options.requireSellerNameInGreeting !== false
   const { renderedText, missingVariables } = renderTemplate(template, context)
   const rendered = renderedText.trim()
   if (!rendered) return null
@@ -133,8 +145,11 @@ export const evaluateOwnershipTemplate = (
   if (hasUnresolvedTemplateTokens(rendered)) return null
   if (hasEntityGreeting(rendered)) return null
   if (missingVariables.length > 0) return null
-  if (asString(context.seller_first_name, '').trim()
-    && !greetingIncludesSellerFirstName(rendered, context.seller_first_name)) {
+  if (
+    requireSellerNameInGreeting
+    && asString(context.seller_first_name, '').trim()
+    && !greetingIncludesSellerFirstName(rendered, context.seller_first_name)
+  ) {
     return null
   }
   if (containsForbiddenEntityGreeting(rendered, context)) return null
@@ -176,10 +191,20 @@ export const filterOwnershipTemplatesForLanguage = (
 const evaluateTemplates = (
   templates: SmsTemplate[],
   context: Record<string, string>,
+  evaluateOptions: EvaluateOwnershipTemplateOptions = {},
 ): OwnershipTemplateCandidate[] =>
   templates
-    .map((template) => evaluateOwnershipTemplate(template, context))
+    .map((template) => evaluateOwnershipTemplate(template, context, evaluateOptions))
     .filter((entry): entry is OwnershipTemplateCandidate => Boolean(entry))
+
+const dedupeCandidates = (pool: OwnershipTemplateCandidate[]): OwnershipTemplateCandidate[] => {
+  const uniqueById = new Map<string, OwnershipTemplateCandidate>()
+  for (const entry of pool) {
+    const key = entry.template.templateId || entry.template.id
+    if (!uniqueById.has(key)) uniqueById.set(key, entry)
+  }
+  return Array.from(uniqueById.values())
+}
 
 export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
@@ -189,24 +214,34 @@ export const buildOwnershipTemplatePool = (
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
   const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
+  const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
 
-  // Prefer personalized first-touch templates, but that preference must be based
-  // on whether one actually renders successfully with the resolved context — not
-  // merely whether one exists. When the recipient's name is unresolved (no linked
-  // prospect), every first-touch template requiring {{seller_first_name}} will
-  // fail to render; in that case fall through to the full language-scoped set so
-  // an approved generic (name-free) template can still be selected, instead of
-  // reporting no compatible template while one actually exists.
-  const firstTouchPool = evaluateTemplates(firstTouch, context)
-  const pool = firstTouchPool.length ? firstTouchPool : evaluateTemplates(languageScoped, context)
+  // Prefer personalized first-touch templates when a human first name is known.
+  // Fall back to generic name-free templates when personalized variants do not
+  // render (missing variables, entity guards, etc.) so send is not blocked while
+  // an approved ownership_check template still exists in the catalog.
+  const personalizedFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: true })
+  const genericFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: false })
+  const personalizedLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true })
+  const genericLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: false })
 
-  const uniqueById = new Map<string, OwnershipTemplateCandidate>()
-  for (const entry of pool) {
-    const key = entry.template.templateId || entry.template.id
-    if (!uniqueById.has(key)) uniqueById.set(key, entry)
-  }
+  const pool = hasResolvedSellerName
+    ? (
+      personalizedFirstTouch.length
+        ? personalizedFirstTouch
+        : genericFirstTouch.length
+          ? genericFirstTouch
+          : personalizedLanguageScoped.length
+            ? personalizedLanguageScoped
+            : genericLanguageScoped
+    )
+    : (
+      genericFirstTouch.length
+        ? genericFirstTouch
+        : genericLanguageScoped
+    )
 
-  let candidates = Array.from(uniqueById.values())
+  let candidates = dedupeCandidates(pool)
   const excludeId = asString(options.excludeTemplateId, '').trim()
   if (excludeId && candidates.length > 1) {
     const filtered = candidates.filter(
@@ -260,25 +295,18 @@ export const pickRandomOwnershipCheckTemplate = (
 
 let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
 
+export const resetOwnershipCheckTemplateCacheForTests = (): void => {
+  ownershipTemplateCache = null
+}
+
+/** Active ownership_check rows from Supabase sms_templates (via authenticated template API). */
 export const fetchOwnershipCheckTemplates = async (): Promise<SmsTemplate[]> => {
   const now = Date.now()
   if (ownershipTemplateCache && ownershipTemplateCache.expiresAt > now) {
     return ownershipTemplateCache.templates
   }
 
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase
-    .from('sms_templates')
-    .select('*')
-    .eq('use_case', OWNERSHIP_CHECK_USE_CASE)
-    .eq('is_active', true)
-    .limit(2000)
-
-  if (error) {
-    throw new Error(error.message || 'ownership_check_templates_unavailable')
-  }
-
-  const templates = (Array.isArray(data) ? data : []).map((row) => normalizeSmsTemplate(row as AnyRecord))
+  const templates = await fetchTemplatesByUseCase(OWNERSHIP_CHECK_USE_CASE)
   ownershipTemplateCache = {
     templates,
     expiresAt: now + 60_000,
@@ -318,11 +346,14 @@ export const resolveMapOwnerLanguage = async (
   record: Record<string, unknown>,
   masterOwnerId: string | null,
 ): Promise<string> => {
+  // Prospect language wins over master-owner language for ownership-check template selection.
   const inline = asString(
-    record.best_language
-    ?? record.bestLanguage
+    record.prospect_language_preference
+    ?? record.prospectLanguagePreference
     ?? record.language_preference
     ?? record.languagePreference
+    ?? record.best_language
+    ?? record.bestLanguage
     ?? record.language
     ?? record.seller_language
     ?? record.sellerLanguage,

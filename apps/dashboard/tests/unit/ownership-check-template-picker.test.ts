@@ -1,14 +1,26 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SmsTemplate } from '../../src/lib/data/templateData'
 import {
   buildOwnershipTemplatePool,
   canonicalizeOwnerLanguage,
   evaluateOwnershipTemplate,
+  fetchOwnershipCheckTemplates,
+  resetOwnershipCheckTemplateCacheForTests,
   filterOwnershipTemplatesForLanguage,
   languagesMatchForTemplate,
+  pickOwnershipCheckTemplateForMap,
   pickRandomOwnershipCheckTemplate,
   pickWeightedRandom,
+  resolveMapOwnerLanguage,
 } from '../../src/views/map/seller-card/ownership-check-template-picker'
+
+vi.mock('../../src/lib/data/templateData', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/lib/data/templateData')>()
+  return {
+    ...actual,
+    fetchTemplatesByUseCase: vi.fn(actual.fetchTemplatesByUseCase),
+  }
+})
 
 const makeTemplate = (overrides: Partial<SmsTemplate> & { id: string; language: string; templateText: string }): SmsTemplate => ({
   templateId: overrides.id,
@@ -38,6 +50,55 @@ const context = {
 }
 
 describe('ownership check template picker', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+    resetOwnershipCheckTemplateCacheForTests()
+  })
+
+  it('resolves prospect language preference ahead of master-owner best_language', async () => {
+    await expect(resolveMapOwnerLanguage({
+      language_preference: 'Spanish',
+      best_language: 'English',
+    }, 'mo-1')).resolves.toBe('Spanish')
+  })
+
+  it('randomizes ownership_check templates for the resolved prospect language', async () => {
+    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
+      makeTemplate({ id: 'es-1', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, pregunta sobre {{property_address}}' }),
+      makeTemplate({ id: 'es-2', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, ¿sigue siendo su propiedad en {{property_address}}?' }),
+    ]
+    vi.mocked(fetchTemplatesByUseCase).mockResolvedValue(templates)
+
+    const selection = await pickOwnershipCheckTemplateForMap(
+      context,
+      'Spanish',
+      { random: () => 0.99 },
+    )
+
+    expect(selection?.language).toBe('Spanish')
+    expect(['es-1', 'es-2']).toContain(selection?.templateId)
+    expect(selection?.selectionReason).toMatch(/random/)
+  })
+
+  it('loads active ownership_check templates from Supabase via fetchTemplatesByUseCase', async () => {
+    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+    const catalog = [
+      makeTemplate({
+        id: 'supabase-oc-1',
+        language: 'English',
+        templateText: 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.',
+      }),
+    ]
+    vi.mocked(fetchTemplatesByUseCase).mockResolvedValueOnce(catalog)
+
+    const templates = await fetchOwnershipCheckTemplates()
+    expect(fetchTemplatesByUseCase).toHaveBeenCalledWith('ownership_check')
+    expect(templates).toEqual(catalog)
+    expect(templates.every((template) => template.useCaseSlug === 'ownership_check')).toBe(true)
+  })
+
   it('canonicalizes owner language aliases', () => {
     expect(canonicalizeOwnerLanguage('spanish')).toBe('Spanish')
     expect(canonicalizeOwnerLanguage('Asian Indian (Hindi or Other)')).toBe('Indian (Hindi or Other)')
@@ -78,11 +139,17 @@ describe('ownership check template picker', () => {
   })
 
   it('rejects blank or Hi there greetings instead of repairing them', () => {
-    const templates = [
-      makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' }),
-      makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' }),
-    ]
-    const pool = buildOwnershipTemplatePool(templates, context, 'English')
+    const blankGreeting = makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' })
+    const hiThere = makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' })
+
+    expect(evaluateOwnershipTemplate(blankGreeting, context)).toBeNull()
+    expect(evaluateOwnershipTemplate(hiThere, context)).toBeNull()
+
+    const pool = buildOwnershipTemplatePool(
+      [hiThere],
+      { ...context, seller_first_name: '', seller_name: '' },
+      'English',
+    )
     expect(pool.length).toBe(0)
   })
 
@@ -175,6 +242,47 @@ describe('ownership check template picker', () => {
       expect(pool[0].rendered).not.toContain('William')
       expect(pool[0].rendered).not.toContain('Ludwig')
       expect(pool[0].rendered).toContain('Andre')
+    })
+
+    it('accepts templates that greet with the human seller full name via {{seller_name}}', () => {
+      const result = evaluateOwnershipTemplate(
+        makeTemplate({
+          id: 'en-full-name',
+          language: 'English',
+          templateText: 'Hi {{seller_name}}, this is {{agent_first_name}} about {{property_address}}.',
+        }),
+        {
+          seller_first_name: 'Amanda',
+          seller_name: 'Amanda L Tallen',
+          owner_name: 'mo_804d2f26377bee1f43019235 Trust',
+          property_address: '983 Edmund Ave, Saint Paul, MN 55104',
+          agent_name: 'Andre',
+          agent_first_name: 'Andre',
+        },
+      )
+      expect(result?.rendered).toContain('Hi Amanda L Tallen')
+      expect(result?.rendered).not.toContain('Trust')
+    })
+
+    it('falls back to a generic template when a prospect name is resolved but only generic templates render', () => {
+      const resolvedContext = {
+        seller_first_name: 'Amanda',
+        seller_name: 'Amanda L Tallen',
+        owner_name: 'mo_804d2f26377bee1f43019235 Trust',
+        property_address: '983 Edmund Ave, Saint Paul, MN 55104',
+        agent_name: 'Andre',
+        agent_first_name: 'Andre',
+      }
+
+      const pool = buildOwnershipTemplatePool(
+        [genericFirstTouch],
+        resolvedContext,
+        'English',
+      )
+
+      expect(pool).toHaveLength(1)
+      expect(pool[0].template.id).toBe('en-generic')
+      expect(pool[0].rendered).not.toContain('Trust')
     })
 
     it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {
