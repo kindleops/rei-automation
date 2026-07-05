@@ -20,11 +20,9 @@ import {
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
 import { translateText } from '../../../modules/inbox/translate.api'
-import {
-  buildMapOwnershipCheckHints,
-  buildOwnershipCheckTemplateContext,
-  resolveMapOwnershipCheckIdentity,
-} from '../../../domain/map/resolve-map-ownership-check'
+import { buildOwnershipCheckTemplateContext } from '../../../domain/map/resolve-map-ownership-check'
+import { resolveMapOwnershipCheckIdentityForSend } from '../../../domain/map/resolve-map-ownership-check-client'
+import { buildMapOwnershipCheckHints } from '../../../domain/map/resolve-map-ownership-check'
 import { sendMapOwnershipCheck } from '../../../domain/map/send-map-ownership-check'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import { asNumber, firstDefined, text } from './seller-map-card-formatters'
@@ -243,7 +241,7 @@ export const useSellerMapCardActions = ({
     setFollowUpError(null)
     try {
       if (eligibility.isUncontacted) {
-        const identityResult = await resolveMapOwnershipCheckIdentity(viewModel.propertyId, {
+        const identityResult = await resolveMapOwnershipCheckIdentityForSend(viewModel.propertyId, {
           hints: ownershipHints,
         })
         if (!identityResult.ok) {

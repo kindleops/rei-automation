@@ -345,10 +345,8 @@ const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'pulse_style',
   'execution_ring_color',
   'render_priority',
-  'prospect_best_phone',
-  'display_phone',
-  'canonical_e164',
-  'seller_phone',
+  // Phone columns are resolved live via master_owners.best_phone_1 / v_seller_work_items
+  // (not present on all v_command_map_seller_pin_feed deployments).
 ].join(',')
 
 // Queried separately from COMMAND_MAP_SELLER_PIN_FEED_SELECT (below) so that an
