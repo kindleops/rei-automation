@@ -50,7 +50,7 @@ export async function GET(request) {
     }
 
     const bounds = { lat_min, lat_max, lng_min, lng_max };
-    const tileZoom = Math.max(9, Math.min(16, Math.floor(zoom));
+    const tileZoom = Math.max(9, Math.min(16, Math.floor(zoom)));
 
     const filterContext = await resolveMapFilterContext(request);
     if (filterContext.active && filterContext.error) {
