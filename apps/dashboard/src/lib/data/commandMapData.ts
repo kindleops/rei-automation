@@ -351,6 +351,18 @@ const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'seller_phone',
 ].join(',')
 
+// Queried separately from COMMAND_MAP_SELLER_PIN_FEED_SELECT (below) so that an
+// environment where the 20260705120000 migration hasn't been applied yet still
+// gets the rest of the card — a missing column here must never take down the
+// whole detail query.
+const COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT = [
+  'prospect_full_name',
+  'prospect_first_name',
+  'sms_eligible',
+  'agent_persona',
+  'agent_family',
+].join(',')
+
 /** Canonical thread state from canonical_inbox_threads. */
 const COMMAND_MAP_CANONICAL_THREAD_SELECT = [
   'thread_key',
@@ -854,6 +866,102 @@ export const resolveCommandMapSellerPhone = async (
   return { phone: null, prospectId: resolvedProspectId }
 }
 
+export type CommandMapSellerIdentity = {
+  prospectId: string | null
+  prospectFirstName: string | null
+  prospectFullName: string | null
+  smsEligible: boolean
+  agentPersona: string | null
+  agentFamily: string | null
+}
+
+const readProspectIdentity = async (
+  prospectId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<{ prospectFirstName: string | null; prospectFullName: string | null; smsEligible: boolean } | null> => {
+  const id = String(prospectId ?? '').trim()
+  if (!id) return null
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('prospects')
+    .select('first_name,full_name,sms_eligible')
+    .eq('prospect_id', id)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error || !data) {
+    if (error && !isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] prospect identity lookup failed:', error)
+    }
+    return null
+  }
+  const row = data as Record<string, unknown>
+  return {
+    prospectFirstName: String(row.first_name ?? '').trim() || null,
+    prospectFullName: String(row.full_name ?? '').trim() || null,
+    smsEligible: row.sms_eligible === true,
+  }
+}
+
+const readMasterOwnerAgentSignal = async (
+  masterOwnerId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<{ agentPersona: string | null; agentFamily: string | null } | null> => {
+  const ownerId = String(masterOwnerId ?? '').trim()
+  if (!ownerId) return null
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('master_owners')
+    .select('agent_persona,agent_family')
+    .eq('master_owner_id', ownerId)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error || !data) {
+    if (error && !isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] master owner agent signal lookup failed:', error)
+    }
+    return null
+  }
+  const row = data as Record<string, unknown>
+  return {
+    agentPersona: String(row.agent_persona ?? '').trim() || null,
+    agentFamily: String(row.agent_family ?? '').trim() || null,
+  }
+}
+
+/**
+ * Live fallback identity resolver for the Map ownership-check send. Used only when
+ * the hydrated map-card record itself lacks prospect name / eligibility / agent
+ * fields (e.g. a stale cache or a lightweight pin payload) — the common case is
+ * already covered by v_command_map_seller_pin_feed's own prospect_full_name /
+ * prospect_first_name / sms_eligible / agent_persona / agent_family columns.
+ */
+export const resolveCommandMapSellerIdentity = async (params: {
+  prospectId?: string | null
+  masterOwnerId?: string | null
+  signal?: AbortSignal
+}): Promise<CommandMapSellerIdentity> => {
+  const prospectId = String(params.prospectId ?? '').trim() || null
+  const masterOwnerId = String(params.masterOwnerId ?? '').trim() || null
+
+  const [prospectIdentity, agentSignal] = await Promise.all([
+    readProspectIdentity(prospectId, params.signal),
+    readMasterOwnerAgentSignal(masterOwnerId, params.signal),
+  ])
+
+  return {
+    prospectId,
+    prospectFirstName: prospectIdentity?.prospectFirstName ?? null,
+    prospectFullName: prospectIdentity?.prospectFullName ?? null,
+    smsEligible: prospectIdentity?.smsEligible ?? false,
+    agentPersona: agentSignal?.agentPersona ?? null,
+    agentFamily: agentSignal?.agentFamily ?? null,
+  }
+}
+
 const readSellerWorkItemContact = async (
   propertyId: string,
   signal?: AbortSignal,
@@ -991,6 +1099,39 @@ export const loadCommandMapSellerPinDetail = async (
     return data as Partial<CommandMapSellerPin> | null
   }
 
+  // Isolated from readFeed() on purpose: a 400 here (e.g. migration
+  // 20260705120000 not yet applied to this Supabase project, so these columns
+  // don't exist on the view) must degrade to "no prospect identity/agent data"
+  // only — it must never fail the rest of the card.
+  const readIdentityFields = async () => {
+    let query = supabase.from('v_command_map_seller_pin_feed').select(COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT)
+    if (propertyId) {
+      query = query.eq('property_id', propertyId)
+    } else if (options.threadKey) {
+      query = query.eq('thread_key', options.threadKey)
+    } else if (options.masterOwnerId) {
+      query = query.eq('master_owner_id', options.masterOwnerId)
+    } else if (options.prospectId) {
+      query = query.eq('prospect_id', options.prospectId)
+    } else {
+      return null
+    }
+    if (options.signal) query = query.abortSignal(options.signal)
+    try {
+      const { data, error } = await query.limit(1).maybeSingle()
+      if (error) {
+        if (!isAbortError(error) && import.meta.env.DEV) {
+          console.warn('[CommandMap] seller pin identity fields unavailable (migration pending?):', error)
+        }
+        return null
+      }
+      return data as Partial<CommandMapSellerPin> | null
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[CommandMap] seller pin identity fields query threw:', err)
+      return null
+    }
+  }
+
   const readCanonicalThread = async () => {
     let query = supabase.from('canonical_inbox_threads').select(COMMAND_MAP_CANONICAL_THREAD_SELECT)
     if (propertyId) {
@@ -1038,8 +1179,9 @@ export const loadCommandMapSellerPinDetail = async (
     return mapPropertyEnrichmentRow(propertyData, masterOwner)
   }
 
-  const [sellerWorkItem, canonicalThread, sellerWorkItemContact] = await Promise.all([
+  const [sellerWorkItem, identityFields, canonicalThread, sellerWorkItemContact] = await Promise.all([
     readFeed(),
+    readIdentityFields(),
     readCanonicalThread(),
     readSellerWorkItemContact(propertyId, options.signal),
   ])
@@ -1060,6 +1202,7 @@ export const loadCommandMapSellerPinDetail = async (
 
   const merged = {
     ...(sellerWorkItem ?? {}),
+    ...(identityFields ?? {}),
     ...(canonicalThread ?? {}),
     ...(sellerWorkItemContact ?? {}),
     ...(propertyEnrichment ?? {}),
