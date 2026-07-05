@@ -4,6 +4,13 @@ import { requireOpsDashboardAuth } from "@/lib/security/dashboard-auth.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 import { supabase } from "@/lib/supabase/client.js";
 import { decodeSupabaseBytea } from "@/lib/domain/map/decode-bytea.js";
+import { getFilteredMapVectorTile } from "@/lib/domain/map-filters/map-filter-map-queries.js";
+import {
+  buildFilterResponseMeta,
+  filteredCacheHeaders,
+  mapFilterHttpError,
+  resolveMapFilterContext,
+} from "@/lib/domain/map-filters/map-filter-runtime.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,10 +50,21 @@ export async function GET(request, { params }) {
       return emptyTile();
     }
 
-    const { data, error } = await supabase.rpc("get_property_map_vector_tile", { z, x, y });
-    if (error) throw error;
+    const filterContext = await resolveMapFilterContext(request);
+    if (filterContext.active && filterContext.error) {
+      return mapFilterHttpError(filterContext.error);
+    }
 
-    const bytes = decodeSupabaseBytea(data);
+    let bytes;
+    const filterMeta = buildFilterResponseMeta(filterContext, { zoom: z, x, y, mode: "tile" });
+
+    if (filterContext.filter?.compiled) {
+      bytes = await getFilteredMapVectorTile(filterContext.filter.compiled, { z, x, y });
+    } else {
+      const { data, error } = await supabase.rpc("get_property_map_vector_tile", { z, x, y });
+      if (error) throw error;
+      bytes = decodeSupabaseBytea(data);
+    }
 
     if (!bytes.length) {
       return emptyTile();
@@ -56,7 +74,8 @@ export async function GET(request, { params }) {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.mapbox-vector-tile",
-        "Cache-Control": "public, max-age=120",
+        ...filteredCacheHeaders(filterMeta),
+        ...(filterMeta ? { "X-Map-Filter-Token": filterMeta.filterToken } : {}),
       },
     });
   } catch (error) {

@@ -6,6 +6,17 @@ import { supabase } from "@/lib/supabase/client.js";
 import { normalizeMapAssetType } from "@/lib/domain/map/map-asset-type.js";
 import { deriveMapMarkerState } from "@/lib/domain/map/map-marker-state.js";
 import { resolveCanonicalMapMarkerKey, drainUnmappedPropertyTypes } from "@/lib/domain/map/canonical-map-marker-key.js";
+import {
+  getFilteredBoundsPropertyCount,
+  getFilteredMapProperties,
+  getFilteredMarketAggregates,
+  getFilteredSpatialClusters,
+} from "@/lib/domain/map-filters/map-filter-map-queries.js";
+import {
+  buildFilterResponseMeta,
+  mapFilterHttpError,
+  resolveMapFilterContext,
+} from "@/lib/domain/map-filters/map-filter-runtime.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -243,13 +254,25 @@ export async function GET(request) {
     const markets = marketsFilter ? marketsFilter.split(",").map((s) => s.trim()).filter(Boolean) : null;
     const states = statesFilter ? statesFilter.split(",").map((s) => s.trim()).filter(Boolean) : null;
 
+    const filterContext = await resolveMapFilterContext(request);
+    if (filterContext.active && filterContext.error) {
+      return mapFilterHttpError(filterContext.error);
+    }
+    const filterCompiled = filterContext.filter?.compiled ?? null;
+
     // ── SOURCE A: National market aggregates (zoom 0–5.99) ─────────────────
     if (fetchMode === "national") {
-      const { data: rows, error } = await supabase.rpc("get_map_market_aggregates", {
-        p_markets: markets,
-        p_states: states,
-      });
-      if (error) throw error;
+      let rows;
+      if (filterCompiled) {
+        rows = await getFilteredMarketAggregates(filterCompiled, { markets, states });
+      } else {
+        const { data, error } = await supabase.rpc("get_map_market_aggregates", {
+          p_markets: markets,
+          p_states: states,
+        });
+        if (error) throw error;
+        rows = data;
+      }
 
       const features = (rows ?? []).map(marketAggregateToFeature);
       const totalCanonical = features.reduce((sum, f) => sum + (f.properties.property_count || 0), 0);
@@ -261,7 +284,7 @@ export async function GET(request) {
           generated_at: new Date().toISOString(),
           zoom,
           mode: "national",
-          source: "canonical_market_aggregates",
+          source: filterCompiled ? "filtered_market_aggregates" : "canonical_market_aggregates",
           bounds: { lat_min, lat_max, lng_min, lng_max },
           features,
           counts: {
@@ -270,6 +293,7 @@ export async function GET(request) {
             clipped: false,
             pagination_boundary: null,
           },
+          filter: buildFilterResponseMeta(filterContext, { zoom, mode: "national" }),
         },
       });
     }
@@ -281,25 +305,49 @@ export async function GET(request) {
       }
 
       const gridDegrees = zoom < 7 ? 0.6 : zoom < 8 ? 0.35 : 0.2;
-      const [{ data: clusters, error: clusterError }, { data: exactCount, error: countError }] = await Promise.all([
-        supabase.rpc("get_map_spatial_clusters", {
-          p_lat_min: lat_min,
-          p_lat_max: lat_max,
-          p_lng_min: lng_min,
-          p_lng_max: lng_max,
-          p_grid_degrees: gridDegrees,
-        }),
-        supabase.rpc("get_map_bounds_property_count", {
-          p_lat_min: lat_min,
-          p_lat_max: lat_max,
-          p_lng_min: lng_min,
-          p_lng_max: lng_max,
-          p_markets: markets,
-          p_states: states,
-        }),
-      ]);
-      if (clusterError) throw clusterError;
-      if (countError) throw countError;
+      let clusters;
+      let exactCount;
+      if (filterCompiled) {
+        [clusters, exactCount] = await Promise.all([
+          getFilteredSpatialClusters(filterCompiled, {
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+            gridDegrees,
+          }),
+          getFilteredBoundsPropertyCount(filterCompiled, {
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+            markets,
+            states,
+          }),
+        ]);
+      } else {
+        const [clusterResult, countResult] = await Promise.all([
+          supabase.rpc("get_map_spatial_clusters", {
+            p_lat_min: lat_min,
+            p_lat_max: lat_max,
+            p_lng_min: lng_min,
+            p_lng_max: lng_max,
+            p_grid_degrees: gridDegrees,
+          }),
+          supabase.rpc("get_map_bounds_property_count", {
+            p_lat_min: lat_min,
+            p_lat_max: lat_max,
+            p_lng_min: lng_min,
+            p_lng_max: lng_max,
+            p_markets: markets,
+            p_states: states,
+          }),
+        ]);
+        if (clusterResult.error) throw clusterResult.error;
+        if (countResult.error) throw countResult.error;
+        clusters = clusterResult.data;
+        exactCount = countResult.data;
+      }
 
       const features = (clusters ?? []).map(spatialClusterToFeature);
       const clusterSum = features.reduce((sum, f) => sum + (f.properties.property_count || 0), 0);
@@ -311,7 +359,7 @@ export async function GET(request) {
           generated_at: new Date().toISOString(),
           zoom,
           mode: "metro",
-          source: "canonical_spatial_clusters",
+          source: filterCompiled ? "filtered_spatial_clusters" : "canonical_spatial_clusters",
           bounds: { lat_min, lat_max, lng_min, lng_max },
           features,
           counts: {
@@ -321,6 +369,14 @@ export async function GET(request) {
             clipped: false,
             pagination_boundary: null,
           },
+          filter: buildFilterResponseMeta(filterContext, {
+            zoom,
+            mode: "metro",
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+          }),
         },
       });
     }
@@ -335,22 +391,40 @@ export async function GET(request) {
     const limit = asLimit(searchParams.get("limit"), maxLimit, maxLimit);
 
     if (countsOnly) {
-      const [{ data: exactCount, error: countError }, { data: marketRows, error: marketError }] = await Promise.all([
-        supabase.rpc("get_map_bounds_property_count", {
-          p_lat_min: lat_min,
-          p_lat_max: lat_max,
-          p_lng_min: lng_min,
-          p_lng_max: lng_max,
-          p_markets: markets,
-          p_states: states,
-        }),
-        supabase.rpc("get_map_market_aggregates", {
-          p_markets: markets,
-          p_states: states,
-        }),
-      ]);
-      if (countError) throw countError;
-      if (marketError) throw marketError;
+      let exactCount;
+      let marketRows;
+      if (filterCompiled) {
+        [exactCount, marketRows] = await Promise.all([
+          getFilteredBoundsPropertyCount(filterCompiled, {
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+            markets,
+            states,
+          }),
+          getFilteredMarketAggregates(filterCompiled, { markets, states }),
+        ]);
+      } else {
+        const [countResult, marketResult] = await Promise.all([
+          supabase.rpc("get_map_bounds_property_count", {
+            p_lat_min: lat_min,
+            p_lat_max: lat_max,
+            p_lng_min: lng_min,
+            p_lng_max: lng_max,
+            p_markets: markets,
+            p_states: states,
+          }),
+          supabase.rpc("get_map_market_aggregates", {
+            p_markets: markets,
+            p_states: states,
+          }),
+        ]);
+        if (countResult.error) throw countResult.error;
+        if (marketResult.error) throw marketResult.error;
+        exactCount = countResult.data;
+        marketRows = marketResult.data;
+      }
       const totalCanonical = (marketRows ?? []).reduce((sum, row) => sum + Number(row.property_count || 0), 0);
 
       return NextResponse.json({
@@ -360,7 +434,7 @@ export async function GET(request) {
           generated_at: new Date().toISOString(),
           zoom,
           mode: fetchMode,
-          source: "canonical_property_tiles",
+          source: filterCompiled ? "filtered_property_tiles" : "canonical_property_tiles",
           bounds: { lat_min, lat_max, lng_min, lng_max },
           features: [],
           counts: {
@@ -371,6 +445,14 @@ export async function GET(request) {
             pagination_boundary: null,
             tile_backed: true,
           },
+          filter: buildFilterResponseMeta(filterContext, {
+            zoom,
+            mode: fetchMode,
+            lat_min,
+            lat_max,
+            lng_min,
+            lng_max,
+          }),
         },
       });
     }
@@ -380,36 +462,62 @@ export async function GET(request) {
         ? `${CLUSTER_FIELDS},${MARKER_EXTRA_FIELDS}`
         : CLUSTER_FIELDS;
 
-    const [{ data: exactCount, error: countError }, queryResult] = await Promise.all([
-      supabase.rpc("get_map_bounds_property_count", {
-        p_lat_min: lat_min,
-        p_lat_max: lat_max,
-        p_lng_min: lng_min,
-        p_lng_max: lng_max,
-        p_markets: markets,
-        p_states: states,
-      }),
-      (() => {
-        let query = supabase
-          .from("properties")
-          .select(selectFields)
-          .not("latitude", "is", null)
-          .not("longitude", "is", null)
-          .gte("latitude", lat_min)
-          .lte("latitude", lat_max)
-          .gte("longitude", lng_min)
-          .lte("longitude", lng_max)
-          .order("final_acquisition_score", { ascending: false, nullsFirst: false })
-          .limit(limit);
-        if (markets?.length) query = query.in("market", markets);
-        if (states?.length) query = query.in("property_address_state", states);
-        return query;
-      })(),
-    ]);
-
-    if (countError) throw countError;
-    const { data: rows, error } = queryResult;
-    if (error) throw error;
+    let exactCount;
+    let rows;
+    if (filterCompiled) {
+      [exactCount, rows] = await Promise.all([
+        getFilteredBoundsPropertyCount(filterCompiled, {
+          lat_min,
+          lat_max,
+          lng_min,
+          lng_max,
+          markets,
+          states,
+        }),
+        getFilteredMapProperties(filterCompiled, {
+          lat_min,
+          lat_max,
+          lng_min,
+          lng_max,
+          markets,
+          states,
+          limit,
+          selectFields,
+        }),
+      ]);
+    } else {
+      const [countResult, queryResult] = await Promise.all([
+        supabase.rpc("get_map_bounds_property_count", {
+          p_lat_min: lat_min,
+          p_lat_max: lat_max,
+          p_lng_min: lng_min,
+          p_lng_max: lng_max,
+          p_markets: markets,
+          p_states: states,
+        }),
+        (() => {
+          let query = supabase
+            .from("properties")
+            .select(selectFields)
+            .not("latitude", "is", null)
+            .not("longitude", "is", null)
+            .gte("latitude", lat_min)
+            .lte("latitude", lat_max)
+            .gte("longitude", lng_min)
+            .lte("longitude", lng_max)
+            .order("final_acquisition_score", { ascending: false, nullsFirst: false })
+            .limit(limit);
+          if (markets?.length) query = query.in("market", markets);
+          if (states?.length) query = query.in("property_address_state", states);
+          return query;
+        })(),
+      ]);
+      if (countResult.error) throw countResult.error;
+      const { data, error } = queryResult;
+      if (error) throw error;
+      exactCount = countResult.data;
+      rows = data;
+    }
 
     const features = (rows ?? []).map((row) => toPropertyFeature(row, fetchMode));
     const unmappedTypes = drainUnmappedPropertyTypes();
@@ -431,7 +539,7 @@ export async function GET(request) {
         generated_at: new Date().toISOString(),
         zoom,
         mode: fetchMode,
-        source: "canonical_properties_table",
+        source: filterCompiled ? "filtered_properties_table" : "canonical_properties_table",
         bounds: { lat_min, lat_max, lng_min, lng_max },
         features,
         counts: {
@@ -444,6 +552,14 @@ export async function GET(request) {
           by_marker_state: byMarkerState,
           unmapped_property_types: unmappedTypes,
         },
+        filter: buildFilterResponseMeta(filterContext, {
+          zoom,
+          mode: fetchMode,
+          lat_min,
+          lat_max,
+          lng_min,
+          lng_max,
+        }),
       },
     });
   } catch (error) {
