@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   resolveCanonicalThreadStateKey,
   resolveDialablePhoneFromThread,
@@ -10,6 +10,33 @@ import {
   resolveMapAgentFirstName,
   resolveMapThreadPhone,
 } from '../../src/views/map/seller-card/useSellerMapCardActions'
+
+// Generic chainable Supabase query-builder mock for the fallback-behavior suite
+// below. Each call to `.from(table)` looks up a canned response by table name.
+type TableResponse = { data: unknown; error: unknown }
+
+const makeSupabaseMock = (responses: Record<string, TableResponse>) => {
+  const missingResponse: TableResponse = { data: null, error: { message: 'no mock configured', code: 'MOCK' } }
+  const buildQuery = (table: string) => {
+    const response = responses[table] ?? missingResponse
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      order: () => chain,
+      limit: () => chain,
+      abortSignal: () => chain,
+      maybeSingle: async () => response,
+      single: async () => response,
+    }
+    return chain
+  }
+  return { from: (table: string) => buildQuery(table) }
+}
+
+vi.mock('../../src/lib/supabaseClient', () => ({
+  getSupabaseClient: vi.fn(),
+  hasSupabaseEnv: true,
+}))
 
 const baseRecord = {
   property_id: 'prop-123',
@@ -231,6 +258,92 @@ describe('seller map card thread builder', () => {
       const thread = buildThreadFromViewModel(viewModel, property274564949)
       expect(thread.prospectId).toBe('pros1_5d2dfe5ae95f982c0941f648')
       expect(thread.canonicalE164).toBe('+16514428447')
+    })
+  })
+
+  describe('map card resilience when identity view columns are not yet migrated', () => {
+    afterEach(() => {
+      vi.resetModules()
+      vi.clearAllMocks()
+    })
+
+    it('loadCommandMapSellerPinDetail still returns the full card when the identity-fields query errors (missing columns)', async () => {
+      const { getSupabaseClient } = await import('../../src/lib/supabaseClient')
+      const supabaseMock = makeSupabaseMock({
+        // readFeed() — the primary card query — succeeds normally, with none of
+        // the new identity columns in its select list (matches current
+        // production schema pre-migration).
+        v_command_map_seller_pin_feed: {
+          data: {
+            property_id: '274564949',
+            master_owner_id: 'mo_804d2f26377bee1f43019235',
+            prospect_id: 'pros1_5d2dfe5ae95f982c0941f648',
+            thread_key: 'property:274564949',
+            owner_display_name: 'mo_804d2f26377bee1f43019235 Trust',
+            property_address_full: '983 Edmund Ave, Saint Paul, MN 55104',
+            prospect_best_phone: '+16514428447',
+          },
+          error: null,
+        },
+        canonical_inbox_threads: { data: null, error: null },
+        properties: { data: null, error: null },
+        master_owners: { data: null, error: null },
+        prospects: { data: null, error: null },
+      })
+      vi.mocked(getSupabaseClient).mockReturnValue(supabaseMock as never)
+
+      const { loadCommandMapSellerPinDetail } = await import('../../src/lib/data/commandMapData')
+      const result = await loadCommandMapSellerPinDetail('274564949')
+
+      expect(result).not.toBeNull()
+      expect(result?.property_id).toBe('274564949')
+      expect(result?.property_address_full).toBe('983 Edmund Ave, Saint Paul, MN 55104')
+      expect(result?.prospect_id).toBe('pros1_5d2dfe5ae95f982c0941f648')
+    })
+
+    it('resolveCommandMapSellerIdentity resolves prospect + agent identity directly from prospects/master_owners (no dependency on the new view columns)', async () => {
+      const { getSupabaseClient } = await import('../../src/lib/supabaseClient')
+      const supabaseMock = makeSupabaseMock({
+        prospects: {
+          data: { first_name: 'Amanda', full_name: 'Amanda L Tallen', sms_eligible: true },
+          error: null,
+        },
+        master_owners: {
+          data: { agent_persona: 'Andre Thompson', agent_family: null },
+          error: null,
+        },
+      })
+      vi.mocked(getSupabaseClient).mockReturnValue(supabaseMock as never)
+
+      const { resolveCommandMapSellerIdentity } = await import('../../src/lib/data/commandMapData')
+      const identity = await resolveCommandMapSellerIdentity({
+        prospectId: 'pros1_5d2dfe5ae95f982c0941f648',
+        masterOwnerId: 'mo_804d2f26377bee1f43019235',
+      })
+
+      expect(identity.prospectFirstName).toBe('Amanda')
+      expect(identity.prospectFullName).toBe('Amanda L Tallen')
+      expect(identity.smsEligible).toBe(true)
+      expect(identity.agentPersona).toBe('Andre Thompson')
+    })
+
+    it('resolveCommandMapSellerIdentity degrades to nulls (not a thrown error) when the base-table queries also fail', async () => {
+      const { getSupabaseClient } = await import('../../src/lib/supabaseClient')
+      const supabaseMock = makeSupabaseMock({
+        prospects: { data: null, error: { message: 'boom' } },
+        master_owners: { data: null, error: { message: 'boom' } },
+      })
+      vi.mocked(getSupabaseClient).mockReturnValue(supabaseMock as never)
+
+      const { resolveCommandMapSellerIdentity } = await import('../../src/lib/data/commandMapData')
+      const identity = await resolveCommandMapSellerIdentity({
+        prospectId: 'pros1_5d2dfe5ae95f982c0941f648',
+        masterOwnerId: 'mo_804d2f26377bee1f43019235',
+      })
+
+      expect(identity.prospectFirstName).toBeNull()
+      expect(identity.agentPersona).toBeNull()
+      expect(identity.smsEligible).toBe(false)
     })
   })
 })
