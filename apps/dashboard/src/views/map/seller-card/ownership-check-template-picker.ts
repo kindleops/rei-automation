@@ -56,13 +56,12 @@ export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguag
 const hasBlankGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
 
+const hasHiThereGreeting = (message: string): boolean =>
+  /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
+
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
 
-// Final safety rail: even if an entity name reaches this point through some other
-// path, never let it go out addressed to "Hey West 7th Apartments LLC,". Checks the
-// literal greeting-name slot, not the whole message (which may legitimately mention
-// an LLC/company later in the body).
 const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i
 
 const hasEntityGreeting = (message: string): boolean => {
@@ -71,17 +70,55 @@ const hasEntityGreeting = (message: string): boolean => {
   return isEntityName(match[1])
 }
 
-const repairRenderedTemplate = (message: string): string =>
-  message
-    .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
-    .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
-    .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
-    .trim()
+const containsForbiddenEntityGreeting = (
+  message: string,
+  context: Record<string, string>,
+): boolean => {
+  const ownerName = asString(context.owner_name, '').trim()
+  const sellerFullName = asString(context.seller_name, '').trim()
+  const sellerFirstName = asString(context.seller_first_name, '').trim()
+  const lowered = message.toLowerCase()
+
+  if (ownerName && sellerFirstName && ownerName.toLowerCase() !== sellerFirstName.toLowerCase()) {
+    if (lowered.includes(ownerName.toLowerCase())) return true
+  }
+
+  if (
+    sellerFullName
+    && sellerFirstName
+    && sellerFullName.toLowerCase() !== sellerFirstName.toLowerCase()
+    && lowered.includes(sellerFullName.toLowerCase())
+  ) {
+    return true
+  }
+
+  return false
+}
+
+const greetingIncludesSellerFirstName = (message: string, sellerFirstName: string): boolean => {
+  const first = asString(sellerFirstName, '').trim()
+  if (!first) return false
+  const pattern = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i')
+  return pattern.test(message)
+}
 
 export type OwnershipTemplateCandidate = {
   template: SmsTemplate
-  repaired: string
+  rendered: string
   weight: number
+  templateKey: string
+  language: string
+}
+
+export type OwnershipTemplateSelection = {
+  template: SmsTemplate
+  renderedMessage: string
+  templateId: string
+  templateKey: string
+  language: string
+  weight: number
+  selectionReason: string
+  excludedRecentTemplateId: string | null
 }
 
 export const evaluateOwnershipTemplate = (
@@ -89,12 +126,18 @@ export const evaluateOwnershipTemplate = (
   context: Record<string, string>,
 ): OwnershipTemplateCandidate | null => {
   const { renderedText, missingVariables } = renderTemplate(template, context)
-  const repaired = repairRenderedTemplate(renderedText)
-  if (!repaired) return null
-  if (hasBlankGreeting(repaired)) return null
-  if (hasUnresolvedTemplateTokens(repaired)) return null
-  if (hasEntityGreeting(repaired)) return null
+  const rendered = renderedText.trim()
+  if (!rendered) return null
+  if (hasBlankGreeting(rendered)) return null
+  if (hasHiThereGreeting(rendered)) return null
+  if (hasUnresolvedTemplateTokens(rendered)) return null
+  if (hasEntityGreeting(rendered)) return null
   if (missingVariables.length > 0) return null
+  if (asString(context.seller_first_name, '').trim()
+    && !greetingIncludesSellerFirstName(rendered, context.seller_first_name)) {
+    return null
+  }
+  if (containsForbiddenEntityGreeting(rendered, context)) return null
 
   const raw = template.raw as AnyRecord
   const metadata = (raw.metadata && typeof raw.metadata === 'object'
@@ -102,10 +145,21 @@ export const evaluateOwnershipTemplate = (
     : {}) as AnyRecord
   const weight = Math.max(
     1,
-    Number(raw.traffic_weight ?? metadata.traffic_weight ?? raw.usage_count ?? 1) || 1,
+    Number(raw.traffic_weight ?? metadata.traffic_weight ?? 0) || 0,
+  )
+  const resolvedWeight = weight > 0 ? weight : 1
+  const templateKey = asString(
+    raw.template_key ?? raw.template_id ?? template.templateId ?? template.id,
+    template.id,
   )
 
-  return { template, repaired, weight }
+  return {
+    template,
+    rendered,
+    weight: resolvedWeight,
+    templateKey,
+    language: template.language,
+  }
 }
 
 export const filterOwnershipTemplatesForLanguage = (
@@ -131,6 +185,7 @@ export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
+  options: { excludeTemplateId?: string | null } = {},
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
   const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
@@ -150,7 +205,17 @@ export const buildOwnershipTemplatePool = (
     const key = entry.template.templateId || entry.template.id
     if (!uniqueById.has(key)) uniqueById.set(key, entry)
   }
-  return Array.from(uniqueById.values())
+
+  let candidates = Array.from(uniqueById.values())
+  const excludeId = asString(options.excludeTemplateId, '').trim()
+  if (excludeId && candidates.length > 1) {
+    const filtered = candidates.filter(
+      (entry) => (entry.template.templateId || entry.template.id) !== excludeId,
+    )
+    if (filtered.length) candidates = filtered
+  }
+
+  return candidates
 }
 
 export const pickWeightedRandom = <T extends { weight: number }>(items: T[]): T | null => {
@@ -168,9 +233,29 @@ export const pickRandomOwnershipCheckTemplate = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-): SmsTemplate | null => {
-  const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage)
-  return pickWeightedRandom(pool)?.template ?? null
+  options: { excludeTemplateId?: string | null } = {},
+): OwnershipTemplateSelection | null => {
+  const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage, options)
+  const picked = pickWeightedRandom(pool)
+  if (!picked) return null
+
+  const excludeId = asString(options.excludeTemplateId, '').trim() || null
+  const selectionReason = excludeId && pool.length > 1 && excludeId !== (picked.template.templateId || picked.template.id)
+    ? 'uniform_random_excluding_recent'
+    : picked.weight > 1
+      ? 'traffic_weighted_random'
+      : 'uniform_random'
+
+  return {
+    template: picked.template,
+    renderedMessage: picked.rendered,
+    templateId: picked.template.templateId || picked.template.id,
+    templateKey: picked.templateKey,
+    language: picked.language,
+    weight: picked.weight,
+    selectionReason,
+    excludedRecentTemplateId: excludeId,
+  }
 }
 
 let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
@@ -199,6 +284,34 @@ export const fetchOwnershipCheckTemplates = async (): Promise<SmsTemplate[]> => 
     expiresAt: now + 60_000,
   }
   return templates
+}
+
+export const fetchRecentOwnershipCheckTemplateId = async (
+  propertyId: string,
+  recipientPhone: string,
+): Promise<string | null> => {
+  const normalizedPropertyId = asString(propertyId, '').trim()
+  const normalizedPhone = asString(recipientPhone, '').trim()
+  if (!normalizedPropertyId || !normalizedPhone) return null
+
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('template_id, selected_template_id, metadata')
+    .eq('property_id', normalizedPropertyId)
+    .eq('to_phone_number', normalizedPhone)
+    .eq('message_type', 'ownership_check')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return null
+  const row = data as AnyRecord
+  const metadata = (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as AnyRecord
+  return asString(
+    row.selected_template_id ?? row.template_id ?? metadata.selected_template_id ?? metadata.template_id,
+    '',
+  ) || null
 }
 
 export const resolveMapOwnerLanguage = async (
@@ -233,13 +346,30 @@ export const resolveMapOwnerLanguage = async (
 }
 
 export const pickOwnershipCheckTemplateForMap = async (
-  record: Record<string, unknown>,
   context: Record<string, string>,
-  masterOwnerId: string | null,
-): Promise<SmsTemplate | null> => {
-  const [templates, ownerLanguage] = await Promise.all([
+  ownerLanguage: string,
+  options: {
+    propertyId?: string | null
+    recipientPhone?: string | null
+    random?: () => number
+  } = {},
+): Promise<OwnershipTemplateSelection | null> => {
+  const [templates, recentTemplateId] = await Promise.all([
     fetchOwnershipCheckTemplates(),
-    resolveMapOwnerLanguage(record, masterOwnerId),
+    options.propertyId && options.recipientPhone
+      ? fetchRecentOwnershipCheckTemplateId(options.propertyId, options.recipientPhone)
+      : Promise.resolve(null),
   ])
-  return pickRandomOwnershipCheckTemplate(templates, context, ownerLanguage)
+
+  const originalRandom = Math.random
+  if (options.random) {
+    Math.random = options.random
+  }
+  try {
+    return pickRandomOwnershipCheckTemplate(templates, context, ownerLanguage, {
+      excludeTemplateId: recentTemplateId,
+    })
+  } finally {
+    Math.random = originalRandom
+  }
 }

@@ -6,17 +6,25 @@ import {
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
 import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
-import { resolveCommandMapSellerIdentity, resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
+import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
   getRecommendedTemplates,
   renderTemplate,
 } from '../../../lib/data/templateData'
-import { pickOwnershipCheckTemplateForMap } from './ownership-check-template-picker'
+import {
+  canonicalizeOwnerLanguage,
+  pickOwnershipCheckTemplateForMap,
+} from './ownership-check-template-picker'
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
 import { translateText } from '../../../modules/inbox/translate.api'
+import {
+  buildOwnershipCheckTemplateContext,
+  resolveMapOwnershipCheckIdentity,
+} from '../../../domain/map/resolve-map-ownership-check'
+import { sendMapOwnershipCheck } from '../../../domain/map/send-map-ownership-check'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import { asNumber, firstDefined, text } from './seller-map-card-formatters'
 import { isEntityName, safeHumanName } from '../../../lib/identity/entityDetection'
@@ -228,6 +236,88 @@ export const useSellerMapCardActions = ({
     setFollowUpState('sending')
     setFollowUpError(null)
     try {
+      if (eligibility.isUncontacted) {
+        const identityResult = await resolveMapOwnershipCheckIdentity(viewModel.propertyId)
+        if (!identityResult.ok) {
+          setFollowUpError(identityResult.error)
+          setFollowUpState('blocked')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
+
+        const identity = identityResult.identity
+        const templateContext = buildOwnershipCheckTemplateContext(identity)
+        const templateSelection = await pickOwnershipCheckTemplateForMap(
+          templateContext,
+          canonicalizeOwnerLanguage(identity.ownerLanguage),
+          {
+            propertyId: identity.propertyId,
+            recipientPhone: identity.recipientPhone,
+          },
+        )
+
+        if (!templateSelection) {
+          setFollowUpError('No compatible ownership template')
+          setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
+
+        const sendThread = buildThreadFromViewModel(viewModel, record, {
+          phone: identity.recipientPhone,
+          prospectId: identity.prospectId,
+        })
+        const canonicalThread: InboxThread = {
+          ...sendThread,
+          threadKey: identity.recipientPhone,
+          id: identity.recipientPhone,
+          phoneNumber: identity.recipientPhone,
+          canonicalE164: identity.recipientPhone,
+          sellerPhone: identity.recipientPhone,
+          bestPhone: identity.recipientPhone,
+          display_phone: identity.recipientPhone,
+          prospect_best_phone: identity.recipientPhone,
+          phoneNumberId: identity.phoneId,
+          ownerId: identity.masterOwnerId,
+          prospectId: identity.prospectId,
+          sellerName: identity.sellerDisplayName,
+          first_name: identity.prospectFirstName,
+          prospect_name: identity.prospectFullName,
+          ownerDisplayName: identity.ownerDisplayName,
+          ownerName: identity.ownerDisplayName,
+          propertyAddressFull: identity.propertyAddress,
+          propertyAddress: identity.propertyAddress,
+        }
+
+        const result = await sendMapOwnershipCheck({
+          identity,
+          selection: templateSelection,
+          thread: canonicalThread,
+        })
+
+        if (!result.ok) {
+          setFollowUpError(result.errorMessage || 'Send failed')
+          setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
+
+        setFollowUpState('sent')
+        onActivityRefresh?.()
+        onMessagesRefresh?.()
+        window.setTimeout(() => setFollowUpState('idle'), 2400)
+        return
+      }
+
       let sendThread = thread
       const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
         let candidate = sendThread
@@ -276,66 +366,20 @@ export const useSellerMapCardActions = ({
       }
       sendThread = resolvedSendThread
 
-      let manualTemplateValues = buildMapTemplateManualValues(record)
-      const masterOwnerId = viewModel.masterOwner.id
-        || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
-        || null
-
-      // The hydrated map-card record already carries prospect name/eligibility and
-      // agent_persona/agent_family in the common case (v_command_map_seller_pin_feed).
-      // Only fall back to a live lookup when the record itself is missing them —
-      // e.g. a stale cache or a lightweight pin payload — never treat an absent
-      // field on `record` alone as proof that no recipient/agent can be resolved.
-      if (eligibility.isUncontacted && (!manualTemplateValues.seller_first_name || !manualTemplateValues.agent_first_name)) {
-        const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
-          || text(firstDefined(record, ['prospect_id', 'prospectId']))
-          || null
-        const liveIdentity = await resolveCommandMapSellerIdentity({
-          prospectId: resolvedProspectId,
-          masterOwnerId,
-        })
-        manualTemplateValues = buildMapTemplateManualValues({
-          ...record,
-          prospect_full_name: text(firstDefined(record, ['prospect_full_name'])) || liveIdentity.prospectFullName || '',
-          prospect_first_name: text(firstDefined(record, ['prospect_first_name'])) || liveIdentity.prospectFirstName || '',
-          sms_eligible: firstDefined(record, ['sms_eligible']) ?? liveIdentity.smsEligible,
-          agent_persona: text(firstDefined(record, ['agent_persona'])) || liveIdentity.agentPersona || '',
-          agent_family: text(firstDefined(record, ['agent_family'])) || liveIdentity.agentFamily || '',
-        })
-      }
-
-      if (eligibility.isUncontacted && !manualTemplateValues.agent_first_name) {
-        setFollowUpError('No SMS agent available')
-        setFollowUpState('failed')
-        window.setTimeout(() => {
-          setFollowUpState('idle')
-          setFollowUpError(null)
-        }, 4000)
-        return
-      }
-
-      let followUpTemplate: SmsTemplate | null = null
+      const manualTemplateValues = buildMapTemplateManualValues(record)
       const templateContext = {
         ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
         ...manualTemplateValues,
       }
 
-      if (eligibility.isUncontacted) {
-        followUpTemplate = await pickOwnershipCheckTemplateForMap(record, templateContext, masterOwnerId)
-      } else {
-        const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
-        followUpTemplate = templates.find((template) => template.isFollowUp)
-          || templates.find((template) => template.useCaseSlug.includes('follow'))
-          || templates[0]
-          || null
-      }
+      const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
+      const followUpTemplate: SmsTemplate | null = templates.find((template) => template.isFollowUp)
+        || templates.find((template) => template.useCaseSlug.includes('follow'))
+        || templates[0]
+        || null
 
       if (!followUpTemplate) {
-        setFollowUpError(
-          eligibility.isUncontacted
-            ? 'No compatible ownership template'
-            : 'No compatible follow-up template',
-        )
+        setFollowUpError('No compatible follow-up template')
         setFollowUpState('failed')
         window.setTimeout(() => {
           setFollowUpState('idle')
@@ -344,12 +388,7 @@ export const useSellerMapCardActions = ({
         return
       }
 
-      const { renderedText: rawMessageText } = renderTemplate(followUpTemplate, templateContext)
-      let messageText = rawMessageText
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
-        .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
-        .trim()
+      const { renderedText: messageText } = renderTemplate(followUpTemplate, templateContext)
       if (
         !messageText.trim()
         || hasBlankGreeting(messageText)

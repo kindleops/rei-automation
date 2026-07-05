@@ -390,13 +390,22 @@ export async function runInboxAction({
 
   // ── send-now: create queue row and return result ─────────────────────────
   if (action === 'send-now') {
+    const payloadSource = clean(payload.source) || clean(payload.metadata?.source) || ''
+    const payloadAction = clean(payload.action) || clean(payload.metadata?.action) || ''
+    const isMapOwnershipCheck =
+      payloadSource === 'map_command' ||
+      payloadAction === 'send_ownership_check' ||
+      clean(payload.created_from) === 'leadcommand_map'
     const sendResult = await executeManualInboxSendNow(
       {
         ...payload,
         thread_key: threadKey,
-        source: 'manual_inbox',
-        action: 'send_now',
-        created_from: clean(payload.created_from) || 'leadcommand_inbox',
+        source: isMapOwnershipCheck ? 'map_command' : (payloadSource || 'manual_inbox'),
+        send_source: isMapOwnershipCheck ? 'map_command' : (clean(payload.send_source) || payloadSource || 'manual_inbox'),
+        action: isMapOwnershipCheck ? 'send_ownership_check' : (payloadAction || 'send_now'),
+        message_type: clean(payload.message_type) || (isMapOwnershipCheck ? 'ownership_check' : undefined),
+        use_case_template: clean(payload.use_case_template) || (isMapOwnershipCheck ? 'ownership_check' : undefined),
+        created_from: clean(payload.created_from) || (isMapOwnershipCheck ? 'leadcommand_map' : 'leadcommand_inbox'),
       },
       { supabase }
     )

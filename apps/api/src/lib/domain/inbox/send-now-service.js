@@ -105,10 +105,16 @@ function isManualOperatorSend(input = {}) {
     asBoolean(input.manual_operator_send, false) ||
     clean(input.source) === "manual_inbox" ||
     clean(input.send_source) === "manual_inbox" ||
+    clean(input.source) === "map_command" ||
+    clean(input.send_source) === "map_command" ||
     clean(input_metadata.source) === "manual_inbox" ||
     clean(input_metadata.send_source) === "manual_inbox" ||
+    clean(input_metadata.source) === "map_command" ||
+    clean(input_metadata.send_source) === "map_command" ||
     clean(input.action) === "send_now" ||
-    clean(input_metadata.action) === "send_now"
+    clean(input_metadata.action) === "send_now" ||
+    clean(input.action) === "send_ownership_check" ||
+    clean(input_metadata.action) === "send_ownership_check"
   );
 }
 
@@ -433,23 +439,72 @@ export async function resolveFromPhoneNumber({
  * - manual message length >= 2
  * - auto_reply message length >= 10
  */
+function pickProvenanceField(input = {}, metadata = {}, key = "") {
+  return clean(input[key]) || clean(metadata[key]) || null;
+}
+
+function buildSendNowMetadata(input = {}, normalized = {}) {
+  const input_metadata = objectMetadata(input.metadata);
+  const merged = {
+    ...input_metadata,
+    source: normalized.source,
+    send_source: normalized.send_source || normalized.source,
+    action: normalized.action,
+    created_from: normalized.created_from,
+    manual_operator_send: normalized.manual_operator_send === true,
+    seller_first_name: normalized.seller_first_name || input_metadata.seller_first_name || null,
+    seller_display_name: normalized.seller_display_name || input_metadata.seller_display_name || null,
+    agent_name: normalized.agent_name || input_metadata.agent_name || null,
+    agent_first_name: normalized.agent_first_name || input_metadata.agent_first_name || null,
+    template_id: normalized.template_id || input_metadata.template_id || null,
+    selected_template_id:
+      normalized.selected_template_id || input_metadata.selected_template_id || null,
+    template_key: normalized.template_key || input_metadata.template_key || null,
+    template_source: normalized.template_source || input_metadata.template_source || null,
+    template_language: normalized.language || input_metadata.template_language || null,
+    template_selection_reason:
+      input_metadata.template_selection_reason || null,
+    rendered_message: normalized.rendered_message || input_metadata.rendered_message || null,
+    property_address: normalized.property_address || input_metadata.property_address || null,
+    origin_surface:
+      input_metadata.origin_surface ||
+      (normalized.source === "map_command" ? "command_map" : null),
+    message_events_source_app:
+      input_metadata.message_events_source_app ||
+      (normalized.source === "map_command" ? "LeadCommand Map" : null),
+  };
+  if (normalized.sms_agent_id) merged.sms_agent_id = normalized.sms_agent_id;
+  if (normalized.selected_agent_id) merged.selected_agent_id = normalized.selected_agent_id;
+  return merged;
+}
+
 export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
   const thread_key = clean(input.thread_key);
   const to_phone_number = normalizePhone(clean(input.to_phone_number));
   const from_phone_number = resolvedFrom || normalizePhone(clean(input.from_phone_number));
   const message_body = clean(input.message_body);
   const message_text = clean(input.message_text) || message_body;
-  const message_type = clean(input.message_type) || "manual_reply";
-  const use_case_template = clean(input.use_case_template) || "manual_reply";
-  const type = clean(input.type) || "outbound";
-  const queue_key = clean(input.queue_key) || `inbox:send_now:${crypto.randomUUID()}`;
   const input_metadata = objectMetadata(input.metadata);
   const action = clean(input.action) || clean(input_metadata.action) || "send_now";
   const source =
     clean(input.source) ||
+    clean(input.send_source) ||
     clean(input_metadata.source) ||
-    (action === "send_now" ? "manual_inbox" : "inbox");
-  const created_from = clean(input.created_from) || "leadcommand_inbox";
+    clean(input_metadata.send_source) ||
+    (action === "send_ownership_check" ? "map_command" : action === "send_now" ? "manual_inbox" : "inbox");
+  const send_source = clean(input.send_source) || clean(input_metadata.send_source) || source;
+  const created_from =
+    clean(input.created_from) ||
+    clean(input_metadata.created_from) ||
+    (source === "map_command" ? "leadcommand_map" : "leadcommand_inbox");
+  const message_type =
+    clean(input.message_type) ||
+    (source === "map_command" || action === "send_ownership_check" ? "ownership_check" : "manual_reply");
+  const use_case_template =
+    clean(input.use_case_template) ||
+    (source === "map_command" || action === "send_ownership_check" ? "ownership_check" : "manual_reply");
+  const type = clean(input.type) || "outbound";
+  const queue_key = clean(input.queue_key) || `inbox:send_now:${crypto.randomUUID()}`;
 
   if (!thread_key) {
     return { ok: false, status: 400, error: "missing_thread_key" };
@@ -478,35 +533,81 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
     return { ok: false, status: 422, error: "entity_name_in_greeting" };
   }
 
-  return {
-    ok: true,
-    normalized: {
-      queue_key,
-      thread_key,
-      to_phone_number,
-      from_phone_number,
-      message_body,
-      message_text,
-      message_type,
-      use_case_template,
-      type,
-      master_owner_id: clean(input.master_owner_id) || null,
-      property_id: clean(input.property_id) || null,
-      prospect_id: clean(input.prospect_id) || null,
-      phone_number_id: clean(input.phone_number_id) || null,
-      market_id: clean(input.market_id) || null,
-      textgrid_number_id: clean(input.textgrid_number_id) || null,
+  const normalized = {
+    queue_key,
+    thread_key,
+    to_phone_number,
+    from_phone_number,
+    message_body,
+    message_text,
+    message_type,
+    use_case_template,
+    type,
+    master_owner_id: pickProvenanceField(input, input_metadata, "master_owner_id"),
+    property_id: pickProvenanceField(input, input_metadata, "property_id"),
+    prospect_id: pickProvenanceField(input, input_metadata, "prospect_id"),
+    phone_number_id: pickProvenanceField(input, input_metadata, "phone_number_id"),
+    market_id: pickProvenanceField(input, input_metadata, "market_id"),
+    textgrid_number_id: pickProvenanceField(input, input_metadata, "textgrid_number_id"),
+    source,
+    send_source,
+    action,
+    created_from,
+    seller_first_name: pickProvenanceField(input, input_metadata, "seller_first_name"),
+    seller_display_name: pickProvenanceField(input, input_metadata, "seller_display_name"),
+    agent_name: pickProvenanceField(input, input_metadata, "agent_name"),
+    agent_first_name: pickProvenanceField(input, input_metadata, "agent_first_name"),
+    sms_agent_id: pickProvenanceField(input, input_metadata, "sms_agent_id"),
+    selected_agent_id: pickProvenanceField(input, input_metadata, "selected_agent_id"),
+    template_id: pickProvenanceField(input, input_metadata, "template_id"),
+    selected_template_id:
+      pickProvenanceField(input, input_metadata, "selected_template_id") ||
+      pickProvenanceField(input, input_metadata, "template_id"),
+    template_key: pickProvenanceField(input, input_metadata, "template_key"),
+    template_source: pickProvenanceField(input, input_metadata, "template_source"),
+    language: pickProvenanceField(input, input_metadata, "language"),
+    rendered_message:
+      pickProvenanceField(input, input_metadata, "rendered_message") || message_body,
+    property_address: pickProvenanceField(input, input_metadata, "property_address"),
+    metadata: buildSendNowMetadata(input, {
       source,
+      send_source,
       action,
       created_from,
+      seller_first_name: pickProvenanceField(input, input_metadata, "seller_first_name"),
+      seller_display_name: pickProvenanceField(input, input_metadata, "seller_display_name"),
+      agent_name: pickProvenanceField(input, input_metadata, "agent_name"),
+      agent_first_name: pickProvenanceField(input, input_metadata, "agent_first_name"),
+      sms_agent_id: pickProvenanceField(input, input_metadata, "sms_agent_id"),
+      selected_agent_id: pickProvenanceField(input, input_metadata, "selected_agent_id"),
+      template_id: pickProvenanceField(input, input_metadata, "template_id"),
+      selected_template_id:
+        pickProvenanceField(input, input_metadata, "selected_template_id") ||
+        pickProvenanceField(input, input_metadata, "template_id"),
+      template_key: pickProvenanceField(input, input_metadata, "template_key"),
+      template_source: pickProvenanceField(input, input_metadata, "template_source"),
+      language: pickProvenanceField(input, input_metadata, "language"),
+      rendered_message:
+        pickProvenanceField(input, input_metadata, "rendered_message") || message_body,
+      property_address: pickProvenanceField(input, input_metadata, "property_address"),
       manual_operator_send:
         source === "manual_inbox" ||
+        source === "map_command" ||
         action === "send_now" ||
+        action === "send_ownership_check" ||
         asBoolean(input.manual_operator_send, false),
-      operator_override: asBoolean(input.operator_override, false),
-      force: asBoolean(input.force, false),
-    },
+    }),
+    manual_operator_send:
+      source === "manual_inbox" ||
+      source === "map_command" ||
+      action === "send_now" ||
+      action === "send_ownership_check" ||
+      asBoolean(input.manual_operator_send, false),
+    operator_override: asBoolean(input.operator_override, false),
+    force: asBoolean(input.force, false),
   };
+
+  return { ok: true, normalized };
 }
 
 function mapValidationErrorToReason(validation_error = "") {
@@ -922,7 +1023,11 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 
   const { normalized } = validation;
   const operator_override = normalized.operator_override || normalized.force;
-  const is_manual_send_now = clean(normalized.action).toLowerCase() === "send_now";
+  const is_manual_send_now =
+    normalized.manual_operator_send === true ||
+    clean(normalized.action).toLowerCase() === "send_now" ||
+    clean(normalized.action).toLowerCase() === "send_ownership_check" ||
+    normalized.source === "map_command";
   const warning_codes = [];
 
   // ── Step 3a: non-bypassable compliance guard ───────────────────────
@@ -1145,17 +1250,28 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         touch_number: 1,
         dnc_check: "✅ Cleared",
         delivery_confirmed: "⏳ Pending",
+        seller_first_name: normalized.seller_first_name,
+        seller_display_name: normalized.seller_display_name,
+        agent_name: normalized.agent_name,
+        sms_agent_id: normalized.sms_agent_id,
+        selected_agent_id: normalized.selected_agent_id,
+        template_id: normalized.template_id,
+        selected_template_id: normalized.selected_template_id,
+        template_key: normalized.template_key,
+        template_source: normalized.template_source,
+        language: normalized.language,
+        rendered_message: normalized.rendered_message,
+        property_address: normalized.property_address,
+        source: normalized.source,
+        send_source: normalized.send_source,
+        created_from: normalized.created_from,
         metadata: {
-          source: normalized.source,
-          send_source: normalized.source,
-          action: normalized.action,
-          created_from: normalized.created_from,
-          ...(is_manual_send_now ? { manual_operator_send: true } : {}),
-          ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
-          operator_override: operator_override ? true : false,
+          ...normalized.metadata,
           transport_fingerprint,
           manual_send_warning_codes: warning_codes,
           client_send_id: clean(input.client_send_id || input.metadata?.client_send_id) || null,
+          operator_override: operator_override ? true : false,
+          ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         },
       },
       insert_deps
@@ -1373,6 +1489,10 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   const {
     createQueueRowImpl = createInboxSendNowQueueRow,
     sendTextgridImpl = sendTextgridSMS,
+    finalizeSendQueueSuccessImpl = finalizeSendQueueSuccess,
+    writeOutboundSuccessMessageEventImpl = writeOutboundSuccessMessageEvent,
+    writeOutboundFailureMessageEventImpl = writeOutboundFailureMessageEvent,
+    finalizeSendQueueFailureImpl = finalizeSendQueueFailure,
     supabase = defaultSupabase,
   } = deps;
 
@@ -1394,10 +1514,28 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   const bypassed_queue_emergency_stop =
     bypassed_runtime_brake && runtime_brake.reason === "queue_emergency_stop_active";
 
+  const input_metadata = objectMetadata(input.metadata);
+  const resolved_source =
+    clean(input.source) ||
+    clean(input.send_source) ||
+    clean(input_metadata.source) ||
+    clean(input_metadata.send_source) ||
+    "manual_inbox";
+  const resolved_action =
+    clean(input.action) ||
+    clean(input_metadata.action) ||
+    (resolved_source === "map_command" ? "send_ownership_check" : "send_now");
+  const resolved_created_from =
+    clean(input.created_from) ||
+    clean(input_metadata.created_from) ||
+    (resolved_source === "map_command" ? "leadcommand_map" : "leadcommand_inbox");
+
   const manual_input = {
     ...input,
-    source: "manual_inbox",
-    send_source: "manual_inbox",
+    source: resolved_source,
+    send_source: clean(input.send_source) || resolved_source,
+    action: resolved_action,
+    created_from: resolved_created_from,
     manual_operator_send: true,
     ...(bypassed_runtime_brake
       ? {
@@ -1407,9 +1545,11 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       : {}),
     ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
     metadata: {
-      ...objectMetadata(input.metadata),
-      source: "manual_inbox",
-      send_source: "manual_inbox",
+      ...input_metadata,
+      source: resolved_source,
+      send_source: clean(input.send_source) || clean(input_metadata.send_source) || resolved_source,
+      action: resolved_action,
+      created_from: resolved_created_from,
       manual_operator_send: true,
       ...(bypassed_runtime_brake
         ? {
@@ -1461,8 +1601,17 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       lock_token: manual_lock_token,
       updated_at: now,
       metadata: {
-        ...(audit_result.result?.raw?.metadata ?? {}),
-        source: "manual_inbox",
+        ...(audit_result.result?.raw?.metadata ?? objectMetadata(manual_input.metadata)),
+        source: resolved_source,
+        send_source: clean(manual_input.send_source) || resolved_source,
+        action: resolved_action,
+        created_from: resolved_created_from,
+        ...(resolved_source === "map_command"
+          ? {
+              origin_surface: "command_map",
+              message_events_source_app: "LeadCommand Map",
+            }
+          : {}),
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         manual_send_attempted_at: now,
         manual_lock_token,
@@ -1518,12 +1667,12 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       bypass_system_control: true,
       bypass_reason: "manual_operator_send",
       bypass_content_guards: operator_override_requested,
-      source: "manual_inbox",
-      send_source: "manual_inbox",
+      source: resolved_source,
+      send_source: clean(manual_input.send_source) || resolved_source,
       manual_operator_send: true,
       metadata: {
-        source: "manual_inbox",
-        send_source: "manual_inbox",
+        source: resolved_source,
+        send_source: clean(manual_input.send_source) || resolved_source,
         manual_operator_send: true,
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
       },
@@ -1560,7 +1709,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     // Success path
     try {
       // a. Update send_queue row to terminal 'sent'
-      const finalized_row = await finalizeSendQueueSuccess(
+      const finalized_row = await finalizeSendQueueSuccessImpl(
         normalized_row,
         manual_lock_token,
         send_result,
@@ -1568,7 +1717,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       );
 
       // b. Log message_events, update thread state, outreach, etc.
-      const outbound_event = await writeOutboundSuccessMessageEvent(
+      const outbound_event = await writeOutboundSuccessMessageEventImpl(
         finalized_row,
         send_result,
         bookkeeping_deps
@@ -1599,7 +1748,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       const failure_error = provider_error || new Error("provider_dispatch_failed");
       
       // a. Update send_queue row to 'failed'
-      const failed_row = await finalizeSendQueueFailure(
+      const failed_row = await finalizeSendQueueFailureImpl(
         normalized_row,
         manual_lock_token,
         failure_error,
@@ -1607,7 +1756,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       );
 
       // b. Log failure event
-      await writeOutboundFailureMessageEvent(
+      await writeOutboundFailureMessageEventImpl(
         normalized_row,
         failure_error,
         { ...bookkeeping_deps, send_result }
