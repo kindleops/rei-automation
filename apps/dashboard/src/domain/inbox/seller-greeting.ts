@@ -93,13 +93,15 @@ export const buildSellerGreetingFromThread = (
 
 export const buildMapTemplateManualValues = (
   record: Record<string, unknown>,
+  overrides: Partial<Record<'agent_name' | 'agent_first_name' | 'seller_first_name' | 'seller_name' | 'owner_name' | 'property_address', string>> = {},
 ): Record<string, string> => {
   const greeting = buildSellerGreetingValues(record)
   return {
-    seller_name: greeting.seller_name,
-    seller_first_name: greeting.seller_first_name,
-    owner_name: greeting.owner_name,
-    agent_name: 'Chris',
-    agent_first_name: 'Chris',
+    seller_name: overrides.seller_name ?? greeting.seller_name,
+    seller_first_name: overrides.seller_first_name ?? greeting.seller_first_name,
+    owner_name: overrides.owner_name ?? greeting.owner_name,
+    agent_name: overrides.agent_name ?? '',
+    agent_first_name: overrides.agent_first_name ?? '',
+    ...(overrides.property_address ? { property_address: overrides.property_address } : {}),
   }
 }

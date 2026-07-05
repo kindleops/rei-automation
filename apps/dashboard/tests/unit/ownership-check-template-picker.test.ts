@@ -71,9 +71,18 @@ describe('ownership check template picker', () => {
     const picks = new Set<string>()
     for (let i = 0; i < 30; i += 1) {
       const picked = pickRandomOwnershipCheckTemplate(templates, context, 'English')
-      if (picked?.id) picks.add(picked.id)
+      if (picked?.templateId) picks.add(picked.templateId)
     }
     expect(picks.size).toBeGreaterThan(1)
+  })
+
+  it('rejects blank or Hi there greetings instead of repairing them', () => {
+    const templates = [
+      makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' }),
+      makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' }),
+    ]
+    const pool = buildOwnershipTemplatePool(templates, context, 'English')
+    expect(pool.length).toBe(0)
   })
 
   it('supports weighted random selection', () => {

@@ -93,10 +93,16 @@ function isManualOperatorSend(input = {}) {
     asBoolean(input.manual_operator_send, false) ||
     clean(input.source) === "manual_inbox" ||
     clean(input.send_source) === "manual_inbox" ||
+    clean(input.source) === "map_command" ||
+    clean(input.send_source) === "map_command" ||
     clean(input_metadata.source) === "manual_inbox" ||
     clean(input_metadata.send_source) === "manual_inbox" ||
+    clean(input_metadata.source) === "map_command" ||
+    clean(input_metadata.send_source) === "map_command" ||
     clean(input.action) === "send_now" ||
-    clean(input_metadata.action) === "send_now"
+    clean(input_metadata.action) === "send_now" ||
+    clean(input.action) === "send_ownership_check" ||
+    clean(input_metadata.action) === "send_ownership_check"
   );
 }
 
@@ -1378,10 +1384,28 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   const bypassed_queue_emergency_stop =
     bypassed_runtime_brake && runtime_brake.reason === "queue_emergency_stop_active";
 
+  const input_metadata = objectMetadata(input.metadata);
+  const resolved_source =
+    clean(input.source) ||
+    clean(input.send_source) ||
+    clean(input_metadata.source) ||
+    clean(input_metadata.send_source) ||
+    "manual_inbox";
+  const resolved_action =
+    clean(input.action) ||
+    clean(input_metadata.action) ||
+    (resolved_source === "map_command" ? "send_ownership_check" : "send_now");
+  const resolved_created_from =
+    clean(input.created_from) ||
+    clean(input_metadata.created_from) ||
+    (resolved_source === "map_command" ? "leadcommand_map" : "leadcommand_inbox");
+
   const manual_input = {
     ...input,
-    source: "manual_inbox",
-    send_source: "manual_inbox",
+    source: resolved_source,
+    send_source: clean(input.send_source) || resolved_source,
+    action: resolved_action,
+    created_from: resolved_created_from,
     manual_operator_send: true,
     ...(bypassed_runtime_brake
       ? {
@@ -1391,9 +1415,11 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       : {}),
     ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
     metadata: {
-      ...objectMetadata(input.metadata),
-      source: "manual_inbox",
-      send_source: "manual_inbox",
+      ...input_metadata,
+      source: resolved_source,
+      send_source: clean(input.send_source) || clean(input_metadata.send_source) || resolved_source,
+      action: resolved_action,
+      created_from: resolved_created_from,
       manual_operator_send: true,
       ...(bypassed_runtime_brake
         ? {
@@ -1502,12 +1528,12 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       bypass_system_control: true,
       bypass_reason: "manual_operator_send",
       bypass_content_guards: operator_override_requested,
-      source: "manual_inbox",
-      send_source: "manual_inbox",
+      source: resolved_source,
+      send_source: clean(manual_input.send_source) || resolved_source,
       manual_operator_send: true,
       metadata: {
-        source: "manual_inbox",
-        send_source: "manual_inbox",
+        source: resolved_source,
+        send_source: clean(manual_input.send_source) || resolved_source,
         manual_operator_send: true,
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
       },

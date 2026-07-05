@@ -5,22 +5,26 @@ import {
   queueReplyFromInbox,
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
-import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
-import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
+
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
   getRecommendedTemplates,
   renderTemplate,
 } from '../../../lib/data/templateData'
-import { pickOwnershipCheckTemplateForMap } from './ownership-check-template-picker'
+import {
+  canonicalizeOwnerLanguage,
+  pickOwnershipCheckTemplateForMap,
+} from './ownership-check-template-picker'
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
 import { translateText } from '../../../modules/inbox/translate.api'
+import { buildSellerGreetingValues } from '../../../domain/inbox/seller-greeting'
 import {
-  buildMapTemplateManualValues,
-  buildSellerGreetingValues,
-} from '../../../domain/inbox/seller-greeting'
+  buildOwnershipCheckTemplateContext,
+  resolveMapOwnershipCheckIdentity,
+} from '../../../domain/map/resolve-map-ownership-check'
+import { sendMapOwnershipCheck } from '../../../domain/map/send-map-ownership-check'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import { asNumber, firstDefined, text } from './seller-map-card-formatters'
 
@@ -70,12 +74,6 @@ const parseStateFromMarket = (market: string): string | undefined => {
   return match?.[1]?.toUpperCase()
 }
 
-const hasBlankGreeting = (message: string): boolean =>
-  /^(hi|hey|hello|hola|ola|marhaba)\s*,/i.test(message.trim())
-
-const hasUnresolvedTemplateTokens = (message: string): boolean =>
-  /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
-
 export const buildThreadFromViewModel = (
   vm: SellerMapCardViewModel,
   record: Record<string, unknown>,
@@ -92,11 +90,15 @@ export const buildThreadFromViewModel = (
   const propertyState = propertyStateRaw ? normalizeState(propertyStateRaw).toUpperCase() : undefined
   const greeting = buildSellerGreetingValues({
     ...record,
+    prospect_first_name: overrides.prospectId
+      ? (record.prospect_first_name ?? record.prospectFirstName)
+      : record.prospect_first_name,
+    prospect_full_name: record.prospect_full_name ?? record.prospectFullName,
     owner_display_name: vm.masterOwner.displayName,
     master_owner_display_name: vm.masterOwner.displayName,
     owner_name: vm.masterOwner.displayName,
   })
-  const sellerDisplayName = greeting.seller_name || vm.masterOwner.displayName
+  const sellerDisplayName = greeting.seller_name || text(firstDefined(record, ['prospect_full_name', 'prospectFullName'])) || ''
 
   return {
     id: threadKey || vm.propertyId,
@@ -181,79 +183,103 @@ export const useSellerMapCardActions = ({
     setFollowUpState('sending')
     setFollowUpError(null)
     try {
-      let sendThread = thread
-      const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
-        let candidate = sendThread
-        let dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
-
-        if (!dialablePhone) {
-          const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
-            prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
-            masterOwnerId: viewModel.masterOwner.id
-              || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
-              || null,
-          })
-          if (!resolved.phone) return null
-
-          candidate = buildThreadFromViewModel(viewModel, record, {
-            phone: resolved.phone,
-            prospectId: resolved.prospectId,
-          })
-          dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
+      if (eligibility.isUncontacted) {
+        const identityResult = await resolveMapOwnershipCheckIdentity(viewModel.propertyId)
+        if (!identityResult.ok) {
+          setFollowUpError(identityResult.error)
+          setFollowUpState('blocked')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
         }
 
-        if (!dialablePhone) return null
+        const identity = identityResult.identity
+        const templateContext = buildOwnershipCheckTemplateContext(identity)
+        const ownerLanguage = canonicalizeOwnerLanguage(identity.ownerLanguage)
+        const templateSelection = await pickOwnershipCheckTemplateForMap(
+          templateContext,
+          ownerLanguage,
+          {
+            propertyId: identity.propertyId,
+            recipientPhone: identity.recipientPhone,
+          },
+        )
 
-        return {
-          ...candidate,
-          threadKey: dialablePhone,
-          id: dialablePhone,
-          phoneNumber: dialablePhone,
-          canonicalE164: dialablePhone,
-          sellerPhone: dialablePhone,
-          bestPhone: dialablePhone,
-          display_phone: dialablePhone,
-          prospect_best_phone: dialablePhone,
+        if (!templateSelection) {
+          setFollowUpError('Ownership check template unavailable')
+          setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
         }
-      }
 
-      const resolvedSendThread = await ensureCanonicalSendThread()
-      if (!resolvedSendThread) {
-        setFollowUpError('No valid seller phone on file')
-        setFollowUpState('blocked')
-        window.setTimeout(() => {
-          setFollowUpState('idle')
-          setFollowUpError(null)
-        }, 2400)
+        const sendThread = buildThreadFromViewModel(viewModel, record, {
+          phone: identity.recipientPhone,
+          prospectId: identity.prospectId,
+        })
+        const canonicalThread: InboxThread = {
+          ...sendThread,
+          threadKey: identity.recipientPhone,
+          id: identity.recipientPhone,
+          phoneNumber: identity.recipientPhone,
+          canonicalE164: identity.recipientPhone,
+          sellerPhone: identity.recipientPhone,
+          bestPhone: identity.recipientPhone,
+          display_phone: identity.recipientPhone,
+          prospect_best_phone: identity.recipientPhone,
+          phoneNumberId: identity.phoneId,
+          ownerId: identity.masterOwnerId,
+          prospectId: identity.prospectId,
+          sellerName: identity.sellerDisplayName,
+          seller_name: identity.sellerDisplayName,
+          prospect_first_name: identity.prospectFirstName,
+          prospect_full_name: identity.prospectFullName,
+          ownerDisplayName: identity.ownerDisplayName,
+          ownerName: identity.ownerDisplayName,
+          propertyAddressFull: identity.propertyAddress,
+          propertyAddress: identity.propertyAddress,
+        }
+
+        const result = await sendMapOwnershipCheck({
+          identity,
+          selection: templateSelection,
+          thread: canonicalThread,
+          threadContext: threadContext ?? null,
+        })
+
+        if (!result.ok) {
+          setFollowUpError(result.errorMessage || 'Send failed')
+          setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
+
+        setFollowUpState('sent')
+        onActivityRefresh?.()
+        onMessagesRefresh?.()
+        window.setTimeout(() => setFollowUpState('idle'), 2400)
         return
       }
-      sendThread = resolvedSendThread
 
       let followUpTemplate: SmsTemplate | null = null
-      const manualTemplateValues = buildMapTemplateManualValues(record)
-      const templateContext = {
-        ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
-        ...manualTemplateValues,
-      }
+      const sendThread = thread
+      const templateContext = buildTemplateContextFromThread(sendThread, threadContext ?? null)
 
-      if (eligibility.isUncontacted) {
-        followUpTemplate = await pickOwnershipCheckTemplateForMap(
-          record,
-          templateContext,
-          viewModel.masterOwner.id
-            || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
-            || null,
-        )
-      } else {
-        const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
-        followUpTemplate = templates.find((template) => template.isFollowUp)
-          || templates.find((template) => template.useCaseSlug.includes('follow'))
-          || templates[0]
-          || null
-      }
+      const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
+      followUpTemplate = templates.find((template) => template.isFollowUp)
+        || templates.find((template) => template.useCaseSlug.includes('follow'))
+        || templates[0]
+        || null
 
       if (!followUpTemplate) {
-        setFollowUpError('Ownership check template unavailable')
+        setFollowUpError('Follow-up template unavailable')
         setFollowUpState('failed')
         window.setTimeout(() => {
           setFollowUpState('idle')
@@ -262,13 +288,8 @@ export const useSellerMapCardActions = ({
         return
       }
 
-      const { renderedText: rawMessageText } = renderTemplate(followUpTemplate, templateContext)
-      let messageText = rawMessageText
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s+,/i, '$1 there,')
-        .replace(/^(hi|hey|hello|hola|ola|marhaba)\s*,/i, '$1 there,')
-        .replace(/\[\[[a-z0-9_]+\]\]/gi, '')
-        .trim()
-      if (!messageText.trim() || hasBlankGreeting(messageText) || hasUnresolvedTemplateTokens(messageText)) {
+      const { renderedText: messageText } = renderTemplate(followUpTemplate, templateContext)
+      if (!messageText.trim()) {
         setFollowUpError('Template missing seller name or property details')
         setFollowUpState('failed')
         window.setTimeout(() => {
