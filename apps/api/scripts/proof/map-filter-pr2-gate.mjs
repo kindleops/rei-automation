@@ -3,7 +3,7 @@
  * PR2 final verification gate — live Supabase/Postgres proof.
  *
  * Usage:
- *   node --env-file=.env.local --import ./tests/register-aliases.mjs scripts/proof/map-filter-pr2-gate.mjs
+ *   node --env-file=.env.local scripts/proof/map-filter-pr2-gate.mjs
  */
 import "../../tests/register-live-proof.mjs";
 import fs from "node:fs";
@@ -94,9 +94,37 @@ const SUITE_CASE_IDS = {
     "no_filter", "sfr", "multifamily_2_4", "multifamily_5_plus", "commercial", "storage_units",
     "equity_50_plus", "tax_delinquent", "active_lien", "out_of_state_owner",
   ],
-  "prospect-accounting": ["prospect_sms_eligible", "prospect_primary"],
-  "owner-accounting": ["owner_tier_1", "owner_property_count_5", "owner_portfolio_units_20"],
-  "mixed-expression-accounting": ["property_prospect_mixed", "property_owner_mixed", "nested_mixed_or", "negated_relationship"],
+  "prospect-accounting": [
+    "prospect_sms_eligible",
+    "prospect_email_eligible",
+    "prospect_has_phone",
+    "prospect_has_email",
+    "prospect_primary",
+    "prospect_contact_score",
+    "rel_any_linked",
+    "rel_primary_only",
+    "rel_none_linked",
+    "rel_all_linked",
+  ],
+  "owner-accounting": [
+    "owner_tier_1",
+    "owner_property_count_5",
+    "owner_portfolio_units_20",
+    "owner_portfolio_equity",
+    "owner_has_linked_phone",
+    "owner_has_linked_email",
+    "owner_tax_delinquent_count",
+    "owner_active_lien_count",
+  ],
+  "mixed-expression-accounting": [
+    "property_prospect_mixed",
+    "property_owner_mixed",
+    "three_entity_mixed",
+    "nested_mixed_or",
+    "negated_relationship",
+    "negated_owner_rule",
+    "mixed_or_inside_and",
+  ],
   "relationship-semantics": ["rel_any_linked", "rel_primary_only", "rel_none_linked", "rel_all_linked"],
 };
 
@@ -168,21 +196,26 @@ async function runDirectCounts(compiled, entities = ["property", "prospect", "ow
     compiled.compiledPredicateAst,
     compiled.params || [],
   );
-  const propertyQuery = buildPropertyCountSql(predicateSql);
+  const propertyQuery = buildPropertyCountSql(predicateSql, null, params.length);
   const allParams = [...params, ...propertyQuery.extraParams];
   const started = Date.now();
   const propertyRes = await queryWithTimeout(propertyQuery.sql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs);
   let prospectRes = { rows: [{ count: 0 }] };
   let ownerRes = { rows: [{ count: 0 }] };
   if (entities.includes("prospect")) {
+    const prospectQuery = buildProspectCountSql(predicateSql, params.length);
     prospectRes = await queryWithTimeout(
-      buildProspectCountSql(predicateSql).sql,
-      params,
+      prospectQuery.sql,
+      [...params, ...prospectQuery.extraParams],
       MAP_FILTER_LIMITS.countQueryTimeoutMs,
     );
   }
   if (entities.includes("owner")) {
-    ownerRes = await queryWithTimeout(buildOwnerCountSql(predicateSql), params, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+    ownerRes = await queryWithTimeout(
+      buildOwnerCountSql(predicateSql, params.length),
+      params,
+      MAP_FILTER_LIMITS.countQueryTimeoutMs,
+    );
   }
   return {
     matchingProperties: Number(propertyRes.rows[0]?.count || 0),
@@ -416,14 +449,16 @@ async function runAccountingProof({
   }
 
   const noFilter = section.cases.find((c) => c.id === "no_filter");
-  if (!noFilter?.pass || noFilter.compiler.matchingProperties !== mappableProperties) {
-    section.ok = false;
-    section.issues.push({
-      message: "no_filter_mismatch",
-      expected: mappableProperties,
-      compiler: noFilter?.compiler?.matchingProperties,
-      direct: noFilter?.direct?.matchingProperties,
-    });
+  if (noFilter) {
+    if (!noFilter.pass || noFilter.compiler.matchingProperties !== mappableProperties) {
+      section.ok = false;
+      section.issues.push({
+        message: "no_filter_mismatch",
+        expected: mappableProperties,
+        compiler: noFilter.compiler?.matchingProperties,
+        direct: noFilter.direct?.matchingProperties,
+      });
+    }
   }
 
   fs.writeFileSync(path.join(proofDir, artifactName), JSON.stringify(section, null, 2));
@@ -565,6 +600,19 @@ async function runTokenSecurityProof() {
   }
 }
 
+async function primeDashboardLiveFlagForRouteProof() {
+  const { primeSystemControlCache } = await import("../../src/lib/system-control.js");
+  const res = await queryWithTimeout(
+    `SELECT value FROM system_control WHERE key = 'dashboard_live_enabled' LIMIT 1`,
+    [],
+    10_000,
+  );
+  const raw = res.rows[0]?.value;
+  const enabled = ["true", "1", "yes", "on", "enabled"].includes(String(raw ?? "").trim().toLowerCase());
+  primeSystemControlCache("dashboard_live_enabled", enabled);
+  return enabled;
+}
+
 function buildAuthRequest(body, { secret = OPS_SECRET, orgId = "default", cookie = true } = {}) {
   const headers = new Headers({ "content-type": "application/json" });
   if (secret) headers.set("x-ops-dashboard-secret", secret);
@@ -595,8 +643,17 @@ function responseHasLeak(payload) {
 }
 
 async function runRouteSmoke() {
+  const dashboardLive = await primeDashboardLiveFlagForRouteProof();
   const { previewRoute, tokenRoute } = await loadRouteHandlers();
-  const section = { ok: true, cases: [], issues: [] };
+  const section = { ok: true, cases: [], issues: [], dashboardLiveEnabled: dashboardLive };
+  if (!dashboardLive) {
+    section.ok = false;
+    section.issues.push({ message: "dashboard_live_disabled" });
+    fs.writeFileSync(path.join(proofDir, "route-smoke.json"), JSON.stringify(section, null, 2));
+    report.sections.routeSmoke = section;
+    report.ok = false;
+    return;
+  }
   const validExpr = {
     expression: {
       id: "root",
@@ -712,35 +769,90 @@ async function runRouteSmoke() {
   }
 }
 
+function summarizePlanNode(plan) {
+  const serialized = JSON.stringify(plan);
+  return {
+    nodeType: plan["Node Type"],
+    rows: plan["Actual Rows"],
+    loops: plan["Actual Loops"],
+    sharedHitBlocks: plan["Shared Hit Blocks"],
+    sharedReadBlocks: plan["Shared Read Blocks"],
+    indexUsed: /Index (Scan|Only Scan)/i.test(serialized),
+    sequentialScan: /Seq Scan/i.test(serialized),
+    jsonExpansion: /linked_property_ids_json|jsonb_array_elements|json_array_elements/i.test(serialized),
+    bridgeUsed: /map_filter_property_prospect_links/i.test(serialized),
+  };
+}
+
 async function runQueryPlanProof() {
-  const section = { ok: true, cases: [], timeoutMs: MAP_FILTER_LIMITS.countQueryTimeoutMs };
+  const section = {
+    ok: true,
+    cases: [],
+    timeoutMs: MAP_FILTER_LIMITS.countQueryTimeoutMs,
+    dataset: { properties: 124046, prospects: 149798, master_owners: 102157 },
+    bridgeTable: "map_filter_property_prospect_links",
+  };
+
+  const connStarted = Date.now();
+  await queryWithTimeout("SELECT 1 AS ok", [], 10_000);
+  section.connectionMs = Date.now() - connStarted;
 
   for (const testCase of QUERY_PLAN_CASES) {
-    const compiledResult = compileMapFilter(testCase.expression);
-    const { sql: predicateSql, params } = buildPropertyEligibilitySql(
-      compiledResult.compiled.compiledPredicateAst,
-      compiledResult.compiled.params,
-      { bounds: testCase.bounds || null },
-    );
-    const propertyQuery = buildPropertyCountSql(predicateSql, testCase.bounds || null);
-    const allParams = [...params, ...propertyQuery.extraParams];
-    const explainSql = `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${propertyQuery.sql}`;
-    const started = Date.now();
-    const planRes = await queryWithTimeout(explainSql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs);
-    const plan = planRes.rows[0]?.["QUERY PLAN"]?.[0]?.Plan || {};
-    section.cases.push({
-      id: testCase.id,
-      planningMs: planRes.rows[0]?.["QUERY PLAN"]?.[0]?.["Planning Time"],
-      executionMs: planRes.rows[0]?.["QUERY PLAN"]?.[0]?.["Execution Time"],
-      totalMs: Date.now() - started,
-      nodeType: plan["Node Type"],
-      rows: plan["Actual Rows"],
-      sharedHitBlocks: plan["Shared Hit Blocks"],
-      sharedReadBlocks: plan["Shared Read Blocks"],
-      indexUsed: JSON.stringify(plan).includes("Index"),
-      sequentialScan: plan["Node Type"] === "Seq Scan" || JSON.stringify(plan).includes("Seq Scan"),
-    });
+    const caseStarted = Date.now();
+    try {
+      const compiledResult = compileMapFilter(testCase.expression);
+      if (!compiledResult.ok) {
+        section.ok = false;
+        section.cases.push({ id: testCase.id, pass: false, error: compiledResult.errors });
+        continue;
+      }
+      const { sql: predicateSql, params } = buildPropertyEligibilitySql(
+        compiledResult.compiled.compiledPredicateAst,
+        compiledResult.compiled.params,
+        { bounds: testCase.bounds || null },
+      );
+      const propertyQuery = buildPropertyCountSql(predicateSql, testCase.bounds || null, params.length);
+      const allParams = [...params, ...propertyQuery.extraParams];
+      const explainSql = `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${propertyQuery.sql}`;
+      const planRes = await queryWithTimeout(explainSql, allParams, MAP_FILTER_LIMITS.countQueryTimeoutMs);
+      const planRoot = planRes.rows[0]?.["QUERY PLAN"]?.[0] || {};
+      const plan = planRoot.Plan || {};
+      const summary = summarizePlanNode(plan);
+      section.cases.push({
+        id: testCase.id,
+        pass: true,
+        planningMs: planRoot["Planning Time"],
+        executionMs: planRoot["Execution Time"],
+        totalMs: Date.now() - caseStarted,
+        paramCount: allParams.length,
+        ...summary,
+      });
+    } catch (error) {
+      section.ok = false;
+      section.cases.push({
+        id: testCase.id,
+        pass: false,
+        totalMs: Date.now() - caseStarted,
+        error: error.message,
+        code: error.code,
+      });
+    }
   }
+
+  const executionTimes = section.cases.filter((c) => c.pass && c.executionMs != null).map((c) => c.executionMs);
+  executionTimes.sort((a, b) => a - b);
+  section.stats = {
+    caseCount: section.cases.length,
+    passCount: section.cases.filter((c) => c.pass).length,
+    slowestExecutionMs: executionTimes.length ? executionTimes[executionTimes.length - 1] : null,
+    medianExecutionMs: executionTimes.length
+      ? executionTimes[Math.floor(executionTimes.length / 2)]
+      : null,
+    anyJsonExpansion: section.cases.some((c) => c.jsonExpansion),
+    allBridgeCasesUseBridge: section.cases
+      .filter((c) => c.id.includes("prospect") || c.id.includes("rel_") || c.id.includes("mixed") || c.id.includes("three_entity"))
+      .every((c) => !c.pass || c.bridgeUsed),
+  };
 
   fs.mkdirSync(proofDir, { recursive: true });
   fs.writeFileSync(path.join(proofDir, "query-plans.json"), JSON.stringify(section, null, 2));
@@ -749,14 +861,33 @@ async function runQueryPlanProof() {
     "",
     `Generated: ${new Date().toISOString()}`,
     "",
-    "| Case | Execution ms | Planning ms | Node | Index | Seq Scan |",
-    "|------|--------------|-------------|------|-------|----------|",
+    "## Summary",
+    "",
+    `- Connection setup: ${section.connectionMs}ms`,
+    `- Cases: ${section.stats.passCount}/${section.stats.caseCount} passed`,
+    `- Slowest execution: ${section.stats.slowestExecutionMs}ms`,
+    `- Median execution: ${section.stats.medianExecutionMs}ms`,
+    `- JSON expansion in hot path: ${section.stats.anyJsonExpansion ? "yes" : "no"}`,
+    `- Bridge table: \`${section.bridgeTable}\``,
+    "",
+    "## Plans (post-bridge integration)",
+    "",
+    "| Case | Execution ms | Planning ms | Rows | Index | Seq Scan | Bridge | JSON expand |",
+    "|------|--------------|-------------|------|-------|----------|--------|-------------|",
     ...section.cases.map(
-      (c) => `| ${c.id} | ${c.executionMs} | ${c.planningMs} | ${c.nodeType} | ${c.indexUsed} | ${c.sequentialScan} |`,
+      (c) =>
+        c.pass
+          ? `| ${c.id} | ${c.executionMs} | ${c.planningMs} | ${c.rows} | ${c.indexUsed} | ${c.sequentialScan} | ${c.bridgeUsed} | ${c.jsonExpansion} |`
+          : `| ${c.id} | — | — | — | — | — | — | FAIL: ${c.error} |`,
     ),
   ].join("\n");
   fs.writeFileSync(path.join(proofDir, "query-plans.md"), md);
-  pass("queryPlanProof", section);
+
+  if (section.ok) pass("queryPlanProof", section);
+  else {
+    report.sections.queryPlanProof = section;
+    report.ok = false;
+  }
 }
 
 async function runSuite(name) {

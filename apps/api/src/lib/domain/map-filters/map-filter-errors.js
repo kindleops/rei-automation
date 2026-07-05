@@ -12,4 +12,7 @@ export const MAP_FILTER_ERRORS = {
   unsupported_registry_version: "unsupported_registry_version",
   count_query_failed: "count_query_failed",
   count_query_timeout: "count_query_timeout",
+  property_count_timeout: "property_count_timeout",
+  prospect_count_timeout: "prospect_count_timeout",
+  owner_count_timeout: "owner_count_timeout",
 };

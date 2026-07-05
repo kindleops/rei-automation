@@ -1,8 +1,13 @@
 import { getRegistryField } from "./active-field-registry.js";
+import {
+  MAP_FILTER_PROSPECT_LINKS_ALIAS,
+  MAP_FILTER_PROSPECT_LINKS_TABLE,
+} from "./map-filter-prospect-links.js";
 
 const PROPERTY_ALIAS = "p";
 const PROSPECT_ALIAS = "pr";
 const OWNER_ALIAS = "mo";
+const LINK_ALIAS = MAP_FILTER_PROSPECT_LINKS_ALIAS;
 
 /**
  * Build parameterized SQL for property eligibility from CompiledPredicateNode AST.
@@ -71,13 +76,14 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
 function compileProspectRelationship(node, ctx, outerProspectAlias) {
   const rel = node.relationshipMatch || "any_linked";
   const predicate = compileFieldPredicate(node, ctx, PROSPECT_ALIAS);
-  const linkClause = `${PROPERTY_ALIAS}.property_id::text = ANY (
-    SELECT jsonb_array_elements_text(${PROSPECT_ALIAS}.linked_property_ids_json)
-  )`;
-  const baseExists = `EXISTS (
-    SELECT 1 FROM prospects ${PROSPECT_ALIAS}
-    WHERE ${PROSPECT_ALIAS}.master_owner_id = ${PROPERTY_ALIAS}.master_owner_id
-      AND ${linkClause}
+
+  const linkedProspectExists = (extra = "") => `EXISTS (
+    SELECT 1
+    FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
+    INNER JOIN prospects ${PROSPECT_ALIAS}
+      ON ${PROSPECT_ALIAS}.prospect_id = ${LINK_ALIAS}.prospect_id
+    WHERE ${LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
+      ${extra}
       AND (${predicate})
   )`;
 
@@ -86,41 +92,36 @@ function compileProspectRelationship(node, ctx, outerProspectAlias) {
       const outerPred = compileFieldPredicate(node, ctx, outerProspectAlias);
       return `(${outerPred})`;
     }
-    return baseExists;
+    return linkedProspectExists();
   }
 
   if (rel === "primary_only") {
-    const primaryExists = `EXISTS (
-      SELECT 1 FROM prospects ${PROSPECT_ALIAS}
-      WHERE ${PROSPECT_ALIAS}.master_owner_id = ${PROPERTY_ALIAS}.master_owner_id
-        AND ${linkClause}
-        AND ${PROSPECT_ALIAS}.is_primary_prospect IS TRUE
-        AND (${predicate})
-    )`;
-    return primaryExists;
+    return linkedProspectExists(`AND ${PROSPECT_ALIAS}.is_primary_prospect IS TRUE`);
   }
 
   if (rel === "none_linked") {
-    return `NOT (${baseExists})`;
+    return `NOT (${linkedProspectExists()})`;
   }
 
   if (rel === "all_linked") {
     return `(
       EXISTS (
-        SELECT 1 FROM prospects ${PROSPECT_ALIAS}
-        WHERE ${PROSPECT_ALIAS}.master_owner_id = ${PROPERTY_ALIAS}.master_owner_id
-          AND ${linkClause}
+        SELECT 1
+        FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
+        WHERE ${LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
       )
       AND NOT EXISTS (
-        SELECT 1 FROM prospects ${PROSPECT_ALIAS}
-        WHERE ${PROSPECT_ALIAS}.master_owner_id = ${PROPERTY_ALIAS}.master_owner_id
-          AND ${linkClause}
+        SELECT 1
+        FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
+        INNER JOIN prospects ${PROSPECT_ALIAS}
+          ON ${PROSPECT_ALIAS}.prospect_id = ${LINK_ALIAS}.prospect_id
+        WHERE ${LINK_ALIAS}.property_id = ${PROPERTY_ALIAS}.property_id
           AND NOT (${predicate})
       )
     )`;
   }
 
-  return baseExists;
+  return linkedProspectExists();
 }
 
 function compileGeoPredicate(node, ctx) {
@@ -141,7 +142,6 @@ function compileGeoPredicate(node, ctx) {
       )
     )`;
   }
-  // Polygon / exclusion polygon: store geojson in params — compiled at runtime
   if (node.fieldKey === "geo.drawn_polygon" && node.paramIndices?.length) {
     return `ST_Contains(
       ST_SetSRID(ST_GeomFromGeoJSON(${paramRef(ctx, node.paramIndices[0])}::text), 4326),
@@ -251,50 +251,113 @@ export function hasEntityRules(ast, entityType) {
   return found;
 }
 
-export function buildProspectCountSql(propertyPredicateSql) {
-  return {
-    sql: `
-    SELECT COUNT(DISTINCT pr.prospect_id)::bigint AS count
-    FROM prospects pr
-    WHERE EXISTS (
-      SELECT 1 FROM properties p
-      WHERE p.property_id::text = ANY (SELECT jsonb_array_elements_text(pr.linked_property_ids_json))
-        AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
-        AND (${propertyPredicateSql})
-    )
-  `,
-  };
-}
-
-export function buildOwnerCountSql(propertyPredicateSql) {
-  return `
-    SELECT COUNT(DISTINCT mo.master_owner_id)::bigint AS count
-    FROM master_owners mo
-    WHERE EXISTS (
-      SELECT 1 FROM properties p
-      WHERE p.master_owner_id = mo.master_owner_id
-        AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
-        AND (${propertyPredicateSql})
-    )
-  `;
-}
-
-export function buildPropertyCountSql(propertyPredicateSql, bounds = null) {
+export function buildMatchingPropertiesCte(propertyPredicateSql, bounds = null, predicateParamCount = 0) {
   let boundsClause = "";
-  const params = [];
+  const extraParams = [];
   if (bounds) {
-    boundsClause = `AND p.latitude BETWEEN $${params.length + 1} AND $${params.length + 2}
-      AND p.longitude BETWEEN $${params.length + 3} AND $${params.length + 4}`;
-    params.push(bounds.lat_min, bounds.lat_max, bounds.lng_min, bounds.lng_max);
+    const o = predicateParamCount;
+    boundsClause = `AND ${PROPERTY_ALIAS}.latitude BETWEEN $${o + 1} AND $${o + 2}
+      AND ${PROPERTY_ALIAS}.longitude BETWEEN $${o + 3} AND $${o + 4}`;
+    extraParams.push(bounds.lat_min, bounds.lat_max, bounds.lng_min, bounds.lng_max);
   }
   return {
     sql: `
-      SELECT COUNT(DISTINCT p.property_id)::bigint AS count
-      FROM properties p
-      WHERE p.latitude IS NOT NULL AND p.longitude IS NOT NULL
+      SELECT DISTINCT
+        ${PROPERTY_ALIAS}.property_id,
+        ${PROPERTY_ALIAS}.master_owner_id
+      FROM properties ${PROPERTY_ALIAS}
+      WHERE ${PROPERTY_ALIAS}.latitude IS NOT NULL
+        AND ${PROPERTY_ALIAS}.longitude IS NOT NULL
         AND (${propertyPredicateSql})
         ${boundsClause}
     `,
-    extraParams: params,
+    extraParams,
+  };
+}
+
+export function buildPropertyCountFromMatchingSql() {
+  return `SELECT COUNT(*)::bigint AS count FROM matching_properties`;
+}
+
+export function buildProspectCountFromMatchingSql() {
+  return `
+    SELECT COUNT(DISTINCT ${LINK_ALIAS}.prospect_id)::bigint AS count
+    FROM ${MAP_FILTER_PROSPECT_LINKS_TABLE} ${LINK_ALIAS}
+    INNER JOIN matching_properties mp ON mp.property_id = ${LINK_ALIAS}.property_id
+  `;
+}
+
+export function buildOwnerCountFromMatchingSql(ownerPredicateSql = null) {
+  if (ownerPredicateSql) {
+    return `
+      SELECT COUNT(DISTINCT mp.master_owner_id)::bigint AS count
+      FROM matching_properties mp
+      INNER JOIN master_owners ${OWNER_ALIAS} ON ${OWNER_ALIAS}.master_owner_id = mp.master_owner_id
+      WHERE mp.master_owner_id IS NOT NULL
+        AND (${ownerPredicateSql})
+    `;
+  }
+  return `
+    SELECT COUNT(DISTINCT mp.master_owner_id)::bigint AS count
+    FROM matching_properties mp
+    WHERE mp.master_owner_id IS NOT NULL
+  `;
+}
+
+function wrapMatchingCte(propertyPredicateSql, bounds, predicateParamCount, innerSql) {
+  const cte = buildMatchingPropertiesCte(propertyPredicateSql, bounds, predicateParamCount);
+  return {
+    sql: `
+      WITH matching_properties AS MATERIALIZED (
+        ${cte.sql}
+      )
+      ${innerSql}
+    `,
+    extraParams: cte.extraParams,
+  };
+}
+
+/** Direct SQL builders used by accounting proof comparisons. */
+export function buildProspectCountSql(propertyPredicateSql, predicateParamCount = 0) {
+  return wrapMatchingCte(
+    propertyPredicateSql,
+    null,
+    predicateParamCount,
+    buildProspectCountFromMatchingSql(),
+  );
+}
+
+export function buildOwnerCountSql(propertyPredicateSql, predicateParamCount = 0) {
+  const wrapped = wrapMatchingCte(
+    propertyPredicateSql,
+    null,
+    predicateParamCount,
+    buildOwnerCountFromMatchingSql(),
+  );
+  return wrapped.sql;
+}
+
+export function buildPropertyCountSql(propertyPredicateSql, bounds = null, predicateParamCount = 0) {
+  return wrapMatchingCte(
+    propertyPredicateSql,
+    bounds,
+    predicateParamCount,
+    buildPropertyCountFromMatchingSql(),
+  );
+}
+
+export function buildUnifiedCountSql(propertyPredicateSql, bounds = null, predicateParamCount = 0) {
+  const cte = buildMatchingPropertiesCte(propertyPredicateSql, bounds, predicateParamCount);
+  return {
+    sql: `
+      WITH matching_properties AS MATERIALIZED (
+        ${cte.sql}
+      )
+      SELECT
+        (${buildPropertyCountFromMatchingSql().trim()}) AS matching_properties,
+        (${buildProspectCountFromMatchingSql().trim()}) AS matching_prospects,
+        (${buildOwnerCountFromMatchingSql().trim()}) AS matching_master_owners
+    `,
+    extraParams: cte.extraParams,
   };
 }

@@ -28,7 +28,7 @@ test("token digest changes with organization scope", () => {
   const base = {
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
     normalizedExpression: EMPTY_EXPRESSION,
   };
   const orgA = buildFilterTokenDigest({ ...base, organizationId: "org-a" });
@@ -40,7 +40,7 @@ test("token digest changes with permission scope", () => {
   const base = {
     organizationId: "org-1",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
     normalizedExpression: EMPTY_EXPRESSION,
   };
   const authed = buildFilterTokenDigest({ ...base, permissionScope: "ops_dashboard_authenticated" });
@@ -53,7 +53,7 @@ test("exposed token exposes at least 128 bits", () => {
     organizationId: "org-1",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
     normalizedExpression: EMPTY_EXPRESSION,
   });
   assert.equal(digest.length, 64);
@@ -65,13 +65,13 @@ test("verifyFilterTokenScope rejects cross-tenant token records", () => {
     organizationId: "org-1",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
   };
   const foreign = {
     organizationId: "org-2",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
   };
   assert.equal(verifyFilterTokenScope(foreign, authScope), false);
   assert.equal(verifyFilterTokenScope(authScope, authScope), true);

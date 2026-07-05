@@ -33,10 +33,19 @@ export const MAP_FILTER_ACCOUNTING_CASES = [
   { id: "active_lien", label: "Active lien", expression: group("c", "AND", [rule("r", "property.active_lien", "is_true", true)]) },
   { id: "out_of_state_owner", label: "Out-of-state owner", expression: group("c", "AND", [rule("r", "property.out_of_state_owner", "is_true", true)]) },
   { id: "prospect_sms_eligible", label: "Prospect SMS eligible", expression: group("c", "AND", [rule("r", "prospect.sms_eligible", "is_true", true)]) },
+  { id: "prospect_email_eligible", label: "Prospect email eligible", expression: group("c", "AND", [rule("r", "prospect.email_eligible", "is_true", true)]) },
+  { id: "prospect_has_phone", label: "Prospect has phone", expression: group("c", "AND", [rule("r", "prospect.has_phone", "has_data", true)]) },
+  { id: "prospect_has_email", label: "Prospect has email", expression: group("c", "AND", [rule("r", "prospect.has_email", "has_data", true)]) },
   { id: "prospect_primary", label: "Prospect primary", expression: group("c", "AND", [rule("r", "prospect.is_primary_prospect", "is_true", true, { relationshipMatch: "primary_only" })]) },
+  { id: "prospect_contact_score", label: "Prospect contact score >= 50", expression: group("c", "AND", [rule("r", "prospect.contact_score_final", "greater_than_or_equal", 50)]) },
   { id: "owner_tier_1", label: "Owner TIER_1", expression: group("c", "AND", [rule("r", "master_owner.priority_tier", "equals", "TIER_1")]) },
   { id: "owner_property_count_5", label: "Owner property count >= 5", expression: group("c", "AND", [rule("r", "master_owner.property_count", "greater_than_or_equal", 5)]) },
   { id: "owner_portfolio_units_20", label: "Owner portfolio units >= 20", expression: group("c", "AND", [rule("r", "master_owner.portfolio_total_units", "greater_than_or_equal", 20)]) },
+  { id: "owner_portfolio_equity", label: "Owner portfolio equity >= 500000", expression: group("c", "AND", [rule("r", "master_owner.portfolio_total_equity", "greater_than_or_equal", 500000)]) },
+  { id: "owner_has_linked_phone", label: "Owner has linked phone", expression: group("c", "AND", [rule("r", "master_owner.has_linked_phone", "has_data", true)]) },
+  { id: "owner_has_linked_email", label: "Owner has linked email", expression: group("c", "AND", [rule("r", "master_owner.has_linked_email", "has_data", true)]) },
+  { id: "owner_tax_delinquent_count", label: "Owner tax delinquent count >= 1", expression: group("c", "AND", [rule("r", "master_owner.tax_delinquent_count", "greater_than_or_equal", 1)]) },
+  { id: "owner_active_lien_count", label: "Owner active lien count >= 1", expression: group("c", "AND", [rule("r", "master_owner.active_lien_count", "greater_than_or_equal", 1)]) },
   {
     id: "property_prospect_mixed",
     label: "Property + Prospect",
@@ -74,6 +83,33 @@ export const MAP_FILTER_ACCOUNTING_CASES = [
       group("neg", "OR", [rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "none_linked" })], { negated: true }),
     ]),
   },
+  {
+    id: "negated_owner_rule",
+    label: "Negated owner rule",
+    expression: group("root", "AND", [
+      group("neg", "OR", [rule("o", "master_owner.priority_tier", "equals", "TIER_1")], { negated: true }),
+    ]),
+  },
+  {
+    id: "mixed_or_inside_and",
+    label: "Mixed property/prospect OR inside owner/property AND",
+    expression: group("root", "AND", [
+      rule("eq", "property.equity_percent", "greater_than_or_equal", 40),
+      group("inner-or", "OR", [
+        rule("sms", "prospect.sms_eligible", "is_true", true),
+        rule("pc", "master_owner.property_count", "greater_than_or_equal", 3),
+      ]),
+    ]),
+  },
+  {
+    id: "three_entity_mixed",
+    label: "Property + Prospect + Owner",
+    expression: group("c", "AND", [
+      rule("p", "property.property_type", "equals", "SFR"),
+      rule("pr", "prospect.sms_eligible", "is_true", true),
+      rule("o", "master_owner.property_count", "greater_than_or_equal", 2),
+    ]),
+  },
   { id: "rel_any_linked", label: "ANY_LINKED", expression: group("c", "AND", [rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "any_linked" })]) },
   { id: "rel_primary_only", label: "PRIMARY_ONLY", expression: group("c", "AND", [rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "primary_only" })]) },
   { id: "rel_none_linked", label: "NONE_LINKED", expression: group("c", "AND", [rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "none_linked" })]) },
@@ -81,10 +117,29 @@ export const MAP_FILTER_ACCOUNTING_CASES = [
 ];
 
 export const QUERY_PLAN_CASES = [
-  { id: "plan_property_type", expression: group("c", "AND", [rule("r", "property.property_type", "equals", "SFR")]) },
-  { id: "plan_equity_range", expression: group("c", "AND", [rule("r", "property.equity_percent", "between", [40, 80])]) },
   { id: "plan_prospect_sms", expression: group("c", "AND", [rule("r", "prospect.sms_eligible", "is_true", true)]) },
-  { id: "plan_owner_count", expression: group("c", "AND", [rule("r", "master_owner.property_count", "greater_than_or_equal", 5)]) },
+  {
+    id: "plan_prospect_primary_only",
+    expression: group("c", "AND", [
+      rule("r", "prospect.is_primary_prospect", "is_true", true, { relationshipMatch: "primary_only" }),
+    ]),
+  },
+  {
+    id: "plan_prospect_contact_score",
+    expression: group("c", "AND", [rule("r", "prospect.contact_score_final", "greater_than_or_equal", 50)]),
+  },
+  {
+    id: "plan_rel_none_linked",
+    expression: group("c", "AND", [
+      rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "none_linked" }),
+    ]),
+  },
+  {
+    id: "plan_rel_all_linked",
+    expression: group("c", "AND", [
+      rule("r", "prospect.sms_eligible", "is_true", true, { relationshipMatch: "all_linked" }),
+    ]),
+  },
   {
     id: "plan_property_prospect",
     expression: group("c", "AND", [
@@ -93,19 +148,8 @@ export const QUERY_PLAN_CASES = [
     ]),
   },
   {
-    id: "plan_property_owner",
-    expression: group("c", "AND", [
-      rule("p", "property.equity_percent", "greater_than_or_equal", 50),
-      rule("o", "master_owner.property_count", "greater_than_or_equal", 5),
-    ]),
+    id: "plan_three_entity",
+    expression: MAP_FILTER_ACCOUNTING_CASES.find((c) => c.id === "three_entity_mixed").expression,
   },
-  { id: "plan_nested_or", expression: MAP_FILTER_ACCOUNTING_CASES.find((c) => c.id === "nested_mixed_or").expression },
-  {
-    id: "plan_bounds_cross_entity",
-    expression: group("c", "AND", [
-      rule("p", "property.market", "equals", "TAMPA"),
-      rule("pr", "prospect.sms_eligible", "is_true", true),
-    ]),
-    bounds: { lat_min: 27.8, lat_max: 28.2, lng_min: -82.6, lng_max: -82.2 },
-  },
+  { id: "plan_nested_mixed_or", expression: MAP_FILTER_ACCOUNTING_CASES.find((c) => c.id === "nested_mixed_or").expression },
 ];

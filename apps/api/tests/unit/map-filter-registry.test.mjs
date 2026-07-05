@@ -137,7 +137,7 @@ test("filter token digest uses scope inputs and exposes 128-bit url token", () =
     organizationId: "org-1",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
     normalizedExpression: { id: "root", type: "group", combinator: "AND", negated: false, enabled: true, children: [] },
   });
   assert.equal(digest.length, 64);
@@ -147,7 +147,7 @@ test("filter token digest uses scope inputs and exposes 128-bit url token", () =
     organizationId: "org-2",
     permissionScope: "ops_dashboard_authenticated",
     filterSchemaVersion: 1,
-    registryVersion: "2026-07-04.1",
+    registryVersion: "2026-07-05.1",
     normalizedExpression: { id: "root", type: "group", combinator: "AND", negated: false, enabled: true, children: [] },
   });
   assert.notEqual(digest, digestB);

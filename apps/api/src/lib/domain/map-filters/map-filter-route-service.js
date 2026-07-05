@@ -36,6 +36,7 @@ export async function resolveCompiledMapFilter(request, body = {}) {
       authScope,
       compiled: compiledFromTokenRecord(loaded.token),
       token: loaded.token,
+      timing: { validationMs: 0, normalizationMs: 0, compilationMs: 0 },
     };
   }
 
@@ -53,7 +54,10 @@ export async function resolveCompiledMapFilter(request, body = {}) {
     return { ok: false, status: 400, error: "missing_expression" };
   }
 
+  const compileStarted = Date.now();
   const compiledResult = compileMapFilter(expression);
+  const compilationMs = Date.now() - compileStarted;
+
   if (!compiledResult.ok) {
     return {
       ok: false,
@@ -68,6 +72,11 @@ export async function resolveCompiledMapFilter(request, body = {}) {
     authScope,
     compiled: compiledResult.compiled,
     expression,
+    timing: {
+      validationMs: compilationMs,
+      normalizationMs: compilationMs,
+      compilationMs,
+    },
   };
 }
 
@@ -86,6 +95,7 @@ export async function compileAndStoreMapFilterToken(request, body = {}) {
     authScope: resolved.authScope,
     compiled: resolved.compiled,
     token: stored,
+    timing: resolved.timing,
   };
 }
 
@@ -94,16 +104,32 @@ export async function previewMapFilterCounts(request, body = {}) {
   if (!resolved.ok) return resolved;
 
   const bounds = parseBounds(body.bounds);
-  const countResult = await countMapFilterEntities(resolved.compiled, { bounds });
 
-  return {
-    ok: true,
-    authScope: resolved.authScope,
-    compiled: resolved.compiled,
-    counts: countResult.counts,
-    semantics: countResult.semantics,
-    timing: countResult.timing,
-    meta: countResult.meta,
-    bounds,
-  };
+  try {
+    const countResult = await countMapFilterEntities(resolved.compiled, { bounds });
+    return {
+      ok: true,
+      authScope: resolved.authScope,
+      compiled: resolved.compiled,
+      counts: countResult.counts,
+      semantics: countResult.semantics,
+      timing: {
+        ...resolved.timing,
+        ...countResult.timing,
+        totalMs: (resolved.timing?.compilationMs || 0) + (countResult.timing?.totalMs || 0),
+      },
+      meta: countResult.meta,
+      bounds,
+    };
+  } catch (error) {
+    const code = error?.code || "count_query_failed";
+    const status = code.endsWith("_timeout") ? 504 : 500;
+    return {
+      ok: false,
+      status,
+      error: code,
+      phase: error?.phase || null,
+      message: error?.message || code,
+    };
+  }
 }

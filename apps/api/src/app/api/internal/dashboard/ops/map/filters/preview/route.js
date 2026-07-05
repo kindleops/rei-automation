@@ -39,6 +39,7 @@ export async function POST(request) {
           ok: false,
           route: "internal/dashboard/ops/map/filters/preview",
           error: result.error,
+          phase: result.phase || null,
           issues: result.issues,
           key: result.key,
         },
@@ -67,14 +68,17 @@ export async function POST(request) {
       },
     });
   } catch (error) {
+    const code = error?.code || "map_filter_preview_failed";
+    const status = String(code).endsWith("_timeout") ? 504 : 500;
     return NextResponse.json(
       {
         ok: false,
         route: "internal/dashboard/ops/map/filters/preview",
-        error: "map_filter_preview_failed",
+        error: code,
+        phase: error?.phase || null,
         message: error?.message || "Unknown preview error",
       },
-      { status: 500 },
+      { status },
     );
   }
 }
