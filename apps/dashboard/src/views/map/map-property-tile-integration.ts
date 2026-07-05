@@ -109,16 +109,21 @@ export const ensurePropertyTileSourceAndLayers = (
   map: maplibregl.Map,
   themeId: CommandMapThemeId,
   beforeLayerId?: string,
+  filterToken?: string | null,
 ): void => {
   const puTokens = getMapThemeTokens(themeId)
   const puPinTokens = getMapPinThemeTokens(themeId)
 
-  const tilesTemplate = buildPropertyTilesUrlTemplate()
+  const tilesTemplate = buildPropertyTilesUrlTemplate(filterToken)
   const existingSource = map.getSource(PROPERTY_TILES_SOURCE_ID) as { tiles?: string[] } | undefined
   const existingTileUrl = existingSource?.tiles?.[0] ?? ''
   const needsSourceRefresh = Boolean(
     existingSource
-    && (existingTileUrl.startsWith('/') || !existingTileUrl.startsWith('http')),
+    && (
+      existingTileUrl !== tilesTemplate
+      || existingTileUrl.startsWith('/')
+      || !existingTileUrl.startsWith('http')
+    ),
   )
 
   if (needsSourceRefresh) {

@@ -34,7 +34,7 @@ export const PROPERTY_TILES_LAYER_IDS = {
 
 export const PROPERTY_TILES_SOURCE_LAYER = 'properties'
 
-export const buildPropertyTilesUrlTemplate = (): string => {
+export const buildPropertyTilesUrlTemplate = (filterToken?: string | null): string => {
   const base = getBackendBaseUrl()
   let prefix = base ? `${base}/api/internal/dashboard/ops/map/tiles` : '/api/internal/dashboard/ops/map/tiles'
   // MapLibre resolves relative tile URLs against the style spec origin (Carto CDN),
@@ -42,7 +42,9 @@ export const buildPropertyTilesUrlTemplate = (): string => {
   if (typeof window !== 'undefined' && prefix.startsWith('/')) {
     prefix = `${window.location.origin}${prefix}`
   }
-  return `${prefix}/{z}/{x}/{y}`
+  const tilePath = `${prefix}/{z}/{x}/{y}`
+  if (!filterToken) return tilePath
+  return `${tilePath}?filter=${encodeURIComponent(filterToken)}`
 }
 
 export const buildPropertyTileLayerPaint = (themeId: CommandMapThemeId) => {

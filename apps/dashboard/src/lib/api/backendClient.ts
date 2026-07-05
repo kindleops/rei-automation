@@ -1655,6 +1655,7 @@ export function fetchMapProperties(params: {
   markets?: string
   states?: string
   counts_only?: boolean
+  filter?: string
 }, signal?: AbortSignal): Promise<BackendResult<MapPropertiesResponse>> {
   const qs = new URLSearchParams(
     Object.fromEntries(
@@ -1690,6 +1691,7 @@ export function fetchMapAccounting(params: {
   lng_min: number
   lng_max: number
   zoom: number
+  filter?: string
 }, signal?: AbortSignal): Promise<BackendResult<MapAccountingResponse>> {
   const qs = new URLSearchParams(
     Object.fromEntries(

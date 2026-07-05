@@ -138,6 +138,8 @@ import {
   THEME_TRANSITION_MS,
 } from './map-visual-presets'
 import { fetchMapProperties } from '../../lib/api/backendClient'
+import { MasterFiltersWorkspace } from './master-filters'
+import type { MapFilterBounds } from './master-filters'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
   CONTACTABILITY_ORDER,
@@ -558,7 +560,6 @@ type MapKpiChip = {
 
 type ControlsTab = 'modes' | 'filters' | 'style' | 'intel' | 'performance'
 type MapModeKey = CommandMapIntelligenceModeId
-type FilterCategory = 'property' | 'prospect' | 'owner' | 'buyer' | 'saved'
 type CinematicControlsState = {
   livePulses: 'off' | 'subtle' | 'full'
   pinGlow: 'off' | 'subtle' | 'full'
@@ -828,29 +829,6 @@ const MAP_MODES: Array<{ key: MapModeKey; label: string; description: string; sw
   { key: 'territory', label: 'Territory Scan', description: 'Property universe, asset mix, boundaries', swatches: ['#64748b', '#94a3b8', '#a6d260'] },
   { key: 'census', label: 'Census Intel', description: 'Demographic and economic overlays', swatches: ['#06b6d4', '#8b5cf6', '#38bdf8'] },
   { key: 'command', label: 'Command Mode', description: 'Highest-priority leads, follow-ups, replies, urgent activity', swatches: ['#ff2d87', '#ff6b35', '#30d158'] },
-]
-
-const FILTER_CATEGORIES: Array<{ key: FilterCategory; label: string }> = [
-  { key: 'property', label: 'Property' },
-  { key: 'prospect', label: 'Prospect' },
-  { key: 'owner', label: 'Owner' },
-  { key: 'buyer', label: 'Buyer' },
-  { key: 'saved', label: 'Saved' },
-]
-
-const FILTER_PRESETS: Array<{ key: string; label: string; filters: Partial<MapFilterState> }> = [
-  { key: 'hot_sellers', label: 'Hot Sellers', filters: { leadTemperature: 'hot' } },
-  { key: 'follow_up', label: 'Follow-Up Due', filters: { followUpDue: true } },
-  { key: 'unread', label: 'New Replies', filters: { unreadOnly: true } },
-  { key: 'high_equity', label: 'High Equity Absentee', filters: { highEquity: true } },
-  { key: 'landlords', label: 'Tired Landlords', filters: { leadTemperature: 'warm' } },
-  { key: 'multi_24', label: '2–4 Unit Owners', filters: { propertyType: '2–4 Units' } },
-  { key: 'multi_5plus', label: '5+ Multifamily', filters: { propertyType: '5+ Units' } },
-  { key: 'storage', label: 'Storage Owners', filters: { propertyType: 'Storage' } },
-  { key: 'delinquent', label: 'Tax Delinquent', filters: {} },
-  { key: 'out_of_state', label: 'Out-of-State', filters: {} },
-  { key: 'buyer_dense', label: 'Buyer Dense', filters: {} },
-  { key: 'institutional_excl', label: 'Institutional Excl.', filters: {} },
 ]
 
 type CinematicThemeDef = { id: MapStyleMode; label: string; description: string; bestFor: string }
@@ -1895,52 +1873,6 @@ const toActivityPins = (pins: CommandMapPin[], activityMode: InboxMapActivityMod
       activity_label: activityLabelFor(activityState),
     }]
   })
-}
-
-const matchesFilters = (pin: CommandMapPin, filters: MapFilterState): boolean => {
-  if (filters.market && pin.market !== filters.market) return false
-  if (filters.stage) {
-    const stage = normalizeLifecycleStage(pin.lifecycle_stage || pin.conversation_stage)
-    if (stage !== normalizeLifecycleStage(filters.stage)) return false
-  }
-  if (filters.status) {
-    const status = normalizeOperationalStatus(pin.operational_status || pin.conversation_status)
-    if (status !== normalizeOperationalStatus(filters.status)) return false
-  }
-  if (filters.leadTemperature) {
-    const temp = normalizeLeadTemperature(pin.lead_temperature)
-    if (temp !== normalizeLeadTemperature(filters.leadTemperature)) return false
-  }
-  if (filters.disposition) {
-    const disposition = normalizeDisposition(pin.disposition)
-    if (disposition !== normalizeDisposition(filters.disposition)) return false
-  }
-  if (filters.contactability) {
-    const contactability = normalizeContactability(pin.contactability_status)
-    if (contactability !== normalizeContactability(filters.contactability)) return false
-  }
-  if (filters.archiveOnly && !pin.is_archived) return false
-  if (filters.snoozeOnly) {
-    const snoozedUntil = pin.snoozed_until ? new Date(pin.snoozed_until).getTime() : 0
-    if (!Number.isFinite(snoozedUntil) || snoozedUntil <= Date.now()) return false
-  }
-  if (filters.automationStatus && pin.automation_status !== filters.automationStatus) return false
-  if (filters.messageDirection && pin.last_message_direction !== filters.messageDirection) return false
-  if (filters.unreadOnly && !pin.unread) return false
-  if (filters.followUpDue && pin.inbox_bucket !== 'follow_up_due') return false
-  if (filters.highEquity && (pin.equity_percent ?? 0) < 50) return false
-  if (filters.propertyType && pin.property_type !== filters.propertyType) return false
-  if (filters.offerStatus && pin.offer_status !== filters.offerStatus) return false
-  if (filters.contractStatus && pin.contract_status !== filters.contractStatus) return false
-  if (filters.suppressionStatus && pin.suppression_status !== filters.suppressionStatus) return false
-  if (filters.dateRange) {
-    const days = Number(filters.dateRange)
-    const ts = new Date(pin.last_activity_at).getTime()
-    if (Number.isFinite(days) && Number.isFinite(ts)) {
-      if (Date.now() - ts > days * 86400000) return false
-    }
-  }
-  return true
 }
 
 const featureCollectionForPins = (
@@ -4213,8 +4145,9 @@ export function InboxCommandMap({
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [activeControlsTab, setActiveControlsTab] = useState<ControlsTab>('modes')
   const [mapMode, setMapMode] = useState<MapModeKey>('acquisition')
-  const [filterCategory, setFilterCategory] = useState<FilterCategory>('prospect')
-  const [filterSearch, setFilterSearch] = useState('')
+  const [appliedMapFilterToken, setAppliedMapFilterToken] = useState<string | null>(null)
+  const [appliedMasterFilterRuleCount, setAppliedMasterFilterRuleCount] = useState(0)
+  const appliedMapFilterTokenRef = useRef<string | null>(null)
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false)
   const [cinematicControls, setCinematicControls] = useState<CinematicControlsState>({
     livePulses: 'off',
@@ -4532,10 +4465,7 @@ export function InboxCommandMap({
     return { mapped, unmapped }
   }, [baseThreads])
   const allPins = useMemo(() => toActivityPins(pinPipeline.mapped, activityMode), [activityMode, pinPipeline.mapped])
-  const filteredPins = useMemo(
-    () => allPins.filter((pin) => matchesFilters(pin, filters)),
-    [allPins, filters],
-  )
+  const filteredPins = allPins
   const selectedBasePin = useMemo(() => {
     if (!selectedHydratedThread) return null
     return buildMapPin(selectedHydratedThread).pin
@@ -4675,24 +4605,16 @@ export function InboxCommandMap({
     [buyerCommandData?.profiles, selectedBuyerKey, selectedBuyerPurchase?.buyerKey],
   )
   const buyerFilterCount = useMemo(() => countBuyerFilters(buyerFilters), [buyerFilters])
-  const activeFilterCount = useMemo(() => {
-    let count = 0
-    if (filters.market) count++
-    if (filters.stage) count++
-    if (filters.status) count++
-    if (filters.leadTemperature) count++
-    if (filters.disposition) count++
-    if (filters.contactability) count++
-    if (filters.archiveOnly) count++
-    if (filters.snoozeOnly) count++
-    if (filters.automationStatus) count++
-    if (filters.propertyType) count++
-    if (filters.unreadOnly) count++
-    if (filters.followUpDue) count++
-    if (filters.highEquity) count++
-    count += buyerFilterCount
-    return count
-  }, [filters, buyerFilterCount])
+  const activeFilterCount = appliedMasterFilterRuleCount
+  const mapFilterBounds = useMemo<MapFilterBounds | null>(() => {
+    if (!viewportBounds) return null
+    return {
+      lat_min: viewportBounds.south,
+      lat_max: viewportBounds.north,
+      lng_min: viewportBounds.west,
+      lng_max: viewportBounds.east,
+    }
+  }, [viewportBounds])
   const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => ({
     type: 'FeatureCollection',
     features: [],
@@ -6517,7 +6439,7 @@ export function InboxCommandMap({
       }
 
       // MVT property tiles must install before legacy GeoJSON universe layers.
-      ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, puAnchor)
+      ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, puAnchor, appliedMapFilterTokenRef.current)
 
       // ── SOURCE B: Property universe — asset icon + status ring ─────────────
       if (!map.getSource(PROPERTY_UNIVERSE_SOURCE_ID)) {
@@ -6920,7 +6842,7 @@ export function InboxCommandMap({
     const installPropertyTileStack = (targetMap: maplibregl.Map) => {
       const tileAnchor = targetMap.getLayer('command-pin-cluster-glow') ? 'command-pin-cluster-glow' : undefined
       try {
-        ensurePropertyTileSourceAndLayers(targetMap, activeThemeRef.current.id, tileAnchor)
+        ensurePropertyTileSourceAndLayers(targetMap, activeThemeRef.current.id, tileAnchor, appliedMapFilterTokenRef.current)
       } catch (err) {
         console.warn('[CommandMap] property tile source/layers failed to install', err)
       }
@@ -8138,6 +8060,7 @@ export function InboxCommandMap({
       lng_max: viewportBounds.east,
       zoom: Math.round(viewportZoom * 10) / 10,
       ...(tileBacked ? { counts_only: true } : {}),
+      ...(appliedMapFilterToken ? { filter: appliedMapFilterToken } : {}),
     }, signal).then((result) => {
       if (!result.ok || signal.aborted) return
       const payload = result.data.data
@@ -8211,8 +8134,18 @@ export function InboxCommandMap({
         return
       }
     }).catch(() => { /* aborted or network error */ })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportBounds, viewportZoom, baseStyleLoading, sellerPinLayers.sellerPins, selectedPropertyId, mapStyleMode, mapMode])
+  }, [viewportBounds, viewportZoom, baseStyleLoading, sellerPinLayers.sellerPins, selectedPropertyId, mapStyleMode, mapMode, appliedMapFilterToken])
+
+  useEffect(() => {
+    appliedMapFilterTokenRef.current = appliedMapFilterToken
+    const map = mapRef.current
+    if (!isStyleSafe(map) || baseStyleLoading) return
+    if (!shouldUseVectorTileSource(viewportZoom)) return
+    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusters)
+      ? PROPERTY_UNIVERSE_LAYER_IDS.clusters
+      : undefined
+    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterToken)
+  }, [appliedMapFilterToken, baseStyleLoading, viewportZoom])
 
   // ── Zoom-band layer visibility (no blank ranges) ──────────────────────────
   useEffect(() => {
@@ -9373,7 +9306,7 @@ export function InboxCommandMap({
           </div>
         </div>
         {filtersOpen && (
-          <div className="nx-icm__controls-popover">
+          <div className={cls('nx-icm__controls-popover', activeControlsTab === 'filters' && 'is-master-filters')}>
             <div className="nx-icm__controls-drawer-header">
               <div className="nx-icm__controls-drawer-title">
                 <span className="nx-icm__controls-drawer-eyebrow">Map Command</span>
@@ -9393,6 +9326,23 @@ export function InboxCommandMap({
                 </button>
               ))}
             </div>
+            {activeControlsTab === 'filters' ? (
+              <MasterFiltersWorkspace
+                isMobile={isMobile}
+                bounds={mapFilterBounds}
+                initialToken={appliedMapFilterToken}
+                onApply={({ token, activeRuleCount }) => {
+                  propertyUniverseAbortRef.current?.abort()
+                  setAppliedMapFilterToken(token)
+                  setAppliedMasterFilterRuleCount(activeRuleCount)
+                }}
+                onClear={() => {
+                  propertyUniverseAbortRef.current?.abort()
+                  setAppliedMapFilterToken(null)
+                  setAppliedMasterFilterRuleCount(0)
+                }}
+              />
+            ) : (
             <div className="nx-icm__controls-panel">
               {activeControlsTab === 'modes' && (
                 <>
@@ -9527,289 +9477,6 @@ export function InboxCommandMap({
                       ))}
                     </div>
                   </div>
-                </>
-              )}
-              {activeControlsTab === 'filters' && (
-                <>
-                  {/* Filter header — count + search */}
-                  <div className="nx-icm__filter-header">
-                    <div className="nx-icm__filter-header-meta">
-                      {activeFilterCount > 0 && (
-                        <span className="nx-icm__filter-active-count">{activeFilterCount} active</span>
-                      )}
-                    </div>
-                    <input
-                      className="nx-icm__filter-search"
-                      type="search"
-                      placeholder="Search 200+ filters..."
-                      value={filterSearch}
-                      onChange={(e) => setFilterSearch(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Preset segment chips */}
-                  <div className="nx-icm__filter-preset-row">
-                    {FILTER_PRESETS.map((preset) => (
-                      <button key={preset.key} type="button" className="nx-icm__filter-preset-chip" onClick={() => setFilters((c) => ({ ...c, ...preset.filters }))}>
-                        {preset.label}
-                      </button>
-                    ))}
-                    {activeFilterCount > 0 && (
-                      <button type="button" className="nx-icm__filter-preset-chip nx-icm__filter-preset-chip--clear" onClick={() => { setFilters(defaultFilters); setActiveKpiFilter(null) }}>
-                        Clear {activeFilterCount}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Filter category tabs */}
-                  <div className="nx-icm__filter-cat-tabs">
-                    {FILTER_CATEGORIES.map((cat) => (
-                      <button key={cat.key} type="button" className={cls('nx-icm__filter-cat-tab', filterCategory === cat.key && 'is-active')} onClick={() => setFilterCategory(cat.key)}>
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Property filters */}
-                  {filterCategory === 'property' && (
-                    <>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Asset &amp; Use</span>
-                        <div className="nx-icm__filter-grid">
-                          <select className="nx-icm__field" value={filters.propertyType} onChange={(e) => setFilters((c) => ({ ...c, propertyType: e.target.value }))}>
-                            <option value="">All Asset Types</option>
-                            {['SFR', '2–4 Units', '5+ Units', 'Storage', 'Retail', 'Office', 'Industrial', 'Land', 'Mixed Use'].map((t) => <option key={t} value={t}>{t}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Ownership</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Owner Occupied</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Absentee Owner</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Out-of-State</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Corporate Owner</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Trust Owner</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Ownership Yrs</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Distress Signals</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Vacant</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Tax Delinquent</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Active Lien</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Foreclosure</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Pre-Foreclosure</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Auction</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Scores</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Motivation Score</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Acq Score</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Deal Strength</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Distress Score</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Opp Score</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Value &amp; Equity</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.highEquity} onChange={(e) => setFilters((c) => ({ ...c, highEquity: e.target.checked }))} /><span>High Equity</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Equity %</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Est Value</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Cash Offer</span></label>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Prospect filters */}
-                  {filterCategory === 'prospect' && (
-                    <>
-                      <div className="nx-icm__controls-group">
-                        <div className="nx-icm__controls-headerline">
-                          <span className="nx-icm__controls-label">KPI Focus</span>
-                          <label className="nx-icm__checkbox" style={{ fontSize: 11, minHeight: 28 }}>
-                            <input type="checkbox" checked={showKpiBadges} onChange={(e) => setShowKpiBadges(e.target.checked)} />
-                            Badges
-                          </label>
-                        </div>
-                        <div className="nx-icm__controls-segment">
-                          {kpiChips.map((chip) => (
-                            <button key={chip.key} type="button" className={cls('nx-icm__kpi-chip', activeKpiFilter === chip.key && 'is-active')} onClick={() => setActiveKpiFilter((c) => c === chip.key ? null : chip.key)} style={{ '--icm-kpi-tone': chip.tone } as CSSProperties}>
-                              <span>{chip.label}</span><strong>{chip.count}</strong>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Conversation</span>
-                        <div className="nx-icm__filter-grid">
-                          <select className="nx-icm__field" value={filters.market} onChange={(e) => setFilters((c) => ({ ...c, market: e.target.value }))}><option value="">All Markets</option>{markets.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.stage} onChange={(e) => setFilters((c) => ({ ...c, stage: e.target.value }))}><option value="">All Stages</option>{stages.map((s) => <option key={s} value={s}>{LIFECYCLE_STAGE_META[s].shortLabel} {LIFECYCLE_STAGE_META[s].label}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.status} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))}><option value="">All Statuses</option>{statuses.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.leadTemperature} onChange={(e) => setFilters((c) => ({ ...c, leadTemperature: e.target.value }))}><option value="">All Temps</option>{temperatures.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.disposition} onChange={(e) => setFilters((c) => ({ ...c, disposition: e.target.value }))}><option value="">All Dispositions</option>{DISPOSITION_ORDER.map((d) => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}</select>
-                          <select className="nx-icm__field" value={filters.contactability} onChange={(e) => setFilters((c) => ({ ...c, contactability: e.target.value }))}><option value="">All Contactability</option>{CONTACTABILITY_ORDER.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}</select>
-                        </div>
-                        <div className="nx-icm__layer-toggle-grid" style={{ marginTop: 6 }}>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.unreadOnly} onChange={(e) => setFilters((c) => ({ ...c, unreadOnly: e.target.checked }))} /><span>Unread</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.followUpDue} onChange={(e) => setFilters((c) => ({ ...c, followUpDue: e.target.checked }))} /><span>Follow-Up Due</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.archiveOnly} onChange={(e) => setFilters((c) => ({ ...c, archiveOnly: e.target.checked }))} /><span>Archived</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={filters.snoozeOnly} onChange={(e) => setFilters((c) => ({ ...c, snoozeOnly: e.target.checked }))} /><span>Snoozed</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Reply</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Inbound</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Outreach</span>
-                        <div className="nx-icm__filter-grid">
-                          <select className="nx-icm__field" value={filters.automationStatus} onChange={(e) => setFilters((c) => ({ ...c, automationStatus: e.target.value }))}><option value="">All Automation</option>{automationStatuses.map((s) => <option key={s} value={s}>{s}</option>)}</select>
-                        </div>
-                        <div className="nx-icm__layer-toggle-grid" style={{ marginTop: 6 }}>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Last Contacted</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Touch Count</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Campaign</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Agent Persona</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Contactability</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>SMS Eligible</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Has Phone</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Has Email</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Phone Conf.</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Excl. Suppressed</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Excl. DNC/Opt-Out</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Intent Signals</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Positive</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Negotiating</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Price Mentioned</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Timeline Mentioned</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Not Interested</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Wrong Number</span></label>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Owner filters */}
-                  {filterCategory === 'owner' && (
-                    <>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Identity</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Individual</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Corporate</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Trust</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Institutional</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>HF Exclusion</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Portfolio</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Portfolio Size</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Multi-Property</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Total Equity</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Landlord Signal</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Location</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Mailing State</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Mailing City</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Out-of-State</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Contact Quality</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Phone</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Email</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Phone Conf.</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Best Channel</span></label>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Buyer filters */}
-                  {filterCategory === 'buyer' && (
-                    <>
-                      {buyerFilters && (
-                        <>
-                          <datalist id="buyer-markets">{buyerFilterOptions.markets.map((v) => <option key={v} value={v} />)}</datalist>
-                          <datalist id="buyer-property-types">{buyerFilterOptions.propertyTypes.map((v) => <option key={v} value={v} />)}</datalist>
-                          <div className="nx-icm__controls-group">
-                            <div className="nx-icm__controls-headerline">
-                              <span className="nx-icm__controls-label">Buyer Activity</span>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                {buyerFilterCount > 0 && <span className="nx-icm__pill-note">{buyerFilterCount} active</span>}
-                                <button type="button" className="nx-icm__mode-tab" onClick={clearBuyerFilters}>Clear</button>
-                              </div>
-                            </div>
-                            <div className="nx-icm__filter-grid">
-                              <select className="nx-icm__field" value={buyerFilters.activityWindowDays} onChange={(e) => onBuyerFiltersChange?.({ activityWindowDays: Number(e.target.value) as BuyerMapFilters['activityWindowDays'] })}>{[30, 90, 180, 365].map((d) => <option key={d} value={d}>{d}d window</option>)}</select>
-                              <select className="nx-icm__field" value={buyerFilters.radiusMiles} onChange={(e) => onBuyerFiltersChange?.({ radiusMiles: Number(e.target.value) as BuyerMapFilters['radiusMiles'] })}>{[1, 3, 5, 10].map((m) => <option key={m} value={m}>{m} mi radius</option>)}</select>
-                              <input className="nx-icm__field" list="buyer-markets" value={buyerFilters.market} onChange={(e) => onBuyerFiltersChange?.({ market: e.target.value })} placeholder="Market" />
-                              <input className="nx-icm__field" list="buyer-property-types" value={buyerFilters.propertyType} onChange={(e) => onBuyerFiltersChange?.({ propertyType: e.target.value })} placeholder="Property Type" />
-                            </div>
-                          </div>
-                        </>
-                      )}
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Buyer Type</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.repeatBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, repeatBuyers: e.target.checked }))} /><span>Repeat Buyer</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.corporateBuyers} onChange={(e) => setBuyerLayers((c) => ({ ...c, corporateBuyers: e.target.checked }))} /><span>Corporate</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.localInvestors} onChange={(e) => setBuyerLayers((c) => ({ ...c, localInvestors: e.target.checked }))} /><span>Local Investor</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.flippers} onChange={(e) => setBuyerLayers((c) => ({ ...c, flippers: e.target.checked }))} /><span>Flipper</span></label>
-                          <label className="nx-icm__layer-toggle"><input type="checkbox" checked={buyerLayers.builders} onChange={(e) => setBuyerLayers((c) => ({ ...c, builders: e.target.checked }))} /><span>Builder</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Retail Excl.</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Asset Match</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Asset Type</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Units</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Sqft Range</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Year Built</span></label>
-                        </div>
-                      </div>
-                      <div className="nx-icm__controls-group">
-                        <span className="nx-icm__controls-label">Price Metrics</span>
-                        <div className="nx-icm__layer-toggle-grid">
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>Purchase Price</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>PPSF</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>PPU</span></label>
-                          <label className="nx-icm__layer-toggle is-placeholder"><input type="checkbox" disabled /><span>% of ARV</span></label>
-                        </div>
-                      </div>
-                      {!buyerFilters && (
-                        <div className="nx-icm__controls-group">
-                          <p className="nx-icm__placeholder-note">Select a thread with buyer data to unlock comp filters.</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Saved segments */}
-                  {filterCategory === 'saved' && (
-                    <div className="nx-icm__controls-group">
-                      <p className="nx-icm__placeholder-note">Saved segments coming soon. Build a filter set and pin it for instant recall.</p>
-                    </div>
-                  )}
                 </>
               )}
               {activeControlsTab === 'style' && (
@@ -10099,16 +9766,11 @@ export function InboxCommandMap({
               )}
             </div>
             <div className="nx-icm__controls-footer">
-              <button type="button" className="nx-icm__mode-tab" onClick={() => {
-                setFilters(defaultFilters)
-                setActiveKpiFilter(null)
-              }}>
-                Clear Filters
-              </button>
-              <button type="button" className="nx-icm__mode-tab is-active" onClick={() => setFiltersOpen(false)}>
-                Done
+              <button type="button" className="nx-icm__mode-tab" onClick={() => setFiltersOpen(false)}>
+                Close
               </button>
             </div>
+            )}
           </div>
         )}
       </div>}
