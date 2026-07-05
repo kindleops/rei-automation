@@ -35,7 +35,7 @@ export function MasterFiltersDesktop() {
       <header className="mf-header">
         <div className="mf-header__title">
           <h2>Master Filters</h2>
-          <p className="mf-header__subtitle">Build a property-universe filter stack across four domains.</p>
+          <p className="mf-header__subtitle">Filters the full property universe — contacted and uncontacted.</p>
         </div>
         <button
           type="button"

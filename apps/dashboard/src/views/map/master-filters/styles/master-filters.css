@@ -4,15 +4,32 @@
   width: min(96vw, 1320px);
   max-width: calc(100vw - 24px);
   max-height: min(88vh, 920px);
+  padding: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: 18px;
+}
+
+.nx-icm__controls-popover.is-master-filters .nx-icm__controls-drawer-header {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid rgba(120, 180, 255, 0.14);
+}
+
+.nx-icm__controls-popover.is-master-filters .nx-icm__controls-tabs {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid rgba(120, 180, 255, 0.1);
 }
 
 .nx-icm__controls-popover.is-master-filters .mf-workspace {
   flex: 1;
   min-height: 0;
-  border-radius: 0 0 16px 16px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .mf-workspace {
@@ -78,11 +95,11 @@
 
 .mf-desktop-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 0.95fr) minmax(320px, 1.15fr) minmax(260px, 0.9fr);
+  grid-template-columns: minmax(240px, 0.95fr) minmax(300px, 1.15fr) minmax(240px, 0.9fr);
   gap: 12px;
   padding: 12px 16px;
   flex: 1;
-  min-height: 0;
+  min-height: 360px;
   overflow: hidden;
 }
 
@@ -832,4 +849,11 @@
   .mf-chip {
     transition: none;
   }
+}
+
+.nx-icm__map-status-pill.is-filter-active {
+  border-color: rgba(94, 176, 255, 0.45);
+  color: #d8ecff;
+  background: rgba(24, 56, 96, 0.82);
+  box-shadow: 0 0 0 1px rgba(94, 176, 255, 0.18);
 }

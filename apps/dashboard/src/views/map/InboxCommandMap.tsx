@@ -3437,9 +3437,11 @@ const applySellerPinFieldPresentation = (
     sellerPinsEnabled: boolean
     viewportZoom: number
     geojson?: FeatureCollection<Point, Record<string, unknown>>
+    /** When set, keep filtered property-universe MVT visible (all properties incl. uncontacted). */
+    masterFilterActive?: boolean
   },
 ): void => {
-  const { sellerPinsEnabled, viewportZoom, geojson } = options
+  const { sellerPinsEnabled, viewportZoom, geojson, masterFilterActive = false } = options
   const geojsonFeatureCount = geojson?.features?.length ?? 0
   ensureSellerPinIconLayer(map, geojson)
   if (geojson) {
@@ -3449,6 +3451,7 @@ const applySellerPinFieldPresentation = (
   const sellerPinFieldActive = (
     shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom, geojsonFeatureCount)
     && isSellerPinIconLayerReady(map)
+    && !masterFilterActive
   )
   const showMarkers = sellerPinFieldActive
     && shouldUsePropertySource(viewportZoom)
@@ -6834,6 +6837,7 @@ export function InboxCommandMap({
           sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
           viewportZoom: map.getZoom(),
           geojson: sellerPinsGeojsonRef.current,
+          masterFilterActive: Boolean(appliedMapFilterTokenRef.current),
         })
         void syncBasemapPresentation(map)
         syncLayerVisibility(map, activityModeRef.current)
@@ -7028,6 +7032,7 @@ export function InboxCommandMap({
         sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
         viewportZoom: mapInstance.getZoom(),
         geojson: sellerPinsGeojsonRef.current,
+        masterFilterActive: Boolean(appliedMapFilterTokenRef.current),
       })
       void syncBasemapPresentation(mapInstance)
       scheduleMapResize(true)
@@ -7886,6 +7891,7 @@ export function InboxCommandMap({
           sellerPinsEnabled: sellerPinLayersRef.current.sellerPins,
           viewportZoom: liveMap.getZoom(),
           geojson: sellerPinsGeojsonRef.current,
+          masterFilterActive: Boolean(appliedMapFilterTokenRef.current),
         })
       }, 96)
     })
@@ -7970,7 +7976,7 @@ export function InboxCommandMap({
     const map = mapRef.current
     if (!isStyleSafe(map) || baseStyleLoading) return
     if (!viewportBounds) return
-    if (!sellerPinLayers.sellerPins) return
+    if (!sellerPinLayers.sellerPins && !appliedMapFilterToken) return
 
     propertyUniverseAbortRef.current?.abort()
     propertyUniverseAbortRef.current = new AbortController()
@@ -8079,13 +8085,15 @@ export function InboxCommandMap({
 
     const applyZoomBandVisibility = () => {
       const zoom = map.getZoom()
-      const showPropertyField = sellerPinLayers.sellerPins
+      const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
+      const showPropertyField = sellerPinLayers.sellerPins || masterFilterActive
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
       const sellerPinFieldActive = (
         shouldPresentSellerPinGeojsonField(showPropertyField, zoom, sellerPinsGeojsonRef.current.features.length)
         && isSellerPinIconLayerReady(map)
+        && !masterFilterActive
       )
-      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && !sellerPinFieldActive
+      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && (!sellerPinFieldActive || masterFilterActive)
       const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !sellerPinFieldActive
       const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
       const showPropertyMarkers = showPropertyLevel && (
@@ -8147,7 +8155,7 @@ export function InboxCommandMap({
       map.off('moveend', applyZoomBandVisibility)
       map.off('zoomend', applyZoomBandVisibility)
     }
-  }, [baseStyleLoading, isMobile, sellerPinLayers.sellerPins, sellerPinsGeojson, viewportZoom, selectedPropertyId])
+  }, [appliedMapFilterToken, baseStyleLoading, isMobile, sellerPinLayers.sellerPins, sellerPinsGeojson, viewportZoom, selectedPropertyId])
 
   useEffect(() => {
     const map = mapRef.current
@@ -8958,6 +8966,7 @@ export function InboxCommandMap({
         sellerPinsEnabled: sellerPinLayers.sellerPins,
         viewportZoom: map.getZoom(),
         geojson: nextSellerPinsGeojson,
+        masterFilterActive: Boolean(appliedMapFilterToken),
       })
       syncCommandPinSourcesWithSellerFallback(
         map,
@@ -8971,7 +8980,7 @@ export function InboxCommandMap({
         },
       )
     }
-  }, [mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
+  }, [appliedMapFilterToken, mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
 
   // ── Push census + buyer demand GeoJSON to map sources ─────────────────────
   useEffect(() => {
@@ -9002,6 +9011,7 @@ export function InboxCommandMap({
       sellerPinsEnabled: sellerPinLayers.sellerPins,
       viewportZoom,
       geojson: sellerPinsGeojsonRef.current,
+      masterFilterActive: Boolean(appliedMapFilterToken),
     })
     const spGlowLayerId = `${SOLD_COMPS_LAYER_IDS.marker}-glow`
     // Keep comp glow aligned with comp marker visibility
@@ -9009,7 +9019,7 @@ export function InboxCommandMap({
       const compVisible = map.getLayoutProperty(SOLD_COMPS_LAYER_IDS.marker, 'visibility') ?? 'none'
       map.setLayoutProperty(spGlowLayerId, 'visibility', compVisible)
     }
-  }, [sellerPinLayers.sellerPins, baseStyleLoading, viewportZoom])
+  }, [appliedMapFilterToken, sellerPinLayers.sellerPins, baseStyleLoading, viewportZoom])
 
   useEffect(() => {
     const map = mapRef.current
@@ -9739,8 +9749,13 @@ export function InboxCommandMap({
         visible={isMapDiagnosticsDebugEnabled() && Boolean(mapPropertyDiagnostics)}
       />
 
-      {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning) && (
+      {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning || appliedMapFilterToken) && (
         <div className="nx-icm__map-status" aria-live="polite">
+          {appliedMapFilterToken && appliedMasterFilterRuleCount > 0 && (
+            <span className="nx-icm__map-status-pill is-filter-active">
+              Property universe filter · {appliedMasterFilterRuleCount} rule{appliedMasterFilterRuleCount === 1 ? '' : 's'} (all properties)
+            </span>
+          )}
           {baseStyleLoading && <span className="nx-icm__map-status-pill">Loading {getCommandMapTheme(mapStyleMode).label} base style…</span>}
           {sellerPinsLoading && <span className="nx-icm__map-status-pill">Hydrating seller pins…</span>}
           {styleFallbackWarning && <span className="nx-icm__map-status-pill is-warning">{styleFallbackWarning}</span>}
