@@ -1,0 +1,1 @@
+export { countMapFilterEntities } from "./map-filter-count-service.js";

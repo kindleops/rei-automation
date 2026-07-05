@@ -88,7 +88,11 @@ export function operatorsForDataType(dataType) {
   return OPERATORS_BY_DATA_TYPE[dataType] || [];
 }
 
-export function isOperatorValidForDataType(dataType, operator) {
+export function isOperatorValidForDataType(dataType, operator, field = null) {
   const allowed = operatorsForDataType(dataType);
-  return allowed.includes(operator);
+  if (allowed.includes(operator)) return true;
+  if (field?.presenceStrategy && DERIVED_PRESENCE_OPERATORS.includes(operator)) {
+    return true;
+  }
+  return false;
 }
