@@ -3531,12 +3531,6 @@ const applyMasterFilterMapLayerOverride = (
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
   }
 
-  try {
-    const tileSource = map.getSource(PROPERTY_TILES_SOURCE_ID) as maplibregl.VectorTileSource | undefined
-    tileSource?.reload?.()
-  } catch {
-    // ignore reload errors during style transitions
-  }
 }
 
 // Only query layers that actually exist in the current style, and always
