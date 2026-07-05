@@ -1,0 +1,161 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "id": "property_prospect_mixed",
+      "label": "Property + Prospect",
+      "direct": {
+        "matchingProperties": 69908,
+        "matchingProspects": 95102,
+        "matchingMasterOwners": 19273,
+        "durationMs": 2475
+      },
+      "compiler": {
+        "matchingProperties": 69908,
+        "matchingProspects": 95102,
+        "matchingMasterOwners": 19273,
+        "durationMs": 1932
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2479,
+      "pass": true
+    },
+    {
+      "id": "property_owner_mixed",
+      "label": "Property + Master Owner",
+      "direct": {
+        "matchingProperties": 5363,
+        "matchingProspects": 2025,
+        "matchingMasterOwners": 1178,
+        "durationMs": 1101
+      },
+      "compiler": {
+        "matchingProperties": 5363,
+        "matchingProspects": 2025,
+        "matchingMasterOwners": 1178,
+        "durationMs": 901
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1101,
+      "pass": true
+    },
+    {
+      "id": "nested_mixed_or",
+      "label": "Nested mixed-entity OR",
+      "direct": {
+        "matchingProperties": 89301,
+        "matchingProspects": 114749,
+        "matchingMasterOwners": 22238,
+        "durationMs": 3236
+      },
+      "compiler": {
+        "matchingProperties": 89301,
+        "matchingProspects": 114749,
+        "matchingMasterOwners": 22238,
+        "durationMs": 1778
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 3236,
+      "pass": true
+    },
+    {
+      "id": "negated_relationship",
+      "label": "Negated relationship",
+      "direct": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "durationMs": 3015
+      },
+      "compiler": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "durationMs": 1758
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 3016,
+      "pass": true
+    },
+    {
+      "id": "negated_owner_rule",
+      "label": "Negated owner rule",
+      "direct": {
+        "matchingProperties": 114069,
+        "matchingProspects": 141333,
+        "matchingMasterOwners": 27071,
+        "durationMs": 2422
+      },
+      "compiler": {
+        "matchingProperties": 114069,
+        "matchingProspects": 141333,
+        "matchingMasterOwners": 27071,
+        "durationMs": 1973
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2422,
+      "pass": true
+    },
+    {
+      "id": "mixed_or_inside_and",
+      "label": "Mixed property/prospect OR inside owner/property AND",
+      "direct": {
+        "matchingProperties": 93611,
+        "matchingProspects": 124008,
+        "matchingMasterOwners": 22771,
+        "durationMs": 3686
+      },
+      "compiler": {
+        "matchingProperties": 93611,
+        "matchingProspects": 124008,
+        "matchingMasterOwners": 22771,
+        "durationMs": 2292
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 3687,
+      "pass": true
+    },
+    {
+      "id": "three_entity_mixed",
+      "label": "Property + Prospect + Owner",
+      "direct": {
+        "matchingProperties": 7129,
+        "matchingProspects": 4391,
+        "matchingMasterOwners": 2550,
+        "durationMs": 1681
+      },
+      "compiler": {
+        "matchingProperties": 7129,
+        "matchingProspects": 4391,
+        "matchingMasterOwners": 2550,
+        "durationMs": 1260
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1682,
+      "pass": true
+    }
+  ],
+  "issues": [],
+  "suite": "mixedExpressionAccounting",
+  "entities": [
+    "property",
+    "prospect",
+    "owner"
+  ],
+  "exactPropertyCount": 124046,
+  "mappablePropertyCount": 124046
+}

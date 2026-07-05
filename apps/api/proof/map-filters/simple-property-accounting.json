@@ -1,0 +1,222 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "id": "no_filter",
+      "label": "No filter",
+      "direct": {
+        "matchingProperties": 124046,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 426
+      },
+      "compiler": {
+        "matchingProperties": 124046,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 1211
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1213,
+      "pass": true
+    },
+    {
+      "id": "sfr",
+      "label": "SFR",
+      "direct": {
+        "matchingProperties": 89222,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 494
+      },
+      "compiler": {
+        "matchingProperties": 89222,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 742
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 745,
+      "pass": true
+    },
+    {
+      "id": "multifamily_2_4",
+      "label": "Multifamily 2-4",
+      "direct": {
+        "matchingProperties": 22624,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 204
+      },
+      "compiler": {
+        "matchingProperties": 22624,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 369
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 369,
+      "pass": true
+    },
+    {
+      "id": "multifamily_5_plus",
+      "label": "Multifamily 5+",
+      "direct": {
+        "matchingProperties": 10672,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 161
+      },
+      "compiler": {
+        "matchingProperties": 10672,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 334
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 335,
+      "pass": true
+    },
+    {
+      "id": "commercial",
+      "label": "Commercial",
+      "direct": {
+        "matchingProperties": 805,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 174
+      },
+      "compiler": {
+        "matchingProperties": 805,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 314
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 315,
+      "pass": true
+    },
+    {
+      "id": "storage_units",
+      "label": "Storage Units",
+      "direct": {
+        "matchingProperties": 376,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 138
+      },
+      "compiler": {
+        "matchingProperties": 376,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 337
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 338,
+      "pass": true
+    },
+    {
+      "id": "equity_50_plus",
+      "label": "Equity >= 50%",
+      "direct": {
+        "matchingProperties": 121444,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 423
+      },
+      "compiler": {
+        "matchingProperties": 121444,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 630
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 630,
+      "pass": true
+    },
+    {
+      "id": "tax_delinquent",
+      "label": "Tax delinquent",
+      "direct": {
+        "matchingProperties": 13061,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 245
+      },
+      "compiler": {
+        "matchingProperties": 13061,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 373
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 375,
+      "pass": true
+    },
+    {
+      "id": "active_lien",
+      "label": "Active lien",
+      "direct": {
+        "matchingProperties": 3450,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 226
+      },
+      "compiler": {
+        "matchingProperties": 3450,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 352
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 352,
+      "pass": true
+    },
+    {
+      "id": "out_of_state_owner",
+      "label": "Out-of-state owner",
+      "direct": {
+        "matchingProperties": 8891,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 326
+      },
+      "compiler": {
+        "matchingProperties": 8891,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "durationMs": 528
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 528,
+      "pass": true
+    }
+  ],
+  "issues": [],
+  "suite": "simplePropertyAccounting",
+  "entities": [
+    "property"
+  ],
+  "exactPropertyCount": 124046,
+  "mappablePropertyCount": 124046
+}

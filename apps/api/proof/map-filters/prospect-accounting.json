@@ -1,0 +1,223 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "id": "prospect_sms_eligible",
+      "label": "Prospect SMS eligible",
+      "direct": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 2328
+      },
+      "compiler": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 2509
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2513,
+      "pass": true
+    },
+    {
+      "id": "prospect_email_eligible",
+      "label": "Prospect email eligible",
+      "direct": {
+        "matchingProperties": 103375,
+        "matchingProspects": 139060,
+        "matchingMasterOwners": 0,
+        "durationMs": 2755
+      },
+      "compiler": {
+        "matchingProperties": 103375,
+        "matchingProspects": 139060,
+        "matchingMasterOwners": 0,
+        "durationMs": 1955
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2756,
+      "pass": true
+    },
+    {
+      "id": "prospect_has_phone",
+      "label": "Prospect has phone",
+      "direct": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 2745
+      },
+      "compiler": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 2071
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2746,
+      "pass": true
+    },
+    {
+      "id": "prospect_has_email",
+      "label": "Prospect has email",
+      "direct": {
+        "matchingProperties": 103375,
+        "matchingProspects": 139060,
+        "matchingMasterOwners": 0,
+        "durationMs": 2663
+      },
+      "compiler": {
+        "matchingProperties": 103375,
+        "matchingProspects": 139060,
+        "matchingMasterOwners": 0,
+        "durationMs": 2185
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2663,
+      "pass": true
+    },
+    {
+      "id": "prospect_primary",
+      "label": "Prospect primary",
+      "direct": {
+        "matchingProperties": 105919,
+        "matchingProspects": 141567,
+        "matchingMasterOwners": 0,
+        "durationMs": 20168
+      },
+      "compiler": {
+        "matchingProperties": 105919,
+        "matchingProspects": 141567,
+        "matchingMasterOwners": 0,
+        "durationMs": 8829
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 20169,
+      "pass": true
+    },
+    {
+      "id": "prospect_contact_score",
+      "label": "Prospect contact score >= 50",
+      "direct": {
+        "matchingProperties": 106400,
+        "matchingProspects": 142442,
+        "matchingMasterOwners": 0,
+        "durationMs": 2998
+      },
+      "compiler": {
+        "matchingProperties": 106400,
+        "matchingProspects": 142442,
+        "matchingMasterOwners": 0,
+        "durationMs": 2233
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2998,
+      "pass": true
+    },
+    {
+      "id": "rel_any_linked",
+      "label": "ANY_LINKED",
+      "direct": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 2061
+      },
+      "compiler": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 0,
+        "durationMs": 1478
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 2062,
+      "pass": true
+    },
+    {
+      "id": "rel_primary_only",
+      "label": "PRIMARY_ONLY",
+      "direct": {
+        "matchingProperties": 74049,
+        "matchingProspects": 93948,
+        "matchingMasterOwners": 0,
+        "durationMs": 17263
+      },
+      "compiler": {
+        "matchingProperties": 74049,
+        "matchingProspects": 93948,
+        "matchingMasterOwners": 0,
+        "durationMs": 11955
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 17263,
+      "pass": true
+    },
+    {
+      "id": "rel_none_linked",
+      "label": "NONE_LINKED",
+      "direct": {
+        "matchingProperties": 30551,
+        "matchingProspects": 25463,
+        "matchingMasterOwners": 0,
+        "durationMs": 1971
+      },
+      "compiler": {
+        "matchingProperties": 30551,
+        "matchingProspects": 25463,
+        "matchingMasterOwners": 0,
+        "durationMs": 1669
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1971,
+      "pass": true
+    },
+    {
+      "id": "rel_all_linked",
+      "label": "ALL_LINKED",
+      "direct": {
+        "matchingProperties": 63151,
+        "matchingProspects": 70442,
+        "matchingMasterOwners": 0,
+        "durationMs": 1919
+      },
+      "compiler": {
+        "matchingProperties": 63151,
+        "matchingProspects": 70442,
+        "matchingMasterOwners": 0,
+        "durationMs": 1675
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1919,
+      "pass": true
+    }
+  ],
+  "issues": [],
+  "suite": "prospectAccounting",
+  "entities": [
+    "property",
+    "prospect"
+  ],
+  "exactPropertyCount": 124046,
+  "mappablePropertyCount": 124046
+}

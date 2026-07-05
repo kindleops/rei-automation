@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-07-05T05:41:04.128Z",
+  "ok": true,
+  "suites": {
+    "routeSmoke": {
+      "ok": true,
+      "caseCount": 8
+    }
+  }
+}

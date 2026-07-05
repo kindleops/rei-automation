@@ -1,0 +1,181 @@
+{
+  "ok": true,
+  "cases": [
+    {
+      "id": "owner_tier_1",
+      "label": "Owner TIER_1",
+      "direct": {
+        "matchingProperties": 9977,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 8081,
+        "durationMs": 12414
+      },
+      "compiler": {
+        "matchingProperties": 9977,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 8081,
+        "durationMs": 10176
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 12418,
+      "pass": true
+    },
+    {
+      "id": "owner_property_count_5",
+      "label": "Owner property count >= 5",
+      "direct": {
+        "matchingProperties": 2591,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 333,
+        "durationMs": 716
+      },
+      "compiler": {
+        "matchingProperties": 2591,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 333,
+        "durationMs": 699
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 717,
+      "pass": true
+    },
+    {
+      "id": "owner_portfolio_units_20",
+      "label": "Owner portfolio units >= 20",
+      "direct": {
+        "matchingProperties": 805,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 617,
+        "durationMs": 437
+      },
+      "compiler": {
+        "matchingProperties": 805,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 617,
+        "durationMs": 514
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 514,
+      "pass": true
+    },
+    {
+      "id": "owner_portfolio_equity",
+      "label": "Owner portfolio equity >= 500000",
+      "direct": {
+        "matchingProperties": 10051,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 5868,
+        "durationMs": 946
+      },
+      "compiler": {
+        "matchingProperties": 10051,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 5868,
+        "durationMs": 838
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 946,
+      "pass": true
+    },
+    {
+      "id": "owner_has_linked_phone",
+      "label": "Owner has linked phone",
+      "direct": {
+        "matchingProperties": 36040,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 30426,
+        "durationMs": 14589
+      },
+      "compiler": {
+        "matchingProperties": 36040,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 30426,
+        "durationMs": 8610
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 14590,
+      "pass": true
+    },
+    {
+      "id": "owner_has_linked_email",
+      "label": "Owner has linked email",
+      "direct": {
+        "matchingProperties": 37595,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 31638,
+        "durationMs": 23984
+      },
+      "compiler": {
+        "matchingProperties": 37595,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 31638,
+        "durationMs": 12470
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 23985,
+      "pass": true
+    },
+    {
+      "id": "owner_tax_delinquent_count",
+      "label": "Owner tax delinquent count >= 1",
+      "direct": {
+        "matchingProperties": 4537,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 3470,
+        "durationMs": 1424
+      },
+      "compiler": {
+        "matchingProperties": 4537,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 3470,
+        "durationMs": 1211
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 1424,
+      "pass": true
+    },
+    {
+      "id": "owner_active_lien_count",
+      "label": "Owner active lien count >= 1",
+      "direct": {
+        "matchingProperties": 1542,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 1230,
+        "durationMs": 848
+      },
+      "compiler": {
+        "matchingProperties": 1542,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 1230,
+        "durationMs": 718
+      },
+      "propertyDiff": 0,
+      "prospectDiff": 0,
+      "ownerDiff": 0,
+      "durationMs": 848,
+      "pass": true
+    }
+  ],
+  "issues": [],
+  "suite": "ownerAccounting",
+  "entities": [
+    "property",
+    "owner"
+  ],
+  "exactPropertyCount": 124046,
+  "mappablePropertyCount": 124046
+}
