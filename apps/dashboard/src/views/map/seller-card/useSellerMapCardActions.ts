@@ -6,7 +6,7 @@ import {
   sendInboxMessageNow,
 } from '../../../lib/data/inboxData'
 import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
-import { resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
+import { resolveCommandMapSellerIdentity, resolveCommandMapSellerPhone } from '../../../lib/data/commandMapData'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
@@ -67,6 +67,20 @@ const parseStateFromMarket = (market: string): string | undefined => {
   return match?.[1]?.toUpperCase()
 }
 
+const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? value
+
+/**
+ * Resolves the SMS agent's first name from the loose agent_persona/agent_family
+ * signal on the Master Owner (the same fields apps/api's outbound feeder already
+ * resolves agent identity from). There is no hardcoded fallback name here — an
+ * unresolved agent must block the send (sender_identity_missing), never invent or
+ * default to a static human name.
+ */
+export const resolveMapAgentFirstName = (record: Record<string, unknown>): string => {
+  const agentSignal = safeHumanName(text(firstDefined(record, ['agent_persona', 'agent_family'])))
+  return agentSignal ? firstToken(agentSignal) : ''
+}
+
 export const buildMapTemplateManualValues = (record: Record<string, unknown>): Record<string, string> => {
   // Master Owner / entity name — ownership context only, never the SMS greeting name.
   const ownerName = text(firstDefined(record, [
@@ -77,18 +91,26 @@ export const buildMapTemplateManualValues = (record: Record<string, unknown>): R
     'seller_display_name',
     'seller_name',
   ]))
-  const prospectName = safeHumanName(text(firstDefined(record, [
-    'prospect_full_name',
-    'prospect_name',
-    'prospect_first_name',
-  ])))
-  const first = prospectName ? (prospectName.split(/\s+/).filter(Boolean)[0] ?? prospectName) : ''
+  // sms_eligible === false (explicitly known ineligible) means the linked prospect
+  // must not be personalized by name here, even if a name string is present.
+  // Undefined/missing (older records that don't carry this field yet) is treated
+  // as "unknown," not "ineligible," so it doesn't regress existing personalization.
+  const isKnownIneligible = record.sms_eligible === false
+  const prospectName = isKnownIneligible
+    ? ''
+    : safeHumanName(text(firstDefined(record, [
+        'prospect_full_name',
+        'prospect_name',
+        'prospect_first_name',
+      ])))
+  const first = prospectName ? firstToken(prospectName) : ''
+  const agentFirstName = resolveMapAgentFirstName(record)
   return {
     seller_name: prospectName,
     seller_first_name: first,
     owner_name: ownerName,
-    agent_name: 'Chris',
-    agent_first_name: 'Chris',
+    agent_name: agentFirstName,
+    agent_first_name: agentFirstName,
   }
 }
 
@@ -254,21 +276,52 @@ export const useSellerMapCardActions = ({
       }
       sendThread = resolvedSendThread
 
+      let manualTemplateValues = buildMapTemplateManualValues(record)
+      const masterOwnerId = viewModel.masterOwner.id
+        || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
+        || null
+
+      // The hydrated map-card record already carries prospect name/eligibility and
+      // agent_persona/agent_family in the common case (v_command_map_seller_pin_feed).
+      // Only fall back to a live lookup when the record itself is missing them —
+      // e.g. a stale cache or a lightweight pin payload — never treat an absent
+      // field on `record` alone as proof that no recipient/agent can be resolved.
+      if (eligibility.isUncontacted && (!manualTemplateValues.seller_first_name || !manualTemplateValues.agent_first_name)) {
+        const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
+          || text(firstDefined(record, ['prospect_id', 'prospectId']))
+          || null
+        const liveIdentity = await resolveCommandMapSellerIdentity({
+          prospectId: resolvedProspectId,
+          masterOwnerId,
+        })
+        manualTemplateValues = buildMapTemplateManualValues({
+          ...record,
+          prospect_full_name: text(firstDefined(record, ['prospect_full_name'])) || liveIdentity.prospectFullName || '',
+          prospect_first_name: text(firstDefined(record, ['prospect_first_name'])) || liveIdentity.prospectFirstName || '',
+          sms_eligible: firstDefined(record, ['sms_eligible']) ?? liveIdentity.smsEligible,
+          agent_persona: text(firstDefined(record, ['agent_persona'])) || liveIdentity.agentPersona || '',
+          agent_family: text(firstDefined(record, ['agent_family'])) || liveIdentity.agentFamily || '',
+        })
+      }
+
+      if (eligibility.isUncontacted && !manualTemplateValues.agent_first_name) {
+        setFollowUpError('No SMS agent available')
+        setFollowUpState('failed')
+        window.setTimeout(() => {
+          setFollowUpState('idle')
+          setFollowUpError(null)
+        }, 4000)
+        return
+      }
+
       let followUpTemplate: SmsTemplate | null = null
-      const manualTemplateValues = buildMapTemplateManualValues(record)
       const templateContext = {
         ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
         ...manualTemplateValues,
       }
 
       if (eligibility.isUncontacted) {
-        followUpTemplate = await pickOwnershipCheckTemplateForMap(
-          record,
-          templateContext,
-          viewModel.masterOwner.id
-            || text(firstDefined(record, ['master_owner_id', 'masterOwnerId']))
-            || null,
-        )
+        followUpTemplate = await pickOwnershipCheckTemplateForMap(record, templateContext, masterOwnerId)
       } else {
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
         followUpTemplate = templates.find((template) => template.isFollowUp)
@@ -278,7 +331,11 @@ export const useSellerMapCardActions = ({
       }
 
       if (!followUpTemplate) {
-        setFollowUpError('Ownership check template unavailable')
+        setFollowUpError(
+          eligibility.isUncontacted
+            ? 'No compatible ownership template'
+            : 'No compatible follow-up template',
+        )
         setFollowUpState('failed')
         window.setTimeout(() => {
           setFollowUpState('idle')

@@ -7,6 +7,7 @@ import { buildSellerMapCardViewModel } from '../../src/views/map/seller-card/sel
 import {
   buildMapTemplateManualValues,
   buildThreadFromViewModel,
+  resolveMapAgentFirstName,
   resolveMapThreadPhone,
 } from '../../src/views/map/seller-card/useSellerMapCardActions'
 
@@ -141,6 +142,95 @@ describe('seller map card thread builder', () => {
       const values = buildMapTemplateManualValues({ owner_display_name: 'Jose A Valdizon' })
       expect(values.seller_first_name).toBe('')
       expect(values.seller_name).toBe('')
+    })
+  })
+
+  describe('map SMS sender identity never hardcodes "Chris" (launch blocker)', () => {
+    it('never returns a hardcoded sender name when no agent signal is present', () => {
+      const values = buildMapTemplateManualValues({
+        owner_display_name: 'West 7th Apartments LLC',
+        prospect_full_name: 'Amanda L Tallen',
+      })
+      expect(values.agent_first_name).toBe('')
+      expect(values.agent_name).toBe('')
+      expect(values.agent_first_name).not.toBe('Chris')
+    })
+
+    it('resolves the agent first name from agent_persona', () => {
+      expect(resolveMapAgentFirstName({ agent_persona: 'Andre Thompson' })).toBe('Andre')
+      expect(resolveMapAgentFirstName({ agent_persona: 'Carlos' })).toBe('Carlos')
+    })
+
+    it('falls back to agent_family when agent_persona is absent', () => {
+      expect(resolveMapAgentFirstName({ agent_family: 'Amina' })).toBe('Amina')
+    })
+
+    it('does not reject a legitimately assigned agent named Chris', () => {
+      expect(resolveMapAgentFirstName({ agent_persona: 'Chris Porter' })).toBe('Chris')
+    })
+
+    it('never resolves an entity-shaped string as the agent name', () => {
+      expect(resolveMapAgentFirstName({ agent_persona: 'West 7th Apartments LLC' })).toBe('')
+    })
+
+    it('buildMapTemplateManualValues surfaces the resolved agent as both agent_name and agent_first_name', () => {
+      const values = buildMapTemplateManualValues({ agent_persona: 'Andre Thompson' })
+      expect(values.agent_name).toBe('Andre')
+      expect(values.agent_first_name).toBe('Andre')
+    })
+  })
+
+  describe('production regression fixture: property 274564949 / Amanda L Tallen (map ownership check availability)', () => {
+    // Exact live record from the launch-blocker regression report: a property with
+    // properties.best_phone = null but a valid, SMS-eligible, property-linked primary
+    // prospect (Amanda) — the map card must resolve Amanda, not report the action
+    // unavailable, and must never substitute the Master Owner name for her.
+    const property274564949 = {
+      property_id: '274564949',
+      master_owner_id: 'mo_804d2f26377bee1f43019235',
+      prospect_id: 'pros1_5d2dfe5ae95f982c0941f648',
+      thread_key: 'property:274564949',
+      property_address_full: '983 Edmund Ave, Saint Paul, MN 55104',
+      property_address_state: 'MN',
+      market: 'Minneapolis, MN',
+      owner_display_name: 'mo_804d2f26377bee1f43019235 Trust',
+      prospect_full_name: 'Amanda L Tallen',
+      prospect_first_name: 'Amanda',
+      prospect_best_phone: '+16514428447',
+      sms_eligible: true,
+      agent_persona: 'Andre Thompson',
+      outbound_count: 0,
+      sent_count: 0,
+    }
+
+    it('resolves Amanda (not the Master Owner) as the personalized recipient', () => {
+      const values = buildMapTemplateManualValues(property274564949)
+      expect(values.seller_first_name).toBe('Amanda')
+      expect(values.seller_name).toBe('Amanda L Tallen')
+      expect(values.seller_first_name).not.toContain('Trust')
+    })
+
+    it('resolves the assigned agent instead of hardcoding Chris', () => {
+      const values = buildMapTemplateManualValues(property274564949)
+      expect(values.agent_first_name).toBe('Andre')
+      expect(values.agent_first_name).not.toBe('Chris')
+    })
+
+    it('resolves Amanda\'s prospect phone via resolveMapThreadPhone even though properties.best_phone is null', () => {
+      expect(resolveMapThreadPhone(property274564949)).toBe('+16514428447')
+    })
+
+    it('does not personalize by name when sms_eligible is explicitly false, even if a name is present', () => {
+      const values = buildMapTemplateManualValues({ ...property274564949, sms_eligible: false })
+      expect(values.seller_first_name).toBe('')
+      expect(values.seller_name).toBe('')
+    })
+
+    it('maps the full record into an inbox thread carrying the resolved prospect and phone', () => {
+      const viewModel = buildSellerMapCardViewModel(property274564949)
+      const thread = buildThreadFromViewModel(viewModel, property274564949)
+      expect(thread.prospectId).toBe('pros1_5d2dfe5ae95f982c0941f648')
+      expect(thread.canonicalE164).toBe('+16514428447')
     })
   })
 })
