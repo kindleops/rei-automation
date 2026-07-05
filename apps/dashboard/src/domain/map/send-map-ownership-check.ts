@@ -57,6 +57,8 @@ export const buildMapOwnershipCheckQueuePayload = ({
     owner_name: identity.ownerDisplayName,
     rendered_message: selection.renderedMessage,
     message_events_source_app: 'LeadCommand Map',
+    // message_events has no canonical text phone_id column; preserve the ph_ id here.
+    canonical_phone_id: identity.phoneId,
   }
 
   const payload: Record<string, unknown> = {
@@ -80,7 +82,11 @@ export const buildMapOwnershipCheckQueuePayload = ({
     property_id: identity.propertyId,
     master_owner_id: identity.masterOwnerId,
     prospect_id: identity.prospectId,
-    phone_number_id: identity.phoneId,
+    // Canonical phones.phone_id is ph_-prefixed TEXT. Send it as phone_id.
+    // Only populate the UUID column phone_number_id if the value is genuinely a UUID
+    // (from a separate UUID-based registry) — never coerce ph_ text into it.
+    phone_id: identity.phoneId,
+    ...(isValidUUID(text(identity.phoneId)) ? { phone_number_id: identity.phoneId } : {}),
     seller_first_name: identity.prospectFirstName,
     seller_display_name: identity.sellerDisplayName,
     agent_name: identity.agentName,

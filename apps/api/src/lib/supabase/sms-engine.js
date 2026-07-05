@@ -10,6 +10,7 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isUuid } from "@/lib/utils/is-uuid.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
   classifyThreadFromChronology,
@@ -494,8 +495,15 @@ export function normalizeSendQueueRow(row) {
     master_owner_id: safe_row.master_owner_id || null,
     prospect_id: safe_row.prospect_id || null,
     property_id: safe_row.property_id || null,
-    phone_id: safe_row.phone_id || safe_row.phone_number_id || safe_row.phone_item_id || null,
-    phone_number_id: safe_row.phone_number_id || safe_row.phone_id || safe_row.phone_item_id || null,
+    // Canonical phones.phone_id is ph_-prefixed TEXT; phone_number_id is a UUID column.
+    // Preserve the text id as phone_id (rescuing a mis-placed non-UUID phone_number_id),
+    // and only keep a genuine UUID in phone_number_id — never coerce ph_ text into it.
+    phone_id:
+      safe_row.phone_id ||
+      (isUuid(safe_row.phone_number_id) ? null : safe_row.phone_number_id) ||
+      safe_row.phone_item_id ||
+      null,
+    phone_number_id: isUuid(safe_row.phone_number_id) ? safe_row.phone_number_id : null,
     market_id: safe_row.market_id || null,
     sms_agent_id:
       safe_row.sms_agent_id ||
@@ -1510,6 +1518,12 @@ export function buildSuccessMessageEvent(row, send_result, options = {}) {
         clean(row_metadata.source) ||
         clean(row_metadata.send_source) ||
         "supabase_send_queue",
+      // message_events has no canonical text phone_id column; preserve the ph_ id here.
+      canonical_phone_id:
+        clean(normalized.phone_id) ||
+        (isUuid(normalized.phone_number_id) ? null : clean(normalized.phone_number_id)) ||
+        clean(row_metadata.canonical_phone_id) ||
+        null,
       queue_key,
       send_result,
       client_send_id: normalized.metadata?.client_send_id || null,
@@ -1612,6 +1626,12 @@ function buildFailureMessageEvent(row, error, options = {}) {
     classification_confidence: normalized.classification_confidence || null,
     metadata: {
       source: "supabase_send_queue",
+      // message_events has no canonical text phone_id column; preserve the ph_ id here.
+      canonical_phone_id:
+        clean(normalized.phone_id) ||
+        (isUuid(normalized.phone_number_id) ? null : clean(normalized.phone_number_id)) ||
+        clean(row_metadata.canonical_phone_id) ||
+        null,
       queue_key,
       ...textGridFailureMetadata(normalized_failure),
       error: {
@@ -3943,6 +3963,11 @@ export function buildSendQueueInsertPayload(row = {}, now = null) {
   const ts = now || nowIso();
   const normalized = normalizeSendQueueRow(row);
   const metadata = ensureObject(normalized.metadata);
+  // Preserve the canonical ph_ text phone id in metadata (message_events has no
+  // canonical text phone_id column; provenance must survive on the queue row too).
+  if (normalized.phone_id && metadata.canonical_phone_id == null) {
+    metadata.canonical_phone_id = normalized.phone_id;
+  }
 
   const candidate = {
     queue_key: clean(normalized.queue_key) || crypto.randomUUID(),
@@ -3958,7 +3983,7 @@ export function buildSendQueueInsertPayload(row = {}, now = null) {
     next_retry_at: normalized.next_retry_at || null,
     message_body: normalized.message_body,
     message_text: normalized.message_text || normalized.message_body,
-    phone_number_id: normalized.phone_number_id || null,
+    phone_number_id: isUuid(normalized.phone_number_id) ? normalized.phone_number_id : null,
     phone_id: normalized.phone_id || null,
     to_phone_number: resolveQueueDestinationPhone(normalized).phone || null,
     from_phone_number: normalizePhone(normalized.from_phone_number) || null,

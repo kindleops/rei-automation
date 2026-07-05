@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/utils/phones.js";
+import { isUuid } from "@/lib/utils/is-uuid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
@@ -451,6 +452,7 @@ function buildSendNowMetadata(input = {}, normalized = {}) {
     send_source: normalized.send_source || normalized.source,
     action: normalized.action,
     created_from: normalized.created_from,
+    canonical_phone_id: normalized.phone_id || input_metadata.canonical_phone_id || null,
     manual_operator_send: normalized.manual_operator_send === true,
     seller_first_name: normalized.seller_first_name || input_metadata.seller_first_name || null,
     seller_display_name: normalized.seller_display_name || input_metadata.seller_display_name || null,
@@ -533,6 +535,15 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
     return { ok: false, status: 422, error: "entity_name_in_greeting" };
   }
 
+  const raw_phone_number_id = pickProvenanceField(input, input_metadata, "phone_number_id");
+  const raw_phone_id = pickProvenanceField(input, input_metadata, "phone_id");
+  // Canonical phones.phone_id is ph_-prefixed TEXT; phone_number_id is a UUID column.
+  // Never coerce ph_ text into phone_number_id — preserve it as phone_id, and rescue a
+  // mis-placed non-UUID value that arrived in phone_number_id.
+  const resolved_phone_id =
+    raw_phone_id || (isUuid(raw_phone_number_id) ? null : raw_phone_number_id);
+  const resolved_phone_number_id = isUuid(raw_phone_number_id) ? raw_phone_number_id : null;
+
   const normalized = {
     queue_key,
     thread_key,
@@ -546,7 +557,8 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
     master_owner_id: pickProvenanceField(input, input_metadata, "master_owner_id"),
     property_id: pickProvenanceField(input, input_metadata, "property_id"),
     prospect_id: pickProvenanceField(input, input_metadata, "prospect_id"),
-    phone_number_id: pickProvenanceField(input, input_metadata, "phone_number_id"),
+    phone_id: resolved_phone_id,
+    phone_number_id: resolved_phone_number_id,
     market_id: pickProvenanceField(input, input_metadata, "market_id"),
     textgrid_number_id: pickProvenanceField(input, input_metadata, "textgrid_number_id"),
     source,
@@ -574,6 +586,7 @@ export function validateInboxSendNowPayload(input = {}, resolvedFrom = null) {
       send_source,
       action,
       created_from,
+      phone_id: resolved_phone_id,
       seller_first_name: pickProvenanceField(input, input_metadata, "seller_first_name"),
       seller_display_name: pickProvenanceField(input, input_metadata, "seller_display_name"),
       agent_name: pickProvenanceField(input, input_metadata, "agent_name"),
@@ -1243,6 +1256,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         master_owner_id: normalized.master_owner_id,
         property_id: normalized.property_id,
         prospect_id: normalized.prospect_id,
+        phone_id: normalized.phone_id,
         phone_number_id: normalized.phone_number_id,
         textgrid_number_id: normalized.textgrid_number_id,
         market_id: normalized.market_id,
@@ -1529,6 +1543,13 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     clean(input.created_from) ||
     clean(input_metadata.created_from) ||
     (resolved_source === "map_command" ? "leadcommand_map" : "leadcommand_inbox");
+  // Canonical ph_ text phone id preserved through claim + message-event metadata.
+  // Never derived from a genuine UUID phone_number_id (that stays in its own column).
+  const resolved_canonical_phone_id =
+    clean(input.phone_id) ||
+    clean(input_metadata.canonical_phone_id) ||
+    (isUuid(clean(input.phone_number_id)) ? null : clean(input.phone_number_id)) ||
+    null;
 
   const manual_input = {
     ...input,
@@ -1550,6 +1571,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       send_source: clean(input.send_source) || clean(input_metadata.send_source) || resolved_source,
       action: resolved_action,
       created_from: resolved_created_from,
+      canonical_phone_id: resolved_canonical_phone_id,
       manual_operator_send: true,
       ...(bypassed_runtime_brake
         ? {
@@ -1606,6 +1628,8 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
         send_source: clean(manual_input.send_source) || resolved_source,
         action: resolved_action,
         created_from: resolved_created_from,
+        canonical_phone_id:
+          audit_result.result?.raw?.metadata?.canonical_phone_id || resolved_canonical_phone_id,
         ...(resolved_source === "map_command"
           ? {
               origin_surface: "command_map",

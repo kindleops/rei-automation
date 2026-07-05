@@ -470,6 +470,36 @@ describe('map ownership check canonical resolver', () => {
     expect(payload.selected_template_id).toBe('tpl-david')
     expect(payload.rendered_message).toContain('Hi David')
     expect(payload.queue_key).toMatch(/^map:ownership_check:/)
+    // Canonical ph_ text id -> phone_id; UUID column phone_number_id never populated with ph_.
+    expect(payload.phone_id).toBe('ph-david')
+    expect(payload.phone_number_id).toBeUndefined()
+    expect((payload.metadata as Record<string, unknown>).canonical_phone_id).toBe('ph-david')
+  })
+
+  it('routes a genuine UUID phone id into the UUID column phone_number_id', async () => {
+    const identityResult = await resolveMapOwnershipCheckIdentity('prop-david', { supabase: makeSupabase(davidFixture) })
+    expect(identityResult.ok).toBe(true)
+    if (!identityResult.ok) return
+
+    const uuid = '11111111-2222-4333-8444-555555555555'
+    const payload = buildMapOwnershipCheckQueuePayload({
+      identity: { ...identityResult.identity, phoneId: uuid },
+      selection: {
+        template: makeTemplate('tpl-david', 'Hi David'),
+        renderedMessage: 'Hi David, quick question about your property.',
+        templateId: 'tpl-david',
+        templateKey: 'tpl-david',
+        language: 'English',
+        weight: 1,
+        selectionReason: 'uniform_random',
+        excludedRecentTemplateId: null,
+      },
+      thread: { threadKey: '+16125550101', marketId: 'minneapolis, mn' } as never,
+      fromPhone: '+16125559999',
+      textgridNumberId: null,
+    })
+    expect(payload.phone_id).toBe(uuid)
+    expect(payload.phone_number_id).toBe(uuid)
   })
 
   it('uses map_command source attribution, not manual_inbox', async () => {
