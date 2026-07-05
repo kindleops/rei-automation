@@ -306,6 +306,13 @@ interface InboxSendOptions extends InboxTemplateSendOptions {
   createdFrom?: string
   sendSource?: string
   action?: string
+  sellerFirstName?: string
+  sellerDisplayName?: string
+  agentFirstName?: string
+  agentName?: string
+  propertyAddress?: string
+  language?: string
+  renderedMessage?: string
 }
 
 export interface QueueProcessorHealth {
@@ -5019,6 +5026,19 @@ export const sendInboxMessageNow = async (
       our_number: fromPhone,
       seller_phone: sellerPhone,
       note: 'queued_ready_for_processor',
+      manual_operator_send: true,
+      ...(options?.sellerFirstName ? { seller_first_name: options.sellerFirstName } : {}),
+      ...(options?.sellerDisplayName ? { seller_display_name: options.sellerDisplayName } : {}),
+      ...(options?.agentFirstName ? { agent_first_name: options.agentFirstName } : {}),
+      ...(options?.agentName ? { agent_name: options.agentName } : {}),
+      ...(options?.propertyAddress ? { property_address: options.propertyAddress } : {}),
+      ...(options?.renderedMessage ? { rendered_message: options.renderedMessage } : {}),
+      ...(options?.sendSource === 'map_command'
+        ? {
+          origin_surface: 'command_map',
+          message_events_source_app: 'LeadCommand Map',
+        }
+        : {}),
       ...(options?.clientSendId ? { client_send_id: options.clientSendId } : {}),
       ...buildQueueRoutingMetadata(routingThread),
       template_variables: personalization.renderVariables,
@@ -5040,8 +5060,21 @@ export const sendInboxMessageNow = async (
     force: options?.operatorOverride === true,
   }
 
+  if (options?.sellerFirstName) insertPayload.seller_first_name = options.sellerFirstName
+  if (options?.sellerDisplayName) insertPayload.seller_display_name = options.sellerDisplayName
+  if (options?.agentFirstName) insertPayload.agent_first_name = options.agentFirstName
+  if (options?.agentName) insertPayload.agent_name = options.agentName
+  if (options?.propertyAddress) insertPayload.property_address = options.propertyAddress
+  if (options?.renderedMessage) insertPayload.rendered_message = options.renderedMessage
+  if (options?.sendSource) insertPayload.source = options.sendSource
+  if (options?.sendSource) insertPayload.send_source = options.sendSource
+  if (options?.action) insertPayload.action = options.action
+  if (options?.createdFrom) insertPayload.created_from = options.createdFrom
+  if (options?.sendSource === 'map_command') insertPayload.manual_operator_send = true
+
   // ALWAYS include from_phone_number (now natively included above but preserving logic)
-  if (templateAttachment.language) insertPayload.language = templateAttachment.language
+  if (options?.language) insertPayload.language = options.language
+  else if (templateAttachment.language) insertPayload.language = templateAttachment.language
   if (isValidUUID(asString(templateAttachment.templateId, ''))) {
     insertPayload.template_id = templateAttachment.templateId
     insertPayload.selected_template_id = templateAttachment.templateId

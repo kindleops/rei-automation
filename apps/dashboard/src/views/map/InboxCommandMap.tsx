@@ -21,7 +21,15 @@ import {
 } from '../buyer-match/buyerCommandData'
 import { loadBuyerDemandLayerPoints, type BuyerDemandMetric, type BuyerDemandLayerPoint, formatShortPrice } from '../../lib/data/buyerActivityMapData'
 import { loadCensusForProperty, calculateInvestorOpportunityScore, type CensusData } from '../../lib/data/censusData'
-import { loadSoldCompsInBounds, type RecentSoldComp, loadCommandMapSellerPinDetail, loadCommandMapSellerPins, type CommandMapSellerPin } from '../../lib/data/commandMapData'
+import {
+  loadSoldCompsInBounds,
+  type RecentSoldComp,
+  loadCommandMapSellerPinDetail,
+  loadCommandMapSellerPins,
+  normalizeSellerDialablePhone,
+  pickSellerContactPhone,
+  type CommandMapSellerPin,
+} from '../../lib/data/commandMapData'
 import {
   centerMapOnActivity,
   loadLiveActivityFeedSnapshot,
@@ -947,6 +955,7 @@ const needsSellerPinHydration = (pin: Partial<CommandMapSellerPin>): boolean => 
 
 const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapSellerPin => {
   const normalizedPropertyType = text(pin.property_type) || text(pin.asset_class) || '—'
+  const resolvedPhone = normalizeSellerDialablePhone(pickSellerContactPhone(pin as Record<string, unknown>))
   return {
     property_id: text(pin.property_id),
     master_owner_id: text(pin.master_owner_id) || null,
@@ -1024,10 +1033,10 @@ const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapS
     automation_state: text(pin.automation_state) || text(pin.execution_state) || null,
     follow_up_due_at: text(pin.follow_up_due_at) || null,
     next_action_at: text(pin.next_action_at) || text(pin.next_scheduled_for) || null,
-    canonical_e164: text(pin.canonical_e164) || text(pin.seller_phone) || text(pin.prospect_best_phone) || null,
-    seller_phone: text(pin.seller_phone) || text(pin.canonical_e164) || text(pin.prospect_best_phone) || null,
-    prospect_best_phone: text(pin.prospect_best_phone) || text(pin.display_phone) || null,
-    display_phone: text(pin.display_phone) || text(pin.prospect_best_phone) || null,
+    canonical_e164: resolvedPhone,
+    seller_phone: resolvedPhone,
+    prospect_best_phone: resolvedPhone,
+    display_phone: resolvedPhone,
     property_count: nullIfZeroish(pin.property_count ?? null),
     streetview_image: text(pin.streetview_image) || null,
     map_image: text(pin.map_image) || null,

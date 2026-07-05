@@ -742,14 +742,87 @@ export const pickSellerContactPhone = (row: Record<string, unknown> | null | und
     row.prospect_best_phone,
     row.display_phone,
     row.seller_phone,
+    row.best_phone,
     row.best_phone_1,
     row.phone,
+    row.phone_number,
+    row.e164,
   ]
   for (const candidate of candidates) {
     const phone = String(candidate ?? '').trim()
     if (!phone || phone.toLowerCase() === 'no phone') continue
     if (/^ph_[a-z0-9_]+$/i.test(phone)) continue
     return phone
+  }
+  return null
+}
+
+/** Normalize a loose US phone string to +1 E.164 for TextGrid sends. */
+export const normalizeSellerDialablePhone = (value: unknown): string | null => {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.toLowerCase() === 'no phone' || /^ph_[a-z0-9_]+$/i.test(raw)) return null
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  if (raw.startsWith('+') && digits.length >= 10) return `+${digits}`
+  return null
+}
+
+const readCommandMapPinFeedContact = async (
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<{ phone: string | null; prospectId: string | null; masterOwnerId: string | null } | null> => {
+  if (!propertyId) return null
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('v_command_map_seller_pin_feed')
+    .select('prospect_id,master_owner_id,prospect_best_phone,display_phone,canonical_e164,seller_phone')
+    .eq('property_id', propertyId)
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query.limit(1).maybeSingle()
+  if (error || !data) {
+    if (error && !isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] pin feed phone lookup failed:', error)
+    }
+    return null
+  }
+  const row = data as Record<string, unknown>
+  const phone = normalizeSellerDialablePhone(pickSellerContactPhone(row))
+  return {
+    phone,
+    prospectId: String(row.prospect_id ?? '').trim() || null,
+    masterOwnerId: String(row.master_owner_id ?? '').trim() || null,
+  }
+}
+
+const readProspectLinkedPhones = async (
+  prospectId: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  const id = String(prospectId ?? '').trim()
+  if (!id) return null
+
+  const supabase = getSupabaseClient()
+  let query = supabase
+    .from('phones')
+    .select('canonical_e164,phone,phone_number,e164,sort_rank')
+    .or(`primary_prospect_id.eq.${id},canonical_prospect_id.eq.${id}`)
+    .order('sort_rank', { ascending: true })
+    .limit(8)
+  if (signal) query = query.abortSignal(signal)
+
+  const { data, error } = await query
+  if (error || !data?.length) {
+    if (error && !isAbortError(error) && import.meta.env.DEV) {
+      console.warn('[CommandMap] prospect linked phones lookup failed:', error)
+    }
+    return null
+  }
+
+  for (const row of data as Record<string, unknown>[]) {
+    const normalized = normalizeSellerDialablePhone(pickSellerContactPhone(row))
+    if (normalized) return normalized
   }
   return null
 }
@@ -828,6 +901,18 @@ export const resolveCommandMapSellerPhone = async (
 ): Promise<{ phone: string | null; prospectId: string | null }> => {
   if (!propertyId) return { phone: null, prospectId: options.prospectId ?? null }
 
+  let resolvedProspectId = String(options.prospectId ?? '').trim() || null
+  let resolvedOwnerId = String(options.masterOwnerId ?? '').trim() || null
+
+  const pinFeed = await readCommandMapPinFeedContact(propertyId, options.signal)
+  if (pinFeed) {
+    resolvedProspectId = resolvedProspectId || pinFeed.prospectId
+    resolvedOwnerId = resolvedOwnerId || pinFeed.masterOwnerId
+    if (pinFeed.phone) {
+      return { phone: pinFeed.phone, prospectId: resolvedProspectId }
+    }
+  }
+
   const supabase = getSupabaseClient()
   let query = supabase
     .from('v_seller_work_items')
@@ -836,12 +921,10 @@ export const resolveCommandMapSellerPhone = async (
   if (options.signal) query = query.abortSignal(options.signal)
 
   const { data, error } = await query.limit(1).maybeSingle()
-  let resolvedProspectId = String(options.prospectId ?? '').trim() || null
-  let resolvedOwnerId = String(options.masterOwnerId ?? '').trim() || null
 
   if (!error && data) {
     const row = data as Record<string, unknown>
-    const phone = pickSellerContactPhone(row)
+    const phone = normalizeSellerDialablePhone(pickSellerContactPhone(row))
     resolvedProspectId = resolvedProspectId || String(row.prospect_id ?? '').trim() || null
     resolvedOwnerId = resolvedOwnerId || String(row.master_owner_id ?? '').trim() || null
     if (phone) {
@@ -853,14 +936,23 @@ export const resolveCommandMapSellerPhone = async (
     resolvedOwnerId = await resolveMasterOwnerIdForProperty(propertyId, options.signal)
   }
 
-  const ownerPhone = await readMasterOwnerBestPhone(resolvedOwnerId, options.signal)
+  const ownerPhone = normalizeSellerDialablePhone(
+    await readMasterOwnerBestPhone(resolvedOwnerId, options.signal),
+  )
   if (ownerPhone) {
     return { phone: ownerPhone, prospectId: resolvedProspectId }
   }
 
-  const prospectPhone = await readProspectBestPhone(resolvedProspectId, options.signal)
+  const prospectPhone = normalizeSellerDialablePhone(
+    await readProspectBestPhone(resolvedProspectId, options.signal),
+  )
   if (prospectPhone) {
     return { phone: prospectPhone, prospectId: resolvedProspectId }
+  }
+
+  const linkedPhone = await readProspectLinkedPhones(resolvedProspectId, options.signal)
+  if (linkedPhone) {
+    return { phone: linkedPhone, prospectId: resolvedProspectId }
   }
 
   return { phone: null, prospectId: resolvedProspectId }

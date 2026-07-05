@@ -7,6 +7,8 @@ import {
 } from '../../../lib/data/inboxData'
 import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCanonicalThreadStateKey'
 import {
+  normalizeSellerDialablePhone,
+  pickSellerContactPhone,
   resolveCommandMapSellerIdentity,
   resolveCommandMapSellerPhone,
   resolveMasterOwnerIdForProperty,
@@ -48,9 +50,10 @@ const MAP_THREAD_PHONE_KEYS = [
 ]
 
 export const resolveMapThreadPhone = (record: Record<string, unknown>): string => {
+  const fromPicker = normalizeSellerDialablePhone(pickSellerContactPhone(record))
+  if (fromPicker) return fromPicker
   const raw = text(firstDefined(record, MAP_THREAD_PHONE_KEYS))
-  if (!raw || raw.toLowerCase() === 'no phone') return ''
-  return raw
+  return normalizeSellerDialablePhone(raw) || ''
 }
 
 const resolveMapThreadKey = (
@@ -256,24 +259,21 @@ export const useSellerMapCardActions = ({
         || null
 
       const ensureCanonicalSendThread = async (): Promise<InboxThread | null> => {
-        let candidate = sendThread
-        let dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
-
-        if (!dialablePhone) {
-          const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
-            prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
-            masterOwnerId: resolveMasterOwnerId(),
-          })
-          if (!resolved.phone) return null
-
-          candidate = buildThreadFromViewModel(viewModel, record, {
-            phone: resolved.phone,
-            prospectId: resolved.prospectId,
-          })
-          dialablePhone = resolveDialablePhoneFromThread(candidate as unknown as Record<string, unknown>)
-        }
-
+        const resolved = await resolveCommandMapSellerPhone(viewModel.propertyId, {
+          prospectId: text(firstDefined(record, ['prospect_id', 'prospectId'])) || null,
+          masterOwnerId: resolveMasterOwnerId(),
+        })
+        const dialablePhone = resolved.phone
+          || resolveDialablePhoneFromThread(sendThread as unknown as Record<string, unknown>)
+          || normalizeSellerDialablePhone(pickSellerContactPhone(record))
         if (!dialablePhone) return null
+
+        const candidate = buildThreadFromViewModel(viewModel, record, {
+          phone: dialablePhone,
+          prospectId: resolved.prospectId
+            || text(firstDefined(record, ['prospect_id', 'prospectId']))
+            || null,
+        })
 
         return {
           ...candidate,
@@ -341,6 +341,7 @@ export const useSellerMapCardActions = ({
 
       let followUpTemplate: SmsTemplate | null = null
       let messageText = ''
+      let selectedOwnershipLanguage: string | undefined
 
       if (eligibility.isUncontacted) {
         if (!manualTemplateValues.agent_first_name) {
@@ -402,6 +403,7 @@ export const useSellerMapCardActions = ({
         }
 
         followUpTemplate = templateSelection.template
+        selectedOwnershipLanguage = templateSelection.language
         messageText = renderTemplate(followUpTemplate, templateContext).renderedText
       } else {
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
@@ -449,6 +451,13 @@ export const useSellerMapCardActions = ({
           createdFrom: 'leadcommand_map',
           sendSource: 'map_command',
           action: 'send_ownership_check',
+          sellerFirstName: manualTemplateValues.seller_first_name,
+          sellerDisplayName: manualTemplateValues.seller_name || manualTemplateValues.seller_first_name,
+          agentFirstName: manualTemplateValues.agent_first_name,
+          agentName: manualTemplateValues.agent_name || manualTemplateValues.agent_first_name,
+          propertyAddress: viewModel.property.address,
+          language: selectedOwnershipLanguage,
+          renderedMessage: messageText,
         }
         : {}
 
@@ -459,7 +468,8 @@ export const useSellerMapCardActions = ({
       })
 
       if (!result.ok) {
-        setFollowUpError(result.errorMessage || result.guardReason || 'Send failed')
+        const detail = result.backendReason || result.guardReason || result.errorMessage || 'Send failed'
+        setFollowUpError(detail.slice(0, 80))
         setFollowUpState(result.suppressionBlocked ? 'blocked' : 'failed')
         window.setTimeout(() => {
           setFollowUpState('idle')
