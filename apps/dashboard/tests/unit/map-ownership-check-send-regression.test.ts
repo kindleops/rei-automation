@@ -79,9 +79,14 @@ const amandaRecord = {
 const makeSupabaseMock = (tables: Record<string, { data: unknown; error: unknown }>) => {
   const from = (table: string) => ({
     select: () => ({
-      eq: () => ({
+      eq: (_column: string, _value: unknown) => ({
         limit: () => ({
           maybeSingle: async () => tables[table] ?? { data: null, error: null },
+        }),
+        order: () => ({
+          limit: () => ({
+            maybeSingle: async () => tables[table] ?? { data: null, error: null },
+          }),
         }),
       }),
     }),
@@ -106,6 +111,43 @@ describe('map ownership check send regression', () => {
 
   it('2. opening the card performs no ownership resolver request', () => {
     expect(vi.mocked(getSupabaseClient)).not.toHaveBeenCalled()
+  })
+
+  it('4b. resolves master_owner_id from properties when the card record omits it', async () => {
+    const recordWithoutOwner = {
+      ...amandaRecord,
+      master_owner_id: undefined,
+      masterOwnerId: undefined,
+      owner_id: undefined,
+    }
+    delete (recordWithoutOwner as Record<string, unknown>).master_owner_id
+
+    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabaseMock({
+      properties: {
+        data: { master_owner_id: 'mo_804d2f26377bee1f43019235' },
+        error: null,
+      },
+      master_owners: {
+        data: {
+          best_phone_1: '+16514428447',
+          primary_phone_id: 'ph_amanda',
+          agent_persona: 'Andre Thompson',
+          agent_family: null,
+          display_name: 'mo_804d2f26377bee1f43019235 Trust',
+          best_language: 'English',
+        },
+        error: null,
+      },
+    }) as never)
+
+    const viewModel = buildSellerMapCardViewModel(recordWithoutOwner)
+    expect(viewModel.masterOwner.id).toBeNull()
+
+    const result = await resolveMapOwnershipCheckForSend('274564949', viewModel, recordWithoutOwner)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.masterOwnerId).toBe('mo_804d2f26377bee1f43019235')
+    expect(result.identity.recipientPhone).toBe('+16514428447')
   })
 
   it('4. existing working phone sends without requiring canonical phone/prospect match', async () => {

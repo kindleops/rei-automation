@@ -143,7 +143,9 @@ export const buildThreadFromViewModel = (
 ): InboxThread => {
   const threadKey = resolveMapThreadKey(vm, record)
   const phone = text(overrides.phone) || resolveMapThreadPhone(record)
-  const ownerId = text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || vm.masterOwner.id || undefined
+  const ownerId = text(firstDefined(record, ['master_owner_id', 'masterOwnerId', 'owner_id', 'ownerId']))
+    || vm.masterOwner.id
+    || undefined
   const prospectId = text(overrides.prospectId) || text(firstDefined(record, ['prospect_id', 'prospectId'])) || undefined
   const market = text(firstDefined(record, ['market', 'filter_market', 'display_market'])) || 'unknown'
   const propertyStateRaw = text(firstDefined(record, ['property_address_state', 'propertyAddressState', 'state']))

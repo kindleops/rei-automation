@@ -802,7 +802,7 @@ const readProspectBestPhone = async (
   return pickSellerContactPhone(data as Record<string, unknown>)
 }
 
-const resolveMasterOwnerIdForProperty = async (
+export const resolveMasterOwnerIdForProperty = async (
   propertyId: string,
   signal?: AbortSignal,
 ): Promise<string | null> => {

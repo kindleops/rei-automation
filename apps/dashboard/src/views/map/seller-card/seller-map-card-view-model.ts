@@ -260,7 +260,7 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     propertyId: text(firstDefined(record, ['property_id', 'propertyId', 'id'])),
     threadKey,
     masterOwner: {
-      id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId'])) || null,
+      id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId', 'owner_id', 'ownerId'])) || null,
       displayName: resolveMasterOwnerName(record),
       mailingAddress: text(firstDefined(record, ['mailing_address_full', 'owner_mailing_address', 'mailing_address'])) || null,
       yearsOwned,
