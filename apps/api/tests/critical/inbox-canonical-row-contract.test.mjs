@@ -213,57 +213,47 @@ test("getLiveInbox trusts bucket-scoped SQL for manual bucket switch", async () 
   );
   assert.equal(priority.threads.length, 1, "bucket-scoped priority query must return priority rows");
   const priorityRow = priority.threads[0];
-  assert.equal(priorityRow.owner_name, "Priority Seller", "bucket tab rows must include canonical owner enrichment");
-  assert.equal(priorityRow.property_address_full, "22 Priority Blvd", "bucket tab rows must include canonical address enrichment");
-  assert.equal(priorityRow.property_flags_text, "Tax Delinquent", "bucket tab rows must include canonical property flags");
+  assert.equal(priorityRow.seller_phone, "+15550002222", "bucket tab rows must include seller phone from authoritative state");
+  assert.equal(priorityRow.latest_message_body, "Priority seller", "bucket tab rows must include latest message preview");
+  assert.equal(priorityRow.inbox_bucket, "priority", "bucket tab rows must preserve authoritative inbox_bucket");
 });
 
-test("getLiveInbox returns enriched canonical rows for initial boot", async () => {
-  const threadRows = [
+test("getLiveInbox returns fast boot rows from inbox_thread_state for initial boot", async () => {
+  const stateRows = [
     {
       thread_key: "+15550001111",
-      canonical_thread_key: "+15550001111",
       canonical_e164: "+15550001111",
       seller_phone: "+15550001111",
-      owner_name: "Jane Seller",
-      seller_display_name: "Jane Seller",
-      property_address_full: "123 Main St",
-      property_address_city: "Dallas",
-      property_state: "TX",
-      property_zip: "75201",
-      market: "Dallas",
-      property_type: "SFR",
-      estimated_value: 250000,
-      equity_amount: 120000,
-      equity_percent: 48,
-      final_acquisition_score: 71,
       inbox_bucket: "new_replies",
       latest_message_body: "Yes I am interested",
       latest_message_at: "2026-06-24T12:00:00.000Z",
-      latest_message_direction: "inbound",
+      latest_direction: "inbound",
       unread_count: 1,
       property_id: "p-1",
       master_owner_id: "mo-1",
-      contact_identity_class: "probable_owner",
+      market: "Dallas",
     },
   ];
-  const supabase = makeLiveInboxThreadSupabase(threadRows, {
-    countRows: [buildInboxCountRowFromThreads(threadRows)],
+  const supabase = makeLiveInboxThreadSupabase([], {
+    stateRows,
+    countRows: [buildInboxCountRowFromThreads(stateRows.map((row) => ({
+      ...row,
+      latest_message_direction: row.latest_direction,
+    })))],
   });
 
   const result = await getLiveInbox(
-    { filter: "all", timeout_mode: "initial_boot", limit: 25 },
+    { filter: "all", timeout_mode: "initial_boot", limit: 25, skip_counts: "1", skip_delivery: "1" },
+    { listOnly: true, skipCounts: true, skipDelivery: true },
     { supabase },
   );
 
   assert.equal(result.threads.length, 1);
   const row = result.threads[0];
-  assert.equal(row.owner_name, "Jane Seller");
-  assert.equal(row.property_address_full, "123 Main St");
+  assert.equal(row.seller_phone, "+15550001111");
+  assert.equal(row.latest_message_body, "Yes I am interested");
+  assert.equal(row.inbox_bucket, "new_replies");
   assert.equal(row.market, "Dallas");
-  assert.equal(row.property_type, "SFR");
-  assert.equal(Number(row.estimated_value), 250000);
-  assert.equal(row.contact_identity_class, "probable_owner");
-  assert.equal(result.source, "canonical_inbox_threads");
-  assert.notEqual(result.countsSource, "skipped");
+  assert.equal(result.source, "inbox_thread_state");
+  assert.equal(result.countsSource, "skipped");
 });

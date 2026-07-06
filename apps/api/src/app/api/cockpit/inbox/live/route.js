@@ -9,9 +9,9 @@ export const dynamic = 'force-dynamic'
 
 const BACKEND_GRACE_PERIOD = 500;
 const PROD_TIMEOUT_MS_BY_MODE = {
-  initial_boot: 8_000 - BACKEND_GRACE_PERIOD,
-  manual_bucket_switch: 8_000 - BACKEND_GRACE_PERIOD,
-  auto_refresh: 8_000 - BACKEND_GRACE_PERIOD,
+  initial_boot: 20_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 20_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 15_000 - BACKEND_GRACE_PERIOD,
 }
 const DEV_TIMEOUT_MS_BY_MODE = {
   initial_boot: 45_000 - BACKEND_GRACE_PERIOD,
@@ -52,7 +52,7 @@ export async function GET(request) {
       selectMode: 'canonical_row_contract',
     })
 
-    const liveOptions = timeoutMode === 'manual_bucket_switch' || timeoutMode === 'auto_refresh'
+    const liveOptions = timeoutMode === 'initial_boot' || timeoutMode === 'manual_bucket_switch' || timeoutMode === 'auto_refresh'
       ? { listOnly: true, skipCounts: true, skipDelivery: true }
       : {}
 

@@ -1825,8 +1825,26 @@ export const fetchLiveInbox = async ({
   const normalizedPayload = hasNestedLivePayload ? { ...payload, ...nestedData } : payload
   const degradedThreads = safeArray((normalizedPayload['threads'] ?? []) as AnyRecord[])
   if (payload['degraded'] && degradedThreads.length === 0) {
-    // Backend hit its internal timeout — throw so the adapter falls back to cache
-    // rather than overwriting good cached rows with an empty degraded response.
+    // Backend hit its internal timeout — retry once with the fast bucket path before
+    // surfacing a hard load failure (common on mobile / cold production boots).
+    const alreadyRetried = queryString.includes('refresh_reason=inbox_degraded_retry')
+    if (!alreadyRetried) {
+      const retryParams = new URLSearchParams(queryString)
+      retryParams.set('timeout_mode', 'manual_bucket_switch')
+      retryParams.set('skip_counts', '1')
+      retryParams.set('skip_delivery', '1')
+      retryParams.set('refresh_reason', 'inbox_degraded_retry')
+      const retryResult = await backendClient.fetchLiveInbox(retryParams.toString(), signal)
+      if (retryResult.ok) {
+        const retryPayload = retryResult.data as AnyRecord
+        const retryThreads = safeArray((retryPayload['threads'] ?? []) as AnyRecord[])
+        if (retryThreads.length > 0 || !retryPayload['degraded']) {
+          const retryNested = ((retryPayload['data'] && typeof retryPayload['data'] === 'object') ? retryPayload['data'] : null) as AnyRecord | null
+          const retryNormalized = retryNested ? { ...retryPayload, ...retryNested } : retryPayload
+          return normalizeLiveInboxResponse(retryNormalized, limit)
+        }
+      }
+    }
     throw new Error(`Live inbox API degraded (backend timeout)`)
   }
   return normalizeLiveInboxResponse(normalizedPayload, limit)

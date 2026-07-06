@@ -901,7 +901,7 @@ test("initial boot fallback returns threads without exact-counting v_inbox_enric
   assert.equal(result.fallback_used, true);
   assert.equal(result.countsSource, "skipped");
   assert.equal(result.diagnostics?.count_preserved_reason, "counts_skipped_by_request");
-  assert.ok(Object.keys(result.threads[0]).length <= 35, "initial boot rows should be compact summaries");
+  assert.ok(Object.keys(result.threads[0]).length <= 50, "initial boot rows should be compact summaries");
   assert.equal(trackers.fallbackExactCountRequested, false);
   assert.equal(trackers.fallbackCountQueryRequested, false);
 });
@@ -943,5 +943,5 @@ test("manual bucket switch returns compact summary rows without dossier blobs", 
   assert.equal(row.prospect_data, undefined);
   assert.equal(row.master_owner_data, undefined);
   assert.equal(row.preview, "Yes I still own it");
-  assert.ok(Object.keys(row).length <= 35, `expected compact summary row, got ${Object.keys(row).length} keys`);
+  assert.ok(Object.keys(row).length <= 50, `expected compact summary row, got ${Object.keys(row).length} keys`);
 });

@@ -147,10 +147,20 @@ export function deriveInboxThreadStateRows(threadRows = []) {
     const latestAt = row.latest_message_at || row.last_message_at || null;
     return {
       thread_key: threadKey,
+      seller_phone: row.seller_phone || row.best_phone || row.canonical_e164 || threadKey,
+      canonical_e164: row.canonical_e164 || row.seller_phone || threadKey,
       inbox_bucket: bucket,
       automation_lane: row.automation_lane || (bucket === "cold" ? "cold_reactivation" : null),
       property_id: row.property_id ?? null,
+      master_owner_id: row.master_owner_id ?? null,
+      market: row.market ?? null,
+      latest_message_body: row.latest_message_body ?? row.preview ?? null,
+      latest_message_at: latestAt,
+      latest_direction: direction || row.latest_direction || null,
       latest_message_direction: direction || null,
+      is_read: row.is_read ?? false,
+      is_suppressed: row.is_suppressed ?? false,
+      unread_count: row.unread_count ?? 0,
       last_outbound_at: direction === "outbound" ? latestAt : row.last_outbound_at || null,
       last_inbound_at: direction === "inbound" ? latestAt : row.last_inbound_at || null,
     };

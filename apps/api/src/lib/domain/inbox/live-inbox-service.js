@@ -48,6 +48,10 @@ const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
 const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
 const BOOT_FAST_THREAD_SOURCE = "inbox_thread_state";
+const BOOT_FAST_SOURCE_CONFIG = {
+  key: "boot_fast",
+  name: BOOT_FAST_THREAD_SOURCE,
+};
 const BOOT_FAST_THREAD_FIELDS = [
   "thread_key",
   "seller_phone",
@@ -1857,7 +1861,7 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   };
 }
 
-async function queryInitialBootThreadRows(params = {}, {
+async function queryFastInboxThreadRows(params = {}, {
   supabase = defaultSupabase,
   limit,
   filter,
@@ -1869,13 +1873,13 @@ async function queryInitialBootThreadRows(params = {}, {
   if (clean(params.q) || clean(params.keyword_group || params.keywordGroup)) return null;
 
   let query = supabase
-    .from(PRIMARY_THREAD_SOURCE)
-    .select(INBOX_THREAD_SUMMARY_SELECT_FIELDS)
+    .from(BOOT_FAST_THREAD_SOURCE)
+    .select(BOOT_FAST_THREAD_FIELDS)
     .not("thread_key", "is", null)
     .neq("thread_key", "");
 
   if (params.direction && params.direction !== "all") {
-    query = query.eq("latest_message_direction", normalizeDirection(params.direction));
+    query = query.eq("latest_direction", normalizeDirection(params.direction));
   }
 
   if (typeof query.order === "function") {
@@ -1900,12 +1904,18 @@ async function queryInitialBootThreadRows(params = {}, {
     return null;
   }
 
+  const rows = (data || []).map((row) => compactBootThreadRow(mapAuthoritativeInboxRow(row)));
+
   return {
-    data: data || [],
+    data: rows,
     count: null,
     error: null,
-    sourceConfig: THREAD_SOURCE_CONFIGS[0],
+    sourceConfig: BOOT_FAST_SOURCE_CONFIG,
   };
+}
+
+async function queryInitialBootThreadRows(params = {}, deps = {}) {
+  return queryFastInboxThreadRows(params, deps);
 }
 
 async function queryThreadSource(params = {}, { supabase = defaultSupabase, limit, filter, selectMode, cursorKeyset, offset, preferredThreadSource } = {}) {
@@ -1928,21 +1938,23 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     };
   }
 
-  if (!advancedActive && isInitialBoot) {
-    const bootResult = await queryInitialBootThreadRows(params, {
+  const initialBootSafeMode = selectMode === "initial_boot_safe";
+  if (!advancedActive && (isInitialBoot || isFastBucket)) {
+    const bootResult = await queryFastInboxThreadRows(params, {
       supabase,
       limit,
       filter,
       cursorKeyset,
       offset,
     });
-    if (bootResult) return bootResult;
+    if (bootResult && (bootResult.data?.length > 0 || !initialBootSafeMode)) {
+      return bootResult;
+    }
   }
 
-  // Bucket tabs must use canonical_inbox_threads so rows match All Messages enrichment
-  // (owner, address, flags, contact_identity_class). inbox_thread_state is bucket-fast
-  // but sparse and breaks inbox rows + composer when used for manual_bucket_switch.
-  const useAuthoritativeFastPath = false;
+  // Bucket tabs use inbox_thread_state for fast tab switches; canonical_inbox_threads
+  // remains the enrichment fallback when the fast path is empty or unavailable.
+  const useAuthoritativeFastPath = true;
   if (!advancedActive && isFastBucket && useAuthoritativeFastPath) {
     let authoritativeResult = null;
     try {
@@ -2437,7 +2449,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const linkedContextHydrationStartedAt = nowMs();
   let linkedContextHydrationMs = 0;
   const skipHeavyHydration = options.listOnly === true;
-  const fastListMode = fastBucketMode || initialBootSafeMode;
+  const fastListMode = fastBucketMode || initialBootSafeMode || initialBootMode;
   try {
     if (!skipLinkedContextHydration) {
       finalRows = await hydrateThreadIdentityFromMessageEvents(finalRows, supabase);
