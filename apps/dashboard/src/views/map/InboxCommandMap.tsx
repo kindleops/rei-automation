@@ -5000,6 +5000,14 @@ export function InboxCommandMap({
     const pinSnapshot = sanitizeSellerPinRecord(card.feature as Partial<CommandMapSellerPin>)
     const threadKey = text(card.feature.thread_key) || null
     const masterOwnerId = text(card.feature.master_owner_id) || null
+    const hydrationTimeoutId = setTimeout(() => {
+      setter((current) => (
+        current && current.kind === 'seller' && text(current.feature.property_id) === propertyId && current.hydrating
+          ? { ...current, hydrating: false }
+          : current
+      ))
+    }, 12_000)
+
     loadCommandMapSellerPinDetail(propertyId, {
       signal: controller.signal,
       threadKey,
@@ -5025,6 +5033,9 @@ export function InboxCommandMap({
             ? { ...current, hydrating: false }
             : current
         ))
+      })
+      .finally(() => {
+        clearTimeout(hydrationTimeoutId)
       })
   }, [])
 

@@ -345,6 +345,11 @@ const COMMAND_MAP_SELLER_PIN_FEED_SELECT = [
   'pulse_style',
   'execution_ring_color',
   'render_priority',
+].join(',')
+
+// Phone columns from migration 20260704120000 — queried separately so a project
+// that has not applied that migration still loads the rest of the seller card.
+const COMMAND_MAP_SELLER_PIN_FEED_PHONE_SELECT = [
   'prospect_best_phone',
   'display_phone',
   'canonical_e164',
@@ -363,8 +368,8 @@ const COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT = [
   'agent_family',
 ].join(',')
 
-/** Canonical thread state from canonical_inbox_threads. */
-const COMMAND_MAP_CANONICAL_THREAD_SELECT = [
+/** Fast thread state from inbox_thread_state (canonical_inbox_threads is too slow in prod). */
+const COMMAND_MAP_THREAD_STATE_SELECT = [
   'thread_key',
   'property_id',
   'master_owner_id',
@@ -380,17 +385,41 @@ const COMMAND_MAP_CANONICAL_THREAD_SELECT = [
   'is_suppressed',
   'latest_message_body',
   'latest_message_at',
-  'latest_message_direction',
+  'latest_direction',
   'last_inbound_at',
   'last_outbound_at',
-  'delivery_status',
   'latest_delivery_status',
-  'follow_up_at',
-  'owner_name',
-  'property_address_full',
   'market',
-  'property_type',
 ].join(',')
+
+const COMMAND_MAP_DETAIL_QUERY_TIMEOUT_MS = 6_000
+
+const withDetailQueryTimeout = async <T,>(
+  label: string,
+  run: () => Promise<T>,
+  timeoutMs = COMMAND_MAP_DETAIL_QUERY_TIMEOUT_MS,
+): Promise<T | null> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  try {
+    const result = await Promise.race([
+      run(),
+      new Promise<null>((resolve) => {
+        timeoutId = setTimeout(() => {
+          if (import.meta.env.DEV) {
+            console.warn(`[CommandMap] ${label} timed out after ${timeoutMs}ms`)
+          }
+          resolve(null)
+        }, timeoutMs)
+      }),
+    ])
+    return result
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn(`[CommandMap] ${label} failed:`, error)
+    return null
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
 
 /** Extended property + owner dossier fields from properties + master_owners. */
 const COMMAND_MAP_PROPERTY_ENRICHMENT_SELECT = [
@@ -1098,10 +1127,10 @@ const readSellerWorkItemContact = async (
   }
 }
 
-const mapCanonicalThreadRow = (row: Record<string, unknown> | null): Partial<CommandMapSellerPin> | null => {
+const mapThreadStateRow = (row: Record<string, unknown> | null): Partial<CommandMapSellerPin> | null => {
   if (!row) return null
   const latestBody = String(row.latest_message_body ?? '').trim()
-  const latestDirection = String(row.latest_message_direction ?? '').trim().toLowerCase()
+  const latestDirection = String(row.latest_message_direction ?? row.latest_direction ?? '').trim().toLowerCase()
   return {
     thread_key: String(row.thread_key ?? '').trim() || null,
     property_id: String(row.property_id ?? '').trim(),
@@ -1118,7 +1147,7 @@ const mapCanonicalThreadRow = (row: Record<string, unknown> | null): Partial<Com
     lead_temperature: String(row.lead_temperature ?? row.temperature ?? '').trim() || null,
     inbox_category: String(row.inbox_category ?? row.inbox_bucket ?? '').trim() || null,
     latest_message_at: String(row.latest_message_at ?? '').trim() || null,
-    latest_direction: String(row.latest_message_direction ?? '').trim() || null,
+    latest_direction: latestDirection || null,
     last_inbound_at: String(row.last_inbound_at ?? '').trim() || null,
     last_outbound_at: String(row.last_outbound_at ?? '').trim() || null,
     last_inbound_text: latestDirection === 'inbound' ? latestBody || null : null,
@@ -1178,8 +1207,8 @@ export const loadCommandMapSellerPinDetail = async (
 ): Promise<Partial<CommandMapSellerPin> | null> => {
   const supabase = getSupabaseClient()
 
-  const readFeed = async () => {
-    let query = supabase.from('v_command_map_seller_pin_feed').select(COMMAND_MAP_SELLER_PIN_FEED_SELECT)
+  const buildPinFeedQuery = (select: string) => {
+    let query = supabase.from('v_command_map_seller_pin_feed').select(select)
     if (propertyId) {
       query = query.eq('property_id', propertyId)
     } else if (options.threadKey) {
@@ -1192,13 +1221,31 @@ export const loadCommandMapSellerPinDetail = async (
       return null
     }
     if (options.signal) query = query.abortSignal(options.signal)
+    return query
+  }
+
+  const readFeed = async () => {
+    const query = buildPinFeedQuery(COMMAND_MAP_SELLER_PIN_FEED_SELECT)
+    if (!query) return null
     const { data, error } = await query.limit(1).maybeSingle()
     if (error) {
       if (isAbortError(error)) return null
       if (import.meta.env.DEV) console.warn('[CommandMap] seller pin feed detail failed:', error)
       return null
     }
-    return data as Partial<CommandMapSellerPin> | null
+    if (!data) return null
+
+    let merged = data as Partial<CommandMapSellerPin>
+    const phoneQuery = buildPinFeedQuery(COMMAND_MAP_SELLER_PIN_FEED_PHONE_SELECT)
+    if (phoneQuery) {
+      const { data: phoneData, error: phoneError } = await phoneQuery.limit(1).maybeSingle()
+      if (!phoneError && phoneData) {
+        merged = { ...merged, ...(phoneData as Record<string, unknown>) }
+      } else if (phoneError && !isAbortError(phoneError) && import.meta.env.DEV) {
+        console.warn('[CommandMap] seller pin phone fields unavailable (migration pending?):', phoneError)
+      }
+    }
+    return merged
   }
 
   // Isolated from readFeed() on purpose: a 400 here (e.g. migration
@@ -1234,8 +1281,8 @@ export const loadCommandMapSellerPinDetail = async (
     }
   }
 
-  const readCanonicalThread = async () => {
-    let query = supabase.from('canonical_inbox_threads').select(COMMAND_MAP_CANONICAL_THREAD_SELECT)
+  const readThreadState = async () => {
+    let query = supabase.from('inbox_thread_state').select(COMMAND_MAP_THREAD_STATE_SELECT)
     if (propertyId) {
       query = query.eq('property_id', propertyId)
     } else if (options.threadKey) {
@@ -1249,10 +1296,10 @@ export const loadCommandMapSellerPinDetail = async (
     const { data, error } = await query.order('latest_message_at', { ascending: false }).limit(1).maybeSingle()
     if (error) {
       if (isAbortError(error)) return null
-      if (import.meta.env.DEV) console.warn('[CommandMap] canonical thread detail failed:', error)
+      if (import.meta.env.DEV) console.warn('[CommandMap] inbox thread state detail failed:', error)
       return null
     }
-    return mapCanonicalThreadRow(data as Record<string, unknown> | null)
+    return mapThreadStateRow(data as Record<string, unknown> | null)
   }
 
   const readPropertyEnrichment = async (resolvedPropertyId: string, masterOwnerId: string | null) => {
@@ -1281,35 +1328,38 @@ export const loadCommandMapSellerPinDetail = async (
     return mapPropertyEnrichmentRow(propertyData, masterOwner)
   }
 
-  const [sellerWorkItem, identityFields, canonicalThread, sellerWorkItemContact] = await Promise.all([
-    readFeed(),
-    readIdentityFields(),
-    readCanonicalThread(),
-    readSellerWorkItemContact(propertyId, options.signal),
+  const [sellerWorkItem, identityFields, threadState, sellerWorkItemContact] = await Promise.all([
+    withDetailQueryTimeout('seller_pin_feed', () => readFeed()),
+    withDetailQueryTimeout('seller_pin_identity', () => readIdentityFields(), 4_000),
+    withDetailQueryTimeout('inbox_thread_state', () => readThreadState()),
+    withDetailQueryTimeout('seller_work_item_contact', () => readSellerWorkItemContact(propertyId, options.signal)),
   ])
 
-  const resolvedPropertyId = canonicalThread?.property_id
+  const resolvedPropertyId = threadState?.property_id
     || sellerWorkItem?.property_id
     || propertyId
-  const resolvedMasterOwnerId = canonicalThread?.master_owner_id
+  const resolvedMasterOwnerId = threadState?.master_owner_id
     || sellerWorkItem?.master_owner_id
     || options.masterOwnerId
     || null
 
   const propertyEnrichment = resolvedPropertyId
-    ? await readPropertyEnrichment(resolvedPropertyId, resolvedMasterOwnerId)
+    ? await withDetailQueryTimeout(
+      'property_enrichment',
+      () => readPropertyEnrichment(resolvedPropertyId, resolvedMasterOwnerId),
+    )
     : null
 
-  if (!sellerWorkItem && !canonicalThread && !propertyEnrichment) return null
+  if (!sellerWorkItem && !threadState && !propertyEnrichment && !sellerWorkItemContact) return null
 
   const merged = {
     ...(sellerWorkItem ?? {}),
     ...(identityFields ?? {}),
-    ...(canonicalThread ?? {}),
+    ...(threadState ?? {}),
     ...(sellerWorkItemContact ?? {}),
     ...(propertyEnrichment ?? {}),
     property_id: resolvedPropertyId,
-    thread_key: canonicalThread?.thread_key ?? sellerWorkItem?.thread_key ?? options.threadKey ?? null,
+    thread_key: threadState?.thread_key ?? sellerWorkItem?.thread_key ?? options.threadKey ?? null,
     master_owner_id: resolvedMasterOwnerId,
     prospect_id: sellerWorkItemContact?.prospect_id ?? sellerWorkItem?.prospect_id ?? options.prospectId ?? null,
     owner_priority_score:
@@ -1317,7 +1367,7 @@ export const loadCommandMapSellerPinDetail = async (
       ?? sellerWorkItem?.priority_score
       ?? null,
     priority_score: sellerWorkItem?.priority_score ?? propertyEnrichment?.owner_priority_score ?? null,
-    next_action_at: sellerWorkItem?.next_scheduled_for ?? canonicalThread?.follow_up_due_at ?? null,
+    next_action_at: sellerWorkItem?.next_scheduled_for ?? threadState?.follow_up_due_at ?? null,
     automation_state: sellerWorkItem?.execution_state ?? null,
   } satisfies Partial<CommandMapSellerPin>
 

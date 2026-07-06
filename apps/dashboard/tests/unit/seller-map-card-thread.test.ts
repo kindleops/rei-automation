@@ -285,7 +285,7 @@ describe('seller map card thread builder', () => {
           },
           error: null,
         },
-        canonical_inbox_threads: { data: null, error: null },
+        inbox_thread_state: { data: null, error: null },
         properties: { data: null, error: null },
         master_owners: { data: null, error: null },
         prospects: { data: null, error: null },
