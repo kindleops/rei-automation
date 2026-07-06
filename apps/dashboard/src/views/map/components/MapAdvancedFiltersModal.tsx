@@ -188,7 +188,7 @@ export function MapAdvancedFiltersModal({
     onClear()
   }, [onClear])
 
-  const canApply = !applying && !previewLoading && (!hasActiveFilters || (previewCount != null && !previewError))
+  const canApply = !applying && (!hasActiveFilters || !previewLoading)
 
   const handleApply = useCallback(async () => {
     if (!canApply) return

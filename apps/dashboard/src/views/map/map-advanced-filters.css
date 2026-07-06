@@ -24,7 +24,13 @@
 }
 
 .nx-ifm-overlay--map {
-  z-index: 10050;
+  z-index: 13050;
+}
+
+.nx-icm__mode-tab--filters.is-active {
+  border-color: rgba(166, 210, 96, 0.55);
+  color: #e8ffd0;
+  box-shadow: 0 0 0 1px rgba(166, 210, 96, 0.2);
 }
 
 .nx-ifm-modal--map .nx-ifm-header span.is-error {

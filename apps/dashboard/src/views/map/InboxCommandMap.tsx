@@ -93,6 +93,7 @@ import {
   shouldUseAggregateSource,
   shouldUsePropertySource,
   shouldUseVectorTileSource,
+  MAP_ZOOM_BANDS,
 } from './map-property-source'
 import {
   ALL_PROPERTY_TILE_LAYER_IDS,
@@ -4142,6 +4143,7 @@ export function InboxCommandMap({
 
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [mapAdvancedFiltersOpen, setMapAdvancedFiltersOpen] = useState(false)
+  const [mapFilterStatusMessage, setMapFilterStatusMessage] = useState<string | null>(null)
   const [activeControlsTab, setActiveControlsTab] = useState<ControlsTab>('modes')
   const [mapMode, setMapMode] = useState<MapModeKey>('acquisition')
   const [appliedMapFilterToken, setAppliedMapFilterToken] = useState<string | null>(null)
@@ -4614,13 +4616,30 @@ export function InboxCommandMap({
     }
   }, [viewportBounds])
 
-  const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number) => {
+  const openMapAdvancedFilters = useCallback(() => {
+    setFiltersOpen(false)
+    setMapAdvancedFiltersOpen(true)
+  }, [])
+
+  const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number, matchingProperties?: number | null) => {
     propertyUniverseAbortRef.current?.abort()
     appliedMapFilterTokenRef.current = token
     setAppliedMapFilterToken(token)
     setAppliedMasterFilterRuleCount(activeRuleCount)
     const map = mapRef.current
     if (isStyleSafe(map)) {
+      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin) {
+        map.easeTo({ zoom: 10.5, duration: 720 })
+        setMapFilterStatusMessage('Zoomed to city level — filtered property pins are visible at zoom 9+')
+      } else if (token) {
+        setMapFilterStatusMessage(
+          matchingProperties != null
+            ? `Showing ${matchingProperties.toLocaleString()} matching properties`
+            : 'Property universe filter applied',
+        )
+      } else {
+        setMapFilterStatusMessage(null)
+      }
       const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
         ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
         : undefined
@@ -4643,6 +4662,7 @@ export function InboxCommandMap({
     appliedMapFilterTokenRef.current = null
     setAppliedMapFilterToken(null)
     setAppliedMasterFilterRuleCount(0)
+    setMapFilterStatusMessage(null)
     const map = mapRef.current
     if (isStyleSafe(map)) {
       const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
@@ -9349,6 +9369,13 @@ export function InboxCommandMap({
             <strong>{visiblePins.length}</strong>
           </div>
           <div className="nx-icm__header-actions">
+            <button
+              type="button"
+              className={cls('nx-icm__mode-tab', 'nx-icm__mode-tab--filters', mapAdvancedFiltersOpen && 'is-active')}
+              onClick={openMapAdvancedFilters}
+            >
+              {activeFilterCount > 0 ? `Advanced Filters · ${activeFilterCount}` : 'Advanced Filters'}
+            </button>
             <button type="button" className={cls('nx-icm__mode-tab', filtersOpen && 'is-active')} onClick={() => setFiltersOpen((open) => !open)}>
               Map Controls
             </button>
@@ -9371,7 +9398,7 @@ export function InboxCommandMap({
                   className={cls('nx-icm__controls-tab', activeControlsTab === tab.key && 'is-active')}
                   onClick={() => {
                     if (tab.key === 'filters') {
-                      setMapAdvancedFiltersOpen(true)
+                      openMapAdvancedFilters()
                       return
                     }
                     setActiveControlsTab(tab.key)
@@ -9823,10 +9850,10 @@ export function InboxCommandMap({
         <button
           type="button"
           className="nx-icm__command-filters-btn"
-          onClick={() => setMapAdvancedFiltersOpen(true)}
+          onClick={openMapAdvancedFilters}
           aria-label="Open advanced map filters"
         >
-          Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
+          Advanced Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
         </button>
       )}
 
@@ -9873,11 +9900,16 @@ export function InboxCommandMap({
         visible={isMapDiagnosticsDebugEnabled() && Boolean(mapPropertyDiagnostics)}
       />
 
-      {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning || appliedMapFilterToken) && (
+      {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning || appliedMapFilterToken || mapFilterStatusMessage) && (
         <div className="nx-icm__map-status" aria-live="polite">
+          {mapFilterStatusMessage && (
+            <span className="nx-icm__map-status-pill is-filter-active">
+              {mapFilterStatusMessage}
+            </span>
+          )}
           {appliedMapFilterToken && appliedMasterFilterRuleCount > 0 && (
             <span className="nx-icm__map-status-pill is-filter-active">
-              Property universe filter · {appliedMasterFilterRuleCount} rule{appliedMasterFilterRuleCount === 1 ? '' : 's'} (all properties)
+              Property universe filter · {appliedMasterFilterRuleCount} rule{appliedMasterFilterRuleCount === 1 ? '' : 's'}
             </span>
           )}
           {baseStyleLoading && <span className="nx-icm__map-status-pill">Loading {getCommandMapTheme(mapStyleMode).label} base style…</span>}
@@ -10262,8 +10294,8 @@ export function InboxCommandMap({
         open={mapAdvancedFiltersOpen}
         bounds={mapFilterBounds}
         onClose={() => setMapAdvancedFiltersOpen(false)}
-        onApply={({ token, activeRuleCount }) => {
-          applyMapFilterToken(token, activeRuleCount)
+        onApply={({ token, activeRuleCount, matchingProperties }) => {
+          applyMapFilterToken(token, activeRuleCount, matchingProperties)
         }}
         onClear={clearMapFilterToken}
       />
