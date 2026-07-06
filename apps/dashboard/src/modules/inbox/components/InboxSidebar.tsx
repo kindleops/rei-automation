@@ -1247,7 +1247,7 @@ export const InboxSidebar = ({
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
   const prevThreadsLengthRef = useRef(threads.length)
-  const inboxLoadFailed = Boolean(formatLoadingError(loadingError))
+  const inboxLoadFailed = Boolean(formatLoadingError(loadingError)) && threads.length === 0
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
     if (activeViewFilter === 'waiting_on_seller' || activeViewFilter === 'waiting') return 'waiting'
     if (activeViewFilter === 'follow_up_due' || activeViewFilter === 'follow_up') return 'follow_up'

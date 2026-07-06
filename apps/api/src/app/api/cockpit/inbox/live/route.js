@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders } from '../../_shared.js'
 import { degradedLiveResponse } from '@/lib/domain/inbox/degraded-read-responses.js'
-import { getLiveInbox } from '@/lib/domain/inbox/live-inbox-service.js'
+import { getLiveInbox, loadInboxBootSnapshot } from '@/lib/domain/inbox/live-inbox-service.js'
 import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 
 export const runtime = 'nodejs'
@@ -9,9 +9,9 @@ export const dynamic = 'force-dynamic'
 
 const BACKEND_GRACE_PERIOD = 500;
 const PROD_TIMEOUT_MS_BY_MODE = {
-  initial_boot: 20_000 - BACKEND_GRACE_PERIOD,
-  manual_bucket_switch: 20_000 - BACKEND_GRACE_PERIOD,
-  auto_refresh: 15_000 - BACKEND_GRACE_PERIOD,
+  initial_boot: 8_000 - BACKEND_GRACE_PERIOD,
+  manual_bucket_switch: 12_000 - BACKEND_GRACE_PERIOD,
+  auto_refresh: 10_000 - BACKEND_GRACE_PERIOD,
 }
 const DEV_TIMEOUT_MS_BY_MODE = {
   initial_boot: 45_000 - BACKEND_GRACE_PERIOD,
@@ -69,6 +69,41 @@ export async function GET(request) {
       ])
     } catch (innerErr) {
       if (innerErr.isTimeout) {
+        const snapshot = loadInboxBootSnapshot()
+        if (snapshot?.threads?.length > 0) {
+          return NextResponse.json(
+            {
+              ok: true,
+              degraded: true,
+              dataMode: 'stale_snapshot',
+              timeoutMode,
+              error_code: 'live_inbox_timeout',
+              error: 'live_inbox_timeout',
+              threads: snapshot.threads,
+              messages: [],
+              counts: {},
+              countsDegraded: true,
+              countsApproximate: false,
+              sourceUsed: `${snapshot.source}:snapshot`,
+              diagnostics: {
+                source: `${snapshot.source}:snapshot`,
+                sourceUsed: `${snapshot.source}:snapshot`,
+                countsSource: 'timeout_snapshot',
+                countsDegraded: true,
+                count_preserved_reason: 'live_timeout_served_boot_snapshot',
+                snapshotAgeMs: Date.now() - snapshot.capturedAt,
+              },
+              mapPins: [],
+              pagination: {
+                limit: snapshot.threads.length,
+                returned: snapshot.threads.length,
+                has_more: false,
+                next_cursor: null,
+              },
+            },
+            { status: 200, headers: cors },
+          )
+        }
         return NextResponse.json(
           degradedLiveResponse({
             timeoutMode,

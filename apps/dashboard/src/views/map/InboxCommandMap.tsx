@@ -5001,11 +5001,16 @@ export function InboxCommandMap({
     const threadKey = text(card.feature.thread_key) || null
     const masterOwnerId = text(card.feature.master_owner_id) || null
     const hydrationTimeoutId = setTimeout(() => {
-      setter((current) => (
-        current && current.kind === 'seller' && text(current.feature.property_id) === propertyId && current.hydrating
-          ? { ...current, hydrating: false }
-          : current
-      ))
+      setter((current) => {
+        if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId || !current.hydrating) {
+          return current
+        }
+        return {
+          ...current,
+          feature: sanitizeSellerPinRecord(pinSnapshot) as Record<string, unknown>,
+          hydrating: false,
+        }
+      })
     }, 12_000)
 
     loadCommandMapSellerPinDetail(propertyId, {
@@ -5014,8 +5019,7 @@ export function InboxCommandMap({
       masterOwnerId,
     })
       .then((detail) => {
-        if (!detail) return
-        const hydrated = sanitizeSellerPinRecord({ ...pinSnapshot, ...detail })
+        const hydrated = sanitizeSellerPinRecord({ ...pinSnapshot, ...(detail ?? {}) })
         sellerPinDetailsCacheRef.current.set(propertyId, hydrated)
         setter((current) => {
           if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
@@ -5028,11 +5032,14 @@ export function InboxCommandMap({
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        setter((current) => (
-          current && current.kind === 'seller' && text(current.feature.property_id) === propertyId
-            ? { ...current, hydrating: false }
-            : current
-        ))
+        setter((current) => {
+          if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
+          return {
+            ...current,
+            feature: sanitizeSellerPinRecord(pinSnapshot) as Record<string, unknown>,
+            hydrating: false,
+          }
+        })
       })
       .finally(() => {
         clearTimeout(hydrationTimeoutId)

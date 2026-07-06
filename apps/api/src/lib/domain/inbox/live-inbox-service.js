@@ -1855,6 +1855,63 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 }
 
 const BOOT_FAST_QUERY_TIMEOUT_MS = 4_000;
+const BOOT_UNORDERED_QUERY_TIMEOUT_MS = 2_000;
+const INBOX_BOOT_SNAPSHOT_TTL_MS = 45 * 60 * 1000;
+let inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE };
+
+export function rememberInboxBootSnapshot(threads = []) {
+  if (!Array.isArray(threads) || threads.length === 0) return;
+  inboxBootSnapshot = {
+    capturedAt: Date.now(),
+    threads: threads.slice(0, 100),
+    source: BOOT_FAST_THREAD_SOURCE,
+  };
+}
+
+export function loadInboxBootSnapshot(maxAgeMs = INBOX_BOOT_SNAPSHOT_TTL_MS) {
+  if (Date.now() - inboxBootSnapshot.capturedAt > maxAgeMs) return null;
+  if (!inboxBootSnapshot.threads.length) return null;
+  return {
+    threads: inboxBootSnapshot.threads,
+    source: inboxBootSnapshot.source,
+    capturedAt: inboxBootSnapshot.capturedAt,
+  };
+}
+
+async function raceQueryWithTimeout(runQuery, timeoutMs, timeoutLabel) {
+  let timeoutId = null;
+  try {
+    return await Promise.race([
+      runQuery(),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          console.warn(timeoutLabel, { timeoutMs });
+          resolve(null);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function queryUnorderedBootThreadRows({ supabase, limit }) {
+  const { data, error } = await supabase
+    .from(BOOT_FAST_THREAD_SOURCE)
+    .select(BOOT_FAST_THREAD_FIELDS)
+    .limit(limit + 1);
+  if (error) {
+    console.warn("[INBOX_BOOT_UNORDERED_FAILED]", error?.message || error);
+    return null;
+  }
+  const rows = (data || []).map((row) => compactBootThreadRow(mapAuthoritativeInboxRow(row)));
+  return {
+    data: rows,
+    count: null,
+    error: null,
+    sourceConfig: BOOT_FAST_SOURCE_CONFIG,
+  };
+}
 
 async function queryFastInboxThreadRows(params = {}, {
   supabase = defaultSupabase,
@@ -1909,21 +1966,35 @@ async function queryFastInboxThreadRows(params = {}, {
     };
   };
 
-  let timeoutId = null;
-  try {
-    const result = await Promise.race([
-      runQuery(),
-      new Promise((resolve) => {
-        timeoutId = setTimeout(() => {
-          console.warn("[INBOX_BOOT_SOURCE_TIMEOUT]", { timeoutMs: BOOT_FAST_QUERY_TIMEOUT_MS, filter: normalizedFilter });
-          resolve(null);
-        }, BOOT_FAST_QUERY_TIMEOUT_MS);
-      }),
-    ]);
-    return result;
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+  let result = await raceQueryWithTimeout(
+    runQuery,
+    BOOT_FAST_QUERY_TIMEOUT_MS,
+    "[INBOX_BOOT_SOURCE_TIMEOUT]",
+  );
+  if (!result || result.data?.length === 0) {
+    const unordered = await raceQueryWithTimeout(
+      () => queryUnorderedBootThreadRows({ supabase, limit }),
+      BOOT_UNORDERED_QUERY_TIMEOUT_MS,
+      "[INBOX_BOOT_UNORDERED_TIMEOUT]",
+    );
+    if (unordered?.data?.length > 0) result = unordered;
   }
+  if (!result || result.data?.length === 0) {
+    const snapshot = loadInboxBootSnapshot();
+    if (snapshot?.threads?.length > 0) {
+      console.warn("[INBOX_BOOT_SNAPSHOT_SERVED]", {
+        threadCount: snapshot.threads.length,
+        ageMs: Date.now() - snapshot.capturedAt,
+      });
+      return {
+        data: snapshot.threads.slice(0, limit + 1),
+        count: null,
+        error: null,
+        sourceConfig: { ...BOOT_FAST_SOURCE_CONFIG, key: "boot_snapshot" },
+      };
+    }
+  }
+  return result;
 }
 
 async function queryInitialBootThreadRows(params = {}, deps = {}) {
@@ -2551,6 +2622,8 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
         latest_message_body: row.latest_message_body || null,
       }))
     : [];
+
+  if (finalRows.length > 0) rememberInboxBootSnapshot(finalRows);
 
   return {
     threads: finalRows,

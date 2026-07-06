@@ -1845,7 +1845,21 @@ export const fetchLiveInbox = async ({
         }
       }
     }
-    throw new Error(`Live inbox API degraded (backend timeout)`)
+    // Degraded empty is common when production Supabase is overloaded — return a soft
+    // empty payload so the client can keep showing cached rows instead of hard-failing.
+    return normalizeLiveInboxResponse({
+      ...normalizedPayload,
+      threads: [],
+      stale: true,
+      dataMode: payload['dataMode'] ?? 'timeout_preserved',
+    }, limit)
+  }
+  if (payload['degraded'] && degradedThreads.length > 0) {
+    return normalizeLiveInboxResponse({
+      ...normalizedPayload,
+      stale: true,
+      dataMode: payload['dataMode'] ?? 'stale_snapshot',
+    }, limit)
   }
   return normalizeLiveInboxResponse(normalizedPayload, limit)
 }

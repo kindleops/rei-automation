@@ -102,6 +102,25 @@ const readCachedBootRows = (bucketKey: string = DEFAULT_BOOT_BUCKET_KEY): InboxT
   }
 }
 
+const readAnyCachedBootRows = (): InboxThread[] => {
+  const primary = readCachedBootRows(DEFAULT_BOOT_BUCKET_KEY)
+  if (primary.length > 0) return primary
+  if (typeof localStorage === 'undefined') return []
+  let best: InboxThread[] = []
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i)
+    if (!key?.startsWith(`${CACHE_KEY}:`)) continue
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || '') as { threads?: InboxThread[] }
+      const rows = Array.isArray(parsed?.threads) ? parsed.threads : []
+      if (rows.length > best.length) best = rows
+    } catch {
+      localStorage.removeItem(key)
+    }
+  }
+  return best
+}
+
 const buildBootStoreState = (): typeof EMPTY_INBOX_STORE_STATE => {
   const cachedCounts = readCachedViewCounts()
   const cachedRows = readCachedBootRows(DEFAULT_BOOT_BUCKET_KEY)
@@ -153,9 +172,8 @@ const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConne
 }
 
 const LIVE_INBOX_TIMEOUT_MS_BY_MODE: Record<InboxTimeoutMode, number> = {
-  initial_boot: 20_000,
-  // Must stay >= API manual_bucket_switch budget so category tabs don't time out while all_threads succeeds.
-  manual_bucket_switch: 20_000,
+  initial_boot: 10_000,
+  manual_bucket_switch: 14_000,
   auto_refresh: 12_000,
 }
 
@@ -431,6 +449,35 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
         }
       } catch {
         localStorage.removeItem(scopedCacheKey)
+      }
+    }
+
+    const anyCachedRows = readAnyCachedBootRows()
+    if (anyCachedRows.length > 0) {
+      return {
+        threads: anyCachedRows,
+        unreadCount: 0,
+        urgentCount: 0,
+        totalCount: anyCachedRows.length,
+        aiDraftCount: 0,
+        dataMode: 'fallback_error',
+        liveFetchStatus: 'fallback_error',
+        liveFetchError: liveFetchError,
+        messageEventsCount: anyCachedRows.length,
+        messageEventsRawCount: anyCachedRows.length,
+        groupedThreadCount: anyCachedRows.length,
+        priorityInboxCount: null,
+        activeInboxCount: null,
+        waitingInboxCount: null,
+        allInboxCount: anyCachedRows.length,
+        unreadThreadsCount: null,
+        sendQueueCount: null,
+        archivedThreadsCount: null,
+        hiddenThreadsCount: null,
+        suppressedThreadsCount: null,
+        deadThreadsCount: null,
+        lastLiveFetchAt: null,
+        _requestedFilter: filterKey,
       }
     }
 
@@ -1020,15 +1067,23 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       if (model.dataMode !== 'live' && !hasThreadRows) {
         if (currentRowsCount === 0) {
           console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads.length, dataMode: model.dataMode })
+          dispatch({
+            type: 'BUCKET_FETCH_ERROR',
+            bucketKey,
+            requestId,
+            error: model.liveFetchError ?? 'inbox_load_failed'
+          })
         } else {
           console.warn(`[Inbox Protection] Ignoring degraded/fallback response. Preserving ${currentRowsCount} existing rows.`)
+          dispatch({
+            type: 'BUCKET_FETCH_DONE',
+            bucketKey,
+            requestId,
+            rows: currentBucket?.rows ?? [],
+            cursor: currentBucket?.cursor ?? null,
+            hasMore: currentBucket?.hasMore ?? false,
+          })
         }
-        dispatch({
-          type: 'BUCKET_FETCH_ERROR',
-          bucketKey,
-          requestId,
-          error: model.liveFetchError ?? 'inbox_load_failed'
-        })
         if (abortByBucketRef.current[bucketKey] === controller) delete abortByBucketRef.current[bucketKey]
         return model
       }
@@ -1707,9 +1762,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const data: InboxModel = {
     // Bucket rows — ONLY from the active bucket, never from another bucket's cache.
     threads: (activeBucket?.rows ?? []) as InboxThread[],
-    liveFetchError: activeBucket?.error ?? null,
-    liveFetchStatus: activeBucket?.error ? 'fallback_error' : 'active',
-    dataMode: activeBucket?.error ? 'fallback_error' : 'live',
+    liveFetchError: (activeBucket?.rows?.length ?? 0) > 0 ? null : (activeBucket?.error ?? null),
+    liveFetchStatus: (activeBucket?.rows?.length ?? 0) > 0
+      ? 'active'
+      : (activeBucket?.error ? 'fallback_error' : 'active'),
+    dataMode: (activeBucket?.rows?.length ?? 0) > 0
+      ? 'live'
+      : (activeBucket?.error ? 'fallback_error' : 'live'),
 
     // Counts isolated from bucket rows — a counts failure never poisons these rows.
     counts: storeState.viewCounts,
