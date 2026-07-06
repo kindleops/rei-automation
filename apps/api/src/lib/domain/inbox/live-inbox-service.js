@@ -1854,6 +1854,8 @@ async function queryAuthoritativeInboxThreads(params = {}, {
   };
 }
 
+const BOOT_FAST_QUERY_TIMEOUT_MS = 4_000;
+
 async function queryFastInboxThreadRows(params = {}, {
   supabase = defaultSupabase,
   limit,
@@ -1865,46 +1867,63 @@ async function queryFastInboxThreadRows(params = {}, {
   if (normalizedFilter !== "all" && normalizedFilter !== "all_messages") return null;
   if (clean(params.q) || clean(params.keyword_group || params.keywordGroup)) return null;
 
-  let query = supabase
-    .from(BOOT_FAST_THREAD_SOURCE)
-    .select(BOOT_FAST_THREAD_FIELDS)
-    .not("thread_key", "is", null)
-    .neq("thread_key", "");
+  const runQuery = async () => {
+    let query = supabase
+      .from(BOOT_FAST_THREAD_SOURCE)
+      .select(BOOT_FAST_THREAD_FIELDS)
+      .not("thread_key", "is", null)
+      .neq("thread_key", "");
 
-  if (params.direction && params.direction !== "all") {
-    query = query.eq("latest_direction", normalizeDirection(params.direction));
-  }
+    if (params.direction && params.direction !== "all") {
+      query = query.eq("latest_direction", normalizeDirection(params.direction));
+    }
 
-  if (typeof query.order === "function") {
-    query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
-    query = query.order("thread_key", { ascending: false });
-  }
+    if (typeof query.order === "function") {
+      query = query.order("latest_message_at", { ascending: false, nullsFirst: false });
+      query = query.order("thread_key", { ascending: false });
+    }
 
-  if (cursorKeyset && typeof query.or === "function") {
-    query = query.or(
-      `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`,
-    );
-    if (typeof query.limit === "function") query = query.limit(limit + 1);
-  } else if (offset > 0 && typeof query.range === "function") {
-    query = query.range(offset, offset + limit);
-  } else if (typeof query.limit === "function") {
-    query = query.limit(limit + 1);
-  }
+    if (cursorKeyset && typeof query.or === "function") {
+      query = query.or(
+        `latest_message_at.lt.${cursorKeyset.latest_message_at},and(latest_message_at.eq.${cursorKeyset.latest_message_at},thread_key.lt.${quoteSupabaseValue(cursorKeyset.thread_key)})`,
+      );
+      if (typeof query.limit === "function") query = query.limit(limit + 1);
+    } else if (offset > 0 && typeof query.range === "function") {
+      query = query.range(offset, offset + limit);
+    } else if (typeof query.limit === "function") {
+      query = query.limit(limit + 1);
+    }
 
-  const { data, error } = await query;
-  if (error) {
-    console.warn("[INBOX_BOOT_SOURCE_FAILED]", error?.message || error);
-    return null;
-  }
+    const { data, error } = await query;
+    if (error) {
+      console.warn("[INBOX_BOOT_SOURCE_FAILED]", error?.message || error);
+      return null;
+    }
 
-  const rows = (data || []).map((row) => compactBootThreadRow(mapAuthoritativeInboxRow(row)));
-
-  return {
-    data: rows,
-    count: null,
-    error: null,
-    sourceConfig: BOOT_FAST_SOURCE_CONFIG,
+    const rows = (data || []).map((row) => compactBootThreadRow(mapAuthoritativeInboxRow(row)));
+    return {
+      data: rows,
+      count: null,
+      error: null,
+      sourceConfig: BOOT_FAST_SOURCE_CONFIG,
+    };
   };
+
+  let timeoutId = null;
+  try {
+    const result = await Promise.race([
+      runQuery(),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          console.warn("[INBOX_BOOT_SOURCE_TIMEOUT]", { timeoutMs: BOOT_FAST_QUERY_TIMEOUT_MS, filter: normalizedFilter });
+          resolve(null);
+        }, BOOT_FAST_QUERY_TIMEOUT_MS);
+      }),
+    ]);
+    return result;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 async function queryInitialBootThreadRows(params = {}, deps = {}) {
