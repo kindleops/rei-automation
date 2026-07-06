@@ -2022,7 +2022,12 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
   }
 
   const initialBootSafeMode = selectMode === "initial_boot_safe";
-  if (!advancedActive && (isInitialBoot || isFastBucket)) {
+  const normalizedFilter = normalizeLiveFilter(filter);
+  const isAllFilter = normalizedFilter === "all" || normalizedFilter === "all_messages";
+
+  // Boot fast path only supports filter=all. Bucket tabs must use authoritative
+  // inbox_thread_state SQL — returning empty here was blanking Priority/New Replies.
+  if (!advancedActive && (isInitialBoot || isFastBucket) && isAllFilter) {
     const bootResult = await queryFastInboxThreadRows(params, {
       supabase,
       limit,
@@ -2033,9 +2038,9 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     if (bootResult && (bootResult.data?.length > 0 || !initialBootSafeMode)) {
       return bootResult;
     }
-    // Never fall through to canonical_inbox_threads for boot/fast modes — that view
+    // Never fall through to canonical_inbox_threads for initial boot — that view
     // routinely exceeds production timeouts and would blank the inbox/map cards.
-    if (isInitialBoot || isFastBucket) {
+    if (isInitialBoot) {
       return bootResult || {
         data: [],
         count: null,
