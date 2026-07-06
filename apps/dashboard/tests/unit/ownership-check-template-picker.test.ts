@@ -286,7 +286,7 @@ describe('ownership check template picker', () => {
       expect(result).toBeNull()
     })
 
-    it('accepts templates that greet with the human seller full name via {{seller_name}}', () => {
+    it('renders {{seller_name}} as first name only — never the multi-word full name', () => {
       const result = evaluateOwnershipTemplate(
         makeTemplate({
           id: 'en-full-name',
@@ -295,15 +295,36 @@ describe('ownership check template picker', () => {
         }),
         {
           seller_first_name: 'Amanda',
-          seller_name: 'Amanda L Tallen',
+          seller_name: 'Amanda',
           owner_name: 'mo_804d2f26377bee1f43019235 Trust',
           property_address: '983 Edmund Ave, Saint Paul, MN 55104',
           agent_name: 'Andre',
           agent_first_name: 'Andre',
         },
       )
-      expect(result?.rendered).toContain('Hi Amanda L Tallen')
+      expect(result?.rendered).toContain('Hi Amanda,')
+      expect(result?.rendered).not.toContain('Tallen')
       expect(result?.rendered).not.toContain('Trust')
+    })
+
+    it('rejects rendered greetings that leak a multi-word full name', () => {
+      const result = evaluateOwnershipTemplate(
+        makeTemplate({
+          id: 'en-leaked-full',
+          language: 'English',
+          templateText: 'Hey {{seller_first_name}}, hope all is well. This is {{agent_first_name}} reaching out about {{property_address}}.',
+        }),
+        {
+          seller_first_name: 'Nicole',
+          seller_name: 'Nicole',
+          owner_name: 'Some Trust',
+          property_address: '4534 Logan Avenue North',
+          agent_name: 'Michael',
+          agent_first_name: 'Michael',
+        },
+      )
+      expect(result?.rendered).toContain('Hey Nicole,')
+      expect(result?.rendered).not.toContain('Harriet')
     })
 
     it('rejects generic templates when seller and agent are both resolved', () => {

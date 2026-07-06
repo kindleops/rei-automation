@@ -5,7 +5,7 @@ import {
   type SmsTemplate,
 } from '../../../lib/data/templateData'
 import { asString, type AnyRecord } from '../../../lib/data/shared'
-import { isEntityName } from '../../../lib/identity/entityDetection'
+import { isEntityName, safeHumanName } from '../../../lib/identity/entityDetection'
 
 const OWNERSHIP_CHECK_USE_CASE = 'ownership_check'
 
@@ -86,6 +86,30 @@ const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
 
 const GREETING_NAME_PATTERN = /^\s*(?:hi|hey|hello|hola|ola|marhaba)\s+([^,]+),/i
+
+const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? ''
+
+/** Prospect greeting must always be a single first name — never a multi-word full name. */
+export const resolveProspectGreetingFirstName = (
+  prospectFirstName: unknown,
+  prospectFullName?: unknown,
+): string => {
+  const fromFirst = safeHumanName(asString(prospectFirstName, '').trim())
+  const fromFull = safeHumanName(asString(prospectFullName, '').trim())
+  if (fromFirst) return firstToken(fromFirst)
+  if (fromFull) return firstToken(fromFull)
+  return ''
+}
+
+const greetingUsesFullNameInsteadOfFirst = (message: string, sellerFirstName: string): boolean => {
+  const first = asString(sellerFirstName, '').trim()
+  if (!first || first.includes(' ')) return false
+  const match = message.trim().match(GREETING_NAME_PATTERN)
+  if (!match) return false
+  const greeted = match[1].trim()
+  if (greeted.toLowerCase() === first.toLowerCase()) return false
+  return greeted.toLowerCase().startsWith(`${first.toLowerCase()} `)
+}
 
 const hasEntityGreeting = (message: string): boolean => {
   const match = message.trim().match(GREETING_NAME_PATTERN)
@@ -176,6 +200,9 @@ export const evaluateOwnershipTemplate = (
   ) {
     return null
   }
+  if (sellerFirstName && greetingUsesFullNameInsteadOfFirst(rendered, sellerFirstName)) {
+    return null
+  }
   if (hasGenericRightPersonWording(rendered)) {
     return null
   }
@@ -245,24 +272,20 @@ export const buildOwnershipTemplatePool = (
   options: { excludeTemplateId?: string | null } = {},
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
-  const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
   const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
   const hasResolvedAgentName = Boolean(asString(context.agent_first_name, '').trim())
 
-  // Ownership check must greet the human seller by name. Generic "Hi," / right-person
+  // Ownership check must greet the human seller by first name. Generic "Hi," / right-person
   // templates are rejected by TextGrid and must never be selected from the map card.
   if (!hasResolvedSellerName || !hasResolvedAgentName) {
     return []
   }
 
-  const personalizedFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: true })
-  const personalizedLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true })
-
-  const pool = personalizedFirstTouch.length
-    ? personalizedFirstTouch
-    : personalizedLanguageScoped
-
-  let candidates = dedupeCandidates(pool)
+  // Randomize across the full ownership_check catalog for this language — not a tiny
+  // first-touch subset that was starving map sends down to 1-2 repeated templates.
+  let candidates = dedupeCandidates(
+    evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true }),
+  )
   const excludeId = asString(options.excludeTemplateId, '').trim()
   if (excludeId && candidates.length > 1) {
     const filtered = candidates.filter(

@@ -7,7 +7,21 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const TEMPLATE_COLUMNS = [
-  'id', 'template_id', 'is_active', 'use_case', 'stage_code', 'language', 'template_body', 'updated_at',
+  'id',
+  'template_id',
+  'template_key',
+  'is_active',
+  'is_first_touch',
+  'is_follow_up',
+  'use_case',
+  'stage_code',
+  'stage_label',
+  'language',
+  'template_body',
+  'english_translation',
+  'traffic_weight',
+  'metadata',
+  'updated_at',
 ].join(',')
 
 function corsHeaders(_request) {
@@ -26,7 +40,10 @@ export async function GET(request) {
 
   const timer = createRequestTimer('templates-list')
   const { searchParams } = new URL(request.url)
-  const limit = Math.max(1, Math.min(500, Number(searchParams.get('limit') || 200)))
+  const useCase = String(searchParams.get('use_case') || searchParams.get('useCase') || '').trim()
+  const defaultLimit = useCase ? 5000 : 200
+  const maxLimit = useCase ? 5000 : 500
+  const limit = Math.max(1, Math.min(maxLimit, Number(searchParams.get('limit') || defaultLimit)))
   const includeInactive = ['1', 'true', 'yes'].includes(String(searchParams.get('includeInactive') || searchParams.get('include_inactive') || '').toLowerCase())
 
   try {
@@ -36,6 +53,7 @@ export async function GET(request) {
       .order('updated_at', { ascending: false })
       .limit(limit)
     if (!includeInactive) query = query.eq('is_active', true)
+    if (useCase) query = query.eq('use_case', useCase)
 
     const { data, error } = await query
     timer.mark('supabase_query', { error: error?.message || null })

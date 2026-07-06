@@ -159,6 +159,14 @@ export const normalizeSmsTemplate = (row: AnyRecord): SmsTemplate => {
   const stageCode = asString(row['stage_code'] ?? row['stage'] ?? row['workflow_stage'], '') || null
   const stageLabel = asString(row['stage_label'] ?? row['stage_name'], '') || null
   const active = asBoolean(row['active'] ?? row['is_active'] ?? true, true)
+  const isFollowUp = asBoolean(row['is_follow_up'], false)
+  const stageCodeNormalized = asString(row['stage_code'] ?? row['stage'] ?? '', '').trim().toUpperCase()
+  const isFirstTouchExplicit = asBoolean(row['is_first_touch'], false)
+  const isFirstTouch = !isFollowUp && (
+    isFirstTouchExplicit
+    || useCaseSlug === 'ownership_check'
+    || stageCodeNormalized === 'S1'
+  )
 
   return {
     id: asString(row['id'] ?? row['template_id'] ?? `${useCaseSlug}:${language}:${templateText.slice(0, 18)}`, ''),
@@ -172,8 +180,8 @@ export const normalizeSmsTemplate = (row: AnyRecord): SmsTemplate => {
     agentStyle: asString(row['agent_style'] ?? row['agent_style_fit'], '') || null,
     propertyTypeScope: asString(row['property_type_scope'], '') || null,
     dealStrategy: asString(row['deal_strategy'], '') || null,
-    isFirstTouch: asBoolean(row['is_first_touch'], false),
-    isFollowUp: asBoolean(row['is_follow_up'], false),
+    isFirstTouch,
+    isFollowUp,
     templateText,
     englishTranslation: asString(row['english_translation'], '') || null,
     variables: getTemplateVariables(templateText),
@@ -205,6 +213,7 @@ export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Pr
   const apiResult = await fetchSmsTemplatesFromApi({
     limit,
     includeInactive: params.includeInactive,
+    useCase: params.useCase && params.useCase !== 'all' ? params.useCase : undefined,
   })
   if (!apiResult.ok) {
     const err = apiResult as { message?: string; error?: string }
@@ -254,7 +263,7 @@ export const fetchTemplateLanguages = async (): Promise<string[]> => {
 }
 
 export const fetchTemplatesByUseCase = async (useCase: string): Promise<SmsTemplate[]> =>
-  fetchSmsTemplates({ useCase, limit: 1000 })
+  fetchSmsTemplates({ useCase, limit: 5000 })
 
 export const fetchTemplatesByLanguage = async (language: string): Promise<SmsTemplate[]> =>
   fetchSmsTemplates({ language, limit: 1000 })

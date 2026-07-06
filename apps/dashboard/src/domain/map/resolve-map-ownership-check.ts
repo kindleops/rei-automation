@@ -3,6 +3,8 @@ import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString, type AnyRecord } from '../../lib/data/shared'
 import { safeHumanName } from '../../lib/identity/entityDetection'
 
+const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? ''
+
 /** Production-safe PostgREST select for master_owners (lcppdrmrdfblstpcbgpf). */
 export const MAP_OWNERSHIP_MASTER_OWNER_SELECT =
   'master_owner_id, best_phone_1, primary_phone_id, display_name, best_language, agent_persona, agent_family'
@@ -807,8 +809,13 @@ const tryResolveFromHydratedMapHints = async (
       .maybeSingle()
     if (prospectError || !prospectRow) return null
     const prospect = prospectRow as AnyRecord
-    prospectFirstName = prospectFirstName || safeHumanName(text(prospect.first_name))
-    prospectFullName = prospectFullName || safeHumanName(text(prospect.full_name)) || prospectFirstName
+    const loadedFirst = safeHumanName(text(prospect.first_name))
+    const loadedFull = safeHumanName(text(prospect.full_name))
+    prospectFirstName = prospectFirstName || (loadedFirst ? firstToken(loadedFirst) : '')
+    prospectFullName = prospectFullName || loadedFull || prospectFirstName
+    if (!prospectFirstName && loadedFull) {
+      prospectFirstName = firstToken(loadedFull)
+    }
   }
   if (!prospectFirstName) return null
 
@@ -954,8 +961,12 @@ export const resolveMapOwnershipCheckIdentity = async (
   }
 
   const prospect = prospectRow as AnyRecord
-  const prospectFirstName = text(prospect.first_name) || text(hints.prospectFirstName)
-  const prospectFullName = text(prospect.full_name) || text(hints.prospectFullName) || prospectFirstName
+  const loadedFirst = safeHumanName(text(prospect.first_name) || text(hints.prospectFirstName))
+  const loadedFull = safeHumanName(text(prospect.full_name) || text(hints.prospectFullName))
+  const prospectFirstName = loadedFirst
+    ? firstToken(loadedFirst)
+    : (loadedFull ? firstToken(loadedFull) : '')
+  const prospectFullName = loadedFull || prospectFirstName
 
   const prospectMasterOwnerId = text(prospect.master_owner_id)
   if (prospectMasterOwnerId && prospectMasterOwnerId !== masterOwnerId) {
@@ -978,17 +989,34 @@ export const resolveMapOwnershipCheckIdentity = async (
   })
 }
 
+const resolveProspectGreetingFirstName = (
+  prospectFirstName: string,
+  prospectFullName: string,
+): string => {
+  const fromFirst = safeHumanName(prospectFirstName)
+  const fromFull = safeHumanName(prospectFullName)
+  if (fromFirst) return firstToken(fromFirst)
+  if (fromFull) return firstToken(fromFull)
+  return ''
+}
+
 export const buildOwnershipCheckTemplateContext = (
   identity: MapOwnershipCheckIdentity,
 ): Record<string, string> => {
-  const sellerFirstName = safeHumanName(identity.prospectFirstName)
-  const sellerName = safeHumanName(identity.prospectFullName) || sellerFirstName
+  const sellerFirstName = resolveProspectGreetingFirstName(
+    identity.prospectFirstName,
+    identity.prospectFullName,
+  )
   return {
     seller_first_name: sellerFirstName,
-    seller_name: sellerName,
-    seller_display_name: sellerName,
+    seller_name: sellerFirstName,
+    seller_full_name: sellerFirstName,
+    seller_display_name: sellerFirstName,
+    first_name: sellerFirstName,
+    nickname: sellerFirstName,
     owner_name: identity.ownerDisplayName,
     property_address: identity.propertyAddress,
+    street_address: identity.propertyAddress,
     agent_name: identity.agentFirstName,
     agent_first_name: identity.agentFirstName,
   }

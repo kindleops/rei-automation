@@ -51,8 +51,9 @@ const resolveGreetingName = (hints: ReturnType<typeof buildMapOwnershipCheckHint
 } => {
   const firstFromHint = safeHumanName(hints.prospectFirstName)
   const fullFromHint = safeHumanName(hints.prospectFullName)
-  const firstFromFull = fullFromHint ? safeHumanName(firstToken(fullFromHint)) : ''
-  const prospectFirstName = firstFromHint || firstFromFull
+  const prospectFirstName = firstFromHint
+    ? safeHumanName(firstToken(firstFromHint))
+    : (fullFromHint ? safeHumanName(firstToken(fullFromHint)) : '')
   const prospectFullName = fullFromHint || prospectFirstName
   return { prospectFirstName, prospectFullName }
 }

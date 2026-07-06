@@ -648,10 +648,15 @@ export function fetchQueueProcessorHealth(): Promise<BackendResult<Record<string
   return callBackend('/api/cockpit/queue/processor-health')
 }
 
-export function fetchSmsTemplatesFromApi(params?: { limit?: number; includeInactive?: boolean }): Promise<BackendResult<{ templates: unknown[] }>> {
+export function fetchSmsTemplatesFromApi(params?: {
+  limit?: number
+  includeInactive?: boolean
+  useCase?: string
+}): Promise<BackendResult<{ templates: unknown[] }>> {
   const qs = new URLSearchParams()
   if (params?.limit) qs.set('limit', String(params.limit))
   if (params?.includeInactive) qs.set('includeInactive', 'true')
+  if (params?.useCase) qs.set('use_case', params.useCase)
   const suffix = qs.toString()
   return callBackend(`/api/cockpit/templates/list${suffix ? `?${suffix}` : ''}`)
 }

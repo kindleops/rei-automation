@@ -119,7 +119,7 @@ export const buildMapTemplateManualValues = (record: Record<string, unknown>): R
   const first = prospectName ? firstToken(prospectName) : ''
   const agentFirstName = resolveMapAgentFirstName(record)
   return {
-    seller_name: prospectName,
+    seller_name: first,
     seller_first_name: first,
     owner_name: ownerName,
     agent_name: agentFirstName,
