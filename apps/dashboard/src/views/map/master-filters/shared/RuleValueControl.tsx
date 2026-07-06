@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 import type { MapFilterRegistryField } from '../types'
 import { cls } from '../utils'
+import { GlassSelect } from './GlassSelect'
 
 export interface RuleValueControlProps {
   field: MapFilterRegistryField | null
@@ -37,7 +38,7 @@ function resolveControlKind(field: MapFilterRegistryField | null, operator: stri
     field.controlType === 'enum_picker'
     || field.controlType === 'status_segment'
     || field.controlType === 'tag_picker'
-    || (field.valueSource === 'distinct' && field.enumOptions?.length)
+    || (field.valueSource === 'distinct' && (field.valueOptions?.length || field.enumOptions?.length))
   ) {
     return 'enum'
   }
@@ -52,6 +53,17 @@ function resolveControlKind(field: MapFilterRegistryField | null, operator: stri
   }
   if (field.controlType === 'date_range' || field.dataType === 'date') return 'date'
   return 'text'
+}
+
+function buildEnumOptions(field: MapFilterRegistryField | null) {
+  if (!field) return []
+  if (field.valueOptions?.length) {
+    return field.valueOptions.map((option) => ({
+      label: option.label,
+      value: String(option.value),
+    }))
+  }
+  return (field.enumOptions ?? []).map((option) => ({ label: option, value: option }))
 }
 
 export function RuleValueControl({
@@ -102,22 +114,21 @@ export function RuleValueControl({
   }
 
   if (controlKind === 'enum') {
-    const options = field?.enumOptions ?? []
+    const options = buildEnumOptions(field)
     if (!options.length) {
       return <span className="mf-muted">No preset values</span>
     }
     return (
-      <select
-        className="mf-select"
+      <GlassSelect
         value={value == null ? '' : String(value)}
+        options={options}
         disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">Select…</option>
-        {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
+        aria-label={field?.label ? `Value for ${field.label}` : 'Filter value'}
+        onChange={(next) => {
+          const matched = field?.valueOptions?.find((option) => String(option.value) === next)
+          onChange(matched ? matched.value : next)
+        }}
+      />
     )
   }
 
@@ -127,22 +138,23 @@ export function RuleValueControl({
 
   if (controlKind === 'between') {
     const pair = Array.isArray(value) ? value : ['', '']
-    const inputType = field?.controlType === 'currency_range' ? 'number' : 'number'
     return (
       <div className="mf-between">
-        <input className="mf-input" type={inputType} value={String(pair[0] ?? '')} disabled={disabled} placeholder="Min" onChange={(e) => onChange([e.target.value, pair[1]])} />
+        <input className="mf-input mf-input--glass" type="number" inputMode="decimal" value={String(pair[0] ?? '')} disabled={disabled} placeholder="Min" onChange={(e) => onChange([e.target.value, pair[1]])} />
         <span>to</span>
-        <input className="mf-input" type={inputType} value={String(pair[1] ?? '')} disabled={disabled} placeholder="Max" onChange={(e) => onChange([pair[0], e.target.value])} />
+        <input className="mf-input mf-input--glass" type="number" inputMode="decimal" value={String(pair[1] ?? '')} disabled={disabled} placeholder="Max" onChange={(e) => onChange([pair[0], e.target.value])} />
       </div>
     )
   }
 
   if (controlKind === 'number') {
-    const placeholder = field?.controlType === 'currency_range' ? 'Amount' : 'Enter value'
+    const isCurrency = field?.controlType === 'currency_range'
+    const placeholder = isCurrency ? 'Amount' : 'Enter value'
     return (
       <input
-        className="mf-input"
+        className={cls('mf-input', 'mf-input--glass', isCurrency && 'mf-input--currency')}
         type="number"
+        inputMode="decimal"
         value={value == null ? '' : String(value)}
         disabled={disabled}
         placeholder={placeholder}
@@ -154,7 +166,7 @@ export function RuleValueControl({
   if (controlKind === 'date') {
     return (
       <input
-        className="mf-input"
+        className="mf-input mf-input--glass"
         type="date"
         value={value == null ? '' : String(value)}
         disabled={disabled}
@@ -165,7 +177,7 @@ export function RuleValueControl({
 
   return (
     <input
-      className="mf-input"
+      className="mf-input mf-input--glass"
       type="text"
       value={value == null ? '' : String(value)}
       disabled={disabled}

@@ -95,7 +95,17 @@ export interface MapFilterRegistryField {
   advanced?: boolean
   launchVisible?: boolean
   enumOptions?: string[]
+  valueOptions?: { label: string; value: string | number | boolean }[]
+  verifiedQuickPresetKeys?: string[]
 }
+
+export type MapFilterPreviewStatus =
+  | 'baseline'
+  | 'loading'
+  | 'valid'
+  | 'failed'
+  | 'incomplete'
+  | 'stale'
 
 export interface MapFilterRegistryAlias {
   alias: string

@@ -7,6 +7,7 @@ import { ENTITY_LABELS } from '../types'
 import { normalizeRegistryEntity } from '../entity-utils'
 import { cls } from '../utils'
 import { RuleValueControl } from './RuleValueControl'
+import { GlassSelect } from './GlassSelect'
 
 export interface RuleCardProps {
   rule: AdvancedMapFilterRule
@@ -14,13 +15,18 @@ export interface RuleCardProps {
 }
 
 export function RuleCard({ rule, depth = 0 }: RuleCardProps) {
-  const { draftExpression, setDraftExpression, fields } = useMasterFilters()
+  const { draftExpression, setDraftExpression, fields, validationIssues } = useMasterFilters()
 
   const field = useMemo(() => fields.find((f) => f.key === rule.fieldKey) ?? null, [fields, rule.fieldKey])
   const entityLabel = useMemo(() => {
     const entity = field ? normalizeRegistryEntity(field.entity) : null
     return entity ? ENTITY_LABELS[entity] : 'Field'
   }, [field])
+
+  const ruleIssues = useMemo(
+    () => validationIssues.filter((issue) => issue.ruleId === rule.id),
+    [rule.id, validationIssues],
+  )
 
   const updateRule = (patch: Partial<AdvancedMapFilterRule>) => {
     setDraftExpression(updateNodeInTree(draftExpression, rule.id, (node) => {
@@ -29,8 +35,14 @@ export function RuleCard({ rule, depth = 0 }: RuleCardProps) {
     }))
   }
 
+  const fieldOptions = fields.map((f) => ({ label: f.label, value: f.key }))
+  const operatorOptions = (field?.operators ?? ['equals']).map((op) => ({
+    label: op.replace(/_/g, ' '),
+    value: op,
+  }))
+
   return (
-    <article className={cls('mf-rule', depth > 0 && 'mf-rule--nested')}>
+    <article className={cls('mf-rule', depth > 0 && 'mf-rule--nested', ruleIssues.length > 0 && 'is-invalid')}>
       <div className="mf-rule__top">
         <span className="mf-rule__entity">{entityLabel}</span>
         <div className="mf-rule__actions">
@@ -41,25 +53,44 @@ export function RuleCard({ rule, depth = 0 }: RuleCardProps) {
       <div className="mf-rule__grid">
         <label className="mf-label">
           <span>Field</span>
-          <select className="mf-select" value={rule.fieldKey} onChange={(e) => {
-            const next = fields.find((f) => f.key === e.target.value)
-            updateRule({ fieldKey: e.target.value, operator: next?.operators[0] ?? 'equals', value: '' })
-          }}>
-            <option value="">Select field…</option>
-            {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-          </select>
+          <GlassSelect
+            value={rule.fieldKey}
+            options={fieldOptions}
+            placeholder="Select field…"
+            aria-label="Filter field"
+            onChange={(fieldKey) => {
+              const next = fields.find((f) => f.key === fieldKey)
+              updateRule({
+                fieldKey,
+                operator: next?.defaultOperator ?? next?.operators[0] ?? 'equals',
+                value: '',
+              })
+            }}
+          />
         </label>
         <label className="mf-label">
           <span>Operator</span>
-          <select className="mf-select" value={rule.operator} onChange={(e) => updateRule({ operator: e.target.value })}>
-            {(field?.operators ?? ['equals']).map((op) => <option key={op} value={op}>{op.replace(/_/g, ' ')}</option>)}
-          </select>
+          <GlassSelect
+            value={rule.operator}
+            options={operatorOptions}
+            aria-label="Filter operator"
+            onChange={(operator) => updateRule({ operator })}
+          />
         </label>
         <label className="mf-label mf-label--value">
           <span>Value</span>
-          <RuleValueControl field={field} operator={rule.operator} value={rule.value} onChange={(value) => updateRule({ value })} onOperatorChange={(operator) => updateRule({ operator })} />
+          <RuleValueControl
+            field={field}
+            operator={rule.operator}
+            value={rule.value}
+            onChange={(value) => updateRule({ value })}
+            onOperatorChange={(operator) => updateRule({ operator })}
+          />
         </label>
       </div>
+      {ruleIssues.map((issue) => (
+        <p key={`${issue.code}-${issue.fieldKey}`} className="mf-rule__issue">{issue.message}</p>
+      ))}
     </article>
   )
 }
