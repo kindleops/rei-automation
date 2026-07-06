@@ -384,7 +384,7 @@ describe('map ownership check send regression', () => {
     const actionsPath = fileURLToPath(new URL('../../src/views/map/seller-card/useSellerMapCardActions.ts', import.meta.url))
     const source = await readFile(actionsPath, 'utf8')
     expect(source).toContain('sendInboxMessageNow')
-    expect(source).toContain('resolveMapOwnershipCheckIdentity')
+    expect(source).toContain('resolveMapOwnershipCheckForSend')
     expect(source).toContain('buildOwnershipCheckTemplateContext')
     expect(source).toContain('renderTemplate(followUpTemplate, templateContext)')
     expect(source).toContain('skipRenderGuard: true')

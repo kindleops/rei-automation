@@ -1,6 +1,8 @@
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString } from '../../lib/data/shared'
 import {
+  normalizeSellerDialablePhone,
+  pickSellerContactPhone,
   resolveCommandMapSellerPhone,
   resolveMasterOwnerIdForProperty,
 } from '../../lib/data/commandMapData'
@@ -14,16 +16,8 @@ import type { SellerMapCardViewModel } from '../../views/map/seller-card/seller-
 
 const text = (value: unknown): string => asString(value, '').trim()
 
-const toE164 = (value: unknown): string => {
-  const raw = text(value)
-  if (!raw) return ''
-  const digits = raw.replace(/\D/g, '')
-  if (!digits) return ''
-  if (raw.startsWith('+')) return `+${digits}`
-  if (digits.length === 10) return `+1${digits}`
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
-  return `+${digits}`
-}
+const dialablePhone = (value: unknown): string =>
+  normalizeSellerDialablePhone(value) || ''
 
 const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? ''
 
@@ -47,11 +41,9 @@ const MAP_THREAD_PHONE_KEYS = [
 const firstDefined = (...values: unknown[]): unknown =>
   values.find((value) => value != null && text(value))
 
-const resolveHydratedThreadPhone = (record: Record<string, unknown>): string => {
-  const raw = text(firstDefined(...MAP_THREAD_PHONE_KEYS.map((key) => record[key])))
-  if (!raw || raw.toLowerCase() === 'no phone') return ''
-  return toE164(raw)
-}
+const resolveHydratedThreadPhone = (record: Record<string, unknown>): string =>
+  dialablePhone(pickSellerContactPhone(record))
+  || dialablePhone(firstDefined(...MAP_THREAD_PHONE_KEYS.map((key) => record[key])))
 
 const resolveGreetingName = (hints: ReturnType<typeof buildMapOwnershipCheckHints>): {
   prospectFirstName: string
@@ -86,7 +78,7 @@ const readMasterOwnerSendSignals = async (
   if (error || !data) return null
   const row = data as Record<string, unknown>
   return {
-    bestPhone: toE164(row.best_phone_1),
+    bestPhone: dialablePhone(row.best_phone_1),
     primaryPhoneId: text(row.primary_phone_id),
     agentPersona: text(row.agent_persona),
     agentFamily: text(row.agent_family),
@@ -95,17 +87,35 @@ const readMasterOwnerSendSignals = async (
   }
 }
 
-const readSellerWorkItemMasterOwnerId = async (propertyId: string): Promise<string> => {
+const readSellerWorkItemOwnership = async (
+  propertyId: string,
+): Promise<{
+  masterOwnerId: string
+  prospectId: string
+  prospectFullName: string
+  recipientPhone: string
+} | null> => {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('v_seller_work_items')
-    .select('master_owner_id')
+    .select('master_owner_id, prospect_id, prospect_full_name, prospect_best_phone, display_phone')
     .eq('property_id', propertyId)
     .limit(1)
     .maybeSingle()
 
-  if (error || !data) return ''
-  return text((data as Record<string, unknown>).master_owner_id)
+  if (error || !data) return null
+  const row = data as Record<string, unknown>
+  return {
+    masterOwnerId: text(row.master_owner_id),
+    prospectId: text(row.prospect_id),
+    prospectFullName: text(row.prospect_full_name),
+    recipientPhone: dialablePhone(pickSellerContactPhone(row)),
+  }
+}
+
+const readSellerWorkItemMasterOwnerId = async (propertyId: string): Promise<string> => {
+  const workItem = await readSellerWorkItemOwnership(propertyId)
+  return workItem?.masterOwnerId || ''
 }
 
 const resolveMasterOwnerIdForSend = async (
@@ -136,65 +146,53 @@ export const resolveMapOwnershipCheckForSend = async (
     return { ok: false, error: 'property_id is required' }
   }
 
-  const hints = buildMapOwnershipCheckHints(viewModel, record)
+  const workItem = await readSellerWorkItemOwnership(normalizedPropertyId)
+  const baseHints = buildMapOwnershipCheckHints(viewModel, record)
+  const workItemFullName = safeHumanName(workItem?.prospectFullName || '')
+  const hints = {
+    ...baseHints,
+    masterOwnerId: baseHints.masterOwnerId || workItem?.masterOwnerId || null,
+    prospectId: baseHints.prospectId || workItem?.prospectId || null,
+    prospectFullName: baseHints.prospectFullName || workItemFullName || null,
+    prospectFirstName: baseHints.prospectFirstName
+      || (workItemFullName ? safeHumanName(firstToken(workItemFullName)) : null),
+  }
   const masterOwnerId = await resolveMasterOwnerIdForSend(normalizedPropertyId, hints)
   if (!masterOwnerId) {
     return { ok: false, error: 'property_owner_link_missing' }
   }
 
-  let recipientPhone = toE164(hints.recipientPhone) || resolveHydratedThreadPhone(record)
-  let phoneId = text(hints.phoneId)
-  let ownerSignals = null as Awaited<ReturnType<typeof readMasterOwnerSendSignals>>
-
-  ownerSignals = await readMasterOwnerSendSignals(masterOwnerId)
-
-  if (!recipientPhone || !phoneId) {
-    if (!recipientPhone) {
-      recipientPhone = ownerSignals?.bestPhone || ''
-    }
-    if (!phoneId) {
-      phoneId = ownerSignals?.primaryPhoneId || ''
-    }
-  }
+  const ownerSignals = await readMasterOwnerSendSignals(masterOwnerId)
+  let recipientPhone = ownerSignals?.bestPhone
+    || workItem?.recipientPhone
+    || dialablePhone(hints.recipientPhone)
+    || resolveHydratedThreadPhone(record)
+  const phoneId = text(hints.phoneId) || ownerSignals?.primaryPhoneId || ''
 
   if (!recipientPhone) {
     const resolved = await resolveCommandMapSellerPhone(normalizedPropertyId, {
       prospectId: hints.prospectId,
       masterOwnerId,
     })
-    recipientPhone = toE164(resolved.phone)
+    recipientPhone = dialablePhone(resolved.phone)
   }
 
   if (!recipientPhone) {
     return { ok: false, error: 'master_owner_missing_best_phone' }
   }
 
-  const agentName = text(hints.agentPersona)
+  const agentPersona = text(hints.agentPersona)
     || text(hints.agentFamily)
     || ownerSignals?.agentPersona
     || ownerSignals?.agentFamily
     || ''
-  const agentFirstName = agentName ? firstToken(safeHumanName(agentName) || agentName) : ''
-  if (!agentName || !agentFirstName) {
+  const agentFirstName = agentPersona ? firstToken(safeHumanName(agentPersona) || agentPersona) : ''
+  if (!agentFirstName) {
     return { ok: false, error: 'assigned_agent_missing' }
   }
 
   const prospectId = text(hints.prospectId)
-  let { prospectFirstName, prospectFullName } = resolveGreetingName(hints)
-  if (prospectId && (!prospectFirstName || !prospectFullName)) {
-    const supabase = getSupabaseClient()
-    const { data: prospectRow } = await supabase
-      .from('prospects')
-      .select('first_name, full_name')
-      .eq('prospect_id', prospectId)
-      .limit(1)
-      .maybeSingle()
-    if (prospectRow) {
-      const row = prospectRow as Record<string, unknown>
-      prospectFirstName = prospectFirstName || safeHumanName(text(row.first_name))
-      prospectFullName = prospectFullName || safeHumanName(text(row.full_name)) || prospectFirstName
-    }
-  }
+  const { prospectFirstName, prospectFullName } = resolveGreetingName(hints)
   if (!prospectFirstName) {
     return { ok: false, error: 'prospect_name_missing' }
   }
@@ -224,7 +222,7 @@ export const resolveMapOwnershipCheckForSend = async (
     prospectFirstName,
     prospectFullName,
     smsEligible: true,
-    agentName,
+    agentName: agentFirstName,
     agentFirstName,
     ownerDisplayName,
     ownerLanguage,

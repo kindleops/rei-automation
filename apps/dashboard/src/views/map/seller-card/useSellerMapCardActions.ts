@@ -12,11 +12,10 @@ import {
   resolveCommandMapSellerPhone,
 } from '../../../lib/data/commandMapData'
 import {
-  buildMapOwnershipCheckHints,
   buildOwnershipCheckTemplateContext,
-  resolveMapOwnershipCheckIdentity,
   type MapOwnershipCheckIdentity,
 } from '../../../domain/map/resolve-map-ownership-check'
+import { resolveMapOwnershipCheckForSend } from '../../../domain/map/resolve-map-ownership-check-for-send'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
@@ -327,10 +326,11 @@ export const useSellerMapCardActions = ({
       let ownershipIdentity: MapOwnershipCheckIdentity | null = null
 
       if (eligibility.isUncontacted) {
-        const ownershipHints = buildMapOwnershipCheckHints(viewModel, record)
-        const ownershipResolved = await resolveMapOwnershipCheckIdentity(viewModel.propertyId, {
-          hints: ownershipHints,
-        })
+        const ownershipResolved = await resolveMapOwnershipCheckForSend(
+          viewModel.propertyId,
+          viewModel,
+          record,
+        )
         if (!ownershipResolved.ok) {
           setFollowUpError(mapOwnershipResolveError(ownershipResolved.error).slice(0, 80))
           setFollowUpState('blocked')

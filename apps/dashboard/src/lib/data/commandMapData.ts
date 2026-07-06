@@ -775,9 +775,11 @@ const readCommandMapPinFeedContact = async (
 ): Promise<{ phone: string | null; prospectId: string | null; masterOwnerId: string | null } | null> => {
   if (!propertyId) return null
   const supabase = getSupabaseClient()
+  // Production pin feed may not expose phone columns (pre-20260704120000 migration).
+  // Identity only here — phone resolves via master_owners.best_phone_1 / work items.
   let query = supabase
     .from('v_command_map_seller_pin_feed')
-    .select('prospect_id,master_owner_id,prospect_best_phone,display_phone,canonical_e164,seller_phone')
+    .select('prospect_id,master_owner_id')
     .eq('property_id', propertyId)
   if (signal) query = query.abortSignal(signal)
   const { data, error } = await query.limit(1).maybeSingle()
