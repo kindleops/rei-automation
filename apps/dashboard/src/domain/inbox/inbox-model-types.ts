@@ -349,8 +349,9 @@ export interface InboxModel {
   urgentCount: number
   totalCount: number
   aiDraftCount: number
-  dataMode: 'live' | 'mock_preview' | 'fallback_error'
+  dataMode: 'live' | 'mock_preview' | 'fallback_error' | 'auth_error' | 'backend_unavailable' | 'degraded_timeout'
   liveFetchStatus: 'active' | 'error' | 'disabled' | 'fallback_error'
+  countsFetchWarning?: string | null
   liveFetchError: string | null
   /** Internal: tracks which filter was used to load these threads — prevents stale rows bleeding across filter switches */
   _requestedFilter?: string

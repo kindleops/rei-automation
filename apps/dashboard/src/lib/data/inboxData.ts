@@ -22,6 +22,12 @@ import {
   type AnyRecord,
 } from './shared'
 import { emitNotification } from '../../shared/NotificationToast'
+import {
+  buildInboxLiveFetchError,
+  classifyInboxBackendFailure,
+  InboxLiveApiError,
+  resolveInboxLiveDataMode,
+} from '../../domain/inbox/inbox-boot-read'
 import { isEntityName } from '../identity/entityDetection'
 import { getDealContextByThread, normalizeDealContext, type DealContext } from './dealContext'
 import { commitDashboardMessages, commitDashboardThreads } from './dashboardEntityStore'
@@ -177,6 +183,8 @@ export interface LiveInboxResponse {
   diagnostics?: LiveInboxDiagnostics
   source?: string | null
   fallbackUsed?: boolean
+  degraded?: boolean
+  dataMode?: string | null
   countsDegraded?: boolean
   countsApproximate?: boolean
   countsSource?: string | null
@@ -1743,6 +1751,8 @@ const normalizeLiveInboxResponse = (payload: AnyRecord, fallbackLimit: number): 
     },
     source: asString(payload['source'] ?? diagnostics['source'], '') || null,
     fallbackUsed: asBoolean(payload['fallback_used'] ?? payload['fallbackUsed'] ?? diagnostics['fallback_used'] ?? diagnostics['fallbackUsed'], false),
+    degraded: asBoolean(payload['degraded'] ?? payload['stale'], false),
+    dataMode: asString(payload['dataMode'] ?? payload['data_mode'], '') || null,
     countsDegraded: asBoolean(payload['countsDegraded'] ?? payload['counts_degraded'] ?? diagnostics['countsDegraded'] ?? diagnostics['counts_degraded'], false),
     countsApproximate: asBoolean(payload['countsApproximate'] ?? payload['counts_approximate'] ?? diagnostics['countsApproximate'] ?? diagnostics['counts_approximate'], false),
     countsSource: asString(payload['countsSource'] ?? payload['counts_source'] ?? diagnostics['countsSource'] ?? diagnostics['counts_source'], '') || null,
@@ -1808,8 +1818,12 @@ export const fetchLiveInbox = async ({
     responseBodyPath: responsePayload?.threads ? 'threads' : responseData?.threads ? 'data.threads' : responsePayload?.messages ? 'messages' : responseData?.messages ? 'data.messages' : null,
   })
   if (!result.ok) {
-    const errorMsg = result.message || result.error || 'Unknown API error'
-    throw new Error(`Live inbox API failed (${result.status}): ${errorMsg}`)
+    throw new InboxLiveApiError(classifyInboxBackendFailure({
+      status: result.status,
+      error: result.error ?? null,
+      message: result.message ?? null,
+      isDev: DEV,
+    }))
   }
   const payload = result.data as AnyRecord
   const nestedData = ((payload['data'] && typeof payload['data'] === 'object') ? payload['data'] : null) as AnyRecord | null
@@ -2172,6 +2186,8 @@ export const getInboxRowsForView = async (
   countsApproximate?: boolean;
   countsSource?: string | null;
   countPreservedReason?: string | null;
+  degraded?: boolean;
+  dataMode?: string | null;
 }> => {
   const requestedPageSize = options.maxRows ?? options.limit ?? HYDRATED_INBOX_PAGE_SIZE
   const page_size = options._timeoutMode === 'initial_boot'
@@ -2308,6 +2324,8 @@ export const getInboxRowsForView = async (
     countsApproximate: live.countsApproximate ?? live.diagnostics?.countsApproximate ?? false,
     countsSource: live.countsSource ?? live.diagnostics?.countsSource ?? null,
     countPreservedReason: live.countPreservedReason ?? live.diagnostics?.countPreservedReason ?? null,
+    degraded: live.degraded === true,
+    dataMode: live.dataMode ?? null,
   }
 }
 
@@ -2973,6 +2991,15 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
   const nextCursorRaw = viewResult?.next_cursor ?? null
   const hasMoreActual = viewResult?.has_more ?? (nextCursorRaw != null)
 
+  const resolvedDataMode = resolveInboxLiveDataMode({
+    threadCount: threads.length,
+    degraded: viewResult?.degraded === true,
+    fallbackUsed: viewResult?.fallbackUsed === true || liveDiagnostics.fallbackUsed === true,
+    apiDataMode: viewResult?.dataMode ?? null,
+    errorCode: null,
+  })
+  const resolvedLiveFetchError = buildInboxLiveFetchError(resolvedDataMode, { isDev: DEV })
+
   // Task: totalCount must be bucket-aware.
   const view = filterState.view || 'all_messages'
   let bucketTotal = allInboxCount
@@ -2994,9 +3021,9 @@ export const fetchInboxModel = async (options: InboxFetchOptions = {}): Promise<
     urgentCount: numOr(categoryCounts.hot_leads),
     totalCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     aiDraftCount: threadList.filter((thread) => thread.aiDraft !== null).length,
-    dataMode: 'live',
-    liveFetchStatus: 'active',
-    liveFetchError: null,
+    dataMode: resolvedDataMode,
+    liveFetchStatus: resolvedDataMode === 'live' ? 'active' : 'fallback_error',
+    liveFetchError: resolvedLiveFetchError,
     messageEventsCount: bucketTotal > 0 ? bucketTotal : totalAvailable,
     messageEventsRawCount: bucketTotal,
     groupedThreadCount: bucketTotal > 0 ? bucketTotal : totalAvailable,

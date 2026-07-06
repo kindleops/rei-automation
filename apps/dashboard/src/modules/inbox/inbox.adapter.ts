@@ -33,6 +33,15 @@ import {
   markInboxLiveRequest,
   publishInboxProof,
 } from '../../domain/inbox/inbox-proof-bridge'
+import {
+  applyInboxCountsFetchResult,
+  classifyInboxBackendFailure,
+  getBackendAuthSecretPresence,
+  InboxLiveApiError,
+  mapAuthoritativeCountsFromPayload,
+  planInboxMountFetches,
+  resolveThreadFetchCommit,
+} from '../../domain/inbox/inbox-boot-read'
 
 const CACHE_KEY = 'leadcommand.liveInbox.lastGood.v2'
 const CACHE_COUNTS_KEY = 'leadcommand.liveInbox.lastGoodCounts.v2'
@@ -72,20 +81,40 @@ const writeCachedViewCounts = (counts: Record<string, number>) => {
 const DEFAULT_BOOT_BUCKET_KEY = 'all_messages'
 const COUNTS_REFRESH_DEBOUNCE_MS = 350
 
-const refreshAuthoritativeViewCounts = (
+export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
+  onWarning?: (warning: string | null) => void,
 ) => {
   void backendClient.fetchInboxCounts().then((res) => {
-    if (!res.ok) return
-    const payload = (res.data ?? {}) as Record<string, unknown>
-    const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as
-      | Record<string, unknown>
-      | undefined
-    if (!rawCounts || Object.keys(rawCounts).length === 0) return
-    const counts = mapAuthoritativeCounts(rawCounts)
-    dispatch({ type: 'SET_VIEW_COUNTS', counts })
-    writeCachedViewCounts(counts)
-  }).catch(() => {})
+    const applied = applyInboxCountsFetchResult({
+      ok: res.ok,
+      status: res.status,
+      payload: res.ok
+        ? ((res.data ?? null) as Record<string, unknown> | null)
+        : ({
+          error: res.error ?? null,
+          message: res.message ?? null,
+        } as Record<string, unknown>),
+      isDev,
+    })
+    if (applied.counts && Object.keys(applied.counts).length > 0) {
+      dispatch({ type: 'SET_VIEW_COUNTS', counts: applied.counts })
+      writeCachedViewCounts(applied.counts)
+      onWarning?.(null)
+      return
+    }
+    if (applied.warning) {
+      console.warn('[INBOX_COUNTS_FETCH_WARNING]', { warning: applied.warning, status: applied.status ?? null })
+      onWarning?.(applied.warning)
+    }
+  }).catch((err) => {
+    const failure = classifyInboxBackendFailure({
+      message: err instanceof Error ? err.message : String(err),
+      isDev,
+    })
+    console.warn('[INBOX_COUNTS_FETCH_WARNING]', { warning: failure.message, diagnosticCode: failure.diagnosticCode })
+    onWarning?.(failure.message)
+  })
 }
 
 const readCachedBootRows = (bucketKey: string = DEFAULT_BOOT_BUCKET_KEY): InboxThread[] => {
@@ -148,20 +177,8 @@ const buildBootStoreState = (): typeof EMPTY_INBOX_STORE_STATE => {
   }
 }
 
-const mapAuthoritativeCounts = (rawCounts: Record<string, unknown>): Record<string, number> => ({
-  priority: Number(rawCounts.priority ?? rawCounts.hot_leads ?? 0),
-  new_replies: Number(rawCounts.new_replies ?? rawCounts.new_inbound ?? 0),
-  needs_review: Number(rawCounts.needs_review ?? 0),
-  waiting: Number(rawCounts.waiting ?? rawCounts.waiting_on_seller ?? 0),
-  follow_up: Number(rawCounts.follow_up ?? rawCounts.outbound_active ?? 0),
-  cold: Number(rawCounts.cold ?? rawCounts.cold_no_response ?? 0),
-  dead: Number(rawCounts.dead ?? 0),
-  suppressed: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? 0),
-  all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
-  all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
-  active: Number(rawCounts.active ?? 0),
-  automated: Number(rawCounts.automated ?? 0),
-})
+const mapAuthoritativeCounts = (rawCounts: Record<string, unknown>): Record<string, number> =>
+  mapAuthoritativeCountsFromPayload({ counts: rawCounts })
 
 const toDashboardConnectionState = (status: InboxRealtimeStatus): DashboardConnectionState => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline'
@@ -427,12 +444,24 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     // Do NOT commit fallback_error for an intentionally cancelled request.
     if (options.signal?.aborted) throw error
 
-    const liveFetchError = error instanceof Error ? error.message : String(error)
+    const classification = error instanceof InboxLiveApiError
+      ? error.classification
+      : classifyInboxBackendFailure({
+        message: error instanceof Error ? error.message : String(error),
+        isDev,
+      })
+    const liveFetchError = classification.message
     if (liveFetchError.includes('timed out')) {
       console.warn('[INBOX_TIMEOUT_HIT]', { filterKey, timeoutMode, timeoutMs, liveFetchError })
     }
+    console.warn('[INBOX_LOAD_FAILED]', {
+      filterKey,
+      dataMode: classification.dataMode,
+      diagnosticCode: classification.diagnosticCode,
+      retryable: classification.retryable,
+    })
     if (isDev) {
-      console.error('[NEXUS] Inbox live load failed.', { filterKey, error })
+      console.error('[NEXUS] Inbox live load failed.', { filterKey, error, classification })
     }
 
     // Only return cache for the SAME filter — never substitute a different filter's cache
@@ -443,8 +472,8 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
         return {
           ...parsed,
           _requestedFilter: filterKey,
-          dataMode: 'fallback_error',
-          liveFetchStatus: 'fallback_error',
+          dataMode: classification.dataMode,
+          liveFetchStatus: classification.liveFetchStatus,
           liveFetchError,
         }
       } catch {
@@ -460,9 +489,9 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
         urgentCount: 0,
         totalCount: anyCachedRows.length,
         aiDraftCount: 0,
-        dataMode: 'fallback_error',
-        liveFetchStatus: 'fallback_error',
-        liveFetchError: liveFetchError,
+        dataMode: classification.dataMode,
+        liveFetchStatus: classification.liveFetchStatus,
+        liveFetchError,
         messageEventsCount: anyCachedRows.length,
         messageEventsRawCount: anyCachedRows.length,
         groupedThreadCount: anyCachedRows.length,
@@ -481,7 +510,13 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
       }
     }
 
-    return { ...emptyLiveErrorModel(liveFetchError), _requestedFilter: filterKey }
+    return {
+      ...emptyLiveErrorModel(liveFetchError),
+      _requestedFilter: filterKey,
+      dataMode: classification.dataMode,
+      liveFetchStatus: classification.liveFetchStatus,
+      liveFetchError,
+    }
   }
 }
 
@@ -955,7 +990,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   pausedRef.current = paused
 
   // Non-row metadata from the last successful API response (counts, map pins, etc.)
-  const metaRef = useRef<Partial<InboxModel>>({})
+  const metaRef = useRef<Partial<InboxModel>>({ countsFetchWarning: null })
 
   const lastFetchRef = useRef<InboxFetchOptions>({ sourceMode: initialSourceMode })
   const abortByBucketRef = useRef<Record<string, AbortController>>({})
@@ -1061,17 +1096,23 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       const currentBucket = stateRef.current.buckets[bucketKey]
       const currentRowsCount = currentBucket?.rows?.length ?? 0
       const hasThreadRows = (model.threads?.length ?? 0) > 0
+      const commitAction = resolveThreadFetchCommit({
+        dataMode: model.dataMode,
+        incomingThreadCount: model.threads?.length ?? 0,
+        currentRowCount: currentRowsCount,
+      })
 
-      // Protection Rule: only block a degraded response when it has no rows to show.
-      // If threads exist, commit them and preserve the last good counts instead.
-      if (model.dataMode !== 'live' && !hasThreadRows) {
-        if (currentRowsCount === 0) {
+      if (commitAction !== 'commit_live') {
+        if (commitAction === 'error_empty') {
           console.warn('[INBOX_DEGRADED_INITIAL_BLOCKED]', { bucketKey, rowCount: model.threads.length, dataMode: model.dataMode })
           dispatch({
             type: 'BUCKET_FETCH_ERROR',
             bucketKey,
             requestId,
-            error: model.liveFetchError ?? 'inbox_load_failed'
+            error: model.liveFetchError ?? 'inbox_load_failed',
+          })
+          refreshAuthoritativeViewCounts(dispatch, (warning) => {
+            metaRef.current.countsFetchWarning = warning
           })
         } else {
           console.warn(`[Inbox Protection] Ignoring degraded/fallback response. Preserving ${currentRowsCount} existing rows.`)
@@ -1088,7 +1129,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         return model
       }
 
-      if (model.dataMode === 'fallback_error' && hasThreadRows && currentRowsCount > 0) {
+      if (model.dataMode !== 'live' && model.dataMode !== 'mock_preview' && hasThreadRows && currentRowsCount > 0) {
         const currentScore = getRichnessScore(currentBucket.rows)
         const incomingScore = getRichnessScore(model.threads)
         if (incomingScore < currentScore) {
@@ -1267,6 +1308,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       if (!staleGuardPassed) return null
       const errMsg = err instanceof Error ? err.message : String(err)
       dispatch({ type: 'BUCKET_FETCH_ERROR', bucketKey, requestId, error: errMsg })
+      refreshAuthoritativeViewCounts(dispatch, (warning) => {
+        metaRef.current.countsFetchWarning = warning
+      })
       setError(err)
       if (isDev) console.error('[NEXUS] useInboxData load failed', err)
       return null
@@ -1395,7 +1439,25 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   useEffect(() => {
     let cancelled = false
 
-    void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot', limit: 25 })
+    const mountPlan = planInboxMountFetches()
+    if (mountPlan.fetchCountsImmediately) {
+      const auth = getBackendAuthSecretPresence()
+      if (!auth.present && !isDev) {
+        metaRef.current.countsFetchWarning = 'Inbox API authentication secret is missing in this build.'
+        console.warn('[INBOX_AUTH_SECRET_MISSING]', {
+          present: false,
+          secretLength: auth.secretLength,
+          first6: auth.first6,
+          last4: auth.last4,
+        })
+      }
+      refreshAuthoritativeViewCounts(dispatch, (warning) => {
+        metaRef.current.countsFetchWarning = warning
+      })
+    }
+    if (mountPlan.fetchThreads) {
+      void refresh({ _timeoutMode: 'initial_boot', _refreshReason: 'initial_boot', limit: 25 })
+    }
 
     let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null
 
@@ -1406,7 +1468,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       isDocumentHidden: () => typeof document !== 'undefined' && document.hidden,
       onTick: () => {
         markDegradedPollTick()
-        refreshAuthoritativeViewCounts(dispatch)
+        refreshAuthoritativeViewCounts(dispatch, (warning) => {
+          metaRef.current.countsFetchWarning = warning
+        })
         void refresh({
           _automatic: true,
           _refreshReason: 'fallback_polling',
@@ -1659,7 +1723,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         realtimeBatchRef.current.eventCount += 1
         if (countsRefreshDebounceRef.current) clearTimeout(countsRefreshDebounceRef.current)
         countsRefreshDebounceRef.current = setTimeout(() => {
-          refreshAuthoritativeViewCounts(dispatch)
+          refreshAuthoritativeViewCounts(dispatch, (warning) => {
+            metaRef.current.countsFetchWarning = warning
+          })
         }, COUNTS_REFRESH_DEBOUNCE_MS)
         if (!patchApplied && isDev) {
           console.log('[INBOX_REALTIME_PATCH_SKIPPED]', {
@@ -1807,6 +1873,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     liveDataSource: metaRef.current.liveDataSource ?? null,
     fallbackUsed: metaRef.current.fallbackUsed ?? false,
     lastLiveFetchAt: metaRef.current.lastLiveFetchAt ?? null,
+    countsFetchWarning: metaRef.current.countsFetchWarning ?? null,
     messageEventsCount: null,
     messageEventsRawCount: null,
     groupedThreadCount: null,
