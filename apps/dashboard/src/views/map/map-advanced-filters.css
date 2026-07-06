@@ -1,0 +1,53 @@
+/* Map Advanced Filters — extends Inbox nx-ifm shell */
+
+.nx-ifm-overlay--map {
+  z-index: 10050;
+}
+
+.nx-ifm-modal--map .nx-ifm-header span.is-error {
+  color: var(--nx-danger, #ff7080);
+}
+
+@media (max-width: 900px) {
+  .nx-ifm-overlay--map {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .nx-ifm-modal--map {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .nx-ifm-modal--map .nx-ifm-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .nx-ifm-modal--map .nx-ifm-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 8px 10px;
+  }
+
+  .nx-ifm-modal--map .nx-ifm-rail-item {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .nx-ifm-modal--map .nx-ifm-active {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .nx-ifm-modal--map .nx-ifm-fields {
+    grid-template-columns: 1fr;
+  }
+}

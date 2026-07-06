@@ -1,3 +1,4 @@
+/** @deprecated Rejected UI — use MapAdvancedFiltersModal. API/types remain for pipeline wiring. */
 export { MasterFiltersWorkspace } from './MasterFiltersWorkspace'
 export { MasterFiltersProvider, useMasterFilters } from './MasterFiltersProvider'
 export type { MasterFiltersProviderProps } from './MasterFiltersProvider'

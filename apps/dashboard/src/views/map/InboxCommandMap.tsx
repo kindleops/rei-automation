@@ -145,8 +145,8 @@ import {
   THEME_TRANSITION_MS,
 } from './map-visual-presets'
 import { fetchMapProperties } from '../../lib/api/backendClient'
-import { MasterFiltersWorkspace } from './master-filters'
 import type { MapFilterBounds } from './master-filters'
+import { MapAdvancedFiltersModal } from './components/MapAdvancedFiltersModal'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
   LIFECYCLE_STAGE_META,
@@ -4140,6 +4140,7 @@ export function InboxCommandMap({
   const [showCensusDock, setShowCensusDock] = useState(false)
 
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [mapAdvancedFiltersOpen, setMapAdvancedFiltersOpen] = useState(false)
   const [activeControlsTab, setActiveControlsTab] = useState<ControlsTab>('modes')
   const [mapMode, setMapMode] = useState<MapModeKey>('acquisition')
   const [appliedMapFilterToken, setAppliedMapFilterToken] = useState<string | null>(null)
@@ -4611,6 +4612,49 @@ export function InboxCommandMap({
       lng_max: viewportBounds.east,
     }
   }, [viewportBounds])
+
+  const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number) => {
+    propertyUniverseAbortRef.current?.abort()
+    appliedMapFilterTokenRef.current = token
+    setAppliedMapFilterToken(token)
+    setAppliedMasterFilterRuleCount(activeRuleCount)
+    const map = mapRef.current
+    if (isStyleSafe(map)) {
+      const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
+        ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
+        : undefined
+      ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
+      applyMasterFilterMapLayerOverride(map, Boolean(token))
+      if (!token) {
+        applySellerPinFieldPresentation(map, {
+          sellerPinsEnabled: sellerPinLayers.sellerPins,
+          viewportZoom: map.getZoom(),
+          geojson: sellerPinsGeojsonRef.current,
+          masterFilterActive: false,
+        })
+      }
+    }
+  }, [sellerPinLayers.sellerPins])
+
+  const clearMapFilterToken = useCallback(() => {
+    propertyUniverseAbortRef.current?.abort()
+    appliedMapFilterTokenRef.current = null
+    setAppliedMapFilterToken(null)
+    setAppliedMasterFilterRuleCount(0)
+    const map = mapRef.current
+    if (isStyleSafe(map)) {
+      const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
+        ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
+        : undefined
+      ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, null)
+      applySellerPinFieldPresentation(map, {
+        sellerPinsEnabled: sellerPinLayers.sellerPins,
+        viewportZoom: map.getZoom(),
+        geojson: sellerPinsGeojsonRef.current,
+        masterFilterActive: false,
+      })
+    }
+  }, [sellerPinLayers.sellerPins])
   const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => ({
     type: 'FeatureCollection',
     features: [],
@@ -9309,7 +9353,7 @@ export function InboxCommandMap({
           </div>
         </div>
         {filtersOpen && (
-          <div className={cls('nx-icm__controls-popover', activeControlsTab === 'filters' && 'is-master-filters')}>
+          <div className="nx-icm__controls-popover">
             <div className="nx-icm__controls-drawer-header">
               <div className="nx-icm__controls-drawer-title">
                 <span className="nx-icm__controls-drawer-eyebrow">Map Command</span>
@@ -9323,60 +9367,19 @@ export function InboxCommandMap({
                   key={tab.key}
                   type="button"
                   className={cls('nx-icm__controls-tab', activeControlsTab === tab.key && 'is-active')}
-                  onClick={() => setActiveControlsTab(tab.key)}
+                  onClick={() => {
+                    if (tab.key === 'filters') {
+                      setMapAdvancedFiltersOpen(true)
+                      return
+                    }
+                    setActiveControlsTab(tab.key)
+                  }}
                 >
                   {tab.key === 'filters' && activeFilterCount > 0 ? `Filters · ${activeFilterCount}` : tab.label}
                 </button>
               ))}
             </div>
-            {activeControlsTab === 'filters' ? (
-              <MasterFiltersWorkspace
-                isMobile={isMobile}
-                bounds={mapFilterBounds}
-                initialToken={appliedMapFilterToken}
-                onApply={({ token, activeRuleCount }) => {
-                  propertyUniverseAbortRef.current?.abort()
-                  appliedMapFilterTokenRef.current = token
-                  setAppliedMapFilterToken(token)
-                  setAppliedMasterFilterRuleCount(activeRuleCount)
-                  const map = mapRef.current
-                  if (isStyleSafe(map)) {
-                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
-                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
-                      : undefined
-                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
-                    applyMasterFilterMapLayerOverride(map, Boolean(token))
-                    if (!token) {
-                      applySellerPinFieldPresentation(map, {
-                        sellerPinsEnabled: sellerPinLayers.sellerPins,
-                        viewportZoom: map.getZoom(),
-                        geojson: sellerPinsGeojsonRef.current,
-                        masterFilterActive: false,
-                      })
-                    }
-                  }
-                }}
-                onClear={() => {
-                  propertyUniverseAbortRef.current?.abort()
-                  appliedMapFilterTokenRef.current = null
-                  setAppliedMapFilterToken(null)
-                  setAppliedMasterFilterRuleCount(0)
-                  const map = mapRef.current
-                  if (isStyleSafe(map)) {
-                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
-                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
-                      : undefined
-                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, null)
-                    applySellerPinFieldPresentation(map, {
-                      sellerPinsEnabled: sellerPinLayers.sellerPins,
-                      viewportZoom: map.getZoom(),
-                      geojson: sellerPinsGeojsonRef.current,
-                      masterFilterActive: false,
-                    })
-                  }
-                }}
-              />
-            ) : (
+            {activeControlsTab !== 'filters' ? (
             <>
             <div className="nx-icm__controls-panel">
               {activeControlsTab === 'modes' && (
@@ -9806,7 +9809,7 @@ export function InboxCommandMap({
               </button>
             </div>
             </>
-            )}
+            ) : null}
           </div>
         )}
       </div>}
@@ -10241,6 +10244,16 @@ export function InboxCommandMap({
           </div>
         </div>
       )}
+
+      <MapAdvancedFiltersModal
+        open={mapAdvancedFiltersOpen}
+        bounds={mapFilterBounds}
+        onClose={() => setMapAdvancedFiltersOpen(false)}
+        onApply={({ token, activeRuleCount }) => {
+          applyMapFilterToken(token, activeRuleCount)
+        }}
+        onClear={clearMapFilterToken}
+      />
     </div>
   )
 }
