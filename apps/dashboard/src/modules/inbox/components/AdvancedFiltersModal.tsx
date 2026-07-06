@@ -275,15 +275,12 @@ export const AdvancedFiltersModal = ({
 
         <div className="nx-ifm-body">
           <nav className="nx-ifm-rail">
-            {groups.map((g) => {
-              void fields.filter((f) => f.group === g.id && countActiveAdvancedFilters(local) > 0).length
-              return (
+            {groups.map((g) => (
                 <button key={g.id} type="button" className={`nx-ifm-rail-item${activeGroup === g.id ? ' is-active' : ''}`} onClick={() => setActiveGroup(g.id)}>
                   <span className="nx-ifm-rail-icon">{GROUP_ICONS[g.id] ?? '•'}</span>
                   <span>{g.label}</span>
                 </button>
-              )
-            })}
+            ))}
           </nav>
 
           <div className="nx-ifm-main">

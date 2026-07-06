@@ -205,7 +205,7 @@ export function countMapFilterActiveFields(
 ): number {
   let count = mapStatus !== 'all' ? 1 : 0
   const serialized = serializeAdvancedFiltersForServer(filters)
-  for (const [key, value] of Object.entries(serialized)) {
+  for (const value of Object.values(serialized)) {
     if (isActive(value)) count += 1
   }
   return count
