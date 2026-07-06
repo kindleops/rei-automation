@@ -1,0 +1,150 @@
+{
+  "generatedAt": "2026-07-06T21:22:14.200Z",
+  "proofArtifact": "apps/api/proof/map-filters/master-filters-pipeline-proof.json",
+  "proofOk": true,
+  "catalog": "operator_verified",
+  "pipeline": ["expression", "compile", "preview", "token", "map_apply"],
+  "filters": [
+    {
+      "uiLabel": "Property Type",
+      "entity": "property",
+      "fieldKey": "property.property_type",
+      "dataType": "text",
+      "controlType": "enum_picker",
+      "operator": "equals",
+      "canonicalValues": ["Single Family", "Multifamily 2-4", "Multifamily 5+", "Commercial", "Storage Units", "Land"],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Equity Percentage",
+      "entity": "property",
+      "fieldKey": "property.equity_percent",
+      "dataType": "number",
+      "controlType": "number_range",
+      "operator": "greater_than_or_equal",
+      "canonicalValues": [50, 70],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Units Count",
+      "entity": "property",
+      "fieldKey": "property.units_count",
+      "dataType": "number",
+      "controlType": "number_range",
+      "operator": "greater_than_or_equal",
+      "canonicalValues": [2, 5],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Estimated Value",
+      "entity": "property",
+      "fieldKey": "property.estimated_value",
+      "dataType": "number",
+      "controlType": "currency_range",
+      "operator": "greater_than_or_equal",
+      "canonicalValues": [250000],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "SMS Eligible",
+      "entity": "prospect",
+      "fieldKey": "prospect.sms_eligible",
+      "dataType": "boolean",
+      "controlType": "boolean_segment",
+      "operator": "is_true",
+      "canonicalValues": [true],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Has Phone",
+      "entity": "prospect",
+      "fieldKey": "prospect.has_phone",
+      "dataType": "derived_presence",
+      "controlType": "boolean_segment",
+      "operator": "has_data",
+      "canonicalValues": [true],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Has Email",
+      "entity": "prospect",
+      "fieldKey": "prospect.has_email",
+      "dataType": "derived_presence",
+      "controlType": "boolean_segment",
+      "operator": "has_data",
+      "canonicalValues": [true],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Primary Prospect",
+      "entity": "prospect",
+      "fieldKey": "prospect.is_primary_prospect",
+      "dataType": "boolean",
+      "controlType": "boolean_segment",
+      "operator": "is_true",
+      "canonicalValues": [true],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Property Count",
+      "entity": "master_owner",
+      "fieldKey": "master_owner.property_count",
+      "dataType": "number",
+      "controlType": "number_range",
+      "operator": "greater_than_or_equal",
+      "canonicalValues": [2, 5],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Portfolio Units",
+      "entity": "master_owner",
+      "fieldKey": "master_owner.portfolio_total_units",
+      "dataType": "number",
+      "controlType": "number_range",
+      "operator": "greater_than_or_equal",
+      "canonicalValues": [10, 20],
+      "launchVisible": true,
+      "status": "pass"
+    },
+    {
+      "uiLabel": "Has Canonical Phone",
+      "entity": "phone",
+      "fieldKey": "phone.has_canonical_phone",
+      "dataType": "derived_presence",
+      "controlType": "boolean_segment",
+      "operator": "has_data",
+      "canonicalValues": [true],
+      "launchVisible": true,
+      "status": "pass"
+    }
+  ],
+  "quickPresets": [
+    { "key": "all_properties", "label": "All Properties", "launchVisible": true, "status": "pending_proof" },
+    { "key": "multifamily_5_plus", "label": "5+ Multifamily", "launchVisible": true, "status": "pending_proof" },
+    { "key": "multifamily_2_4", "label": "2–4 Unit Owners", "launchVisible": true, "status": "pending_proof" },
+    { "key": "high_equity", "label": "High Equity", "launchVisible": true, "status": "pending_proof" },
+    { "key": "sms_eligible", "label": "SMS Eligible", "launchVisible": true, "status": "pending_proof" },
+    { "key": "has_phone", "label": "Has Phone", "launchVisible": true, "status": "pending_proof" },
+    { "key": "portfolio_owner", "label": "Portfolio Owner", "launchVisible": true, "status": "pending_proof" }
+  ],
+  "excludedUntilProof": [
+    "property.tax_delinquent",
+    "property.active_lien",
+    "property.property_flags_json",
+    "property.building_condition",
+    "uncontacted",
+    "contacted",
+    "vacant",
+    "tax_delinquent",
+    "active_lien"
+  ]
+}

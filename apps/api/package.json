@@ -41,7 +41,9 @@
     "proof:wfv2-system": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/wfv2-system-automation-proof.test.mjs",
     "proof:wfv2-studio-recovery": "NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/workflow-studio-v2-recovery.test.mjs",
     "start": "next start",
-    "discord:register": "node scripts/register-discord-commands.mjs"
+    "discord:register": "node scripts/register-discord-commands.mjs",
+    "proof:master-filters": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs",
+    "proof:master-filters:offline": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs --offline"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.4",

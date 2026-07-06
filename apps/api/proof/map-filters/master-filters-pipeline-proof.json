@@ -1,0 +1,896 @@
+{
+  "generatedAt": "2026-07-06T21:22:14.200Z",
+  "offlineMode": false,
+  "databaseConnected": true,
+  "verifiedFieldCount": 11,
+  "verifiedQuickPresetKeys": [
+    "all_properties",
+    "multifamily_5_plus",
+    "multifamily_2_4",
+    "high_equity",
+    "sms_eligible",
+    "has_phone",
+    "portfolio_owner"
+  ],
+  "cases": [
+    {
+      "id": "no_filter",
+      "label": "No filter",
+      "expression": {
+        "id": "case-no-filter",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": []
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "eae344af5a783c01da0a107d929f05b6",
+      "matchingProperties": 124046,
+      "counts": {
+        "matchingProperties": 124046,
+        "matchingProspects": 149798,
+        "matchingMasterOwners": 35152,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1037,
+        "propertyCountMs": 103,
+        "prospectCountMs": 972,
+        "ownerCountMs": 133,
+        "phoneCountMs": 107,
+        "countQueryMs": 1315,
+        "totalMs": 3131
+      },
+      "activeRuleCount": 0,
+      "durationMs": 3134
+    },
+    {
+      "id": "property_type_mf5",
+      "label": "Property Type = Multifamily 5+",
+      "expression": {
+        "id": "case-mf5",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-mf5-rule",
+            "type": "rule",
+            "fieldKey": "property.property_type",
+            "operator": "equals",
+            "value": "Multifamily 5+",
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "a30cdfe838ac7fe42ade78f2ba948fa0",
+      "matchingProperties": 10672,
+      "counts": {
+        "matchingProperties": 10672,
+        "matchingProspects": 9288,
+        "matchingMasterOwners": 3017,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1016,
+        "propertyCountMs": 95,
+        "prospectCountMs": 291,
+        "ownerCountMs": 103,
+        "phoneCountMs": 89,
+        "countQueryMs": 578,
+        "totalMs": 1991
+      },
+      "activeRuleCount": 1,
+      "durationMs": 1993
+    },
+    {
+      "id": "property_type_mf24",
+      "label": "Property Type = Multifamily 2-4",
+      "expression": {
+        "id": "case-mf24",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-mf24-rule",
+            "type": "rule",
+            "fieldKey": "property.property_type",
+            "operator": "equals",
+            "value": "Multifamily 2-4",
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "0dbe2ad410e7c8fe95f0f5e6b7f19f4f",
+      "matchingProperties": 22624,
+      "counts": {
+        "matchingProperties": 22624,
+        "matchingProspects": 30487,
+        "matchingMasterOwners": 3715,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1008,
+        "propertyCountMs": 80,
+        "prospectCountMs": 292,
+        "ownerCountMs": 97,
+        "phoneCountMs": 89,
+        "countQueryMs": 558,
+        "totalMs": 1976
+      },
+      "activeRuleCount": 1,
+      "durationMs": 1978
+    },
+    {
+      "id": "equity_percent_gte_50",
+      "label": "Equity Percentage >= 50",
+      "expression": {
+        "id": "case-equity",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-equity-rule",
+            "type": "rule",
+            "fieldKey": "property.equity_percent",
+            "operator": "greater_than_or_equal",
+            "value": 50,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "9bfc04ec37980d991fedaea4300fa3f2",
+      "matchingProperties": 121444,
+      "counts": {
+        "matchingProperties": 121444,
+        "matchingProspects": 148834,
+        "matchingMasterOwners": 33609,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1008,
+        "propertyCountMs": 102,
+        "prospectCountMs": 972,
+        "ownerCountMs": 127,
+        "phoneCountMs": 105,
+        "countQueryMs": 1306,
+        "totalMs": 3099
+      },
+      "activeRuleCount": 1,
+      "durationMs": 3099
+    },
+    {
+      "id": "units_count_gte_5",
+      "label": "Units Count >= 5",
+      "expression": {
+        "id": "case-units",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-units-rule",
+            "type": "rule",
+            "fieldKey": "property.units_count",
+            "operator": "greater_than_or_equal",
+            "value": 5,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "4ffe060ba7e46a603843d60857ec9cf2",
+      "matchingProperties": 5092,
+      "counts": {
+        "matchingProperties": 5092,
+        "matchingProspects": 2943,
+        "matchingMasterOwners": 2687,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1975,
+        "propertyCountMs": 90,
+        "prospectCountMs": 113,
+        "ownerCountMs": 80,
+        "phoneCountMs": 70,
+        "countQueryMs": 353,
+        "totalMs": 3207
+      },
+      "activeRuleCount": 1,
+      "durationMs": 3208
+    },
+    {
+      "id": "estimated_value_gte_250k",
+      "label": "Estimated Value >= 250000",
+      "expression": {
+        "id": "case-value",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-value-rule",
+            "type": "rule",
+            "fieldKey": "property.estimated_value",
+            "operator": "greater_than_or_equal",
+            "value": 250000,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "9741c739e098a39327dc4bb84ced79c6",
+      "matchingProperties": 61727,
+      "counts": {
+        "matchingProperties": 61727,
+        "matchingProspects": 74471,
+        "matchingMasterOwners": 20404,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1987,
+        "propertyCountMs": 99,
+        "prospectCountMs": 387,
+        "ownerCountMs": 100,
+        "phoneCountMs": 97,
+        "countQueryMs": 683,
+        "totalMs": 3546
+      },
+      "activeRuleCount": 1,
+      "durationMs": 3547
+    },
+    {
+      "id": "prospect_sms_eligible",
+      "label": "Prospect SMS Eligible = true",
+      "expression": {
+        "id": "case-sms",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-sms-rule",
+            "type": "rule",
+            "fieldKey": "prospect.sms_eligible",
+            "operator": "is_true",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "bcb315072d7d643fd7d23d5e982e9f8a",
+      "matchingProperties": 93495,
+      "counts": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 3095,
+        "propertyCountMs": 89,
+        "prospectCountMs": 1143,
+        "ownerCountMs": 142,
+        "phoneCountMs": 73,
+        "countQueryMs": 1447,
+        "totalMs": 7370
+      },
+      "activeRuleCount": 1,
+      "durationMs": 7371
+    },
+    {
+      "id": "prospect_has_phone",
+      "label": "Prospect Has Phone = true",
+      "expression": {
+        "id": "case-prospect-phone",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-prospect-phone-rule",
+            "type": "rule",
+            "fieldKey": "prospect.has_phone",
+            "operator": "has_data",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "c462f73d36df98dff5f4a8506d1c8e5c",
+      "matchingProperties": 93495,
+      "counts": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 3104,
+        "propertyCountMs": 86,
+        "prospectCountMs": 1133,
+        "ownerCountMs": 149,
+        "phoneCountMs": 78,
+        "countQueryMs": 1446,
+        "totalMs": 7409
+      },
+      "activeRuleCount": 1,
+      "durationMs": 7409
+    },
+    {
+      "id": "prospect_primary",
+      "label": "Prospect Primary = true",
+      "expression": {
+        "id": "case-primary",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-primary-rule",
+            "type": "rule",
+            "fieldKey": "prospect.is_primary_prospect",
+            "operator": "is_true",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "c6d19ff9067ef38aac20c587e7d38d77",
+      "matchingProperties": 105919,
+      "counts": {
+        "matchingProperties": 105919,
+        "matchingProspects": 141567,
+        "matchingMasterOwners": 26912,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 3204,
+        "propertyCountMs": 96,
+        "prospectCountMs": 1130,
+        "ownerCountMs": 141,
+        "phoneCountMs": 76,
+        "countQueryMs": 1443,
+        "totalMs": 7368
+      },
+      "activeRuleCount": 1,
+      "durationMs": 7368
+    },
+    {
+      "id": "owner_property_count_gte_5",
+      "label": "Master Owner Property Count >= 5",
+      "expression": {
+        "id": "case-owner-count",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-owner-count-rule",
+            "type": "rule",
+            "fieldKey": "master_owner.property_count",
+            "operator": "greater_than_or_equal",
+            "value": 5,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "ffdb7dce996e03e5864c817975f8e50b",
+      "matchingProperties": 2591,
+      "counts": {
+        "matchingProperties": 2591,
+        "matchingProspects": 579,
+        "matchingMasterOwners": 333,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 3542,
+        "propertyCountMs": 81,
+        "prospectCountMs": 115,
+        "ownerCountMs": 94,
+        "phoneCountMs": 80,
+        "countQueryMs": 370,
+        "totalMs": 6300
+      },
+      "activeRuleCount": 1,
+      "durationMs": 6301
+    },
+    {
+      "id": "owner_portfolio_units_gte_20",
+      "label": "Master Owner Portfolio Units >= 20",
+      "expression": {
+        "id": "case-portfolio-units",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-portfolio-units-rule",
+            "type": "rule",
+            "fieldKey": "master_owner.portfolio_total_units",
+            "operator": "greater_than_or_equal",
+            "value": 20,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "0f29f3defde254aeb97521f5bcd3e5db",
+      "matchingProperties": 805,
+      "counts": {
+        "matchingProperties": 805,
+        "matchingProspects": 80,
+        "matchingMasterOwners": 617,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 6301,
+        "propertyCountMs": 75,
+        "prospectCountMs": 98,
+        "ownerCountMs": 76,
+        "phoneCountMs": 89,
+        "countQueryMs": 338,
+        "totalMs": 7648
+      },
+      "activeRuleCount": 1,
+      "durationMs": 7648
+    },
+    {
+      "id": "phone_has_canonical",
+      "label": "Phone Has Canonical = true",
+      "expression": {
+        "id": "case-phone",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "case-phone-rule",
+            "type": "rule",
+            "fieldKey": "phone.has_canonical_phone",
+            "operator": "has_data",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "b5e351a24d8811801b9633f7f1b1fac2",
+      "matchingProperties": 0,
+      "counts": {
+        "matchingProperties": 0,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 7366,
+        "propertyCountMs": 72,
+        "prospectCountMs": 77,
+        "ownerCountMs": 73,
+        "phoneCountMs": 78,
+        "countQueryMs": 300,
+        "totalMs": 8012
+      },
+      "activeRuleCount": 1,
+      "durationMs": 8012
+    }
+  ],
+  "quickPresets": [
+    {
+      "key": "all_properties",
+      "verified": true,
+      "id": "preset:all_properties",
+      "label": "Quick preset: All Properties",
+      "expression": {
+        "id": "preset-all",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": []
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "6fb3ba684870942c9ebf03950547dc10",
+      "matchingProperties": 124046,
+      "counts": {
+        "matchingProperties": 124046,
+        "matchingProspects": 149798,
+        "matchingMasterOwners": 35152,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1,
+        "propertyCountMs": 96,
+        "prospectCountMs": 889,
+        "ownerCountMs": 124,
+        "phoneCountMs": 102,
+        "countQueryMs": 1211,
+        "totalMs": 1794
+      },
+      "activeRuleCount": 0,
+      "durationMs": 1795
+    },
+    {
+      "key": "multifamily_5_plus",
+      "verified": true,
+      "id": "preset:multifamily_5_plus",
+      "label": "Quick preset: 5+ MULTIFAMILY",
+      "expression": {
+        "id": "preset-mf5",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-mf5-rule",
+            "type": "rule",
+            "fieldKey": "property.property_type",
+            "operator": "equals",
+            "value": "Multifamily 5+",
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "089b83ba7f817fb430d3e4500fb833ea",
+      "matchingProperties": 10672,
+      "counts": {
+        "matchingProperties": 10672,
+        "matchingProspects": 9288,
+        "matchingMasterOwners": 3017,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 2,
+        "propertyCountMs": 77,
+        "prospectCountMs": 190,
+        "ownerCountMs": 102,
+        "phoneCountMs": 85,
+        "countQueryMs": 454,
+        "totalMs": 855
+      },
+      "activeRuleCount": 1,
+      "durationMs": 855
+    },
+    {
+      "key": "multifamily_2_4",
+      "verified": true,
+      "id": "preset:multifamily_2_4",
+      "label": "Quick preset: 2–4 UNIT OWNERS",
+      "expression": {
+        "id": "preset-mf24",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-mf24-rule",
+            "type": "rule",
+            "fieldKey": "property.property_type",
+            "operator": "equals",
+            "value": "Multifamily 2-4",
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "25e5caa3d8739f2dc68f92aba0b8fafe",
+      "matchingProperties": 22624,
+      "counts": {
+        "matchingProperties": 22624,
+        "matchingProspects": 30487,
+        "matchingMasterOwners": 3715,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1,
+        "propertyCountMs": 82,
+        "prospectCountMs": 280,
+        "ownerCountMs": 88,
+        "phoneCountMs": 85,
+        "countQueryMs": 535,
+        "totalMs": 1026
+      },
+      "activeRuleCount": 1,
+      "durationMs": 1027
+    },
+    {
+      "key": "high_equity",
+      "verified": true,
+      "id": "preset:high_equity",
+      "label": "Quick preset: HIGH EQUITY",
+      "expression": {
+        "id": "preset-high-equity",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-high-equity-rule",
+            "type": "rule",
+            "fieldKey": "property.equity_percent",
+            "operator": "greater_than_or_equal",
+            "value": 50,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "1d675a6e470c618359a89e3c0d37dfb0",
+      "matchingProperties": 121444,
+      "counts": {
+        "matchingProperties": 121444,
+        "matchingProspects": 148834,
+        "matchingMasterOwners": 33609,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1,
+        "propertyCountMs": 79,
+        "prospectCountMs": 752,
+        "ownerCountMs": 127,
+        "phoneCountMs": 94,
+        "countQueryMs": 1052,
+        "totalMs": 1854
+      },
+      "activeRuleCount": 1,
+      "durationMs": 1854
+    },
+    {
+      "key": "sms_eligible",
+      "verified": true,
+      "id": "preset:sms_eligible",
+      "label": "Quick preset: SMS ELIGIBLE",
+      "expression": {
+        "id": "preset-sms",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-sms-rule",
+            "type": "rule",
+            "fieldKey": "prospect.sms_eligible",
+            "operator": "is_true",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "9215f300d4a9894a9f4bfbe4808cf07e",
+      "matchingProperties": 93495,
+      "counts": {
+        "matchingProperties": 93495,
+        "matchingProspects": 124335,
+        "matchingMasterOwners": 22648,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 854,
+        "propertyCountMs": 90,
+        "prospectCountMs": 608,
+        "ownerCountMs": 118,
+        "phoneCountMs": 87,
+        "countQueryMs": 903,
+        "totalMs": 3059
+      },
+      "activeRuleCount": 1,
+      "durationMs": 3059
+    },
+    {
+      "key": "has_phone",
+      "verified": true,
+      "id": "preset:has_phone",
+      "label": "Quick preset: Has Phone",
+      "expression": {
+        "id": "preset-phone",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-phone-rule",
+            "type": "rule",
+            "fieldKey": "phone.has_canonical_phone",
+            "operator": "has_data",
+            "value": true,
+            "enabled": true,
+            "relationshipMatch": "any_linked"
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "a3975d0bd8f9c97fca35b435dcf83578",
+      "matchingProperties": 0,
+      "counts": {
+        "matchingProperties": 0,
+        "matchingProspects": 0,
+        "matchingMasterOwners": 0,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1026,
+        "propertyCountMs": 79,
+        "prospectCountMs": 95,
+        "ownerCountMs": 76,
+        "phoneCountMs": 85,
+        "countQueryMs": 335,
+        "totalMs": 1712
+      },
+      "activeRuleCount": 1,
+      "durationMs": 1712
+    },
+    {
+      "key": "portfolio_owner",
+      "verified": true,
+      "id": "preset:portfolio_owner",
+      "label": "Quick preset: Portfolio Owner",
+      "expression": {
+        "id": "preset-portfolio-owner",
+        "type": "group",
+        "combinator": "AND",
+        "negated": false,
+        "enabled": true,
+        "children": [
+          {
+            "id": "preset-portfolio-owner-rule",
+            "type": "rule",
+            "fieldKey": "master_owner.property_count",
+            "operator": "greater_than_or_equal",
+            "value": 2,
+            "enabled": true
+          }
+        ]
+      },
+      "ok": true,
+      "compile": "pass",
+      "preview": "pass",
+      "token": "pass",
+      "filterToken": "a5528313202a5287670c78640033dd63",
+      "matchingProperties": 9668,
+      "counts": {
+        "matchingProperties": 9668,
+        "matchingProspects": 5612,
+        "matchingMasterOwners": 3339,
+        "matchingPhones": 0,
+        "propertiesInBounds": null,
+        "representedProperties": null
+      },
+      "timing": {
+        "connectionMs": 1712,
+        "propertyCountMs": 84,
+        "prospectCountMs": 154,
+        "ownerCountMs": 92,
+        "phoneCountMs": 81,
+        "countQueryMs": 411,
+        "totalMs": 4338
+      },
+      "activeRuleCount": 1,
+      "durationMs": 4339
+    }
+  ],
+  "ok": true
+}
