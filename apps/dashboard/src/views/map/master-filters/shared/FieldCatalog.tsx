@@ -20,7 +20,11 @@ export function FieldCatalog({ onSelectField }: FieldCatalogProps) {
   } = useMasterFilters()
 
   const entityFields = useMemo(
-    () => fields.filter((f) => fieldMatchesEntity(f, selectedEntity)),
+    () => fields.filter((f) => (
+      fieldMatchesEntity(f, selectedEntity)
+      && f.launchVisible !== false
+      && !f.advanced
+    )),
     [fields, selectedEntity],
   )
 

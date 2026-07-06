@@ -42,8 +42,9 @@ export function appendFilterParam(url: string, token: string | null | undefined)
 }
 
 export async function fetchMapFilterRegistry(q?: string) {
-  const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
-  const result = await callBackend<ApiEnvelope<MapFilterRegistryResponse>>(`${REGISTRY_ROUTE}${qs}`)
+  const params = new URLSearchParams({ catalog: 'operator' })
+  if (q?.trim()) params.set('q', q.trim())
+  const result = await callBackend<ApiEnvelope<MapFilterRegistryResponse>>(`${REGISTRY_ROUTE}?${params}`)
   if (!result.ok) return result
   if (!result.data?.ok || !result.data.data) {
     return {

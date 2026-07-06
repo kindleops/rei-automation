@@ -58,6 +58,17 @@ export interface MapFilterFieldJsonMeta {
   hasCustomCompiler: boolean
 }
 
+export type OperatorControlType =
+  | 'boolean_segment'
+  | 'enum_picker'
+  | 'number_range'
+  | 'currency_range'
+  | 'date_range'
+  | 'status_segment'
+  | 'geo_picker'
+  | 'tag_picker'
+  | 'text_search'
+
 /** Client-safe registry field shape from sanitizeFieldForClient(). */
 export interface MapFilterRegistryField {
   key: string
@@ -76,6 +87,14 @@ export interface MapFilterRegistryField {
   synonyms: string[]
   partialCoverage?: boolean
   json?: MapFilterFieldJsonMeta
+  uiKey?: string
+  controlType?: OperatorControlType
+  defaultOperator?: string
+  searchable?: boolean
+  quickFilter?: boolean
+  advanced?: boolean
+  launchVisible?: boolean
+  enumOptions?: string[]
 }
 
 export interface MapFilterRegistryAlias {
@@ -93,7 +112,9 @@ export interface MapFilterRegistryResponse {
   filterSchemaVersion: string
   registryVersion: string
   generatedAt: string
+  catalog?: 'operator' | 'full'
   activeFieldCount: number
+  registryFieldCount?: number
   tableBaselines: Record<string, number>
   countSemantics: Record<string, MapFilterCountSemantic>
   relationshipSemantics: Record<string, unknown>
