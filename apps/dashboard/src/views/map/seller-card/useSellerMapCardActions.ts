@@ -9,10 +9,14 @@ import { resolveDialablePhoneFromThread } from '../../../domain/inbox/resolveCan
 import {
   normalizeSellerDialablePhone,
   pickSellerContactPhone,
-  resolveCommandMapSellerIdentity,
   resolveCommandMapSellerPhone,
-  resolveMasterOwnerIdForProperty,
 } from '../../../lib/data/commandMapData'
+import {
+  buildMapOwnershipCheckHints,
+  buildOwnershipCheckTemplateContext,
+  resolveMapOwnershipCheckIdentity,
+  type MapOwnershipCheckIdentity,
+} from '../../../domain/map/resolve-map-ownership-check'
 import { normalizeState } from '../../../lib/data/textgridRouting'
 import {
   buildTemplateContextFromThread,
@@ -22,7 +26,6 @@ import {
 import {
   hasTextgridBlockedGreeting,
   pickOwnershipCheckTemplateForMap,
-  resolveMapOwnerLanguage,
 } from './ownership-check-template-picker'
 import type { SmsTemplate } from '../../../lib/data/templateData'
 import type { TemplateActionPayload } from '../../../modules/inbox/components/TemplatePopover'
@@ -149,6 +152,17 @@ const hasEntityGreeting = (message: string): boolean => {
   const match = message.trim().match(GREETING_NAME_PATTERN)
   if (!match) return false
   return isEntityName(match[1])
+}
+
+const mapOwnershipResolveError = (error: string): string => {
+  const messages: Record<string, string> = {
+    master_owner_missing_best_phone: 'No valid seller phone on file',
+    assigned_agent_missing: 'No SMS agent available',
+    property_owner_link_missing: 'Property owner link missing',
+    property_owner_link_ambiguous: 'Ambiguous property owner',
+    prospect_name_missing: 'Prospect name missing',
+  }
+  return messages[error] || error
 }
 
 export const buildThreadFromViewModel = (
@@ -291,88 +305,34 @@ export const useSellerMapCardActions = ({
         }
       }
 
-      const resolvedSendThread = await ensureCanonicalSendThread()
-      if (!resolvedSendThread) {
-        setFollowUpError('No valid seller phone on file')
-        setFollowUpState('blocked')
-        window.setTimeout(() => {
-          setFollowUpState('idle')
-          setFollowUpError(null)
-        }, 2400)
-        return
-      }
-      sendThread = resolvedSendThread
-
-      let manualTemplateValues = buildMapTemplateManualValues(record)
-      let liveIdentity: Awaited<ReturnType<typeof resolveCommandMapSellerIdentity>> | null = null
-      const masterOwnerId = resolveMasterOwnerId()
-        || await resolveMasterOwnerIdForProperty(viewModel.propertyId)
-        || null
-
-      // Always hydrate prospect + agent + language from Supabase on uncontacted sends.
-      if (eligibility.isUncontacted) {
-        const resolvedProspectId = text(firstDefined(sendThread as unknown as Record<string, unknown>, ['prospectId', 'prospect_id']))
-          || text(firstDefined(record, ['prospect_id', 'prospectId']))
-          || null
-        liveIdentity = await resolveCommandMapSellerIdentity({
-          prospectId: resolvedProspectId,
-          masterOwnerId,
-        })
-        const hydratedProspectFullName = text(firstDefined(record, ['prospect_full_name', 'prospect_name']))
-          || liveIdentity.prospectFullName
-          || ''
-        const hydratedProspectFirstName = text(firstDefined(record, ['prospect_first_name']))
-          || liveIdentity.prospectFirstName
-          || ''
-        manualTemplateValues = buildMapTemplateManualValues({
-          ...record,
-          prospect_full_name: hydratedProspectFullName,
-          prospect_first_name: hydratedProspectFirstName,
-          // Map ownership check greets the linked human prospect even when sms_eligible
-          // is false in prospects — blanking the name selects TextGrid-blocked "Hi," templates.
-          sms_eligible: undefined,
-          agent_persona: text(firstDefined(record, ['agent_persona', 'agentPersona']))
-            || liveIdentity.agentPersona
-            || '',
-          agent_family: text(firstDefined(record, ['agent_family', 'agentFamily']))
-            || liveIdentity.agentFamily
-            || '',
-        })
-        const resolvedSellerFirst = safeHumanName(
-          manualTemplateValues.seller_first_name || hydratedProspectFirstName || hydratedProspectFullName,
-        )
-        if (resolvedSellerFirst) {
-          manualTemplateValues = {
-            ...manualTemplateValues,
-            seller_name: manualTemplateValues.seller_name || resolvedSellerFirst,
-            seller_first_name: firstToken(resolvedSellerFirst),
-          }
+      if (!eligibility.isUncontacted) {
+        const resolvedSendThread = await ensureCanonicalSendThread()
+        if (!resolvedSendThread) {
+          setFollowUpError('No valid seller phone on file')
+          setFollowUpState('blocked')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 2400)
+          return
         }
+        sendThread = resolvedSendThread
       }
 
-      const templateContext = {
-        ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
-        ...manualTemplateValues,
-        property_address: viewModel.property.address,
-      }
+      const manualTemplateValues = buildMapTemplateManualValues(record)
 
       let followUpTemplate: SmsTemplate | null = null
       let messageText = ''
       let selectedOwnershipLanguage: string | undefined
+      let ownershipIdentity: MapOwnershipCheckIdentity | null = null
 
       if (eligibility.isUncontacted) {
-        if (!manualTemplateValues.agent_first_name) {
-          setFollowUpError('No SMS agent available')
-          setFollowUpState('failed')
-          window.setTimeout(() => {
-            setFollowUpState('idle')
-            setFollowUpError(null)
-          }, 4000)
-          return
-        }
-
-        if (!manualTemplateValues.seller_first_name) {
-          setFollowUpError('Seller name required for ownership check')
+        const ownershipHints = buildMapOwnershipCheckHints(viewModel, record)
+        const ownershipResolved = await resolveMapOwnershipCheckIdentity(viewModel.propertyId, {
+          hints: ownershipHints,
+        })
+        if (!ownershipResolved.ok) {
+          setFollowUpError(mapOwnershipResolveError(ownershipResolved.error).slice(0, 80))
           setFollowUpState('blocked')
           window.setTimeout(() => {
             setFollowUpState('idle')
@@ -381,31 +341,34 @@ export const useSellerMapCardActions = ({
           return
         }
 
-        const hydratedProspectLanguage = text(firstDefined(record, [
-          'prospect_language_preference',
-          'prospectLanguagePreference',
-          'language_preference',
-          'languagePreference',
-          'language',
-          'detected_language',
-          'seller_language',
-          'sellerLanguage',
-        ])) || liveIdentity?.prospectLanguagePreference || ''
-        const languageRecord = {
-          ...record,
-          prospect_language_preference: hydratedProspectLanguage,
-          language_preference: hydratedProspectLanguage,
-          language: hydratedProspectLanguage,
+        ownershipIdentity = ownershipResolved.identity
+        sendThread = {
+          ...buildThreadFromViewModel(viewModel, record, {
+            phone: ownershipIdentity.recipientPhone,
+            prospectId: ownershipIdentity.prospectId,
+          }),
+          threadKey: ownershipIdentity.recipientPhone,
+          id: ownershipIdentity.recipientPhone,
+          phoneNumber: ownershipIdentity.recipientPhone,
+          canonicalE164: ownershipIdentity.recipientPhone,
+          sellerPhone: ownershipIdentity.recipientPhone,
+          bestPhone: ownershipIdentity.recipientPhone,
+          display_phone: ownershipIdentity.recipientPhone,
+          prospect_best_phone: ownershipIdentity.recipientPhone,
+          ownerId: ownershipIdentity.masterOwnerId,
+          propertyAddress: ownershipIdentity.propertyAddress,
+          propertyAddressFull: ownershipIdentity.propertyAddress,
         }
-        const ownerLanguage = await resolveMapOwnerLanguage(languageRecord, masterOwnerId)
+
+        const templateContext = buildOwnershipCheckTemplateContext(ownershipIdentity)
         let templateSelection = null
         try {
           templateSelection = await pickOwnershipCheckTemplateForMap(
             templateContext,
-            ownerLanguage,
+            ownershipIdentity.ownerLanguage,
             {
-              propertyId: viewModel.propertyId,
-              recipientPhone: sendThread.canonicalE164 || sendThread.phoneNumber,
+              propertyId: ownershipIdentity.propertyId,
+              recipientPhone: ownershipIdentity.recipientPhone,
             },
           )
         } catch (templateError) {
@@ -433,6 +396,11 @@ export const useSellerMapCardActions = ({
         selectedOwnershipLanguage = templateSelection.language
         messageText = renderTemplate(followUpTemplate, templateContext).renderedText
       } else {
+        const templateContext = {
+          ...buildTemplateContextFromThread(sendThread, threadContext ?? null, manualTemplateValues),
+          ...manualTemplateValues,
+          property_address: viewModel.property.address,
+        }
         const templates = await getRecommendedTemplates(sendThread, threadContext ?? null)
         followUpTemplate = templates.find((template) => template.isFollowUp)
           || templates.find((template) => template.useCaseSlug.includes('follow'))
@@ -470,7 +438,7 @@ export const useSellerMapCardActions = ({
         return
       }
 
-      const ownershipSendOptions = eligibility.isUncontacted
+      const ownershipSendOptions = eligibility.isUncontacted && ownershipIdentity
         ? {
           skipRenderGuard: true as const,
           messageType: 'ownership_check',
@@ -479,12 +447,12 @@ export const useSellerMapCardActions = ({
           createdFrom: 'leadcommand_map',
           sendSource: 'map_command',
           action: 'send_ownership_check',
-          sellerFirstName: manualTemplateValues.seller_first_name,
-          sellerDisplayName: manualTemplateValues.seller_name || manualTemplateValues.seller_first_name,
-          agentFirstName: manualTemplateValues.agent_first_name,
-          agentName: manualTemplateValues.agent_name || manualTemplateValues.agent_first_name,
-          propertyAddress: viewModel.property.address,
-          language: selectedOwnershipLanguage,
+          sellerFirstName: ownershipIdentity.prospectFirstName,
+          sellerDisplayName: ownershipIdentity.sellerDisplayName,
+          agentFirstName: ownershipIdentity.agentFirstName,
+          agentName: ownershipIdentity.agentFirstName,
+          propertyAddress: ownershipIdentity.propertyAddress,
+          language: selectedOwnershipLanguage || ownershipIdentity.ownerLanguage,
           renderedMessage: messageText,
         }
         : {}

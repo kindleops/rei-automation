@@ -142,16 +142,13 @@ export const resolveMapOwnershipCheckForSend = async (
     return { ok: false, error: 'property_owner_link_missing' }
   }
 
-  if (hints.smsEligible === false) {
-    return { ok: false, error: 'prospect_not_sms_eligible' }
-  }
-
   let recipientPhone = toE164(hints.recipientPhone) || resolveHydratedThreadPhone(record)
   let phoneId = text(hints.phoneId)
   let ownerSignals = null as Awaited<ReturnType<typeof readMasterOwnerSendSignals>>
 
+  ownerSignals = await readMasterOwnerSendSignals(masterOwnerId)
+
   if (!recipientPhone || !phoneId) {
-    ownerSignals = await readMasterOwnerSendSignals(masterOwnerId)
     if (!recipientPhone) {
       recipientPhone = ownerSignals?.bestPhone || ''
     }
@@ -172,10 +169,6 @@ export const resolveMapOwnershipCheckForSend = async (
     return { ok: false, error: 'master_owner_missing_best_phone' }
   }
 
-  if (!ownerSignals) {
-    ownerSignals = await readMasterOwnerSendSignals(masterOwnerId)
-  }
-
   const agentName = text(hints.agentPersona)
     || text(hints.agentFamily)
     || ownerSignals?.agentPersona
@@ -187,27 +180,40 @@ export const resolveMapOwnershipCheckForSend = async (
   }
 
   const prospectId = text(hints.prospectId)
-  const { prospectFirstName, prospectFullName } = resolveGreetingName(hints)
+  let { prospectFirstName, prospectFullName } = resolveGreetingName(hints)
+  if (prospectId && (!prospectFirstName || !prospectFullName)) {
+    const supabase = getSupabaseClient()
+    const { data: prospectRow } = await supabase
+      .from('prospects')
+      .select('first_name, full_name')
+      .eq('prospect_id', prospectId)
+      .limit(1)
+      .maybeSingle()
+    if (prospectRow) {
+      const row = prospectRow as Record<string, unknown>
+      prospectFirstName = prospectFirstName || safeHumanName(text(row.first_name))
+      prospectFullName = prospectFullName || safeHumanName(text(row.full_name)) || prospectFirstName
+    }
+  }
+  if (!prospectFirstName) {
+    return { ok: false, error: 'prospect_name_missing' }
+  }
+
   const propertyAddress = text(firstDefined(
-    record.property_address_full,
-    record.propertyAddressFull,
     record.property_address,
-    viewModel.property.address,
-  ))
+    record.propertyAddress,
+  )) || (() => {
+    const full = text(firstDefined(
+      record.property_address_full,
+      record.propertyAddressFull,
+      viewModel.property.address,
+    ))
+    return full.split(',')[0]?.trim() || full
+  })()
   const ownerDisplayName = text(hints.ownerDisplayName)
     || ownerSignals?.ownerDisplayName
     || viewModel.masterOwner.displayName
-  const ownerLanguage = text(firstDefined(
-    record.prospect_language_preference,
-    record.prospectLanguagePreference,
-    record.language_preference,
-    record.languagePreference,
-    record.best_language,
-    record.bestLanguage,
-    record.language,
-    record.seller_language,
-    record.sellerLanguage,
-  )) || ownerSignals?.ownerLanguage || 'English'
+  const ownerLanguage = ownerSignals?.ownerLanguage || 'English'
 
   const identity: MapOwnershipCheckIdentity = {
     propertyId: normalizedPropertyId,

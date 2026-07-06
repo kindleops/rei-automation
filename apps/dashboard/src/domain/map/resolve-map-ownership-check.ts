@@ -88,6 +88,22 @@ const SUPPRESSED_STATUSES = new Set(['suppressed', 'blocked', 'property_suppress
 
 const text = (value: unknown): string => asString(value, '').trim()
 
+/** Street line only — templates use {{property_address}}, not city/state/zip. */
+export const resolveStreetPropertyAddress = (
+  property: AnyRecord,
+  record?: Record<string, unknown>,
+): string => {
+  const fromRecord = record
+    ? text(record.property_address ?? record.propertyAddress)
+    : ''
+  if (fromRecord) return fromRecord
+  const street = text(property.property_address)
+  if (street) return street
+  const full = text(property.property_address_full)
+  if (!full) return ''
+  return full.split(',')[0]?.trim() || full
+}
+
 const toE164 = (value: unknown): string => {
   const raw = text(value)
   if (!raw) return ''
@@ -701,7 +717,7 @@ const buildIdentityFromResolvedParts = ({
   }
 
   const ownerDisplayName = text(owner.display_name) || text(hints.ownerDisplayName)
-  const propertyAddress = text(property.property_address_full) || text(property.property_address)
+  const propertyAddress = resolveStreetPropertyAddress(property)
 
   return {
     ok: true,
@@ -740,9 +756,6 @@ const tryResolveFromHydratedMapHints = async (
   const masterOwnerId = text(hints.masterOwnerId)
   const prospectId = text(hints.prospectId)
   if (!masterOwnerId || !prospectId) return null
-  if (hints.smsEligible === false) {
-    return { ok: false, error: 'prospect_not_sms_eligible' }
-  }
 
   const propertyOwnerId = text(property.master_owner_id)
   if (propertyOwnerId && propertyOwnerId !== masterOwnerId) return null
@@ -762,7 +775,7 @@ const tryResolveFromHydratedMapHints = async (
   if (ownerError || !ownerRow) return null
 
   const owner = ownerRow as AnyRecord
-  const recipientPhone = toE164(hints.recipientPhone) || toE164(owner.best_phone_1)
+  const recipientPhone = toE164(owner.best_phone_1) || toE164(hints.recipientPhone)
   if (!recipientPhone) {
     return { ok: false, error: 'master_owner_missing_best_phone' }
   }
@@ -783,8 +796,22 @@ const tryResolveFromHydratedMapHints = async (
 
   if (!phoneId) return null
 
-  const prospectFirstName = text(hints.prospectFirstName)
-  const prospectFullName = text(hints.prospectFullName) || prospectFirstName
+  let prospectFirstName = safeHumanName(text(hints.prospectFirstName))
+  let prospectFullName = safeHumanName(text(hints.prospectFullName)) || prospectFirstName
+  if (!prospectFirstName || !prospectFullName) {
+    const { data: prospectRow, error: prospectError } = await supabase
+      .from('prospects')
+      .select('first_name, full_name')
+      .eq('prospect_id', prospectId)
+      .limit(1)
+      .maybeSingle()
+    if (prospectError || !prospectRow) return null
+    const prospect = prospectRow as AnyRecord
+    prospectFirstName = prospectFirstName || safeHumanName(text(prospect.first_name))
+    prospectFullName = prospectFullName || safeHumanName(text(prospect.full_name)) || prospectFirstName
+  }
+  if (!prospectFirstName) return null
+
   return buildIdentityFromResolvedParts({
     propertyId,
     property,
@@ -935,10 +962,6 @@ export const resolveMapOwnershipCheckIdentity = async (
     return { ok: false, error: 'property_owner_link_missing' }
   }
 
-  if (prospect.sms_eligible !== true && hints.smsEligible !== true) {
-    return { ok: false, error: 'prospect_not_sms_eligible' }
-  }
-
   return buildIdentityFromResolvedParts({
     propertyId: normalizedPropertyId,
     property,
@@ -966,7 +989,7 @@ export const buildOwnershipCheckTemplateContext = (
     seller_display_name: sellerName,
     owner_name: identity.ownerDisplayName,
     property_address: identity.propertyAddress,
-    agent_name: identity.agentName,
+    agent_name: identity.agentFirstName,
     agent_first_name: identity.agentFirstName,
   }
 }

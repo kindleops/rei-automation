@@ -367,19 +367,7 @@ export const resolveMapOwnerLanguage = async (
   record: Record<string, unknown>,
   masterOwnerId: string | null,
 ): Promise<string> => {
-  // Prospect language wins over master-owner language for ownership-check template selection.
-  const inline = asString(
-    record.prospect_language_preference
-    ?? record.prospectLanguagePreference
-    ?? record.language_preference
-    ?? record.languagePreference
-    ?? record.best_language
-    ?? record.bestLanguage
-    ?? record.language
-    ?? record.seller_language
-    ?? record.sellerLanguage,
-    '',
-  ).trim()
+  const inline = asString(record.best_language ?? record.bestLanguage, '').trim()
   if (inline) return canonicalizeOwnerLanguage(inline)
 
   const ownerId = asString(masterOwnerId, '').trim()

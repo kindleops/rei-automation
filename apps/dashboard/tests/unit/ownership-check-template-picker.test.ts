@@ -56,11 +56,11 @@ describe('ownership check template picker', () => {
     resetOwnershipCheckTemplateCacheForTests()
   })
 
-  it('resolves prospect language preference ahead of master-owner best_language', async () => {
+  it('resolves ownership-check language from master_owners.best_language', async () => {
     await expect(resolveMapOwnerLanguage({
       language_preference: 'Spanish',
-      best_language: 'English',
-    }, 'mo-1')).resolves.toBe('Spanish')
+      best_language: 'Mandarin',
+    }, 'mo-1')).resolves.toBe('Mandarin')
   })
 
   it('randomizes ownership_check templates for the resolved prospect language', async () => {

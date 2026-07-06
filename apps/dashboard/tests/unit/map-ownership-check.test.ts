@@ -698,7 +698,7 @@ describe('map ownership check canonical resolver', () => {
   it('renders David as Hi David', () => {
     const context = buildOwnershipCheckTemplateContext(identityFixture)
     const evaluated = evaluateOwnershipTemplate(
-      makeTemplate('en-david', 'Hi {{seller_first_name}}, this is {{agent_first_name}}. I had a quick question about {{property_address}}.'),
+      makeTemplate('en-david', 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.'),
       context,
     )
     expect(evaluated?.rendered).toContain('Hi David')
