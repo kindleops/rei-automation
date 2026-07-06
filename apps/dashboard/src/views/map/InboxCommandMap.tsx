@@ -145,7 +145,7 @@ import {
   THEME_TRANSITION_MS,
 } from './map-visual-presets'
 import { fetchMapProperties } from '../../lib/api/backendClient'
-import { MasterFiltersWorkspace } from './master-filters'
+// Master Filters workspace rebuilt in feat(filters) commits — import restored after desktop/mobile land.
 import type { MapFilterBounds } from './master-filters'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
@@ -9330,44 +9330,9 @@ export function InboxCommandMap({
               ))}
             </div>
             {activeControlsTab === 'filters' ? (
-              <MasterFiltersWorkspace
-                isMobile={isMobile}
-                bounds={mapFilterBounds}
-                initialToken={appliedMapFilterToken}
-                onApply={({ token, activeRuleCount }) => {
-                  propertyUniverseAbortRef.current?.abort()
-                  appliedMapFilterTokenRef.current = token
-                  setAppliedMapFilterToken(token)
-                  setAppliedMasterFilterRuleCount(activeRuleCount)
-                  const map = mapRef.current
-                  if (isStyleSafe(map)) {
-                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
-                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
-                      : undefined
-                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
-                    applyMasterFilterMapLayerOverride(map, true)
-                  }
-                }}
-                onClear={() => {
-                  propertyUniverseAbortRef.current?.abort()
-                  appliedMapFilterTokenRef.current = null
-                  setAppliedMapFilterToken(null)
-                  setAppliedMasterFilterRuleCount(0)
-                  const map = mapRef.current
-                  if (isStyleSafe(map)) {
-                    const anchor = map.getLayer(PROPERTY_UNIVERSE_LAYER_IDS.clusterRing)
-                      ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
-                      : undefined
-                    ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, null)
-                    applySellerPinFieldPresentation(map, {
-                      sellerPinsEnabled: sellerPinLayers.sellerPins,
-                      viewportZoom: map.getZoom(),
-                      geojson: sellerPinsGeojsonRef.current,
-                      masterFilterActive: false,
-                    })
-                  }
-                }}
-              />
+              <div className="nx-icm__filters-rebuild-placeholder" role="status">
+                Master Filters workspace is rebuilding.
+              </div>
             ) : (
             <>
             <div className="nx-icm__controls-panel">
