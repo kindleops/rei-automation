@@ -42,6 +42,14 @@ export function compileExpressionTree(node, state = { params: [], nextIndex: 0 }
     if (field.entity === "geo") {
       return { type: "geo_rule", ...base };
     }
+    if (field.dataType === "inbox_scope" && node.operator === "matches_conditions") {
+      return {
+        type: "inbox_scope_rule",
+        fieldKey: field.key,
+        operator: node.operator,
+        conditions: Array.isArray(node.value) ? node.value : [],
+      };
+    }
     return { type: "property_rule", ...base };
   }
 

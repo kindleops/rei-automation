@@ -203,13 +203,17 @@ export interface MapFilterQueryParams {
 
 export interface MapFilterPreviewRequest {
   expression?: AdvancedMapFilterGroup
+  inboxFilters?: Record<string, unknown>
+  mapStatus?: string
   filterToken?: string
   presetKey?: string
   bounds?: MapFilterBounds | null
 }
 
 export interface MapFilterTokenRequest {
-  expression: AdvancedMapFilterGroup
+  expression?: AdvancedMapFilterGroup
+  inboxFilters?: Record<string, unknown>
+  mapStatus?: string
   ttlHours?: number
 }
 

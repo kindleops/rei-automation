@@ -106,6 +106,10 @@ function validateRuleValue(field, operator, value) {
   if (["is_blank", "is_not_blank", "is_empty", "is_not_empty", "has_data", "has_no_data"].includes(operator)) {
     return [];
   }
+  if (field.dataType === "inbox_scope" && operator === "matches_conditions") {
+    if (!Array.isArray(value) || value.length === 0) return ["missing_inbox_conditions"];
+    return [];
+  }
   if (["is_true", "is_false", "is_unknown"].includes(operator)) {
     return [];
   }

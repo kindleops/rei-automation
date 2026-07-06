@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './map-intelligence-cards.css'
+import './map-advanced-filters.css'
 import type { FeatureCollection, GeoJsonProperties, LineString, Point, Polygon } from 'geojson'
 import type { ThreadMessage } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
@@ -4625,6 +4626,7 @@ export function InboxCommandMap({
         : undefined
       ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
       applyMasterFilterMapLayerOverride(map, Boolean(token))
+      map.triggerRepaint()
       if (!token) {
         applySellerPinFieldPresentation(map, {
           sellerPinsEnabled: sellerPinLayers.sellerPins,
@@ -9816,6 +9818,17 @@ export function InboxCommandMap({
 
 
       <div key={mapContainerKey} ref={containerRef} className="nx-icm__canvas" />
+
+      {commandMode && (
+        <button
+          type="button"
+          className="nx-icm__command-filters-btn"
+          onClick={() => setMapAdvancedFiltersOpen(true)}
+          aria-label="Open advanced map filters"
+        >
+          Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
+        </button>
+      )}
 
       {tempLocation && (
         <aside className="cc-map-dossier" style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, width: '320px' }}>

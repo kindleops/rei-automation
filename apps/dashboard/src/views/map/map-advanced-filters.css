@@ -1,5 +1,28 @@
 /* Map Advanced Filters — extends Inbox nx-ifm shell */
 
+.nx-icm__command-filters-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 12;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 16, 24, 0.82);
+  color: #f4f7fb;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+.nx-icm__command-filters-btn:hover {
+  border-color: rgba(166, 210, 96, 0.45);
+  color: #e8ffd0;
+}
+
 .nx-ifm-overlay--map {
   z-index: 10050;
 }

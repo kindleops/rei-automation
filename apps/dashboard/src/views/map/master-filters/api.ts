@@ -59,10 +59,15 @@ export async function fetchMapFilterRegistry(q?: string) {
 }
 
 export async function previewMapFilter(
-  expression: AdvancedMapFilterGroup,
+  expressionOrPayload: AdvancedMapFilterGroup | {
+    inboxFilters: Record<string, unknown>
+    mapStatus?: string
+  },
   bounds?: MapFilterBounds | null,
 ) {
-  const body: MapFilterPreviewRequest = { expression }
+  const body: MapFilterPreviewRequest = 'inboxFilters' in expressionOrPayload
+    ? { inboxFilters: expressionOrPayload.inboxFilters, mapStatus: expressionOrPayload.mapStatus }
+    : { expression: expressionOrPayload }
   if (bounds) body.bounds = bounds
 
   const result = await callBackend<ApiEnvelope<MapFilterPreviewResponse>>(PREVIEW_ROUTE, {
@@ -83,8 +88,16 @@ export async function previewMapFilter(
   return { ok: true as const, status: result.status, data: result.data.data }
 }
 
-export async function createMapFilterToken(expression: AdvancedMapFilterGroup, ttlHours?: number) {
-  const body: MapFilterTokenRequest = { expression }
+export async function createMapFilterToken(
+  expressionOrPayload: AdvancedMapFilterGroup | {
+    inboxFilters: Record<string, unknown>
+    mapStatus?: string
+  },
+  ttlHours?: number,
+) {
+  const body: MapFilterTokenRequest = 'inboxFilters' in expressionOrPayload
+    ? { inboxFilters: expressionOrPayload.inboxFilters, mapStatus: expressionOrPayload.mapStatus }
+    : { expression: expressionOrPayload }
   if (ttlHours != null) body.ttlHours = ttlHours
 
   const result = await callBackend<ApiEnvelope<MapFilterTokenResponse>>(TOKEN_ROUTE, {

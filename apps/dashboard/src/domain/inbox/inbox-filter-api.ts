@@ -40,7 +40,9 @@ export async function fetchInboxFilterCatalog(signal?: AbortSignal) {
     source: string
   }>('/api/cockpit/inbox/filter-catalog', { signal })
   if (!res.ok) throw new Error(res.message || 'filter_catalog_failed')
-  return res.data
+  const body = res.data
+  if (!body?.fields?.length) throw new Error('filter_catalog_empty')
+  return body
 }
 
 export async function fetchInboxFilterOptions(

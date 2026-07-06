@@ -3,9 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { InboxAdvancedFilters, InboxViewSelectValue, InboxStageSelectValue } from '../inbox-ui-helpers'
 import {
-  buildAdvancedFilterChips,
   clearAllAdvancedFilters,
-  countActiveAdvancedFilters,
   serializeAdvancedFiltersForServer,
 } from '../../../domain/inbox/inbox-advanced-filter-engine'
 import {
@@ -19,6 +17,12 @@ import {
   type FilterOption,
   type SavedInboxView,
 } from '../../../domain/inbox/inbox-filter-api'
+import { INBOX_FILTER_CATALOG, INBOX_FILTER_FIELD_COUNT } from '../../../domain/inbox/inbox-filter-catalog-client'
+import {
+  buildCatalogFilterChips,
+  countActiveCatalogFilters,
+  resolveCatalogRangeKeys,
+} from '../../../domain/inbox/inbox-filter-catalog-runtime'
 
 interface AdvancedFiltersModalProps {
   open: boolean
@@ -57,8 +61,8 @@ export const AdvancedFiltersModal = ({
   onClose,
   onApply,
 }: AdvancedFiltersModalProps) => {
-  const [groups, setGroups] = useState<FilterCatalogGroup[]>([])
-  const [fields, setFields] = useState<FilterCatalogField[]>([])
+  const [groups, setGroups] = useState<FilterCatalogGroup[]>(INBOX_FILTER_CATALOG.groups)
+  const [fields, setFields] = useState<FilterCatalogField[]>(INBOX_FILTER_CATALOG.fields)
   const [activeGroup, setActiveGroup] = useState('conversation')
   const [local, setLocal] = useState(advancedFilters)
   const [localStage, setLocalStage] = useState(stageFilter)
@@ -78,9 +82,13 @@ export const AdvancedFiltersModal = ({
     setLocal(advancedFilters)
     setLocalStage(stageFilter)
     setSearch('')
+    setGroups(INBOX_FILTER_CATALOG.groups)
+    setFields(INBOX_FILTER_CATALOG.fields)
     void fetchInboxFilterCatalog().then((cat) => {
-      setGroups(cat?.groups ?? [])
-      setFields(cat?.fields ?? [])
+      if ((cat?.fields?.length ?? 0) >= INBOX_FILTER_FIELD_COUNT) {
+        setGroups(cat.groups ?? INBOX_FILTER_CATALOG.groups)
+        setFields(cat.fields)
+      }
     }).catch(() => {})
     void fetchInboxSavedViews().then(setSavedViews).catch(() => {})
   }, [open, advancedFilters, stageFilter])
@@ -107,8 +115,21 @@ export const AdvancedFiltersModal = ({
     setLocal((c) => ({ ...c, ...p }))
   }, [])
 
-  const activeCount = useMemo(() => countActiveAdvancedFilters(local), [local])
-  const chips = useMemo(() => buildAdvancedFilterChips(local, { stage: localStage, view: viewFilter }), [local, localStage, viewFilter])
+  const activeCount = useMemo(() => countActiveCatalogFilters(local), [local])
+  const chips = useMemo(() => {
+    const base = buildCatalogFilterChips(local)
+    if (localStage && localStage !== 'all_stages') {
+      return [
+        {
+          key: 'stage',
+          label: `Stage: ${localStage}`,
+          clear: (current: InboxAdvancedFilters) => current,
+        },
+        ...base,
+      ]
+    }
+    return base
+  }, [local, localStage])
 
   const groupFields = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -172,8 +193,8 @@ export const AdvancedFiltersModal = ({
     }
 
     if (field.type === 'numberRange') {
-      const minKey = `${field.key}Min` as keyof InboxAdvancedFilters
-      const maxKey = `${field.key.replace(/Min$/, '')}Max` as keyof InboxAdvancedFilters
+      const { minKey, maxKey } = resolveCatalogRangeKeys(field)
+      if (!minKey || !maxKey) return null
       return (
         <label key={field.key} className="nx-ifm-field">
           <span>{field.label}</span>
@@ -187,8 +208,8 @@ export const AdvancedFiltersModal = ({
     }
 
     if (field.type === 'dateRange') {
-      const fromKey = field.key as keyof InboxAdvancedFilters
-      const toKey = field.key.replace(/From$/, 'To') as keyof InboxAdvancedFilters
+      const { fromKey, toKey } = resolveCatalogRangeKeys(field)
+      if (!fromKey || !toKey) return null
       return (
         <label key={field.key} className="nx-ifm-field">
           <span>{field.label}</span>

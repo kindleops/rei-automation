@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-06T21:22:14.200Z",
-  "offlineMode": false,
+  "generatedAt": "2026-07-06T22:19:52.243Z",
+  "offlineMode": true,
   "databaseConnected": true,
   "verifiedFieldCount": 11,
   "verifiedQuickPresetKeys": [
@@ -39,16 +39,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1037,
-        "propertyCountMs": 103,
-        "prospectCountMs": 972,
-        "ownerCountMs": 133,
-        "phoneCountMs": 107,
-        "countQueryMs": 1315,
-        "totalMs": 3131
+        "connectionMs": 747,
+        "propertyCountMs": 87,
+        "prospectCountMs": 767,
+        "ownerCountMs": 200,
+        "phoneCountMs": 86,
+        "countQueryMs": 1140,
+        "totalMs": 8038
       },
       "activeRuleCount": 0,
-      "durationMs": 3134
+      "durationMs": 8040
     },
     {
       "id": "property_type_mf5",
@@ -85,16 +85,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1016,
-        "propertyCountMs": 95,
-        "prospectCountMs": 291,
-        "ownerCountMs": 103,
-        "phoneCountMs": 89,
-        "countQueryMs": 578,
-        "totalMs": 1991
+        "connectionMs": 693,
+        "propertyCountMs": 101,
+        "prospectCountMs": 187,
+        "ownerCountMs": 87,
+        "phoneCountMs": 84,
+        "countQueryMs": 459,
+        "totalMs": 7086
       },
       "activeRuleCount": 1,
-      "durationMs": 1993
+      "durationMs": 7087
     },
     {
       "id": "property_type_mf24",
@@ -131,16 +131,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1008,
-        "propertyCountMs": 80,
-        "prospectCountMs": 292,
-        "ownerCountMs": 97,
-        "phoneCountMs": 89,
-        "countQueryMs": 558,
-        "totalMs": 1976
+        "connectionMs": 732,
+        "propertyCountMs": 87,
+        "prospectCountMs": 1333,
+        "ownerCountMs": 307,
+        "phoneCountMs": 134,
+        "countQueryMs": 1861,
+        "totalMs": 4087
       },
       "activeRuleCount": 1,
-      "durationMs": 1978
+      "durationMs": 4089
     },
     {
       "id": "equity_percent_gte_50",
@@ -177,16 +177,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1008,
-        "propertyCountMs": 102,
-        "prospectCountMs": 972,
-        "ownerCountMs": 127,
-        "phoneCountMs": 105,
-        "countQueryMs": 1306,
-        "totalMs": 3099
+        "connectionMs": 729,
+        "propertyCountMs": 101,
+        "prospectCountMs": 803,
+        "ownerCountMs": 199,
+        "phoneCountMs": 71,
+        "countQueryMs": 1174,
+        "totalMs": 7815
       },
       "activeRuleCount": 1,
-      "durationMs": 3099
+      "durationMs": 7816
     },
     {
       "id": "units_count_gte_5",
@@ -223,16 +223,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1975,
-        "propertyCountMs": 90,
-        "prospectCountMs": 113,
-        "ownerCountMs": 80,
-        "phoneCountMs": 70,
-        "countQueryMs": 353,
-        "totalMs": 3207
+        "connectionMs": 4087,
+        "propertyCountMs": 71,
+        "prospectCountMs": 109,
+        "ownerCountMs": 90,
+        "phoneCountMs": 93,
+        "countQueryMs": 363,
+        "totalMs": 7210
       },
       "activeRuleCount": 1,
-      "durationMs": 3208
+      "durationMs": 7210
     },
     {
       "id": "estimated_value_gte_250k",
@@ -269,16 +269,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1987,
-        "propertyCountMs": 99,
-        "prospectCountMs": 387,
-        "ownerCountMs": 100,
-        "phoneCountMs": 97,
-        "countQueryMs": 683,
-        "totalMs": 3546
+        "connectionMs": 7082,
+        "propertyCountMs": 105,
+        "prospectCountMs": 431,
+        "ownerCountMs": 112,
+        "phoneCountMs": 72,
+        "countQueryMs": 720,
+        "totalMs": 8509
       },
       "activeRuleCount": 1,
-      "durationMs": 3547
+      "durationMs": 8509
     },
     {
       "id": "prospect_sms_eligible",
@@ -316,16 +316,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 3095,
-        "propertyCountMs": 89,
-        "prospectCountMs": 1143,
-        "ownerCountMs": 142,
-        "phoneCountMs": 73,
-        "countQueryMs": 1447,
-        "totalMs": 7370
+        "connectionMs": 7209,
+        "propertyCountMs": 87,
+        "prospectCountMs": 949,
+        "ownerCountMs": 146,
+        "phoneCountMs": 86,
+        "countQueryMs": 1268,
+        "totalMs": 10458
       },
       "activeRuleCount": 1,
-      "durationMs": 7371
+      "durationMs": 10458
     },
     {
       "id": "prospect_has_phone",
@@ -363,16 +363,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 3104,
-        "propertyCountMs": 86,
-        "prospectCountMs": 1133,
-        "ownerCountMs": 149,
-        "phoneCountMs": 78,
-        "countQueryMs": 1446,
-        "totalMs": 7409
+        "connectionMs": 7813,
+        "propertyCountMs": 83,
+        "prospectCountMs": 701,
+        "ownerCountMs": 117,
+        "phoneCountMs": 84,
+        "countQueryMs": 985,
+        "totalMs": 10989
       },
       "activeRuleCount": 1,
-      "durationMs": 7409
+      "durationMs": 10989
     },
     {
       "id": "prospect_primary",
@@ -410,16 +410,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 3204,
-        "propertyCountMs": 96,
-        "prospectCountMs": 1130,
-        "ownerCountMs": 141,
-        "phoneCountMs": 76,
-        "countQueryMs": 1443,
-        "totalMs": 7368
+        "connectionMs": 8018,
+        "propertyCountMs": 97,
+        "prospectCountMs": 753,
+        "ownerCountMs": 117,
+        "phoneCountMs": 85,
+        "countQueryMs": 1052,
+        "totalMs": 11128
       },
       "activeRuleCount": 1,
-      "durationMs": 7368
+      "durationMs": 11128
     },
     {
       "id": "owner_property_count_gte_5",
@@ -456,16 +456,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 3542,
-        "propertyCountMs": 81,
-        "prospectCountMs": 115,
+        "connectionMs": 8507,
+        "propertyCountMs": 82,
+        "prospectCountMs": 101,
         "ownerCountMs": 94,
-        "phoneCountMs": 80,
-        "countQueryMs": 370,
-        "totalMs": 6300
+        "phoneCountMs": 81,
+        "countQueryMs": 358,
+        "totalMs": 10712
       },
       "activeRuleCount": 1,
-      "durationMs": 6301
+      "durationMs": 10713
     },
     {
       "id": "owner_portfolio_units_gte_20",
@@ -487,31 +487,14 @@
           }
         ]
       },
-      "ok": true,
+      "ok": false,
       "compile": "pass",
-      "preview": "pass",
+      "preview": "fail",
       "token": "pass",
       "filterToken": "0f29f3defde254aeb97521f5bcd3e5db",
-      "matchingProperties": 805,
-      "counts": {
-        "matchingProperties": 805,
-        "matchingProspects": 80,
-        "matchingMasterOwners": 617,
-        "matchingPhones": 0,
-        "propertiesInBounds": null,
-        "representedProperties": null
-      },
-      "timing": {
-        "connectionMs": 6301,
-        "propertyCountMs": 75,
-        "prospectCountMs": 98,
-        "ownerCountMs": 76,
-        "phoneCountMs": 89,
-        "countQueryMs": 338,
-        "totalMs": 7648
-      },
-      "activeRuleCount": 1,
-      "durationMs": 7648
+      "error": "timeout exceeded when trying to connect",
+      "phase": null,
+      "durationMs": 10001
     },
     {
       "id": "phone_has_canonical",
@@ -534,31 +517,14 @@
           }
         ]
       },
-      "ok": true,
+      "ok": false,
       "compile": "pass",
-      "preview": "pass",
+      "preview": "fail",
       "token": "pass",
       "filterToken": "b5e351a24d8811801b9633f7f1b1fac2",
-      "matchingProperties": 0,
-      "counts": {
-        "matchingProperties": 0,
-        "matchingProspects": 0,
-        "matchingMasterOwners": 0,
-        "matchingPhones": 0,
-        "propertiesInBounds": null,
-        "representedProperties": null
-      },
-      "timing": {
-        "connectionMs": 7366,
-        "propertyCountMs": 72,
-        "prospectCountMs": 77,
-        "ownerCountMs": 73,
-        "phoneCountMs": 78,
-        "countQueryMs": 300,
-        "totalMs": 8012
-      },
-      "activeRuleCount": 1,
-      "durationMs": 8012
+      "error": "timeout exceeded when trying to connect",
+      "phase": null,
+      "durationMs": 10001
     }
   ],
   "quickPresets": [
@@ -590,16 +556,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1,
-        "propertyCountMs": 96,
-        "prospectCountMs": 889,
-        "ownerCountMs": 124,
-        "phoneCountMs": 102,
-        "countQueryMs": 1211,
-        "totalMs": 1794
+        "connectionMs": 2,
+        "propertyCountMs": 100,
+        "prospectCountMs": 709,
+        "ownerCountMs": 147,
+        "phoneCountMs": 85,
+        "countQueryMs": 1041,
+        "totalMs": 1621
       },
       "activeRuleCount": 0,
-      "durationMs": 1795
+      "durationMs": 1621
     },
     {
       "key": "multifamily_5_plus",
@@ -638,16 +604,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 2,
-        "propertyCountMs": 77,
-        "prospectCountMs": 190,
-        "ownerCountMs": 102,
-        "phoneCountMs": 85,
-        "countQueryMs": 454,
-        "totalMs": 855
+        "connectionMs": 1,
+        "propertyCountMs": 80,
+        "prospectCountMs": 160,
+        "ownerCountMs": 95,
+        "phoneCountMs": 80,
+        "countQueryMs": 415,
+        "totalMs": 833
       },
       "activeRuleCount": 1,
-      "durationMs": 855
+      "durationMs": 834
     },
     {
       "key": "multifamily_2_4",
@@ -687,15 +653,15 @@
       },
       "timing": {
         "connectionMs": 1,
-        "propertyCountMs": 82,
-        "prospectCountMs": 280,
-        "ownerCountMs": 88,
-        "phoneCountMs": 85,
-        "countQueryMs": 535,
-        "totalMs": 1026
+        "propertyCountMs": 91,
+        "prospectCountMs": 220,
+        "ownerCountMs": 90,
+        "phoneCountMs": 76,
+        "countQueryMs": 477,
+        "totalMs": 942
       },
       "activeRuleCount": 1,
-      "durationMs": 1027
+      "durationMs": 942
     },
     {
       "key": "high_equity",
@@ -735,15 +701,15 @@
       },
       "timing": {
         "connectionMs": 1,
-        "propertyCountMs": 79,
-        "prospectCountMs": 752,
-        "ownerCountMs": 127,
-        "phoneCountMs": 94,
-        "countQueryMs": 1052,
-        "totalMs": 1854
+        "propertyCountMs": 84,
+        "prospectCountMs": 828,
+        "ownerCountMs": 123,
+        "phoneCountMs": 90,
+        "countQueryMs": 1125,
+        "totalMs": 1863
       },
       "activeRuleCount": 1,
-      "durationMs": 1854
+      "durationMs": 1864
     },
     {
       "key": "sms_eligible",
@@ -783,16 +749,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 854,
-        "propertyCountMs": 90,
-        "prospectCountMs": 608,
-        "ownerCountMs": 118,
-        "phoneCountMs": 87,
-        "countQueryMs": 903,
-        "totalMs": 3059
+        "connectionMs": 833,
+        "propertyCountMs": 84,
+        "prospectCountMs": 721,
+        "ownerCountMs": 131,
+        "phoneCountMs": 84,
+        "countQueryMs": 1020,
+        "totalMs": 3024
       },
       "activeRuleCount": 1,
-      "durationMs": 3059
+      "durationMs": 3024
     },
     {
       "key": "has_phone",
@@ -832,16 +798,16 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1026,
-        "propertyCountMs": 79,
+        "connectionMs": 941,
+        "propertyCountMs": 75,
         "prospectCountMs": 95,
-        "ownerCountMs": 76,
-        "phoneCountMs": 85,
-        "countQueryMs": 335,
-        "totalMs": 1712
+        "ownerCountMs": 94,
+        "phoneCountMs": 76,
+        "countQueryMs": 340,
+        "totalMs": 1668
       },
       "activeRuleCount": 1,
-      "durationMs": 1712
+      "durationMs": 1669
     },
     {
       "key": "portfolio_owner",
@@ -880,17 +846,17 @@
         "representedProperties": null
       },
       "timing": {
-        "connectionMs": 1712,
-        "propertyCountMs": 84,
-        "prospectCountMs": 154,
-        "ownerCountMs": 92,
-        "phoneCountMs": 81,
-        "countQueryMs": 411,
-        "totalMs": 4338
+        "connectionMs": 1619,
+        "propertyCountMs": 112,
+        "prospectCountMs": 156,
+        "ownerCountMs": 89,
+        "phoneCountMs": 90,
+        "countQueryMs": 447,
+        "totalMs": 3743
       },
       "activeRuleCount": 1,
-      "durationMs": 4339
+      "durationMs": 3743
     }
   ],
-  "ok": true
+  "ok": false
 }

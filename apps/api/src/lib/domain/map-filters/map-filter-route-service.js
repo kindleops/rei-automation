@@ -1,4 +1,5 @@
 import { compileMapFilter } from "./map-filter-compiler.js";
+import { buildMapFilterExpressionFromInboxFilters } from "./inbox-to-map-filter-expression.js";
 import { countMapFilterEntities } from "./map-filter-count-service.js";
 import { resolveMapFilterAuthScope } from "./filter-scope.js";
 import { getMapFilterPreset } from "./map-filter-presets.js";
@@ -41,6 +42,11 @@ export async function resolveCompiledMapFilter(request, body = {}) {
   }
 
   let expression = body.expression;
+  if (body.inboxFilters && typeof body.inboxFilters === "object") {
+    expression = buildMapFilterExpressionFromInboxFilters(body.inboxFilters, {
+      mapStatus: clean(body.mapStatus) || "all",
+    });
+  }
   const presetKey = clean(body.presetKey || body.preset);
   if (presetKey) {
     const preset = getMapFilterPreset(presetKey);

@@ -1,4 +1,5 @@
 import { getRegistryField } from "./active-field-registry.js";
+import { buildInboxScopeExistsSql } from "./inbox-filter-scope-sql.js";
 import {
   MAP_FILTER_PROSPECT_LINKS_ALIAS,
   MAP_FILTER_PROSPECT_LINKS_TABLE,
@@ -78,6 +79,15 @@ function compileAstNode(node, ctx, { mode, outerProspectAlias = null } = {}) {
 
   if (node.type === "phone_rule") {
     return compilePhoneRelationship(node, ctx);
+  }
+
+  if (node.type === "inbox_scope_rule") {
+    const { sql, params } = buildInboxScopeExistsSql(node.conditions || [], {
+      params: ctx.params,
+      propertyAlias: PROPERTY_ALIAS,
+    });
+    ctx.params = params;
+    return sql;
   }
 
   return "TRUE";

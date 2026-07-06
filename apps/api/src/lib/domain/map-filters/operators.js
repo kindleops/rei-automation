@@ -72,6 +72,8 @@ export const DERIVED_PRESENCE_OPERATORS = [
   "is_unknown",
 ];
 
+export const INBOX_SCOPE_OPERATORS = ["matches_conditions"];
+
 export const OPERATORS_BY_DATA_TYPE = {
   text: TEXT_OPERATORS,
   number: NUMERIC_OPERATORS,
@@ -82,6 +84,7 @@ export const OPERATORS_BY_DATA_TYPE = {
   json_object_array: JSON_OBJECT_ARRAY_OPERATORS,
   geo: GEO_OPERATORS,
   derived_presence: DERIVED_PRESENCE_OPERATORS,
+  inbox_scope: INBOX_SCOPE_OPERATORS,
 };
 
 export function operatorsForDataType(dataType) {
