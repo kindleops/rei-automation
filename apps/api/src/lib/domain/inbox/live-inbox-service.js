@@ -2404,7 +2404,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || fastBucketMode || initialBootSafeMode || deps.skipCounts === true || options.skipCounts === true;
   const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootSafeMode || options.skipDelivery === true;
-  const skipLinkedContextHydration = initialBootMode || fastBucketMode || options.listOnly === true;
+  // Keep linked-context hydration on bucket tab switches so list rows show owner/address.
+  // Initial boot still skips it for sub-second first paint.
+  const skipLinkedContextHydration = initialBootMode || options.listOnly === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);

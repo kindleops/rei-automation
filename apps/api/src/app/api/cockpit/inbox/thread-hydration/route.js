@@ -37,6 +37,68 @@ function parseConversationThreadId(value) {
   return parsed
 }
 
+const CANONICAL_FALLBACK_SELECT = 'property_address_full, owner_name, market, property_type, estimated_value, canonical_e164, latest_message_body, latest_message_at, property_id, master_owner_id, prospect_id, seller_phone, thread_key'
+
+async function resolveCanonicalInboxFallbackRow(supabase, {
+  targetThreadKey = '',
+  conversationThreadId = '',
+  legacyThreadKey = '',
+  normalizedPhone = '',
+  propertyId = '',
+  masterOwnerId = '',
+} = {}) {
+  const selectRow = async (column, value) => {
+    const needle = clean(value)
+    if (!needle) return null
+    const { data, error } = await supabase
+      .from('canonical_inbox_threads')
+      .select(CANONICAL_FALLBACK_SELECT)
+      .eq(column, needle)
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      console.warn('[HYDRATION_CANONICAL_FALLBACK_FAILED]', { column, message: error.message })
+      return null
+    }
+    return data || null
+  }
+
+  const attempts = []
+  const parsedIdentity = parseConversationThreadId(conversationThreadId || targetThreadKey)
+  const phoneCandidates = [
+    normalizedPhone,
+    parsedIdentity.normalized_phone,
+    legacyThreadKey,
+    targetThreadKey.startsWith('ct:') ? '' : targetThreadKey,
+  ].map(clean).filter(Boolean)
+
+  for (const phone of [...new Set(phoneCandidates)]) {
+    attempts.push(['seller_phone', phone], ['canonical_e164', phone], ['thread_key', phone])
+  }
+  if (targetThreadKey) attempts.push(['thread_key', targetThreadKey])
+  if (legacyThreadKey) attempts.push(['thread_key', legacyThreadKey])
+
+  for (const [column, value] of attempts) {
+    const row = await selectRow(column, value)
+    if (row) return row
+  }
+
+  const resolvedPropertyId = clean(propertyId || parsedIdentity.property_id)
+  const resolvedMasterOwnerId = clean(masterOwnerId || parsedIdentity.master_owner_id)
+  if (resolvedPropertyId && resolvedMasterOwnerId) {
+    const { data, error } = await supabase
+      .from('canonical_inbox_threads')
+      .select(CANONICAL_FALLBACK_SELECT)
+      .eq('property_id', resolvedPropertyId)
+      .eq('master_owner_id', resolvedMasterOwnerId)
+      .limit(1)
+      .maybeSingle()
+    if (!error && data) return data
+  }
+
+  return null
+}
+
 export async function OPTIONS(request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) })
 }
@@ -102,15 +164,15 @@ export async function GET(request) {
     const degradedParts = []
 
     console.log('[HYDRATION] 1. Fetching fallback data...')
-    let fallbackData = {}
-    if (target_thread_key) {
-      const { data } = await supabase
-        .from('canonical_inbox_threads')
-        .select('property_address_full, owner_name, market, property_type, estimated_value, canonical_e164, latest_message_body, latest_message_at, property_id, master_owner_id, prospect_id')
-        .eq('thread_key', target_thread_key)
-        .maybeSingle()
-      if (data) fallbackData = data
-    }
+    const fallbackRow = await resolveCanonicalInboxFallbackRow(supabase, {
+      targetThreadKey: target_thread_key,
+      conversationThreadId: conversation_thread_id,
+      legacyThreadKey: legacy_thread_key,
+      normalizedPhone: effective_normalized_phone,
+      propertyId: effective_property_id,
+      masterOwnerId: effective_master_owner_id,
+    })
+    const fallbackData = fallbackRow || {}
 
     const resolved_e164 = effective_normalized_phone || fallbackData.canonical_e164 || ''
     const resolved_property_id = effective_property_id || fallbackData.property_id || ''

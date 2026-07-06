@@ -2018,8 +2018,8 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     normalizedPhone: normalizedPhoneForThreadIdentity(row),
     normalized_phone: normalizedPhoneForThreadIdentity(row),
     leadId: dc.property_id || dc.master_owner_id || conversationThreadId,
-    ownerId: dc.masterOwnerId || dc.master_owner_id || (row.ownerId as string | undefined) || null,
-    propertyId: dc.propertyId || dc.property_id || null,
+    ownerId: dc.masterOwnerId || dc.master_owner_id || asString(row.master_owner_id ?? row.ownerId ?? row.masterOwnerId, '') || null,
+    propertyId: dc.propertyId || dc.property_id || asString(row.property_id ?? row.propertyId, '') || null,
     prospectId: dc.prospectId || dc.prospect_id || null,
     phoneNumberId: dc.phoneId || dc.phone_id || null,
     textgridNumberId: dc.textgridNumberId || dc.textgrid_number_id || asString(row.textgridNumberId || row.textgrid_number_id, '') || undefined,
@@ -3984,6 +3984,67 @@ export const getThreadIntelligence = async (thread: InboxWorkflowThread, signal?
 
 
 /** Instant thread context from row fields — never blocks on Supabase lookups. */
+export const buildThreadContextFromDealContext = (dealContext: DealContext | null | undefined): ThreadContext | null => {
+  if (!dealContext) return null
+  const dcRecord = dealContext as unknown as AnyRecord
+  const ownerId = asString(dealContext.masterOwnerId || dealContext.master_owner_id || dcRecord.ownerId, '')
+  const propertyId = asString(dealContext.propertyId || dealContext.property_id, '')
+  const ownerName = firstNonEmptyString(
+    dealContext.ownerName,
+    dealContext.owner_name,
+    dealContext.displayName,
+    dealContext.display_name,
+    dealContext.sellerDisplayName,
+    dealContext.fullName,
+  ) || 'Unknown Owner'
+  const propertyAddress = firstNonEmptyString(
+    dealContext.propertyAddress,
+    dealContext.property_address_full,
+    dcRecord.property_address,
+  ) || 'Unknown Address'
+  const phone = asString(
+    dealContext.canonicalE164 || dealContext.canonical_e164 || dealContext.sellerPhone || dealContext.seller_phone,
+    '',
+  ) || null
+  const market = asString(dealContext.market || dealContext.market_name, '')
+
+  return {
+    seller: ownerId || ownerName !== 'Unknown Owner'
+      ? { id: ownerId, name: ownerName, market }
+      : null,
+    property: propertyId || propertyAddress !== 'Unknown Address'
+      ? { id: propertyId, address: propertyAddress, market }
+      : null,
+    phone,
+    contactStack: phone ? [{ type: 'phone', value: phone, status: 'known' }] : [],
+    dealContext: {
+      stage: asString(dealContext.stage || dealContext.universalStage || dealContext.conversationStage, 'unknown'),
+      nextAction: asString(dcRecord.nextSystemAction || dcRecord.next_system_action, ''),
+    },
+    aiContext: null,
+    queueContext: null,
+    contextMatchQuality: 'high',
+    contextDebug: {
+      resolvedPhoneTable: null,
+      resolvedMasterOwnerTable: null,
+      resolvedOwnerTable: null,
+      resolvedPropertyTable: null,
+      resolvedProspectTable: null,
+      matchedOwnerBy: 'deal_context',
+      matchedProspectBy: 'deal_context',
+      matchedPropertyBy: 'deal_context',
+      matchedPhoneBy: 'deal_context',
+      matchedPhoneRowId: null,
+      matchedEmailBy: null,
+      matchedAiBrainBy: null,
+      matchedQueueBy: null,
+      bridgedMasterOwnerId: ownerId || null,
+      bridgedProspectId: asString(dealContext.prospectId || dealContext.prospect_id, '') || null,
+      bridgedPropertyId: propertyId || null,
+    },
+  }
+}
+
 export const buildThreadContextFromThread = (thread: InboxThread): ThreadContext => {
   const threadRecord = thread as unknown as AnyRecord
   const propertyData = thread.property_data && typeof thread.property_data === 'object' ? thread.property_data as AnyRecord : {}

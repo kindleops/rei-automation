@@ -135,8 +135,8 @@ export async function loadThreadContext({ thread_key, supabase }) {
     safeSelect(supabase, "title_routing_closing_engine", (q) => (propertyIds.length ? q.select("*").in("property_id", propertyIds) : Promise.resolve({ data: [] }))),
     safeSelect(supabase, "closings", (q) => (propertyIds.length ? q.select("*").in("property_id", propertyIds) : Promise.resolve({ data: [] }))),
     safeSelect(supabase, "buyer_match", (q) => (propertyIds.length ? q.select("*").in("property_id", propertyIds) : Promise.resolve({ data: [] }))),
-    safeSelect(supabase, "agents", (q) => q.select("*").limit(100)),
-    safeSelect(supabase, "templates", (q) => q.select("*").limit(200)),
+    safeSelect(supabase, "agents", (q) => q.select("id,name,agent_name,persona").limit(25)),
+    safeSelect(supabase, "templates", (q) => q.select("id,name,template_name,use_case,stage,agent_style,source").limit(50)),
     safeSelect(supabase, "inbox_thread_state", (q) => q.select("*").eq("thread_key", thread_key).limit(1)),
   ]);
 

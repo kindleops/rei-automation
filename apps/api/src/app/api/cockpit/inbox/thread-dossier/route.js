@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 const ALLOWED_ORIGINS = new Set([
   'https://ops.leadcommand.ai',

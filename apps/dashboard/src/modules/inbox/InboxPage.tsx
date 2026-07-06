@@ -37,6 +37,7 @@ import {
   getThreadMessagesPageForThread,
   getThreadMessagesForThread,
   getConversationThreadIdForThread,
+  buildThreadContextFromDealContext,
   buildThreadContextFromThread,
   queueReplyFromInbox,
   scheduleReplyFromInbox,
@@ -2120,6 +2121,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           if (result.dealContext) {
             setDealContext(result.dealContext)
             dealContextCacheRef.current[cacheKey] = result.dealContext
+            const hydratedContext = buildThreadContextFromDealContext(result.dealContext)
+            if (hydratedContext) setThreadContext(hydratedContext)
           }
           if (result.intelligence) {
             setThreadIntelligence({
@@ -2133,6 +2136,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           if (result.dealContext) {
             setDealContext(result.dealContext)
             dealContextCacheRef.current[cacheKey] = result.dealContext
+            const dossierContext = buildThreadContextFromDealContext(result.dealContext)
+            if (dossierContext) setThreadContext(dossierContext)
           }
           if (result.intelligence) {
             setThreadIntelligence((current) => ({ ...(current ?? {}), ...result.intelligence }))
