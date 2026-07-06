@@ -52,6 +52,8 @@ const BOOT_FAST_SOURCE_CONFIG = {
   key: "boot_fast",
   name: BOOT_FAST_THREAD_SOURCE,
 };
+// Minimal columns verified on inbox_thread_state — PostgREST rejects the whole
+// select if any listed column is missing on a lagging production project.
 const BOOT_FAST_THREAD_FIELDS = [
   "thread_key",
   "seller_phone",
@@ -65,17 +67,8 @@ const BOOT_FAST_THREAD_FIELDS = [
   "latest_message_at",
   "latest_direction",
   "latest_delivery_status",
-  "latest_message_event_id",
-  "message_count",
-  "inbound_count",
-  "outbound_count",
-  "last_inbound_at",
-  "last_outbound_at",
-  "last_intent",
   "is_read",
   "is_suppressed",
-  "disposition",
-  "automation_lane",
   "updated_at",
 ].join(",");
 const DEFAULT_LIMIT = 100;
@@ -1949,6 +1942,16 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     });
     if (bootResult && (bootResult.data?.length > 0 || !initialBootSafeMode)) {
       return bootResult;
+    }
+    // Never fall through to canonical_inbox_threads for boot/fast modes — that view
+    // routinely exceeds production timeouts and would blank the inbox/map cards.
+    if (isInitialBoot || isFastBucket) {
+      return bootResult || {
+        data: [],
+        count: null,
+        error: null,
+        sourceConfig: BOOT_FAST_SOURCE_CONFIG,
+      };
     }
   }
 
