@@ -697,6 +697,7 @@ export default defineConfig(({ mode }) => {
     || devIdentity.commitSha
   const cacheVersion = resolveBuildCacheVersion({ commitSha })
   return {
+    publicDir: 'static',
     define: {
       'import.meta.env.VITE_COMMIT_SHA': JSON.stringify(commitSha),
       'import.meta.env.VITE_BUILD_TIME': JSON.stringify(buildTime),

@@ -14,6 +14,16 @@ const isImmutableAsset = (url) =>
   url.pathname.startsWith('/assets/')
   || /\.[a-f0-9]{8,}\.(js|css|woff2?)$/i.test(url.pathname)
 
+const isCacheableAssetResponse = (url, response) => {
+  if (!response?.ok) return false
+  const type = (response.headers.get('content-type') || '').toLowerCase()
+  if (type.includes('text/html')) return false
+  if (url.pathname.startsWith('/assets/')) {
+    return type.includes('javascript') || type.includes('css') || type.includes('font')
+  }
+  return type.includes('javascript') || type.includes('css') || type.includes('font')
+}
+
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })
@@ -52,9 +62,13 @@ self.addEventListener('fetch', (event) => {
   if (isImmutableAsset(url)) {
     event.respondWith(
       caches.match(request).then((cached) => {
-        if (cached) return cached
+        if (cached) {
+          const cachedType = (cached.headers.get('content-type') || '').toLowerCase()
+          if (!cachedType.includes('text/html')) return cached
+          void caches.open(ACTIVE_CACHE).then((cache) => cache.delete(request))
+        }
         return fetch(request).then((response) => {
-          if (response.ok) {
+          if (isCacheableAssetResponse(url, response)) {
             const copy = response.clone()
             void caches.open(ACTIVE_CACHE).then((cache) => cache.put(request, copy))
           }

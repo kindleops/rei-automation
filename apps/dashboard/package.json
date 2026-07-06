@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "sync:sounds": "mkdir -p public/sounds && (test -d ../../sounds && cp ../../sounds/*.mp3 public/sounds/ || true)",
+    "sync:sounds": "mkdir -p static/sounds && (test -d ../../sounds && cp ../../sounds/*.mp3 static/sounds/ || true)",
     "predev": "npm run sync:sounds",
     "dev": "vite",
     "prebuild": "npm run sync:sounds",

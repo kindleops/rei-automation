@@ -53,6 +53,6 @@
     { "source": "/api/intel/:path*", "destination": "https://api-steel-three-96.vercel.app/api/intel/:path*" },
     { "source": "/api/ops/:path*", "destination": "https://api-steel-three-96.vercel.app/api/ops/:path*" },
     { "source": "/api/workflows/:path*", "destination": "https://api-steel-three-96.vercel.app/api/workflows/:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/|favicon\\.svg|icons/|manifest\\.webmanifest|sw\\.js|sounds/).*)", "destination": "/index.html" }
   ]
 }

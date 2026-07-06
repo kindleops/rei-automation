@@ -83,6 +83,7 @@ Movies/
 Music/
 Pictures/
 Projects/
-Public/
+# macOS ~/Public — do not match vite `static/` or legacy `public/`
+/public/
 Applications/
 .vercel
