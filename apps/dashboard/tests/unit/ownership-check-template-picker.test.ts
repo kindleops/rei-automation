@@ -4,6 +4,7 @@ import {
   buildOwnershipTemplatePool,
   canonicalizeOwnerLanguage,
   evaluateOwnershipTemplate,
+  hasTextgridBlockedGreeting,
   fetchOwnershipCheckTemplates,
   resetOwnershipCheckTemplateCacheForTests,
   filterOwnershipTemplatesForLanguage,
@@ -97,6 +98,14 @@ describe('ownership check template picker', () => {
     expect(fetchTemplatesByUseCase).toHaveBeenCalledWith('ownership_check')
     expect(templates).toEqual(catalog)
     expect(templates.every((template) => template.useCaseSlug === 'ownership_check')).toBe(true)
+  })
+
+  it('detects TextGrid-blocked Hi-comma greetings from production failures', () => {
+    expect(hasTextgridBlockedGreeting(
+      'Hi, I had a quick question about 2919 Logan Ave N, Minneapolis, Mn 55411. Are you connected with the owner?',
+    )).toBe(true)
+    expect(hasTextgridBlockedGreeting('Hi Pathao, this is Jake about 2919 Logan Ave N.')).toBe(false)
+    expect(hasTextgridBlockedGreeting('Ni hao Pathao, Jake zai zheli.')).toBe(false)
   })
 
   it('canonicalizes owner language aliases', () => {
@@ -233,7 +242,7 @@ describe('ownership check template picker', () => {
     })
   })
 
-  describe('falls back to a generic template when no prospect name is resolved (regression: William & Cheryl Ludwig / 665 Portland Ave)', () => {
+  describe('requires resolved seller + agent names (no generic TextGrid-blocked fallbacks)', () => {
     const personalizedFirstTouch = makeTemplate({
       id: 'en-personalized',
       language: 'English',
@@ -243,15 +252,11 @@ describe('ownership check template picker', () => {
     const genericFirstTouch = makeTemplate({
       id: 'en-generic',
       language: 'English',
-      // Deliberately NOT flagged is_first_touch in the catalog — mirrors a real
-      // template-catalog shape where only personalized variants are tagged
-      // first-touch, even though a generic ownership-check is semantically a
-      // first touch too.
-      isFirstTouch: false,
-      templateText: 'This is {{agent_first_name}}. I\'m reaching out about {{property_address}}. Are you the owner?',
+      isFirstTouch: true,
+      templateText: 'Hi, I had a quick question about {{property_address}}. Are you connected with the owner?',
     })
 
-    it('selects the generic template when seller_first_name is unresolved and only personalized first-touch templates exist otherwise', () => {
+    it('returns no pool when seller_first_name is unresolved — never selects TextGrid-blocked "Hi," templates', () => {
       const unresolvedContext = {
         seller_first_name: '',
         seller_name: '',
@@ -267,11 +272,18 @@ describe('ownership check template picker', () => {
         'English',
       )
 
-      expect(pool).toHaveLength(1)
-      expect(pool[0].template.id).toBe('en-generic')
-      expect(pool[0].rendered).not.toContain('William')
-      expect(pool[0].rendered).not.toContain('Ludwig')
-      expect(pool[0].rendered).toContain('Andre')
+      expect(pool).toHaveLength(0)
+    })
+
+    it('rejects production generic ownership_check wording that TextGrid blocks', () => {
+      const result = evaluateOwnershipTemplate(genericFirstTouch, {
+        seller_first_name: '',
+        seller_name: '',
+        property_address: '2919 Logan Ave N, Minneapolis, MN 55411',
+        agent_name: 'Jake',
+        agent_first_name: 'Jake',
+      })
+      expect(result).toBeNull()
     })
 
     it('accepts templates that greet with the human seller full name via {{seller_name}}', () => {

@@ -20,6 +20,7 @@ import {
   renderTemplate,
 } from '../../../lib/data/templateData'
 import {
+  hasTextgridBlockedGreeting,
   pickOwnershipCheckTemplateForMap,
   resolveMapOwnerLanguage,
 } from './ownership-check-template-picker'
@@ -134,6 +135,8 @@ const hasGenericRightPersonWording = (message: string): boolean =>
   /\bright person\b/i.test(message)
   || /\bwho handles\b/i.test(message)
   || /\btrying to reach\b/i.test(message)
+  || /\bhad a quick question\b/i.test(message)
+  || /\bare you connected with\b/i.test(message)
 
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
@@ -315,15 +318,19 @@ export const useSellerMapCardActions = ({
           prospectId: resolvedProspectId,
           masterOwnerId,
         })
+        const hydratedProspectFullName = text(firstDefined(record, ['prospect_full_name', 'prospect_name']))
+          || liveIdentity.prospectFullName
+          || ''
+        const hydratedProspectFirstName = text(firstDefined(record, ['prospect_first_name']))
+          || liveIdentity.prospectFirstName
+          || ''
         manualTemplateValues = buildMapTemplateManualValues({
           ...record,
-          prospect_full_name: text(firstDefined(record, ['prospect_full_name', 'prospect_name']))
-            || liveIdentity.prospectFullName
-            || '',
-          prospect_first_name: text(firstDefined(record, ['prospect_first_name']))
-            || liveIdentity.prospectFirstName
-            || '',
-          sms_eligible: firstDefined(record, ['sms_eligible']) ?? liveIdentity.smsEligible,
+          prospect_full_name: hydratedProspectFullName,
+          prospect_first_name: hydratedProspectFirstName,
+          // Map ownership check greets the linked human prospect even when sms_eligible
+          // is false in prospects — blanking the name selects TextGrid-blocked "Hi," templates.
+          sms_eligible: undefined,
           agent_persona: text(firstDefined(record, ['agent_persona', 'agentPersona']))
             || liveIdentity.agentPersona
             || '',
@@ -331,6 +338,16 @@ export const useSellerMapCardActions = ({
             || liveIdentity.agentFamily
             || '',
         })
+        const resolvedSellerFirst = safeHumanName(
+          manualTemplateValues.seller_first_name || hydratedProspectFirstName || hydratedProspectFullName,
+        )
+        if (resolvedSellerFirst) {
+          manualTemplateValues = {
+            ...manualTemplateValues,
+            seller_name: manualTemplateValues.seller_name || resolvedSellerFirst,
+            seller_first_name: firstToken(resolvedSellerFirst),
+          }
+        }
       }
 
       const templateContext = {
@@ -347,6 +364,16 @@ export const useSellerMapCardActions = ({
         if (!manualTemplateValues.agent_first_name) {
           setFollowUpError('No SMS agent available')
           setFollowUpState('failed')
+          window.setTimeout(() => {
+            setFollowUpState('idle')
+            setFollowUpError(null)
+          }, 4000)
+          return
+        }
+
+        if (!manualTemplateValues.seller_first_name) {
+          setFollowUpError('Seller name required for ownership check')
+          setFollowUpState('blocked')
           window.setTimeout(() => {
             setFollowUpState('idle')
             setFollowUpError(null)
@@ -428,6 +455,7 @@ export const useSellerMapCardActions = ({
       if (
         !messageText.trim()
         || hasBlankGreeting(messageText)
+        || hasTextgridBlockedGreeting(messageText)
         || hasHiThereGreeting(messageText)
         || hasGenericRightPersonWording(messageText)
         || hasUnresolvedTemplateTokens(messageText)

@@ -62,11 +62,15 @@ export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguag
 const usesNonLatinSellerNameMatching = (sellerFirstName: string): boolean =>
   /[\u3040-\u9fff\u3400-\u4dbf\uac00-\ud7af\u0600-\u06ff\u0590-\u05ff]/.test(sellerFirstName)
 
-// Block only greetings where the comma is not followed by substantive content
-// (e.g. "Hi," or "Hi, {{seller_first_name}}"), not natural name-free openers
-// such as "Hi, this is {{agent_first_name}} about {{property_address}}."
+// Mirror apps/api textgrid.js BLANK_GREETING_RE — any "Hi," opener is provider-blocked.
+export const TEXTGRID_BLANK_GREETING_RE =
+  /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i
+
+export const hasTextgridBlockedGreeting = (message: string): boolean =>
+  TEXTGRID_BLANK_GREETING_RE.test(message.trim())
+
 const hasBlankGreeting = (message: string): boolean =>
-  /^(hi|hey|hello|hola|ola|marhaba)\s*,\s*(?:\{\{|\[\[|$)/i.test(message.trim())
+  hasTextgridBlockedGreeting(message)
 
 const hasHiThereGreeting = (message: string): boolean =>
   /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
@@ -75,6 +79,8 @@ const hasGenericRightPersonWording = (message: string): boolean =>
   /\bright person\b/i.test(message)
   || /\bwho handles\b/i.test(message)
   || /\btrying to reach\b/i.test(message)
+  || /\bhad a quick question\b/i.test(message)
+  || /\bare you connected with\b/i.test(message)
 
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
@@ -242,37 +248,19 @@ export const buildOwnershipTemplatePool = (
   const firstTouch = languageScoped.filter((template) => template.isFirstTouch)
   const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
   const hasResolvedAgentName = Boolean(asString(context.agent_first_name, '').trim())
-  const hasPersonalizedContext = hasResolvedSellerName && hasResolvedAgentName
 
-  // Prefer personalized first-touch templates when a human first name is known.
-  // When both seller + agent are resolved, never fall back to generic "right person"
-  // templates — only Supabase ownership_check rows that render with real placeholders.
+  // Ownership check must greet the human seller by name. Generic "Hi," / right-person
+  // templates are rejected by TextGrid and must never be selected from the map card.
+  if (!hasResolvedSellerName || !hasResolvedAgentName) {
+    return []
+  }
+
   const personalizedFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: true })
-  const genericFirstTouch = evaluateTemplates(firstTouch, context, { requireSellerNameInGreeting: false })
   const personalizedLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true })
-  const genericLanguageScoped = evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: false })
 
-  const pool = hasPersonalizedContext
-    ? (
-      personalizedFirstTouch.length
-        ? personalizedFirstTouch
-        : personalizedLanguageScoped
-    )
-    : hasResolvedSellerName
-      ? (
-        personalizedFirstTouch.length
-          ? personalizedFirstTouch
-          : genericFirstTouch.length
-            ? genericFirstTouch
-            : personalizedLanguageScoped.length
-              ? personalizedLanguageScoped
-              : genericLanguageScoped
-      )
-      : (
-        genericFirstTouch.length
-          ? genericFirstTouch
-          : genericLanguageScoped
-      )
+  const pool = personalizedFirstTouch.length
+    ? personalizedFirstTouch
+    : personalizedLanguageScoped
 
   let candidates = dedupeCandidates(pool)
   const excludeId = asString(options.excludeTemplateId, '').trim()

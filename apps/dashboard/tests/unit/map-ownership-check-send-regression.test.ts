@@ -12,6 +12,7 @@ import {
   buildOwnershipCheckTemplateContext,
 } from '../../src/domain/map/resolve-map-ownership-check'
 import {
+  buildOwnershipTemplatePool,
   evaluateOwnershipTemplate,
   pickRandomOwnershipCheckTemplate,
 } from '../../src/views/map/seller-card/ownership-check-template-picker'
@@ -134,7 +135,7 @@ describe('map ownership check send regression', () => {
     expect(values.seller_first_name).not.toContain('Trust')
   })
 
-  it('8. human name missing selects a name-free ownership-check template from the Supabase pool', () => {
+  it('8. human name missing yields no ownership-check pool (blocks TextGrid "Hi," templates)', () => {
     const context = buildOwnershipCheckTemplateContext({
       propertyId: 'prop-1',
       masterOwnerId: 'mo-1',
@@ -156,17 +157,32 @@ describe('map ownership check send regression', () => {
       resolutionDiagnostics: { candidateCount: 1, source: 'hydrated_map_identity' },
     })
 
-    const named = evaluateOwnershipTemplate(
-      makeTemplate('named', 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.'),
+    const pool = buildOwnershipTemplatePool(
+      [
+        makeTemplate('named', 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.'),
+        makeTemplate('generic', 'Hi, I had a quick question about {{property_address}}. Are you connected with the owner?'),
+      ],
       context,
+      'English',
     )
-    const generic = evaluateOwnershipTemplate(
-      makeTemplate('generic', 'Hi, this is {{agent_first_name}}. I\'m reaching out about {{property_address}}.'),
-      context,
-    )
-    expect(named).toBeNull()
-    expect(generic?.rendered).toContain('Michael')
-    expect(generic?.rendered.toLowerCase()).not.toContain('llc')
+    expect(pool).toHaveLength(0)
+  })
+
+  it('8b. production Pathao case: sms_eligible false still supplies seller_first_name for ownership check', () => {
+    const values = buildMapTemplateManualValues({
+      prospect_full_name: 'Pathao Vang',
+      prospect_first_name: 'Pathao',
+      sms_eligible: false,
+      agent_persona: 'Jake Peterson',
+    })
+    expect(values.seller_first_name).toBe('')
+    const ownershipValues = buildMapTemplateManualValues({
+      prospect_full_name: 'Pathao Vang',
+      prospect_first_name: 'Pathao',
+      sms_eligible: undefined,
+      agent_persona: 'Jake Peterson',
+    })
+    expect(ownershipValues.seller_first_name).toBe('Pathao')
   })
 
   it('9. entity name is never inserted into the greeting', () => {

@@ -1456,6 +1456,7 @@ function mapProcessedManualSendFailure(reason = "", error_message = "") {
 
   if (
     combined.includes("blank_seller_greeting") ||
+    combined.includes("message contains blank greeting") ||
     combined.includes("unresolved placeholder") ||
     combined.includes("seller_first_name is blank") ||
     combined.includes("blank_greeting") ||
