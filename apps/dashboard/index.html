@@ -14,6 +14,53 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        var KEY = 'nexus:sw-recovery-generation'
+        var GEN = '4'
+        var ENTRY = '__NEXUS_MAIN_ENTRY__'
+
+        function loadApp() {
+          var script = document.createElement('script')
+          script.type = 'module'
+          script.crossOrigin = 'anonymous'
+          script.src = ENTRY
+          document.body.appendChild(script)
+        }
+
+        if (localStorage.getItem(KEY) === GEN) {
+          loadApp()
+          return
+        }
+
+        if (!('serviceWorker' in navigator)) {
+          localStorage.setItem(KEY, GEN)
+          loadApp()
+          return
+        }
+
+        var hadController = Boolean(navigator.serviceWorker.controller)
+
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          return Promise.all(regs.map(function (reg) { return reg.unregister() })).then(function () {
+            return regs.length > 0 || hadController
+          })
+        }).then(function (hadServiceWorker) {
+          if (!('caches' in window)) return hadServiceWorker
+          return caches.keys().then(function (keys) {
+            return Promise.all(keys.filter(function (key) {
+              return key.indexOf('nexus-shell') === 0
+            }).map(function (key) { return caches.delete(key) }))
+          }).then(function () { return hadServiceWorker })
+        }).then(function (hadServiceWorker) {
+          localStorage.setItem(KEY, GEN)
+          if (hadServiceWorker) {
+            location.reload()
+            return
+          }
+          loadApp()
+        })
+      })()
+    </script>
   </body>
 </html>

@@ -37,9 +37,10 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((keys) => Promise.all(
         keys
-          .filter((key) => (key.startsWith('nexus-shell') && key !== ACTIVE_CACHE) || LEGACY_CACHES.includes(key))
+          .filter((key) => key.startsWith('nexus-shell') || LEGACY_CACHES.includes(key))
           .map((key) => caches.delete(key)),
       ))
+      .then(() => caches.open(ACTIVE_CACHE))
       .then(() => self.clients.claim())
       .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
       .then((clients) => {
@@ -60,21 +61,21 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname === '/sw.js') return
 
   if (isImmutableAsset(url)) {
+    // Network-first: never serve a stale (possibly HTML-poisoned) cache before the network.
     event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) {
-          const cachedType = (cached.headers.get('content-type') || '').toLowerCase()
-          if (!cachedType.includes('text/html')) return cached
-          void caches.open(ACTIVE_CACHE).then((cache) => cache.delete(request))
-        }
-        return fetch(request).then((response) => {
+      fetch(request)
+        .then((response) => {
           if (isCacheableAssetResponse(url, response)) {
             const copy = response.clone()
             void caches.open(ACTIVE_CACHE).then((cache) => cache.put(request, copy))
           }
           return response
         })
-      }),
+        .catch(() => caches.match(request).then((cached) => {
+          const cachedType = (cached?.headers.get('content-type') || '').toLowerCase()
+          if (cached && !cachedType.includes('text/html')) return cached
+          return Response.error()
+        })),
     )
     return
   }

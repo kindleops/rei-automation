@@ -652,6 +652,42 @@ function resolveBuildCacheVersion(devIdentity: { commitSha: string }) {
   return sha === 'unknown' || sha === 'local' ? `dev-${Date.now()}` : sha.slice(0, 12)
 }
 
+const MAIN_ENTRY_PLACEHOLDER = '__NEXUS_MAIN_ENTRY__'
+
+const swRecoveryBootPlugin = (): Plugin => {
+  let outDir = 'dist'
+
+  return {
+    name: 'sw-recovery-boot',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!ctx.server) return html
+        return html.replace(MAIN_ENTRY_PLACEHOLDER, '/src/main.tsx')
+      },
+    },
+    closeBundle() {
+      const assetsDir = path.join(outDir, 'assets')
+      const mainFile = fs.readdirSync(assetsDir).find((file) => /^main-.*\.js$/.test(file))
+      if (!mainFile) {
+        throw new Error('sw-recovery-boot: expected hashed main entry in build output')
+      }
+
+      const indexPath = path.join(outDir, 'index.html')
+      const html = fs.readFileSync(indexPath, 'utf8')
+      if (!html.includes(MAIN_ENTRY_PLACEHOLDER)) return
+
+      fs.writeFileSync(
+        indexPath,
+        html.replace(MAIN_ENTRY_PLACEHOLDER, `/assets/${mainFile}`),
+      )
+    },
+  }
+}
+
 const pwaManifestPlugin = (cacheVersion: string): Plugin => {
   const manifestPath = fileURLToPath(new URL('./manifest.webmanifest', import.meta.url))
   const swPath = fileURLToPath(new URL('./sw.js', import.meta.url))
@@ -707,7 +743,15 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
-    plugins: [react(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    build: {
+      rollupOptions: {
+        input: {
+          main: fileURLToPath(new URL('./src/main.tsx', import.meta.url)),
+          index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        },
+      },
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,
