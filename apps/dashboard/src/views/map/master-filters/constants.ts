@@ -1,21 +1,14 @@
 /** Verified production baseline — reconciles with public.properties. */
 export const CANONICAL_PROPERTY_BASELINE = 124_046
 
-/** Canonical quick-filter preset keys in display order. */
+/** Verified quick-filter preset keys — must match backend VERIFIED_QUICK_PRESET_KEYS. */
 export const CANONICAL_QUICK_FILTER_KEYS = [
   'all_properties',
-  'uncontacted',
-  'contacted',
+  'multifamily_5_plus',
+  'multifamily_2_4',
   'high_equity',
   'sms_eligible',
   'has_phone',
-  'absentee_owner',
-  'out_of_state',
-  'tax_delinquent',
-  'active_lien',
-  'vacant',
-  'multifamily_2_4',
-  'multifamily_5_plus',
   'portfolio_owner',
 ] as const
 

@@ -107,31 +107,30 @@ test("canonical presets reference only registry field keys", () => {
   assert.deepEqual(errors, [], errors.join(", "));
 });
 
-test("preset catalog includes supported chips and excludes removed placeholders", () => {
+test("preset catalog exposes only verified launch quick filters", () => {
   const presetKeys = new Set(getMapFilterPresets().map((p) => p.key));
   const removedKeys = new Set(REMOVED_PLACEHOLDER_PRESETS.map((p) => p.key));
 
-  for (const key of ["multifamily_2_4", "multifamily_5_plus", "sms_eligible", "portfolio_5_plus", "exclude_institutional"]) {
-    assert.ok(presetKeys.has(key), `missing preset ${key}`);
+  for (const key of [
+    "all_properties",
+    "multifamily_2_4",
+    "multifamily_5_plus",
+    "high_equity",
+    "sms_eligible",
+    "has_phone",
+    "portfolio_owner",
+  ]) {
+    assert.ok(presetKeys.has(key), `missing verified preset ${key}`);
+  }
+
+  for (const blocked of ["tax_delinquent", "active_lien", "vacant", "uncontacted", "contacted"]) {
+    assert.ok(!presetKeys.has(blocked), `blocked preset still exposed: ${blocked}`);
   }
 
   for (const removed of removedKeys) {
     if (removed === "delinquent" || removed === "out_of_state" || removed === "institutional_excl") continue;
     assert.ok(!presetKeys.has(removed), `removed preset still present: ${removed}`);
   }
-});
-
-test("high equity absentee preset uses mixed-entity OR group", () => {
-  const preset = getMapFilterPresets().find((p) => p.key === "high_equity_absentee");
-  assert.ok(preset);
-  const root = preset.expression;
-  assert.equal(root.type, "group");
-  assert.equal(root.combinator, "AND");
-  const orGroup = root.children.find((c) => c.type === "group" && c.combinator === "OR");
-  assert.ok(orGroup, "missing OR group for absentee signals");
-  const entities = new Set(orGroup.children.map((c) => c.fieldKey.split(".")[0]));
-  assert.ok(entities.has("property"));
-  assert.ok(entities.has("master_owner"));
 });
 
 test("count and relationship semantics are documented", () => {

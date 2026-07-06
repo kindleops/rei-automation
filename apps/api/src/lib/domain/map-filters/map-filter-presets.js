@@ -2,6 +2,7 @@ import {
   buildContactedContactExpression,
   buildUncontactedContactExpression,
 } from "./contact-status-semantics.js";
+import { VERIFIED_QUICK_PRESET_KEYS } from "./operator-filter-catalog.js";
 
 /** Canonical quick presets — server-owned expressions only. */
 
@@ -422,40 +423,26 @@ export const MAP_FILTER_PRESET_CATALOG = {
   },
 };
 
-const PRESET_DISPLAY_ORDER = [
-  "all_properties",
-  "uncontacted",
-  "contacted",
-  "high_equity",
-  "sms_eligible",
-  "has_phone",
-  "absentee_owner",
-  "out_of_state",
-  "tax_delinquent",
-  "active_lien",
-  "vacant",
-  "multifamily_2_4",
-  "multifamily_5_plus",
-  "portfolio_owner",
-];
+const VERIFIED_PRESET_KEY_SET = new Set(VERIFIED_QUICK_PRESET_KEYS);
 
 export function getMapFilterPresets() {
-  const presets = Object.values(MAP_FILTER_PRESET_CATALOG).map((preset) => ({
-    key: preset.key,
-    label: preset.label,
-    entity: preset.entity,
-    description: preset.description,
-    expression: preset.expression,
-    system: Boolean(preset.system),
-  }));
+  const presets = VERIFIED_QUICK_PRESET_KEYS
+    .map((key) => MAP_FILTER_PRESET_CATALOG[key])
+    .filter(Boolean)
+    .map((preset) => ({
+      key: preset.key,
+      label: preset.label,
+      entity: preset.entity,
+      description: preset.description,
+      expression: preset.expression,
+      system: Boolean(preset.system),
+    }));
 
-  const orderIndex = new Map(PRESET_DISPLAY_ORDER.map((key, index) => [key, index]));
-  return presets.sort((a, b) => {
-    const ai = orderIndex.has(a.key) ? orderIndex.get(a.key) : Number.MAX_SAFE_INTEGER;
-    const bi = orderIndex.has(b.key) ? orderIndex.get(b.key) : Number.MAX_SAFE_INTEGER;
-    if (ai !== bi) return ai - bi;
-    return a.label.localeCompare(b.label);
-  });
+  return presets;
+}
+
+export function isVerifiedQuickPreset(presetKey) {
+  return VERIFIED_PRESET_KEY_SET.has(presetKey);
 }
 
 export function getMapFilterPreset(presetKey) {
