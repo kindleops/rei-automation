@@ -6,24 +6,6 @@ import { createRequestTimer } from '@/lib/cockpit/server-timing.js'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const TEMPLATE_COLUMNS = [
-  'id',
-  'template_id',
-  'template_key',
-  'is_active',
-  'is_first_touch',
-  'is_follow_up',
-  'use_case',
-  'stage_code',
-  'stage_label',
-  'language',
-  'template_body',
-  'english_translation',
-  'traffic_weight',
-  'metadata',
-  'updated_at',
-].join(',')
-
 function corsHeaders(_request) {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -49,7 +31,7 @@ export async function GET(request) {
   try {
     let query = supabase
       .from('sms_templates')
-      .select(TEMPLATE_COLUMNS)
+      .select('*')
       .order('updated_at', { ascending: false })
       .limit(limit)
     if (!includeInactive) query = query.eq('is_active', true)
