@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { previewMapFilter } from '../api'
 import type { AdvancedMapFilterGroup, MapFilterBounds, MapFilterPreviewCounts } from '../types'
-import { countActiveRules } from '../expression-utils'
 
-const PREVIEW_DEBOUNCE_MS = 500
+const PREVIEW_DEBOUNCE_MS = 450
 
 export interface UseMapFilterPreviewResult {
   previewCounts: MapFilterPreviewCounts | null
   previewLoading: boolean
   previewError: string | null
+  previewDurationMs: number | null
   refreshPreview: () => void
 }
 
@@ -20,25 +20,21 @@ export function useMapFilterPreview(
   const [previewCounts, setPreviewCounts] = useState<MapFilterPreviewCounts | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewDurationMs, setPreviewDurationMs] = useState<number | null>(null)
   const requestId = useRef(0)
 
   const runPreview = useCallback(async () => {
-    const activeRules = countActiveRules(expression)
-    if (activeRules === 0) {
-      setPreviewCounts(null)
-      setPreviewError(null)
-      setPreviewLoading(false)
-      return
-    }
-
     const id = ++requestId.current
     setPreviewLoading(true)
     setPreviewError(null)
 
+    const started = performance.now()
     const result = await previewMapFilter(expression, bounds)
     if (id !== requestId.current) return
 
     setPreviewLoading(false)
+    setPreviewDurationMs(Math.round(performance.now() - started))
+
     if (!result.ok) {
       setPreviewError(result.message || result.error)
       return
@@ -57,6 +53,7 @@ export function useMapFilterPreview(
     previewCounts,
     previewLoading,
     previewError,
+    previewDurationMs,
     refreshPreview: runPreview,
   }
 }
