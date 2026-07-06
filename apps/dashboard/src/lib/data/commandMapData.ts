@@ -1240,7 +1240,7 @@ export const loadCommandMapSellerPinDetail = async (
     if (phoneQuery) {
       const { data: phoneData, error: phoneError } = await phoneQuery.limit(1).maybeSingle()
       if (!phoneError && phoneData) {
-        merged = { ...merged, ...(phoneData as Record<string, unknown>) }
+        merged = { ...merged, ...(phoneData as unknown as Record<string, unknown>) }
       } else if (phoneError && !isAbortError(phoneError) && import.meta.env.DEV) {
         console.warn('[CommandMap] seller pin phone fields unavailable (migration pending?):', phoneError)
       }
