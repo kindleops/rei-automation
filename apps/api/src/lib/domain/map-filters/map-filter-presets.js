@@ -1,3 +1,8 @@
+import {
+  buildContactedContactExpression,
+  buildUncontactedContactExpression,
+} from "./contact-status-semantics.js";
+
 /** Canonical quick presets — server-owned expressions only. */
 
 function rule(id, fieldKey, operator, value, extra = {}) {
@@ -32,8 +37,32 @@ const HIGH_PORTFOLIO_EQUITY = 1_000_000;
 const HIGH_URGENCY_SCORE = 70;
 const HIGH_PRIORITY_SCORE = 70;
 
-/** @type {Record<string, { key: string; label: string; entity: string; description: string; expression: object }>} */
+/** @type {Record<string, { key: string; label: string; entity: string; description: string; expression: object; system?: boolean }>} */
 export const MAP_FILTER_PRESET_CATALOG = {
+  all_properties: {
+    key: "all_properties",
+    label: "All Properties",
+    entity: "property",
+    description: "Every authorized property — contacted and uncontacted.",
+    system: true,
+    expression: group("preset-all", "AND", []),
+  },
+  uncontacted: {
+    key: "uncontacted",
+    label: "Uncontacted",
+    entity: "property",
+    description: "Properties with no qualifying contact activity on the canonical contact-status field.",
+    system: true,
+    expression: buildUncontactedContactExpression(),
+  },
+  contacted: {
+    key: "contacted",
+    label: "Contacted",
+    entity: "property",
+    description: "Properties with qualifying contact activity on the canonical contact-status field.",
+    system: true,
+    expression: buildContactedContactExpression(),
+  },
   sfr: {
     key: "sfr",
     label: "SFR",
@@ -202,11 +231,41 @@ export const MAP_FILTER_PRESET_CATALOG = {
   },
   has_phone: {
     key: "has_phone",
-    label: "HAS PHONE",
-    entity: "prospect",
-    description: "Properties with prospects that have phone records.",
+    label: "Has Phone",
+    entity: "phone",
+    description: "Properties with at least one linked phone record.",
     expression: group("preset-phone", "AND", [
-      rule("preset-phone-rule", "prospect.has_phone", "has_data", true, { relationshipMatch: "any_linked" }),
+      rule("preset-phone-rule", "phone.has_canonical_phone", "has_data", true, { relationshipMatch: "any_linked" }),
+    ]),
+  },
+  absentee_owner: {
+    key: "absentee_owner",
+    label: "Absentee Owner",
+    entity: "property",
+    description: "Out-of-state or absentee owner signals.",
+    expression: group("preset-absentee", "AND", [
+      group("preset-absentee-or", "OR", [
+        rule("preset-absentee-oss", "property.out_of_state_owner", "is_true", true),
+        rule("preset-absentee-type", "master_owner.owner_type_guess", "contains", "ABSENTEE"),
+      ]),
+    ]),
+  },
+  vacant: {
+    key: "vacant",
+    label: "Vacant",
+    entity: "property",
+    description: "Properties flagged as vacant in property flags.",
+    expression: group("preset-vacant", "AND", [
+      rule("preset-vacant-rule", "property.property_flags_json", "contains_any", ["vacant", "Vacant", "VACANT"]),
+    ]),
+  },
+  portfolio_owner: {
+    key: "portfolio_owner",
+    label: "Portfolio Owner",
+    entity: "master_owner",
+    description: "Owners with two or more properties.",
+    expression: group("preset-portfolio-owner", "AND", [
+      rule("preset-portfolio-owner-rule", "master_owner.property_count", "greater_than_or_equal", 2),
     ]),
   },
   has_email: {

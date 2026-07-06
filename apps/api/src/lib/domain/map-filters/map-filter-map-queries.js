@@ -31,9 +31,9 @@ function appendMarketStateFilters({ markets, states }, params, startIndex) {
   return { clause, params, nextIndex };
 }
 
-function matchingCteSql(compiled, bounds = null) {
+function matchingCteSql(compiled, bounds = null, { requireGeo = true } = {}) {
   const { sql: predicateSql, params } = buildCompiledPredicate(compiled);
-  const matchingCte = buildMatchingPropertiesCte(predicateSql, bounds, params.length);
+  const matchingCte = buildMatchingPropertiesCte(predicateSql, bounds, params.length, { requireGeo });
   return {
     predicateParams: params,
     extraParams: matchingCte.extraParams,

@@ -80,6 +80,10 @@ export const EXCLUDED_SENSITIVE_FIELDS = [
 export const FIELD_ALIASES = {
   "property.saleprice": "property.sale_price",
   "property.total_loan_amt": "property.total_loan_balance",
+  "property.uncontacted": "property.contact_status",
+  "property.contacted": "property.contact_status",
+  "property.no_contact": "property.contact_status",
+  "property.new_lead": "property.contact_status",
   "prospects.person_flags_text": "prospect.person_flags_json",
   "prospect.seller_tags_text": "prospect.seller_tags_json",
   "master_owner.seller_tags_text": "master_owner.seller_tags_json",
@@ -195,7 +199,7 @@ export const RAW_MAP_FILTER_FIELD_DEFINITIONS = [
   field({ key: "property.final_acquisition_score", entity: "property", table: "properties", column: "final_acquisition_score", label: "Final Acquisition Score", description: "Final acquisition score.", category: "Signals", dataType: "number", populatedRows: 104217, valueSource: "range", synonyms: ["acquisition score", "acq score"] }),
 
   // ── 10F Enriched contact (partial) ──────────────────────────────────────────
-  field({ key: "property.contact_status", entity: "property", table: "properties", column: "contact_status", label: "Contact Status", description: "Property-level contact status.", category: "Enriched Contact", dataType: "text", populatedRows: 121182, valueSource: "distinct" }),
+  field({ key: "property.contact_status", entity: "property", table: "properties", column: "contact_status", label: "Contact Status", description: "Property-level contact status. Canonical source for contacted vs uncontacted map filters.", category: "Enriched Contact", dataType: "text", populatedRows: 121182, valueSource: "distinct", synonyms: ["uncontacted", "contacted", "no contact", "new lead", "not contacted", "message history", "active thread"] }),
   field({ key: "property.activity_status", entity: "property", table: "properties", column: "activity_status", label: "Activity Status", description: "Property activity status.", category: "Enriched Contact", dataType: "text", populatedRows: 8021, valueSource: "distinct" }),
   field({ key: "property.sms_eligible", entity: "property", table: "properties", column: "sms_eligible", label: "Property SMS Eligible", description: "Property-level SMS eligibility (partial coverage).", category: "Enriched Contact", dataType: "boolean", populatedRows: 8075, valueSource: "boolean" }),
   field({ key: "property.best_phone", entity: "property", table: "properties", column: "best_phone", label: "Best Phone (Property)", description: "Best phone on property record.", category: "Enriched Contact", dataType: "text", populatedRows: 8021, valueSource: "derived_presence", presenceStrategy: "has_data" }),

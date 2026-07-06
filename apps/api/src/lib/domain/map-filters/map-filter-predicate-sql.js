@@ -309,7 +309,12 @@ export function hasEntityRules(ast, entityType) {
   return found;
 }
 
-export function buildMatchingPropertiesCte(propertyPredicateSql, bounds = null, predicateParamCount = 0) {
+export function buildMatchingPropertiesCte(
+  propertyPredicateSql,
+  bounds = null,
+  predicateParamCount = 0,
+  { requireGeo = false } = {},
+) {
   let boundsClause = "";
   const extraParams = [];
   if (bounds) {
@@ -318,15 +323,18 @@ export function buildMatchingPropertiesCte(propertyPredicateSql, bounds = null, 
       AND ${PROPERTY_ALIAS}.longitude BETWEEN $${o + 3} AND $${o + 4}`;
     extraParams.push(bounds.lat_min, bounds.lat_max, bounds.lng_min, bounds.lng_max);
   }
+  const geoClause = requireGeo || bounds
+    ? `AND ${PROPERTY_ALIAS}.latitude IS NOT NULL
+        AND ${PROPERTY_ALIAS}.longitude IS NOT NULL`
+    : "";
   return {
     sql: `
       SELECT DISTINCT
         ${PROPERTY_ALIAS}.property_id,
         ${PROPERTY_ALIAS}.master_owner_id
-      FROM properties ${PROPERTY_ALIAS}
-      WHERE ${PROPERTY_ALIAS}.latitude IS NOT NULL
-        AND ${PROPERTY_ALIAS}.longitude IS NOT NULL
-        AND (${propertyPredicateSql})
+      FROM public.properties ${PROPERTY_ALIAS}
+      WHERE (${propertyPredicateSql})
+        ${geoClause}
         ${boundsClause}
     `,
     extraParams,

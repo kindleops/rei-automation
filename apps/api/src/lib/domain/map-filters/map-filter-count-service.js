@@ -50,7 +50,9 @@ export async function countMapFilterEntities(
     { bounds: parsedBounds },
   );
 
-  const matchingCte = buildMatchingPropertiesCte(predicateSql, parsedBounds, params.length);
+  const matchingCte = buildMatchingPropertiesCte(predicateSql, parsedBounds, params.length, {
+    requireGeo: Boolean(parsedBounds),
+  });
   const allParams = [...params, ...matchingCte.extraParams];
   const timeoutMs = MAP_FILTER_LIMITS.countQueryTimeoutMs;
 
