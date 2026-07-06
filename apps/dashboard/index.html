@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NEXUS" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" crossorigin href="__NEXUS_MAIN_CSS__" id="nexus-main-css" />
     <title>NEXUS Command Center</title>
   </head>
   <body>
@@ -17,10 +18,23 @@
     <script>
       (function () {
         var KEY = 'nexus:sw-recovery-generation'
-        var GEN = '4'
+        var GEN = '5'
         var ENTRY = '__NEXUS_MAIN_ENTRY__'
+        var CSS = '__NEXUS_MAIN_CSS__'
+
+        function ensureMainStylesheet() {
+          if (!CSS || CSS.indexOf('__NEXUS_') === 0) return
+          if (document.getElementById('nexus-main-css')) return
+          var link = document.createElement('link')
+          link.id = 'nexus-main-css'
+          link.rel = 'stylesheet'
+          link.crossOrigin = 'anonymous'
+          link.href = CSS
+          document.head.appendChild(link)
+        }
 
         function loadApp() {
+          ensureMainStylesheet()
           var script = document.createElement('script')
           script.type = 'module'
           script.crossOrigin = 'anonymous'

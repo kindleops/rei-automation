@@ -653,6 +653,7 @@ function resolveBuildCacheVersion(devIdentity: { commitSha: string }) {
 }
 
 const MAIN_ENTRY_PLACEHOLDER = '__NEXUS_MAIN_ENTRY__'
+const MAIN_CSS_PLACEHOLDER = '__NEXUS_MAIN_CSS__'
 
 const swRecoveryBootPlugin = (): Plugin => {
   let outDir = 'dist'
@@ -666,24 +667,32 @@ const swRecoveryBootPlugin = (): Plugin => {
       order: 'post',
       handler(html, ctx) {
         if (!ctx.server) return html
-        return html.replace(MAIN_ENTRY_PLACEHOLDER, '/src/main.tsx')
+        return html
+          .replace(MAIN_ENTRY_PLACEHOLDER, '/src/main.tsx')
+          .replace(
+            new RegExp(`\\s*<link rel="stylesheet"[^>]*href="${MAIN_CSS_PLACEHOLDER}"[^>]*/>\\s*`, 'g'),
+            '\n',
+          )
       },
     },
     closeBundle() {
       const assetsDir = path.join(outDir, 'assets')
       const mainFile = fs.readdirSync(assetsDir).find((file) => /^main-.*\.js$/.test(file))
+      const mainCss = fs.readdirSync(assetsDir).find((file) => /^main-.*\.css$/.test(file))
       if (!mainFile) {
         throw new Error('sw-recovery-boot: expected hashed main entry in build output')
       }
+      if (!mainCss) {
+        throw new Error('sw-recovery-boot: expected hashed main stylesheet in build output')
+      }
 
       const indexPath = path.join(outDir, 'index.html')
-      const html = fs.readFileSync(indexPath, 'utf8')
-      if (!html.includes(MAIN_ENTRY_PLACEHOLDER)) return
+      let html = fs.readFileSync(indexPath, 'utf8')
+      html = html
+        .replace(MAIN_ENTRY_PLACEHOLDER, `/assets/${mainFile}`)
+        .replace(MAIN_CSS_PLACEHOLDER, `/assets/${mainCss}`)
 
-      fs.writeFileSync(
-        indexPath,
-        html.replace(MAIN_ENTRY_PLACEHOLDER, `/assets/${mainFile}`),
-      )
+      fs.writeFileSync(indexPath, html)
     },
   }
 }

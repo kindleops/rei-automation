@@ -11,6 +11,9 @@ export function resolveDatabaseUrl() {
     clean(process.env.DATABASE_URL) ||
     clean(process.env.SUPABASE_DB_URL) ||
     clean(process.env.SUPABASE_URL_NO_POOL) ||
+    clean(process.env.POSTGRES_URL) ||
+    clean(process.env.POSTGRES_URL_NON_POOLING) ||
+    clean(process.env.POSTGRES_PRISMA_URL) ||
     "";
 
   if (!explicit) return "";
