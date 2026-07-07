@@ -7,6 +7,13 @@ import {
 } from "./map-filter-predicate-sql.js";
 
 const QUERY_TIMEOUT_MS = MAP_FILTER_LIMITS.countQueryTimeoutMs;
+const MVT_TILE_COORD_PARAM_COUNT = 3;
+
+/** Renumber $1..$N placeholders after leading tile coordinate params ($1-$3). */
+function offsetSqlParamPlaceholders(sql, offset) {
+  if (!offset) return sql;
+  return String(sql).replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+}
 
 function buildCompiledPredicate(compiled) {
   return buildPropertyEligibilitySql(
@@ -180,13 +187,14 @@ export async function getFilteredMapProperties(
 
 export async function getFilteredMapVectorTile(compiled, { z, x, y }) {
   const cte = matchingCteSql(compiled);
+  const matchingSql = offsetSqlParamPlaceholders(cte.sql, MVT_TILE_COORD_PARAM_COUNT);
 
   const sql = `
     WITH tile_bounds AS (
       SELECT ST_TileEnvelope($1::int, $2::int, $3::int) AS geom_3857
     ),
     matching_properties AS MATERIALIZED (
-      ${cte.sql}
+      ${matchingSql}
     ),
     mvt_source AS (
       SELECT

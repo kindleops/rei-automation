@@ -4635,14 +4635,24 @@ export function InboxCommandMap({
         ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
         : undefined
       ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, token)
-      applyMasterFilterMapLayerOverride(map, Boolean(token))
+      applySellerPinFieldPresentation(map, {
+        sellerPinsEnabled: sellerPinLayers.sellerPins,
+        viewportZoom: map.getZoom(),
+        geojson: sellerPinsGeojsonRef.current,
+        masterFilterActive: Boolean(token),
+      })
       map.triggerRepaint()
-      if (!token) {
-        applySellerPinFieldPresentation(map, {
-          sellerPinsEnabled: sellerPinLayers.sellerPins,
-          viewportZoom: map.getZoom(),
-          geojson: sellerPinsGeojsonRef.current,
-          masterFilterActive: false,
+      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin) {
+        map.once('zoomend', () => {
+          if (!isStyleSafe(map) || !appliedMapFilterTokenRef.current) return
+          ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterTokenRef.current)
+          applySellerPinFieldPresentation(map, {
+            sellerPinsEnabled: sellerPinLayers.sellerPins,
+            viewportZoom: map.getZoom(),
+            geojson: sellerPinsGeojsonRef.current,
+            masterFilterActive: true,
+          })
+          map.triggerRepaint()
         })
       }
     }
