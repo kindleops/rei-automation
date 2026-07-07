@@ -149,6 +149,7 @@ import {
 import { fetchMapProperties } from '../../lib/api/backendClient'
 
 import { MapAdvancedFiltersModal } from './components/MapAdvancedFiltersModal'
+import type { MapAppliedFilterDraft } from '../../domain/map/map-filter-draft'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
   LIFECYCLE_STAGE_META,
@@ -4148,6 +4149,7 @@ export function InboxCommandMap({
   const [mapMode, setMapMode] = useState<MapModeKey>('acquisition')
   const [appliedMapFilterToken, setAppliedMapFilterToken] = useState<string | null>(null)
   const [appliedMasterFilterRuleCount, setAppliedMasterFilterRuleCount] = useState(0)
+  const [appliedMapFilterDraft, setAppliedMapFilterDraft] = useState<MapAppliedFilterDraft | null>(null)
   const appliedMapFilterTokenRef = useRef<string | null>(null)
   const [advancedLayersOpen, setAdvancedLayersOpen] = useState(false)
   const [cinematicControls, setCinematicControls] = useState<CinematicControlsState>({
@@ -4663,6 +4665,7 @@ export function InboxCommandMap({
     appliedMapFilterTokenRef.current = null
     setAppliedMapFilterToken(null)
     setAppliedMasterFilterRuleCount(0)
+    setAppliedMapFilterDraft(null)
     setMapFilterStatusMessage(null)
     const map = mapRef.current
     if (isStyleSafe(map)) {
@@ -10293,8 +10296,10 @@ export function InboxCommandMap({
 
       <MapAdvancedFiltersModal
         open={mapAdvancedFiltersOpen}
+        initialDraft={appliedMapFilterDraft}
         onClose={() => setMapAdvancedFiltersOpen(false)}
-        onApply={({ token, activeRuleCount, matchingProperties }) => {
+        onApply={({ token, activeRuleCount, matchingProperties, draft }) => {
+          setAppliedMapFilterDraft(draft)
           applyMapFilterToken(token, activeRuleCount, matchingProperties)
         }}
         onClear={clearMapFilterToken}

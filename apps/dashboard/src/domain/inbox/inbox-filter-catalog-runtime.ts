@@ -2,6 +2,11 @@ import type { FilterCatalogField } from './inbox-filter-api'
 import { INBOX_FILTER_FIELDS } from './inbox-filter-catalog-client'
 import type { InboxAdvancedFilters } from '../../modules/inbox/inbox-ui-helpers'
 import { serializeAdvancedFiltersForServer } from './inbox-advanced-filter-engine'
+import {
+  formatCatalogSelectSummary,
+  isCatalogSelectValueActive,
+  normalizeCatalogSelectValue,
+} from './catalog-select-value'
 
 const isActiveValue = (value: unknown): boolean => {
   if (value === undefined || value === null || value === '') return false
@@ -61,6 +66,13 @@ export function pickActiveCatalogFilterValues(filters: InboxAdvancedFilters): Re
 
     const value = (filters as Record<string, unknown>)[field.key]
     if (!isActiveValue(value) || seen.has(field.key)) continue
+    if (field.type === 'select') {
+      const normalized = normalizeCatalogSelectValue(value)
+      if (!normalized.length) continue
+      payload[field.key] = normalized.length === 1 ? normalized[0] : normalized
+      seen.add(field.key)
+      continue
+    }
     payload[field.key] = value
     seen.add(field.key)
   }
@@ -117,7 +129,10 @@ export function countActiveCatalogFilters(filters: InboxAdvancedFilters = {}): n
       continue
     }
     const value = (filters as Record<string, unknown>)[field.key]
-    if (isActiveValue(value) && !seen.has(field.key)) {
+    const active = field.type === 'select'
+      ? isCatalogSelectValueActive(value)
+      : isActiveValue(value)
+    if (active && !seen.has(field.key)) {
       seen.add(field.key)
       count += 1
     }
@@ -189,7 +204,10 @@ export function buildCatalogFilterChips(filters: InboxAdvancedFilters): CatalogF
 
     const value = (filters as Record<string, unknown>)[field.key]
     if (!isActiveValue(value)) continue
-    push(field.key, `${field.label}: ${String(value)}`, (current) => ({
+    const labelValue = field.type === 'select'
+      ? formatCatalogSelectSummary(normalizeCatalogSelectValue(value))
+      : String(value)
+    push(field.key, `${field.label}: ${labelValue}`, (current) => ({
       ...current,
       [field.key]: field.key === 'outOfStateOwner' ? 'all' : undefined,
     }))

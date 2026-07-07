@@ -61,7 +61,17 @@ function buildDirectRules(payload: Record<string, unknown>): AdvancedMapFilterGr
   const push = (r: ReturnType<typeof createRule> | null) => { if (r) rules.push(r) }
   const gte = (k: string, v: unknown, rel?: 'any_linked') => { if (isActive(v)) push(withRel(createRule(k, 'greater_than_or_equal', v), rel)) }
   const lte = (k: string, v: unknown, rel?: 'any_linked') => { if (isActive(v)) push(withRel(createRule(k, 'less_than_or_equal', v), rel)) }
-  const eq = (k: string, v: unknown, rel?: 'any_linked') => { if (isActive(v)) push(withRel(createRule(k, 'equals', v), rel)) }
+  const eq = (k: string, v: unknown, rel?: 'any_linked') => {
+    if (!isActive(v)) return
+    if (Array.isArray(v)) {
+      const items = v.map((item) => String(item ?? '').trim()).filter(Boolean)
+      if (!items.length) return
+      if (items.length === 1) push(withRel(createRule(k, 'equals', items[0]), rel))
+      else push(withRel(createRule(k, 'is_any_of', items), rel))
+      return
+    }
+    push(withRel(createRule(k, 'equals', v), rel))
+  }
   const contains = (k: string, v: unknown, rel?: 'any_linked') => { if (isActive(v)) push(withRel(createRule(k, 'contains', v), rel)) }
 
   eq('property.market', payload.market)

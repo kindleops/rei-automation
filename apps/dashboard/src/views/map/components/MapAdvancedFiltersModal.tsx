@@ -31,16 +31,27 @@ import {
   isMapExcludedFilterKey,
   stripMapExcludedFilters,
 } from '../../../domain/map/map-filter-field-exclusions'
+import {
+  formatCatalogSelectSummary,
+  normalizeCatalogSelectValue,
+} from '../../../domain/inbox/catalog-select-value'
+import {
+  mergeMapFilterDraft,
+  type MapAppliedFilterDraft,
+} from '../../../domain/map/map-filter-draft'
 import '../../../modules/inbox/inbox-polish.css'
 import '../map-advanced-filters.css'
 
 export interface MapAdvancedFiltersModalProps {
   open: boolean
+  /** Previously applied filters — restored when reopening the modal. */
+  initialDraft?: MapAppliedFilterDraft | null
   onClose: () => void
   onApply: (payload: {
     token: string | null
     activeRuleCount: number
     matchingProperties: number
+    draft: MapAppliedFilterDraft
   }) => void
   onClear: () => void
 }
@@ -74,6 +85,7 @@ const asNum = (v: string): number | undefined => { const n = Number(v); return v
 
 export function MapAdvancedFiltersModal({
   open,
+  initialDraft = null,
   onClose,
   onApply,
   onClear,
@@ -97,11 +109,14 @@ export function MapAdvancedFiltersModal({
   const [propertyFlagMode, setPropertyFlagMode] = useState<FlagMode>('any')
   const [personFlagMode, setPersonFlagMode] = useState<FlagMode>('any')
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialDraftRef = useRef(initialDraft)
+  initialDraftRef.current = initialDraft
 
   useEffect(() => {
     if (!open) return
-    setLocal(DEFAULT_ADVANCED_FILTERS)
-    setMapStatus('all')
+    const draft = initialDraftRef.current
+    setLocal(mergeMapFilterDraft(draft?.filters))
+    setMapStatus(draft?.mapStatus ?? 'all')
     setSearch('')
     setPreviewError(null)
     setActiveGroup('map_status')
@@ -235,8 +250,14 @@ export function MapAdvancedFiltersModal({
     if (!canApply) return
     setApplying(true)
     try {
+      const draft = { filters: { ...local }, mapStatus }
       if (!hasActiveFilters) {
-        onApply({ token: null, activeRuleCount: 0, matchingProperties: CANONICAL_PROPERTY_BASELINE })
+        onApply({
+          token: null,
+          activeRuleCount: 0,
+          matchingProperties: CANONICAL_PROPERTY_BASELINE,
+          draft,
+        })
         onClose()
         return
       }
@@ -249,12 +270,13 @@ export function MapAdvancedFiltersModal({
         token: tokenResult.data.filterToken,
         activeRuleCount: activeCount,
         matchingProperties: previewCount ?? CANONICAL_PROPERTY_BASELINE,
+        draft,
       })
       onClose()
     } finally {
       setApplying(false)
     }
-  }, [activeCount, canApply, hasActiveFilters, onApply, onClose, previewCount, previewPayload])
+  }, [activeCount, canApply, hasActiveFilters, local, mapStatus, onApply, onClose, previewCount, previewPayload])
 
   const handleSave = useCallback(async () => {
     if (!saveName.trim()) return
@@ -344,8 +366,18 @@ export function MapAdvancedFiltersModal({
     }
 
     if (field.type === 'select') {
+      const selected = normalizeCatalogSelectValue((local as Record<string, unknown>)[field.key])
       return (
-        <SelectField key={`${field.key}-${optionsVersion}`} label={field.label} value={(local[key] as string) ?? ''} onChange={(v) => patch({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)} loadOptions={() => loadOptions(field)} cached={optionsCacheRef.current[field.optionsKey || field.key]} />
+        <MultiSelectField
+          key={`${field.key}-${optionsVersion}`}
+          label={field.label}
+          selected={selected}
+          onChange={(values) => patch({
+            [key]: values.length ? (values.length === 1 ? values[0] : values) : undefined,
+          } as Partial<InboxAdvancedFilters>)}
+          loadOptions={() => loadOptions(field)}
+          cached={optionsCacheRef.current[field.optionsKey || field.key]}
+        />
       )
     }
 
@@ -471,15 +503,20 @@ export function MapAdvancedFiltersModal({
   )
 }
 
-function SelectField({ label, value, onChange, loadOptions, cached }: {
-  label: string; value: string; onChange: (v: string) => void
-  loadOptions: () => Promise<FilterOption[]>; cached?: FilterOption[]
+function MultiSelectField({ label, selected, onChange, loadOptions, cached }: {
+  label: string
+  selected: string[]
+  onChange: (values: string[]) => void
+  loadOptions: () => Promise<FilterOption[]>
+  cached?: FilterOption[]
 }) {
   const loadRef = useRef(loadOptions)
   loadRef.current = loadOptions
   const [opts, setOpts] = useState<FilterOption[]>(cached ?? [])
   const [loading, setLoading] = useState(!cached?.length)
   const [error, setError] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+
   useEffect(() => {
     if (cached?.length) {
       setOpts(cached)
@@ -504,14 +541,43 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
       })
     return () => { cancelled = true }
   }, [cached])
+
+  const filtered = opts.filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()))
+  const toggle = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value])
+  }
+  const summary = formatCatalogSelectSummary(selected)
+
   return (
-    <label className="nx-ifm-field">
-      <span>{label}{loading ? ' · Loading…' : error ? ' · Unavailable' : ''}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={loading && !opts.length}>
-        <option value="">{loading ? 'Loading…' : error ? 'Unavailable' : 'Any'}</option>
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label} ({o.count.toLocaleString()})</option>)}
-      </select>
-    </label>
+    <div className="nx-ifm-field nx-ifm-field--multi">
+      <span>
+        {label}
+        {loading ? ' · Loading…' : error ? ' · Unavailable' : selected.length ? ` · ${summary}` : ''}
+      </span>
+      <input
+        type="text"
+        className="nx-ifm-multi-search"
+        placeholder={loading ? 'Loading options…' : error ? 'Unavailable' : 'Search options…'}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        disabled={loading && !opts.length}
+      />
+      <div className="nx-ifm-multi-list">
+        {loading && filtered.length === 0 && <p className="nx-ifm-empty">Loading options…</p>}
+        {!loading && error && filtered.length === 0 && <p className="nx-ifm-empty">Unable to load options</p>}
+        {!loading && !error && filtered.length === 0 && <p className="nx-ifm-empty">No options match</p>}
+        {filtered.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            className={`nx-ifm-flag-chip${selected.includes(o.value) ? ' is-selected' : ''}`}
+            onClick={() => toggle(o.value)}
+          >
+            {o.label} <em>{o.count.toLocaleString()}</em>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 

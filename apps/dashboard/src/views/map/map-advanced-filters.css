@@ -37,6 +37,31 @@
   color: var(--nx-danger, #ff7080);
 }
 
+.nx-ifm-field--multi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nx-ifm-multi-search {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 18, 0.72);
+  color: inherit;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.nx-ifm-multi-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 @media (max-width: 900px) {
   .nx-ifm-overlay--map {
     padding: 0;

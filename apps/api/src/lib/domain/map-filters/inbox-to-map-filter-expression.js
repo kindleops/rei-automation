@@ -147,7 +147,17 @@ function buildDirectMapRules(filters) {
   const pr = (key, op, val, rel) => rules.push(rule(key, op, val, rel));
   const gte = (key, val, rel) => { if (isActive(val)) pr(key, "greater_than_or_equal", val, rel); };
   const lte = (key, val, rel) => { if (isActive(val)) pr(key, "less_than_or_equal", val, rel); };
-  const eq = (key, val, rel) => { if (isActive(val)) pr(key, "equals", val, rel); };
+  const eq = (key, val, rel) => {
+    if (!isActive(val)) return;
+    if (Array.isArray(val)) {
+      const items = val.map((item) => String(item ?? "").trim()).filter(Boolean);
+      if (!items.length) return;
+      if (items.length === 1) pr(key, "equals", items[0], rel);
+      else pr(key, "is_any_of", items, rel);
+      return;
+    }
+    pr(key, "equals", val, rel);
+  };
   const contains = (key, val, rel) => { if (isActive(val)) pr(key, "contains", val, rel); };
 
   eq("property.market", filters.market);
