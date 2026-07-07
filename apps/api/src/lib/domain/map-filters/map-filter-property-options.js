@@ -91,7 +91,7 @@ async function queryPropertyDistinct({ column, search = "", limit = OPTIONS_LIMI
       GROUP BY TRIM(p.${propertyColumn}::text)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 
@@ -123,7 +123,7 @@ async function queryProspectLinkedDistinct({ column, search = "", limit = OPTION
       GROUP BY TRIM(pr.${prospectColumn}::text)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 
@@ -155,7 +155,7 @@ async function queryOwnerLinkedDistinct({ column, search = "", limit = OPTIONS_L
       GROUP BY TRIM(mo.${ownerColumn}::text)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 
@@ -187,7 +187,7 @@ async function queryPhoneLinkedDistinct({ column, search = "", limit = OPTIONS_L
       GROUP BY TRIM(ph.${phoneColumn}::text)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 
@@ -225,7 +225,7 @@ async function queryPropertyFlagOptions({ search = "", limit = OPTIONS_LIMIT }) 
       GROUP BY TRIM(flag_txt)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 
@@ -264,7 +264,7 @@ async function queryPersonFlagOptions({ search = "", limit = OPTIONS_LIMIT }) {
       GROUP BY TRIM(flag_txt)
     ) grouped
     WHERE grouped.value <> ''${searchClause}
-    ORDER BY grouped.count DESC, grouped.label ASC
+    ORDER BY grouped.count DESC, grouped.value ASC
     LIMIT $${params.length}
   `;
 

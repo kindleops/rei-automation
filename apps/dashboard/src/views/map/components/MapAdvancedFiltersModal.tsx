@@ -24,16 +24,18 @@ import { INBOX_FILTER_CATALOG, INBOX_FILTER_FIELD_COUNT } from '../../../domain/
 import type { InboxAdvancedFilters } from '../../../modules/inbox/inbox-ui-helpers'
 import { Icon } from '../../../shared/icons'
 import { createMapFilterToken, fetchMapFilterOptions, previewMapFilter } from '../master-filters/api'
-import type { MapFilterBounds } from '../master-filters/types'
 import { CANONICAL_PROPERTY_BASELINE } from '../master-filters/constants'
 import type { MapStatusValue } from '../../../domain/map/inbox-to-map-filter-expression'
-import { isMapLocationFilterKey, stripMapLocationFilters } from '../../../domain/map/map-filter-field-exclusions'
+import {
+  isMapExcludedFilterGroup,
+  isMapExcludedFilterKey,
+  stripMapExcludedFilters,
+} from '../../../domain/map/map-filter-field-exclusions'
 import '../../../modules/inbox/inbox-polish.css'
 import '../map-advanced-filters.css'
 
 export interface MapAdvancedFiltersModalProps {
   open: boolean
-  bounds?: MapFilterBounds | null
   onClose: () => void
   onApply: (payload: {
     token: string | null
@@ -47,7 +49,7 @@ type FlagMode = 'any' | 'all' | 'exclude'
 
 const GROUP_ICONS: Record<string, string> = {
   map_status: '🗺️',
-  conversation: '📥', property: '🏠', financials: '💰', condition: '🔧',
+  property: '🏠', financials: '💰', condition: '🔧',
   distress: '⚠️', prospect: '👤', owner: '💼', phone: '📱', email: '✉️',
 }
 
@@ -57,10 +59,14 @@ const MAP_STATUS_GROUP: FilterCatalogGroup = {
   icon: 'map',
 }
 
-const INITIAL_GROUPS: FilterCatalogGroup[] = [MAP_STATUS_GROUP, ...INBOX_FILTER_CATALOG.groups]
+const INITIAL_GROUPS: FilterCatalogGroup[] = [MAP_STATUS_GROUP, ...filterMapCatalogGroups(INBOX_FILTER_CATALOG.groups)]
+
+function filterMapCatalogGroups(catalogGroups: FilterCatalogGroup[]) {
+  return catalogGroups.filter((group) => !isMapExcludedFilterGroup(group.id))
+}
 
 function filterMapCatalogFields(catalogFields: FilterCatalogField[]) {
-  return catalogFields.filter((field) => !isMapLocationFilterKey(field.key))
+  return catalogFields.filter((field) => !isMapExcludedFilterKey(field.key))
 }
 
 const num = (v: number | undefined) => (v === undefined ? '' : String(v))
@@ -68,7 +74,6 @@ const asNum = (v: string): number | undefined => { const n = Number(v); return v
 
 export function MapAdvancedFiltersModal({
   open,
-  bounds = null,
   onClose,
   onApply,
   onClear,
@@ -100,14 +105,14 @@ export function MapAdvancedFiltersModal({
     setSearch('')
     setPreviewError(null)
     setActiveGroup('map_status')
-    setGroups([MAP_STATUS_GROUP, ...INBOX_FILTER_CATALOG.groups])
+    setGroups([MAP_STATUS_GROUP, ...filterMapCatalogGroups(INBOX_FILTER_CATALOG.groups)])
     setFields(filterMapCatalogFields(INBOX_FILTER_CATALOG.fields))
     optionsCacheRef.current = {}
     optionsInflightRef.current = {}
     setOptionsVersion((v) => v + 1)
     void fetchInboxFilterCatalog().then((cat) => {
       if ((cat?.fields?.length ?? 0) >= INBOX_FILTER_FIELD_COUNT) {
-        setGroups([MAP_STATUS_GROUP, ...(cat.groups ?? INBOX_FILTER_CATALOG.groups)])
+        setGroups([MAP_STATUS_GROUP, ...filterMapCatalogGroups(cat.groups ?? INBOX_FILTER_CATALOG.groups)])
         setFields(filterMapCatalogFields(cat.fields))
       }
     }).catch(() => {})
@@ -115,7 +120,7 @@ export function MapAdvancedFiltersModal({
   }, [open])
 
   const inboxFilters = useMemo(
-    () => stripMapLocationFilters(serializeInboxFiltersForMap(local)),
+    () => stripMapExcludedFilters(serializeInboxFiltersForMap(local)),
     [local],
   )
 
@@ -135,7 +140,7 @@ export function MapAdvancedFiltersModal({
     previewTimer.current = setTimeout(() => {
       setPreviewLoading(true)
       setPreviewError(null)
-      void previewMapFilter(previewPayload, bounds)
+      void previewMapFilter(previewPayload)
         .then((result) => {
           if (!result.ok) {
             setPreviewError(result.message || result.error)
@@ -151,7 +156,7 @@ export function MapAdvancedFiltersModal({
         .finally(() => setPreviewLoading(false))
     }, 350)
     return () => { if (previewTimer.current) clearTimeout(previewTimer.current) }
-  }, [open, previewPayload, bounds])
+  }, [open, previewPayload])
 
   const patch = useCallback((p: Partial<InboxAdvancedFilters>) => {
     setLocal((c) => ({ ...c, ...p }))
@@ -436,7 +441,7 @@ export function MapAdvancedFiltersModal({
               <div className="nx-ifm-saved">
                 <h5>Saved Views</h5>
                 {savedViews.filter((v) => !v.is_system).map((v) => (
-                  <button key={v.id} type="button" className="nx-ifm-saved-item" onClick={() => setLocal(stripMapLocationFilters(v.filter_json) as InboxAdvancedFilters)}>
+                  <button key={v.id} type="button" className="nx-ifm-saved-item" onClick={() => setLocal(stripMapExcludedFilters(v.filter_json) as InboxAdvancedFilters)}>
                     {v.name}
                   </button>
                 ))}

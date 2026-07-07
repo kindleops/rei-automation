@@ -147,7 +147,7 @@ import {
   THEME_TRANSITION_MS,
 } from './map-visual-presets'
 import { fetchMapProperties } from '../../lib/api/backendClient'
-import type { MapFilterBounds } from './master-filters'
+
 import { MapAdvancedFiltersModal } from './components/MapAdvancedFiltersModal'
 import type { LocationResult } from '../../domain/command-center/command.types'
 import {
@@ -4606,15 +4606,6 @@ export function InboxCommandMap({
     [buyerCommandData?.profiles, selectedBuyerKey, selectedBuyerPurchase?.buyerKey],
   )
   const activeFilterCount = appliedMasterFilterRuleCount
-  const mapFilterBounds = useMemo<MapFilterBounds | null>(() => {
-    if (!viewportBounds) return null
-    return {
-      lat_min: viewportBounds.south,
-      lat_max: viewportBounds.north,
-      lng_min: viewportBounds.west,
-      lng_max: viewportBounds.east,
-    }
-  }, [viewportBounds])
 
   const openMapAdvancedFilters = useCallback(() => {
     setFiltersOpen(false)
@@ -10292,7 +10283,6 @@ export function InboxCommandMap({
 
       <MapAdvancedFiltersModal
         open={mapAdvancedFiltersOpen}
-        bounds={mapFilterBounds}
         onClose={() => setMapAdvancedFiltersOpen(false)}
         onApply={({ token, activeRuleCount, matchingProperties }) => {
           applyMapFilterToken(token, activeRuleCount, matchingProperties)
