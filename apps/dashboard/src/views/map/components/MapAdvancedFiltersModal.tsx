@@ -13,7 +13,6 @@ import {
 } from '../../../domain/inbox/inbox-filter-catalog-runtime'
 import {
   fetchInboxFilterCatalog,
-  fetchInboxFilterOptions,
   fetchInboxSavedViews,
   saveInboxView,
   type FilterCatalogField,
@@ -24,10 +23,11 @@ import {
 import { INBOX_FILTER_CATALOG, INBOX_FILTER_FIELD_COUNT } from '../../../domain/inbox/inbox-filter-catalog-client'
 import type { InboxAdvancedFilters } from '../../../modules/inbox/inbox-ui-helpers'
 import { Icon } from '../../../shared/icons'
-import { createMapFilterToken, previewMapFilter } from '../master-filters/api'
+import { createMapFilterToken, fetchMapFilterOptions, previewMapFilter } from '../master-filters/api'
 import type { MapFilterBounds } from '../master-filters/types'
 import { CANONICAL_PROPERTY_BASELINE } from '../master-filters/constants'
 import type { MapStatusValue } from '../../../domain/map/inbox-to-map-filter-expression'
+import { isMapLocationFilterKey, stripMapLocationFilters } from '../../../domain/map/map-filter-field-exclusions'
 import '../../../modules/inbox/inbox-polish.css'
 import '../map-advanced-filters.css'
 
@@ -59,6 +59,10 @@ const MAP_STATUS_GROUP: FilterCatalogGroup = {
 
 const INITIAL_GROUPS: FilterCatalogGroup[] = [MAP_STATUS_GROUP, ...INBOX_FILTER_CATALOG.groups]
 
+function filterMapCatalogFields(catalogFields: FilterCatalogField[]) {
+  return catalogFields.filter((field) => !isMapLocationFilterKey(field.key))
+}
+
 const num = (v: number | undefined) => (v === undefined ? '' : String(v))
 const asNum = (v: string): number | undefined => { const n = Number(v); return v.trim() && Number.isFinite(n) ? n : undefined }
 
@@ -70,7 +74,7 @@ export function MapAdvancedFiltersModal({
   onClear,
 }: MapAdvancedFiltersModalProps) {
   const [groups, setGroups] = useState<FilterCatalogGroup[]>(INITIAL_GROUPS)
-  const [fields, setFields] = useState<FilterCatalogField[]>(INBOX_FILTER_CATALOG.fields)
+  const [fields, setFields] = useState<FilterCatalogField[]>(filterMapCatalogFields(INBOX_FILTER_CATALOG.fields))
   const [activeGroup, setActiveGroup] = useState('map_status')
   const [local, setLocal] = useState<InboxAdvancedFilters>(DEFAULT_ADVANCED_FILTERS)
   const [mapStatus, setMapStatus] = useState<MapStatusValue>('all')
@@ -78,7 +82,9 @@ export function MapAdvancedFiltersModal({
   const [previewCount, setPreviewCount] = useState<number | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const [optionsCache, setOptionsCache] = useState<Record<string, FilterOption[]>>({})
+  const optionsCacheRef = useRef<Record<string, FilterOption[]>>({})
+  const optionsInflightRef = useRef<Record<string, Promise<FilterOption[]>>>({})
+  const [optionsVersion, setOptionsVersion] = useState(0)
   const [savedViews, setSavedViews] = useState<SavedInboxView[]>([])
   const [saveOpen, setSaveOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
@@ -95,17 +101,23 @@ export function MapAdvancedFiltersModal({
     setPreviewError(null)
     setActiveGroup('map_status')
     setGroups([MAP_STATUS_GROUP, ...INBOX_FILTER_CATALOG.groups])
-    setFields(INBOX_FILTER_CATALOG.fields)
+    setFields(filterMapCatalogFields(INBOX_FILTER_CATALOG.fields))
+    optionsCacheRef.current = {}
+    optionsInflightRef.current = {}
+    setOptionsVersion((v) => v + 1)
     void fetchInboxFilterCatalog().then((cat) => {
       if ((cat?.fields?.length ?? 0) >= INBOX_FILTER_FIELD_COUNT) {
         setGroups([MAP_STATUS_GROUP, ...(cat.groups ?? INBOX_FILTER_CATALOG.groups)])
-        setFields(cat.fields)
+        setFields(filterMapCatalogFields(cat.fields))
       }
     }).catch(() => {})
     void fetchInboxSavedViews().then(setSavedViews).catch(() => {})
   }, [open])
 
-  const inboxFilters = useMemo(() => serializeInboxFiltersForMap(local), [local])
+  const inboxFilters = useMemo(
+    () => stripMapLocationFilters(serializeInboxFiltersForMap(local)),
+    [local],
+  )
 
   const previewPayload = useMemo(
     () => ({ inboxFilters, mapStatus }),
@@ -175,11 +187,35 @@ export function MapAdvancedFiltersModal({
 
   const loadOptions = useCallback(async (field: FilterCatalogField) => {
     const key = field.optionsKey || field.key
-    if (optionsCache[key]) return optionsCache[key]
-    const opts = await fetchInboxFilterOptions(key, { advanced: inboxFilters, filter: 'all' })
-    setOptionsCache((c) => ({ ...c, [key]: opts }))
-    return opts
-  }, [optionsCache, inboxFilters])
+    const cached = optionsCacheRef.current[key]
+    if (cached?.length) return cached
+    if (key in optionsInflightRef.current) return optionsInflightRef.current[key]
+
+    const request = fetchMapFilterOptions(key, { advanced: inboxFilters })
+      .then((result) => {
+        if (!result.ok) throw new Error(result.message || result.error || 'filter_options_failed')
+        const opts = result.data ?? []
+        optionsCacheRef.current[key] = opts
+        setOptionsVersion((v) => v + 1)
+        return opts
+      })
+      .finally(() => {
+        delete optionsInflightRef.current[key]
+      })
+
+    optionsInflightRef.current[key] = request
+    return request
+  }, [inboxFilters])
+
+  useEffect(() => {
+    if (!open || activeGroup === 'map_status') return
+    const preload = groupFields
+      .filter((f) => f.type === 'select' || f.type === 'flags')
+      .slice(0, 8)
+    for (const field of preload) {
+      void loadOptions(field).catch(() => {})
+    }
+  }, [open, activeGroup, groupFields, loadOptions])
 
   const handleClearAll = useCallback(() => {
     const fresh = clearAllAdvancedFilters()
@@ -304,7 +340,7 @@ export function MapAdvancedFiltersModal({
 
     if (field.type === 'select') {
       return (
-        <SelectField key={field.key} label={field.label} value={(local[key] as string) ?? ''} onChange={(v) => patch({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)} loadOptions={() => loadOptions(field)} cached={optionsCache[field.optionsKey || field.key]} />
+        <SelectField key={`${field.key}-${optionsVersion}`} label={field.label} value={(local[key] as string) ?? ''} onChange={(v) => patch({ [key]: v || undefined } as Partial<InboxAdvancedFilters>)} loadOptions={() => loadOptions(field)} cached={optionsCacheRef.current[field.optionsKey || field.key]} />
       )
     }
 
@@ -340,7 +376,7 @@ export function MapAdvancedFiltersModal({
             <strong>Advanced Filters</strong>
             <span className={previewError && hasActiveFilters ? 'is-error' : undefined}>
               {headerCountLabel}
-              {fields.length > 0 ? ` · ${fields.length} filters` : ` · ${INBOX_FILTER_FIELD_COUNT} filters`}
+              {fields.length > 0 ? ` · ${fields.length} filters` : ` · ${filterMapCatalogFields(INBOX_FILTER_CATALOG.fields).length} filters`}
             </span>
           </div>
           <div className="nx-ifm-header-actions">
@@ -400,7 +436,7 @@ export function MapAdvancedFiltersModal({
               <div className="nx-ifm-saved">
                 <h5>Saved Views</h5>
                 {savedViews.filter((v) => !v.is_system).map((v) => (
-                  <button key={v.id} type="button" className="nx-ifm-saved-item" onClick={() => setLocal(v.filter_json as InboxAdvancedFilters)}>
+                  <button key={v.id} type="button" className="nx-ifm-saved-item" onClick={() => setLocal(stripMapLocationFilters(v.filter_json) as InboxAdvancedFilters)}>
                     {v.name}
                   </button>
                 ))}
@@ -434,17 +470,41 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
   label: string; value: string; onChange: (v: string) => void
   loadOptions: () => Promise<FilterOption[]>; cached?: FilterOption[]
 }) {
+  const loadRef = useRef(loadOptions)
+  loadRef.current = loadOptions
   const [opts, setOpts] = useState<FilterOption[]>(cached ?? [])
+  const [loading, setLoading] = useState(!cached?.length)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
-    if (cached?.length) { setOpts(cached); return }
-    void loadOptions().then(setOpts).catch(() => {})
-  }, [cached, loadOptions])
+    if (cached?.length) {
+      setOpts(cached)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    void loadRef.current()
+      .then((next) => {
+        if (cancelled) return
+        setOpts(next)
+        setLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setOpts([])
+        setLoading(false)
+        setError(err instanceof Error ? err.message : 'Unable to load options')
+      })
+    return () => { cancelled = true }
+  }, [cached])
   return (
     <label className="nx-ifm-field">
-      <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Any</option>
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label} ({o.count})</option>)}
+      <span>{label}{loading ? ' · Loading…' : error ? ' · Unavailable' : ''}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={loading && !opts.length}>
+        <option value="">{loading ? 'Loading…' : error ? 'Unavailable' : 'Any'}</option>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label} ({o.count.toLocaleString()})</option>)}
       </select>
     </label>
   )
@@ -454,17 +514,37 @@ function FlagPicker({ selected, onChange, loadOptions }: {
   selected: string[]
   onChange: (flags: string[]) => void; loadOptions: () => Promise<FilterOption[]>
 }) {
+  const loadRef = useRef(loadOptions)
+  loadRef.current = loadOptions
   const [opts, setOpts] = useState<FilterOption[]>([])
+  const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
-  useEffect(() => { void loadOptions().then(setOpts).catch(() => {}) }, [loadOptions])
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    void loadRef.current()
+      .then((next) => {
+        if (cancelled) return
+        setOpts(next)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setOpts([])
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
   const filtered = opts.filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()))
   const toggle = (flag: string) => {
     onChange(selected.includes(flag) ? selected.filter((f) => f !== flag) : [...selected, flag])
   }
   return (
     <div className="nx-ifm-flag-picker">
-      <input type="text" placeholder="Search flags…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="text" placeholder={loading ? 'Loading flags…' : 'Search flags…'} value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="nx-ifm-flag-list">
+        {loading && filtered.length === 0 && <p className="nx-ifm-empty">Loading flag options…</p>}
+        {!loading && filtered.length === 0 && <p className="nx-ifm-empty">No flags available</p>}
         {filtered.map((o) => (
           <button key={o.value} type="button" className={`nx-ifm-flag-chip${selected.includes(o.value) ? ' is-selected' : ''}`} onClick={() => toggle(o.value)}>
             {o.label} <em>{o.count}</em>

@@ -16,8 +16,15 @@ import type {
 const REGISTRY_ROUTE = '/api/internal/dashboard/ops/map/filters/registry'
 const PREVIEW_ROUTE = '/api/internal/dashboard/ops/map/filters/preview'
 const TOKEN_ROUTE = '/api/internal/dashboard/ops/map/filters/token'
+const OPTIONS_ROUTE = '/api/internal/dashboard/ops/map/filters/options'
 const PRESETS_ROUTE = '/api/internal/dashboard/ops/map/filters/presets'
 const SAVED_ROUTE = '/api/internal/dashboard/ops/map/filters/saved'
+
+export interface MapFilterOption {
+  value: string
+  label: string
+  count: number
+}
 
 interface ApiEnvelope<T> {
   ok: boolean
@@ -116,6 +123,33 @@ export async function createMapFilterToken(
     }
   }
   return { ok: true as const, status: result.status, data: result.data.data }
+}
+
+export async function fetchMapFilterOptions(
+  field: string,
+  context: Record<string, unknown> = {},
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ field })
+  if (context.advanced) params.set('advanced', JSON.stringify(context.advanced))
+  const result = await callBackend<ApiEnvelope<{
+    field: string
+    options: MapFilterOption[]
+    totalDistinct: number
+    source: string
+  }>>(`${OPTIONS_ROUTE}?${params}`, { signal })
+
+  if (!result.ok) return result
+  if (!result.data?.ok || !result.data.data) {
+    return {
+      ok: false as const,
+      status: result.status,
+      error: result.data?.error || 'options_fetch_failed',
+      message: result.data?.message || 'Failed to load filter options',
+      upstream: result.data,
+    }
+  }
+  return { ok: true as const, status: result.status, data: result.data.data.options ?? [] }
 }
 
 export async function fetchMapFilterPresets() {
