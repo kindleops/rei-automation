@@ -159,10 +159,12 @@ export const SellerMapCard = ({
   const cardStyle = getSellerMapCardStyle(layoutMode, anchor, containerSize, isMobile)
   const isPeek = cardMode === 'peek'
   const [sheetSnap, setSheetSnap] = useState<BottomSheetSnap>(() => snapFromCardMode(cardMode))
+  const [trackedSnapMode, setTrackedSnapMode] = useState(cardMode)
 
-  useEffect(() => {
+  if (cardMode !== trackedSnapMode) {
+    setTrackedSnapMode(cardMode)
     setSheetSnap(snapFromCardMode(cardMode))
-  }, [cardMode])
+  }
 
   const stageColor = LIFECYCLE_STAGE_META[viewModel.operations.stage as keyof typeof LIFECYCLE_STAGE_META]?.color
   const statusColor = OPERATIONAL_STATUS_META[viewModel.operations.status as keyof typeof OPERATIONAL_STATUS_META]?.color
