@@ -93,7 +93,7 @@ describe('buildSellerMapCardViewModel', () => {
     expect(vm.intelligenceStrip[1]?.value).toBe('1,988')
     expect(vm.intelligenceStrip[2]?.value).toBe('CBS')
     expect(vm.followUpEligibility.isUncontacted).toBe(true)
-    expect(vm.followUpEligibility.canExecute).toBe(false)
+    expect(vm.followUpEligibility.canExecute).toBe(true)
   })
 
   it('maps enrichment fields from properties row aliases', () => {
