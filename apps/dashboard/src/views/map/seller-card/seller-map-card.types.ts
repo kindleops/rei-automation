@@ -4,6 +4,8 @@ export type SellerMapCardFlag = {
   key: string
   label: string
   severity: 'high' | 'medium' | 'low'
+  tier?: 'critical' | 'motivation' | 'positive' | 'context' | 'neutral'
+  tooltip?: string
 }
 
 export type SellerMapCardMetric = {
@@ -32,9 +34,63 @@ export type SellerMapCardActivityKind =
   | 'suppressed'
   | 'none'
 
+export type SellerMapCardFinancialMeter = {
+  key: string
+  label: string
+  percent: number
+  caption: string | null
+}
+
+export type SellerMapCardOwnerPressure = {
+  score: number | null
+  tier: string | null
+  label: string
+  drivers: Array<{ label: string; impact: 'positive' | 'negative' }>
+  confidence: string
+  summary: string | null
+}
+
+export type SellerMapCardProspectProfile = {
+  resolvedName: string | null
+  relationshipConfidence: string
+  smsEligible: boolean | null
+  hasPhone: boolean
+  hasEmail: boolean
+  contactScore: number | null
+  phoneScore: number | null
+  language: string | null
+  meterPercent: number
+  meterLabel: string
+  badges: Array<{ key: string; label: string; tone: 'ready' | 'warn' | 'neutral' }>
+  emptyState: string | null
+  fields: Array<{ label: string; value: string }>
+}
+
+export type SellerMapCardPropertyProfileGroup = {
+  key: string
+  label: string
+  fields: Array<{ label: string; value: string }>
+}
+
+export type SellerMapCardActionBar = {
+  primary: {
+    label: string
+    action: 'ownership_check' | 'follow_up' | 'reply' | 'disabled'
+    enabled: boolean
+    disabledReason: string | null
+  }
+  secondary: {
+    label: string
+    action: 'message' | 'open_thread' | 'none'
+    enabled: boolean
+  }
+}
+
 export type SellerMapCardViewModel = {
   propertyId: string
   threadKey: string | null
+  headerDisplayName: string
+  canonicalPhone: string | null
 
   masterOwner: {
     id: string | null
@@ -122,16 +178,28 @@ export type SellerMapCardViewModel = {
   }
 
   flags: SellerMapCardFlag[]
+  weightedTags: SellerMapCardFlag[]
   assetSummaryLine: string
   contextualLine: string | null
   peekMetrics: SellerMapCardMetric[]
   focusMetrics: SellerMapCardMetric[]
   intelligenceStrip: SellerMapCardIntelligenceField[]
   followUpEligibility: FollowUpEligibilityView
+  actionBar: SellerMapCardActionBar
+  financialProfile: {
+    fields: Array<{ label: string; value: string }>
+    meters: SellerMapCardFinancialMeter[]
+    pressureCaption: string | null
+  }
+  ownerPressure: SellerMapCardOwnerPressure
+  prospectProfile: SellerMapCardProspectProfile
+  propertyProfileGroups: SellerMapCardPropertyProfileGroup[]
   focusProfileFields: Array<{ label: string; value: string }>
   focusFinancialFields: Array<{ label: string; value: string }>
   focusOwnerFields: Array<{ label: string; value: string }>
   focusOperationFields: Array<{ label: string; value: string }>
+  contactStateLabel: string
+  activeCommunication: boolean
 
   activity: {
     kind: SellerMapCardActivityKind

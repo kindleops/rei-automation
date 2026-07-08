@@ -1,4 +1,5 @@
 import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { safeHumanName } from '../../../lib/identity/entityDetection'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import {
   buildAssetInput,
@@ -6,7 +7,16 @@ import {
   resolveSellerAssetPresentation,
 } from './seller-asset-presentation-registry'
 import { buildCanonicalLeadStatePresentation } from './seller-lead-state-presentation'
-import { resolveFollowUpEligibility } from './seller-follow-up-eligibility'
+import { resolveFollowUpEligibility, hasPriorOutboundContact } from './seller-follow-up-eligibility'
+import { resolveSellerActionBar } from './seller-action-bar'
+import { buildFinancialProfile } from './seller-financial-profile'
+import { buildOwnerPressureInput, computeOwnerPressureProfile } from './seller-owner-pressure'
+import {
+  buildProspectContactabilityFields,
+  buildProspectContactabilityProfile,
+} from './seller-prospect-contactability'
+import { buildPropertyProfileGroups } from './seller-property-profile'
+import { buildWeightedTags, collapseWeightedTags } from './seller-weighted-tags'
 import {
   asBoolean,
   asNumber,
@@ -18,23 +28,9 @@ import {
   formatPercent,
   formatRelativeUpper,
   nullIfZeroish,
-  parseTagValues,
   text,
   titleize,
 } from './seller-map-card-formatters'
-
-const PRIORITY_FLAG_ORDER = [
-  'High Equity',
-  'Free And Clear',
-  'Tax Delinquent',
-  'Absentee Owner',
-  'Out Of State Owner',
-  'Vacant',
-  'Tired Landlord',
-  'Probate',
-  'Active Lien',
-  'Senior Owner',
-]
 
 const resolveMasterOwnerName = (record: Record<string, unknown>): string => {
   const name = text(firstDefined(record, [
@@ -50,6 +46,32 @@ const resolveMasterOwnerName = (record: Record<string, unknown>): string => {
   ]))
   return name || 'Unknown Owner'
 }
+
+const resolveHeaderDisplayName = (record: Record<string, unknown>): string => {
+  const prospectName = safeHumanName(text(firstDefined(record, [
+    'prospect_full_name',
+    'prospect_first_name',
+    'prospect_name',
+  ])))
+  if (prospectName && record.sms_eligible !== false) return prospectName
+  return resolveMasterOwnerName(record)
+}
+
+const resolveCanonicalPhone = (record: Record<string, unknown>): string | null => {
+  const phone = text(firstDefined(record, [
+    'canonical_e164',
+    'seller_phone',
+    'prospect_best_phone',
+    'display_phone',
+  ]))
+  if (!phone || phone.toLowerCase() === 'no phone') return null
+  return phone
+}
+
+const resolveContactStateLabel = (
+  canonical: ReturnType<typeof buildCanonicalLeadStatePresentation>,
+  activity: SellerMapCardViewModel['activity'],
+): string => canonical.statusLabel || activity.headline
 
 const resolvePropertyImage = (record: Record<string, unknown>, address: string): string | null => {
   const direct = text(firstDefined(record, [
@@ -68,32 +90,17 @@ const resolvePropertyImage = (record: Record<string, unknown>, address: string):
   return null
 }
 
-const buildFlags = (record: Record<string, unknown>, equityPercent: number | null): SellerMapCardViewModel['flags'] => {
-  const tags = new Set<string>([
-    ...parseTagValues(firstDefined(record, ['property_flags_json', 'property_flags_text', 'property_tags_json', 'property_tags_text', 'seller_tags_json', 'seller_tags_text', 'podio_tags'])),
-  ].map(titleize))
-
-  if ((equityPercent ?? 0) >= 65) tags.add('High Equity')
-  if ((equityPercent ?? 0) >= 95) tags.add('Free And Clear')
-  if (asBoolean(firstDefined(record, ['tax_delinquent', 'taxDelinquent'])) === true) tags.add('Tax Delinquent')
-  if (asBoolean(firstDefined(record, ['absentee_owner', 'absenteeOwner'])) === true) tags.add('Absentee Owner')
-  if (asBoolean(firstDefined(record, ['out_of_state_owner', 'outOfStateOwner'])) === true) tags.add('Out Of State Owner')
-  if (asBoolean(firstDefined(record, ['active_lien', 'activeLien'])) === true) tags.add('Active Lien')
-  if (asBoolean(firstDefined(record, ['vacant', 'is_vacant'])) === true) tags.add('Vacant')
-
-  const sorted = Array.from(tags).sort((left, right) => {
-    const leftIndex = PRIORITY_FLAG_ORDER.indexOf(left)
-    const rightIndex = PRIORITY_FLAG_ORDER.indexOf(right)
-    if (leftIndex >= 0 || rightIndex >= 0) {
-      return (leftIndex >= 0 ? leftIndex : 999) - (rightIndex >= 0 ? rightIndex : 999)
-    }
-    return left.localeCompare(right)
-  })
-
-  return sorted.slice(0, 8).map((label, index) => ({
-    key: label.toLowerCase().replace(/\s+/g, '_'),
-    label,
-    severity: index < 3 ? 'high' : index < 5 ? 'medium' : 'low',
+const mapWeightedTagsToFlags = (
+  tags: ReturnType<typeof buildWeightedTags>,
+  limit: number,
+): SellerMapCardViewModel['flags'] => {
+  const { visible } = collapseWeightedTags(tags, limit)
+  return visible.map((tag) => ({
+    key: tag.key,
+    label: tag.label,
+    severity: tag.severity,
+    tier: tag.tier,
+    tooltip: tag.tooltip,
   }))
 }
 
@@ -182,13 +189,49 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
   const priority = classifyPriorityScore(priorityScore, priorityTier)
 
   const equityPercent = assetInput.equityPercent
-  const flags = buildFlags(record, equityPercent)
+  const yearsOwned = nullIfZeroish(asNumber(firstDefined(record, ['ownership_years', 'ownershipYears', 'years_owned'])))
+  const portfolioCount = nullIfZeroish(asNumber(firstDefined(record, [
+    'portfolio_count',
+    'property_count',
+    'owner_property_count',
+  ])))
+  const ownerType = text(firstDefined(record, ['owner_type'])) || null
+  const hasPriorContact = hasPriorOutboundContact(record)
+
+  const weightedTags = buildWeightedTags(record, {
+    equityPercent,
+    assetClassKey: presentation.key,
+    units: assetInput.units,
+    portfolioCount,
+    ownershipYears: yearsOwned,
+    ownerType,
+    hasPriorContact,
+    ownerPriorityScore: nullIfZeroish(asNumber(firstDefined(record, [
+      'owner_priority_score',
+      'master_owner_priority_score',
+      'mo_priority_score',
+    ]))),
+  })
+  const flags = mapWeightedTagsToFlags(weightedTags, 10)
   const activity = buildActivity(record, canonical)
 
-  const yearsOwned = nullIfZeroish(asNumber(firstDefined(record, ['ownership_years', 'ownershipYears', 'years_owned'])))
-  const portfolioCount = nullIfZeroish(asNumber(firstDefined(record, ['portfolio_count', 'property_count', 'owner_property_count'])))
+  const financialProfile = buildFinancialProfile({
+    estimatedValue: assetInput.estimatedValue,
+    equityAmount: assetInput.equityAmount,
+    equityPercent: assetInput.equityPercent,
+    mortgageBalance: nullIfZeroish(asNumber(firstDefined(record, ['mortgage_balance', 'loan_balance', 'total_loan_balance']))),
+    repairs: assetInput.repairs,
+    pricePerUnit: assetInput.pricePerUnit,
+    pricePerSqft: assetInput.pricePerSqft,
+    units: assetInput.units,
+    sqft: assetInput.sqft,
+  }, presentation.key)
 
-  const focusFinancialFields = [
+  const ownerPressureRaw = computeOwnerPressureProfile(buildOwnerPressureInput(record))
+
+  const focusFinancialFields = financialProfile.fields.length > 0
+    ? financialProfile.fields
+    : [
     { label: 'Estimated Value', value: formatMoney(assetInput.estimatedValue) },
     { label: 'Equity Amount', value: formatMoney(assetInput.equityAmount) },
     { label: 'Equity %', value: formatPercent(assetInput.equityPercent) },
@@ -210,19 +253,8 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Contactability', value: canonical.contactabilityLabel },
   ].filter((field) => field.value !== '—')
 
-  const mortgageBalance = nullIfZeroish(asNumber(firstDefined(record, ['mortgage_balance', 'loan_balance'])))
-  const fourthFocusMetric = presentation.key === 'land'
-    ? { label: 'Value Per Acre', value: formatMoney(assetInput.valuePerAcre) }
-    : presentation.key === 'multifamily_2_4'
-      ? { label: 'Price Per Unit', value: formatMoney(assetInput.pricePerUnit) }
-      : presentation.key === 'multifamily_5_plus'
-        ? { label: 'Avg Sqft / Unit', value: formatInteger(assetInput.avgSqftPerUnit) }
-        : { label: 'Mortgage Balance', value: formatMoney(mortgageBalance) }
-
-  const focusMetrics = [
-    ...presentation.buildPeekMetrics(assetInput).slice(0, 3),
-    fourthFocusMetric,
-  ]
+  const peekMetrics = presentation.buildPeekMetrics(assetInput)
+  const focusMetrics = peekMetrics
 
   const intelligenceStrip = [
     { label: 'Condition', value: text(assetInput.condition) || '—' },
@@ -246,6 +278,26 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     suppressionReason,
   })
 
+  const actionBar = resolveSellerActionBar({
+    followUpEligibility,
+    status: canonical.status,
+    messagingBlocked: canonical.messagingBlocked,
+    messagingBlockReason,
+    hasThread: Boolean(threadKey) && !threadKey?.startsWith('property:'),
+  })
+
+  const prospectProfileRaw = buildProspectContactabilityProfile(record, {
+    suppressed: canonical.messagingBlocked,
+    suppressionReason,
+  })
+  const prospectProfile = {
+    ...prospectProfileRaw,
+    fields: buildProspectContactabilityFields(prospectProfileRaw),
+  }
+
+  const activeCommunication = ['contacted', 'new_reply', 'follow_up_due', 'negotiating', 'needs_response'].includes(canonical.status)
+    || hasPriorContact
+
   const focusOperationFields = [
     { label: 'Campaign', value: text(firstDefined(record, ['campaign_name', 'campaignName'])) || '—' },
     { label: 'Automation', value: text(firstDefined(record, ['automation_state', 'automationState', 'execution_state'])) || '—' },
@@ -256,9 +308,11 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Delivery', value: text(firstDefined(record, ['delivery_status', 'latest_delivery_status'])) || '—' },
   ].filter((field) => field.value !== '—')
 
-  return {
+  const partialVm = {
     propertyId: text(firstDefined(record, ['property_id', 'propertyId', 'id'])),
     threadKey,
+    headerDisplayName: resolveHeaderDisplayName(record),
+    canonicalPhone: resolveCanonicalPhone(record),
     masterOwner: {
       id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId', 'owner_id', 'ownerId'])) || null,
       displayName: resolveMasterOwnerName(record),
@@ -340,12 +394,24 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
       deliveryStatus: text(firstDefined(record, ['delivery_status', 'latest_delivery_status'])) || null,
     },
     flags,
+    weightedTags: flags,
     assetSummaryLine: presentation.buildSummaryLine(assetInput) || '—',
     contextualLine: buildContextualLine(record) || null,
-    peekMetrics: presentation.buildPeekMetrics(assetInput),
+    peekMetrics,
     focusMetrics,
     intelligenceStrip,
     followUpEligibility,
+    actionBar,
+    financialProfile,
+    ownerPressure: {
+      score: ownerPressureRaw.score,
+      tier: ownerPressureRaw.tier,
+      label: ownerPressureRaw.label,
+      drivers: ownerPressureRaw.drivers,
+      confidence: ownerPressureRaw.confidence,
+      summary: ownerPressureRaw.summary,
+    },
+    prospectProfile,
     focusProfileFields: presentation.buildFocusProfileFields(assetInput).filter((field) => field.value !== '—'),
     focusFinancialFields,
     focusOwnerFields,
@@ -354,5 +420,17 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     edgeAccent: resolveEdgeAccent(activity, canonical),
     messagingBlocked: canonical.messagingBlocked,
     messagingBlockReason,
+    contactStateLabel: resolveContactStateLabel(canonical, activity),
+    activeCommunication,
+  }
+
+  const fullVm: SellerMapCardViewModel = {
+    ...partialVm,
+    propertyProfileGroups: [],
+  }
+
+  return {
+    ...fullVm,
+    propertyProfileGroups: buildPropertyProfileGroups(fullVm, record),
   }
 }
