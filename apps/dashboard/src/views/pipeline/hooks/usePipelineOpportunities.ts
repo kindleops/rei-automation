@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  fetchPipelineMetrics,
-  fetchPipelineOpportunities,
-  fetchPipelineSavedViews,
   savePipelineView,
   transitionPipelineStage,
   transitionPipelineStatus,
   transitionPipelineTemperature,
 } from '../../../domain/pipeline/pipeline-opportunity-api'
+import { loadPipelineBoardSurface } from '../../../domain/pipeline/pipeline-surface-loader'
+import type { OpsSurfaceErrorType } from '../../../domain/ops/ops-surface-result'
 import { patchLeadStateFromView } from '../../../domain/lead-state/persistUniversalLeadState'
 import { normalizeLifecycleStage } from '../../../domain/lead-state/universal-lead-state-registry'
 import type {
@@ -50,6 +49,8 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorType, setErrorType] = useState<OpsSurfaceErrorType | null>(null)
+  const [retryable, setRetryable] = useState(true)
   const [total, setTotal] = useState(0)
   const initialLoadDone = useRef(false)
   const requestSeq = useRef(0)
@@ -156,23 +157,41 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     if (isInitial) setLoading(true)
     else setRefreshing(true)
     setError(null)
+    setErrorType(null)
     try {
-      const [list, metricData, globalMetrics, views] = await Promise.all([
-        fetchPipelineOpportunities({ limit: 500, hydrate_follow_up: false, ...scopeParams }),
-        fetchPipelineMetrics({ scope: viewState.scope }),
-        fetchPipelineMetrics({ scope: 'all' }),
-        fetchPipelineSavedViews(),
-      ])
+      const surface = await loadPipelineBoardSurface({
+        limit: 500,
+        hydrate_follow_up: false,
+        ...scopeParams,
+      })
       if (requestId !== requestSeq.current) return
+      if (!surface.ok) {
+        setError(surface.errorMessage ?? 'pipeline_fetch_failed')
+        setErrorType(surface.errorType ?? 'query_failed')
+        setRetryable(surface.retryable ?? true)
+        if (initialLoadDone.current) {
+          // Preserve stale rows with warning — do not wipe board on refresh failure.
+          return
+        }
+        setOpportunities([])
+        setTotal(0)
+        setMetrics(null)
+        setGlobalTotal(0)
+        return
+      }
+      const { list, metrics: metricData, globalMetrics, views } = surface.data
       setOpportunities(list.rows)
       setTotal(list.total)
       setMetrics(metricData)
       setGlobalTotal(globalMetrics.total ?? 0)
       setSavedViews(views)
+      setRetryable(true)
       initialLoadDone.current = true
     } catch (err) {
       if (requestId !== requestSeq.current) return
       setError(err instanceof Error ? err.message : 'pipeline_fetch_failed')
+      setErrorType('query_failed')
+      setRetryable(true)
     } finally {
       if (requestId !== requestSeq.current) return
       setLoading(false)
@@ -283,6 +302,8 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     loading,
     refreshing,
     error,
+    errorType,
+    retryable,
     total,
     refresh,
     moveStage,

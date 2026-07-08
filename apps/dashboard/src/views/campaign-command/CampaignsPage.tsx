@@ -1114,6 +1114,12 @@ export const CampaignListPanel = ({
   campaigns,
   allCampaigns,
   loading,
+  loadFailed = false,
+  loadErrorType,
+  loadErrorMessage,
+  loadRetryable = true,
+  loadDegraded = false,
+  onRetry,
   selectedId,
   onSelect,
   onCampaignAction,
@@ -1126,6 +1132,12 @@ export const CampaignListPanel = ({
   campaigns: CampaignSummary[]
   allCampaigns: CampaignSummary[]
   loading: boolean
+  loadFailed?: boolean
+  loadErrorType?: CampaignModel['errorType']
+  loadErrorMessage?: string
+  loadRetryable?: boolean
+  loadDegraded?: boolean
+  onRetry?: () => void
   selectedId: string | null
   onSelect: (c: CampaignSummary | null) => void
   onCampaignAction: (action: string, campaign: CampaignSummary) => void
@@ -1191,10 +1203,33 @@ export const CampaignListPanel = ({
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {[1, 2, 3, 4, 5].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 56, width: '100%' }} />)}
           </div>
+        ) : loadFailed ? (
+          <div className="ccc__empty" style={{ padding: 24 }}>
+            <div className="ccc__empty-title">
+              {loadErrorType === 'auth_error'
+                ? 'Campaign authentication failed'
+                : loadErrorType === 'backend_unavailable'
+                  ? 'Campaign backend unavailable'
+                  : loadErrorType === 'missing_view'
+                    ? 'Campaign data source missing'
+                    : 'Campaign load failed'}
+            </div>
+            <div className="ccc__empty-sub">{loadErrorMessage ?? 'Could not reach canonical campaign API.'}</div>
+            {loadRetryable && onRetry && (
+              <button type="button" className="ccc__action-btn" onClick={() => onRetry()}>Retry</button>
+            )}
+          </div>
         ) : campaigns.length === 0 ? (
           <div className="ccc__empty" style={{ padding: 24 }}>
-            <div className="ccc__empty-title">No campaigns</div>
-            <div className="ccc__empty-sub">Try adjusting filters</div>
+            <div className="ccc__empty-title">
+              {allCampaigns.length === 0 ? 'No campaigns available' : 'No campaigns match filters'}
+            </div>
+            <div className="ccc__empty-sub">
+              {allCampaigns.length === 0
+                ? 'Canonical campaign list returned zero eligible campaigns.'
+                : 'Try adjusting filters'}
+            </div>
+            {loadDegraded && <div className="ccc__empty-sub">Showing degraded canonical fallback data.</div>}
           </div>
         ) : (
           campaigns.map((c) => {
@@ -1591,6 +1626,12 @@ export const CampaignsPage = () => {
           campaigns={campaigns}
           allCampaigns={model?.campaigns ?? []}
           loading={loading}
+          loadFailed={model?.ok === false}
+          loadErrorType={model?.errorType}
+          loadErrorMessage={model?.errorMessage}
+          loadRetryable={model?.retryable ?? true}
+          loadDegraded={model?.degraded === true}
+          onRetry={() => void load()}
           selectedId={commandState.activeCampaignId}
           onSelect={handleSelectCampaign}
           onCampaignAction={handleCampaignAction}

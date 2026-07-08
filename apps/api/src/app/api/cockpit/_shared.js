@@ -131,3 +131,8 @@ export function ensureMutationAuth(request) {
   }
   return { ok: true, auth: auth.auth }
 }
+
+/** Dashboard read auth — same ops-dashboard gate as mutations; named for read routes. */
+export function ensureDashboardReadAuth(request) {
+  return ensureMutationAuth(request)
+}

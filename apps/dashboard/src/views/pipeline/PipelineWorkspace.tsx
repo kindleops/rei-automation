@@ -91,6 +91,8 @@ export function PipelineWorkspace({
     loading,
     refreshing,
     error,
+    errorType,
+    retryable,
     moveStage,
     moveStatus,
     moveTemperature,
@@ -298,13 +300,22 @@ export function PipelineWorkspace({
     onClearOpportunityPreview?.()
   }, [onClearOpportunityPreview])
 
-  if (error) {
+  if (error && opportunities.length === 0) {
     const operatorError = sanitizePipelineError(error)
+    const title = errorType === 'auth_error'
+      ? 'Pipeline authentication failed'
+      : errorType === 'backend_unavailable'
+        ? 'Pipeline backend unavailable'
+        : errorType === 'missing_view'
+          ? 'Pipeline configuration error'
+          : 'Pipeline load failed'
     return (
       <div className="plv plv--error" role="alert">
+        <strong>{title}</strong>
         <p>{operatorError.message}</p>
+        {errorType && <small>Type: {errorType}</small>}
         {operatorError.traceId && <small>Trace: {operatorError.traceId}</small>}
-        {operatorError.retryable && (
+        {(retryable ?? operatorError.retryable) && (
           <button type="button" className="plv-action-btn" onClick={() => void refresh()}>Retry</button>
         )}
       </div>
