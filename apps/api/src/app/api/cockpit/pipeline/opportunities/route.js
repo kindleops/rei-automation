@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server.js';
 import { listOpportunities } from '@/lib/domain/opportunity/opportunity-service.js';
-import { corsHeaders, ensureMutationAuth, unauthorizedJson } from '../_shared.js';
+import { corsHeaders, ensureDashboardReadAuth, unauthorizedJson } from '../_shared.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,8 +11,13 @@ export async function OPTIONS(request) {
 
 export async function GET(request) {
   const headers = corsHeaders(request);
-  const auth = ensureMutationAuth(request);
-  if (!auth.ok) return unauthorizedJson(auth.response, headers);
+  const auth = ensureDashboardReadAuth(request);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, errorType: 'auth_error', error: 'unauthorized', message: 'Dashboard authentication required', retryable: true },
+      { status: auth.response?.status || 401, headers },
+    );
+  }
 
   try {
     const { searchParams } = new URL(request.url);
@@ -23,7 +28,13 @@ export async function GET(request) {
     );
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error?.message || 'pipeline_opportunities_fetch_failed' },
+      {
+        ok: false,
+        errorType: 'query_failed',
+        error: 'pipeline_opportunities_fetch_failed',
+        message: error?.message || 'pipeline_opportunities_fetch_failed',
+        retryable: true,
+      },
       { status: 500, headers },
     );
   }

@@ -1,4 +1,10 @@
 import {
+  classifyBackendFailure,
+  opsError,
+  opsSuccess,
+  type OpsSurfaceResult,
+} from '../../domain/ops/ops-surface-result'
+import {
   callBackend,
   cloneWorkflowBackend,
   createWorkflowBackend,
@@ -53,9 +59,34 @@ const unwrapWorkflowResponse = <T,>(result: BackendResult<Record<string, unknown
   return unwrapWorkflowApiPayload<T>(unwrap(result))
 }
 
+export const loadWorkflowStudioSurface = async (): Promise<OpsSurfaceResult<{ workflows: Workflow[] }>> => {
+  const result = await listWorkflowsBackend()
+  if (!result.ok) {
+    const errorType = classifyBackendFailure(result)
+    return opsError(
+      { workflows: [] },
+      errorType,
+      result.message || result.error || 'workflow_list_failed',
+      { retryable: errorType !== 'auth_error', source: 'backend_api' },
+    )
+  }
+  try {
+    const response = unwrapWorkflowResponse<{ ok: boolean; workflows: Workflow[] }>(result)
+    return opsSuccess({ workflows: response.workflows ?? [] }, 'backend_api')
+  } catch (error) {
+    return opsError(
+      { workflows: [] },
+      'query_failed',
+      error instanceof Error ? error.message : 'workflow_list_failed',
+      { source: 'backend_api' },
+    )
+  }
+}
+
 export const loadWorkflowStudio = async (): Promise<{ workflows: Workflow[] }> => {
-  const response = unwrapWorkflowResponse<{ ok: boolean; workflows: Workflow[] }>(await listWorkflowsBackend())
-  return { workflows: response.workflows ?? [] }
+  const surface = await loadWorkflowStudioSurface()
+  if (!surface.ok) throw new Error(surface.errorMessage || surface.errorType || 'workflow_list_failed')
+  return surface.data
 }
 
 export const loadWorkflowDetail = async (workflowId: string): Promise<WorkflowDetail> => {

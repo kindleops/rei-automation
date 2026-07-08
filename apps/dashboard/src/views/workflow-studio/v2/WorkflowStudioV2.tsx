@@ -15,7 +15,7 @@ import {
   insertNodeOnEdge,
   loadAnalytics,
   loadWorkflowDetail,
-  loadWorkflowStudio,
+  loadWorkflowStudioSurface,
   mutateWorkflowGraph,
   pauseWorkflowDraft,
   publishWorkflow,
@@ -46,6 +46,7 @@ import {
   useSellerAutomationStudioLocation,
 } from './workflow-studio-routing'
 import { SellerAutomationStudioPanel } from './SellerAutomationStudioPanel'
+import { WorkflowAutomationActivityPanel } from './WorkflowAutomationActivityPanel'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import {
   WorkflowMobileActionsSheet,
@@ -141,11 +142,16 @@ export const WorkflowStudioV2 = ({
   }, [sellerAutomationMode])
 
   const refreshList = useCallback(async () => {
-    const model = await loadWorkflowStudio()
-    setWorkflows(model.workflows)
+    const surface = await loadWorkflowStudioSurface()
+    if (!surface.ok) {
+      setApiAvailable(false)
+      setApiError({ message: surface.errorMessage ?? 'Workflow list unavailable' })
+      throw new Error(surface.errorMessage || surface.errorType || 'workflow_list_failed')
+    }
+    setWorkflows(surface.data.workflows)
     setApiAvailable(true)
     setApiError(null)
-    return model.workflows
+    return surface.data.workflows
   }, [])
 
   const loadSelected = useCallback(async (workflowId: string) => {
@@ -862,15 +868,18 @@ export const WorkflowStudioV2 = ({
 
             <div className="wfs2__rail-body">
               {railSection === 'workflows' ? (
-                <WorkflowNavigatorV2
-                  workflows={workflows}
-                  selectedId={selectedId}
-                  loading={loading}
-                  busy={busy}
-                  onSelect={(workflowId) => void loadSelected(workflowId)}
-                  onCreate={() => setCreateOpen(true)}
-                  onAction={handleNavigatorAction}
-                />
+                <>
+                  <WorkflowNavigatorV2
+                    workflows={workflows}
+                    selectedId={selectedId}
+                    loading={loading}
+                    busy={busy}
+                    onSelect={(workflowId) => void loadSelected(workflowId)}
+                    onCreate={() => setCreateOpen(true)}
+                    onAction={handleNavigatorAction}
+                  />
+                  <WorkflowAutomationActivityPanel enabled={apiAvailable} />
+                </>
               ) : (
                 <WorkflowNodePaletteV2
                   onAddNode={addNodeFromPalette}
