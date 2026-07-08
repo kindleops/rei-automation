@@ -11,7 +11,7 @@
  * dedupes and enforces 21610 suppression through the canonical queue writer).
  */
 
-import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { supabase as defaultSupabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
@@ -196,8 +196,13 @@ async function resolveEffectiveFollowUpMode({
   getSystemValueImpl = getSystemValue,
 } = {}) {
   let system_mode = null;
+  // The default system-control reader needs real Supabase config; without it
+  // (e.g. network-guarded tests) skip the read and fail closed to disabled.
+  const can_read_system = getSystemValueImpl !== getSystemValue || hasSupabaseConfig();
   try {
-    system_mode = await getSystemValueImpl(FOLLOW_UP_AUTOMATION_MODE_KEY);
+    system_mode = can_read_system
+      ? await getSystemValueImpl(FOLLOW_UP_AUTOMATION_MODE_KEY)
+      : null;
   } catch {
     system_mode = null; // unreadable control ⇒ fail closed to disabled
   }

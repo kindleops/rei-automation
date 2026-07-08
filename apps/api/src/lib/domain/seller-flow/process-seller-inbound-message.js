@@ -47,6 +47,7 @@ import {
   alignSellerStageReply,
 } from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const defaultDeps = {
@@ -393,8 +394,11 @@ export async function processSellerInboundMessage({
 
   // ── Inbound takeover: a seller reply cancels pending no-reply follow-ups
   // BEFORE classification, so a stale nurture can never race the live reply.
+  // Runs only with an injected client or real Supabase config — never against
+  // the placeholder default client.
   let followup_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
-  if (!writes_suppressed && (threadKey || inboundFrom)) {
+  const cancellation_client_available = Boolean(supabaseClient) || hasSupabaseConfig();
+  if (!writes_suppressed && cancellation_client_available && (threadKey || inboundFrom)) {
     try {
       followup_cancellation = await runtimeDeps.cancelPendingFollowUpsForThread({
         thread_key: threadKey || inboundFrom,
