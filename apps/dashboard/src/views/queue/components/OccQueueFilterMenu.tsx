@@ -12,7 +12,7 @@ const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean
 
 type DatePreset = 'today' | '24h' | '7d' | '14d' | '30d' | '60d' | '90d' | 'all' | 'custom'
 type QueueDateBasis = 'created_at' | 'scheduled_for' | 'updated_at'
-type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent'
+type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent' | 'proof'
 
 const DATE_PRESETS: DatePreset[] = ['today', '24h', '7d', '14d', '30d', '60d', '90d', 'all', 'custom']
 

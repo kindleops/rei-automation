@@ -17,6 +17,11 @@ import { adaptQueueModel } from './queue.adapter'
 import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
+import {
+  isProofTestQueueItem,
+  resolveTouchStageDisplay,
+  shouldReopenDossierFromContext,
+} from '../../domain/queue/queue-status-truth'
 import { Icon } from '../../shared/icons'
 import { resolveAssetTypeIcon } from '../../shared/asset-type-icons'
 import { formatRelativeTime } from '../../shared/formatters'
@@ -100,8 +105,13 @@ const fmtPhone = (p: string | null | undefined) =>
 
 // ── Stage + name helpers (Phase 3 / Phase 5) ────────────────────────────────
 
+// Prefer canonical seller/thread stage over a hardcoded touch_number; never
+// assert "Ownership Confirmation / T1" when canonical state says offer/negotiation.
 const resolveStageLabel = (item: QueueItem): string =>
-  item.stageLabel ?? (item.stageCode ? STAGE_LABELS[item.stageCode] : '—')
+  resolveTouchStageDisplay(item).stageLabel
+
+const resolveTouchLabel = (item: QueueItem): string =>
+  resolveTouchStageDisplay(item).touchLabel
 
 const STAGE_TONE: Record<string, string> = {
   S1: 'blue', S2: 'cyan', S3: 'violet', S4: 'amber', S5: 'green',
@@ -175,7 +185,7 @@ const DATE_BASIS_LABELS: Record<QueueDateBasis, string> = {
 
 // ── Status constants ───────────────────────────────────────────────────────
 
-type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent'
+type StatusBucket = 'all' | 'scheduled' | 'queued' | 'sending' | 'failed' | 'blocked' | 'approval' | 'delivered' | 'sent' | 'proof'
 
 const FAILURE_TONE: Record<string, string> = {
   Carrier: 'red', Compliance: 'red', Routing: 'amber',
@@ -852,7 +862,7 @@ const QueueCommandRow = ({
           title={[
             identity.primary,
             propertyLine,
-            `${stageLabel} · T${item.touchNumber}`,
+            `${stageLabel} · ${resolveTouchLabel(item)}`,
             campaignLabel,
             templateLabel,
             messageSnippet,
@@ -875,7 +885,7 @@ const QueueCommandRow = ({
             {item.stageCode
               ? <span className={cls('occ-cmd-chip', `is-${stageTone}`)} title={stageLabel}>{item.stageCode}</span>
               : <span className="occ-cmd-chip is-muted">—</span>}
-            <span className="occ-cmd-chip">T{item.touchNumber}</span>
+            <span className="occ-cmd-chip">{resolveTouchLabel(item)}</span>
             {item.requiresApproval && <span className="occ-cmd-chip is-amber">APR</span>}
           </span>
           <CmdSep />
@@ -1021,7 +1031,7 @@ const QueueRow = ({
               {item.stageCode
                 ? <span className={cls('occ-stage-pill', `is-${stageTone}`)}>{stageLabel}</span>
                 : <span className="occ-stage-pill is-muted">No stage</span>}
-              <span className="occ-touch-badge">T{item.touchNumber}</span>
+              <span className="occ-touch-badge">{resolveTouchLabel(item)}</span>
               {item.requiresApproval && <span className="occ-approval-tag">Approval</span>}
             </div>
             <span className="occ-row-secondary" title={campaignLabel}>{campaignLabel}</span>
@@ -1136,6 +1146,11 @@ export const QueuePage = ({
   const [density, setDensity] = useState<QueueDensity>('compact')
   const [confirmPreview, setConfirmPreview] = useState<BulkActionPreview | null>(null)
   const [dossierOpen, setDossierOpen] = useState(true)
+  // Mirror of selectedId for stale-closure-free reads inside stable callbacks.
+  const selectedIdRef = useRef<string | null>(null)
+  // Row id an operator just explicitly closed — prevents the external-context
+  // effect from immediately re-selecting (and reopening) the same dossier.
+  const dismissedContextRef = useRef<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedSenderPhone, setSelectedSenderPhone] = useState<string | null>(null)
   const [, setSelectedTemplateId] = useState<string | null>(null)
@@ -1309,12 +1324,20 @@ export const QueuePage = ({
   // ── Filtered rows ────────────────────────────────────────────────────────
   const filteredItems = useMemo(() => {
     let result = items
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'failed') result = result.filter(i => isFailed(i.status))
-      else if (statusFilter === 'blocked') result = result.filter(i => BLOCKED_STATUSES.has(i.status))
-      // 'Sent' is the dispatched superset to match the KPI/server bucket.
-      else if (statusFilter === 'sent') result = result.filter(i => isSent(i.status))
-      else result = result.filter(i => i.status === statusFilter)
+    if (statusFilter === 'proof') {
+      // Explicit proof/test bucket — the only place quarantined rows surface.
+      result = result.filter(i => isProofTestQueueItem(i))
+    } else {
+      // Quarantine proof/test rows out of the default live operational queue so it
+      // never looks like production sends are proof hydration / no-SMS.
+      result = result.filter(i => !isProofTestQueueItem(i))
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'failed') result = result.filter(i => isFailed(i.status))
+        else if (statusFilter === 'blocked') result = result.filter(i => BLOCKED_STATUSES.has(i.status))
+        // 'Sent' is the dispatched superset to match the KPI/server bucket.
+        else if (statusFilter === 'sent') result = result.filter(i => isSent(i.status))
+        else result = result.filter(i => i.status === statusFilter)
+      }
     }
     if (marketFilter !== 'all') result = result.filter(i => i.market === marketFilter)
     if (templateFilter !== 'all') result = result.filter(i => i.templateName === templateFilter)
@@ -1341,11 +1364,29 @@ export const QueuePage = ({
     ?? items.find(i => i.id === selectedId)
     ?? null
 
+  // Keep a ref in sync so stable callbacks can read the live selection.
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
+  // Escape closes the dossier and clears the selected row (and records it as
+  // dismissed so the context effect below does not reopen it).
+  useEffect(() => {
+    if (!selectedId) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      dismissedContextRef.current = selectedId
+      setSelectedId(null)
+      setExpandedId(null)
+      setDossierOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedId])
+
   useEffect(() => {
     if (!externalContext || !items.length) return
     const matched = findQueueItemForActiveContext(items, externalContext)
     if (matched) {
-      if (matched.id !== selectedId) {
+      if (matched.id !== selectedId && shouldReopenDossierFromContext(dismissedContextRef.current, matched.id)) {
         setSelectedId(matched.id)
         setDossierOpen(true)
         if (layoutMode === 'medium' || layoutMode === 'compact') setExpandedId(matched.id)
@@ -1372,6 +1413,8 @@ export const QueuePage = ({
 
   const handleSelectRow = useCallback((item: QueueItem) => {
     const next = isMobileLayout ? item.id : (item.id === selectedId ? null : item.id)
+    // Toggling a row closed marks it dismissed; opening any row clears the guard.
+    dismissedContextRef.current = next ? null : item.id
     setSelectedId(next)
     setDossierOpen(Boolean(next))
     if (!isMobileLayout && layoutMode === 'medium') setExpandedId(next)
@@ -1419,7 +1462,13 @@ export const QueuePage = ({
 
   // ── Row + global actions ─────────────────────────────────────────────────
   const handleAction = useCallback(async (action: string, id: string) => {
-    if (action === 'deselect') { setSelectedId(null); setExpandedId(null); return }
+    if (action === 'deselect') {
+      // Full close: clear selection, collapse the dossier, and record the row as
+      // dismissed so the external-context effect cannot reopen it.
+      dismissedContextRef.current = selectedIdRef.current
+      setSelectedId(null); setExpandedId(null); setDossierOpen(false)
+      return
+    }
     if (action === 'deselect-event') { setSelectedEventItem(null); return }
     if (action === 'open-queue-row') {
       setSection('queue')
@@ -1624,6 +1673,11 @@ export const QueuePage = ({
     }
   }, [templateStatsMemo, senderStatsMemo, marketStatsMemo, failureStatsMemo, items, model?.safeCapacityRemaining])
 
+  const proofCount = useMemo(
+    () => items.filter(i => isProofTestQueueItem(i)).length,
+    [items],
+  )
+
   const filterTabs: Array<{ key: StatusBucket; label: string; count: number; tone?: string }> = [
     { key: 'all', label: 'All', count: kpi.total },
     { key: 'scheduled', label: 'Scheduled', count: kpi.scheduled, tone: 'blue' },
@@ -1634,6 +1688,7 @@ export const QueuePage = ({
     { key: 'blocked', label: 'Blocked', count: kpi.blocked, tone: 'amber' },
     { key: 'delivered', label: 'Delivered', count: kpi.delivered, tone: 'green' },
     { key: 'sent', label: 'Sent', count: kpi.sent, tone: 'green' },
+    { key: 'proof', label: 'Proof/Test', count: proofCount, tone: 'amber' },
   ]
 
   const isInitialLoad = loading && !model
@@ -2203,7 +2258,7 @@ export const QueuePage = ({
             mode="queue"
             index={Math.max(0, filteredItems.findIndex(i => i.id === selectedItem.id))}
             total={filteredItems.length}
-            onClose={() => { setSelectedId(null); setDossierOpen(false) }}
+            onClose={() => { dismissedContextRef.current = selectedItem.id; setSelectedId(null); setDossierOpen(false) }}
             onPrev={() => navigateMobileDossier('prev', filteredItems, selectedItem.id, handleSelectRow)}
             onNext={() => navigateMobileDossier('next', filteredItems, selectedItem.id, handleSelectRow)}
             onAction={handleAction}
