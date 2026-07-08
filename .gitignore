@@ -27,6 +27,7 @@ audits/
 .playwright-mcp/
 apps/dashboard/test-results/
 apps/dashboard/proof/**/*.png
+!apps/dashboard/proof/map-cards/*.png
 apps/dashboard/proof/**/structure-evidence.txt
 
 # Root-level local screenshots
