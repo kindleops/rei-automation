@@ -43,8 +43,17 @@ export function resolveGuardedAutoReplyMode({
     return { mode: "dry_run", source: "legacy_dry_run_flag" };
   }
 
+  // auto_reply_mode is the authoritative send gate. Legacy live flags
+  // (auto_reply_enabled/auto_reply_live_enabled) are diagnostics only and
+  // must never enable public sending by themselves: missing/blank/invalid
+  // mode fails closed to disabled.
   if (legacyEnabled && legacyLiveEnabled) {
-    return { mode: "live_limited", source: "legacy_live_flags" };
+    return {
+      mode: "disabled",
+      source: "legacy_live_flags_blocked",
+      legacy_live_fallthrough_blocked: true,
+      audit_reason: "auto_reply_mode_missing_or_invalid",
+    };
   }
 
   return { mode: "disabled", source: "default_disabled" };

@@ -274,3 +274,66 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     idempotent_replay: false,
   };
 }
+
+/**
+ * Inbound takeover: cancel pending no-reply follow-ups for a thread the
+ * moment a seller reply arrives, so stale nurtures never fire after a live
+ * conversation resumed. Same terminal semantics as the gap-recovery sweeper
+ * (queue_status=cancelled + skip_reason), just synchronous.
+ */
+export async function cancelPendingFollowUpsForThread({
+  thread_key,
+  inbound_event_id = null,
+  reason = "cancelled_followup_on_inbound_reply",
+  now = new Date().toISOString(),
+  supabase = defaultSupabase,
+} = {}) {
+  const normalized_thread_key = normalizePhone(thread_key) || clean(thread_key);
+  if (!normalized_thread_key || !supabase) {
+    return { ok: false, cancelled: 0, reason: "missing_thread_key_or_client" };
+  }
+
+  try {
+    const { data: pending, error: pending_error } = await supabase
+      .from("send_queue")
+      .select("id,metadata,queue_status,type,message_type")
+      .eq("thread_key", normalized_thread_key)
+      .in("queue_status", ["scheduled", "queued"])
+      .in("type", ["followup"]);
+
+    if (pending_error) {
+      return { ok: false, cancelled: 0, reason: pending_error.message };
+    }
+    if (!pending?.length) {
+      return { ok: true, cancelled: 0, reason: "no_pending_followups" };
+    }
+
+    let cancelled = 0;
+    const cancelled_ids = [];
+    for (const row of pending) {
+      const { error: cancel_error } = await supabase
+        .from("send_queue")
+        .update({
+          queue_status: "cancelled",
+          updated_at: now,
+          metadata: {
+            ...(row.metadata || {}),
+            skip_reason: reason,
+            cancelled_by: "inbound_takeover",
+            cancelled_by_inbound_event_id: inbound_event_id || null,
+            finalized_at: now,
+          },
+        })
+        .eq("id", row.id)
+        .in("queue_status", ["scheduled", "queued"]);
+      if (!cancel_error) {
+        cancelled += 1;
+        cancelled_ids.push(row.id);
+      }
+    }
+
+    return { ok: true, cancelled, cancelled_ids, reason };
+  } catch (error) {
+    return { ok: false, cancelled: 0, reason: error?.message || "cancel_failed" };
+  }
+}
