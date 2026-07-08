@@ -37,6 +37,7 @@ import {
   shouldHoldRowFromStaleExpiration,
 } from "@/lib/domain/queue/queue-send-brake-state.js";
 import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-machine.js";
+import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -4258,6 +4259,14 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
   });
 
   const row = normalizeSendQueueRow(sanitized);
+
+  // Canonical automation provenance: every outbound row carries the same
+  // source-surface/lifecycle record so all surfaces enter one lifecycle.
+  try {
+    row.metadata = attachOutboundProvenance(row);
+  } catch {
+    // Provenance stamping must never block a send.
+  }
 
   // ── Inbox send-now validation guard ────────────────────────────────
   const is_inbox_send_now =

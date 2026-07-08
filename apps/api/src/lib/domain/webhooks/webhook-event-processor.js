@@ -7,6 +7,7 @@ import {
   markWebhookLogFailed,
 } from '@/lib/supabase/sms-engine.js'
 import { syncCampaignMetrics } from '@/lib/domain/campaigns/campaign-sync-metrics.js'
+import { maybeScheduleFollowUpAfterDelivery } from '@/lib/domain/seller-flow/delivery-triggered-followup.js'
 import { resolveDeployGitSha } from '@/lib/domain/deploy/resolve-deploy-sha.js'
 import { handleTextgridInbound } from '@/lib/flows/handle-textgrid-inbound.js'
 import { warn, info } from '@/lib/logging/logger.js'
@@ -203,10 +204,25 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       })
     }
 
+    // Delivery-confirmed follow-up trigger: only a matched, provider-confirmed
+    // delivery may schedule the next touch (the gate rejects everything else).
+    let delivery_followup = { ok: true, scheduled: false, reason: 'not_attempted' }
+    if (matched) {
+      const scheduleAfterDelivery =
+        deps.maybeScheduleFollowUpAfterDelivery || maybeScheduleFollowUpAfterDelivery
+      delivery_followup = await scheduleAfterDelivery({
+        provider_message_sid: normalized.provider_message_sid,
+        final_delivery_status: processing_result.final_delivery_status,
+        supabase,
+      })
+    }
+
     info('webhook_processor.delivery_live_processed', {
       provider_message_sid: normalized.provider_message_sid,
       matched,
       final_delivery_status: processing_result.final_delivery_status,
+      delivery_followup_scheduled: delivery_followup.scheduled,
+      delivery_followup_reason: delivery_followup.reason,
       latency_ms: Date.now() - started,
     })
 
@@ -215,6 +231,7 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       lane,
       matched,
       ...processing_result,
+      delivery_followup,
       latency_ms: Date.now() - started,
       execution_id,
     }

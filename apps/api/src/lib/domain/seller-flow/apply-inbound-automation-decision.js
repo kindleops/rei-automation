@@ -829,8 +829,24 @@ export async function selectSafeAutoReplyTemplate({
       .filter((row) => isTemplatePropertyCompatible(row, property_type_scope))
       .sort(compareTemplateRank);
 
+    const requested_language = lower(language);
+    const exact_language_match =
+      candidates.find((row) => lower(row.language) === requested_language) || null;
+
+    // Language continuity: a non-English thread must never be answered with
+    // an English template. Missing language template ⇒ fail closed to review.
+    if (!exact_language_match && requested_language !== "english") {
+      return {
+        ok: false,
+        reason: "language_template_missing",
+        human_review_required: true,
+        language,
+        template: null,
+      };
+    }
+
     let selected =
-      candidates.find((row) => lower(row.language) === lower(language)) ||
+      exact_language_match ||
       candidates.find((row) => lower(row.language) === "english") ||
       candidates[0] ||
       null;

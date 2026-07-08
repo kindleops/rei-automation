@@ -13,6 +13,10 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+export function mapSellerFlowStageToUniversal(stage = null) {
+  return mapUniversalStage(stage);
+}
+
 function mapUniversalStage(stage = null) {
   const normalized = normalizeStageLabel(stage) || lower(stage);
   const map = {
