@@ -493,9 +493,7 @@ export const useSellerMapCardActions = ({
     record,
     thread,
     threadContext,
-    viewModel.followUpEligibility,
-    viewModel.masterOwner.id,
-    viewModel.propertyId,
+    viewModel,
   ])
 
   const sendMessage = useCallback(async (messageText: string, template?: TemplateActionPayload['template']) => {
