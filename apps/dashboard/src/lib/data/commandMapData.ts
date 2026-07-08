@@ -154,6 +154,12 @@ export type CommandMapSellerPin = {
   display_phone?: string | null
   best_language?: string | null
   property_count?: number | null
+  portfolio_total_value?: number | null
+  portfolio_total_equity?: number | null
+  portfolio_total_loan_balance?: number | null
+  portfolio_total_tax_amount?: number | null
+  portfolio_total_units?: number | null
+  prospect_language_preference?: string | null
   property_tags_text: string | null
   property_tags_json: unknown | null
   podio_tags?: unknown
@@ -364,6 +370,7 @@ const COMMAND_MAP_SELLER_PIN_IDENTITY_SELECT = [
   'prospect_full_name',
   'prospect_first_name',
   'sms_eligible',
+  'prospect_language_preference',
   'agent_persona',
   'agent_family',
 ].join(',')
@@ -389,6 +396,7 @@ const COMMAND_MAP_THREAD_STATE_SELECT = [
   'last_inbound_at',
   'last_outbound_at',
   'latest_delivery_status',
+  'follow_up_at',
   'market',
 ].join(',')
 
@@ -1198,6 +1206,11 @@ const mapPropertyEnrichmentRow = (
     best_language: String(masterOwner?.best_language ?? '').trim() || null,
     mailing_address_full: String(masterOwner?.primary_owner_address ?? '').trim() || null,
     property_count: Number.isFinite(Number(masterOwner?.property_count)) ? Number(masterOwner?.property_count) : null,
+    portfolio_total_value: Number.isFinite(Number(masterOwner?.portfolio_total_value)) ? Number(masterOwner?.portfolio_total_value) : null,
+    portfolio_total_equity: Number.isFinite(Number(masterOwner?.portfolio_total_equity)) ? Number(masterOwner?.portfolio_total_equity) : null,
+    portfolio_total_loan_balance: Number.isFinite(Number(masterOwner?.portfolio_total_loan_balance)) ? Number(masterOwner?.portfolio_total_loan_balance) : null,
+    portfolio_total_tax_amount: Number.isFinite(Number(masterOwner?.portfolio_total_tax_amount)) ? Number(masterOwner?.portfolio_total_tax_amount) : null,
+    portfolio_total_units: Number.isFinite(Number(masterOwner?.portfolio_total_units)) ? Number(masterOwner?.portfolio_total_units) : null,
   }
 }
 
@@ -1318,7 +1331,7 @@ export const loadCommandMapSellerPinDetail = async (
     if (ownerId) {
       let ownerQuery = supabase
         .from('master_owners')
-        .select('master_owner_id,priority_score,priority_tier,primary_owner_address,property_count,best_language')
+        .select('master_owner_id,priority_score,priority_tier,primary_owner_address,property_count,best_language,portfolio_total_value,portfolio_total_equity,portfolio_total_loan_balance,portfolio_total_tax_amount,portfolio_total_units')
         .eq('master_owner_id', ownerId)
       if (options.signal) ownerQuery = ownerQuery.abortSignal(options.signal)
       const { data: ownerRow } = await ownerQuery.limit(1).maybeSingle()
