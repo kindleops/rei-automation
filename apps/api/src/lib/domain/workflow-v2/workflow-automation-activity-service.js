@@ -20,6 +20,10 @@ function md(row) {
   return row?.metadata && typeof row.metadata === 'object' ? row.metadata : {}
 }
 
+function payloadOf(row) {
+  return row?.payload && typeof row.payload === 'object' ? row.payload : {}
+}
+
 function isFollowUpQueueRow(row) {
   const meta = md(row)
   const touch = Number(row.touch_number ?? meta.touch_number ?? 0)
@@ -41,8 +45,8 @@ function mapEnrollment(row) {
     seller_stage: clean(ctx.seller_stage ?? ctx.stage),
     seller_status: clean(ctx.seller_status ?? ctx.status),
     seller_temperature: clean(ctx.temperature ?? ctx.seller_temperature),
-    human_review_required: row.status === 'paused' && Boolean(row.block_reason),
-    stopped_reason: row.block_reason ?? row.waiting_reason ?? null,
+    human_review_required: row.status === 'waiting' && Boolean(row.pause_reason ?? row.waiting_reason),
+    stopped_reason: row.pause_reason ?? row.waiting_reason ?? null,
     next_scheduled_send: row.next_execution_at ?? null,
     seller_label: clean(ctx.seller_display_name ?? ctx.seller_name ?? row.subject_id),
     property_label: clean(ctx.property_address ?? ctx.property_id),
@@ -54,18 +58,19 @@ function mapEnrollment(row) {
 }
 
 function mapScheduledTask(row) {
+  const payload = payloadOf(row)
   return {
     id: row.id,
     source: 'workflow_v2',
     status: row.status,
-    seller_stage: clean(row.seller_stage),
-    seller_status: clean(row.seller_status),
-    seller_temperature: clean(row.seller_temperature),
-    human_review_required: row.status === 'blocked' || row.status === 'paused',
-    stopped_reason: row.block_reason ?? row.cancel_reason ?? null,
-    next_scheduled_send: row.scheduled_for ?? row.execute_at ?? null,
-    seller_label: clean(row.subject_id),
-    property_label: clean(row.property_id),
+    seller_stage: clean(payload.seller_stage ?? payload.stage),
+    seller_status: clean(payload.seller_status ?? payload.status),
+    seller_temperature: clean(payload.seller_temperature ?? payload.temperature),
+    human_review_required: row.status === 'failed' || row.status === 'cancelled',
+    stopped_reason: row.reason ?? null,
+    next_scheduled_send: row.scheduled_for ?? null,
+    seller_label: clean(payload.seller_display_name ?? payload.seller_name ?? payload.subject_id),
+    property_label: clean(payload.property_address ?? payload.property_id),
     workflow_definition_id: row.workflow_definition_id,
     node_id: row.node_id,
     task_type: row.task_type ?? null,
@@ -98,47 +103,116 @@ function mapSendQueueFollowUp(row) {
   }
 }
 
+async function fetchSource(label, queryPromise) {
+  try {
+    const result = await queryPromise
+    if (result?.error) {
+      return { rows: [], warning: `${label}: ${result.error.message || String(result.error)}` }
+    }
+    return { rows: result.data ?? [], warning: null }
+  } catch (error) {
+    return { rows: [], warning: `${label}: ${error?.message || String(error)}` }
+  }
+}
+
 /**
  * Read-only aggregation of real automation activity across workflow tables and send_queue.
- * No writes. No SMS. No enable/disable controls.
+ * Schema-safe: uses only columns present in current migrations. Partial source failures
+ * degrade gracefully so send_queue follow-up activity can still be returned.
  */
 export async function listWorkflowAutomationActivity(options = {}, deps = {}) {
   const client = db(deps)
   const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 300)
+  const warnings = []
 
-  const [enrollmentsRes, tasksRes, queueRes] = await Promise.all([
-    client
+  const enrollmentSelect = [
+    'id',
+    'workflow_definition_id',
+    'subject_type',
+    'subject_id',
+    'status',
+    'context',
+    'current_node_id',
+    'enrolled_at',
+    'updated_at',
+    'next_execution_at',
+    'waiting_reason',
+    'pause_reason',
+    'paused_at',
+    'terminated_at',
+    'completed_at',
+  ].join(', ')
+
+  const taskSelect = [
+    'id',
+    'workflow_definition_id',
+    'enrollment_id',
+    'run_id',
+    'node_id',
+    'task_type',
+    'status',
+    'scheduled_for',
+    'reason',
+    'payload',
+    'created_at',
+    'updated_at',
+    'completed_at',
+  ].join(', ')
+
+  const queueSelect = [
+    'id',
+    'queue_status',
+    'status',
+    'touch_number',
+    'use_case',
+    'stage',
+    'seller_name',
+    'property_address',
+    'scheduled_for',
+    'scheduled_for_utc',
+    'failed_reason',
+    'blocked_reason',
+    'paused_reason',
+    'requires_approval',
+    'campaign_id',
+    'metadata',
+    'created_at',
+    'updated_at',
+  ].join(', ')
+
+  const [enrollmentsFetch, tasksFetch, queueFetch] = await Promise.all([
+    fetchSource('workflow_enrollments', client
       .from('workflow_enrollments')
-      .select('id, workflow_definition_id, workflow_run_id, subject_id, status, context, current_node_id, enrolled_at, updated_at, next_execution_at, waiting_reason, block_reason')
+      .select(enrollmentSelect)
       .order('updated_at', { ascending: false })
-      .limit(limit),
-    client
+      .limit(limit)),
+    fetchSource('workflow_scheduled_tasks', client
       .from('workflow_scheduled_tasks')
-      .select('id, workflow_definition_id, node_id, subject_id, property_id, status, task_type, scheduled_for, execute_at, seller_stage, seller_status, seller_temperature, block_reason, cancel_reason, created_at, updated_at')
+      .select(taskSelect)
       .order('updated_at', { ascending: false })
-      .limit(limit),
-    client
+      .limit(limit)),
+    fetchSource('send_queue', client
       .from('send_queue')
-      .select('id, queue_status, status, touch_number, use_case, stage, seller_name, property_address, scheduled_for, scheduled_for_utc, failed_reason, blocked_reason, paused_reason, requires_approval, campaign_id, metadata, created_at, updated_at')
+      .select(queueSelect)
       .gt('touch_number', 1)
       .in('queue_status', ['scheduled', 'queued', 'ready', 'sending', 'sent', 'approval', 'blocked', 'failed', 'cancelled', 'expired'])
       .order('updated_at', { ascending: false })
-      .limit(limit * 2),
+      .limit(limit * 2)),
   ])
 
-  if (enrollmentsRes.error) throw enrollmentsRes.error
-  if (tasksRes.error) throw tasksRes.error
-  if (queueRes.error) throw queueRes.error
+  for (const fetch of [enrollmentsFetch, tasksFetch, queueFetch]) {
+    if (fetch.warning) warnings.push(fetch.warning)
+  }
 
-  const enrollments = (enrollmentsRes.data ?? []).map(mapEnrollment)
-  const scheduled_tasks = (tasksRes.data ?? []).map(mapScheduledTask)
-  const queue_followups = (queueRes.data ?? []).filter(isFollowUpQueueRow).map(mapSendQueueFollowUp)
+  const enrollments = enrollmentsFetch.rows.map(mapEnrollment)
+  const scheduled_tasks = tasksFetch.rows.map(mapScheduledTask)
+  const queue_followups = queueFetch.rows.filter(isFollowUpQueueRow).map(mapSendQueueFollowUp)
 
   const activity = [...enrollments, ...scheduled_tasks, ...queue_followups]
     .sort((a, b) => String(b.updated_at ?? b.next_scheduled_send ?? '').localeCompare(String(a.updated_at ?? a.next_scheduled_send ?? '')))
     .slice(0, limit)
 
-  return {
+  const payload = {
     ok: true,
     activity,
     counts: {
@@ -154,4 +228,11 @@ export async function listWorkflowAutomationActivity(options = {}, deps = {}) {
       auto_reply: activity.some((row) => lower(row.auto_reply_authority).includes('auto')),
     },
   }
+
+  if (warnings.length) {
+    payload.degraded = true
+    payload.warnings = warnings
+  }
+
+  return payload
 }
