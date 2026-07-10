@@ -14,6 +14,18 @@ function withCors(request, payload, status = 200) {
   return NextResponse.json(payload, { status, headers: corsHeaders(request) })
 }
 
+const CAMPAIGN_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function invalidCampaignIdResponse(request, campaignId) {
+  return withCors(request, {
+    ok: false,
+    errorType: 'invalid_campaign_id',
+    error: 'invalid_campaign_id',
+    message: `Campaign id must be a UUID (received "${campaignId}"). List campaigns via GET /api/cockpit/campaigns.`,
+    retryable: false,
+  }, 400)
+}
+
 async function campaignIdFromParams(params) {
   const resolved = await params
   return resolved?.id || resolved?.campaign_id || null
@@ -30,6 +42,9 @@ export async function GET(request, { params }) {
   const campaignId = await campaignIdFromParams(params)
   if (!campaignId) {
     return withCors(request, { ok: false, error: 'campaign_id_required' }, 400)
+  }
+  if (!CAMPAIGN_ID_RE.test(campaignId)) {
+    return invalidCampaignIdResponse(request, campaignId)
   }
 
   try {
@@ -53,6 +68,9 @@ export async function PATCH(request, { params }) {
   if (!campaignId) {
     return withCors(request, { ok: false, error: 'campaign_id_required' }, 400)
   }
+  if (!CAMPAIGN_ID_RE.test(campaignId)) {
+    return invalidCampaignIdResponse(request, campaignId)
+  }
 
   try {
     const payload = await parseJsonSafe(request)
@@ -75,6 +93,9 @@ export async function DELETE(request, { params }) {
   const campaignId = await campaignIdFromParams(params)
   if (!campaignId) {
     return withCors(request, { ok: false, error: 'campaign_id_required' }, 400)
+  }
+  if (!CAMPAIGN_ID_RE.test(campaignId)) {
+    return invalidCampaignIdResponse(request, campaignId)
   }
 
   try {

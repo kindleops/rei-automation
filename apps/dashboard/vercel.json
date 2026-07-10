@@ -42,6 +42,8 @@
     { "source": "/api/cockpit/deal-context/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/deal-context/:path*" },
     { "source": "/api/cockpit/entity-graph/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/entity-graph/:path*" },
     { "source": "/api/cockpit/campaigns/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/campaigns/:path*" },
+    { "source": "/api/cockpit/pipeline/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/pipeline/:path*" },
+    { "source": "/api/cockpit/seller-automation/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/seller-automation/:path*" },
     { "source": "/api/cockpit/workflows/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/workflows/:path*" },
     { "source": "/api/cockpit/templates/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/templates/:path*" },
     { "source": "/api/cockpit/metrics/:path*", "destination": "https://api-steel-three-96.vercel.app/api/cockpit/metrics/:path*" },

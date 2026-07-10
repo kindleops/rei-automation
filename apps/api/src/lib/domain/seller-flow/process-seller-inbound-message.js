@@ -8,7 +8,10 @@ import {
 } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
 import { executeReferralAutomation } from "@/lib/domain/seller-flow/execute-referral-automation.js";
 import { resolveSellerAutoReplyPlan } from "@/lib/domain/seller-flow/resolve-seller-auto-reply-plan.js";
-import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import {
+  scheduleFollowUp,
+  cancelPendingFollowUpsForThread,
+} from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { normalizeClassificationContract } from "@/lib/domain/seller-flow/normalize-classification-contract.js";
 import {
   buildSellerFlowDecision,
@@ -44,6 +47,7 @@ import {
   alignSellerStageReply,
 } from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const defaultDeps = {
@@ -55,6 +59,7 @@ const defaultDeps = {
   executeReferralAutomation,
   resolveSellerAutoReplyPlan,
   scheduleFollowUp,
+  cancelPendingFollowUpsForThread,
   patchUniversalLeadState,
   emitAutomationEvent,
   // Canonical ADE runner — injectable for tests/proofs; defaults to the lazy
@@ -386,6 +391,28 @@ export async function processSellerInboundMessage({
       ? Boolean(explicitExecutionAllowed)
       : Boolean(queue_permission.allowed);
   const writes_suppressed = Boolean(dryRun || proofRun);
+
+  // ── Inbound takeover: a seller reply cancels pending no-reply follow-ups
+  // BEFORE classification, so a stale nurture can never race the live reply.
+  // Runs only with an injected client or real Supabase config — never against
+  // the placeholder default client.
+  let followup_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
+  const cancellation_client_available = Boolean(supabaseClient) || hasSupabaseConfig();
+  if (!writes_suppressed && cancellation_client_available && (threadKey || inboundFrom)) {
+    try {
+      followup_cancellation = await runtimeDeps.cancelPendingFollowUpsForThread({
+        thread_key: threadKey || inboundFrom,
+        inbound_event_id: inboundEventId,
+        supabase,
+      });
+    } catch (cancel_error) {
+      followup_cancellation = {
+        ok: false,
+        cancelled: 0,
+        reason: cancel_error?.message || "cancel_failed",
+      };
+    }
+  }
 
   let classification = providedClassification;
   if (!classification) {
@@ -1050,6 +1077,7 @@ export async function processSellerInboundMessage({
     intelligence_snapshot: aligned_intelligence_snapshot,
     execution: execution_view.execution,
     follow_up: execution_view.follow_up,
+    followup_cancellation,
     decision,
     seller_stage_reply,
     universal_state_patch,

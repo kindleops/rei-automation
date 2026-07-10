@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server.js'
-import { ensureMutationAuth } from '../../_shared.js'
+import { ensureDashboardReadAuth } from '../../_shared.js'
 import { getPipelineMetrics } from '@/lib/domain/opportunity/opportunity-service.js'
 
 export const runtime = 'nodejs'
@@ -37,11 +37,11 @@ export async function OPTIONS(request) {
 
 export async function GET(request) {
   const cors = corsHeaders(request)
-  const auth = ensureMutationAuth(request)
+  const auth = ensureDashboardReadAuth(request)
   if (!auth.ok) {
     return NextResponse.json(
-      await auth.response.json().catch(() => ({ ok: false, error: 'unauthorized' })),
-      { status: auth.response.status, headers: cors },
+      { ok: false, errorType: 'auth_error', error: 'unauthorized', message: 'Dashboard authentication required', retryable: true },
+      { status: auth.response?.status || 401, headers: cors },
     )
   }
 
@@ -51,8 +51,8 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, data: metrics }, { status: 200, headers: cors })
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500, headers: cors }
+      { ok: false, errorType: 'query_failed', error: 'pipeline_counts_fetch_failed', message: error.message, retryable: true },
+      { status: 500, headers: cors },
     )
   }
 }

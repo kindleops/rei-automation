@@ -42,10 +42,21 @@ function toTimestamp(value: string | number | Date | undefined): number | null {
   return Number.isFinite(ts) ? ts : null
 }
 
+// Proof/test classification is metadata-only. A row is NEVER proof merely
+// because sms_eligible === false, or because it is suppressed / blocked /
+// failed / cancelled / missing a phone — those are real operational statuses.
+function truthy(value: unknown): boolean {
+  return value === true || String(value ?? '').trim().toLowerCase() === 'true'
+}
+
 function isProofRow(metadata: Record<string, unknown>): boolean {
   return Boolean(
-    metadata.no_send === true ||
-    metadata.proof_hydration === true ||
+    truthy(metadata.dry_run) ||
+    truthy(metadata.proof_mode) ||
+    truthy(metadata.test_mode) ||
+    truthy(metadata.no_sms_transmit) ||
+    truthy(metadata.no_send) ||
+    truthy(metadata.proof_hydration) ||
     metadata.proof_mode === 'no_send' ||
     metadata.launch_mode === 'proof_hydration_no_send',
   )
@@ -77,7 +88,7 @@ export function resolveQueueDispatchTruth(input: QueueDispatchTruthInput): Queue
     }
   }
 
-  if (isProofRow(metadata) || input.smsEligible === false) {
+  if (isProofRow(metadata)) {
     return {
       category: 'proof',
       label: 'Proof / Test',

@@ -1,3 +1,9 @@
+import {
+  classifyBackendFailure,
+  opsError,
+  opsSuccess,
+  type OpsSurfaceResult,
+} from '../../domain/ops/ops-surface-result'
 import type {
   CampaignModel,
   CampaignSummary,
@@ -199,50 +205,134 @@ function applyCommandSummaryToCampaign(campaign: CampaignSummary, summary: Await
   }
 }
 
-export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
-  const backend = await listCampaignsBackend()
-  if (backend.ok && backend.data?.campaigns) {
-    return backend.data.campaigns.map((row) => mapCampaignSummaryRow(row as CampaignApiSummary & Record<string, unknown>))
+async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
+  if (!hasSupabaseEnv) {
+    throw new Error('canonical_campaigns_fallback_unavailable')
+  }
+  const client = getSupabaseClient()
+  const { data: campaigns, error } = await client
+    .from('campaigns')
+    .select('id, name, status, created_at, updated_at, metadata, auto_send_enabled, send_interval_seconds, send_window_start, send_window_end')
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) {
+    const msg = error.message || String(error)
+    if (error.code === '42P01' || /does not exist|relation/i.test(msg)) {
+      throw Object.assign(new Error('missing_view'), { code: 'missing_view' })
+    }
+    throw error
   }
 
-  if (!hasSupabaseEnv) return []
-  const client = getSupabaseClient()
-  const { data, error } = await client
-    .from('v_sms_campaign_dashboard')
-    .select('*')
-    .order('status', { ascending: true })
-  if (error) throw error
-  
-  // Map snake_case to our CampaignSummary interface
-  return (data ?? []).map((row: any) => ({
-    id: row.campaign_id,
-    campaign_name: row.campaign_name,
-    status: row.status,
-    total_targets: row.total_targets ?? 0,
-    ready_targets: row.ready_count ?? 0,
-    scheduled_targets: row.scheduled_count ?? 0,
-    queued_targets: row.queued_count ?? 0,
-    sent_count: row.sent_count ?? 0,
-    delivered_count: row.delivered_count ?? 0,
-    failed_count: row.failed_count ?? 0,
-    reply_count: (row.positive_reply_count ?? 0) + (row.negative_reply_count ?? 0),
-    positive_reply_count: row.positive_reply_count ?? 0,
-    negative_reply_count: row.negative_reply_count ?? 0,
-    opt_out_count: row.opted_out_count ?? 0,
-    delivery_rate: row.delivery_rate_percent ?? 0,
-    reply_rate: row.reply_rate_percent ?? 0,
-    positive_rate: row.positive_rate_percent ?? 0,
-    opt_out_rate: row.optout_rate_percent ?? 0,
-    failure_rate: row.failure_rate_percent ?? 0,
-    next_send_at: row.next_scheduled_for ?? null,
-    last_send_at: row.last_sent_at ?? null,
-    send_interval_seconds: row.send_interval_seconds ?? 900,
-    send_window_start: row.send_window_start ?? null,
-    send_window_end: row.send_window_end ?? null,
-    auto_send_enabled: row.auto_send_enabled ?? false,
-    health_score: 100, // Computed below or in UI
-    health_status: 'healthy',
-  }))
+  const ids = (campaigns ?? []).map((row) => row.id as string)
+  const targetCounts = new Map<string, { total: number; ready: number }>()
+  if (ids.length) {
+    const { data: targets, error: targetError } = await client
+      .from('campaign_targets')
+      .select('campaign_id, status')
+      .in('campaign_id', ids)
+    if (targetError) throw targetError
+    for (const target of targets ?? []) {
+      const key = String(target.campaign_id)
+      const bucket = targetCounts.get(key) ?? { total: 0, ready: 0 }
+      bucket.total += 1
+      if (String(target.status).toLowerCase() === 'ready') bucket.ready += 1
+      targetCounts.set(key, bucket)
+    }
+  }
+
+  return (campaigns ?? []).map((row) => {
+    const counts = targetCounts.get(String(row.id)) ?? { total: 0, ready: 0 }
+    return {
+      id: String(row.id),
+      campaign_name: String(row.name ?? ''),
+      status: row.status as CampaignSummary['status'],
+      total_targets: counts.total,
+      ready_targets: counts.ready,
+      planned_targets: 0,
+      scheduled_targets: 0,
+      scheduled_queue_rows: 0,
+      queued_targets: 0,
+      sent_count: 0,
+      delivered_count: 0,
+      failed_count: 0,
+      reply_count: 0,
+      positive_reply_count: 0,
+      negative_reply_count: 0,
+      opt_out_count: 0,
+      delivery_rate: 0,
+      reply_rate: 0,
+      positive_rate: 0,
+      opt_out_rate: 0,
+      failure_rate: 0,
+      next_send_at: null,
+      last_send_at: null,
+      send_interval_seconds: Number(row.send_interval_seconds ?? 900),
+      send_window_start: row.send_window_start ?? null,
+      send_window_end: row.send_window_end ?? null,
+      auto_queue_enabled: false,
+      auto_send_enabled: Boolean(row.auto_send_enabled ?? false),
+      blocked_reason_counts: {},
+      health_score: 0,
+      health_status: 'caution',
+      execution_proof: null,
+    }
+  })
+}
+
+export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<CampaignSummary[]>> => {
+  const backend = await listCampaignsBackend()
+  if (backend.ok && backend.data?.campaigns) {
+    const campaigns = backend.data.campaigns.map((row) =>
+      mapCampaignSummaryRow(row as CampaignApiSummary & Record<string, unknown>),
+    )
+    return opsSuccess(campaigns, 'backend_api')
+  }
+
+  const backendFail = backend.ok ? null : backend
+  const backendMessage = backendFail?.message || backendFail?.error || 'campaign_backend_unavailable'
+  const backendErrorType = classifyBackendFailure(backend)
+  if (backendErrorType === 'auth_error') {
+    return opsError([], 'auth_error', backendMessage || 'campaign_auth_failed', {
+      retryable: true,
+      source: 'backend_api',
+    })
+  }
+
+  if (!hasSupabaseEnv) {
+    return opsError([], backendErrorType, backendMessage, {
+      retryable: backendErrorType !== 'missing_view',
+      source: 'backend_api',
+    })
+  }
+
+  try {
+    const campaigns = await fetchCampaignsCanonicalFallback()
+    if (campaigns.length === 0) {
+      return { ...opsSuccess(campaigns, 'supabase_campaigns'), degraded: true }
+    }
+    return {
+      ...opsSuccess(campaigns, 'supabase_campaigns'),
+      degraded: true,
+      errorMessage: backendMessage || 'Using degraded canonical campaign fallback',
+      retryable: true,
+    }
+  } catch (error) {
+    const err = error as { code?: string; message?: string }
+    const missingView = err.code === 'missing_view' || /does not exist|relation/i.test(err.message ?? '')
+    return opsError(
+      [],
+      missingView ? 'missing_view' : 'query_failed',
+      err.message || 'campaign_query_failed',
+      { degraded: true, retryable: !missingView, source: 'supabase_campaigns' },
+    )
+  }
+}
+
+/** @deprecated Prefer fetchCampaignsSurface for typed load/error handling. */
+export const fetchCampaigns = async (): Promise<CampaignSummary[]> => {
+  const result = await fetchCampaignsSurface()
+  if (!result.ok) throw new Error(result.errorMessage || result.errorType || 'campaign_load_failed')
+  return result.data
 }
 
 export type CampaignTargetsPage = {
@@ -975,14 +1065,19 @@ export const buildSuppressionChecklist = (campaign: CampaignSummary): Suppressio
 // ── Main loader ─────────────────────────────────────────────────────────────────
 
 export const loadCampaigns = async (): Promise<CampaignModel> => {
-  if (hasSupabaseEnv) {
-    try {
-      const campaigns = await fetchCampaigns()
-      return { campaigns, kpis: buildKpis(campaigns) }
-    } catch (error) {
-      if (isDev) console.warn('[NEXUS] Campaigns load failed.', error)
-    }
+  const surface = await fetchCampaignsSurface()
+  const model: CampaignModel = {
+    campaigns: surface.data,
+    kpis: buildKpis(surface.data),
+    ok: surface.ok,
+    errorType: surface.errorType as CampaignModel['errorType'],
+    errorMessage: surface.errorMessage,
+    degraded: surface.degraded,
+    retryable: surface.retryable,
+    source: surface.source,
   }
-  // Return empty if no supabase environment
-  return { campaigns: [], kpis: buildKpis([]) }
+  if (!surface.ok && isDev) {
+    console.warn('[NEXUS] Campaigns load failed.', surface.errorType, surface.errorMessage)
+  }
+  return model
 }

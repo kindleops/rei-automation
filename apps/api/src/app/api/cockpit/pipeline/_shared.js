@@ -1,6 +1,6 @@
-import { corsHeaders, ensureMutationAuth } from '../../_shared.js';
+import { corsHeaders, ensureDashboardReadAuth, ensureMutationAuth } from '../../_shared.js';
 
-export { corsHeaders, ensureMutationAuth };
+export { corsHeaders, ensureDashboardReadAuth, ensureMutationAuth };
 
 export function unauthorizedJson(authResponse, headers) {
   return new Response(

@@ -314,9 +314,22 @@ export interface CampaignKpis {
   failureRate: number
 }
 
+export type CampaignLoadErrorType =
+  | 'auth_error'
+  | 'backend_unavailable'
+  | 'missing_view'
+  | 'query_failed'
+  | 'no_campaigns'
+
 export interface CampaignModel {
   campaigns: CampaignSummary[]
   kpis: CampaignKpis
+  ok?: boolean
+  errorType?: CampaignLoadErrorType
+  errorMessage?: string
+  degraded?: boolean
+  retryable?: boolean
+  source?: string
 }
 
 export type CampaignDetailTab =

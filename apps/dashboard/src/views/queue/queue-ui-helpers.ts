@@ -1,6 +1,27 @@
 import type { QueueItem } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
+import {
+  resolveQueueDeliveryTruth,
+  type QueueDiagnosticCode,
+} from '../../domain/queue/queue-status-truth'
+
+// Statuses where the canonical delivery/receipt truth is authoritative over the
+// pre-send dispatch label (a dispatched or terminal row must never show a
+// pre-send label like "Not Runnable").
+const DELIVERY_TRUTH_STATUSES = new Set([
+  'sent', 'delivered', 'failed', 'failed_transport', 'blocked', 'blocked_by_health_guard',
+  'retry', 'retrying', 'sending', 'processing', 'expired', 'cancelled', 'duplicate_blocked',
+])
+
+const DIAGNOSTIC_LABELS: Record<QueueDiagnosticCode, string> = {
+  message_event_missing: 'Message event missing',
+  provider_id_missing: 'Missing provider ID',
+  provider_receipt_missing: 'Awaiting final receipt',
+  queue_status_conflict: 'Queue status conflict',
+  sent_with_failed_reason: 'Sent row has failure reason',
+  proof_test_row: 'Proof / test row',
+}
 
 export type QueueDensity = 'comfortable' | 'compact' | 'command'
 
@@ -149,6 +170,10 @@ export interface StatusPresentation {
   hasCurrentException: boolean
   dispatchLabel?: string
   nextEligibleSendAt?: string | null
+  /** Raw queue_status shown as secondary context when it disagrees with truth. */
+  secondaryStatus?: string | null
+  /** Operational diagnostics (labels) — warnings, never the primary status alone. */
+  diagnostics?: string[]
 }
 
 const FLAG_LABELS: Record<string, string> = {
@@ -220,19 +245,39 @@ export const resolveStatusPresentation = (item: QueueItem): StatusPresentation =
   if (delivered) tone = 'green'
   else if (item.status === 'sent' && item.deliveryStatus === 'pending') tone = 'green'
 
-  const primary = item.dispatchLabel || dispatchTruth.label || formatDisplayStatus(item.status)
+  // Canonical delivery/receipt truth wins for any dispatched or terminal row so
+  // a "sent" row with a failure reason shows Failed, a delivered receipt shows
+  // Delivered, and a missing provider id shows as a diagnostic — not "sent".
+  const deliveryTruth = resolveQueueDeliveryTruth(item)
+  const useDeliveryTruth =
+    DELIVERY_TRUTH_STATUSES.has(item.status) ||
+    deliveryTruth.isTerminal || deliveryTruth.isDelivered || deliveryTruth.isFailed
+
+  const diagnostics = deliveryTruth.diagnostics.map((code) => DIAGNOSTIC_LABELS[code])
+  const secondaryStatus =
+    useDeliveryTruth && deliveryTruth.secondaryQueueStatus &&
+    formatDisplayStatus(deliveryTruth.secondaryQueueStatus) !== deliveryTruth.status
+      ? formatDisplayStatus(deliveryTruth.secondaryQueueStatus)
+      : null
+
+  const dispatchPrimary = item.dispatchLabel || dispatchTruth.label || formatDisplayStatus(item.status)
+  const primary = useDeliveryTruth ? deliveryTruth.status : dispatchPrimary
+
+  const dispatchTone = dispatchTruth.category === 'proof' ? 'amber'
+    : dispatchTruth.category === 'globally_blocked' ? 'red'
+      : dispatchTruth.category === 'future_window' ? 'blue'
+        : tone
 
   return {
     primary,
-    tone: dispatchTruth.category === 'proof' ? 'amber'
-      : dispatchTruth.category === 'globally_blocked' ? 'red'
-        : dispatchTruth.category === 'future_window' ? 'blue'
-          : tone,
+    tone: useDeliveryTruth ? deliveryTruth.tone : dispatchTone,
     blocking: hasCurrentException || dispatchTruth.blocker ? blocking : null,
     historicalWarnings,
     hasCurrentException: hasCurrentException || Boolean(dispatchTruth.blocker),
     dispatchLabel: dispatchTruth.label,
     nextEligibleSendAt: item.nextEligibleSendAt || dispatchTruth.nextEligibleSendAt,
+    secondaryStatus,
+    diagnostics,
   }
 }
 
