@@ -62,6 +62,19 @@ const SMALL_WORDS = Object.freeze({
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
   eighty: 80, ninety: 90, a: 1, an: 1, half: 0.5,
+  // Spanish spelled-out numbers ("ciento veinte mil" = 120,000). "cien"/
+  // "ciento" are additive hundreds in Spanish, so SMALL_WORDS (not scale) is
+  // correct: ciento(100) + veinte(20), then the "mil" scale multiplies.
+  uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7,
+  ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12, trece: 13, catorce: 14,
+  quince: 15, dieciseis: 16, dieciséis: 16, diecisiete: 17, dieciocho: 18,
+  diecinueve: 19, veinte: 20, veintiuno: 21, veintidos: 22, veintidós: 22,
+  veintitres: 23, veintitrés: 23, veinticuatro: 24, veinticinco: 25,
+  veintiseis: 26, veintiséis: 26, veintisiete: 27, veintiocho: 28,
+  veintinueve: 29, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60,
+  setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100,
+  medio: 0.5, media: 0.5,
+  y: 0, // connector: "ciento veinte y cinco mil"
 });
 
 const SCALE_WORDS = Object.freeze({
@@ -72,6 +85,9 @@ const SCALE_WORDS = Object.freeze({
   million: 1_000_000,
   m: 1_000_000,
   mil: 1_000, // colloquial/Spanish "mil" = thousand
+  millon: 1_000_000,
+  millón: 1_000_000,
+  millones: 1_000_000,
 });
 
 /**

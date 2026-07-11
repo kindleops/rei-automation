@@ -24,6 +24,10 @@ import {
 } from "@/lib/domain/seller-flow/persist-seller-transition.js";
 import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
 import {
+  extractSellerFacts,
+  extractionToResolverFacts,
+} from "@/lib/domain/seller-flow/extract-seller-facts.js";
+import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
   classifyNegotiationZone,
@@ -472,6 +476,39 @@ export async function processSellerInboundMessage({
     valuation_confidence: persisted_ade?.valuation_confidence ?? null,
   };
 
+  // ── Monetary understanding (spec §3): classify every number BEFORE any
+  // negotiation decision. Low-confidence money asks for clarification and
+  // never drives an offer. Runs here (ahead of the intelligence phase) so the
+  // evidence-backed fact extraction below shares the same monetary authority
+  // and the extraction record persists with the intelligence snapshot.
+  const prior_negotiation_state = deal_state?.negotiation_state || null;
+  const negotiation_active = Boolean(
+    (Array.isArray(prior_negotiation_state?.offers_made)
+      ? prior_negotiation_state.offers_made.length > 0
+      : Number(prior_negotiation_state?.offers_made) > 0) ||
+      prior_negotiation_state?.latest_offer != null
+  );
+  const price_signal = resolveAskingPriceSignal(message, {
+    reference:
+      prior_negotiation_state?.current_asking_price ??
+      prior_negotiation_state?.current_ask ??
+      underwriting.recommended_cash_offer ??
+      underwriting.valuation_mid ??
+      null,
+    negotiationActive: negotiation_active,
+    sourceMessageId: providerMessageId || inboundEventId,
+  });
+
+  // ── Deterministic evidence-backed fact extraction (not a classifier —
+  // classify.js remains the only intent classifier). Every fact carries
+  // evidence text, source message id and extractor version.
+  const fact_extraction = extractSellerFacts({
+    message,
+    sourceMessageId: providerMessageId || inboundEventId,
+    priceSignal: price_signal,
+  });
+  const extraction_facts = extractionToResolverFacts(fact_extraction);
+
   const legacy_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
     inbound_event: {
       item_id: inboundEventId,
@@ -516,6 +553,13 @@ export async function processSellerInboundMessage({
   });
 
   let intelligence_snapshot = intelligence?.intelligence_snapshot || null;
+
+  // The audit row persists the whole snapshot as metadata, so attaching the
+  // extraction record here makes every evidence-backed fact durable and
+  // replayable alongside the decision that consumed it.
+  if (intelligence_snapshot && fact_extraction) {
+    intelligence_snapshot.fact_extraction = fact_extraction;
+  }
 
   try {
     await runtimeDeps.persistInboundIntelligenceSnapshot({
@@ -566,26 +610,10 @@ export async function processSellerInboundMessage({
 
   // ── Monetary understanding (spec §3): classify every number BEFORE any
   // negotiation decision. Low-confidence money asks for clarification and
-  // never drives an offer.
+  // never drives an offer. (price_signal and the fact extraction were
+  // computed before the intelligence phase — see above.)
   const stage_engine_decision =
     intelligence?.stage_domain?.engine_result?.stage_decision || null;
-  const prior_negotiation_state = deal_state?.negotiation_state || null;
-  const negotiation_active = Boolean(
-    (Array.isArray(prior_negotiation_state?.offers_made)
-      ? prior_negotiation_state.offers_made.length > 0
-      : Number(prior_negotiation_state?.offers_made) > 0) ||
-      prior_negotiation_state?.latest_offer != null
-  );
-  const price_signal = resolveAskingPriceSignal(message, {
-    reference:
-      prior_negotiation_state?.current_asking_price ??
-      prior_negotiation_state?.current_ask ??
-      underwriting.recommended_cash_offer ??
-      underwriting.valuation_mid ??
-      null,
-    negotiationActive: negotiation_active,
-    sourceMessageId: providerMessageId || inboundEventId,
-  });
 
   // ── Deterministic lifecycle transition (resolved BEFORE the reply is
   // queued so ADE + strategy shape the outbound instead of trailing it).
@@ -603,22 +631,28 @@ export async function processSellerInboundMessage({
         occupancy_status:
           summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
       },
+      // Classifier/engine values keep precedence; the evidence-backed
+      // extraction fills gaps and stamps extractor_version into facts_patch.
       new_facts: {
+        ...extraction_facts,
         asking_price:
           price_signal.asking_price ??
           stage_engine_decision?.seller_asking_price ??
           extracted.asking_price ??
           null,
         condition_summary:
-          typeof extracted.condition === "string" ? extracted.condition : null,
+          typeof extracted.condition === "string"
+            ? extracted.condition
+            : extraction_facts.repairs_summary || null,
         condition_disclosed:
           contract.normalized_intent === "condition_disclosed" ||
           Boolean(extracted.condition) ||
+          extraction_facts.condition_disclosed ||
           undefined,
         occupancy_status: extracted.tenant_occupied
           ? "tenant_occupied"
-          : stage_engine_decision?.occupancy_status || null,
-        timeline: extracted.timeline || null,
+          : stage_engine_decision?.occupancy_status || extraction_facts.occupancy_status || null,
+        timeline: extracted.timeline || extraction_facts.timeline || null,
       },
       intent:
         intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
@@ -1080,6 +1114,7 @@ export async function processSellerInboundMessage({
     ok: true,
     classification,
     contract,
+    fact_extraction,
     intelligence,
     intelligence_snapshot: aligned_intelligence_snapshot,
     execution: execution_view.execution,
