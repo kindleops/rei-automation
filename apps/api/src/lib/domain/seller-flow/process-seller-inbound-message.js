@@ -1,4 +1,4 @@
-import { classify } from "@/lib/domain/classification/classify.js";
+import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import {
@@ -906,6 +906,13 @@ export async function processSellerInboundMessage({
             source_view: "seller_inbound_orchestrator",
             reason: decision.reasoning_code || decision.immediate_next_action,
             executed_next_action: Boolean(execution?.queued),
+            message_event_id: inboundEventId || providerMessageId || null,
+            automation_authority: effective_auto_reply_mode,
+            classifier_version: `${CLASSIFY_VERSION}:${classification?.source || "heuristic"}`,
+            extractor_version: transition?.facts_patch?.extractor_version || null,
+            resolver_version: transition?.resolver_version || null,
+            transition_reason: transition?.reasoning_code || null,
+            prospect_id: prospectId || null,
             metadata: decision.reasoning_code
               ? { reasoning_code: decision.reasoning_code, next_action: decision.next_action }
               : {},

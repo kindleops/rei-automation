@@ -47,6 +47,32 @@ export async function fetchCurrentLeadState(supabase, threadKey) {
   return data || null;
 }
 
+/**
+ * Provenance keys promoted from meta into every audit event's metadata so a
+ * state mutation is always traceable to the exact message, authority mode and
+ * decision-engine versions that produced it (no schema change required).
+ */
+const PROVENANCE_META_KEYS = Object.freeze([
+  'message_event_id',
+  'automation_authority',
+  'classifier_version',
+  'extractor_version',
+  'resolver_version',
+  'transition_reason',
+  'prospect_id',
+]);
+
+function buildAuditMetadata(meta = {}) {
+  const metadata = meta.metadata && typeof meta.metadata === 'object' ? { ...meta.metadata } : {};
+  for (const key of PROVENANCE_META_KEYS) {
+    const value = meta[key];
+    if (value !== null && value !== undefined && value !== '' && metadata[key] === undefined) {
+      metadata[key] = value;
+    }
+  }
+  return metadata;
+}
+
 async function writeAuditEvents(supabase, {
   threadKey,
   propertyId,
@@ -56,6 +82,7 @@ async function writeAuditEvents(supabase, {
 }) {
   const events = [];
   const now = new Date().toISOString();
+  const metadata = buildAuditMetadata(meta);
   for (const field of TRACKED_FIELDS) {
     if (!(field in patch)) continue;
     const previousValue = previous?.[field] ?? null;
@@ -73,7 +100,7 @@ async function writeAuditEvents(supabase, {
       change_source: meta.change_source || STATE_SOURCE_CODES.MANUAL,
       executed_next_action: meta.executed_next_action === true,
       created_at: now,
-      metadata: meta.metadata && typeof meta.metadata === 'object' ? meta.metadata : {},
+      metadata,
     });
   }
   if (!events.length) return [];
@@ -200,9 +227,14 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   if ('is_read' in canonicalPatch) {
     rowPatch.is_read = asBoolean(canonicalPatch.is_read, false);
     rowPatch.last_read_at = rowPatch.is_read ? now : null;
+    // Legacy mirror: the dashboard inbox route historically wrote read_at.
+    rowPatch.read_at = rowPatch.last_read_at;
   }
   if ('is_pinned' in canonicalPatch) rowPatch.is_pinned = asBoolean(canonicalPatch.is_pinned, false);
   if ('is_starred' in canonicalPatch) rowPatch.is_starred = asBoolean(canonicalPatch.is_starred, false);
+  // Identity backfill (not state): allow callers to attach entity ids.
+  if (clean(canonicalPatch.master_owner_id)) rowPatch.master_owner_id = clean(canonicalPatch.master_owner_id);
+  if (clean(canonicalPatch.property_id)) rowPatch.property_id = clean(canonicalPatch.property_id);
   if (meta.updated_by) rowPatch.updated_by = clean(meta.updated_by);
 
   return rowPatch;

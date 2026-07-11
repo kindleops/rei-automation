@@ -322,7 +322,10 @@ test("automation engine: asking price moves thread hot and urgent without sendin
   );
 
   assert.equal(result.ok, true);
-  assert.equal(thread.stage, "needs_offer");
+  // "needs_offer" normalizes to the canonical `offer` stage via the universal
+  // lead-state write service (legacy mirrors stay in sync).
+  assert.equal(thread.stage, "offer");
+  assert.equal(thread.lifecycle_stage, "offer");
   assert.equal(thread.priority, "urgent");
   assert.equal(thread.is_urgent, true);
   assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
@@ -582,8 +585,13 @@ test("automation engine: safe action aliases are dry-run or existing-table only"
   );
 
   assert.equal(result.ok, true);
-  assert.equal(thread.status, "open");
-  assert.equal(thread.stage, "needs_offer");
+  // Lifecycle fields now flow through patchUniversalLeadState, which
+  // normalizes legacy free-text values into the canonical registry vocabulary
+  // ("open" → not_contacted, "needs_offer" → offer) and mirrors legacy columns.
+  assert.equal(thread.status, "not_contacted");
+  assert.equal(thread.operational_status, "not_contacted");
+  assert.equal(thread.stage, "offer");
+  assert.equal(thread.lifecycle_stage, "offer");
   assert.equal(thread.metadata.automation_engine.lead_temperature, "hot");
   assert.equal(supabase.rows.ops_notifications.length, 1);
   assert.equal(followupAction.result.dry_run, true);

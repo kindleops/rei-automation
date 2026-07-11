@@ -446,7 +446,10 @@ export function normalizePatchToCanonical(patch = {}) {
   const normalized = {};
   for (const [key, value] of Object.entries(patch || {})) {
     const canonicalKey = LEGACY_FIELD_ALIASES[key] || key;
-    if (!UNIVERSAL_LEAD_STATE_PATCH_FIELDS.includes(canonicalKey) && !['autopilot_mode', 'assigned_user', 'manual_review'].includes(canonicalKey)) {
+    if (
+      !UNIVERSAL_LEAD_STATE_PATCH_FIELDS.includes(canonicalKey) &&
+      !['autopilot_mode', 'assigned_user', 'manual_review', 'master_owner_id', 'property_id'].includes(canonicalKey)
+    ) {
       continue;
     }
     if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value);

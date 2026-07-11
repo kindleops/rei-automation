@@ -6,6 +6,12 @@ import {
   normalizeStage,
 } from "@/lib/providers/podio.js";
 
+/**
+ * Provenance identifier recorded on every state mutation this classifier's
+ * output produces. Bump when classification semantics change materially.
+ */
+export const CLASSIFY_VERSION = "classify_js_v1";
+
 // ══════════════════════════════════════════════════════════════════════════
 // UTILITIES
 // ══════════════════════════════════════════════════════════════════════════

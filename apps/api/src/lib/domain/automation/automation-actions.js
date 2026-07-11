@@ -1,6 +1,8 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import {
   AUTOMATION_LOG_TAGS,
   logAutomationConsole,
@@ -498,6 +500,16 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
     }
   }
 
+  // Lifecycle fields (stage/status/next_action) must go through the canonical
+  // write service so automation rules respect manual locks, the monotonic
+  // stage guard, and the universal_lead_state_events audit trail. Everything
+  // else on this row is projection/bookkeeping and keeps the direct upsert.
+  const lifecycle_patch = compact({
+    stage: clean(params.stage) || undefined,
+    status: clean(params.status) || undefined,
+    next_action: clean(params.next_action) || undefined,
+  });
+
   const row = compact({
     thread_key,
     master_owner_id: clean(event.master_owner_id) || null,
@@ -506,12 +518,9 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
     canonical_e164: resolvePhoneE164(event, params),
     seller_phone: resolvePhoneE164(event, params),
     market: clean(payload.market) || null,
-    status: clean(params.status) || undefined,
-    stage: clean(params.stage) || undefined,
     priority: clean(params.priority) || undefined,
     is_urgent: typeof params.is_urgent === "boolean" ? params.is_urgent : undefined,
     last_intent: clean(payload.detected_intent || payload.intent) || undefined,
-    next_action: clean(params.next_action) || undefined,
     metadata: {
       ...existing_metadata,
       automation_engine: {
@@ -525,8 +534,38 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
     updated_by: "automation_engine",
   });
 
-  if (dry_run) return { ok: true, dry_run: true, planned_patch: row };
+  if (dry_run) {
+    return { ok: true, dry_run: true, planned_patch: { ...row, ...lifecycle_patch } };
+  }
   if (!db?.from) return { ok: false, skipped: true, reason: "supabase_unavailable" };
+
+  let lifecycle_result = null;
+  if (Object.keys(lifecycle_patch).length) {
+    try {
+      lifecycle_result = await patchUniversalLeadState({
+        threadKey: thread_key,
+        patch: lifecycle_patch,
+        supabase: db,
+        meta: {
+          change_source: STATE_SOURCE_CODES.SYSTEM,
+          source_view: "workflow_automation_rule",
+          updated_by: "automation_engine",
+          reason: clean(params.rule_key) || clean(event.event_type) || "automation_rule",
+          automation_authority: "automation_rule_engine",
+          metadata: {
+            rule_key: params.rule_key || null,
+            event_type: event.event_type || null,
+          },
+        },
+      });
+    } catch (lifecycle_error) {
+      lifecycle_result = {
+        ok: false,
+        blocked: true,
+        reason: lifecycle_error?.message || "lifecycle_patch_failed",
+      };
+    }
+  }
 
   const result = await maybeSingle(
     db.from("inbox_thread_state").upsert(row, { onConflict: "thread_key" }).select()
@@ -543,6 +582,7 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
       patched: false,
       reason: "state_columns_pending_migration",
       intended_patch: row,
+      lifecycle_result,
       error: result.error.message || null,
     };
   }
@@ -550,6 +590,7 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
     return skippedMissingTarget("inbox_thread_state", result.error, {
       thread_key,
       intended_patch: row,
+      lifecycle_result,
     });
   }
 
@@ -558,6 +599,8 @@ async function patchThreadState({ db, event, params, dry_run } = {}) {
     thread_key,
     patched: !result?.error,
     row: result?.data || row,
+    lifecycle_result,
+    lifecycle_blocked_reason: lifecycle_result?.blocked ? lifecycle_result.reason : null,
     error: result?.error?.message || null,
   };
 }

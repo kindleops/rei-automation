@@ -15,9 +15,14 @@ import { supabase as defaultSupabase, hasSupabaseConfig } from "@/lib/supabase/c
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
+import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
-const BLOCKED_CONTACTABILITY = new Set(["opted_out", "wrong_number", "do_not_text"]);
+// Registry blocking codes (opted_out/dnc/provider_blacklisted/invalid_number/
+// do_not_text) plus the legacy "wrong_number" string some historical rows
+// carry. The old local set missed invalid_number — the code the wrong-number
+// intent actually writes — as well as dnc and provider_blacklisted.
+const BLOCKED_CONTACTABILITY = new Set([...BLOCKING_CONTACTABILITY, "wrong_number"]);
 const TERMINAL_STAGES = new Set(["closed", "dead", "closed_lost", "archived"]);
 
 function clean(value) {

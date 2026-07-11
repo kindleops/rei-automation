@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireOpsDashboardAuth } from "@/lib/security/dashboard-auth.js";
 import { supabase } from "@/lib/supabase/client.js";
 import { getSystemFlag } from "@/lib/system-control.js";
+import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,31 +117,51 @@ export async function PUT(request) {
     const next_is_read = asBoolean(body?.is_read, false);
     const next_is_archived = asBoolean(body?.is_archived, false);
     const now = new Date().toISOString();
+    const updated_by =
+      clean(body?.updated_by) || clean(auth.auth?.identity_label) || "dashboard";
 
-    const payload = {
-      thread_key,
-      master_owner_id: clean(body?.master_owner_id) || null,
-      property_id: clean(body?.property_id) || null,
-      is_read: next_is_read,
-      is_archived: next_is_archived,
-      read_at: next_is_read ? now : null,
-      archived_at: next_is_archived ? now : null,
-      updated_by: clean(body?.updated_by) || clean(auth.auth?.identity_label) || "dashboard",
-      updated_at: now,
-    };
+    // Read/archive flags are lead state: route them through the canonical
+    // write service so they land on the canonical columns (last_read_at, the
+    // read_at legacy mirror) and produce universal_lead_state_events audit rows.
+    const result = await patchUniversalLeadState({
+      threadKey: thread_key,
+      patch: {
+        is_read: next_is_read,
+        is_archived: next_is_archived,
+        master_owner_id: clean(body?.master_owner_id) || undefined,
+        property_id: clean(body?.property_id) || undefined,
+      },
+      supabase,
+      meta: {
+        change_source: "manual",
+        source_view: "dashboard_inbox_thread_state",
+        updated_by,
+        reason: body?.reason || null,
+      },
+    });
 
-    const { data, error } = await supabase
-      .from("inbox_thread_state")
-      .upsert(payload, { onConflict: "thread_key" })
-      .select("thread_key,master_owner_id,property_id,is_read,is_archived,read_at,archived_at,updated_at,updated_by")
-      .maybeSingle();
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, route: "internal/dashboard/inbox/thread-state", error: result.reason },
+        { status: 400 }
+      );
+    }
 
-    if (error) throw error;
-
+    const row = result.row || {};
     return NextResponse.json({
       ok: true,
       route: "internal/dashboard/inbox/thread-state",
-      data,
+      data: {
+        thread_key,
+        master_owner_id: clean(body?.master_owner_id) || row.master_owner_id || null,
+        property_id: clean(body?.property_id) || row.property_id || null,
+        is_read: next_is_read,
+        is_archived: next_is_archived,
+        read_at: next_is_read ? now : null,
+        archived_at: next_is_archived ? now : null,
+        updated_at: now,
+        updated_by,
+      },
     });
   } catch (error) {
     return NextResponse.json(
