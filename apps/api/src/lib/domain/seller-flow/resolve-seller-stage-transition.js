@@ -356,6 +356,7 @@ export function resolveSellerStageTransition({
   closing_evidence = null,
   engine_decision = null,
   source_message_id = null,
+  temperature_signal = null,
   now = new Date().toISOString(),
 } = {}) {
   const beforeCode = normalizeLifecycleStage(stage_before);
@@ -375,6 +376,9 @@ export function resolveSellerStageTransition({
     facts_patch: facts,
     automation_mode,
     resolved_at: now,
+    // Explainability: deterministic component scores + reason codes from the
+    // temperature signal model travel with every resolution (audit + Studio).
+    temperature_signal: temperature_signal || null,
   };
 
   // ── 1. Blocking intents: state changes without lifecycle movement ────────
@@ -485,12 +489,17 @@ export function resolveSellerStageTransition({
   const afterIdx = Math.max(beforeIdx, unresolvedIdx);
   const afterCode = stageAt(afterIdx);
 
-  // Temperature floor by engagement depth.
+  // Temperature floor by engagement depth, then by the explainable signal
+  // model's floor (which never exceeds what explicit language allows — the
+  // negative-intent paths above never reach here).
   let temperature = normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED);
   if (afterIdx >= 4 || negotiation_state?.terms_accepted || intentKey === "asks_offer") {
     temperature = bumpTemperature(temperature, LEAD_TEMPERATURE_CODES.HOT);
   } else if (afterIdx >= 2 || interestResolved(facts)) {
     temperature = bumpTemperature(temperature, LEAD_TEMPERATURE_CODES.WARM);
+  }
+  if (temperature_signal?.temperature_floor) {
+    temperature = bumpTemperature(temperature, temperature_signal.temperature_floor);
   }
 
   const prompt = STAGE_PROMPTS[afterCode] || STAGE_PROMPTS[LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION];

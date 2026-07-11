@@ -2,9 +2,9 @@ import {
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
-  isAllowedLifecycleTransition,
   UNIVERSAL_LEAD_STATE_PATCH_FIELDS,
 } from '@/lib/domain/lead-state/universal-lead-state-registry.js';
+import { validateLifecycleTransition } from '@/lib/domain/lead-state/seller-lifecycle-stage-registry.js';
 import { isCanonicalThreadKey } from '@/lib/cockpit/cockpit-service.js';
 
 function clean(value) {
@@ -60,6 +60,8 @@ const PROVENANCE_META_KEYS = Object.freeze([
   'resolver_version',
   'transition_reason',
   'prospect_id',
+  'authority_evidence',
+  'temperature_reason_codes',
 ]);
 
 function buildAuditMetadata(meta = {}) {
@@ -169,6 +171,8 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     rowPatch.lead_temperature = canonicalPatch.lead_temperature;
     rowPatch.temperature = canonicalPatch.lead_temperature;
     rowPatch.temperature_source = meta.change_source || STATE_SOURCE_CODES.MANUAL;
+    // Explainability: reason codes from the deterministic signal model.
+    if (clean(meta.temperature_reason)) rowPatch.temperature_reason = clean(meta.temperature_reason);
     if (meta.manual_temperature_lock != null) {
       rowPatch.manual_temperature_lock = asBoolean(meta.manual_temperature_lock, true);
     } else if (meta.change_source === STATE_SOURCE_CODES.MANUAL) {
@@ -259,21 +263,28 @@ export async function patchUniversalLeadState({
 
   const previous = await fetchCurrentLeadState(supabase, key);
 
-  // Lifecycle stage is monotonic for automated writers: autopilot/AI/system can
-  // only hold or advance, and never override an operator's manual stage lock.
+  // Lifecycle stage writes pass the single registry transition validator:
+  // automated writers (autopilot/AI/system) can only hold or advance, never
+  // override an operator's manual stage lock, and can only enter the
+  // operational stages (S7–S10) with authoritative evidence in meta.
   // Operators (change_source=manual) may still move a lead anywhere.
   const stageGuards = [];
   const changeSource = meta.change_source || STATE_SOURCE_CODES.MANUAL;
-  if ('lifecycle_stage' in canonicalPatch && previous && changeSource !== STATE_SOURCE_CODES.MANUAL) {
-    if (previous.manual_stage_lock === true) {
+  if ('lifecycle_stage' in canonicalPatch && changeSource !== STATE_SOURCE_CODES.MANUAL) {
+    if (previous?.manual_stage_lock === true) {
       delete canonicalPatch.lifecycle_stage;
       stageGuards.push('manual_stage_lock_blocked_stage_write');
-    } else if (
-      previous.lifecycle_stage &&
-      !isAllowedLifecycleTransition(previous.lifecycle_stage, canonicalPatch.lifecycle_stage)
-    ) {
-      delete canonicalPatch.lifecycle_stage;
-      stageGuards.push('monotonic_stage_guard_blocked_regression');
+    } else {
+      const validation = validateLifecycleTransition({
+        from: previous?.lifecycle_stage || null,
+        to: canonicalPatch.lifecycle_stage,
+        change_source: changeSource,
+        authority_evidence: meta.authority_evidence || null,
+      });
+      if (!validation.allowed) {
+        delete canonicalPatch.lifecycle_stage;
+        stageGuards.push(validation.reason);
+      }
     }
   }
   if (!Object.keys(canonicalPatch).length) {

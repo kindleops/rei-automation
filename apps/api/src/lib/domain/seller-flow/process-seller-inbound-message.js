@@ -27,6 +27,7 @@ import {
   extractSellerFacts,
   extractionToResolverFacts,
 } from "@/lib/domain/seller-flow/extract-seller-facts.js";
+import { computeTemperatureSignal } from "@/lib/domain/seller-flow/temperature-signal-model.js";
 import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
@@ -615,6 +616,26 @@ export async function processSellerInboundMessage({
   const stage_engine_decision =
     intelligence?.stage_domain?.engine_result?.stage_decision || null;
 
+  // ── Explainable deterministic temperature signal (Mission 4): explicit
+  // meaning dominates; secondary engagement signals only nudge within band.
+  const temperature_signal = computeTemperatureSignal({
+    intent: intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
+    facts: {
+      ...extraction_facts,
+      asking_price: price_signal.asking_price || deal_state?.known_facts?.asking_price || null,
+      interest: contract.interest_signal === "interested" ? "interested" : null,
+    },
+    objections: fact_extraction?.facts?.objections?.value || null,
+    secondary: {
+      message_word_count: String(message || "").trim().split(/\s+/).filter(Boolean).length,
+      question_count: (String(message || "").match(/\?/g) || []).length,
+      seller_reply_count:
+        context?.summary?.seller_reply_count ?? context?.summary?.inbound_count ?? null,
+      conversation_depth: context?.summary?.message_count ?? null,
+      reply_latency_seconds: null,
+    },
+  });
+
   // ── Deterministic lifecycle transition (resolved BEFORE the reply is
   // queued so ADE + strategy shape the outbound instead of trailing it).
   let transition = null;
@@ -665,6 +686,7 @@ export async function processSellerInboundMessage({
       contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
       engine_decision: stage_engine_decision,
       source_message_id: providerMessageId || inboundEventId,
+      temperature_signal,
     });
   } catch (transition_error) {
     runtimeDeps.warn("[SELLER_INBOUND_TRANSITION_RESOLVER_FAILED]", {
@@ -747,6 +769,7 @@ export async function processSellerInboundMessage({
         contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
         engine_decision: stage_engine_decision,
         source_message_id: providerMessageId || inboundEventId,
+        temperature_signal,
       });
     } catch {
       // keep the original transition on re-resolution failure
@@ -947,6 +970,15 @@ export async function processSellerInboundMessage({
             resolver_version: transition?.resolver_version || null,
             transition_reason: transition?.reasoning_code || null,
             prospect_id: prospectId || null,
+            // The resolver can only reach S7+ when persisted contract/
+            // disposition/closing state fed it — cite that evidence so the
+            // registry validator admits the operational-stage advancement.
+            authority_evidence:
+              transition && Number(transition.stage_after_number) >= 7
+                ? { type: "persisted_deal_state", source: "loadSellerDealState" }
+                : null,
+            temperature_reason_codes: temperature_signal?.reason_codes || null,
+            temperature_reason: (temperature_signal?.reason_codes || []).join(",") || null,
             metadata: decision.reasoning_code
               ? { reasoning_code: decision.reasoning_code, next_action: decision.next_action }
               : {},

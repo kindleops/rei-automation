@@ -16,6 +16,7 @@ import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-sched
 import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import { resolveFollowUpPolicyForStage } from "@/lib/domain/seller-flow/followup-policy-registry.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
 // Registry blocking codes (opted_out/dnc/provider_blacklisted/invalid_number/
@@ -178,6 +179,20 @@ async function pendingFollowupExists(supabase, thread_key) {
   return (data || []).length > 0;
 }
 
+async function countAutomatedFollowUps(supabase, thread_key) {
+  // Lifetime cap input: every automated follow-up row that was not cancelled.
+  // Fetches a bounded page and filters locally — the caps are single digits,
+  // so 50 rows is already far past any policy ceiling.
+  const { data, error } = await supabase
+    .from("send_queue")
+    .select("id,queue_status")
+    .eq("thread_key", thread_key)
+    .in("type", ["followup"])
+    .limit(50);
+  if (error) throw error;
+  return (data || []).filter((row) => lower(row?.queue_status) !== "cancelled").length;
+}
+
 async function loadLeadStateGuards(supabase, thread_key) {
   try {
     const { data } = await supabase
@@ -305,6 +320,30 @@ export async function maybeScheduleFollowUpAfterDelivery({
 
     if (!decision.eligible) {
       return { ok: true, scheduled: false, reason: decision.reason, mode };
+    }
+
+    // Stage follow-up policy (one registry, no scattered timers): the
+    // thread's CURRENT lifecycle stage must allow automated follow-ups, and
+    // the lifetime automated-touch cap for that stage must not be exhausted.
+    const stage_policy = resolveFollowUpPolicyForStage(lead_state.lifecycle_stage);
+    if (!stage_policy.policy.enabled) {
+      return {
+        ok: true,
+        scheduled: false,
+        reason: `followup_policy_disabled_for_stage:${stage_policy.stage}`,
+        mode,
+        thread_key: outbound.thread_key,
+      };
+    }
+    const prior_followups = await countAutomatedFollowUps(supabase, outbound.thread_key);
+    if (prior_followups >= stage_policy.policy.max_automated_followups) {
+      return {
+        ok: true,
+        scheduled: false,
+        reason: `followup_max_attempts_reached:${prior_followups}/${stage_policy.policy.max_automated_followups}`,
+        mode,
+        thread_key: outbound.thread_key,
+      };
     }
 
     // Explicit activation gate — evaluated only after every delivery guard
