@@ -271,7 +271,8 @@ const MATRIX = [
     },
   },
   {
-    name: "contract signed advances to S7 under contract",
+    // S6 → S7: seller contract executed (contract/disposition readiness) enters Dispo.
+    name: "seller contract executed advances S6 → S7 dispo",
     input: {
       stage_before: "formal_contract",
       intent: "ownership_confirmed",
@@ -280,12 +281,14 @@ const MATRIX = [
       contract_state: { sent: true, signed: true, executed: true },
       classification_confidence: 0.95,
     },
-    expect: { stage_after: "under_contract", next_action: NEXT_ACTIONS.START_DISPOSITION },
+    expect: { stage_after: "disposition", next_action: NEXT_ACTIONS.START_DISPOSITION },
   },
   {
-    name: "disposition started advances to S8",
+    // S7 → S8: requires an authoritative buyer-contract event (buyer_selected).
+    // "disposition started" alone keeps the deal in Dispo (S7).
+    name: "disposition started alone does NOT advance past S7 dispo",
     input: {
-      stage_before: "under_contract",
+      stage_before: "disposition",
       intent: "unclear",
       new_facts: { condition_disclosed: true },
       known_facts: { asking_price: { value: 95000 }, occupancy_status: "vacant", condition_level: "turnkey" },
@@ -297,11 +300,25 @@ const MATRIX = [
     expect: { stage_after: "disposition", next_action: NEXT_ACTIONS.START_DISPOSITION },
   },
   {
-    name: "closing ready advances to S9 → S10 gate with buyer selected",
+    // S7 → S8: buyer under contract (authoritative buyer-contract event).
+    name: "buyer under contract advances S7 → S8 under contract with buyer",
     input: {
       stage_before: "disposition",
       intent: "unclear",
-      new_facts: { condition_disclosed: true },
+      known_facts: { asking_price: { value: 95000 }, occupancy_status: "vacant", condition_level: "turnkey" },
+      negotiation_state: { terms_accepted: true },
+      contract_state: { executed: true },
+      disposition_state: { started: true, buyer_selected: true },
+      classification_confidence: 0.9,
+    },
+    expect: { stage_after: "under_contract", next_action: NEXT_ACTIONS.RESOLVE_CLOSING_BLOCKER },
+  },
+  {
+    // S8 → S9: escrow/title event.
+    name: "escrow ready advances S8 → S9 escrow",
+    input: {
+      stage_before: "under_contract",
+      intent: "unclear",
       known_facts: { asking_price: { value: 95000 }, occupancy_status: "vacant", condition_level: "turnkey" },
       negotiation_state: { terms_accepted: true },
       contract_state: { executed: true },
@@ -309,14 +326,14 @@ const MATRIX = [
       closing_readiness: { ready: true },
       classification_confidence: 0.9,
     },
-    expect: { stage_after: "closed", next_action: NEXT_ACTIONS.CLOSE },
+    expect: { stage_after: "prepared_to_close", next_action: NEXT_ACTIONS.RESOLVE_CLOSING_BLOCKER },
   },
   {
-    name: "closed with verified evidence stays terminal",
+    // S9 → S10: verified closing event.
+    name: "verified closing advances S9 → S10 closed",
     input: {
       stage_before: "prepared_to_close",
       intent: "unclear",
-      new_facts: { condition_disclosed: true },
       known_facts: { asking_price: { value: 95000 }, occupancy_status: "vacant", condition_level: "turnkey" },
       negotiation_state: { terms_accepted: true },
       contract_state: { executed: true },

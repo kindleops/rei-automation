@@ -27,9 +27,9 @@ export const UNIVERSAL_STAGE_LABELS = Object.fromEntries(
     property_condition: 'S4 Property Condition',
     offer: 'S5 Offer',
     formal_contract: 'S6 Formal Contract',
-    under_contract: 'S7 Under Contract',
-    disposition: 'S8 Disposition',
-    prepared_to_close: 'S9 Prepared to Close',
+    disposition: 'S7 Dispo',
+    under_contract: 'S8 Under Contract With Buyer',
+    prepared_to_close: 'S9 Escrow',
     closed: 'S10 Closed',
   }),
 )

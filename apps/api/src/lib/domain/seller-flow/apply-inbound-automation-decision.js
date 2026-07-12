@@ -20,6 +20,8 @@ import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ens
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
+import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
+import { buildOutboundTemplateAttribution } from "@/lib/domain/templates/outbound-attribution.js";
 import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
@@ -789,7 +791,28 @@ export async function selectSafeAutoReplyTemplate({
   }
 
   const supabase = supabaseClient || getDefaultSupabaseClient();
-  const language = clean(classification?.language) || "English";
+  // Language continuity (activation spec): an established thread/prospect
+  // language always wins over per-message detection so one terse "ok" in a
+  // Spanish conversation can never flip the reply to English. Unknown (fresh
+  // thread, no signal anywhere) keeps today's English default for template
+  // search but is recorded on the result so review surfaces can see it.
+  const language_resolution = resolveThreadLanguage({
+    threadLanguage:
+      context?.automation_decision?.classification?.language ||
+      context?.summary?.language ||
+      null,
+    prospectLanguagePreference:
+      context?.seller_owner_intelligence?.contact_identity?.language ||
+      context?.summary?.language_preference ||
+      null,
+    explicitInboundLanguage: classification?.explicit_language || null,
+    detectedLanguage: classification?.language || null,
+    messageText:
+      context?.automation_decision?.inbound_detection?.latest_inbound_text || "",
+  });
+  const language = language_resolution.is_unknown
+    ? "English"
+    : language_resolution.language;
   const languages = language === "English" ? ["English"] : [language, "English"];
   const allowed_matches = uniq([
     ...asArray(decision?.allowed_template_stages).map(lower),
@@ -841,6 +864,7 @@ export async function selectSafeAutoReplyTemplate({
         reason: "language_template_missing",
         human_review_required: true,
         language,
+        language_resolution,
         template: null,
       };
     }
@@ -905,6 +929,7 @@ export async function selectSafeAutoReplyTemplate({
     return {
       ok: true,
       reason: "template_selected",
+      language_resolution,
       template: selected,
     };
   } catch (error) {
@@ -1952,6 +1977,7 @@ export async function executeInboundAutomationDecision({
     textgrid_number_id: context?.ids?.textgrid_number_id || null,
     template_id: clean(selected_template.template_id || selected_template.id) || null,
     selected_template_id: clean(selected_template.template_id || selected_template.id) || null,
+    template_key: clean(selected_template.template_id || selected_template.id) || selected_use_case || null,
     current_stage: clean(selected_template.stage_code) || null,
     message_type: "Follow-Up",
     use_case_template: selected_use_case,
@@ -2004,6 +2030,19 @@ export async function executeInboundAutomationDecision({
         stage_code: selected_template.stage_code || null,
         language: selected_template.language || null,
       },
+      // Canonical outbound attribution (Mission 5): one deterministic block on
+      // every automated send. Promoted to first-class columns by the proposed
+      // template attribution migration; lives in metadata until then.
+      automation_provenance: buildOutboundTemplateAttribution({
+        template: selected_template,
+        stage: clean(selected_template.stage_code) || selected_use_case,
+        classifiedOutcome: normalizeCanonicalIntent(classification?.primary_intent),
+        language: clean(selected_template.language) || clean(classification?.language) || "English",
+        experiment: null,
+        touchNumber: 0,
+        parentOutboundEventId: null,
+        automationOrigin: "autopilot_inbound_reply",
+      }),
       route_hint: base_decision.route_hint || null,
       allowed_template_stages: base_decision.allowed_template_stages || [],
       property_id: propertyId || null,

@@ -2,9 +2,9 @@ import {
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
-  isAllowedLifecycleTransition,
   UNIVERSAL_LEAD_STATE_PATCH_FIELDS,
 } from '@/lib/domain/lead-state/universal-lead-state-registry.js';
+import { validateLifecycleTransition } from '@/lib/domain/lead-state/seller-lifecycle-stage-registry.js';
 import { isCanonicalThreadKey } from '@/lib/cockpit/cockpit-service.js';
 
 function clean(value) {
@@ -47,6 +47,34 @@ export async function fetchCurrentLeadState(supabase, threadKey) {
   return data || null;
 }
 
+/**
+ * Provenance keys promoted from meta into every audit event's metadata so a
+ * state mutation is always traceable to the exact message, authority mode and
+ * decision-engine versions that produced it (no schema change required).
+ */
+const PROVENANCE_META_KEYS = Object.freeze([
+  'message_event_id',
+  'automation_authority',
+  'classifier_version',
+  'extractor_version',
+  'resolver_version',
+  'transition_reason',
+  'prospect_id',
+  'authority_evidence',
+  'temperature_reason_codes',
+]);
+
+function buildAuditMetadata(meta = {}) {
+  const metadata = meta.metadata && typeof meta.metadata === 'object' ? { ...meta.metadata } : {};
+  for (const key of PROVENANCE_META_KEYS) {
+    const value = meta[key];
+    if (value !== null && value !== undefined && value !== '' && metadata[key] === undefined) {
+      metadata[key] = value;
+    }
+  }
+  return metadata;
+}
+
 async function writeAuditEvents(supabase, {
   threadKey,
   propertyId,
@@ -56,6 +84,7 @@ async function writeAuditEvents(supabase, {
 }) {
   const events = [];
   const now = new Date().toISOString();
+  const metadata = buildAuditMetadata(meta);
   for (const field of TRACKED_FIELDS) {
     if (!(field in patch)) continue;
     const previousValue = previous?.[field] ?? null;
@@ -73,7 +102,7 @@ async function writeAuditEvents(supabase, {
       change_source: meta.change_source || STATE_SOURCE_CODES.MANUAL,
       executed_next_action: meta.executed_next_action === true,
       created_at: now,
-      metadata: meta.metadata && typeof meta.metadata === 'object' ? meta.metadata : {},
+      metadata,
     });
   }
   if (!events.length) return [];
@@ -142,6 +171,8 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     rowPatch.lead_temperature = canonicalPatch.lead_temperature;
     rowPatch.temperature = canonicalPatch.lead_temperature;
     rowPatch.temperature_source = meta.change_source || STATE_SOURCE_CODES.MANUAL;
+    // Explainability: reason codes from the deterministic signal model.
+    if (clean(meta.temperature_reason)) rowPatch.temperature_reason = clean(meta.temperature_reason);
     if (meta.manual_temperature_lock != null) {
       rowPatch.manual_temperature_lock = asBoolean(meta.manual_temperature_lock, true);
     } else if (meta.change_source === STATE_SOURCE_CODES.MANUAL) {
@@ -200,9 +231,14 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   if ('is_read' in canonicalPatch) {
     rowPatch.is_read = asBoolean(canonicalPatch.is_read, false);
     rowPatch.last_read_at = rowPatch.is_read ? now : null;
+    // Legacy mirror: the dashboard inbox route historically wrote read_at.
+    rowPatch.read_at = rowPatch.last_read_at;
   }
   if ('is_pinned' in canonicalPatch) rowPatch.is_pinned = asBoolean(canonicalPatch.is_pinned, false);
   if ('is_starred' in canonicalPatch) rowPatch.is_starred = asBoolean(canonicalPatch.is_starred, false);
+  // Identity backfill (not state): allow callers to attach entity ids.
+  if (clean(canonicalPatch.master_owner_id)) rowPatch.master_owner_id = clean(canonicalPatch.master_owner_id);
+  if (clean(canonicalPatch.property_id)) rowPatch.property_id = clean(canonicalPatch.property_id);
   if (meta.updated_by) rowPatch.updated_by = clean(meta.updated_by);
 
   return rowPatch;
@@ -227,21 +263,28 @@ export async function patchUniversalLeadState({
 
   const previous = await fetchCurrentLeadState(supabase, key);
 
-  // Lifecycle stage is monotonic for automated writers: autopilot/AI/system can
-  // only hold or advance, and never override an operator's manual stage lock.
+  // Lifecycle stage writes pass the single registry transition validator:
+  // automated writers (autopilot/AI/system) can only hold or advance, never
+  // override an operator's manual stage lock, and can only enter the
+  // operational stages (S7–S10) with authoritative evidence in meta.
   // Operators (change_source=manual) may still move a lead anywhere.
   const stageGuards = [];
   const changeSource = meta.change_source || STATE_SOURCE_CODES.MANUAL;
-  if ('lifecycle_stage' in canonicalPatch && previous && changeSource !== STATE_SOURCE_CODES.MANUAL) {
-    if (previous.manual_stage_lock === true) {
+  if ('lifecycle_stage' in canonicalPatch && changeSource !== STATE_SOURCE_CODES.MANUAL) {
+    if (previous?.manual_stage_lock === true) {
       delete canonicalPatch.lifecycle_stage;
       stageGuards.push('manual_stage_lock_blocked_stage_write');
-    } else if (
-      previous.lifecycle_stage &&
-      !isAllowedLifecycleTransition(previous.lifecycle_stage, canonicalPatch.lifecycle_stage)
-    ) {
-      delete canonicalPatch.lifecycle_stage;
-      stageGuards.push('monotonic_stage_guard_blocked_regression');
+    } else {
+      const validation = validateLifecycleTransition({
+        from: previous?.lifecycle_stage || null,
+        to: canonicalPatch.lifecycle_stage,
+        change_source: changeSource,
+        authority_evidence: meta.authority_evidence || null,
+      });
+      if (!validation.allowed) {
+        delete canonicalPatch.lifecycle_stage;
+        stageGuards.push(validation.reason);
+      }
     }
   }
   if (!Object.keys(canonicalPatch).length) {
