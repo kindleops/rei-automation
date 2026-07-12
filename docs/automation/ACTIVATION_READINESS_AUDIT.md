@@ -281,14 +281,19 @@ New focused coverage added by this branch (all green): seller fact extraction (2
 language registry (18), combined ownership+interest template (10), Workflow Studio event enrichment (4), multilingual
 lifecycle regression (20), plus updated automation-engine assertions for canonicalized stage/status values.
 
-Builds:
+Builds — clean controlled comparison (two disposable worktrees, Node v23.11.0, npm 11.4.1, fresh `npm ci` with no symlinked
+node_modules, `rm -rf .next` before each, identical `npm run build`):
 
 | Build | origin/main | branch |
 |---|---|---|
-| `apps/api` (`next build`) | **red** (worker exit 1) | **red** — same pre-existing static-generation crash (`The "id" argument must be of type string. Received undefined`) after webpack "Compiled with warnings" succeeds |
-| `apps/dashboard` (`tsc -b && vite build`) | — | **green** (4.12 s) |
+| `apps/api` (`next build`) | **GREEN** — exit 0, 11/11 static pages | **GREEN** — exit 0, 11/11 static pages |
+| `apps/dashboard` (`tsc -b && vite build`) | — | **green** |
 
-The API build red is pre-existing (present on origin/main), occurs in the post-compile static-generation phase, and does not
-reference any changed module. Every changed module webpack-compiled successfully; the two build warnings
-(`ensureDashboardReadAuth` reexport, non-literal `runtime` field) exist on both branches. No changed file introduces a build
-regression.
+Both API builds compile (with one identical pre-existing warning — `ensureDashboardReadAuth` reexport in `_shared.js`, present
+on origin/main and the branch) and exit 0. Neither clean build emits the `The "id" argument must be of type string` error.
+
+**Correction:** an earlier run reported the API build as "red on both branches." That was an environment artifact, not a real
+failure — the primary worktree's `node_modules` had been corrupted by a `typescript@7.0.2` package that `next build`
+auto-installs into `package.json`/lockfile (later reverted, leaving an inconsistent tree) combined with a stale `.next`. Under a
+clean `npm ci`, **both origin/main and the branch build successfully**, so the branch introduces no build regression and the API
+build passes.
