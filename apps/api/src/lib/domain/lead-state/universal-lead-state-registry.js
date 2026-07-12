@@ -35,8 +35,16 @@ export const LIFECYCLE_STAGE_ORDER = Object.freeze([
   LIFECYCLE_STAGE_CODES.PROPERTY_CONDITION,
   LIFECYCLE_STAGE_CODES.OFFER,
   LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT,
-  LIFECYCLE_STAGE_CODES.UNDER_CONTRACT,
+  // Canonical operational order (S7–S10): Dispo → Under Contract With Buyer →
+  // Escrow → Closed. The string VALUES are unchanged (disposition,
+  // under_contract, prepared_to_close) so the acquisition_opportunities
+  // acquisition_stage CHECK constraint stays satisfied and no string-keyed
+  // consumer breaks; only the ordinal position and display label move. A
+  // literal code rename (under_contract → under_contract_with_buyer,
+  // prepared_to_close → escrow) is a proposed, unapplied migration
+  // (docs/automation/PROPOSED_stage_code_rename_migration.md).
   LIFECYCLE_STAGE_CODES.DISPOSITION,
+  LIFECYCLE_STAGE_CODES.UNDER_CONTRACT,
   LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE,
   LIFECYCLE_STAGE_CODES.CLOSED,
 ]);
@@ -48,9 +56,11 @@ export const LIFECYCLE_STAGE_META = Object.freeze({
   [LIFECYCLE_STAGE_CODES.PROPERTY_CONDITION]: { number: 4, label: 'Property Condition', shortLabel: 'S4', color: '#ff9f0a', icon: 'home' },
   [LIFECYCLE_STAGE_CODES.OFFER]: { number: 5, label: 'Offer', shortLabel: 'S5', color: '#ff453a', icon: 'file-text' },
   [LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT]: { number: 6, label: 'Formal Contract', shortLabel: 'S6', color: '#ff9f0a', icon: 'file-signature' },
-  [LIFECYCLE_STAGE_CODES.UNDER_CONTRACT]: { number: 7, label: 'Under Contract', shortLabel: 'S7', color: '#34c759', icon: 'check-circle' },
-  [LIFECYCLE_STAGE_CODES.DISPOSITION]: { number: 8, label: 'Disposition', shortLabel: 'S8', color: '#5ac8fa', icon: 'users' },
-  [LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE]: { number: 9, label: 'Prepared to Close', shortLabel: 'S9', color: '#30d158', icon: 'flag' },
+  // S7 Dispo, S8 Under Contract With Buyer, S9 Escrow (code strings retained;
+  // see LIFECYCLE_STAGE_ORDER note and the proposed code-rename migration).
+  [LIFECYCLE_STAGE_CODES.DISPOSITION]: { number: 7, label: 'Dispo', shortLabel: 'S7', color: '#5ac8fa', icon: 'users' },
+  [LIFECYCLE_STAGE_CODES.UNDER_CONTRACT]: { number: 8, label: 'Under Contract With Buyer', shortLabel: 'S8', color: '#34c759', icon: 'check-circle' },
+  [LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE]: { number: 9, label: 'Escrow', shortLabel: 'S9', color: '#30d158', icon: 'flag' },
   [LIFECYCLE_STAGE_CODES.CLOSED]: { number: 10, label: 'Closed', shortLabel: 'S10', color: '#7d8797', icon: 'lock' },
 });
 
@@ -218,9 +228,16 @@ const LIFECYCLE_STAGE_ALIAS_MAP = Object.freeze({
   contract_requested: LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT,
   formal_contract: LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT,
   under_contract: LIFECYCLE_STAGE_CODES.UNDER_CONTRACT,
+  // Forward-compatible alias for the proposed S8 code rename (Under Contract
+  // With Buyer). Resolves before the CHECK-constraint migration is applied.
+  under_contract_with_buyer: LIFECYCLE_STAGE_CODES.UNDER_CONTRACT,
+  buyer_under_contract: LIFECYCLE_STAGE_CODES.UNDER_CONTRACT,
   disposition: LIFECYCLE_STAGE_CODES.DISPOSITION,
+  dispo: LIFECYCLE_STAGE_CODES.DISPOSITION,
   closing: LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE,
   prepared_to_close: LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE,
+  // Forward-compatible alias for the proposed S9 code rename (Escrow).
+  escrow: LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE,
   title_closing: LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE,
   closed: LIFECYCLE_STAGE_CODES.CLOSED,
   dead: LIFECYCLE_STAGE_CODES.CLOSED,
@@ -322,8 +339,8 @@ export function normalizeLifecycleStage(value, fallback = LIFECYCLE_STAGE_CODES.
   if (key.includes('price') || key.includes('asking')) return LIFECYCLE_STAGE_CODES.ASKING_PRICE;
   if (key.includes('interest') || key.includes('consider')) return LIFECYCLE_STAGE_CODES.OFFER_INTEREST;
   if (key.includes('ownership')) return LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION;
-  if (key.includes('disposition')) return LIFECYCLE_STAGE_CODES.DISPOSITION;
-  if (key.includes('prepared') || key.includes('clear_to_close')) return LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE;
+  if (key.includes('disposition') || key === 'dispo') return LIFECYCLE_STAGE_CODES.DISPOSITION;
+  if (key.includes('prepared') || key.includes('clear_to_close') || key.includes('escrow')) return LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE;
   if (key.includes('closed') || key.includes('dead')) return LIFECYCLE_STAGE_CODES.CLOSED;
   return fallback;
 }

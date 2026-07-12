@@ -139,42 +139,49 @@ export const SELLER_LIFECYCLE_STAGE_REGISTRY = Object.freeze({
     terminal: false,
     workflow: { label: "Formal Contract", short: "S6" },
   },
-  [C.UNDER_CONTRACT]: {
+  // S7 Dispo — first operational stage. Entry requires disposition readiness
+  // (contract/disposition authority), never a seller text. Advances from S6.
+  [C.DISPOSITION]: {
     number: 7,
-    entry_condition: "contract_executed",
+    entry_condition: "disposition_started",
     valid_intents: [],
-    valid_facts: ["contract_state"],
+    valid_facts: ["disposition_state"],
     allowed_previous: [C.FORMAL_CONTRACT],
     automated_entry: { allowed: true, requires_authority_evidence: true },
-    required_fields: ["executed_contract"],
+    required_fields: ["disposition_readiness"],
     response_policy: "close_handoff",
     follow_up_policy: "none",
     human_review_conditions: [],
     suppression_conditions: [],
     terminal: false,
-    workflow: { label: "Under Contract", short: "S7" },
+    workflow: { label: "Dispo", short: "S7" },
   },
-  [C.DISPOSITION]: {
+  // S8 Under Contract With Buyer — entry requires an authoritative buyer
+  // contract/assignment event. Advances only from S7 (disposition).
+  // (Code string remains `under_contract`; proposed rename → under_contract_with_buyer.)
+  [C.UNDER_CONTRACT]: {
     number: 8,
-    entry_condition: "disposition_started",
+    entry_condition: "buyer_contract_executed",
     valid_intents: [],
-    valid_facts: ["disposition_state"],
-    allowed_previous: [C.UNDER_CONTRACT],
+    valid_facts: ["buyer_contract_state"],
+    allowed_previous: [C.DISPOSITION],
     automated_entry: { allowed: true, requires_authority_evidence: true },
-    required_fields: ["disposition_readiness"],
+    required_fields: ["executed_buyer_contract"],
     response_policy: null,
     follow_up_policy: "none",
     human_review_conditions: [],
     suppression_conditions: [],
     terminal: false,
-    workflow: { label: "Disposition", short: "S8" },
+    workflow: { label: "Under Contract With Buyer", short: "S8" },
   },
+  // S9 Escrow — entry requires an escrow/title event. Advances only from S8.
+  // (Code string remains `prepared_to_close`; proposed rename → escrow.)
   [C.PREPARED_TO_CLOSE]: {
     number: 9,
-    entry_condition: "closing_ready",
+    entry_condition: "escrow_ready",
     valid_intents: [],
-    valid_facts: ["closing_readiness", "title_issues"],
-    allowed_previous: [C.DISPOSITION],
+    valid_facts: ["escrow_readiness", "title_issues"],
+    allowed_previous: [C.UNDER_CONTRACT],
     automated_entry: { allowed: true, requires_authority_evidence: true },
     required_fields: ["escrow_or_title_event"],
     response_policy: null,
@@ -182,7 +189,7 @@ export const SELLER_LIFECYCLE_STAGE_REGISTRY = Object.freeze({
     human_review_conditions: ["title_issue", "probate", "lien", "authority_gap"],
     suppression_conditions: [],
     terminal: false,
-    workflow: { label: "Prepared to Close", short: "S9" },
+    workflow: { label: "Escrow", short: "S9" },
   },
   [C.CLOSED]: {
     number: 10,
@@ -207,8 +214,8 @@ export function stageRegistryEntry(code) {
   return SELLER_LIFECYCLE_STAGE_REGISTRY[normalizeLifecycleStage(code)] || null;
 }
 
-/** First operational stage index (S7): automated entry requires evidence. */
-const FIRST_OPERATIONAL_IDX = STAGE_INDEX.get(C.UNDER_CONTRACT);
+/** First operational stage index (S7 = Dispo): automated entry requires evidence. */
+const FIRST_OPERATIONAL_IDX = STAGE_INDEX.get(C.DISPOSITION);
 
 function hasValidAuthorityEvidence(evidence) {
   if (!evidence || typeof evidence !== "object") return false;

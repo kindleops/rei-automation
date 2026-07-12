@@ -190,17 +190,25 @@ function firstUnresolvedIdx(facts = {}, {
   disposition = null,
   closing = null,
 } = {}) {
+  // checks[i] is TRUE when milestone i is COMPLETE (the deal has exited that
+  // stage). stage = first index whose check is FALSE. Canonical order:
+  //   S6 formal_contract → S7 disposition → S8 under-contract-with-buyer →
+  //   S9 escrow → S10 closed.
+  // S7→S8 requires an authoritative buyer-contract event (buyer_selected):
+  // "disposition started" alone keeps the deal in Dispo. S8→S9 requires an
+  // escrow/title event; S9→S10 requires a verified closing. None of these can
+  // be satisfied by seller text — they read only external state objects.
   const checks = [
     () => ownershipResolved(facts),                                      // S1
     () => interestResolved(facts),                                       // S2
     () => priceResolved(facts, ade),                                     // S3
     () => conditionResolved(facts, ade),                                 // S4
     () => negotiation?.terms_accepted === true,                          // S5
-    () => contract?.executed === true || contract?.signed === true,      // S6
-    () => disposition?.started === true,                                 // S7
-    () => disposition?.buyer_selected === true,                          // S8
-    () => closing?.ready === true,                                       // S9
-    () => closing?.closed === true,                                      // S10
+    () => contract?.executed === true || contract?.signed === true,      // S6 → S7 (Dispo) on contract/disposition readiness
+    () => disposition?.buyer_selected === true,                          // S7 Dispo → S8 on authoritative buyer contract
+    () => closing?.ready === true,                                       // S8 Under Contract w/ Buyer → S9 on escrow/title event
+    () => closing?.closed === true,                                      // S9 Escrow → S10 on verified closing
+    () => closing?.closed === true,                                      // S10 Closed (terminal)
   ];
   for (let i = 0; i < checks.length; i += 1) {
     if (!checks[i]()) return i;
@@ -292,16 +300,19 @@ const STAGE_PROMPTS = Object.freeze({
     next_action: NEXT_ACTIONS.GENERATE_CONTRACT,
     workflow_event: "READY_FOR_CONTRACT",
   },
-  [LIFECYCLE_STAGE_CODES.UNDER_CONTRACT]: {
+  // S7 Dispo (code `disposition`): hand off to disposition.
+  [LIFECYCLE_STAGE_CODES.DISPOSITION]: {
     template_use_case: "close_handoff",
     next_action: NEXT_ACTIONS.START_DISPOSITION,
     workflow_event: "READY_FOR_DISPOSITION",
   },
-  [LIFECYCLE_STAGE_CODES.DISPOSITION]: {
+  // S8 Under Contract With Buyer (code `under_contract`): drive toward closing.
+  [LIFECYCLE_STAGE_CODES.UNDER_CONTRACT]: {
     template_use_case: null,
-    next_action: NEXT_ACTIONS.START_DISPOSITION,
+    next_action: NEXT_ACTIONS.RESOLVE_CLOSING_BLOCKER,
     workflow_event: null,
   },
+  // S9 Escrow (code `prepared_to_close`).
   [LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE]: {
     template_use_case: null,
     next_action: NEXT_ACTIONS.RESOLVE_CLOSING_BLOCKER,

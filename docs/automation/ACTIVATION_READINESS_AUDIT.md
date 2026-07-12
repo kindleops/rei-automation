@@ -33,21 +33,34 @@ plus legacy mirrors (`stage`, `status`, `seller_stage`, `conversation_status`, `
 temperature (4), disposition (10), contactability (6), `STATE_SOURCE_CODES` (`ai|manual|system|autopilot`), alias maps, and
 `isAllowedLifecycleTransition` (forward-only, `closed` reachable from anywhere). The dashboard has a mirror copy.
 
-### 1a. ⚠ Stage 7/8 ordering discrepancy (decision required — not changed by this branch)
+### 1a. Stage 7/8/9 ordering — CORRECTED (order fixed in code, no migration)
 
-The mission brief lists the lifecycle as `…6. Formal Contract, 7. Dispo, 8. Under Contract With Buyer, 9. Escrow, 10. Closed`.
-The deployed canonical registry (and every persisted row, the dashboard mirror, and the transition resolver) orders it:
+The registry previously ordered S7 `under_contract`, S8 `disposition`, S9 `prepared_to_close`. The canonical order is now:
 
 ```
-7. under_contract   (label "Under Contract")      ← seller contract executed
-8. disposition      (label "Disposition")
-9. prepared_to_close (label "Prepared to Close")  ← brief calls this stage "Escrow"
+7. disposition        (label "Dispo")
+8. under_contract      (label "Under Contract With Buyer")
+9. prepared_to_close   (label "Escrow")
+10. closed
 ```
 
-Reordering S7/S8 (or renaming S9) is a data + UI + resolver migration touching persisted `lifecycle_stage` values. Per the
-"do not change the canonical ten-stage lifecycle" constraint, this branch keeps the registry as deployed and flags the
-discrepancy for an explicit product decision. Nothing in Stages 1–6 automation depends on the S7/S8 order; stages ≥7 only
-advance from authoritative operational events in either ordering.
+The **order + labels** were corrected in code with **no database migration**: stages persist as semantic strings and the S7–S9
+string values were left unchanged (only ordinal position and label moved), so the `acquisition_opportunities` CHECK constraint
+stays satisfied and no string-keyed consumer breaks. Read-only production queries confirmed **zero rows** carry any S7/S8/S9
+code across `inbox_thread_state`, `acquisition_opportunities`, `seller_automation_executions/steps`, `message_events`,
+`send_queue`, `active_negotiations`, `deal_thread_state` — so existing deal meaning is preserved exactly. Surfaces updated:
+API canonical registry, API pipeline registry, seller-lifecycle stage registry + transition validator, resolver STAGE_PROMPTS
+and milestone predicates, dashboard lead-state mirror, dashboard pipeline taxonomy, tests.
+
+The milestone predicates now enforce: **S6→S7** on contract/disposition readiness; **S7→S8** only on an authoritative
+buyer-contract event (`disposition.buyer_selected`) — "disposition started" alone keeps the deal in Dispo; **S8→S9** on an
+escrow/title event; **S9→S10** on a verified closing. Seller text alone can never advance into S7–S10 (proved in
+`lifecycle-stage-policy-registry.test.mjs`).
+
+The literal code-string rename (`under_contract`→`under_contract_with_buyer`, `prepared_to_close`→`escrow`) **does** require a
+CHECK-constraint migration on `acquisition_opportunities.acquisition_stage` and is provided as an unapplied proposal in
+`docs/automation/PROPOSED_stage_code_rename_migration.md`. Forward-compatible read-aliases for the new names are already in the
+normalizers.
 
 ## 2. All lifecycle state writers (current main)
 

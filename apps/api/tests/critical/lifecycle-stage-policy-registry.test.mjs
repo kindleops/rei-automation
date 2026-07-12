@@ -76,6 +76,62 @@ test("transition validator: automation cannot enter S7-S10 without authoritative
   }
 });
 
+test("canonical stage order is S7 Dispo, S8 Under Contract With Buyer, S9 Escrow", () => {
+  const order = LIFECYCLE_STAGE_ORDER;
+  assert.equal(order[6], LIFECYCLE_STAGE_CODES.DISPOSITION, "S7 = disposition");
+  assert.equal(order[7], LIFECYCLE_STAGE_CODES.UNDER_CONTRACT, "S8 = under_contract (Under Contract With Buyer)");
+  assert.equal(order[8], LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE, "S9 = prepared_to_close (Escrow)");
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.DISPOSITION].number, 7);
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.UNDER_CONTRACT].number, 8);
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE].number, 9);
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.DISPOSITION].workflow.label, "Dispo");
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.UNDER_CONTRACT].workflow.label, "Under Contract With Buyer");
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE].workflow.label, "Escrow");
+});
+
+test("stage registry: S6→S7 previous is formal_contract; S7→S8 previous is disposition", () => {
+  assert.deepEqual(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.DISPOSITION].allowed_previous, [LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT]);
+  assert.deepEqual(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.UNDER_CONTRACT].allowed_previous, [LIFECYCLE_STAGE_CODES.DISPOSITION]);
+  assert.deepEqual(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.PREPARED_TO_CLOSE].allowed_previous, [LIFECYCLE_STAGE_CODES.UNDER_CONTRACT]);
+  assert.equal(SELLER_LIFECYCLE_STAGE_REGISTRY[LIFECYCLE_STAGE_CODES.UNDER_CONTRACT].entry_condition, "buyer_contract_executed");
+});
+
+test("transition validator: S6→S7 and S7→S8 both require authoritative evidence for automation", () => {
+  // S6 → S7 (Dispo): needs contract/disposition-readiness evidence.
+  const s6s7 = validateLifecycleTransition({ from: LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT, to: LIFECYCLE_STAGE_CODES.DISPOSITION, change_source: "autopilot" });
+  assert.equal(s6s7.allowed, false);
+  assert.equal(s6s7.reason, "operational_stage_requires_authoritative_event");
+  // S7 → S8 (Under Contract With Buyer): needs an authoritative buyer-contract event.
+  const s7s8 = validateLifecycleTransition({ from: LIFECYCLE_STAGE_CODES.DISPOSITION, to: LIFECYCLE_STAGE_CODES.UNDER_CONTRACT, change_source: "autopilot" });
+  assert.equal(s7s8.allowed, false);
+  assert.equal(s7s8.reason, "operational_stage_requires_authoritative_event");
+  assert.equal(
+    validateLifecycleTransition({ from: LIFECYCLE_STAGE_CODES.DISPOSITION, to: LIFECYCLE_STAGE_CODES.UNDER_CONTRACT, change_source: "autopilot", authority_evidence: { type: "buyer_contract_event", source: "buyers_webhook" } }).allowed,
+    true,
+  );
+});
+
+test("resolver: seller text alone can never advance into S7-S10", () => {
+  // Every conversational intent with no external deal-state evidence, from an
+  // S6 lead, must stay at or below S6 (formal_contract, index 5).
+  for (const intent of ["ownership_confirmed", "asks_offer", "seller_interested", "asking_price_provided", "condition_disclosed", "unclear"]) {
+    const t = resolveSellerStageTransition({
+      stage_before: "formal_contract",
+      intent,
+      known_facts: { asking_price: { value: 95000 }, occupancy_status: "vacant", condition_level: "turnkey" },
+      new_facts: { asking_price: { value: 95000 } },
+      negotiation_state: { terms_accepted: true },
+      contract_state: { executed: true },
+      classification_confidence: 0.95,
+    });
+    assert.ok(t.stage_after_number <= 7, `${intent} must not push past S7 without external events (got S${t.stage_after_number})`);
+    // Without a buyer-contract event it can reach at most S7 (Dispo), never S8+.
+    assert.notEqual(t.stage_after, "under_contract");
+    assert.notEqual(t.stage_after, "prepared_to_close");
+    assert.notEqual(t.stage_after, "closed");
+  }
+});
+
 test("transition validator: conversation stages advance without evidence", () => {
   const result = validateLifecycleTransition({
     from: LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION,

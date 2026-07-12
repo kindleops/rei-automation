@@ -10,8 +10,12 @@ export const LIFECYCLE_STAGE_ORDER = [
   'property_condition',
   'offer',
   'formal_contract',
-  'under_contract',
+  // Canonical operational order (S7–S10): Dispo → Under Contract With Buyer →
+  // Escrow → Closed. Code strings retained (disposition/under_contract/
+  // prepared_to_close) to match the API registry and the acquisition_stage
+  // CHECK constraint; only ordinal position and label move.
   'disposition',
+  'under_contract',
   'prepared_to_close',
   'closed',
 ] as const
@@ -31,9 +35,9 @@ export const LIFECYCLE_STAGE_META: Record<LifecycleStageCode, {
   property_condition: { number: 4, label: 'Property Condition', shortLabel: 'S4', color: '#ff9f0a', icon: 'home' },
   offer: { number: 5, label: 'Offer', shortLabel: 'S5', color: '#ff453a', icon: 'file-text' },
   formal_contract: { number: 6, label: 'Formal Contract', shortLabel: 'S6', color: '#ff9f0a', icon: 'file-signature' },
-  under_contract: { number: 7, label: 'Under Contract', shortLabel: 'S7', color: '#34c759', icon: 'check-circle' },
-  disposition: { number: 8, label: 'Disposition', shortLabel: 'S8', color: '#5ac8fa', icon: 'users' },
-  prepared_to_close: { number: 9, label: 'Prepared to Close', shortLabel: 'S9', color: '#30d158', icon: 'flag' },
+  disposition: { number: 7, label: 'Dispo', shortLabel: 'S7', color: '#5ac8fa', icon: 'users' },
+  under_contract: { number: 8, label: 'Under Contract With Buyer', shortLabel: 'S8', color: '#34c759', icon: 'check-circle' },
+  prepared_to_close: { number: 9, label: 'Escrow', shortLabel: 'S9', color: '#30d158', icon: 'flag' },
   closed: { number: 10, label: 'Closed', shortLabel: 'S10', color: '#7d8797', icon: 'lock' },
 }
 
