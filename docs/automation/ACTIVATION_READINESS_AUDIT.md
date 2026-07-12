@@ -248,3 +248,34 @@ rerouted (§2).
 
 Out of scope (explicitly not done): S7/S8 reorder decision (§1a), canonical S7–S10 lifecycle event vocabulary and webhook →
 lifecycle advancement (requires product decision on Podio vs thread-state ownership), any migration, any deploy, any send.
+
+## 13. Verification results
+
+Tests (`npm run test:critical`, node --test, concurrency 1):
+
+| Suite | Result |
+|---|---|
+| origin/main baseline | 3467 tests, 3386 pass, **79 fail** (pre-existing red baseline; network-blocked integration tests) |
+| branch | 3544 tests (+77 new, all pass), 3463 pass, **79 fail** |
+| Newly introduced regressions | **0** |
+
+The two 79-failure sets differ by one name each (`evaluateCandidateEligibility allows unknown identity` vs
+`feeder launch button converts dry_run`). Both live in `feed-candidates.test.mjs`, a network-blocked integration file that
+times out at 14 s (`CRITICAL_TEST_NETWORK_BLOCKED`); it imports **none** of the changed modules and the changed set touches
+none of its files. This is a flaky-timeout reshuffle, not a regression — verified by import trace and `git diff --name-only`.
+
+New focused coverage added by this branch (all green): seller fact extraction (26), lifecycle stage/policy/temperature/
+language registry (18), combined ownership+interest template (10), Workflow Studio event enrichment (4), multilingual
+lifecycle regression (20), plus updated automation-engine assertions for canonicalized stage/status values.
+
+Builds:
+
+| Build | origin/main | branch |
+|---|---|---|
+| `apps/api` (`next build`) | **red** (worker exit 1) | **red** — same pre-existing static-generation crash (`The "id" argument must be of type string. Received undefined`) after webpack "Compiled with warnings" succeeds |
+| `apps/dashboard` (`tsc -b && vite build`) | — | **green** (4.12 s) |
+
+The API build red is pre-existing (present on origin/main), occurs in the post-compile static-generation phase, and does not
+reference any changed module. Every changed module webpack-compiled successfully; the two build warnings
+(`ensureDashboardReadAuth` reexport, non-literal `runtime` field) exist on both branches. No changed file introduces a build
+regression.
