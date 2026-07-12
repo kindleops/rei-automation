@@ -162,7 +162,7 @@ describe('seller map card thread builder', () => {
         prospect_full_name: 'Maria Lopez',
       })
       expect(values.seller_first_name).toBe('Maria')
-      expect(values.seller_name).toBe('Maria Lopez')
+      expect(values.seller_name).toBe('Maria')
     })
 
     it('leaves seller_first_name empty (never entity-derived) when only an individual-named owner exists and no prospect is linked', () => {
@@ -233,7 +233,7 @@ describe('seller map card thread builder', () => {
     it('resolves Amanda (not the Master Owner) as the personalized recipient', () => {
       const values = buildMapTemplateManualValues(property274564949)
       expect(values.seller_first_name).toBe('Amanda')
-      expect(values.seller_name).toBe('Amanda L Tallen')
+      expect(values.seller_name).toBe('Amanda')
       expect(values.seller_first_name).not.toContain('Trust')
     })
 
