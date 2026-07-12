@@ -61,6 +61,7 @@ type AssetInput = {
   valuePerAcre: number | null
   assessedTotalValue: number | null
   occupancyLabel: string | null
+  mortgageBalance: number | null
 }
 
 const joinParts = (parts: Array<string | null | undefined>): string =>
@@ -120,8 +121,9 @@ const SINGLE_FAMILY: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Repairs', formatMoney(input.repairs)),
+    metric('Mortgage Balance', formatMoney(input.mortgageBalance)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Bedrooms', value: formatInteger(input.beds) },
@@ -152,8 +154,9 @@ const MULTIFAMILY_2_4: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
-    metric('Price Per Unit', formatMoney(input.pricePerUnit)),
+    metric('Equity %', formatPercent(input.equityPercent)),
+    metric('Units', formatInteger(input.units)),
+    metric('Price / Unit', formatMoney(input.pricePerUnit)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Units', value: formatInteger(input.units) },
@@ -183,8 +186,11 @@ const MULTIFAMILY_5_PLUS: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
-    metric('Avg Sqft / Unit', formatInteger(input.avgSqftPerUnit)),
+    metric('Equity %', formatPercent(input.equityPercent)),
+    metric('Units', formatInteger(input.units)),
+    input.avgSqftPerUnit != null
+      ? metric('Avg Sqft / Unit', formatInteger(input.avgSqftPerUnit))
+      : metric('Price / Unit', formatMoney(input.pricePerUnit)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Units', value: formatInteger(input.units) },
@@ -216,8 +222,9 @@ const RETAIL: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Building Sqft', formatInteger(input.sqft)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Subtype', value: text(input.subtype) || 'Retail' },
@@ -246,8 +253,9 @@ const OFFICE: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Building Sqft', formatInteger(input.sqft)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Subtype', value: text(input.subtype) || 'Office' },
@@ -276,8 +284,9 @@ const INDUSTRIAL: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Building Sqft', formatInteger(input.sqft)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Subtype', value: text(input.subtype) || 'Industrial' },
@@ -306,8 +315,9 @@ const STORAGE: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Units', formatInteger(input.units)),
     metric('Building Sqft', formatInteger(input.sqft)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Units', value: formatInteger(input.units) },
@@ -335,8 +345,9 @@ const LAND: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
-    metric('Value Per Acre', formatMoney(input.valuePerAcre)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
+    metric('Zoning / Use', text(input.zoning) || text(input.landUse) || '—'),
+    metric('Owner Status', input.occupancyLabel ? titleize(input.occupancyLabel) : '—'),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
@@ -364,8 +375,9 @@ const OTHER_COMMERCIAL: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Building Sqft', formatInteger(input.sqft)),
+    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Subtype', value: text(input.subtype) || 'Commercial' },
@@ -393,8 +405,9 @@ const UNKNOWN: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Equity', formatPercent(input.equityPercent)),
+    metric('Equity %', formatPercent(input.equityPercent)),
     metric('Repairs', formatMoney(input.repairs)),
+    metric('Building Sqft', formatInteger(input.sqft)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Asset Type', value: text(input.assetType) || '—' },
@@ -470,6 +483,11 @@ export const buildAssetInput = (record: Record<string, unknown>): AssetInput => 
       'assessed_value',
     ]))),
     occupancyLabel: text(firstDefined(record, ['occupancy_code', 'occupancy', 'land_use', 'county_land_use_code'])) || null,
+    mortgageBalance: nullIfZeroish(asNumber(firstDefined(record, [
+      'mortgage_balance',
+      'loan_balance',
+      'total_loan_balance',
+    ]))),
   }
 }
 

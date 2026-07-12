@@ -1280,3 +1280,309 @@
 [data-nexus-theme="light"] .smc-summary--physical {
   color: #0c1930;
 }
+
+/* Desktop dossier density */
+.smc-shell:not(.is-mobile) .smc-body--peek-dense,
+.smc-shell:not(.is-mobile) .smc-body--focus-dense {
+  gap: 8px;
+  padding: 10px 14px 12px;
+}
+
+.smc-shell:not(.is-mobile) .smc-identity--dossier .smc-identity__name {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--smc-text);
+}
+
+.smc-shell:not(.is-mobile) .smc-identity--dossier .smc-identity__address {
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--smc-text) 88%, transparent);
+}
+
+.smc-shell:not(.is-mobile) .smc-identity__asset-line {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--smc-accent);
+  letter-spacing: 0.02em;
+}
+
+.smc-shell:not(.is-mobile) .smc-identity__phone {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--smc-muted);
+}
+
+.smc-peek-hero {
+  position: relative;
+}
+
+.smc-peek-hero__overlay {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  z-index: 3;
+}
+
+.smc-peek-hero__overlay .smc-state-row {
+  margin: 0;
+}
+
+.smc-metrics--dense {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.smc-metrics--dense .smc-metric {
+  min-height: 42px;
+  padding: 5px 6px;
+}
+
+.smc-metrics--dense .smc-metric span {
+  font-size: 9px;
+}
+
+.smc-metrics--dense .smc-metric strong {
+  font-size: 11px;
+}
+
+.smc-flags--weighted .smc-flag.is-critical {
+  color: #ffb4b0;
+  border-color: rgba(255, 90, 82, 0.45);
+  background: rgba(255, 70, 62, 0.16);
+}
+
+.smc-flags--weighted .smc-flag.is-motivation {
+  color: #ffd28a;
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.smc-flags--weighted .smc-flag.is-positive {
+  color: #8ef0c8;
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.smc-flags--weighted .smc-flag.is-context {
+  color: #8be9ff;
+  border-color: rgba(104, 217, 255, 0.42);
+  background: rgba(104, 217, 255, 0.12);
+}
+
+.smc-contact-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.smc-contact-state__pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--smc-muted);
+}
+
+.smc-contact-state__pill.is-active {
+  color: var(--smc-accent);
+}
+
+.smc-contact-state__badge,
+.smc-badge--active {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8ef0c8;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.12);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.smc-section--financial h4,
+.smc-section--owner-pressure h4,
+.smc-section--prospect h4,
+.smc-section--profile h4,
+.smc-section--ops h4 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--smc-muted);
+}
+
+.smc-kv-grid--compact {
+  gap: 4px 8px;
+}
+
+.smc-kv-grid--compact .smc-kv {
+  padding: 4px 0;
+}
+
+.smc-kv-grid--compact .smc-kv span {
+  font-size: 9px;
+}
+
+.smc-kv-grid--compact .smc-kv strong {
+  font-size: 11px;
+}
+
+.smc-fin-meters {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.smc-fin-meter__head,
+.smc-contact-meter__head,
+.smc-pressure-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--smc-muted);
+}
+
+.smc-fin-meter__head strong,
+.smc-contact-meter__head strong,
+.smc-pressure-card__head strong {
+  color: var(--smc-text);
+  font-size: 11px;
+}
+
+.smc-fin-meter__track,
+.smc-contact-meter__track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.smc-fin-meter__fill,
+.smc-contact-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--smc-accent) 70%, #22c55e), var(--smc-accent));
+}
+
+.smc-fin-caption,
+.smc-pressure-card__summary,
+.smc-empty-line {
+  margin: 0 0 6px;
+  font-size: 10px;
+  color: var(--smc-muted);
+}
+
+.smc-pressure-card {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.smc-pressure-card__drivers,
+.smc-contact-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.smc-pressure-driver,
+.smc-contact-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.smc-pressure-driver.is-negative {
+  color: #ffb4b0;
+  border-color: rgba(255, 90, 82, 0.35);
+}
+
+.smc-pressure-driver.is-positive {
+  color: #8ef0c8;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.smc-contact-badge.is-ready {
+  color: #8ef0c8;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.smc-contact-badge.is-warn {
+  color: #ffd28a;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.smc-profile-group + .smc-profile-group {
+  margin-top: 8px;
+}
+
+.smc-profile-group h5 {
+  margin: 0 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--smc-muted);
+}
+
+.smc-intel-section--compact .smc-intel-strip--compact {
+  gap: 6px;
+}
+
+.smc-intel-strip__priority--compact {
+  min-width: 72px;
+}
+
+.smc-actions--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin-top: auto;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--smc-glass-bottom) 88%, black));
+}
+
+.smc-thread__state--empty {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 16px;
+}
+
+.smc-thread__empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.smc-thread__empty-copy {
+  margin: 0;
+  font-size: 11px;
+  color: var(--smc-muted);
+}
+
+.smc-thread__empty-action {
+  border: 1px solid color-mix(in srgb, var(--smc-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--smc-accent) 16%, transparent);
+  color: var(--smc-text);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}

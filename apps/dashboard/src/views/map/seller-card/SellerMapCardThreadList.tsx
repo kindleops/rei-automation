@@ -4,18 +4,28 @@ import { buildMessageTimelineMeta, formatDateSeparator } from './seller-map-card
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
+type ThreadEmptyState = {
+  hasMessages: boolean
+  recipientName: string
+  canSendOwnershipCheck: boolean
+  blockedReason: string | null
+  onInsertOwnershipCheck?: () => void
+}
+
 export const SellerMapCardThreadList = ({
   messages,
   loading = false,
   error = null,
   onRetry,
   translations = {},
+  emptyState,
 }: {
   messages: ThreadMessage[]
   loading?: boolean
   error?: string | null
   onRetry?: () => void
   translations?: Record<string, string>
+  emptyState?: ThreadEmptyState
 }) => {
   const listRef = useRef<HTMLDivElement>(null)
   const timeline = buildMessageTimelineMeta(messages)
@@ -42,9 +52,31 @@ export const SellerMapCardThreadList = ({
   }
 
   if (messages.length === 0) {
+    const blocked = emptyState?.blockedReason
+    const canOwnershipCheck = emptyState?.canSendOwnershipCheck && emptyState.onInsertOwnershipCheck
     return (
-      <div className="smc-thread__state">
-        <p>No messages yet. Send the first message below.</p>
+      <div className="smc-thread__state smc-thread__state--empty">
+        <p className="smc-thread__empty-title">No messages yet.</p>
+        {canOwnershipCheck ? (
+          <p className="smc-thread__empty-copy">Ownership check is ready for this property.</p>
+        ) : blocked ? (
+          <p className="smc-thread__empty-copy">{blocked}</p>
+        ) : (
+          <p className="smc-thread__empty-copy">
+            {emptyState?.recipientName
+              ? `Resolve a valid SMS recipient before messaging ${emptyState.recipientName}.`
+              : 'Resolve a valid SMS recipient before sending.'}
+          </p>
+        )}
+        {canOwnershipCheck ? (
+          <button
+            type="button"
+            className="smc-thread__empty-action"
+            onClick={emptyState.onInsertOwnershipCheck}
+          >
+            Insert Ownership Check
+          </button>
+        ) : null}
       </div>
     )
   }

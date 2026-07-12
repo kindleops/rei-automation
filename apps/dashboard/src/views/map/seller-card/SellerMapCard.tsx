@@ -18,6 +18,18 @@ import { useSellerMapCardConversation } from './useSellerMapCardConversation'
 import { SellerMapCardPriorityRing } from './SellerMapCardPriorityRing'
 import { SellerMapCardThreadList } from './SellerMapCardThreadList'
 import { SellerMapCardConversationSkeleton } from './SellerMapCardConversationSkeleton'
+import {
+  SellerMapCardContactStateStrip,
+  SellerMapCardFinancialSection,
+  SellerMapCardIntelligenceSection,
+  SellerMapCardMetrics,
+  SellerMapCardOperationSection,
+  SellerMapCardOwnerPressureSection,
+  SellerMapCardPropertyProfileSection,
+  SellerMapCardProspectSection,
+  SellerMapCardWeightedTags,
+} from './SellerMapCardDesktopSections'
+
 import '../../../modules/inbox/conversation-composer-premium.css'
 import '../../../modules/inbox/conversation-live.css'
 import './seller-map-card.css'
@@ -147,10 +159,12 @@ export const SellerMapCard = ({
   const cardStyle = getSellerMapCardStyle(layoutMode, anchor, containerSize, isMobile)
   const isPeek = cardMode === 'peek'
   const [sheetSnap, setSheetSnap] = useState<BottomSheetSnap>(() => snapFromCardMode(cardMode))
+  const [trackedSnapMode, setTrackedSnapMode] = useState(cardMode)
 
-  useEffect(() => {
+  if (cardMode !== trackedSnapMode) {
+    setTrackedSnapMode(cardMode)
     setSheetSnap(snapFromCardMode(cardMode))
-  }, [cardMode])
+  }
 
   const stageColor = LIFECYCLE_STAGE_META[viewModel.operations.stage as keyof typeof LIFECYCLE_STAGE_META]?.color
   const statusColor = OPERATIONAL_STATUS_META[viewModel.operations.status as keyof typeof OPERATIONAL_STATUS_META]?.color
@@ -164,9 +178,9 @@ export const SellerMapCard = ({
   } as CSSProperties
 
   const isFocus = cardMode === 'focus'
-  const visibleFlags = isPeek ? viewModel.flags.slice(0, 3) : viewModel.flags
-  const hiddenFlagCount = isPeek ? Math.max(0, viewModel.flags.length - visibleFlags.length) : 0
-  const followUpEligibility = viewModel.followUpEligibility
+  const tagLimit = isPeek ? 6 : 10
+  const visibleFlags = viewModel.flags.slice(0, tagLimit)
+  const hiddenFlagCount = Math.max(0, viewModel.flags.length - visibleFlags.length)
   const sendingNumber = thread.canonicalE164 || thread.phoneNumber || null
 
   useEffect(() => {
@@ -202,10 +216,17 @@ export const SellerMapCard = ({
     <div className="smc-state-row" aria-label="Canonical lead state">
       <span className="smc-badge smc-badge--stage">{viewModel.operations.stageLabel}</span>
       <span className="smc-badge smc-badge--status">{viewModel.operations.statusLabel}</span>
-      <span className="smc-badge smc-badge--temp">{viewModel.operations.temperatureLabel}</span>
+      <span className="smc-badge smc-badge--temp">
+        {viewModel.masterOwner.priorityScore != null
+          ? `Score ${Math.round(viewModel.masterOwner.priorityScore)}`
+          : 'Unscored'}
+      </span>
       <span className="smc-badge smc-badge--asset">{viewModel.property.assetType}</span>
       {viewModel.property.units != null && viewModel.property.units > 1 ? (
         <span className="smc-badge smc-badge--units">{viewModel.property.units} units</span>
+      ) : null}
+      {viewModel.activeCommunication ? (
+        <span className="smc-badge smc-badge--active">Active Communication</span>
       ) : null}
     </div>
   )
@@ -254,70 +275,30 @@ export const SellerMapCard = ({
   )
 
   const identityHeader = (
-    <header className="smc-identity">
+    <header className="smc-identity smc-identity--dossier">
       <div className="smc-identity__copy">
-        <h3 className="smc-identity__name">{viewModel.masterOwner.displayName}</h3>
+        <h3 className="smc-identity__name">{viewModel.headerDisplayName}</h3>
         <p className="smc-identity__address" title={viewModel.property.address}>{viewModel.property.address}</p>
+        <p className="smc-identity__asset-line">{viewModel.assetSummaryLine}</p>
+        {viewModel.canonicalPhone ? (
+          <p className="smc-identity__phone">{viewModel.canonicalPhone}</p>
+        ) : null}
       </div>
     </header>
   )
 
   const metricsBlock = (metrics: typeof viewModel.peekMetrics, variant: 'peek' | 'focus') => (
-    <div className={cls('smc-metrics', variant === 'focus' && 'smc-metrics--focus')} aria-label="Primary metrics">
-      {metrics.map((metric) => (
-        <div key={metric.label} className={cls('smc-metric', metric.emphasis === 'primary' && 'is-primary')}>
-          <span>{metric.label}</span>
-          <strong>{metric.value}</strong>
-        </div>
-      ))}
-    </div>
+    <SellerMapCardMetrics metrics={metrics} variant={variant} />
   )
 
-  const intelligenceSection = (
-    <section className="smc-intel-section" aria-label="Property intelligence">
-      <div className="smc-intel-head">
-        <svg className="smc-intel-head__icon" viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            d="M8 1.5l5.5 2.2v4.1c0 3.1-2.2 5.4-5.5 6.7C4.7 13.2 2.5 10.9 2.5 7.8V3.7L8 1.5z"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.2"
-          />
-        </svg>
-        <span className="smc-intel-head__label">Property Intelligence</span>
-      </div>
-      <div className="smc-intel-strip">
-        {viewModel.intelligenceStrip.slice(0, 3).map((field) => (
-          <div key={field.label} className="smc-intel-strip__cell">
-            <span>{field.label}</span>
-            <strong>{field.value}</strong>
-          </div>
-        ))}
-        <div className="smc-intel-strip__priority">
-          <span>Priority</span>
-          <SellerMapCardPriorityRing
-            score={viewModel.masterOwner.priorityScore}
-            tier={null}
-            classification={viewModel.masterOwner.priorityClassification}
-            size={44}
-            showUnscoredLabel={viewModel.masterOwner.priorityScore == null}
-          />
-        </div>
-      </div>
-    </section>
-  )
+  const intelligenceSection = <SellerMapCardIntelligenceSection viewModel={viewModel} />
 
   const contextualLine = viewModel.contextualLine ? (
     <p className="smc-context-line">{viewModel.contextualLine}</p>
   ) : null
 
   const flagsBlock = visibleFlags.length > 0 ? (
-    <div className="smc-flags">
-      {visibleFlags.map((flag) => (
-        <span key={flag.key} className={cls('smc-flag', `is-${flag.severity}`)}>{flag.label}</span>
-      ))}
-      {hiddenFlagCount > 0 ? <span className="smc-flag is-more">+{hiddenFlagCount}</span> : null}
-    </div>
+    <SellerMapCardWeightedTags flags={visibleFlags} hiddenCount={hiddenFlagCount} />
   ) : null
 
   const activityBlock = (
@@ -327,59 +308,75 @@ export const SellerMapCard = ({
     </section>
   )
 
+  const handlePrimaryAction = () => {
+    const action = viewModel.actionBar.primary.action
+    if (action === 'reply') {
+      setCardMode('conversation')
+      setSheetSnap('expanded')
+      return
+    }
+    if (action === 'ownership_check' || action === 'follow_up') {
+      void executeFollowUp()
+    }
+  }
+
   const actionFooter = (
-    <footer className="smc-actions">
-      {followUpEligibility.visible ? (
-        <button
-          type="button"
-          className={cls(
-            'smc-action',
-            'smc-action--follow',
-            followUpState !== 'idle' && `is-${followUpState}`,
-          )}
-          disabled={
-            !followUpEligibility.canExecute
-            || followUpState === 'sending'
-          }
-          title={
-            followUpError
-            || followUpEligibility.disabledReason
-            || undefined
-          }
-          onClick={() => void executeFollowUp()}
-        >
-          {followUpButtonLabel(followUpState, followUpEligibility.label, followUpError)}
-        </button>
-      ) : (
-        <span className="smc-action smc-action--spacer" aria-hidden="true" />
-      )}
+    <footer className="smc-actions smc-actions--sticky">
       <button
         type="button"
-        className="smc-action smc-action--message"
-        disabled={viewModel.messagingBlocked}
-        onClick={() => {
-          setCardMode('conversation')
-          setSheetSnap('expanded')
-        }}
+        className={cls(
+          'smc-action',
+          'smc-action--follow',
+          followUpState !== 'idle' && `is-${followUpState}`,
+          !viewModel.actionBar.primary.enabled && 'is-disabled',
+        )}
+        disabled={!viewModel.actionBar.primary.enabled || followUpState === 'sending'}
+        title={
+          followUpError
+          || viewModel.actionBar.primary.disabledReason
+          || undefined
+        }
+        onClick={handlePrimaryAction}
       >
-        Message
+        {viewModel.actionBar.primary.enabled
+          ? followUpButtonLabel(followUpState, viewModel.actionBar.primary.label, followUpError)
+          : (viewModel.actionBar.primary.disabledReason || viewModel.actionBar.primary.label)}
       </button>
+      {viewModel.actionBar.secondary.action !== 'none' ? (
+        <button
+          type="button"
+          className="smc-action smc-action--message"
+          disabled={!viewModel.actionBar.secondary.enabled || viewModel.messagingBlocked}
+          onClick={() => {
+            setCardMode('conversation')
+            setSheetSnap('expanded')
+          }}
+        >
+          {viewModel.actionBar.secondary.label}
+        </button>
+      ) : null}
     </footer>
   )
 
   const peekBody = (
     <>
-      {imageBlock}
-      <div className="smc-body smc-body--peek">
-        {stateBadges}
+      <div className="smc-peek-hero">
+        {imageBlock}
+        <div className="smc-peek-hero__overlay">
+          {stateBadges}
+        </div>
+      </div>
+      <div className="smc-body smc-body--peek smc-body--peek-dense">
         {identityHeader}
-        <p className="smc-summary">{viewModel.assetSummaryLine}</p>
+        <SellerMapCardContactStateStrip
+          label={viewModel.contactStateLabel}
+          activeCommunication={viewModel.activeCommunication}
+        />
         {metricsBlock(viewModel.peekMetrics, 'peek')}
-        {intelligenceSection}
-        {contextualLine}
         {flagsBlock}
         {activityBlock}
       </div>
+      {!isMobile ? actionFooter : null}
     </>
   )
 
@@ -398,44 +395,16 @@ export const SellerMapCard = ({
 
   const focusSections = (
     <div className="smc-focus-scroll">
-      <section className="smc-section">
-        <h4>Property Profile</h4>
-        <div className="smc-kv-grid">
-          {viewModel.focusProfileFields.map((field) => (
-            <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
-          ))}
-        </div>
-      </section>
-      {viewModel.focusFinancialFields.length > 0 ? (
-        <section className="smc-section">
-          <h4>Financial Profile</h4>
-          <div className="smc-kv-grid">
-            {viewModel.focusFinancialFields.map((field) => (
-              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      {viewModel.focusOwnerFields.length > 0 ? (
-        <section className="smc-section">
-          <h4>Master Owner</h4>
-          <div className="smc-kv-grid">
-            {viewModel.focusOwnerFields.map((field) => (
-              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      {viewModel.focusOperationFields.length > 0 ? (
-        <section className="smc-section">
-          <h4>Conversation & Automation</h4>
-          <div className="smc-kv-grid">
-            {viewModel.focusOperationFields.map((field) => (
-              <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      <SellerMapCardFinancialSection financialProfile={viewModel.financialProfile} />
+      <SellerMapCardOwnerPressureSection
+        ownerPressure={viewModel.ownerPressure}
+        ownerFields={viewModel.focusOwnerFields}
+      />
+      <SellerMapCardProspectSection prospectProfile={viewModel.prospectProfile} />
+      {intelligenceSection}
+      {flagsBlock}
+      <SellerMapCardOperationSection fields={viewModel.focusOperationFields} />
+      <SellerMapCardPropertyProfileSection groups={viewModel.propertyProfileGroups} />
     </div>
   )
 
@@ -457,14 +426,15 @@ export const SellerMapCard = ({
         <div className="smc-body smc-body--focus-head">
           {stateBadges}
           {identityHeader}
-          <p className="smc-summary">{viewModel.assetSummaryLine}</p>
+          <SellerMapCardContactStateStrip
+            label={viewModel.contactStateLabel}
+            activeCommunication={viewModel.activeCommunication}
+          />
         </div>
       </div>
-      <div className="smc-body smc-body--focus">
+      <div className="smc-body smc-body--focus smc-body--focus-dense">
         {metricsBlock(viewModel.focusMetrics, 'focus')}
-        {intelligenceSection}
         {contextualLine}
-        {flagsBlock}
         {activityBlock}
         {focusSections}
       </div>
@@ -521,13 +491,24 @@ export const SellerMapCard = ({
             loading={conversationLoading}
             error={conversationError}
             onRetry={() => { void refreshConversation() }}
+            emptyState={{
+              hasMessages: messages.length > 0,
+              recipientName: viewModel.headerDisplayName,
+              canSendOwnershipCheck: viewModel.followUpEligibility.isUncontacted && viewModel.followUpEligibility.canExecute,
+              blockedReason: viewModel.messagingBlockReason,
+              onInsertOwnershipCheck: viewModel.followUpEligibility.canExecute
+                ? () => { void executeFollowUp() }
+                : undefined,
+            }}
           />
         </div>
         <div className="smc-composer-wrap">
           <Composer
             draftText={localDraft}
             onSend={(text) => { void handleSend(text) }}
-            onOpenSchedule={() => {}}
+            onOpenSchedule={(draft) => {
+              if (draft.trim()) setLocalDraft(draft)
+            }}
             onAI={() => {}}
             thread={thread}
             threadContext={threadContext as ThreadContext | null}
