@@ -269,17 +269,20 @@ Tests (`npm run test:critical`, node --test, concurrency 1):
 | Suite | Result |
 |---|---|
 | origin/main baseline | 3467 tests, 3386 pass, **79 fail** (pre-existing red baseline; network-blocked integration tests) |
-| branch | 3544 tests (+77 new, all pass), 3463 pass, **79 fail** |
+| branch (final, HEAD ace27ffd) | 3560 tests (+93 new, all pass), 3480 pass, **78 fail** (one fewer than baseline) |
 | Newly introduced regressions | **0** |
 
-The two 79-failure sets differ by one name each (`evaluateCandidateEligibility allows unknown identity` vs
-`feeder launch button converts dry_run`). Both live in `feed-candidates.test.mjs`, a network-blocked integration file that
-times out at 14 s (`CRITICAL_TEST_NETWORK_BLOCKED`); it imports **none** of the changed modules and the changed set touches
-none of its files. This is a flaky-timeout reshuffle, not a regression — verified by import trace and `git diff --name-only`.
+The failing sets differ only by flaky network-blocked timeouts: the one branch-only name
+(`evaluateCandidateEligibility allows unknown identity`) lives in `feed-candidates.test.mjs`, times out at 14 s
+(`CRITICAL_TEST_NETWORK_BLOCKED`), and imports **none** of the changed modules (verified: the test and
+`supabase-candidate-feeder.js` import 0 of the changed files). The two baseline-only names
+(`feeder launch button converts dry_run`, `inbox-thread-state-targeted-repair.test.mjs`) pass on the branch run. Net: one
+fewer failure than baseline, zero attributable to this branch.
 
 New focused coverage added by this branch (all green): seller fact extraction (26), lifecycle stage/policy/temperature/
-language registry (18), combined ownership+interest template (10), Workflow Studio event enrichment (4), multilingual
-lifecycle regression (20), plus updated automation-engine assertions for canonicalized stage/status values.
+language registry (18 + stage-order proofs), combined ownership+interest template (10), Workflow Studio event enrichment (4),
+multilingual lifecycle regression (20), stage-transition resolver operational-stage cases, template attribution + internal
+A/B experiment (19).
 
 Builds — clean controlled comparison (two disposable worktrees, Node v23.11.0, npm 11.4.1, fresh `npm ci` with no symlinked
 node_modules, `rm -rf .next` before each, identical `npm run build`):
