@@ -299,6 +299,78 @@ async function emitSellerNotifications({
   }
 }
 
+/**
+ * Build the canonical Workflow Studio context for one inbound turn. Every
+ * field is sourced from a real decision/execution/contract object — Studio
+ * must never fabricate activity from UI state. This block is attached to
+ * every emitted event so the Studio timeline can render the full story
+ * (classifier result → extracted facts → transition → outbound → delivery →
+ * follow-up) without re-deriving anything.
+ */
+export function buildWorkflowStudioContext({
+  decision = null,
+  classification = null,
+  factExtraction = null,
+  execution = null,
+  followUp = null,
+  followupCancellation = null,
+  contract = null,
+  temperatureSignal = null,
+  languageResolution = null,
+  autoReplyMode = null,
+} = {}) {
+  const facts = factExtraction?.facts || {};
+  return {
+    stage_before: decision?.stage_before ?? null,
+    stage_after: decision?.stage_after ?? null,
+    transition_reason: decision?.reasoning_code ?? null,
+    execution_mode: decision?.execution_mode ?? null,
+    next_action: decision?.next_action ?? null,
+    // Classifier snapshot
+    classifier: {
+      intent: contract?.normalized_intent ?? classification?.primary_intent ?? null,
+      confidence: classification?.confidence ?? null,
+      source: classification?.source ?? null,
+      version: `${CLASSIFY_VERSION}:${classification?.source || "heuristic"}`,
+    },
+    // Extracted facts summary + review/conflict flags
+    extraction: factExtraction
+      ? {
+          extractor_version: factExtraction.extractor_version,
+          fact_keys: Object.keys(facts),
+          needs_review: Boolean(factExtraction.needs_review),
+          conflicts: factExtraction.conflicts || [],
+          asking_price_needs_clarification: Boolean(factExtraction.asking_price_needs_clarification),
+        }
+      : null,
+    // Temperature explainability
+    temperature: temperatureSignal
+      ? {
+          floor: temperatureSignal.temperature_floor,
+          reason_codes: temperatureSignal.reason_codes || [],
+          model_version: temperatureSignal.model_version,
+        }
+      : null,
+    // Outbound / template selection + send authority
+    outbound: {
+      queued: Boolean(execution?.queued),
+      queue_row_id: execution?.queue_row_id ?? null,
+      template_id: execution?.selected_template?.template_id ?? execution?.selected_template?.id ?? null,
+      template_use_case: execution?.selected_template?.use_case ?? null,
+      language: execution?.selected_template?.language ?? languageResolution?.language ?? null,
+      language_source: languageResolution?.source ?? null,
+      send_authority: autoReplyMode ?? null,
+    },
+    delivery_state: execution?.selected_template ? "queued" : "none",
+    // Follow-up + review + suppression flags
+    followup_scheduled: Boolean(followUp?.followup_created),
+    followup_scheduled_for: followUp?.scheduled_for ?? null,
+    followups_cancelled: Number(followupCancellation?.cancelled || 0),
+    human_review_required: Boolean(decision?.review_required || contract?.ambiguity_review_required),
+    suppression_applied: Boolean(decision?.block_reason || decision?.suppression_reason),
+  };
+}
+
 async function emitWorkflowStudioEvents({
   decision = null,
   propertyId = null,
@@ -307,34 +379,61 @@ async function emitWorkflowStudioEvents({
   threadKey = null,
   inboundEventId = null,
   supabaseClient = null,
+  studioContext = null,
 } = {}) {
-  for (const event of decision?.workflow_events || []) {
+  const options = supabaseClient ? { supabaseClient } : {};
+  const identity = {
+    conversation_thread_id: threadKey,
+    property_id: propertyId || null,
+    prospect_id: prospectId || null,
+    master_owner_id: ownerId || null,
+  };
+
+  async function emit(event_type, payload, dedupeSuffix) {
     try {
       await runtimeDeps.emitAutomationEvent(
         {
-          event_type: event.type,
+          event_type,
           source: "seller_inbound_orchestrator",
-          dedupe_key: `seller-inbound:${inboundEventId}:${event.type}`,
-          conversation_thread_id: threadKey,
-          property_id: propertyId || null,
-          prospect_id: prospectId || null,
-          master_owner_id: ownerId || null,
-          payload: {
-            stage_before: decision.stage_before,
-            stage_after: decision.stage_after,
-            execution_mode: decision.execution_mode,
-            ...event,
-          },
+          dedupe_key: `seller-inbound:${inboundEventId}:${dedupeSuffix || event_type}`,
+          ...identity,
+          payload,
         },
-        supabaseClient ? { supabaseClient } : {}
+        options
       );
     } catch (error) {
       runtimeDeps.warn("[SELLER_INBOUND_WORKFLOW_EMIT_FAILED]", {
-        event_type: event.type,
+        event_type,
         thread_key: threadKey,
         error: error?.message || "workflow_emit_failed",
       });
     }
+  }
+
+  const ctx = studioContext || {};
+
+  // Lifecycle/transition events from the resolver, each enriched with the
+  // canonical Studio context.
+  for (const event of decision?.workflow_events || []) {
+    await emit(event.type, { ...ctx, ...event }, event.type);
+  }
+
+  // First-class operational events so Studio can count them directly instead
+  // of inferring them. Emitted only when they actually occurred.
+  if (ctx.followup_scheduled) {
+    await emit("FOLLOWUP_SCHEDULED", ctx, "followup_scheduled");
+  }
+  if (Number(ctx.followups_cancelled) > 0) {
+    await emit("FOLLOWUP_CANCELLED", ctx, "followup_cancelled");
+  }
+  if (ctx.human_review_required) {
+    await emit("HUMAN_REVIEW_REQUESTED", ctx, "human_review_requested");
+  }
+  if (ctx.suppression_applied) {
+    await emit("SUPPRESSION_APPLIED", ctx, "suppression_applied");
+  }
+  if (ctx.extraction?.needs_review || (ctx.extraction?.conflicts || []).length > 0) {
+    await emit("EXTRACTION_REVIEW_FLAGGED", ctx, "extraction_review_flagged");
   }
 }
 
@@ -1055,6 +1154,18 @@ export async function processSellerInboundMessage({
       threadKey: threadKey || inboundFrom,
       inboundEventId,
       supabaseClient: supabase,
+      studioContext: buildWorkflowStudioContext({
+        decision,
+        classification,
+        factExtraction: fact_extraction,
+        execution,
+        followUp: follow_up_result,
+        followupCancellation: followup_cancellation,
+        contract,
+        temperatureSignal: temperature_signal,
+        languageResolution: execution?.language_resolution || null,
+        autoReplyMode: effective_auto_reply_mode,
+      }),
     });
   }
 
