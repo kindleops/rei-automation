@@ -26,7 +26,7 @@ const supabase = createClient(url, key)
 
 const sampleContext = {
   seller_first_name: 'Maria',
-  seller_name: 'Maria Lopez',
+  seller_name: 'Maria',
   owner_name: 'Maria Lopez',
   property_address: '123 Main St, Miami, FL 33101',
   property_city: 'Miami',

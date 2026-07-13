@@ -178,19 +178,18 @@ describe('ownership check template picker', () => {
     expect(picks.size).toBeGreaterThan(1)
   })
 
-  it('rejects blank or Hi there greetings instead of repairing them', () => {
-    const blankGreeting = makeTemplate({ id: 'bad-1', language: 'English', templateText: 'Hi , question about {{property_address}}' })
-    const hiThere = makeTemplate({ id: 'bad-2', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' })
+  it('keeps active Supabase templates when they render for the resolved context', () => {
+    const hiThere = makeTemplate({ id: 'supabase-1', language: 'English', templateText: 'Hi there, this is {{agent_first_name}} about {{property_address}}' })
 
-    expect(evaluateOwnershipTemplate(blankGreeting, context)).toBeNull()
-    expect(evaluateOwnershipTemplate(hiThere, context)).toBeNull()
+    expect(evaluateOwnershipTemplate(hiThere, context)).not.toBeNull()
 
     const pool = buildOwnershipTemplatePool(
       [hiThere],
       { ...context, seller_first_name: '', seller_name: '' },
       'English',
     )
-    expect(pool.length).toBe(0)
+    expect(pool).toHaveLength(1)
+    expect(pool[0]?.template.id).toBe('supabase-1')
   })
 
   it('supports weighted random selection', () => {
@@ -214,7 +213,7 @@ describe('ownership check template picker', () => {
     })
 
     expect(selection?.templateId).toBe('en-4')
-    expect(selection?.selectionReason).toBe('catalog_rotation_excluding_recent')
+    expect(selection?.selectionReason).toBe('supabase_weighted_rotation_excluding_recent')
     expect(selection?.excludedRecentTemplateIds).toEqual(['en-1', 'en-2', 'en-3'])
   })
 
@@ -276,7 +275,7 @@ describe('ownership check template picker', () => {
     })
   })
 
-  describe('requires resolved seller + agent names (no generic TextGrid-blocked fallbacks)', () => {
+  describe('Supabase catalog selection (no hardcoded template copy)', () => {
     const personalizedFirstTouch = makeTemplate({
       id: 'en-personalized',
       language: 'English',
@@ -290,7 +289,7 @@ describe('ownership check template picker', () => {
       templateText: 'Hi, I had a quick question about {{property_address}}. Are you connected with the owner?',
     })
 
-    it('returns no pool when seller_first_name is unresolved — never selects TextGrid-blocked "Hi," templates', () => {
+    it('keeps generic Supabase templates when they render without seller_first_name', () => {
       const unresolvedContext = {
         seller_first_name: '',
         seller_name: '',
@@ -306,10 +305,10 @@ describe('ownership check template picker', () => {
         'English',
       )
 
-      expect(pool).toHaveLength(0)
+      expect(pool.map((entry) => entry.template.id)).toEqual(['en-generic'])
     })
 
-    it('rejects production generic ownership_check wording that TextGrid blocks', () => {
+    it('accepts active Supabase generic ownership_check wording when it renders', () => {
       const result = evaluateOwnershipTemplate(genericFirstTouch, {
         seller_first_name: '',
         seller_name: '',
@@ -317,7 +316,8 @@ describe('ownership check template picker', () => {
         agent_name: 'Jake',
         agent_first_name: 'Jake',
       })
-      expect(result).toBeNull()
+      expect(result).not.toBeNull()
+      expect(result?.template.id).toBe('en-generic')
     })
 
     it('renders {{seller_name}} as first name only — never the multi-word full name', () => {
@@ -361,7 +361,7 @@ describe('ownership check template picker', () => {
       expect(result?.rendered).not.toContain('Harriet')
     })
 
-    it('rejects generic templates when seller and agent are both resolved', () => {
+    it('includes generic Supabase templates alongside personalized ones', () => {
       const resolvedContext = {
         seller_first_name: 'Amanda',
         seller_name: 'Amanda L Tallen',
@@ -377,10 +377,11 @@ describe('ownership check template picker', () => {
         'English',
       )
 
-      expect(pool).toHaveLength(0)
+      expect(pool).toHaveLength(1)
+      expect(pool[0]?.template.id).toBe('en-generic')
     })
 
-    it('rejects the generic "right person" ownership-check wording when seller and agent are resolved', () => {
+    it('accepts generic "right person" Supabase templates when they render', () => {
       const rightPersonTemplate = makeTemplate({
         id: 'en-right-person',
         language: 'English',
@@ -397,10 +398,11 @@ describe('ownership check template picker', () => {
         agent_first_name: 'Chris',
       })
 
-      expect(result).toBeNull()
+      expect(result).not.toBeNull()
+      expect(result?.template.id).toBe('en-right-person')
     })
 
-    it('still prefers the personalized first-touch template when a real prospect name is resolved', () => {
+    it('includes personalized Supabase templates when a real prospect name is resolved', () => {
       const resolvedContext = {
         seller_first_name: 'Maria',
         seller_name: 'Maria Lopez',
@@ -419,13 +421,40 @@ describe('ownership check template picker', () => {
       expect(pool.map((entry) => entry.template.id)).toContain('en-personalized')
     })
 
-    it('reports no compatible template only when truly nothing renders (e.g. agent also unresolved)', () => {
+    it('reports no compatible template only when nothing in the Supabase catalog renders', () => {
       const pool = buildOwnershipTemplatePool(
-        [personalizedFirstTouch, genericFirstTouch],
+        [personalizedFirstTouch],
         { seller_first_name: '', seller_name: '', owner_name: '', property_address: '665 Portland Ave', agent_name: '', agent_first_name: '' },
         'English',
       )
       expect(pool).toHaveLength(0)
+    })
+
+    it('applies Supabase rotation weights when provided', () => {
+      const templates = [
+        makeTemplate({ id: 'en-light', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
+        makeTemplate({ id: 'en-heavy', language: 'English', templateText: 'Hello {{seller_first_name}}, checking {{property_address}}' }),
+      ]
+      const rotationWeights = new Map([
+        ['en-light', 1],
+        ['en-heavy', 50],
+      ])
+
+      const originalRandom = Math.random
+      Math.random = () => 0.5
+      let selection = null
+      try {
+        selection = pickRandomOwnershipCheckTemplate(templates, context, 'English', {
+          rotationWeights,
+          excludeTemplateIds: [],
+        })
+      } finally {
+        Math.random = originalRandom
+      }
+
+      expect(selection?.templateId).toBe('en-heavy')
+      expect(selection?.weight).toBe(50)
+      expect(selection?.selectionReason).toBe('supabase_traffic_weighted')
     })
   })
 })

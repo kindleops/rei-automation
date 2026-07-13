@@ -135,7 +135,7 @@ describe('map ownership check send regression', () => {
     expect(values.seller_first_name).not.toContain('Trust')
   })
 
-  it('8. human name missing yields no ownership-check pool (blocks TextGrid "Hi," templates)', () => {
+  it('8. human name missing still allows Supabase templates that render without seller_first_name', () => {
     const context = buildOwnershipCheckTemplateContext({
       propertyId: 'prop-1',
       masterOwnerId: 'mo-1',
@@ -170,7 +170,7 @@ describe('map ownership check send regression', () => {
       context,
       'English',
     )
-    expect(pool).toHaveLength(0)
+    expect(pool.map((entry) => entry.template.id)).toEqual(['generic'])
   })
 
   it('8b. production Pathao case: sms_eligible false still supplies seller_first_name for ownership check', () => {
@@ -205,9 +205,9 @@ describe('map ownership check send regression', () => {
     expect(evaluated?.rendered).not.toContain('LLC')
   })
 
-  it('10. "Hi there" is never produced', () => {
+  it('10. active Supabase "Hi there" templates remain selectable when they render', () => {
     const selection = pickRandomOwnershipCheckTemplate(
-      [makeTemplate('bad', 'Hi there, this is {{agent_first_name}} about {{property_address}}.')],
+      [makeTemplate('supabase-hi-there', 'Hi there, this is {{agent_first_name}} about {{property_address}}.')],
       {
         seller_first_name: '',
         seller_name: '',
@@ -218,7 +218,7 @@ describe('map ownership check send regression', () => {
       },
       'English',
     )
-    expect(selection).toBeNull()
+    expect(selection?.templateId).toBe('supabase-hi-there')
   })
 
   it('16. canonical ph_ phone ID remains in phone_id', () => {

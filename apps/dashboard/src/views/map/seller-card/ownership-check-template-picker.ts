@@ -175,58 +175,51 @@ export type OwnershipTemplateSelection = {
 }
 
 export type EvaluateOwnershipTemplateOptions = {
-  /** When true and seller_first_name is resolved, reject templates that omit it from the greeting. */
-  requireSellerNameInGreeting?: boolean
+  rotationWeights?: Map<string, number>
 }
 
-export const evaluateOwnershipTemplate = (
+const resolveTemplateWeight = (
   template: SmsTemplate,
-  context: Record<string, string>,
-  options: EvaluateOwnershipTemplateOptions = {},
-): OwnershipTemplateCandidate | null => {
-  const requireSellerNameInGreeting = options.requireSellerNameInGreeting !== false
-  const { renderedText, missingVariables } = renderTemplate(template, context)
-  const rendered = renderedText.trim()
-  if (!rendered) return null
-  if (hasBlankGreeting(rendered)) return null
-  if (hasHiThereGreeting(rendered)) return null
-  if (hasUnresolvedTemplateTokens(rendered)) return null
-  if (hasEntityGreeting(rendered)) return null
-  if (missingVariables.length > 0) return null
-  const sellerFirstName = asString(context.seller_first_name, '').trim()
-  if (
-    requireSellerNameInGreeting
-    && sellerFirstName
-    && !greetingIncludesSellerFirstName(rendered, sellerFirstName)
-  ) {
-    return null
-  }
-  if (sellerFirstName && greetingUsesFullNameInsteadOfFirst(rendered, sellerFirstName)) {
-    return null
-  }
-  if (hasGenericRightPersonWording(rendered)) {
-    return null
-  }
-  if (containsForbiddenEntityGreeting(rendered, context)) return null
+  rotationWeights?: Map<string, number>,
+): number => {
+  const templateId = asString(template.templateId || template.id, '').trim()
+  const rotationWeight = templateId ? rotationWeights?.get(templateId) : undefined
+  if (rotationWeight && rotationWeight > 0) return rotationWeight
 
   const raw = template.raw as AnyRecord
   const metadata = (raw.metadata && typeof raw.metadata === 'object'
     ? raw.metadata
     : {}) as AnyRecord
-  const weight = Math.max(
-    1,
-    Number(raw.traffic_weight ?? metadata.traffic_weight ?? 0) || 0,
-  )
-  const resolvedWeight = weight > 0 ? weight : 1
+  const rowWeight = Number(raw.traffic_weight ?? metadata.traffic_weight ?? 0)
+  return rowWeight > 0 ? rowWeight : 1
+}
+
+/** Eligibility is render + identity safety only — template copy always comes from Supabase. */
+export const evaluateOwnershipTemplate = (
+  template: SmsTemplate,
+  context: Record<string, string>,
+  options: EvaluateOwnershipTemplateOptions = {},
+): OwnershipTemplateCandidate | null => {
+  const { renderedText, missingVariables } = renderTemplate(template, context)
+  const rendered = renderedText.trim()
+  if (!rendered) return null
+  if (hasUnresolvedTemplateTokens(rendered)) return null
+  if (missingVariables.length > 0) return null
+  if (hasEntityGreeting(rendered)) return null
+  if (containsForbiddenEntityGreeting(rendered, context)) return null
+
   const templateKey = asString(
-    raw.template_key ?? raw.template_id ?? template.templateId ?? template.id,
+    (template.raw as AnyRecord).template_key
+    ?? (template.raw as AnyRecord).template_id
+    ?? template.templateId
+    ?? template.id,
     template.id,
   )
 
   return {
     template,
     rendered,
-    weight: resolvedWeight,
+    weight: resolveTemplateWeight(template, options.rotationWeights),
     templateKey,
     language: template.language,
   }
@@ -273,22 +266,13 @@ export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateIds?: string[] } = {},
+  options: { excludeTemplateIds?: string[]; rotationWeights?: Map<string, number> } = {},
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
-  const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
-  const hasResolvedAgentName = Boolean(asString(context.agent_first_name, '').trim())
 
-  // Ownership check must greet the human seller by first name. Generic "Hi," / right-person
-  // templates are rejected by TextGrid and must never be selected from the map card.
-  if (!hasResolvedSellerName || !hasResolvedAgentName) {
-    return []
-  }
-
-  // Randomize across the full ownership_check catalog for this language — not a tiny
-  // first-touch subset that was starving map sends down to 1-2 repeated templates.
+  // Rotate across every active Supabase ownership_check row that renders for this context.
   let candidates = dedupeCandidates(
-    evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true }),
+    evaluateTemplates(languageScoped, context, { rotationWeights: options.rotationWeights }),
   )
   const excludeIds = Array.from(new Set(
     (options.excludeTemplateIds ?? [])
@@ -326,7 +310,7 @@ export const pickRandomOwnershipCheckTemplate = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateIds?: string[] } = {},
+  options: { excludeTemplateIds?: string[]; rotationWeights?: Map<string, number> } = {},
 ): OwnershipTemplateSelection | null => {
   const excludeIds = Array.from(new Set(
     (options.excludeTemplateIds ?? [])
@@ -335,15 +319,18 @@ export const pickRandomOwnershipCheckTemplate = (
   ))
   const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage, {
     excludeTemplateIds: excludeIds,
+    rotationWeights: options.rotationWeights,
   })
-  const picked = pickUniformRandom(pool)
+  const picked = pickWeightedRandom(pool)
   if (!picked) return null
 
   const pickedId = templateIdentity(picked.template)
   const excludedHit = excludeIds.filter((id) => id !== pickedId)
   const selectionReason = excludedHit.length
-    ? 'catalog_rotation_excluding_recent'
-    : 'uniform_catalog_random'
+    ? 'supabase_weighted_rotation_excluding_recent'
+    : picked.weight > 1
+      ? 'supabase_traffic_weighted'
+      : 'supabase_catalog_random'
 
   return {
     template: picked.template,
@@ -359,9 +346,48 @@ export const pickRandomOwnershipCheckTemplate = (
 }
 
 let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
+let rotationWeightCache: { expiresAt: number; weights: Map<string, number> } | null = null
 
 export const resetOwnershipCheckTemplateCacheForTests = (): void => {
   ownershipTemplateCache = null
+  rotationWeightCache = null
+}
+
+/** traffic_weight rows from Supabase v_ownership_template_rotation_control. */
+export const fetchOwnershipCheckRotationWeights = async (): Promise<Map<string, number>> => {
+  const now = Date.now()
+  if (rotationWeightCache && rotationWeightCache.expiresAt > now) {
+    return rotationWeightCache.weights
+  }
+
+  const weights = new Map<string, number>()
+  try {
+    const supabase = getSupabaseClient()
+    if (!supabase?.from) {
+      rotationWeightCache = { expiresAt: now + 60_000, weights }
+      return weights
+    }
+
+    const { data, error } = await supabase
+      .from('v_ownership_template_rotation_control')
+      .select('template_id, traffic_weight, block_reason')
+
+    if (!error && Array.isArray(data)) {
+      for (const row of data) {
+        const record = row as AnyRecord
+        const templateId = asString(record.template_id, '').trim()
+        const blockReason = asString(record.block_reason, '').trim()
+        const trafficWeight = Number(record.traffic_weight)
+        if (!templateId || blockReason || !(trafficWeight > 0)) continue
+        weights.set(templateId, trafficWeight)
+      }
+    }
+  } catch {
+    // Equal-weight fallback when rotation view is unavailable.
+  }
+
+  rotationWeightCache = { expiresAt: now + 60_000, weights }
+  return weights
 }
 
 /** Active ownership_check rows from Supabase sms_templates (via authenticated template API). */
@@ -502,7 +528,7 @@ export const pickOwnershipCheckTemplateForMap = async (
     random?: () => number
   } = {},
 ): Promise<OwnershipTemplateSelection | null> => {
-  const [templates, recentTemplateIds] = await Promise.all([
+  const [templates, recentTemplateIds, rotationWeights] = await Promise.all([
     fetchOwnershipCheckTemplates(),
     fetchRecentOwnershipCheckTemplateIds({
       propertyId: options.propertyId,
@@ -511,6 +537,7 @@ export const pickOwnershipCheckTemplateForMap = async (
       globalLimit: 12,
       localLimit: 3,
     }),
+    fetchOwnershipCheckRotationWeights(),
   ])
 
   const originalRandom = Math.random
@@ -520,6 +547,7 @@ export const pickOwnershipCheckTemplateForMap = async (
   try {
     return pickRandomOwnershipCheckTemplate(templates, context, ownerLanguage, {
       excludeTemplateIds: recentTemplateIds,
+      rotationWeights,
     })
   } finally {
     Math.random = originalRandom
