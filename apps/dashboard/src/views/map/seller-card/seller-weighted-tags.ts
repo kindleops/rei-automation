@@ -310,13 +310,13 @@ const TAG_REGISTRY: Record<string, TagDefinition> = {
     tooltip: 'Land asset — zoning and utility access are primary drivers.',
     source: 'property_type',
   },
-  cash_buyer_signal: {
-    label: 'Cash Buyer Signal',
+  buyer_demand: {
+    label: 'Buyer Demand',
     tier: 'context',
     category: 'market',
     weight: 44,
     sortPriority: 39,
-    tooltip: 'Market or tag signal suggests cash-buyer appetite in area.',
+    tooltip: 'Geographic buyer-demand signal supports exit liquidity.',
     source: 'property_flags',
   },
   buyer_demand_area: {
@@ -401,6 +401,8 @@ const resolveDefinition = (label: string): TagDefinition => {
   if (lower.includes('senior')) return TAG_REGISTRY.senior_owner
   if (lower.includes('llc')) return TAG_REGISTRY.llc
   if (lower.includes('trust')) return TAG_REGISTRY.trust_owner
+  if (lower.includes('cash') && lower.includes('buyer')) return TAG_REGISTRY.buyer_demand
+  if (lower.includes('buyer') && lower.includes('demand')) return TAG_REGISTRY.buyer_demand
 
   return {
     label,
@@ -526,7 +528,14 @@ export const buildWeightedTags = (
     'phone_score_final',
     'phone_score',
   ])))
-  if ((contactScore ?? 0) >= 70 && (phoneScore ?? 0) >= 60) add(TAG_REGISTRY.strong_contactability, 'medium')
+  const prospectName = text(firstDefined(record, [
+    'prospect_full_name',
+    'prospect_first_name',
+    'prospect_name',
+  ]))
+  if (prospectName && (contactScore ?? 0) >= 70 && (phoneScore ?? 0) >= 60) {
+    add(TAG_REGISTRY.strong_contactability, 'medium')
+  }
 
   return Array.from(tags.values()).sort((left, right) => {
     const tierDelta = TIER_ORDER[left.tier] - TIER_ORDER[right.tier]

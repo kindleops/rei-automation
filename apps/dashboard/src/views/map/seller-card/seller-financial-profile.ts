@@ -14,6 +14,7 @@ export type FinancialMeter = {
 export type FinancialProfileView = {
   fields: Array<{ label: string; value: string }>
   meters: FinancialMeter[]
+  summaryChips: Array<{ label: string; value: string }>
   pressureCaption: string | null
 }
 
@@ -52,20 +53,39 @@ export const buildFinancialProfile = (
       ? clamp((input.equityAmount / input.estimatedValue) * 100)
       : 0
 
+  const leverageCaption = leveragePercent == null
+    ? '—'
+    : leveragePercent >= 70
+      ? 'High'
+      : leveragePercent >= 40
+        ? 'Moderate'
+        : 'Low'
+
+  const repairCaption = repairBurdenPercent == null
+    ? '—'
+    : repairBurdenPercent >= 15
+      ? 'Heavy'
+      : repairBurdenPercent >= 8
+        ? 'Moderate'
+        : 'Light'
+
+  const summaryChips = [
+    { label: 'Equity', value: formatPercent(input.equityPercent) },
+    { label: 'Leverage', value: leverageCaption },
+    { label: 'Repair Burden', value: repairCaption },
+    { label: 'Free & Clear', value: freeAndClear ? 'Yes' : input.equityPercent != null ? 'No' : '—' },
+  ].filter((chip) => chip.value !== '—')
+
   const fields = [
     { label: 'Estimated Value', value: formatMoney(input.estimatedValue) },
-    { label: 'Equity %', value: formatPercent(input.equityPercent) },
     { label: 'Equity Amount', value: formatMoney(input.equityAmount) },
-    { label: 'Mortgage Balance', value: formatMoney(input.mortgageBalance) },
     { label: 'Repair Estimate', value: formatMoney(input.repairs) },
-    { label: 'Free & Clear', value: freeAndClear ? 'Yes' : input.equityPercent != null ? 'No' : '—' },
+    { label: 'Mortgage Balance', value: formatMoney(input.mortgageBalance) },
   ]
 
   if (assetClassKey === 'multifamily_2_4' || assetClassKey === 'multifamily_5_plus') {
-    fields.splice(4, 0, { label: 'Value / Unit', value: formatMoney(input.pricePerUnit) })
-  }
-
-  if (input.sqft && input.estimatedValue) {
+    fields.push({ label: 'Value / Unit', value: formatMoney(input.pricePerUnit) })
+  } else if (input.sqft && input.estimatedValue) {
     fields.push({ label: 'Value / Sqft', value: formatMoney(input.pricePerSqft) })
   }
 
@@ -83,7 +103,7 @@ export const buildFinancialProfile = (
       key: 'leverage',
       label: 'Leverage',
       percent: leveragePercent,
-      caption: leveragePercent >= 70 ? 'High' : leveragePercent >= 40 ? 'Moderate' : 'Low',
+      caption: leverageCaption,
     })
   }
 
@@ -92,19 +112,7 @@ export const buildFinancialProfile = (
       key: 'repairs',
       label: 'Repair burden',
       percent: repairBurdenPercent,
-      caption: repairBurdenPercent >= 15 ? 'Heavy' : repairBurdenPercent >= 8 ? 'Moderate' : 'Light',
-    })
-  }
-
-  if ((assetClassKey === 'multifamily_2_4' || assetClassKey === 'multifamily_5_plus') && input.pricePerUnit) {
-    const unitValuePercent = input.estimatedValue && input.units
-      ? clamp(Math.min(100, (input.pricePerUnit / (input.estimatedValue / input.units)) * 50))
-      : 50
-    meters.push({
-      key: 'value_unit',
-      label: 'Value / unit',
-      percent: unitValuePercent,
-      caption: formatMoney(input.pricePerUnit),
+      caption: repairCaption,
     })
   }
 
@@ -119,6 +127,7 @@ export const buildFinancialProfile = (
   return {
     fields: fields.filter((field) => field.value !== '—'),
     meters,
+    summaryChips,
     pressureCaption,
   }
 }
