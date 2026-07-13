@@ -1,4 +1,8 @@
 import { getSupabaseClient } from '../supabaseClient'
+import {
+  COMMAND_MAP_PROPERTY_DOSSIER_SELECT,
+  COMMAND_MAP_PROPERTY_PEEK_SELECT,
+} from '../../views/map/seller-card/seller-property-dossier-select'
 
 export type SoldCompFilters = {
   monthsBack?: number
@@ -187,6 +191,7 @@ export type CommandMapSellerPin = {
   streetview_image?: string | null
   map_image?: string | null
   satellite_image?: string | null
+  dossier_hydrated?: boolean | null
 }
 
 type MapBounds = {
@@ -196,11 +201,14 @@ type MapBounds = {
   maxLng: number
 }
 
+export type CommandMapDossierMode = 'peek' | 'focus'
+
 type DetailLookupOptions = {
   signal?: AbortSignal
   threadKey?: string | null
   masterOwnerId?: string | null
   prospectId?: string | null
+  dossierMode?: CommandMapDossierMode
 }
 
 const INSTITUTIONAL_NAMES = [
@@ -428,37 +436,6 @@ const withDetailQueryTimeout = async <T,>(
     if (timeoutId) clearTimeout(timeoutId)
   }
 }
-
-/** Extended property + owner dossier fields from properties + master_owners. */
-const COMMAND_MAP_PROPERTY_ENRICHMENT_SELECT = [
-  'property_id',
-  'streetview_image',
-  'map_image',
-  'satellite_image',
-  'effective_year_built',
-  'construction_type',
-  'building_condition',
-  'stories',
-  'zoning',
-  'county_land_use_code',
-  'lot_square_feet',
-  'lot_acreage',
-  'ownership_years',
-  'tax_delinquent',
-  'out_of_state_owner',
-  'absentee_owner',
-  'active_lien',
-  'total_loan_balance',
-  'loan_count',
-  'loan_type',
-  'assd_total_value',
-  'assd_land_value',
-  'assd_improvement_value',
-  'tax_amt',
-  'saleprice',
-  'sale_date',
-  'master_owner_id',
-].join(',')
 
 let lastSellerPinErrorMsg: string | null = null
 let lastSellerPinErrorAt = 0
@@ -1166,14 +1143,31 @@ const mapThreadStateRow = (row: Record<string, unknown> | null): Partial<Command
   }
 }
 
+const mapMasterOwnerFields = (
+  masterOwner: Record<string, unknown> | null,
+): Partial<CommandMapSellerPin> => ({
+  owner_priority_score: Number.isFinite(Number(masterOwner?.priority_score)) ? Number(masterOwner?.priority_score) : null,
+  owner_priority_tier: String(masterOwner?.priority_tier ?? '').trim() || null,
+  best_language: String(masterOwner?.best_language ?? '').trim() || null,
+  mailing_address_full: String(masterOwner?.primary_owner_address ?? '').trim() || null,
+  property_count: Number.isFinite(Number(masterOwner?.property_count)) ? Number(masterOwner?.property_count) : null,
+  portfolio_total_value: Number.isFinite(Number(masterOwner?.portfolio_total_value)) ? Number(masterOwner?.portfolio_total_value) : null,
+  portfolio_total_equity: Number.isFinite(Number(masterOwner?.portfolio_total_equity)) ? Number(masterOwner?.portfolio_total_equity) : null,
+  portfolio_total_loan_balance: Number.isFinite(Number(masterOwner?.portfolio_total_loan_balance)) ? Number(masterOwner?.portfolio_total_loan_balance) : null,
+  portfolio_total_tax_amount: Number.isFinite(Number(masterOwner?.portfolio_total_tax_amount)) ? Number(masterOwner?.portfolio_total_tax_amount) : null,
+  portfolio_total_units: Number.isFinite(Number(masterOwner?.portfolio_total_units)) ? Number(masterOwner?.portfolio_total_units) : null,
+})
+
 const mapPropertyEnrichmentRow = (
   row: Record<string, unknown> | null,
   masterOwner: Record<string, unknown> | null,
-): Partial<CommandMapSellerPin> | null => {
+  dossierMode: CommandMapDossierMode = 'peek',
+): (Partial<CommandMapSellerPin> & Record<string, unknown>) | null => {
   if (!row) return null
   const taxAmt = Number(row.tax_amt)
   const salePrice = Number(row.saleprice)
-  return {
+  const ownerFields = mapMasterOwnerFields(masterOwner)
+  const aliases: Record<string, unknown> = {
     property_id: String(row.property_id ?? '').trim(),
     master_owner_id: String(row.master_owner_id ?? masterOwner?.master_owner_id ?? '').trim() || null,
     streetview_image: String(row.streetview_image ?? '').trim() || null,
@@ -1201,17 +1195,16 @@ const mapPropertyEnrichmentRow = (
     annual_taxes: Number.isFinite(taxAmt) ? taxAmt : null,
     last_sale_amount: Number.isFinite(salePrice) ? salePrice : null,
     last_sale_date: String(row.sale_date ?? '').trim() || null,
-    owner_priority_score: Number.isFinite(Number(masterOwner?.priority_score)) ? Number(masterOwner?.priority_score) : null,
-    owner_priority_tier: String(masterOwner?.priority_tier ?? '').trim() || null,
-    best_language: String(masterOwner?.best_language ?? '').trim() || null,
-    mailing_address_full: String(masterOwner?.primary_owner_address ?? '').trim() || null,
-    property_count: Number.isFinite(Number(masterOwner?.property_count)) ? Number(masterOwner?.property_count) : null,
-    portfolio_total_value: Number.isFinite(Number(masterOwner?.portfolio_total_value)) ? Number(masterOwner?.portfolio_total_value) : null,
-    portfolio_total_equity: Number.isFinite(Number(masterOwner?.portfolio_total_equity)) ? Number(masterOwner?.portfolio_total_equity) : null,
-    portfolio_total_loan_balance: Number.isFinite(Number(masterOwner?.portfolio_total_loan_balance)) ? Number(masterOwner?.portfolio_total_loan_balance) : null,
-    portfolio_total_tax_amount: Number.isFinite(Number(masterOwner?.portfolio_total_tax_amount)) ? Number(masterOwner?.portfolio_total_tax_amount) : null,
-    portfolio_total_units: Number.isFinite(Number(masterOwner?.portfolio_total_units)) ? Number(masterOwner?.portfolio_total_units) : null,
+    dossier_hydrated: dossierMode === 'focus',
+    _dossierHydrated: dossierMode === 'focus',
+    ...ownerFields,
   }
+
+  if (dossierMode === 'focus') {
+    return { ...row, ...aliases }
+  }
+
+  return aliases
 }
 
 export const loadCommandMapSellerPinDetail = async (
@@ -1315,8 +1308,13 @@ export const loadCommandMapSellerPinDetail = async (
     return mapThreadStateRow(data as Record<string, unknown> | null)
   }
 
+  const dossierMode: CommandMapDossierMode = options.dossierMode ?? 'peek'
+  const propertySelect = dossierMode === 'focus'
+    ? COMMAND_MAP_PROPERTY_DOSSIER_SELECT
+    : COMMAND_MAP_PROPERTY_PEEK_SELECT
+
   const readPropertyEnrichment = async (resolvedPropertyId: string, masterOwnerId: string | null) => {
-    let query = supabase.from('properties').select(COMMAND_MAP_PROPERTY_ENRICHMENT_SELECT).eq('property_id', resolvedPropertyId)
+    let query = supabase.from('properties').select(propertySelect).eq('property_id', resolvedPropertyId)
     if (options.signal) query = query.abortSignal(options.signal)
     const { data: propertyRow, error: propertyError } = await query.limit(1).maybeSingle()
     if (propertyError) {
@@ -1338,7 +1336,7 @@ export const loadCommandMapSellerPinDetail = async (
       masterOwner = (ownerRow as Record<string, unknown> | null) ?? null
     }
 
-    return mapPropertyEnrichmentRow(propertyData, masterOwner)
+    return mapPropertyEnrichmentRow(propertyData, masterOwner, dossierMode)
   }
 
   const [sellerWorkItem, identityFields, threadState, sellerWorkItemContact] = await Promise.all([
