@@ -3,37 +3,18 @@ import { safeHumanName } from '../../../lib/identity/entityDetection'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import {
   buildAssetInput,
-  buildContextualLine,
   resolveSellerAssetPresentation,
 } from './seller-asset-presentation-registry'
 import { buildCanonicalLeadStatePresentation } from './seller-lead-state-presentation'
 import { resolveFollowUpEligibility, hasPriorOutboundContact } from './seller-follow-up-eligibility'
 import { resolveSellerActionBar } from './seller-action-bar'
-import { buildFinancialProfile } from './seller-financial-profile'
-import {
-  buildOwnerPressureInput,
-  computeAcquisitionFitProfile,
-  computeOwnerPressureProfile,
-} from './seller-owner-pressure'
-import {
-  buildProspectContactabilityFields,
-  buildProspectContactabilityProfile,
-} from './seller-prospect-contactability'
-import { buildPropertyProfileGroups } from './seller-property-profile'
+import { buildPropertyDossierContract, buildOperationalStateLine } from './seller-property-dossier-contract'
 import { buildWeightedTags, collapseWeightedTags } from './seller-weighted-tags'
 import {
-  asBoolean,
   asNumber,
-  classifyPriorityScore,
   firstDefined,
-  formatDate,
-  formatInteger,
-  formatMoney,
-  formatPercent,
-  formatRelativeUpper,
   nullIfZeroish,
   text,
-  titleize,
 } from './seller-map-card-formatters'
 
 const resolveMasterOwnerName = (record: Record<string, unknown>): string => {
@@ -61,21 +42,6 @@ const resolveHeaderDisplayName = (record: Record<string, unknown>): string => {
   return resolveMasterOwnerName(record)
 }
 
-const resolveCanonicalPhone = (record: Record<string, unknown>): string | null => {
-  const phone = text(firstDefined(record, [
-    'canonical_e164',
-    'seller_phone',
-    'prospect_best_phone',
-    'display_phone',
-  ]))
-  if (!phone || phone.toLowerCase() === 'no phone') return null
-  return phone
-}
-
-const resolveContactStateLabel = (
-  canonical: ReturnType<typeof buildCanonicalLeadStatePresentation>,
-): string => canonical.statusLabel || 'Not Contacted'
-
 const resolvePropertyImage = (record: Record<string, unknown>, address: string): string | null => {
   const direct = text(firstDefined(record, [
     'streetview_image',
@@ -93,79 +59,34 @@ const resolvePropertyImage = (record: Record<string, unknown>, address: string):
   return null
 }
 
-const mapWeightedTagsToFlags = (
-  tags: ReturnType<typeof buildWeightedTags>,
-  limit: number,
-): SellerMapCardViewModel['flags'] => {
-  const { visible } = collapseWeightedTags(tags, limit)
-  return visible.map((tag) => ({
-    key: tag.key,
-    label: tag.label,
-    severity: tag.severity,
-    tier: tag.tier,
-    tooltip: tag.tooltip,
-  }))
-}
-
-const buildActivity = (
-  record: Record<string, unknown>,
+const buildHeaderBadges = (
   canonical: ReturnType<typeof buildCanonicalLeadStatePresentation>,
-): SellerMapCardViewModel['activity'] => {
-  const suppressionReason = text(firstDefined(record, ['suppression_reason', 'suppressionReason']))
-  if (canonical.messagingBlocked || text(firstDefined(record, ['inbox_category'])).includes('suppressed')) {
-    return {
-      kind: 'suppressed',
-      headline: 'SUPPRESSED',
-      detail: suppressionReason || 'No messaging action permitted',
-      timestamp: null,
-    }
+  presentation: ReturnType<typeof resolveSellerAssetPresentation>,
+  priorityScore: number | null,
+  units: number | null,
+): SellerMapCardViewModel['headerBadges'] => {
+  const badges: SellerMapCardViewModel['headerBadges'] = [
+    { key: 'stage', label: canonical.stageLabel, tone: 'stage' },
+    { key: 'status', label: canonical.statusLabel, tone: 'status' },
+  ]
+  if (priorityScore != null) {
+    badges.push({ key: 'score', label: `Score ${Math.round(priorityScore)}`, tone: 'score' })
   }
-
-  const deliveryStatus = text(firstDefined(record, ['delivery_status', 'deliveryStatus', 'latest_delivery_status']))
-  const deliveryFailedAt = text(firstDefined(record, ['delivery_failed_at', 'failed_at', 'latest_failed_at']))
-  if (deliveryStatus.toLowerCase() === 'failed' || deliveryFailedAt) {
-    return {
-      kind: 'delivery_failed',
-      headline: `DELIVERY FAILED${deliveryFailedAt ? ` · ${formatRelativeUpper(deliveryFailedAt)}` : ''}`,
-      detail: text(firstDefined(record, ['delivery_error', 'error_message', 'failure_reason'])) || 'Provider rejected destination number',
-      timestamp: deliveryFailedAt || null,
-    }
+  badges.push({ key: 'asset', label: presentation.label.toUpperCase(), tone: 'asset' })
+  if (units != null && units > 1) {
+    badges.push({ key: 'units', label: `${units} Units`, tone: 'units' })
   }
-
-  const lastInboundText = text(firstDefined(record, ['last_inbound_text', 'lastInboundText', 'latest_inbound_body', 'last_reply_body']))
-  const lastInboundAt = text(firstDefined(record, ['last_inbound_at', 'lastInboundAt', 'last_reply_at', 'lastReplyAt']))
-  if (lastInboundText || canonical.status === 'new_reply') {
-    return {
-      kind: 'last_reply',
-      headline: `LAST REPLY${lastInboundAt ? ` · ${formatRelativeUpper(lastInboundAt)}` : ''}`,
-      detail: lastInboundText || text(firstDefined(record, ['latest_message_body', 'latestMessageBody'])) || null,
-      timestamp: lastInboundAt || null,
-    }
-  }
-
-  const lastOutboundAt = text(firstDefined(record, ['last_outbound_at', 'lastOutboundAt', 'last_contact_at', 'lastContactAt', 'latest_message_at']))
-  const followUpDueAt = text(firstDefined(record, ['next_follow_up_at', 'follow_up_due_at', 'followUpDueAt']))
-  const followUpDetail = canonical.status === 'follow_up_due' || followUpDueAt
-    ? 'Follow-up due today'
-    : text(firstDefined(record, ['last_outbound_text', 'lastOutboundText', 'latest_message_body'])) || null
-
-  return {
-    kind: lastOutboundAt ? 'last_contacted' : 'none',
-    headline: lastOutboundAt ? `LAST CONTACTED · ${formatRelativeUpper(lastOutboundAt)}` : 'NO CONTACT YET',
-    detail: followUpDetail,
-    timestamp: lastOutboundAt || null,
-  }
+  return badges
 }
 
 const resolveEdgeAccent = (
-  activity: SellerMapCardViewModel['activity'],
   canonical: ReturnType<typeof buildCanonicalLeadStatePresentation>,
+  messagingBlocked: boolean,
 ): SellerMapCardViewModel['edgeAccent'] => {
-  if (activity.kind === 'suppressed') return 'suppressed'
-  if (activity.kind === 'delivery_failed') return 'failed'
+  if (messagingBlocked) return 'suppressed'
   if (canonical.status === 'follow_up_due') return 'due'
   if (canonical.temperature === 'hot') return 'hot'
-  if (activity.kind === 'last_reply' || canonical.status === 'new_reply') return 'reply'
+  if (canonical.status === 'new_reply') return 'reply'
   return 'default'
 }
 
@@ -187,10 +108,10 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     'owner_priority_score',
     'master_owner_priority_score',
     'mo_priority_score',
+    'priority_score',
   ])))
-  const priorityTier = text(firstDefined(record, ['owner_priority_tier', 'priority_tier', 'priorityTier'])) || null
-  const priority = classifyPriorityScore(priorityScore, priorityTier)
 
+  const hasPriorContact = hasPriorOutboundContact(record)
   const equityPercent = assetInput.equityPercent
   const yearsOwned = nullIfZeroish(asNumber(firstDefined(record, ['ownership_years', 'ownershipYears', 'years_owned'])))
   const portfolioCount = nullIfZeroish(asNumber(firstDefined(record, [
@@ -199,7 +120,6 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     'owner_property_count',
   ])))
   const ownerType = text(firstDefined(record, ['owner_type'])) || null
-  const hasPriorContact = hasPriorOutboundContact(record)
 
   const weightedTags = buildWeightedTags(record, {
     equityPercent,
@@ -209,69 +129,16 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     ownershipYears: yearsOwned,
     ownerType,
     hasPriorContact,
-    ownerPriorityScore: nullIfZeroish(asNumber(firstDefined(record, [
-      'owner_priority_score',
-      'master_owner_priority_score',
-      'mo_priority_score',
-    ]))),
+    ownerPriorityScore: priorityScore,
   })
-  const flags = mapWeightedTagsToFlags(weightedTags, 10)
-  const activity = buildActivity(record, canonical)
-
-  const financialProfile = buildFinancialProfile({
-    estimatedValue: assetInput.estimatedValue,
-    equityAmount: assetInput.equityAmount,
-    equityPercent: assetInput.equityPercent,
-    mortgageBalance: nullIfZeroish(asNumber(firstDefined(record, ['mortgage_balance', 'loan_balance', 'total_loan_balance']))),
-    repairs: assetInput.repairs,
-    pricePerUnit: assetInput.pricePerUnit,
-    pricePerSqft: assetInput.pricePerSqft,
-    units: assetInput.units,
-    sqft: assetInput.sqft,
-  }, presentation.key)
-
-  const ownerPressureInput = buildOwnerPressureInput(record)
-  const ownerPressureRaw = computeOwnerPressureProfile(ownerPressureInput)
-  const acquisitionFitRaw = computeAcquisitionFitProfile(ownerPressureInput)
-
-  const focusFinancialFields = financialProfile.fields.length > 0
-    ? financialProfile.fields
-    : [
-    { label: 'Estimated Value', value: formatMoney(assetInput.estimatedValue) },
-    { label: 'Equity Amount', value: formatMoney(assetInput.equityAmount) },
-    { label: 'Equity %', value: formatPercent(assetInput.equityPercent) },
-    { label: 'Repairs', value: formatMoney(assetInput.repairs) },
-    { label: 'Mortgage Balance', value: formatMoney(nullIfZeroish(asNumber(firstDefined(record, ['mortgage_balance', 'loan_balance'])))) },
-    { label: 'Assessed Value', value: formatMoney(nullIfZeroish(asNumber(firstDefined(record, ['assessed_total_value', 'total_assessed_value', 'assessed_value'])))) },
-    { label: 'Annual Taxes', value: formatMoney(nullIfZeroish(asNumber(firstDefined(record, ['annual_taxes', 'tax_amount'])))) },
-    { label: 'Last Sale', value: formatMoney(nullIfZeroish(asNumber(firstDefined(record, ['last_sale_amount', 'lastSaleAmount'])))) },
-    { label: 'Last Sale Date', value: formatDate(text(firstDefined(record, ['last_sale_date', 'lastSaleDate', 'sale_date']))) },
-  ].filter((field) => field.value !== '—')
-
-  const focusOwnerFields = [
-    { label: 'Mailing Address', value: text(firstDefined(record, ['mailing_address_full', 'owner_mailing_address', 'mailing_address'])) || '—' },
-    { label: 'Years Owned', value: yearsOwned != null ? `${formatInteger(yearsOwned)} yrs` : '—' },
-    { label: 'Absentee', value: asBoolean(firstDefined(record, ['absentee_owner'])) === true ? 'Yes' : asBoolean(firstDefined(record, ['absentee_owner'])) === false ? 'No' : '—' },
-    { label: 'Out of State', value: asBoolean(firstDefined(record, ['out_of_state_owner'])) === true ? 'Yes' : asBoolean(firstDefined(record, ['out_of_state_owner'])) === false ? 'No' : '—' },
-    { label: 'Free & Clear', value: (equityPercent ?? 0) >= 95 ? 'Yes' : equityPercent != null ? 'No' : '—' },
-    { label: 'Portfolio', value: portfolioCount != null ? formatInteger(portfolioCount) : '—' },
-  ].filter((field) => field.value !== '—')
-
-  const peekMetrics = presentation.buildPeekMetrics(assetInput)
-  const focusMetrics = peekMetrics
-
-  const intelligenceStrip = [
-    { label: 'Condition', value: text(assetInput.condition) || '—' },
-    { label: 'Effective Built', value: formatInteger(assetInput.effectiveYearBuilt) },
-    { label: 'Construction', value: text(assetInput.constructionType) ? titleize(text(assetInput.constructionType)) : '—' },
-    { label: 'Priority', value: priorityScore != null ? String(Math.round(priorityScore)) : 'UNSCORED' },
-  ]
+  const { visible: weightedSignals } = collapseWeightedTags(weightedTags, 10)
 
   const threadKey = text(firstDefined(record, ['thread_key', 'threadKey', 'conversation_id'])) || null
   const suppressionReason = text(firstDefined(record, ['suppression_reason'])) || null
   const messagingBlockReason = canonical.messagingBlocked
     ? (suppressionReason || canonical.contactabilityLabel)
     : null
+
   const followUpEligibility = resolveFollowUpEligibility(record, {
     threadKey,
     messagingBlocked: canonical.messagingBlocked,
@@ -290,160 +157,48 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     hasThread: Boolean(threadKey) && !threadKey?.startsWith('property:'),
   })
 
-  const prospectProfileRaw = buildProspectContactabilityProfile(record, {
-    suppressed: canonical.messagingBlocked,
-    suppressionReason,
-    isUncontacted: followUpEligibility.isUncontacted,
-    hasPriorContact,
-  })
-  const prospectProfile = {
-    ...prospectProfileRaw,
-    fields: buildProspectContactabilityFields(prospectProfileRaw),
-  }
+  const dossierReady = record.dossier_hydrated === true || record._dossierHydrated === true
+  const dossier = dossierReady ? buildPropertyDossierContract(record, presentation.key) : null
 
-  const activeCommunication = ['contacted', 'new_reply', 'follow_up_due', 'negotiating', 'needs_response'].includes(canonical.status)
-    || hasPriorContact
-
-  const focusOperationFields = [
-    { label: 'Campaign', value: text(firstDefined(record, ['campaign_name', 'campaignName'])) || '—' },
-    { label: 'Automation', value: text(firstDefined(record, ['automation_state', 'automationState', 'execution_state'])) || '—' },
-    { label: 'Follow-Up Due', value: formatDate(text(firstDefined(record, ['next_follow_up_at', 'follow_up_due_at']))) },
-    { label: 'Next Action', value: formatDate(text(firstDefined(record, ['next_action_at', 'next_scheduled_for']))) },
-    { label: 'Last Inbound', value: formatDate(text(firstDefined(record, ['last_inbound_at', 'last_reply_at']))) },
-    { label: 'Last Outbound', value: formatDate(text(firstDefined(record, ['last_outbound_at', 'latest_message_at']))) },
-    { label: 'Delivery', value: text(firstDefined(record, ['delivery_status', 'latest_delivery_status'])) || '—' },
-  ].filter((field) => field.value !== '—')
-
-  const partialVm = {
+  return {
     propertyId: text(firstDefined(record, ['property_id', 'propertyId', 'id'])),
     threadKey,
     headerDisplayName: resolveHeaderDisplayName(record),
-    canonicalPhone: resolveCanonicalPhone(record),
-    masterOwner: {
-      id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId', 'owner_id', 'ownerId'])) || null,
-      displayName: resolveMasterOwnerName(record),
-      mailingAddress: text(firstDefined(record, ['mailing_address_full', 'owner_mailing_address', 'mailing_address'])) || null,
-      yearsOwned,
-      absentee: asBoolean(firstDefined(record, ['absentee_owner', 'absenteeOwner'])),
-      outOfState: asBoolean(firstDefined(record, ['out_of_state_owner', 'outOfStateOwner'])),
-      freeAndClear: equityPercent != null ? equityPercent >= 95 : null,
-      portfolioCount,
-      contactability: canonical.contactabilityLabel,
-      suppressed: canonical.messagingBlocked,
-      dnc: canonical.contactability === 'dnc' || canonical.contactability === 'opted_out',
-      priorityScore,
-      priorityClassification: priority.classification,
-      prioritySignals: flags.slice(0, 3).map((flag) => flag.label),
-    },
     property: {
       address,
       imageUrl: resolvePropertyImage(record, address),
       assetType: presentation.label,
       assetClassKey: presentation.key,
-      subtype: assetInput.subtype,
       units: assetInput.units,
-      beds: assetInput.beds,
-      baths: assetInput.baths,
-      sqft: assetInput.sqft,
-      lotSqft: assetInput.lotSqft,
-      acreage: assetInput.acreage,
-      yearBuilt: assetInput.yearBuilt,
-      effectiveYearBuilt: assetInput.effectiveYearBuilt,
-      constructionType: assetInput.constructionType,
-      condition: assetInput.condition,
-      stories: assetInput.stories,
-      zoning: assetInput.zoning,
-      landUse: assetInput.landUse,
-      roadAccess: assetInput.roadAccess,
-      avgSqftPerUnit: assetInput.avgSqftPerUnit,
-      avgBedsPerUnit: assetInput.avgBedsPerUnit,
-      avgBathsPerUnit: assetInput.avgBathsPerUnit,
-      occupancyCode: text(firstDefined(record, ['occupancy_code', 'occupancy'])) || null,
-    },
-    financials: {
-      estimatedValue: assetInput.estimatedValue,
-      estimatedEquity: assetInput.equityAmount,
-      equityPercent: assetInput.equityPercent,
-      repairs: assetInput.repairs,
-      mortgageBalance: nullIfZeroish(asNumber(firstDefined(record, ['mortgage_balance', 'loan_balance']))),
-      loanCount: nullIfZeroish(asNumber(firstDefined(record, ['loan_count']))),
-      loanType: text(firstDefined(record, ['loan_type'])) || null,
-      assessedLandValue: nullIfZeroish(asNumber(firstDefined(record, ['assessed_land_value']))),
-      assessedImprovementValue: nullIfZeroish(asNumber(firstDefined(record, ['assessed_improvement_value']))),
-      assessedTotalValue: nullIfZeroish(asNumber(firstDefined(record, ['assessed_total_value', 'assessed_value']))),
-      annualTaxes: nullIfZeroish(asNumber(firstDefined(record, ['annual_taxes', 'tax_amount']))),
-      lastSaleAmount: nullIfZeroish(asNumber(firstDefined(record, ['last_sale_amount', 'lastSaleAmount']))),
-      lastSaleDate: text(firstDefined(record, ['last_sale_date', 'lastSaleDate'])) || null,
-      pricePerSqft: assetInput.pricePerSqft,
-      pricePerUnit: assetInput.pricePerUnit,
-      valuePerAcre: assetInput.valuePerAcre,
     },
     operations: {
       stage: canonical.stage,
-      stageLabel: canonical.stageLabel,
       status: canonical.status,
+      stageLabel: canonical.stageLabel,
       statusLabel: canonical.statusLabel,
-      temperature: canonical.temperature,
-      temperatureLabel: canonical.temperatureLabel,
-      followUpEligible: followUpEligibility.canExecute,
-      followUpDueAt: text(firstDefined(record, ['next_follow_up_at', 'follow_up_due_at'])) || null,
-      nextActionAt: text(firstDefined(record, ['next_action_at', 'next_scheduled_for'])) || null,
-      campaignName: text(firstDefined(record, ['campaign_name'])) || null,
-      automationState: text(firstDefined(record, ['automation_state', 'execution_state'])) || 'none',
-      suppressionReason: text(firstDefined(record, ['suppression_reason'])) || null,
     },
-    conversation: {
-      lastInboundText: text(firstDefined(record, ['last_inbound_text', 'latest_inbound_body'])) || null,
-      lastInboundAt: text(firstDefined(record, ['last_inbound_at', 'last_reply_at'])) || null,
-      lastOutboundText: text(firstDefined(record, ['last_outbound_text', 'latest_outbound_body'])) || null,
-      lastOutboundAt: text(firstDefined(record, ['last_outbound_at', 'latest_message_at'])) || null,
-      deliveryStatus: text(firstDefined(record, ['delivery_status', 'latest_delivery_status'])) || null,
-    },
-    flags,
-    weightedTags: flags,
+    headerBadges: buildHeaderBadges(canonical, presentation, priorityScore, assetInput.units),
     assetSummaryLine: presentation.buildSummaryLine(assetInput) || '—',
-    contextualLine: buildContextualLine(record) || null,
-    peekMetrics,
-    focusMetrics,
-    intelligenceStrip,
+    peekMetrics: presentation.buildPeekMetrics(assetInput),
+    weightedSignals: weightedSignals.map((tag) => ({
+      key: tag.key,
+      label: tag.label,
+      severity: tag.severity,
+      tier: tag.tier,
+      tooltip: tag.tooltip,
+    })),
+    operationalState: buildOperationalStateLine(record, canonical.statusLabel, canonical.messagingBlocked, messagingBlockReason),
+    dossier,
+    dossierReady,
     followUpEligibility,
     actionBar,
-    financialProfile,
-    ownerPressure: {
-      score: ownerPressureRaw.score,
-      tier: ownerPressureRaw.tier,
-      label: ownerPressureRaw.label,
-      drivers: ownerPressureRaw.drivers,
-      confidence: ownerPressureRaw.confidence,
-      summary: ownerPressureRaw.summary,
-    },
-    acquisitionFit: {
-      score: acquisitionFitRaw.score,
-      tier: acquisitionFitRaw.tier,
-      label: acquisitionFitRaw.label,
-      drivers: acquisitionFitRaw.drivers,
-      summary: acquisitionFitRaw.summary,
-    },
-    prospectProfile,
-    focusProfileFields: presentation.buildFocusProfileFields(assetInput).filter((field) => field.value !== '—'),
-    focusFinancialFields,
-    focusOwnerFields,
-    focusOperationFields,
-    activity,
-    edgeAccent: resolveEdgeAccent(activity, canonical),
+    edgeAccent: resolveEdgeAccent(canonical, canonical.messagingBlocked),
     messagingBlocked: canonical.messagingBlocked,
     messagingBlockReason,
-    contactStateLabel: resolveContactStateLabel(canonical),
-    activeCommunication,
-  }
-
-  const fullVm: SellerMapCardViewModel = {
-    ...partialVm,
-    propertyProfileGroups: [],
-  }
-
-  return {
-    ...fullVm,
-    propertyProfileGroups: buildPropertyProfileGroups(fullVm, record),
+    masterOwner: {
+      id: text(firstDefined(record, ['master_owner_id', 'masterOwnerId', 'owner_id', 'ownerId'])) || null,
+      displayName: resolveMasterOwnerName(record),
+      priorityScore,
+    },
   }
 }

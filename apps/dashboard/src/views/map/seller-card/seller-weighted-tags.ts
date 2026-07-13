@@ -1,9 +1,7 @@
 import type { SellerMapCardFlag } from './seller-map-card.types'
 import {
   asBoolean,
-  asNumber,
   firstDefined,
-  nullIfZeroish,
   parseTagValues,
   text,
   titleize,
@@ -399,10 +397,7 @@ const resolveDefinition = (label: string): TagDefinition => {
   if (lower.includes('vacant')) return TAG_REGISTRY.vacant
   if (lower.includes('tired')) return TAG_REGISTRY.tired_landlord
   if (lower.includes('senior')) return TAG_REGISTRY.senior_owner
-  if (lower.includes('llc')) return TAG_REGISTRY.llc
   if (lower.includes('trust')) return TAG_REGISTRY.trust_owner
-  if (lower.includes('cash') && lower.includes('buyer')) return TAG_REGISTRY.buyer_demand
-  if (lower.includes('buyer') && lower.includes('demand')) return TAG_REGISTRY.buyer_demand
 
   return {
     label,
@@ -419,16 +414,6 @@ const tierToSeverity = (tier: WeightedTagTier): SellerMapCardFlag['severity'] =>
   if (tier === 'critical') return 'high'
   if (tier === 'motivation' || tier === 'positive') return 'medium'
   return 'low'
-}
-
-const hasDialablePhone = (record: Record<string, unknown>): boolean => {
-  const phone = text(firstDefined(record, [
-    'canonical_e164',
-    'seller_phone',
-    'prospect_best_phone',
-    'display_phone',
-  ]))
-  return Boolean(phone) && phone.toLowerCase() !== 'no phone'
 }
 
 export const buildWeightedTags = (
@@ -463,6 +448,8 @@ export const buildWeightedTags = (
     })
   }
 
+  const FORBIDDEN_IMPORTED = /buyer demand|cash buyer|has phone|phone coverage|sms eligible|no contact|llc|corporate owner|multifamily 2|2 units|2–4 units/i
+
   for (const raw of parseTagValues(firstDefined(record, [
     'property_flags_json',
     'property_flags_text',
@@ -472,7 +459,10 @@ export const buildWeightedTags = (
     'seller_tags_text',
     'podio_tags',
   ]))) {
-    add(resolveDefinition(titleize(raw)), 'medium')
+    if (FORBIDDEN_IMPORTED.test(raw)) continue
+    const definition = resolveDefinition(titleize(raw))
+    if (['has_phone', 'sms_eligible', 'no_contact_yet', 'buyer_demand', 'corporate_owner', 'llc', 'multifamily_2_4', 'multifamily_5_plus', 'commercial', 'storage', 'land'].includes(normalizeTagKey(definition.label))) continue
+    add(definition, 'medium')
   }
 
   if ((context.equityPercent ?? 0) >= 95) add(TAG_REGISTRY.free_and_clear)
@@ -489,53 +479,9 @@ export const buildWeightedTags = (
     else if (context.ownershipYears >= 7) add(TAG_REGISTRY.mid_term_owner)
   }
 
-  if ((context.portfolioCount ?? 0) >= 2) add(TAG_REGISTRY.portfolio_owner)
-
-  const ownerType = text(context.ownerType).toLowerCase()
-  if (ownerType.includes('corporate') || ownerType.includes('llc') || ownerType.includes('trust')) {
-    add(TAG_REGISTRY.corporate_complexity)
-    if (ownerType.includes('llc')) add(TAG_REGISTRY.llc)
-    if (ownerType.includes('trust')) add(TAG_REGISTRY.trust_owner)
-    if (ownerType.includes('corporate')) add(TAG_REGISTRY.corporate_owner)
-  }
-
-  if (record.sms_eligible === true) add(TAG_REGISTRY.sms_eligible)
-  if (hasDialablePhone(record)) add(TAG_REGISTRY.has_phone)
-
-  const stage = text(firstDefined(record, ['lifecycle_stage', 'seller_stage', 'stage'])).toLowerCase()
-  if (stage.includes('owner_confirmed') || stage.includes('ownership_confirmation')) add(TAG_REGISTRY.owner_confirmed)
-
   if (text(firstDefined(record, ['execution_state'])).toLowerCase() === 'issue') add(TAG_REGISTRY.issue)
   if (text(firstDefined(record, ['seller_state'])).toLowerCase() === 'hot'
     || asBoolean(firstDefined(record, ['is_urgent'])) === true) add(TAG_REGISTRY.urgent)
-
-  if (context.assetClassKey === 'multifamily_5_plus') add(TAG_REGISTRY.multifamily_5_plus)
-  if (context.assetClassKey === 'multifamily_2_4') add(TAG_REGISTRY.multifamily_2_4)
-  if (context.assetClassKey === 'land') add(TAG_REGISTRY.land)
-  if (context.assetClassKey === 'storage') add(TAG_REGISTRY.storage)
-  if (['retail', 'office', 'industrial', 'other_commercial'].includes(context.assetClassKey)) add(TAG_REGISTRY.commercial)
-
-  if (!context.hasPriorContact) add(TAG_REGISTRY.no_contact_yet)
-  if (context.ownerPriorityScore == null) add(TAG_REGISTRY.unscored)
-
-  const contactScore = nullIfZeroish(asNumber(firstDefined(record, [
-    'prospect_contact_score',
-    'contact_score_final',
-    'contact_score',
-  ])))
-  const phoneScore = nullIfZeroish(asNumber(firstDefined(record, [
-    'prospect_phone_score',
-    'phone_score_final',
-    'phone_score',
-  ])))
-  const prospectName = text(firstDefined(record, [
-    'prospect_full_name',
-    'prospect_first_name',
-    'prospect_name',
-  ]))
-  if (prospectName && (contactScore ?? 0) >= 70 && (phoneScore ?? 0) >= 60) {
-    add(TAG_REGISTRY.strong_contactability, 'medium')
-  }
 
   return Array.from(tags.values()).sort((left, right) => {
     const tierDelta = TIER_ORDER[left.tier] - TIER_ORDER[right.tier]

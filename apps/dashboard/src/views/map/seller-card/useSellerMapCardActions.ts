@@ -190,13 +190,17 @@ export const buildThreadFromViewModel = (
     ownerName: vm.masterOwner.displayName,
     sellerName: vm.masterOwner.displayName,
     subject: vm.property.address,
-    preview: vm.activity.detail || '',
+    preview: text(firstDefined(record, ['last_inbound_text', 'latest_inbound_body'])) || '',
     status: 'read',
-    priority: vm.operations.temperature === 'hot' ? 'urgent' : 'normal',
-    sentiment: vm.operations.temperature === 'hot' ? 'hot' : vm.operations.temperature === 'warm' ? 'warm' : 'neutral',
+    priority: text(firstDefined(record, ['lead_temperature', 'temperature'])) === 'hot' ? 'urgent' : 'normal',
+    sentiment: text(firstDefined(record, ['lead_temperature', 'temperature'])) === 'hot'
+      ? 'hot'
+      : text(firstDefined(record, ['lead_temperature', 'temperature'])) === 'warm'
+        ? 'warm'
+        : 'neutral',
     messageCount: 0,
-    lastMessageLabel: vm.activity.headline,
-    lastMessageIso: vm.conversation.lastInboundAt || vm.conversation.lastOutboundAt || new Date().toISOString(),
+    lastMessageLabel: vm.operationalState || vm.operations.statusLabel,
+    lastMessageIso: text(firstDefined(record, ['last_inbound_at', 'last_outbound_at', 'latest_message_at'])) || new Date().toISOString(),
     unreadCount: 0,
     aiDraft: null,
     labels: [],
@@ -220,8 +224,8 @@ export const buildThreadFromViewModel = (
     owner_display_name: vm.masterOwner.displayName,
     lifecycle_stage: vm.operations.stage,
     operational_status: vm.operations.status,
-    lead_temperature: vm.operations.temperature,
-    isSuppressed: vm.masterOwner.suppressed,
+    lead_temperature: text(firstDefined(record, ['lead_temperature', 'temperature'])) || 'neutral',
+    isSuppressed: record.is_suppressed === true || Boolean(text(firstDefined(record, ['suppression_reason']))),
     owner_priority_score: vm.masterOwner.priorityScore ?? undefined,
     finalAcquisitionScore: vm.masterOwner.priorityScore ?? undefined,
     inboxStage: vm.operations.stage,
