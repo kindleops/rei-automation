@@ -959,6 +959,17 @@ export async function processSellerInboundMessage({
           monetary_amount: authorized_amount,
         }
       : null,
+    // Lifecycle advancement makes the resolver's outstanding question the
+    // template authority (strategy directive above still wins at S5+).
+    // Holds and blocked intents keep intent-profile conversational routing.
+    transitionDirective:
+      transition && transition.advanced && !transition.review_required && !transition.contactability_patch
+        ? {
+            required_template_use_case: transition.required_template_use_case,
+            stage_after: transition.stage_after,
+            reasoning_code: transition.reasoning_code,
+          }
+        : null,
     supabaseClient: supabase,
     getSystemValue,
   });

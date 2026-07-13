@@ -471,6 +471,38 @@ export function resolveSellerStageTransition({
   }
 
   // ── 3. Positive / neutral path: fact implications + milestone scan ───────
+
+  // Ownership-conflict guard: one message carrying BOTH an ownership claim
+  // and a denial ("I own it… well, I sold it last year") is evidence in
+  // conflict, never settled truth. Blocking/opt-out paths above still win;
+  // everything else holds the current stage for a human, persists NO
+  // ownership value, and queues nothing.
+  if (new_facts?.ownership_conflict === true) {
+    return {
+      ...base,
+      facts_patch: { ...facts, ownership_conflict: true },
+      stage_after: beforeCode,
+      stage_after_number: beforeIdx + 1,
+      advanced: false,
+      stages_advanced: 0,
+      operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
+      lead_temperature: normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED),
+      disposition: current_disposition || null,
+      contactability_patch: null,
+      ownership_patch: null,
+      next_action: NEXT_ACTIONS.HUMAN_REVIEW,
+      next_action_due_at: null,
+      required_template_use_case: null,
+      ade_action: ADE_ACTIONS.NONE,
+      review_required: true,
+      review_reason: "contradictory_ownership_evidence",
+      reasoning_code: `${stageShort(beforeCode)}_HOLD_OWNERSHIP_CONFLICT`,
+      workflow_event_types: [],
+      follow_up: { create: false, cancel: true, replace: false, days: null, due_at: null },
+      evaluate_alternate_contact: false,
+    };
+  }
+
   if (intentKey === "ownership_confirmed") facts.ownership_status = "confirmed";
   if (intentKey === "seller_interested" || intentKey === "latent_interest") {
     facts.interest = facts.interest || "interested";

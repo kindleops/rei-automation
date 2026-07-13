@@ -121,6 +121,14 @@ const EXPLICIT_INTENT_RULES = Object.freeze({
     should_queue_reply: false,
     suppression_reason: null,
   }),
+  family_member_respondent: Object.freeze({
+    next_stage: "family_member",
+    template_use_case: null,
+    safety_tier: SELLER_FLOW_SAFETY_TIERS.REVIEW,
+    auto_send_eligible: false,
+    should_queue_reply: false,
+    suppression_reason: null,
+  }),
   agent_representative_respondent: Object.freeze({
     next_stage: "agent_representative",
     template_use_case: null,

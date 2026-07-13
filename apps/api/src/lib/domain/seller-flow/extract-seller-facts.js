@@ -561,6 +561,15 @@ export function extractionToResolverFacts(extraction = null) {
     // treats "confirmed" as the S1 milestone exactly as classify.js does today.
     out.ownership_claim_evidence = facts.ownership.evidence_text || null;
   }
+  if (
+    facts.ownership?.value?.ownership_claim === "contradictory" ||
+    facts.ownership?.conflict === true ||
+    (extraction.conflicts || []).some((c) => c?.field === "ownership")
+  ) {
+    // Contradictory ownership in one message is never settled truth — the
+    // resolver's conflict guard holds the stage and routes to human review.
+    out.ownership_conflict = true;
+  }
   if (facts.reason_for_selling?.value?.reason) {
     out.reason_for_selling = facts.reason_for_selling.value.reason;
   }
