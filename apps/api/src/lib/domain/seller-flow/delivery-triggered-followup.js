@@ -12,7 +12,10 @@
  */
 
 import { supabase as defaultSupabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
-import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import {
+  scheduleFollowUp,
+  STAGE_NO_REPLY_FOLLOWUP_INTENT,
+} from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
@@ -286,7 +289,7 @@ export async function maybeScheduleFollowUpAfterDelivery({
     const event_metadata =
       outbound.metadata && typeof outbound.metadata === "object" ? outbound.metadata : {};
     const provenance = event_metadata.automation_provenance || {};
-    const followup_intent =
+    const declared_followup_intent =
       clean(provenance.followup_intent) || clean(event_metadata.followup_intent) || null;
 
     const sent_at = outbound.sent_at || outbound.event_timestamp;
@@ -307,6 +310,30 @@ export async function maybeScheduleFollowUpAfterDelivery({
       loadLeadStateGuards(supabase, outbound.thread_key),
     ]);
 
+    // Stage follow-up policy (one registry, no scattered timers): the
+    // thread's CURRENT lifecycle stage must allow automated follow-ups, and
+    // the lifetime automated-touch cap for that stage must not be exhausted.
+    const stage_policy = resolveFollowUpPolicyForStage(lead_state.lifecycle_stage);
+
+    // Canonical follow-up plan resolution. An explicitly declared intent (a
+    // disengaging reply's nurture plan) keeps the intent layer. Otherwise a
+    // delivered STAGE QUESTION (e.g. the S1 ownership check) follows the
+    // stage registry's no-reply cadence — the plan is derived from outbound
+    // purpose (template use case + lifecycle stage + policy), never from a
+    // fabricated seller intent: the seller has said nothing yet.
+    const outbound_use_case =
+      clean(provenance.template_use_case) || clean(event_metadata.template_use_case) || null;
+    const stage_no_reply_days = Number(stage_policy.policy.no_reply_delay_days);
+    const stage_plan_available = Boolean(
+      stage_policy.policy.enabled &&
+        Number.isFinite(stage_no_reply_days) &&
+        stage_no_reply_days > 0 &&
+        outbound_use_case
+    );
+    const followup_intent =
+      declared_followup_intent ||
+      (stage_plan_available ? STAGE_NO_REPLY_FOLLOWUP_INTENT : null);
+
     const decision = resolveDeliveryFollowUpDecision({
       final_delivery_status,
       provider_message_id: sid,
@@ -322,10 +349,6 @@ export async function maybeScheduleFollowUpAfterDelivery({
       return { ok: true, scheduled: false, reason: decision.reason, mode };
     }
 
-    // Stage follow-up policy (one registry, no scattered timers): the
-    // thread's CURRENT lifecycle stage must allow automated follow-ups, and
-    // the lifetime automated-touch cap for that stage must not be exhausted.
-    const stage_policy = resolveFollowUpPolicyForStage(lead_state.lifecycle_stage);
     if (!stage_policy.policy.enabled) {
       return {
         ok: true,
@@ -383,6 +406,13 @@ export async function maybeScheduleFollowUpAfterDelivery({
         outbound_message_event_id: outbound.id,
         master_owner_id: outbound.master_owner_id || null,
         property_id: outbound.property_id || null,
+        // Stage-layer plan authority: cadence from the stage registry and
+        // attribution to the outbound's real use case (see scheduler).
+        stage: stage_policy.stage,
+        stage_no_reply_days: stage_plan_available ? stage_no_reply_days : null,
+        followup_use_case: outbound_use_case,
+        agent_name:
+          clean(event_metadata.agent_name) || clean(event_metadata.agent_first_name) || null,
       },
       supabase
     );

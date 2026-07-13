@@ -13,6 +13,7 @@
  */
 
 import { supabase } from '@/lib/supabase/client.js'
+import { excludeInternalCanaryRows } from '@/lib/config/internal-phones.js'
 
 const SMS_COST_PER_MSG = 0.0079
 
@@ -206,12 +207,15 @@ export async function buildWarRoom(params = {}) {
     supabase.from('textgrid_numbers').select('id,phone_number,friendly_name,market,state,is_active,daily_cap').limit(500),
   ])
 
-  const sqRows = (sqRes.data || []).filter((r) => {
+  // Internal canary / proof traffic is quarantined from every KPI rollup:
+  // one exclusion at the fact boundary covers sends, deliveries, replies,
+  // template performance, and conversion metrics downstream.
+  const sqRows = excludeInternalCanaryRows(sqRes.data || []).filter((r) => {
     if (filterState && deriveState(r) !== filterState) return false
     if (filterMarket && clean(r.market) !== filterMarket) return false
     return true
   })
-  const meRows = meRes.data || []
+  const meRows = excludeInternalCanaryRows(meRes.data || [])
   const campaigns = campRes.data || []
   const emailTemplates = emailTplRes.data || []
   const emailEvents = emailEvtRes.data || []

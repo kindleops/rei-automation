@@ -44,12 +44,15 @@ export const OWNERSHIP_INTEREST_COMBO_VARIANTS = Object.freeze({
   English: Object.freeze({
     variant_id: "ownership_interest_combo_v1_en_A",
     language: "English",
-    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}. Are you the owner of {{property_address}}? If so, would you be open to reviewing an offer for it?",
+    // Identifies the agent by name with the truthful "local investor"
+    // descriptor (reason for contact), the property, and the soft offer
+    // interest. Never a company name in the greeting slot.
+    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}, a local investor. Do you still own {{property_address}}? If so, would you be open to reviewing an offer for it?",
   }),
   Spanish: Object.freeze({
     variant_id: "ownership_interest_combo_v1_es_A",
     language: "Spanish",
-    text: "Hola {{seller_first_name}}, le escribe {{agent_first_name}}. ¿Es usted el propietario de {{property_address}}? De ser así, ¿estaría dispuesto a considerar una oferta?",
+    text: "Hola {{seller_first_name}}, le escribe {{agent_first_name}}, un inversionista local. ¿Sigue siendo el propietario de {{property_address}}? De ser así, ¿estaría dispuesto a considerar una oferta?",
   }),
 });
 
