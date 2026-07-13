@@ -987,8 +987,24 @@ const sanitizeSellerPinRecord = (
   pin: Partial<CommandMapSellerPin> & Record<string, unknown>,
 ): CommandMapSellerPin & Record<string, unknown> => {
   const normalizedPropertyType = text(pin.property_type) || text(pin.asset_class) || '—'
-  const resolvedPhone = normalizeSellerDialablePhone(pickSellerContactPhone(pin as Record<string, unknown>))
+  const pinRecord = pin as Record<string, unknown>
+  const resolvedPhone = normalizeSellerDialablePhone(pickSellerContactPhone(pinRecord))
   const dossierHydrated = pin.dossier_hydrated === true || pin._dossierHydrated === true
+  const resolvedCanonicalPhone = normalizeSellerDialablePhone(pinRecord.canonical_e164) || resolvedPhone
+  const resolvedSellerPhone = normalizeSellerDialablePhone(pinRecord.seller_phone) || resolvedPhone
+  const resolvedProspectPhone = normalizeSellerDialablePhone(pinRecord.prospect_best_phone) || resolvedPhone
+  const resolvedDisplayPhone = normalizeSellerDialablePhone(pinRecord.display_phone)
+    || text(pinRecord.display_phone)
+    || resolvedPhone
+  const sendIdentity: Record<string, unknown> = {
+    prospect_full_name: text(pin.prospect_full_name) || null,
+    prospect_first_name: text(pin.prospect_first_name) || null,
+    sms_eligible: pin.sms_eligible ?? null,
+    agent_persona: text(pin.agent_persona) || null,
+    agent_family: text(pin.agent_family) || null,
+    phone_id: text(pin.phone_id) || text(pin.resolved_phone_id) || null,
+    best_language: text(pin.best_language) || null,
+  }
   const core: CommandMapSellerPin & Record<string, unknown> = {
     property_id: text(pin.property_id),
     master_owner_id: text(pin.master_owner_id) || null,
@@ -1066,10 +1082,10 @@ const sanitizeSellerPinRecord = (
     automation_state: text(pin.automation_state) || text(pin.execution_state) || null,
     follow_up_due_at: text(pin.follow_up_due_at) || null,
     next_action_at: text(pin.next_action_at) || text(pin.next_scheduled_for) || null,
-    canonical_e164: resolvedPhone,
-    seller_phone: resolvedPhone,
-    prospect_best_phone: resolvedPhone,
-    display_phone: resolvedPhone,
+    canonical_e164: resolvedCanonicalPhone,
+    seller_phone: resolvedSellerPhone,
+    prospect_best_phone: resolvedProspectPhone,
+    display_phone: resolvedDisplayPhone,
     property_count: nullIfZeroish(pin.property_count ?? null),
     streetview_image: text(pin.streetview_image) || null,
     map_image: text(pin.map_image) || null,
@@ -1102,13 +1118,9 @@ const sanitizeSellerPinRecord = (
     _dossierHydrated: dossierHydrated,
   }
 
-  // Focus hydration returns the full properties row. Keep those columns on the
-  // card record so the dossier contract can render enriched sections.
-  if (dossierHydrated) {
-    return { ...pin, ...core }
-  }
-
-  return core
+  // Always merge the source pin so ownership-check send fields (prospect name,
+  // agent persona, phones) survive peek cards before focus hydration completes.
+  return { ...pin, ...sendIdentity, ...core }
 }
 
 const ringColorsForTheme = (styleMode: MapStyleMode) => {

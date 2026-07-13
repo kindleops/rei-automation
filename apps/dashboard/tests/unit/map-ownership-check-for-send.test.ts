@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolveMapOwnershipCheckForSend } from '../../src/domain/map/resolve-map-ownership-check-for-send'
 import { getSupabaseClient } from '../../src/lib/supabaseClient'
 
@@ -6,119 +7,243 @@ vi.mock('../../src/lib/supabaseClient', () => ({
   getSupabaseClient: vi.fn(),
 }))
 
-vi.mock('../../src/lib/data/commandMapData', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/lib/data/commandMapData')>()
-  return {
-    ...actual,
-    resolveCommandMapSellerPhone: vi.fn(),
-    resolveMasterOwnerIdForProperty: vi.fn(),
-  }
-})
+type TableRow = Record<string, unknown>
 
-const makeSupabase = (tables: Record<string, { data: unknown; error: unknown }>) => {
-  const from = (table: string) => ({
-    select: () => ({
-      eq: () => ({
-        limit: () => ({
-          maybeSingle: async () => tables[table] ?? { data: null, error: null },
+type QueryResult = { data: TableRow | TableRow[] | null; error: null }
+
+const makeSupabase = (tables: Record<string, TableRow | TableRow[] | null>) => {
+  const from = (table: string) => {
+    let filters: Array<{ column: string; value: unknown; op: 'eq' | 'not_null' }> = []
+    let orderSpecs: Array<{ column: string; ascending: boolean }> = []
+    let limitCount: number | null = null
+
+    const execute = (): QueryResult => {
+      const rows = tables[table]
+      if (!rows) return { data: [], error: null }
+      const list = Array.isArray(rows) ? rows : [rows]
+      let matches = list.filter((row) =>
+        filters.every((filter) => {
+          if (filter.op === 'not_null') {
+            return row[filter.column] != null && row[filter.column] !== ''
+          }
+          return row[filter.column] === filter.value
         }),
-      }),
-    }),
-  })
-  return { from }
+      )
+
+      for (const spec of orderSpecs) {
+        matches = [...matches].sort((left, right) => {
+          const leftValue = left[spec.column]
+          const rightValue = right[spec.column]
+          if (leftValue === rightValue) return 0
+          if (leftValue == null) return 1
+          if (rightValue == null) return -1
+          if (leftValue < rightValue) return spec.ascending ? -1 : 1
+          return spec.ascending ? 1 : -1
+        })
+      }
+
+      if (limitCount !== null) {
+        matches = matches.slice(0, limitCount)
+      }
+
+      return { data: matches, error: null }
+    }
+
+    const api = {
+      select: () => api,
+      eq: (column: string, value: unknown) => {
+        filters.push({ column, value, op: 'eq' })
+        return api
+      },
+      not: (column: string, operator: string, value: unknown) => {
+        if (operator === 'is' && value === null) {
+          filters.push({ column, value: null, op: 'not_null' })
+        }
+        return api
+      },
+      order: (column: string, opts?: { ascending?: boolean }) => {
+        orderSpecs.push({ column, ascending: opts?.ascending !== false })
+        return api
+      },
+      limit: (count: number) => {
+        limitCount = count
+        return api
+      },
+      maybeSingle: async () => {
+        const { data, error } = execute()
+        const row = Array.isArray(data) ? data[0] ?? null : data
+        return { data: row, error }
+      },
+      then: (
+        resolve: (value: QueryResult) => unknown,
+        reject?: (reason: unknown) => unknown,
+      ) => Promise.resolve(execute()).then(resolve, reject),
+    }
+
+    return api
+  }
+
+  return { from } as unknown as SupabaseClient
 }
 
-const viewModel = {
-  propertyId: '273415177',
-  masterOwner: { id: 'mo_af316f4b4538de047a59dadd', displayName: 'Owner LLC' },
-  property: { address: '2919 Logan Ave N, Minneapolis, MN 55411' },
-} as never
+const davidFixture = {
+  properties: {
+    property_id: 'prop-david',
+    master_owner_id: 'mo-david',
+    property_address_full: '3945 25th Ave S, Minneapolis, MN 55406',
+    property_address: '3945 25th Ave S',
+  },
+  master_owners: {
+    master_owner_id: 'mo-david',
+    best_phone_1: '+16125550101',
+    primary_phone_id: 'ph-david',
+    display_name: 'David Gilkey & Holly Williams',
+    best_language: 'English',
+    agent_persona: 'Michael Porter',
+    agent_family: null,
+  },
+  phones: {
+    phone_id: 'ph-david',
+    master_owner_id: 'mo-david',
+    canonical_e164: '+16125550101',
+    canonical_prospect_id: 'pros-david',
+    primary_prospect_id: null,
+    linked_prospect_ids_json: ['pros-david'],
+  },
+  prospects: {
+    prospect_id: 'pros-david',
+    first_name: 'David',
+    full_name: 'David Gilkey',
+    sms_eligible: true,
+    master_owner_id: 'mo-david',
+  },
+}
+
+const llcFixture = {
+  properties: {
+    property_id: 'prop-llc',
+    master_owner_id: 'mo-llc',
+    property_address_full: '1200 Standish Ave, Memphis, TN 38108',
+    property_address: '1200 Standish Ave',
+  },
+  master_owners: {
+    master_owner_id: 'mo-llc',
+    best_phone_1: '+19015550303',
+    primary_phone_id: 'ph-llc',
+    display_name: 'Standish Garden Apts LLC',
+    best_language: 'English',
+    agent_persona: 'Carlos Mendez',
+    agent_family: null,
+  },
+  phones: {
+    phone_id: 'ph-llc',
+    master_owner_id: 'mo-llc',
+    canonical_e164: '+19015550303',
+    canonical_prospect_id: 'pros-llc',
+    primary_prospect_id: null,
+    linked_prospect_ids_json: ['pros-llc'],
+  },
+  prospects: {
+    prospect_id: 'pros-llc',
+    first_name: 'Maria',
+    full_name: 'Maria Lopez',
+    sms_eligible: true,
+    master_owner_id: 'mo-llc',
+  },
+}
+
+const viewModelFor = (propertyId: string, masterOwnerId: string, displayName: string, address: string) => ({
+  propertyId,
+  masterOwner: { id: masterOwnerId, displayName },
+  property: { address },
+} as never)
 
 describe('resolveMapOwnershipCheckForSend', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('resolves best_phone_1 from master_owners and prospect name from work items', async () => {
+  it('resolves owner, phone, and human prospect via canonical graph when card record is stripped', async () => {
     vi.mocked(getSupabaseClient).mockReturnValue(makeSupabase({
-      v_seller_work_items: {
-        data: {
-          master_owner_id: 'mo_af316f4b4538de047a59dadd',
-          prospect_id: 'pros0_98d57a9fc2d64c7b68872409',
-          prospect_full_name: 'Pathao Vang',
-          prospect_best_phone: null,
-          display_phone: 'No Phone',
-        },
-        error: null,
-      },
-      master_owners: {
-        data: {
-          best_phone_1: '+16122051794',
-          primary_phone_id: 'ph_1b196162bad274d060872ead',
-          agent_persona: 'Jake Peterson',
-          agent_family: null,
-          display_name: 'Owner LLC',
-          best_language: 'English',
-        },
-        error: null,
-      },
-    }) as never)
+      ...davidFixture,
+      v_seller_work_items: null,
+    }))
 
-    const result = await resolveMapOwnershipCheckForSend('273415177', viewModel, {
-      property_id: '273415177',
-      master_owner_id: 'mo_af316f4b4538de047a59dadd',
-      prospect_id: 'pros0_98d57a9fc2d64c7b68872409',
-      property_address: '2919 Logan Ave N',
-    })
+    const result = await resolveMapOwnershipCheckForSend(
+      'prop-david',
+      viewModelFor('prop-david', 'mo-david', 'David Gilkey & Holly Williams', '3945 25th Ave S, Minneapolis, MN 55406'),
+      {
+        property_id: 'prop-david',
+        master_owner_id: 'mo-david',
+        property_address: '3945 25th Ave S',
+      },
+    )
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.identity.recipientPhone).toBe('+16122051794')
-    expect(result.identity.prospectFirstName).toBe('Pathao')
-    expect(result.identity.agentFirstName).toBe('Jake')
-    expect(result.identity.ownerLanguage).toBe('English')
-    expect(result.identity.propertyAddress).toBe('2919 Logan Ave N')
+    expect(result.identity.recipientPhone).toBe('+16125550101')
+    expect(result.identity.prospectFirstName).toBe('David')
+    expect(result.identity.agentFirstName).toBe('Michael')
+    expect(result.identity.propertyAddress).toBe('3945 25th Ave S')
+    expect(result.identity.resolutionSource).toBe('hydrated_map_identity')
   })
 
-  it('falls back to work-item prospect_best_phone when master owner best_phone_1 is missing', async () => {
+  it('greets linked human prospect for entity LLC owner', async () => {
     vi.mocked(getSupabaseClient).mockReturnValue(makeSupabase({
-      v_seller_work_items: {
-        data: {
-          master_owner_id: 'mo_test',
-          prospect_id: 'pros_test',
-          prospect_full_name: 'Maria Lopez',
-          prospect_best_phone: '+13234221650',
-          display_phone: '+13234221650',
-        },
-        error: null,
-      },
-      master_owners: {
-        data: {
-          best_phone_1: null,
-          primary_phone_id: 'ph_test',
-          agent_persona: 'Andre Thompson',
-          agent_family: null,
-          display_name: 'Test Owner',
-          best_language: 'Spanish',
-        },
-        error: null,
-      },
-    }) as never)
+      ...llcFixture,
+      v_seller_work_items: null,
+    }))
 
-    const result = await resolveMapOwnershipCheckForSend('238398407', {
-      ...viewModel,
-      propertyId: '238398407',
-    } as never, {
-      property_id: '238398407',
-      master_owner_id: 'mo_test',
-      prospect_id: 'pros_test',
-      property_address: '120 Main St',
-    })
+    const result = await resolveMapOwnershipCheckForSend(
+      'prop-llc',
+      viewModelFor('prop-llc', 'mo-llc', 'Standish Garden Apts LLC', '1200 Standish Ave, Memphis, TN 38108'),
+      {
+        property_id: 'prop-llc',
+        master_owner_id: 'mo-llc',
+        owner_display_name: 'Standish Garden Apts LLC',
+        property_address: '1200 Standish Ave',
+      },
+    )
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.identity.recipientPhone).toBe('+13234221650')
     expect(result.identity.prospectFirstName).toBe('Maria')
-    expect(result.identity.agentFirstName).toBe('Andre')
+    expect(result.identity.ownerDisplayName).toBe('Standish Garden Apts LLC')
+    expect(result.identity.agentFirstName).toBe('Carlos')
+  })
+
+  it('enriches stripped records from v_seller_work_items when graph hints are missing', async () => {
+    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabase({
+      ...davidFixture,
+      properties: {
+        ...davidFixture.properties,
+        master_owner_id: null,
+      },
+      map_filter_property_prospect_links: {
+        property_id: 'prop-david',
+        master_owner_id: 'mo-david',
+        prospect_id: 'pros-david',
+      },
+      v_seller_work_items: {
+        property_id: 'prop-david',
+        master_owner_id: 'mo-david',
+        prospect_id: 'pros-david',
+        prospect_full_name: 'David Gilkey',
+        prospect_best_phone: '+16125550101',
+        display_phone: '+16125550101',
+      },
+    }))
+
+    const result = await resolveMapOwnershipCheckForSend(
+      'prop-david',
+      viewModelFor('prop-david', null as never, 'David Gilkey', '3945 25th Ave S, Minneapolis, MN 55406'),
+      { property_id: 'prop-david', property_address: '3945 25th Ave S' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.masterOwnerId).toBe('mo-david')
+    expect(result.identity.prospectFirstName).toBe('David')
+    expect(result.identity.recipientPhone).toBe('+16125550101')
   })
 })
