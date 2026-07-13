@@ -60,6 +60,7 @@ type AssetInput = {
   pricePerSqft: number | null
   valuePerAcre: number | null
   assessedTotalValue: number | null
+  assessedLandValue: number | null
   occupancyLabel: string | null
   mortgageBalance: number | null
 }
@@ -123,7 +124,7 @@ const SINGLE_FAMILY: AssetPresentation = {
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
     metric('Equity %', formatPercent(input.equityPercent)),
     metric('Repairs', formatMoney(input.repairs)),
-    metric('Mortgage Balance', formatMoney(input.mortgageBalance)),
+    metric('Loan Balance', formatMoney(input.mortgageBalance)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Bedrooms', value: formatInteger(input.beds) },
@@ -345,9 +346,9 @@ const LAND: AssetPresentation = {
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
-    metric('Lot Size', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
+    metric('Lot Acres', input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : formatInteger(input.lotSqft)),
     metric('Zoning / Use', text(input.zoning) || text(input.landUse) || '—'),
-    metric('Owner Status', input.occupancyLabel ? titleize(input.occupancyLabel) : '—'),
+    metric('Assessed Land Value', formatMoney(input.assessedLandValue)),
   ],
   buildFocusProfileFields: (input) => [
     { label: 'Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
@@ -481,6 +482,10 @@ export const buildAssetInput = (record: Record<string, unknown>): AssetInput => 
       'assd_total_value',
       'total_assessed_value',
       'assessed_value',
+    ]))),
+    assessedLandValue: nullIfZeroish(asNumber(firstDefined(record, [
+      'assd_land_value',
+      'assessed_land_value',
     ]))),
     occupancyLabel: text(firstDefined(record, ['occupancy_code', 'occupancy', 'land_use', 'county_land_use_code'])) || null,
     mortgageBalance: nullIfZeroish(asNumber(firstDefined(record, [

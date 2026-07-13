@@ -7,7 +7,6 @@ import { MobileBottomSheet, type BottomSheetSnap } from '../../../modules/mobile
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import {
   LIFECYCLE_STAGE_META,
-  LEAD_TEMPERATURE_META,
   OPERATIONAL_STATUS_META,
 } from '../../../domain/lead-state/universal-lead-state-registry'
 import { buildSellerMapCardViewModel } from './seller-map-card-view-model'
@@ -15,18 +14,13 @@ import { getSellerMapCardLayoutMode, getSellerMapCardStyle } from './seller-map-
 import type { SellerMapCardMode } from './seller-map-card.types'
 import { buildThreadFromViewModel, useSellerMapCardActions } from './useSellerMapCardActions'
 import { useSellerMapCardConversation } from './useSellerMapCardConversation'
-import { SellerMapCardPriorityRing } from './SellerMapCardPriorityRing'
 import { SellerMapCardThreadList } from './SellerMapCardThreadList'
 import { SellerMapCardConversationSkeleton } from './SellerMapCardConversationSkeleton'
 import {
-  SellerMapCardContactStateStrip,
-  SellerMapCardFinancialSection,
-  SellerMapCardIntelligenceSection,
+  SellerMapCardBadgeRail,
+  SellerMapCardDossierSections,
   SellerMapCardMetrics,
-  SellerMapCardOperationSection,
-  SellerMapCardOwnerPressureSection,
-  SellerMapCardPropertyProfileSection,
-  SellerMapCardProspectSection,
+  SellerMapCardOperationalState,
   SellerMapCardWeightedTags,
 } from './SellerMapCardDesktopSections'
 
@@ -82,6 +76,7 @@ export const SellerMapCard = ({
   onMouseEnter,
   onMouseLeave,
   onActivityRefresh,
+  detailLoading = false,
 }: {
   record: Record<string, unknown>
   mode: SellerMapCardMode
@@ -97,6 +92,7 @@ export const SellerMapCard = ({
   onMouseEnter?: () => void
   onMouseLeave?: () => void
   onActivityRefresh?: () => void
+  detailLoading?: boolean
 }) => {
   const { isMobile } = useBreakpoint()
   const [cardMode, setCardMode] = useState<SellerMapCardMode>(mode)
@@ -168,19 +164,17 @@ export const SellerMapCard = ({
 
   const stageColor = LIFECYCLE_STAGE_META[viewModel.operations.stage as keyof typeof LIFECYCLE_STAGE_META]?.color
   const statusColor = OPERATIONAL_STATUS_META[viewModel.operations.status as keyof typeof OPERATIONAL_STATUS_META]?.color
-  const tempColor = LEAD_TEMPERATURE_META[viewModel.operations.temperature as keyof typeof LEAD_TEMPERATURE_META]?.color
 
   const shellStyle = {
     ...cardStyle,
     '--smc-stage-color': stageColor ?? 'var(--map-accent, #64d2ff)',
     '--smc-status-color': statusColor ?? '#94a3b8',
-    '--smc-temp-color': tempColor ?? '#94a3b8',
   } as CSSProperties
 
   const isFocus = cardMode === 'focus'
-  const tagLimit = isPeek ? 6 : 10
-  const visibleFlags = viewModel.flags.slice(0, tagLimit)
-  const hiddenFlagCount = Math.max(0, viewModel.flags.length - visibleFlags.length)
+  const signalLimit = isPeek ? 6 : 10
+  const visibleSignals = viewModel.weightedSignals.slice(0, signalLimit)
+  const hiddenSignalCount = Math.max(0, viewModel.weightedSignals.length - visibleSignals.length)
   const sendingNumber = thread.canonicalE164 || thread.phoneNumber || null
 
   useEffect(() => {
@@ -212,62 +206,17 @@ export const SellerMapCard = ({
     }
   }
 
-  const stateBadges = (
-    <div className="smc-state-row" aria-label="Canonical lead state">
-      <span className="smc-badge smc-badge--stage">{viewModel.operations.stageLabel}</span>
-      <span className="smc-badge smc-badge--status">{viewModel.operations.statusLabel}</span>
-      <span className="smc-badge smc-badge--temp">
-        {viewModel.masterOwner.priorityScore != null
-          ? `Score ${Math.round(viewModel.masterOwner.priorityScore)}`
-          : 'Unscored'}
-      </span>
-      <span className="smc-badge smc-badge--asset">{viewModel.property.assetType}</span>
-      {viewModel.property.units != null && viewModel.property.units > 1 ? (
-        <span className="smc-badge smc-badge--units">{viewModel.property.units} units</span>
-      ) : null}
-      {viewModel.activeCommunication ? (
-        <span className="smc-badge smc-badge--active">Active Communication</span>
-      ) : null}
-    </div>
-  )
-
-  const mobilePriorityRing = isMobile ? (
-    <div className="smc-image__priority-glass" aria-label="Seller priority score">
-      <SellerMapCardPriorityRing
-        score={viewModel.masterOwner.priorityScore}
-        tier={null}
-        classification={viewModel.masterOwner.priorityClassification}
-        size={32}
-        showUnscoredLabel={false}
-        compact
-      />
-    </div>
-  ) : null
-
   const imageBlock = viewModel.property.imageUrl ? (
-    <div className={cls(
-      'smc-image',
-      isPeek && 'is-peek',
-      !isPeek && 'is-focus',
-      isMobile && 'is-mobile-hero',
-    )}>
+    <div className={cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')}>
       <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="lazy" decoding="async" />
       <div className="smc-image__gradient" />
-      {mobilePriorityRing}
       {!isPeek && onClose ? (
         <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
       ) : null}
     </div>
   ) : (
-    <div className={cls(
-      'smc-image',
-      'is-placeholder',
-      isPeek && 'is-peek',
-      !isPeek && 'is-focus',
-      isMobile && 'is-mobile-hero',
-    )}>
+    <div className={cls('smc-image', 'is-placeholder', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')}>
       <span>Property Preview</span>
-      {mobilePriorityRing}
       {!isPeek && onClose ? (
         <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
       ) : null}
@@ -280,38 +229,16 @@ export const SellerMapCard = ({
         <h3 className="smc-identity__name">{viewModel.headerDisplayName}</h3>
         <p className="smc-identity__address" title={viewModel.property.address}>{viewModel.property.address}</p>
         <p className="smc-identity__asset-line">{viewModel.assetSummaryLine}</p>
-        {viewModel.canonicalPhone ? (
-          <p className="smc-identity__phone">{viewModel.canonicalPhone}</p>
-        ) : null}
       </div>
     </header>
   )
 
-  const metricsBlock = (metrics: typeof viewModel.peekMetrics, variant: 'peek' | 'focus') => (
-    <SellerMapCardMetrics metrics={metrics} variant={variant} />
+  const metricsBlock = (variant: 'peek' | 'focus') => (
+    <SellerMapCardMetrics metrics={viewModel.peekMetrics} variant={variant} />
   )
 
-  const intelligenceSection = <SellerMapCardIntelligenceSection viewModel={viewModel} />
-
-  const contextualLine = viewModel.contextualLine ? (
-    <p className="smc-context-line">{viewModel.contextualLine}</p>
-  ) : null
-
-  const flagsBlock = visibleFlags.length > 0 ? (
-    <SellerMapCardWeightedTags flags={visibleFlags} hiddenCount={hiddenFlagCount} />
-  ) : null
-
-  const showActivityDetail = viewModel.activity.kind !== 'none'
-    && (viewModel.activity.detail || viewModel.activity.kind === 'last_reply'
-      || viewModel.activity.kind === 'delivery_failed'
-      || viewModel.activity.kind === 'suppressed')
-
-  const activityBlock = showActivityDetail ? (
-    <section className={cls('smc-activity', `is-${viewModel.activity.kind}`)}>
-      {viewModel.activity.detail ? (
-        <p className="smc-activity__copy">{viewModel.activity.detail}</p>
-      ) : null}
-    </section>
+  const signalsBlock = visibleSignals.length > 0 ? (
+    <SellerMapCardWeightedTags flags={visibleSignals} hiddenCount={hiddenSignalCount} />
   ) : null
 
   const handlePrimaryAction = () => {
@@ -337,11 +264,7 @@ export const SellerMapCard = ({
           !viewModel.actionBar.primary.enabled && 'is-disabled',
         )}
         disabled={!viewModel.actionBar.primary.enabled || followUpState === 'sending'}
-        title={
-          followUpError
-          || viewModel.actionBar.primary.disabledReason
-          || undefined
-        }
+        title={followUpError || viewModel.actionBar.primary.disabledReason || undefined}
         onClick={handlePrimaryAction}
       >
         {viewModel.actionBar.primary.enabled
@@ -364,86 +287,38 @@ export const SellerMapCard = ({
     </footer>
   )
 
+  const stickySummary = (
+    <div className="smc-sticky-summary">
+      <SellerMapCardBadgeRail badges={viewModel.headerBadges} />
+      {identityHeader}
+      {metricsBlock(isPeek ? 'peek' : 'focus')}
+    </div>
+  )
+
   const peekBody = (
     <>
-      <div className="smc-peek-hero">
-        {imageBlock}
-        <div className="smc-peek-hero__overlay">
-          {stateBadges}
-        </div>
-      </div>
+      {imageBlock}
       <div className="smc-body smc-body--peek smc-body--peek-dense">
-        {identityHeader}
-        <SellerMapCardContactStateStrip label={viewModel.contactStateLabel} />
-        {metricsBlock(viewModel.peekMetrics, 'peek')}
-        {flagsBlock}
+        {stickySummary}
+        {signalsBlock}
+        <SellerMapCardOperationalState state={viewModel.operationalState} />
       </div>
       {!isMobile ? actionFooter : null}
     </>
   )
 
-  const mobileCardHeader = (
-    <div className="smc-sticky-head">
-      {imageBlock}
-      <div className="smc-body smc-body--peek smc-body--mobile-header">
-        {stateBadges}
-        {identityHeader}
-        {viewModel.assetSummaryLine ? (
-          <p className="smc-summary smc-summary--physical">{viewModel.assetSummaryLine}</p>
-        ) : null}
-      </div>
-    </div>
-  )
-
-  const focusSections = (
-    <div className="smc-focus-scroll">
-      <SellerMapCardFinancialSection financialProfile={viewModel.financialProfile} />
-      <SellerMapCardOwnerPressureSection
-        ownerPressure={viewModel.ownerPressure}
-        acquisitionFit={viewModel.acquisitionFit}
-        ownerFields={viewModel.focusOwnerFields}
-      />
-      <SellerMapCardProspectSection prospectProfile={viewModel.prospectProfile} />
-      {intelligenceSection}
-      {flagsBlock}
-      <SellerMapCardOperationSection fields={viewModel.focusOperationFields} />
-      <SellerMapCardPropertyProfileSection groups={viewModel.propertyProfileGroups} />
-    </div>
-  )
-
-  const mobileExpandedSections = (
-    <>
-      {metricsBlock(viewModel.focusMetrics, 'focus')}
-      {intelligenceSection}
-      {contextualLine}
-      {flagsBlock}
-      {activityBlock}
-      {focusSections}
-    </>
-  )
-
-  const focusScrollBody = (
+  const focusBody = (
     <>
       <div className="smc-sticky-head">
         {imageBlock}
         <div className="smc-body smc-body--focus-head">
-          {stateBadges}
-          {identityHeader}
-          <SellerMapCardContactStateStrip label={viewModel.contactStateLabel} />
+          {stickySummary}
         </div>
       </div>
-      <div className="smc-body smc-body--focus smc-body--focus-dense">
-        {metricsBlock(viewModel.focusMetrics, 'focus')}
-        {contextualLine}
-        {activityBlock}
-        {focusSections}
+      <div className="smc-body smc-body--focus smc-body--focus-dense smc-body--dossier-scroll">
+        <SellerMapCardOperationalState state={viewModel.operationalState} />
+        <SellerMapCardDossierSections viewModel={viewModel} loading={detailLoading && !viewModel.dossierReady} />
       </div>
-    </>
-  )
-
-  const focusBody = (
-    <>
-      {focusScrollBody}
       {actionFooter}
     </>
   )
@@ -457,18 +332,8 @@ export const SellerMapCard = ({
           <div className="smc-conversation__identity">
             <div className="smc-conversation__name">{viewModel.masterOwner.displayName}</div>
             <div className="smc-conversation__addr">{viewModel.property.address}</div>
-            <div className="smc-conversation__badges">
-              <span className="smc-badge smc-badge--stage">{viewModel.operations.stageLabel}</span>
-              <span className="smc-badge smc-badge--status">{viewModel.operations.statusLabel}</span>
-              <span className="smc-badge smc-badge--temp">{viewModel.operations.temperatureLabel}</span>
-              <span className="smc-badge smc-badge--asset">{viewModel.property.assetType}</span>
-            </div>
-            <div className="smc-conversation__meta">
-              {viewModel.operations.automationState !== 'none' ? (
-                <span>{viewModel.operations.automationState}</span>
-              ) : null}
-              {sendingNumber ? <span>{sendingNumber}</span> : null}
-            </div>
+            <SellerMapCardBadgeRail badges={viewModel.headerBadges} />
+            {sendingNumber ? <div className="smc-conversation__meta"><span>{sendingNumber}</span></div> : null}
           </div>
           <div className="smc-conversation__controls">
             <button
@@ -548,12 +413,7 @@ export const SellerMapCard = ({
         ) : (
           <>
             <div className="smc-mobile-sheet__scroll">
-              {mobileCardHeader}
-              {!isPeek ? (
-                <div className="smc-body smc-body--focus smc-body--mobile-expanded">
-                  {mobileExpandedSections}
-                </div>
-              ) : null}
+              {isPeek ? peekBody : focusBody}
             </div>
             {!isPeek ? actionFooter : null}
           </>

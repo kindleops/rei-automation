@@ -1704,3 +1704,75 @@
 .smc-shell:not(.is-mobile) .smc-composer-wrap {
   padding: 0 10px 8px;
 }
+
+.smc-state-row--below-image {
+  margin: 0 0 6px;
+  max-height: none;
+}
+
+.smc-badge--score {
+  color: #f5d67a;
+  border-color: rgba(245, 214, 122, 0.38);
+  background: rgba(245, 214, 122, 0.1);
+}
+
+.smc-sticky-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smc-body--dossier-scroll {
+  padding-bottom: 8px;
+}
+
+.smc-dossier-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smc-dossier-group h5 {
+  margin: 0 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--smc-muted);
+}
+
+.smc-dossier-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.smc-dossier-skeleton__row {
+  height: 42px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  background-size: 200% 100%;
+  animation: smc-dossier-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes smc-dossier-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.smc-operational-state {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--smc-muted) 92%, transparent);
+  line-height: 1.35;
+}
+
+.smc-shell:not(.is-mobile) .smc-body--peek-dense .smc-sticky-summary {
+  gap: 5px;
+}
+
+.smc-shell:not(.is-mobile) .smc-image.is-peek + .smc-body--peek-dense {
+  padding-top: 8px;
+}
