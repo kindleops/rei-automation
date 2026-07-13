@@ -3,6 +3,7 @@ import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString, type AnyRecord } from '../../lib/data/shared'
 import { resolveCommandMapSellerPhone } from '../../lib/data/commandMapData'
 import { safeHumanName } from '../../lib/identity/entityDetection'
+import { resolveOwnershipCheckSellerLanguage } from './ownership-check-language'
 
 const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? ''
 
@@ -42,6 +43,9 @@ export type MapOwnershipCheckHints = {
   agentPersona?: string | null
   agentFamily?: string | null
   smsEligible?: boolean | null
+  prospectLanguagePreference?: string | null
+  languagePreference?: string | null
+  bestLanguage?: string | null
 }
 
 export type PropertyAddressParts = {
@@ -914,6 +918,20 @@ export const buildMapOwnershipCheckHints = (
       : record.sms_eligible === true
         ? true
         : null,
+    prospectLanguagePreference: text(firstDefined(
+      record.prospect_language_preference,
+      record.prospectLanguagePreference,
+    )) || null,
+    languagePreference: text(firstDefined(
+      record.language_preference,
+      record.languagePreference,
+      record.seller_language,
+      record.sellerLanguage,
+    )) || null,
+    bestLanguage: text(firstDefined(
+      record.best_language,
+      record.bestLanguage,
+    )) || null,
   }
 }
 
@@ -968,7 +986,12 @@ const buildIdentityFromResolvedParts = ({
       agentName,
       agentFirstName,
       ownerDisplayName,
-      ownerLanguage: text(owner.best_language) || 'English',
+      ownerLanguage: resolveOwnershipCheckSellerLanguage({
+        prospectLanguagePreference: hints.prospectLanguagePreference,
+        languagePreference: hints.languagePreference,
+        bestLanguage: hints.bestLanguage,
+        ownerBestLanguage: text(owner.best_language) || null,
+      }),
       propertyAddress,
       propertyCity: addressParts.city,
       propertyState: addressParts.state,

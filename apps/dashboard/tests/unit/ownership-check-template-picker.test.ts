@@ -3,6 +3,7 @@ import type { SmsTemplate } from '../../src/lib/data/templateData'
 import {
   buildOwnershipTemplatePool,
   canonicalizeOwnerLanguage,
+  computeRotationExclusionLimit,
   evaluateOwnershipTemplate,
   hasTextgridBlockedGreeting,
   fetchOwnershipCheckTemplates,
@@ -57,11 +58,11 @@ describe('ownership check template picker', () => {
     resetOwnershipCheckTemplateCacheForTests()
   })
 
-  it('resolves ownership-check language from master_owners.best_language', async () => {
+  it('resolves ownership-check language from prospect preference before master owner best_language', async () => {
     await expect(resolveMapOwnerLanguage({
       language_preference: 'Spanish',
       best_language: 'Mandarin',
-    }, 'mo-1')).resolves.toBe('Mandarin')
+    }, 'mo-1')).resolves.toBe('Spanish')
   })
 
   it('randomizes ownership_check templates for the resolved prospect language', async () => {
@@ -81,7 +82,7 @@ describe('ownership check template picker', () => {
 
     expect(selection?.language).toBe('Spanish')
     expect(['es-1', 'es-2']).toContain(selection?.templateId)
-    expect(selection?.selectionReason).toMatch(/random/)
+    expect(selection?.selectionReason).toMatch(/catalog/)
   })
 
   it('loads active ownership_check templates from Supabase via fetchTemplatesByUseCase', async () => {
@@ -118,6 +119,8 @@ describe('ownership check template picker', () => {
     expect(languagesMatchForTemplate('Asian Indian (Hindi or Other)', 'Indian (Hindi or Other)')).toBe(true)
     expect(languagesMatchForTemplate('Spanish', 'Spanish')).toBe(true)
     expect(languagesMatchForTemplate('Spanish', 'English')).toBe(false)
+    expect(languagesMatchForTemplate('Arabic', 'Arabic')).toBe(true)
+    expect(languagesMatchForTemplate('Vietnamese', 'Vietnamese')).toBe(true)
   })
 
   it('filters ownership templates by owner language with english fallback', () => {
@@ -213,7 +216,7 @@ describe('ownership check template picker', () => {
     })
 
     expect(selection?.templateId).toBe('en-4')
-    expect(selection?.selectionReason).toBe('supabase_weighted_rotation_excluding_recent')
+    expect(selection?.selectionReason).toBe('supabase_language_catalog_rotation')
     expect(selection?.excludedRecentTemplateIds).toEqual(['en-1', 'en-2', 'en-3'])
   })
 
@@ -430,31 +433,21 @@ describe('ownership check template picker', () => {
       expect(pool).toHaveLength(0)
     })
 
-    it('applies Supabase rotation weights when provided', () => {
-      const templates = [
-        makeTemplate({ id: 'en-light', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
-        makeTemplate({ id: 'en-heavy', language: 'English', templateText: 'Hello {{seller_first_name}}, checking {{property_address}}' }),
-      ]
-      const rotationWeights = new Map([
-        ['en-light', 1],
-        ['en-heavy', 50],
-      ])
+    it('scales rotation exclusions with the language catalog size', () => {
+      expect(computeRotationExclusionLimit(68)).toBe(57)
+      expect(computeRotationExclusionLimit(12)).toBe(11)
+      expect(computeRotationExclusionLimit(1)).toBe(0)
+    })
 
-      const originalRandom = Math.random
-      Math.random = () => 0.5
-      let selection = null
-      try {
-        selection = pickRandomOwnershipCheckTemplate(templates, context, 'English', {
-          rotationWeights,
-          excludeTemplateIds: [],
-        })
-      } finally {
-        Math.random = originalRandom
-      }
+    it('keeps every active Spanish Supabase template in the language pool', () => {
+      const templates = Array.from({ length: 68 }, (_, index) => makeTemplate({
+        id: `es-${index + 1}`,
+        language: 'Spanish',
+        templateText: `Hola {{seller_first_name}}, pregunta ${index + 1} sobre {{property_address}}`,
+      }))
 
-      expect(selection?.templateId).toBe('en-heavy')
-      expect(selection?.weight).toBe(50)
-      expect(selection?.selectionReason).toBe('supabase_traffic_weighted')
+      const pool = buildOwnershipTemplatePool(templates, context, 'Spanish')
+      expect(pool).toHaveLength(68)
     })
   })
 })

@@ -1,5 +1,10 @@
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import {
+  canonicalizeOwnershipCheckLanguage,
+  languagesMatchForOwnershipCheck,
+  resolveOwnershipCheckSellerLanguage,
+} from '../../../domain/map/ownership-check-language'
+import {
   fetchTemplatesByUseCase,
   renderTemplate,
   type SmsTemplate,
@@ -9,54 +14,14 @@ import { isEntityName, safeHumanName } from '../../../lib/identity/entityDetecti
 
 const OWNERSHIP_CHECK_USE_CASE = 'ownership_check'
 
-const OWNER_LANGUAGE_ALIASES: Record<string, string> = {
-  english: 'English',
-  spanish: 'Spanish',
-  espanol: 'Spanish',
-  español: 'Spanish',
-  portuguese: 'Portuguese',
-  italian: 'Italian',
-  vietnamese: 'Vietnamese',
-  french: 'French',
-  german: 'German',
-  greek: 'Greek',
-  russian: 'Russian',
-  polish: 'Polish',
-  arabic: 'Arabic',
-  hebrew: 'Hebrew',
-  japanese: 'Japanese',
-  korean: 'Korean',
-  mandarin: 'Mandarin',
-  'mandarin chinese': 'Mandarin',
-  chinese: 'Mandarin',
-  zh: 'Mandarin',
-  'zh-cn': 'Mandarin',
-  cn: 'Mandarin',
-  hindi: 'Indian (Hindi or Other)',
-  'indian (hindi or other)': 'Indian (Hindi or Other)',
-  'asian indian (hindi or other)': 'Indian (Hindi or Other)',
-}
+export const canonicalizeOwnerLanguage = canonicalizeOwnershipCheckLanguage
 
-export const canonicalizeOwnerLanguage = (value: unknown): string => {
-  const raw = asString(value, '').trim()
-  if (!raw) return 'English'
-  const lowered = raw.toLowerCase()
-  if (OWNER_LANGUAGE_ALIASES[lowered]) return OWNER_LANGUAGE_ALIASES[lowered]
-  return raw
-}
+export const languagesMatchForTemplate = languagesMatchForOwnershipCheck
 
-export const languagesMatchForTemplate = (ownerLanguage: string, templateLanguage: string): boolean => {
-  const owner = canonicalizeOwnerLanguage(ownerLanguage)
-  const template = canonicalizeOwnerLanguage(templateLanguage)
-  if (owner.toLowerCase() === template.toLowerCase()) return true
-
-  const ownerToken = owner.toLowerCase()
-  const templateToken = template.toLowerCase()
-  if (ownerToken.includes('hindi') && templateToken.includes('hindi')) return true
-  if (ownerToken.includes('indian') && templateToken.includes('indian')) return true
-  const mandarinFamily = new Set(['mandarin', 'chinese', 'zh', 'zh-cn', 'cn'])
-  if (mandarinFamily.has(ownerToken) && mandarinFamily.has(templateToken)) return true
-  return false
+export const computeRotationExclusionLimit = (poolSize: number): number => {
+  if (poolSize <= 1) return 0
+  // Exclude as many recent templates as possible while keeping the full catalog in play.
+  return Math.min(poolSize - 1, Math.max(12, Math.floor(poolSize * 0.85)))
 }
 
 const usesNonLatinSellerNameMatching = (sellerFirstName: string): boolean =>
@@ -174,31 +139,13 @@ export type OwnershipTemplateSelection = {
   excludedRecentTemplateIds: string[]
 }
 
-export type EvaluateOwnershipTemplateOptions = {
-  rotationWeights?: Map<string, number>
-}
-
-const resolveTemplateWeight = (
-  template: SmsTemplate,
-  rotationWeights?: Map<string, number>,
-): number => {
-  const templateId = asString(template.templateId || template.id, '').trim()
-  const rotationWeight = templateId ? rotationWeights?.get(templateId) : undefined
-  if (rotationWeight && rotationWeight > 0) return rotationWeight
-
-  const raw = template.raw as AnyRecord
-  const metadata = (raw.metadata && typeof raw.metadata === 'object'
-    ? raw.metadata
-    : {}) as AnyRecord
-  const rowWeight = Number(raw.traffic_weight ?? metadata.traffic_weight ?? 0)
-  return rowWeight > 0 ? rowWeight : 1
-}
+export type EvaluateOwnershipTemplateOptions = Record<string, never>
 
 /** Eligibility is render + identity safety only — template copy always comes from Supabase. */
 export const evaluateOwnershipTemplate = (
   template: SmsTemplate,
   context: Record<string, string>,
-  options: EvaluateOwnershipTemplateOptions = {},
+  _options: EvaluateOwnershipTemplateOptions = {},
 ): OwnershipTemplateCandidate | null => {
   const { renderedText, missingVariables } = renderTemplate(template, context)
   const rendered = renderedText.trim()
@@ -219,7 +166,7 @@ export const evaluateOwnershipTemplate = (
   return {
     template,
     rendered,
-    weight: resolveTemplateWeight(template, options.rotationWeights),
+    weight: 1,
     templateKey,
     language: template.language,
   }
@@ -266,13 +213,13 @@ export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateIds?: string[]; rotationWeights?: Map<string, number> } = {},
+  options: { excludeTemplateIds?: string[] } = {},
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
 
   // Rotate across every active Supabase ownership_check row that renders for this context.
   let candidates = dedupeCandidates(
-    evaluateTemplates(languageScoped, context, { rotationWeights: options.rotationWeights }),
+    evaluateTemplates(languageScoped, context),
   )
   const excludeIds = Array.from(new Set(
     (options.excludeTemplateIds ?? [])
@@ -310,27 +257,25 @@ export const pickRandomOwnershipCheckTemplate = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateIds?: string[]; rotationWeights?: Map<string, number> } = {},
+  options: { excludeTemplateIds?: string[] } = {},
 ): OwnershipTemplateSelection | null => {
+  const sellerLanguage = canonicalizeOwnershipCheckLanguage(ownerLanguage)
   const excludeIds = Array.from(new Set(
     (options.excludeTemplateIds ?? [])
       .map((id) => asString(id, '').trim())
       .filter(Boolean),
   ))
-  const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage, {
+  const pool = buildOwnershipTemplatePool(templates, context, sellerLanguage, {
     excludeTemplateIds: excludeIds,
-    rotationWeights: options.rotationWeights,
   })
-  const picked = pickWeightedRandom(pool)
+  const picked = pickUniformRandom(pool)
   if (!picked) return null
 
   const pickedId = templateIdentity(picked.template)
   const excludedHit = excludeIds.filter((id) => id !== pickedId)
   const selectionReason = excludedHit.length
-    ? 'supabase_weighted_rotation_excluding_recent'
-    : picked.weight > 1
-      ? 'supabase_traffic_weighted'
-      : 'supabase_catalog_random'
+    ? 'supabase_language_catalog_rotation'
+    : 'supabase_language_catalog_random'
 
   return {
     template: picked.template,
@@ -346,48 +291,9 @@ export const pickRandomOwnershipCheckTemplate = (
 }
 
 let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
-let rotationWeightCache: { expiresAt: number; weights: Map<string, number> } | null = null
 
 export const resetOwnershipCheckTemplateCacheForTests = (): void => {
   ownershipTemplateCache = null
-  rotationWeightCache = null
-}
-
-/** traffic_weight rows from Supabase v_ownership_template_rotation_control. */
-export const fetchOwnershipCheckRotationWeights = async (): Promise<Map<string, number>> => {
-  const now = Date.now()
-  if (rotationWeightCache && rotationWeightCache.expiresAt > now) {
-    return rotationWeightCache.weights
-  }
-
-  const weights = new Map<string, number>()
-  try {
-    const supabase = getSupabaseClient()
-    if (!supabase?.from) {
-      rotationWeightCache = { expiresAt: now + 60_000, weights }
-      return weights
-    }
-
-    const { data, error } = await supabase
-      .from('v_ownership_template_rotation_control')
-      .select('template_id, traffic_weight, block_reason')
-
-    if (!error && Array.isArray(data)) {
-      for (const row of data) {
-        const record = row as AnyRecord
-        const templateId = asString(record.template_id, '').trim()
-        const blockReason = asString(record.block_reason, '').trim()
-        const trafficWeight = Number(record.traffic_weight)
-        if (!templateId || blockReason || !(trafficWeight > 0)) continue
-        weights.set(templateId, trafficWeight)
-      }
-    }
-  } catch {
-    // Equal-weight fallback when rotation view is unavailable.
-  }
-
-  rotationWeightCache = { expiresAt: now + 60_000, weights }
-  return weights
 }
 
 /** Active ownership_check rows from Supabase sms_templates (via authenticated template API). */
@@ -427,9 +333,9 @@ export const fetchRecentOwnershipCheckTemplateIds = async (
 ): Promise<string[]> => {
   const propertyId = asString(options.propertyId, '').trim()
   const recipientPhone = asString(options.recipientPhone, '').trim()
-  const language = canonicalizeOwnerLanguage(options.language)
-  const globalLimit = Math.max(1, options.globalLimit ?? 12)
-  const localLimit = Math.max(1, options.localLimit ?? 3)
+  const language = canonicalizeOwnershipCheckLanguage(options.language)
+  const globalLimit = Math.max(0, options.globalLimit ?? 0)
+  const localLimit = Math.max(0, options.localLimit ?? 0)
   let supabase
   try {
     supabase = getSupabaseClient()
@@ -464,20 +370,24 @@ export const fetchRecentOwnershipCheckTemplateIds = async (
   }
 
   if (globalLimit > 0) {
-    let globalQuery = supabase
+    const fetchLimit = Math.max(globalLimit * 3, globalLimit)
+    const { data: globalRows, error: globalError } = await supabase
       .from('send_queue')
       .select('template_id, selected_template_id, metadata, language')
       .eq('message_type', 'ownership_check')
       .order('created_at', { ascending: false })
-      .limit(globalLimit)
+      .limit(fetchLimit)
 
-    if (language) {
-      globalQuery = globalQuery.eq('language', language)
-    }
-
-    const { data: globalRows, error: globalError } = await globalQuery
     if (!globalError && Array.isArray(globalRows)) {
-      for (const row of globalRows) pushId(readTemplateIdFromQueueRow(row as AnyRecord))
+      for (const row of globalRows) {
+        const record = row as AnyRecord
+        const rowLanguage = asString(record.language, '').trim()
+        if (language && rowLanguage && !languagesMatchForOwnershipCheck(language, rowLanguage)) {
+          continue
+        }
+        pushId(readTemplateIdFromQueueRow(record))
+        if (recentIds.length >= globalLimit) break
+      }
     }
   }
 
@@ -501,22 +411,32 @@ export const resolveMapOwnerLanguage = async (
   record: Record<string, unknown>,
   masterOwnerId: string | null,
 ): Promise<string> => {
-  const inline = asString(record.best_language ?? record.bestLanguage, '').trim()
-  if (inline) return canonicalizeOwnerLanguage(inline)
-
   const ownerId = asString(masterOwnerId, '').trim()
-  if (!ownerId) return 'English'
+  let ownerBestLanguage: string | null = asString(record.best_language ?? record.bestLanguage, '').trim() || null
 
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase
-    .from('master_owners')
-    .select('best_language')
-    .eq('master_owner_id', ownerId)
-    .limit(1)
-    .maybeSingle()
+  if (!ownerBestLanguage && ownerId) {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase
+      .from('master_owners')
+      .select('best_language')
+      .eq('master_owner_id', ownerId)
+      .limit(1)
+      .maybeSingle()
 
-  if (error) return 'English'
-  return canonicalizeOwnerLanguage((data as AnyRecord | null)?.best_language)
+    if (!error) {
+      ownerBestLanguage = asString((data as AnyRecord | null)?.best_language, '').trim() || null
+    }
+  }
+
+  return resolveOwnershipCheckSellerLanguage({
+    prospectLanguagePreference: asString(record.prospect_language_preference, '').trim() || null,
+    languagePreference: asString(
+      record.language_preference ?? record.languagePreference ?? record.seller_language,
+      '',
+    ).trim() || null,
+    bestLanguage: ownerBestLanguage,
+    ownerBestLanguage,
+  })
 }
 
 export const pickOwnershipCheckTemplateForMap = async (
@@ -528,26 +448,26 @@ export const pickOwnershipCheckTemplateForMap = async (
     random?: () => number
   } = {},
 ): Promise<OwnershipTemplateSelection | null> => {
-  const [templates, recentTemplateIds, rotationWeights] = await Promise.all([
-    fetchOwnershipCheckTemplates(),
-    fetchRecentOwnershipCheckTemplateIds({
-      propertyId: options.propertyId,
-      recipientPhone: options.recipientPhone,
-      language: ownerLanguage,
-      globalLimit: 12,
-      localLimit: 3,
-    }),
-    fetchOwnershipCheckRotationWeights(),
-  ])
+  const sellerLanguage = canonicalizeOwnershipCheckLanguage(ownerLanguage)
+  const templates = await fetchOwnershipCheckTemplates()
+  const languageCatalog = filterOwnershipTemplatesForLanguage(templates, sellerLanguage)
+  const rotationWindow = computeRotationExclusionLimit(languageCatalog.length)
+
+  const recentTemplateIds = await fetchRecentOwnershipCheckTemplateIds({
+    propertyId: options.propertyId,
+    recipientPhone: options.recipientPhone,
+    language: sellerLanguage,
+    globalLimit: rotationWindow,
+    localLimit: Math.min(3, rotationWindow),
+  })
 
   const originalRandom = Math.random
   if (options.random) {
     Math.random = options.random
   }
   try {
-    return pickRandomOwnershipCheckTemplate(templates, context, ownerLanguage, {
+    return pickRandomOwnershipCheckTemplate(templates, context, sellerLanguage, {
       excludeTemplateIds: recentTemplateIds,
-      rotationWeights,
     })
   } finally {
     Math.random = originalRandom

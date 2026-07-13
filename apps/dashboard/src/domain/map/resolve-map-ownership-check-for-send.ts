@@ -14,6 +14,7 @@ import {
   type MapOwnershipCheckHints,
   type MapOwnershipCheckResolveResult,
 } from './resolve-map-ownership-check'
+import { resolveOwnershipCheckSellerLanguage } from './ownership-check-language'
 import type { SellerMapCardViewModel } from '../../views/map/seller-card/seller-map-card.types'
 
 const text = (value: unknown): string => asString(value, '').trim()
@@ -129,6 +130,7 @@ const enrichHintsFromMasterOwner = async (
     agentPersona: hints.agentPersona || text(row.agent_persona) || null,
     agentFamily: hints.agentFamily || text(row.agent_family) || null,
     ownerDisplayName: hints.ownerDisplayName || text(row.display_name) || null,
+    bestLanguage: hints.bestLanguage || text(row.best_language) || null,
   }
 }
 
@@ -225,13 +227,18 @@ export const resolveMapOwnershipCheckForSend = async (
   )
   const propertyAddress = addressParts.street || result.identity.propertyAddress
 
-  if (
-    propertyAddress === result.identity.propertyAddress
-    && !addressParts.city
-    && !addressParts.state
-    && !addressParts.zip
-    && !addressParts.county
-  ) {
+  const ownerLanguage = resolveOwnershipCheckSellerLanguage({
+    prospectLanguagePreference: hints.prospectLanguagePreference,
+    languagePreference: hints.languagePreference,
+    bestLanguage: hints.bestLanguage,
+    ownerBestLanguage: text(firstDefined(record.best_language, record.bestLanguage)),
+  })
+
+  const addressChanged = propertyAddress !== result.identity.propertyAddress
+    || Boolean(addressParts.city || addressParts.state || addressParts.zip || addressParts.county)
+  const languageChanged = ownerLanguage !== result.identity.ownerLanguage
+
+  if (!addressChanged && !languageChanged) {
     return result
   }
 
@@ -245,6 +252,7 @@ export const resolveMapOwnershipCheckForSend = async (
       propertyZip: addressParts.zip || result.identity.propertyZip,
       propertyCounty: addressParts.county || result.identity.propertyCounty,
       propertyAddressFull: addressParts.full || result.identity.propertyAddressFull,
+      ownerLanguage,
     },
   }
 }
