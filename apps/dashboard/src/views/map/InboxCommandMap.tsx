@@ -983,10 +983,13 @@ const writeCachedSellerPinDetail = (
   }
 }
 
-const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapSellerPin => {
+const sanitizeSellerPinRecord = (
+  pin: Partial<CommandMapSellerPin> & Record<string, unknown>,
+): CommandMapSellerPin & Record<string, unknown> => {
   const normalizedPropertyType = text(pin.property_type) || text(pin.asset_class) || '—'
   const resolvedPhone = normalizeSellerDialablePhone(pickSellerContactPhone(pin as Record<string, unknown>))
-  return {
+  const dossierHydrated = pin.dossier_hydrated === true || pin._dossierHydrated === true
+  const core: CommandMapSellerPin & Record<string, unknown> = {
     property_id: text(pin.property_id),
     master_owner_id: text(pin.master_owner_id) || null,
     prospect_id: text(pin.prospect_id) || null,
@@ -1095,7 +1098,17 @@ const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapS
     pulse_style: text(pin.pulse_style) || null,
     execution_ring_color: text(pin.execution_ring_color) || null,
     render_priority: nullIfZeroish(pin.render_priority ?? null),
+    dossier_hydrated: dossierHydrated,
+    _dossierHydrated: dossierHydrated,
   }
+
+  // Focus hydration returns the full properties row. Keep those columns on the
+  // card record so the dossier contract can render enriched sections.
+  if (dossierHydrated) {
+    return { ...pin, ...core }
+  }
+
+  return core
 }
 
 const ringColorsForTheme = (styleMode: MapStyleMode) => {
