@@ -273,10 +273,11 @@ describe('desktop map card enriched dossier', () => {
   it('23. storage profile uses storage fields', () => {
     const dossier = buildPropertyDossierContract(hydratedRecord({
       property_type: 'Self Storage',
-      storage_subtype: 'Climate Controlled',
+      storage_units: 120,
+      property_class: 'Climate Controlled',
       units_count: 120,
     }), 'storage')
-    expect(dossier?.assetSpecific.some((field) => field.label === 'Storage Subtype')).toBe(true)
+    expect(dossier?.assetSpecific.some((field) => field.label === 'Storage Units')).toBe(true)
     const vm = buildSellerMapCardViewModel(hydratedRecord({
       property_type: 'Self Storage',
       units_count: 120,
@@ -339,5 +340,8 @@ describe('desktop map card enriched dossier', () => {
     expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).toContain('building_condition')
     expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).toContain('roof_cover')
     expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).toContain('rehab_level')
+    expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).not.toContain('storage_subtype')
+    expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).toContain('lot_size_frontage_feet')
+    expect(COMMAND_MAP_PROPERTY_DOSSIER_SELECT).toContain('mls_market_status')
   })
 })

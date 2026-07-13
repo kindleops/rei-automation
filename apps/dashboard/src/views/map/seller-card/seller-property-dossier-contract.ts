@@ -172,8 +172,8 @@ const ROOF_SPECS: FieldSpec[] = [
 const SITE_SPECS: FieldSpec[] = [
   { key: 'lot_sqft', label: 'Lot Sqft', columns: ['lot_square_feet'], format: fmtIntField, excludeWhenUsed: true },
   { key: 'lot_acres', label: 'Lot Acres', columns: ['lot_acreage'], format: fmtAcres, excludeWhenUsed: true },
-  { key: 'lot_frontage', label: 'Lot Frontage', columns: ['lot_frontage'], format: fmtIntField },
-  { key: 'lot_depth', label: 'Lot Depth', columns: ['lot_depth'], format: fmtIntField },
+  { key: 'lot_frontage', label: 'Lot Frontage', columns: ['lot_size_frontage_feet', 'lot_frontage'], format: fmtIntField },
+  { key: 'lot_depth', label: 'Lot Depth', columns: ['lot_size_depth_feet', 'lot_depth'], format: fmtIntField },
   { key: 'topography', label: 'Topography', columns: ['topography'], format: fmtText },
   { key: 'zoning', label: 'Zoning', columns: ['zoning', 'zoning_code'], format: fmtText, excludeWhenUsed: true },
   { key: 'land_use', label: 'Land Use', columns: ['county_land_use_code', 'property_use'], format: fmtText, excludeWhenUsed: true },
@@ -214,16 +214,14 @@ const VALUATION_SPECS: FieldSpec[] = [
 
 const LOAN_SPECS: FieldSpec[] = [
   { key: 'loan_balance', label: 'Total Loan Balance', columns: ['total_loan_balance', 'mortgage_balance'], format: fmtMoneyField, excludeWhenUsed: true },
-  { key: 'original_loan', label: 'Original Loan Amount', columns: ['original_loan_amount'], format: fmtMoneyField },
-  { key: 'loan_payment', label: 'Loan Payment', columns: ['loan_payment'], format: fmtMoneyField },
-  { key: 'loan_count', label: 'Loan Count', columns: ['loan_count'], format: fmtIntField },
-  { key: 'loan_type', label: 'Loan Type', columns: ['loan_type'], format: fmtText },
+  { key: 'original_loan', label: 'Original Loan Amount', columns: ['total_loan_amt', 'original_loan_amount'], format: fmtMoneyField },
+  { key: 'loan_payment', label: 'Loan Payment', columns: ['total_loan_payment', 'loan_payment'], format: fmtMoneyField },
   { key: 'last_sale_date', label: 'Last Sale Date', columns: ['sale_date', 'last_sale_date'], format: (r) => formatDate(text(r)) },
   { key: 'last_sale_price', label: 'Last Sale Price', columns: ['saleprice', 'last_sale_amount'], format: fmtMoneyField },
   { key: 'recording_date', label: 'Recording Date', columns: ['recording_date'], format: (r) => formatDate(text(r)) },
   { key: 'document_type', label: 'Document Type', columns: ['document_type'], format: fmtText },
-  { key: 'mls_status', label: 'MLS Status', columns: ['mls_status'], format: fmtText },
-  { key: 'listing_price', label: 'Current Listing Price', columns: ['current_listing_price'], format: fmtMoneyField },
+  { key: 'mls_status', label: 'MLS Status', columns: ['mls_market_status', 'mls_status'], format: fmtText },
+  { key: 'listing_price', label: 'Current Listing Price', columns: ['mls_current_listing_price', 'current_listing_price'], format: fmtMoneyField },
   { key: 'mls_sold_date', label: 'MLS Sold Date', columns: ['mls_sold_date'], format: (r) => formatDate(text(r)) },
   { key: 'mls_sold_price', label: 'MLS Sold Price', columns: ['mls_sold_price'], format: fmtMoneyField },
   { key: 'ownership_years', label: 'Ownership Years', columns: ['ownership_years'], format: (r) => {
@@ -245,10 +243,7 @@ const DISTRESS_SPECS: FieldSpec[] = [
   { key: 'foreclosure_stage', label: 'Foreclosure Stage', columns: ['foreclosure_stage'], format: fmtText },
   { key: 'foreclosure_type', label: 'Foreclosure Type', columns: ['foreclosure_type'], format: fmtText },
   { key: 'preforeclosure_status', label: 'Pre-Foreclosure Status', columns: ['preforeclosure_status'], format: fmtText },
-  { key: 'preforeclosure_notice_type', label: 'Notice Type', columns: ['preforeclosure_notice_type'], format: fmtText },
-  { key: 'preforeclosure_notice_date', label: 'Notice Date', columns: ['preforeclosure_notice_date'], format: (r) => formatDate(text(r)) },
-  { key: 'preforeclosure_default_amount', label: 'Default Amount', columns: ['preforeclosure_default_amount'], format: fmtMoneyField },
-  { key: 'preforeclosure_default_date', label: 'Default Date', columns: ['preforeclosure_default_date'], format: (r) => formatDate(text(r)) },
+  { key: 'preforeclosure_stage', label: 'Pre-Foreclosure Stage', columns: ['preforeclosure_stage'], format: fmtText },
   { key: 'auction_date', label: 'Auction Date', columns: ['auction_date'], format: (r) => formatDate(text(r)) },
   { key: 'auction_time', label: 'Auction Time', columns: ['auction_time'], format: fmtText },
   { key: 'auction_location', label: 'Auction Location', columns: ['auction_location'], format: fmtText },
@@ -256,7 +251,7 @@ const DISTRESS_SPECS: FieldSpec[] = [
   { key: 'auction_type', label: 'Auction Type', columns: ['auction_type'], format: fmtText },
   { key: 'auction_opening_bid', label: 'Opening Bid', columns: ['auction_opening_bid'], format: fmtMoneyField },
   { key: 'auction_final_bid', label: 'Final Bid', columns: ['auction_final_bid'], format: fmtMoneyField },
-  { key: 'auction_case_number', label: 'Case Number', columns: ['auction_case_number', 'preforeclosure_case_number'], format: fmtText },
+  { key: 'auction_case_number', label: 'Case Number', columns: ['auction_case_number'], format: fmtText },
 ]
 
 const ASSET_SPECIFIC_SPECS: Record<SellerAssetClassKey, FieldSpec[]> = {
@@ -283,8 +278,8 @@ const ASSET_SPECIFIC_SPECS: Record<SellerAssetClassKey, FieldSpec[]> = {
     { key: 'commercial_subtype', label: 'Commercial Subtype', columns: ['commercial_subtype', 'property_class'], format: fmtText },
   ],
   storage: [
-    { key: 'storage_subtype', label: 'Storage Subtype', columns: ['storage_subtype'], format: fmtText },
-    { key: 'storage_units', label: 'Storage Units', columns: ['units_count'], format: fmtIntField },
+    { key: 'storage_units', label: 'Storage Units', columns: ['storage_units', 'units_count'], format: fmtIntField },
+    { key: 'storage_class', label: 'Property Class', columns: ['property_class'], format: fmtText },
   ],
   land: [
     { key: 'land_use_detail', label: 'Land Use', columns: ['county_land_use_code', 'property_use'], format: fmtText },
