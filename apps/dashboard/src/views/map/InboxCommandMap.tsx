@@ -956,10 +956,40 @@ const needsSellerPinHydration = (pin: Partial<CommandMapSellerPin>): boolean => 
     || !hasImage
 }
 
-const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapSellerPin => {
+const sellerPinDetailCacheKey = (propertyId: string, mode: 'peek' | 'focus') => `${propertyId}:${mode}`
+
+const readCachedSellerPinDetail = (
+  cache: Map<string, CommandMapSellerPin>,
+  propertyId: string,
+  mode: 'peek' | 'focus',
+): CommandMapSellerPin | undefined => {
+  const focus = cache.get(sellerPinDetailCacheKey(propertyId, 'focus'))
+  if (focus) return focus
+  if (mode === 'peek') {
+    return cache.get(sellerPinDetailCacheKey(propertyId, 'peek'))
+  }
+  return undefined
+}
+
+const writeCachedSellerPinDetail = (
+  cache: Map<string, CommandMapSellerPin>,
+  propertyId: string,
+  mode: 'peek' | 'focus',
+  detail: CommandMapSellerPin,
+) => {
+  cache.set(sellerPinDetailCacheKey(propertyId, mode), detail)
+  if (mode === 'focus') {
+    cache.set(sellerPinDetailCacheKey(propertyId, 'peek'), detail)
+  }
+}
+
+const sanitizeSellerPinRecord = (
+  pin: Partial<CommandMapSellerPin> & Record<string, unknown>,
+): CommandMapSellerPin & Record<string, unknown> => {
   const normalizedPropertyType = text(pin.property_type) || text(pin.asset_class) || '—'
   const resolvedPhone = normalizeSellerDialablePhone(pickSellerContactPhone(pin as Record<string, unknown>))
-  return {
+  const dossierHydrated = pin.dossier_hydrated === true || pin._dossierHydrated === true
+  const core: CommandMapSellerPin & Record<string, unknown> = {
     property_id: text(pin.property_id),
     master_owner_id: text(pin.master_owner_id) || null,
     prospect_id: text(pin.prospect_id) || null,
@@ -1068,7 +1098,17 @@ const sanitizeSellerPinRecord = (pin: Partial<CommandMapSellerPin>): CommandMapS
     pulse_style: text(pin.pulse_style) || null,
     execution_ring_color: text(pin.execution_ring_color) || null,
     render_priority: nullIfZeroish(pin.render_priority ?? null),
+    dossier_hydrated: dossierHydrated,
+    _dossierHydrated: dossierHydrated,
   }
+
+  // Focus hydration returns the full properties row. Keep those columns on the
+  // card record so the dossier contract can render enriched sections.
+  if (dossierHydrated) {
+    return { ...pin, ...core }
+  }
+
+  return core
 }
 
 const ringColorsForTheme = (styleMode: MapStyleMode) => {
@@ -2817,6 +2857,7 @@ const MapEntityCard = ({
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
           onActivityRefresh={onSellerActivityRefresh}
+          detailLoading={card.hydrating === true && card.intent === 'selected'}
         />
       </div>
     )
@@ -5045,8 +5086,9 @@ export function InboxCommandMap({
     const propertyId = text(card.feature.property_id)
     if (!propertyId) return
 
-    const cached = sellerPinDetailsCacheRef.current.get(propertyId)
-    if (cached) {
+    const dossierMode: 'peek' | 'focus' = card.intent === 'selected' ? 'focus' : 'peek'
+    const cached = readCachedSellerPinDetail(sellerPinDetailsCacheRef.current, propertyId, dossierMode)
+    if (cached && (dossierMode === 'peek' || cached.dossier_hydrated === true || (cached as Record<string, unknown>)._dossierHydrated === true)) {
       setter((current) => {
         if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
         return {
@@ -5081,16 +5123,17 @@ export function InboxCommandMap({
           hydrating: false,
         }
       })
-    }, 12_000)
+    }, dossierMode === 'focus' ? 18_000 : 12_000)
 
     loadCommandMapSellerPinDetail(propertyId, {
       signal: controller.signal,
       threadKey,
       masterOwnerId,
+      dossierMode,
     })
       .then((detail) => {
         const hydrated = sanitizeSellerPinRecord({ ...pinSnapshot, ...(detail ?? {}) })
-        sellerPinDetailsCacheRef.current.set(propertyId, hydrated)
+        writeCachedSellerPinDetail(sellerPinDetailsCacheRef.current, propertyId, dossierMode, hydrated)
         setter((current) => {
           if (!current || current.kind !== 'seller' || text(current.feature.property_id) !== propertyId) return current
           return {
@@ -7319,7 +7362,9 @@ export function InboxCommandMap({
         hoverPopupRef.current = null
 
         const propertyId = text(record.property_id || record.propertyId)
-        const cachedPin = propertyId ? sellerPinDetailsCacheRef.current.get(propertyId) : null
+        const cachedPin = propertyId
+          ? readCachedSellerPinDetail(sellerPinDetailsCacheRef.current, propertyId, 'peek')
+          : null
         const mergedRecord = cachedPin
           ? sanitizeSellerPinRecord({ ...record, ...cachedPin } as Partial<CommandMapSellerPin>)
           : sanitizeSellerPinRecord(record as Partial<CommandMapSellerPin>)

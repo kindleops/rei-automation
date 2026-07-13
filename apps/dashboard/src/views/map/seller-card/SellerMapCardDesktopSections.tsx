@@ -1,5 +1,5 @@
 import type { SellerMapCardViewModel } from './seller-map-card.types'
-import { SellerMapCardPriorityRing } from './SellerMapCardPriorityRing'
+import type { DossierField, DossierFieldGroup } from './seller-property-dossier-contract'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -10,6 +10,26 @@ const tierClass = (tier?: string) => {
   if (tier === 'context') return 'is-context'
   return 'is-neutral'
 }
+
+export const SellerMapCardBadgeRail = ({ badges }: { badges: SellerMapCardViewModel['headerBadges'] }) => (
+  <div className="smc-state-row smc-state-row--below-image" aria-label="Canonical lead state">
+    {badges.map((badge) => (
+      <span
+        key={badge.key}
+        className={cls(
+          'smc-badge',
+          badge.tone === 'stage' && 'smc-badge--stage',
+          badge.tone === 'status' && 'smc-badge--status',
+          badge.tone === 'score' && 'smc-badge--score',
+          badge.tone === 'asset' && 'smc-badge--asset',
+          badge.tone === 'units' && 'smc-badge--units',
+        )}
+      >
+        {badge.label}
+      </span>
+    ))}
+  </div>
+)
 
 export const SellerMapCardMetrics = ({
   metrics,
@@ -32,7 +52,7 @@ export const SellerMapCardWeightedTags = ({
   flags,
   hiddenCount = 0,
 }: {
-  flags: SellerMapCardViewModel['flags']
+  flags: SellerMapCardViewModel['weightedSignals']
   hiddenCount?: number
 }) => {
   if (flags.length === 0) return null
@@ -52,222 +72,97 @@ export const SellerMapCardWeightedTags = ({
   )
 }
 
-export const SellerMapCardFinancialSection = ({
-  financialProfile,
-}: {
-  financialProfile: SellerMapCardViewModel['financialProfile']
-}) => {
-  if (financialProfile.fields.length === 0 && financialProfile.meters.length === 0) return null
+const DossierFieldGrid = ({ fields }: { fields: DossierField[] }) => {
+  if (fields.length === 0) return null
   return (
-    <section className="smc-section smc-section--financial" aria-label="Financial profile">
-      <h4>Financial Profile</h4>
-      {financialProfile.summaryChips.length > 0 ? (
-        <div className="smc-fin-summary">
-          {financialProfile.summaryChips.map((chip) => (
-            <div key={chip.label} className="smc-fin-summary__chip">
-              <span>{chip.label}</span>
-              <strong>{chip.value}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {financialProfile.meters.length > 0 ? (
-        <div className="smc-fin-meters smc-fin-meters--compact">
-          {financialProfile.meters.map((meter) => (
-            <div key={meter.key} className="smc-fin-meter">
-              <div className="smc-fin-meter__head">
-                <span>{meter.label}</span>
-                <strong>{meter.caption || `${meter.percent}%`}</strong>
-              </div>
-              <div className="smc-fin-meter__track" aria-hidden="true">
-                <span className="smc-fin-meter__fill" style={{ width: `${meter.percent}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
-        {financialProfile.fields.map((field) => (
-          <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-export const SellerMapCardOwnerPressureSection = ({
-  ownerPressure,
-  acquisitionFit,
-  ownerFields,
-}: {
-  ownerPressure: SellerMapCardViewModel['ownerPressure']
-  acquisitionFit: SellerMapCardViewModel['acquisitionFit']
-  ownerFields: SellerMapCardViewModel['focusOwnerFields']
-}) => {
-  if (ownerPressure.score == null && acquisitionFit.score == null && ownerFields.length === 0) return null
-  return (
-    <section className="smc-section smc-section--owner-pressure" aria-label="Owner pressure and acquisition fit">
-      <h4>Ownership / Acquisition Fit</h4>
-      <div className="smc-pressure-dual">
-        <div className="smc-pressure-card smc-pressure-card--distress">
-          <div className="smc-pressure-card__head">
-            <span>Owner Pressure</span>
-            <strong>{ownerPressure.label}</strong>
-          </div>
-          {ownerPressure.summary ? <p className="smc-pressure-card__summary">{ownerPressure.summary}</p> : null}
-          {ownerPressure.drivers.length > 0 ? (
-            <div className="smc-pressure-card__drivers">
-              {ownerPressure.drivers.filter((d) => d.impact === 'negative').slice(0, 3).map((driver) => (
-                <span key={driver.label} className={cls('smc-pressure-driver', `is-${driver.impact}`)}>
-                  {driver.label}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        {acquisitionFit.score != null ? (
-          <div className="smc-pressure-card smc-pressure-card--fit">
-            <div className="smc-pressure-card__head">
-              <span>Acquisition Fit</span>
-              <strong>{acquisitionFit.label}</strong>
-            </div>
-            {acquisitionFit.summary ? <p className="smc-pressure-card__summary">{acquisitionFit.summary}</p> : null}
-            {acquisitionFit.drivers.length > 0 ? (
-              <div className="smc-pressure-card__drivers">
-                {acquisitionFit.drivers.slice(0, 4).map((driver) => (
-                  <span key={driver.label} className={cls('smc-pressure-driver', `is-${driver.impact}`)}>
-                    {driver.label}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      {ownerFields.length > 0 ? (
-        <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
-          {ownerFields.map((field) => (
-            <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-export const SellerMapCardProspectSection = ({
-  prospectProfile,
-}: {
-  prospectProfile: SellerMapCardViewModel['prospectProfile']
-}) => (
-  <section className="smc-section smc-section--prospect" aria-label="Prospect contactability">
-    <h4>Prospect / Contactability</h4>
-    <div className="smc-contact-meter">
-      <div className="smc-contact-meter__head">
-        <span>Contactability</span>
-        <strong>{prospectProfile.meterLabel}</strong>
-      </div>
-      <div className="smc-contact-meter__track" aria-hidden="true">
-        <span className="smc-contact-meter__fill" style={{ width: `${prospectProfile.meterPercent}%` }} />
-      </div>
-      {prospectProfile.badges.length > 0 ? (
-        <div className="smc-contact-badges">
-          {prospectProfile.badges.map((badge) => (
-            <span key={badge.key} className={cls('smc-contact-badge', `is-${badge.tone}`)}>{badge.label}</span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-    {prospectProfile.activityLine ? (
-      <p className="smc-empty-line">{prospectProfile.activityLine}</p>
-    ) : null}
-    <div className="smc-kv-grid smc-kv-grid--compact">
-      {prospectProfile.fields.map((field) => (
-        <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
-      ))}
-    </div>
-  </section>
-)
-
-export const SellerMapCardIntelligenceSection = ({
-  viewModel,
-}: {
-  viewModel: SellerMapCardViewModel
-}) => (
-  <section className="smc-intel-section smc-intel-section--compact" aria-label="Property intelligence">
-    <div className="smc-intel-head">
-      <span className="smc-intel-head__label">Property Intelligence</span>
-    </div>
-    <div className="smc-intel-strip smc-intel-strip--compact">
-      {viewModel.intelligenceStrip.map((field) => (
-        <div key={field.label} className="smc-intel-strip__cell">
+    <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
+      {fields.map((field) => (
+        <div key={field.key} className="smc-kv smc-kv--flat">
           <span>{field.label}</span>
           <strong>{field.value}</strong>
         </div>
       ))}
-      <div className="smc-intel-strip__priority smc-intel-strip__priority--compact">
-        <SellerMapCardPriorityRing
-          score={viewModel.masterOwner.priorityScore}
-          tier={null}
-          classification={viewModel.masterOwner.priorityClassification}
-          size={36}
-          showUnscoredLabel={viewModel.masterOwner.priorityScore == null}
-        />
-      </div>
     </div>
-  </section>
-)
-
-export const SellerMapCardPropertyProfileSection = ({
-  groups,
-}: {
-  groups: SellerMapCardViewModel['propertyProfileGroups']
-}) => {
-  if (groups.length === 0) return null
-  return (
-    <section className="smc-section smc-section--profile" aria-label="Property profile">
-      <h4>Property Profile</h4>
-      {groups.map((group) => (
-        <div key={group.key} className="smc-profile-group">
-          <h5>{group.label}</h5>
-          <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
-            {group.fields.map((field) => (
-              <div key={`${group.key}-${field.label}`} className="smc-kv smc-kv--flat">
-                <span>{field.label}</span>
-                <strong>{field.value}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </section>
   )
 }
 
-export const SellerMapCardContactStateStrip = ({
-  label,
-}: {
-  label: string
-}) => (
-  <div className="smc-contact-state" aria-label="Contact state">
-    <span className="smc-contact-state__pill">{label}</span>
+const DossierGroup = ({ group }: { group: DossierFieldGroup }) => (
+  <div className="smc-dossier-group">
+    <h5>{group.label}</h5>
+    <DossierFieldGrid fields={group.fields} />
   </div>
 )
 
-export const SellerMapCardOperationSection = ({
-  fields,
+export const SellerMapCardDossierSections = ({
+  viewModel,
+  loading,
 }: {
-  fields: SellerMapCardViewModel['focusOperationFields']
+  viewModel: SellerMapCardViewModel
+  loading?: boolean
 }) => {
-  if (fields.length === 0) return null
-  return (
-    <section className="smc-section smc-section--ops" aria-label="Automation and outreach operations">
-      <h4>Automation</h4>
-      <div className="smc-kv-grid smc-kv-grid--compact">
-        {fields.map((field) => (
-          <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+  if (loading) {
+    return (
+      <div className="smc-dossier-skeleton" aria-label="Loading property dossier">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="smc-dossier-skeleton__row" />
         ))}
       </div>
-    </section>
+    )
+  }
+
+  const dossier = viewModel.dossier
+  if (!dossier) return null
+
+  return (
+    <div className="smc-dossier-scroll">
+      {dossier.propertyDetails.length > 0 ? (
+        <section className="smc-section smc-section--property-details" aria-label="Property details">
+          <h4>Property Details</h4>
+          {dossier.propertyDetails.map((group) => (
+            <DossierGroup key={group.key} group={group} />
+          ))}
+        </section>
+      ) : null}
+
+      {dossier.valuationAssessment.length > 0 ? (
+        <section className="smc-section smc-section--valuation" aria-label="Valuation and assessment">
+          <h4>Valuation & Assessment</h4>
+          <DossierFieldGrid fields={dossier.valuationAssessment} />
+        </section>
+      ) : null}
+
+      {dossier.loanTransaction.length > 0 ? (
+        <section className="smc-section smc-section--loan" aria-label="Loan and transaction">
+          <h4>Loan & Transaction</h4>
+          <DossierFieldGrid fields={dossier.loanTransaction} />
+        </section>
+      ) : null}
+
+      {dossier.distressLegal && dossier.distressLegal.length > 0 ? (
+        <section className="smc-section smc-section--distress" aria-label="Distress and legal">
+          <h4>Distress & Legal</h4>
+          <DossierFieldGrid fields={dossier.distressLegal} />
+        </section>
+      ) : null}
+
+      {dossier.assetSpecific.length > 0 ? (
+        <section className="smc-section smc-section--asset-specific" aria-label="Asset-specific details">
+          <h4>Asset-Specific Details</h4>
+          <DossierFieldGrid fields={dossier.assetSpecific} />
+        </section>
+      ) : null}
+
+      {viewModel.weightedSignals.length > 0 ? (
+        <section className="smc-section smc-section--signals" aria-label="Weighted property signals">
+          <h4>Weighted Property Signals</h4>
+          <SellerMapCardWeightedTags flags={viewModel.weightedSignals} />
+        </section>
+      ) : null}
+    </div>
   )
+}
+
+export const SellerMapCardOperationalState = ({ state }: { state: string | null }) => {
+  if (!state) return null
+  return <p className="smc-operational-state">{state}</p>
 }
