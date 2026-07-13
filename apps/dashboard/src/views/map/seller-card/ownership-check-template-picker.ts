@@ -171,6 +171,7 @@ export type OwnershipTemplateSelection = {
   weight: number
   selectionReason: string
   excludedRecentTemplateId: string | null
+  excludedRecentTemplateIds: string[]
 }
 
 export type EvaluateOwnershipTemplateOptions = {
@@ -265,11 +266,14 @@ const dedupeCandidates = (pool: OwnershipTemplateCandidate[]): OwnershipTemplate
   return Array.from(uniqueById.values())
 }
 
+const templateIdentity = (template: SmsTemplate): string =>
+  asString(template.templateId || template.id, '').trim()
+
 export const buildOwnershipTemplatePool = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateId?: string | null } = {},
+  options: { excludeTemplateIds?: string[] } = {},
 ): OwnershipTemplateCandidate[] => {
   const languageScoped = filterOwnershipTemplatesForLanguage(templates, ownerLanguage)
   const hasResolvedSellerName = Boolean(asString(context.seller_first_name, '').trim())
@@ -286,15 +290,25 @@ export const buildOwnershipTemplatePool = (
   let candidates = dedupeCandidates(
     evaluateTemplates(languageScoped, context, { requireSellerNameInGreeting: true }),
   )
-  const excludeId = asString(options.excludeTemplateId, '').trim()
-  if (excludeId && candidates.length > 1) {
-    const filtered = candidates.filter(
-      (entry) => (entry.template.templateId || entry.template.id) !== excludeId,
-    )
+  const excludeIds = Array.from(new Set(
+    (options.excludeTemplateIds ?? [])
+      .map((id) => asString(id, '').trim())
+      .filter(Boolean),
+  ))
+  if (excludeIds.length && candidates.length > 1) {
+    const maxExclusions = Math.max(0, candidates.length - 1)
+    const activeExclusions = new Set(excludeIds.slice(0, maxExclusions))
+    const filtered = candidates.filter((entry) => !activeExclusions.has(templateIdentity(entry.template)))
     if (filtered.length) candidates = filtered
   }
 
   return candidates
+}
+
+export const pickUniformRandom = <T>(items: T[]): T | null => {
+  if (!items.length) return null
+  const index = Math.floor(Math.random() * items.length)
+  return items[index] ?? null
 }
 
 export const pickWeightedRandom = <T extends { weight: number }>(items: T[]): T | null => {
@@ -312,28 +326,35 @@ export const pickRandomOwnershipCheckTemplate = (
   templates: SmsTemplate[],
   context: Record<string, string>,
   ownerLanguage: string,
-  options: { excludeTemplateId?: string | null } = {},
+  options: { excludeTemplateIds?: string[] } = {},
 ): OwnershipTemplateSelection | null => {
-  const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage, options)
-  const picked = pickWeightedRandom(pool)
+  const excludeIds = Array.from(new Set(
+    (options.excludeTemplateIds ?? [])
+      .map((id) => asString(id, '').trim())
+      .filter(Boolean),
+  ))
+  const pool = buildOwnershipTemplatePool(templates, context, ownerLanguage, {
+    excludeTemplateIds: excludeIds,
+  })
+  const picked = pickUniformRandom(pool)
   if (!picked) return null
 
-  const excludeId = asString(options.excludeTemplateId, '').trim() || null
-  const selectionReason = excludeId && pool.length > 1 && excludeId !== (picked.template.templateId || picked.template.id)
-    ? 'uniform_random_excluding_recent'
-    : picked.weight > 1
-      ? 'traffic_weighted_random'
-      : 'uniform_random'
+  const pickedId = templateIdentity(picked.template)
+  const excludedHit = excludeIds.filter((id) => id !== pickedId)
+  const selectionReason = excludedHit.length
+    ? 'catalog_rotation_excluding_recent'
+    : 'uniform_catalog_random'
 
   return {
     template: picked.template,
     renderedMessage: picked.rendered,
-    templateId: picked.template.templateId || picked.template.id,
+    templateId: pickedId,
     templateKey: picked.templateKey,
     language: picked.language,
     weight: picked.weight,
     selectionReason,
-    excludedRecentTemplateId: excludeId,
+    excludedRecentTemplateId: excludedHit[0] ?? null,
+    excludedRecentTemplateIds: excludeIds,
   }
 }
 
@@ -358,32 +379,96 @@ export const fetchOwnershipCheckTemplates = async (): Promise<SmsTemplate[]> => 
   return templates
 }
 
+const readTemplateIdFromQueueRow = (row: AnyRecord): string => {
+  const metadata = (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as AnyRecord
+  return asString(
+    row.selected_template_id
+    ?? row.template_id
+    ?? metadata.selected_template_id
+    ?? metadata.template_id,
+    '',
+  ).trim()
+}
+
+export const fetchRecentOwnershipCheckTemplateIds = async (
+  options: {
+    propertyId?: string | null
+    recipientPhone?: string | null
+    language?: string | null
+    globalLimit?: number
+    localLimit?: number
+  } = {},
+): Promise<string[]> => {
+  const propertyId = asString(options.propertyId, '').trim()
+  const recipientPhone = asString(options.recipientPhone, '').trim()
+  const language = canonicalizeOwnerLanguage(options.language)
+  const globalLimit = Math.max(1, options.globalLimit ?? 12)
+  const localLimit = Math.max(1, options.localLimit ?? 3)
+  let supabase
+  try {
+    supabase = getSupabaseClient()
+  } catch {
+    return []
+  }
+  if (!supabase?.from) return []
+
+  const recentIds: string[] = []
+  const seen = new Set<string>()
+
+  const pushId = (value: string) => {
+    const id = asString(value, '').trim()
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    recentIds.push(id)
+  }
+
+  if (propertyId && recipientPhone && localLimit > 0) {
+    const { data, error } = await supabase
+      .from('send_queue')
+      .select('template_id, selected_template_id, metadata')
+      .eq('property_id', propertyId)
+      .eq('to_phone_number', recipientPhone)
+      .eq('message_type', 'ownership_check')
+      .order('created_at', { ascending: false })
+      .limit(localLimit)
+
+    if (!error && Array.isArray(data)) {
+      for (const row of data) pushId(readTemplateIdFromQueueRow(row as AnyRecord))
+    }
+  }
+
+  if (globalLimit > 0) {
+    let globalQuery = supabase
+      .from('send_queue')
+      .select('template_id, selected_template_id, metadata, language')
+      .eq('message_type', 'ownership_check')
+      .order('created_at', { ascending: false })
+      .limit(globalLimit)
+
+    if (language) {
+      globalQuery = globalQuery.eq('language', language)
+    }
+
+    const { data: globalRows, error: globalError } = await globalQuery
+    if (!globalError && Array.isArray(globalRows)) {
+      for (const row of globalRows) pushId(readTemplateIdFromQueueRow(row as AnyRecord))
+    }
+  }
+
+  return recentIds
+}
+
 export const fetchRecentOwnershipCheckTemplateId = async (
   propertyId: string,
   recipientPhone: string,
 ): Promise<string | null> => {
-  const normalizedPropertyId = asString(propertyId, '').trim()
-  const normalizedPhone = asString(recipientPhone, '').trim()
-  if (!normalizedPropertyId || !normalizedPhone) return null
-
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase
-    .from('send_queue')
-    .select('template_id, selected_template_id, metadata')
-    .eq('property_id', normalizedPropertyId)
-    .eq('to_phone_number', normalizedPhone)
-    .eq('message_type', 'ownership_check')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error || !data) return null
-  const row = data as AnyRecord
-  const metadata = (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as AnyRecord
-  return asString(
-    row.selected_template_id ?? row.template_id ?? metadata.selected_template_id ?? metadata.template_id,
-    '',
-  ) || null
+  const ids = await fetchRecentOwnershipCheckTemplateIds({
+    propertyId,
+    recipientPhone,
+    localLimit: 1,
+    globalLimit: 0,
+  })
+  return ids[0] ?? null
 }
 
 export const resolveMapOwnerLanguage = async (
@@ -417,11 +502,15 @@ export const pickOwnershipCheckTemplateForMap = async (
     random?: () => number
   } = {},
 ): Promise<OwnershipTemplateSelection | null> => {
-  const [templates, recentTemplateId] = await Promise.all([
+  const [templates, recentTemplateIds] = await Promise.all([
     fetchOwnershipCheckTemplates(),
-    options.propertyId && options.recipientPhone
-      ? fetchRecentOwnershipCheckTemplateId(options.propertyId, options.recipientPhone)
-      : Promise.resolve(null),
+    fetchRecentOwnershipCheckTemplateIds({
+      propertyId: options.propertyId,
+      recipientPhone: options.recipientPhone,
+      language: ownerLanguage,
+      globalLimit: 12,
+      localLimit: 3,
+    }),
   ])
 
   const originalRandom = Math.random
@@ -430,7 +519,7 @@ export const pickOwnershipCheckTemplateForMap = async (
   }
   try {
     return pickRandomOwnershipCheckTemplate(templates, context, ownerLanguage, {
-      excludeTemplateId: recentTemplateId,
+      excludeTemplateIds: recentTemplateIds,
     })
   } finally {
     Math.random = originalRandom

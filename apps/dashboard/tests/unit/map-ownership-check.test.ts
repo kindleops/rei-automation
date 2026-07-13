@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   buildOwnershipCheckTemplateContext,
+  parsePropertyAddressParts,
   resolveMapOwnershipCheckIdentity,
 } from '../../src/domain/map/resolve-map-ownership-check'
 import {
@@ -237,7 +238,12 @@ const identityFixture = {
   agentFirstName: 'Michael',
   ownerDisplayName: 'David Gilkey & Holly Williams',
   ownerLanguage: 'English',
-  propertyAddress: '3945 25th Ave S, Minneapolis, MN 55406',
+  propertyAddress: '3945 25th Ave S',
+  propertyCity: 'Minneapolis',
+  propertyState: 'MN',
+  propertyZip: '55406',
+  propertyCounty: '',
+  propertyAddressFull: '3945 25th Ave S, Minneapolis, MN 55406',
   sellerDisplayName: 'David Gilkey',
   smsAgentId: null,
   selectedAgentId: null,
@@ -543,6 +549,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { threadKey: '+16125550101' } as never,
       fromPhone: '+16125559999',
@@ -563,6 +570,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { threadKey: '+16125550101' } as never,
       fromPhone: '+16125559999',
@@ -687,6 +695,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { id: '+16125550101', marketId: 'minneapolis, mn' } as never,
       dryRun: true,
@@ -762,6 +771,27 @@ describe('map ownership check canonical resolver', () => {
     expect(evaluated?.rendered).toContain('Michael')
   })
 
+  it('parses city/state/zip for ownership_check template variables', () => {
+    const parts = parsePropertyAddressParts({
+      property_address_full: '3945 25th Ave S, Minneapolis, MN 55406',
+      property_address_city: 'Minneapolis',
+      property_address_state: 'MN',
+      property_address_zip: '55406',
+    })
+    expect(parts.street).toBe('3945 25th Ave S')
+    expect(parts.city).toBe('Minneapolis')
+    expect(parts.state).toBe('MN')
+    expect(parts.zip).toBe('55406')
+  })
+
+  it('supplies city/zip aliases in ownership_check template context', () => {
+    const context = buildOwnershipCheckTemplateContext(identityFixture)
+    expect(context.city).toBe('Minneapolis')
+    expect(context.zip).toBe('55406')
+    expect(context.property_city).toBe('Minneapolis')
+    expect(context.property_zip).toBe('55406')
+  })
+
   it('uses assigned agent names per master owner', async () => {
     const david = await resolveMapOwnershipCheckIdentity('prop-david', { supabase: makeSupabase(davidFixture) })
     const anthony = await resolveMapOwnershipCheckIdentity('prop-anthony', { supabase: makeSupabase(anthonyFixture) })
@@ -803,6 +833,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { id: '+16125550101', leadId: 'mo-david', marketId: 'minneapolis, mn' } as never,
       dryRun: true,
@@ -827,6 +858,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { threadKey: '+16125550101', marketId: 'minneapolis, mn' } as never,
       fromPhone: '+16125559999',
@@ -856,6 +888,7 @@ describe('map ownership check canonical resolver', () => {
         weight: 1,
         selectionReason: 'uniform_random',
         excludedRecentTemplateId: null,
+        excludedRecentTemplateIds: [],
       },
       thread: { threadKey: '+16125550101' } as never,
       fromPhone: '+16125559999',

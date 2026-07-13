@@ -50,6 +50,7 @@ export const buildMapOwnershipCheckQueuePayload = ({
     template_selection_reason: selection.selectionReason,
     template_traffic_weight: selection.weight,
     excluded_recent_template_id: selection.excludedRecentTemplateId,
+    excluded_recent_template_ids: selection.excludedRecentTemplateIds,
     seller_first_name: identity.prospectFirstName,
     seller_display_name: identity.sellerDisplayName,
     agent_name: identity.agentName,

@@ -44,6 +44,15 @@ export type MapOwnershipCheckHints = {
   smsEligible?: boolean | null
 }
 
+export type PropertyAddressParts = {
+  street: string
+  city: string
+  state: string
+  zip: string
+  county: string
+  full: string
+}
+
 export type MapOwnershipCheckIdentity = {
   propertyId: string
   masterOwnerId: string
@@ -58,6 +67,11 @@ export type MapOwnershipCheckIdentity = {
   ownerDisplayName: string
   ownerLanguage: string
   propertyAddress: string
+  propertyCity: string
+  propertyState: string
+  propertyZip: string
+  propertyCounty: string
+  propertyAddressFull: string
   sellerDisplayName: string
   smsAgentId: string | null
   selectedAgentId: string | null
@@ -105,6 +119,114 @@ export const resolveStreetPropertyAddress = (
   const full = text(property.property_address_full)
   if (!full) return ''
   return full.split(',')[0]?.trim() || full
+}
+
+const readAddressField = (
+  property: AnyRecord,
+  record: Record<string, unknown> | undefined,
+  keys: string[],
+): string => {
+  for (const key of keys) {
+    const fromRecord = record ? text(record[key]) : ''
+    if (fromRecord) return fromRecord
+    const fromProperty = text(property[key])
+    if (fromProperty) return fromProperty
+  }
+  return ''
+}
+
+const parseCityStateZipFromTail = (tail: string): { city: string; state: string; zip: string } => {
+  const trimmed = tail.trim()
+  if (!trimmed) return { city: '', state: '', zip: '' }
+
+  const stateZipMatch = trimmed.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/)
+  if (stateZipMatch) {
+    return { city: '', state: stateZipMatch[1].toUpperCase(), zip: stateZipMatch[2] }
+  }
+
+  const parts = trimmed.split(/\s+/)
+  const last = parts[parts.length - 1] ?? ''
+  const secondLast = parts[parts.length - 2] ?? ''
+  if (/^\d{5}(?:-\d{4})?$/.test(last) && /^[A-Za-z]{2}$/.test(secondLast)) {
+    return {
+      city: parts.slice(0, -2).join(' ').trim(),
+      state: secondLast.toUpperCase(),
+      zip: last,
+    }
+  }
+
+  if (/^[A-Za-z]{2}$/.test(last)) {
+    return {
+      city: parts.slice(0, -1).join(' ').trim(),
+      state: last.toUpperCase(),
+      zip: '',
+    }
+  }
+
+  return { city: trimmed, state: '', zip: '' }
+}
+
+/** Resolve street/city/state/zip/county for ownership_check template variables. */
+export const parsePropertyAddressParts = (
+  property: AnyRecord,
+  record?: Record<string, unknown>,
+): PropertyAddressParts => {
+  const street = resolveStreetPropertyAddress(property, record)
+  const city = readAddressField(property, record, [
+    'property_address_city',
+    'property_city',
+    'city',
+  ])
+  const state = readAddressField(property, record, [
+    'property_address_state',
+    'property_state',
+    'state',
+  ])
+  const zip = readAddressField(property, record, [
+    'property_address_zip',
+    'property_zip',
+    'zip',
+  ])
+  const county = readAddressField(property, record, [
+    'property_address_county_name',
+    'property_county',
+    'county',
+  ])
+  const full = readAddressField(property, record, [
+    'property_address_full',
+    'propertyAddressFull',
+  ]) || [street, city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+
+  if (city || state || zip) {
+    return { street, city, state, zip, county, full }
+  }
+
+  const source = full || street
+  const commaParts = source.split(',').map((part) => part.trim()).filter(Boolean)
+  if (commaParts.length >= 3) {
+    const parsedTail = parseCityStateZipFromTail(commaParts.slice(2).join(', '))
+    return {
+      street: commaParts[0] ?? street,
+      city: commaParts[1] ?? parsedTail.city,
+      state: parsedTail.state,
+      zip: parsedTail.zip,
+      county,
+      full: source,
+    }
+  }
+  if (commaParts.length === 2) {
+    const parsedTail = parseCityStateZipFromTail(commaParts[1] ?? '')
+    return {
+      street: commaParts[0] ?? street,
+      city: parsedTail.city,
+      state: parsedTail.state,
+      zip: parsedTail.zip,
+      county,
+      full: source,
+    }
+  }
+
+  return { street, city: '', state: '', zip: '', county, full: source }
 }
 
 const toE164 = (value: unknown): string => {
@@ -829,7 +951,8 @@ const buildIdentityFromResolvedParts = ({
   }
 
   const ownerDisplayName = text(owner.display_name) || text(hints.ownerDisplayName)
-  const propertyAddress = resolveStreetPropertyAddress(property)
+  const addressParts = parsePropertyAddressParts(property)
+  const propertyAddress = addressParts.street || resolveStreetPropertyAddress(property)
 
   return {
     ok: true,
@@ -847,6 +970,11 @@ const buildIdentityFromResolvedParts = ({
       ownerDisplayName,
       ownerLanguage: text(owner.best_language) || 'English',
       propertyAddress,
+      propertyCity: addressParts.city,
+      propertyState: addressParts.state,
+      propertyZip: addressParts.zip,
+      propertyCounty: addressParts.county,
+      propertyAddressFull: addressParts.full,
       sellerDisplayName: prospectFullName || prospectFirstName,
       smsAgentId: null,
       selectedAgentId: null,
@@ -1169,6 +1297,14 @@ export const buildOwnershipCheckTemplateContext = (
     identity.prospectFirstName,
     identity.prospectFullName,
   )
+  const city = text(identity.propertyCity)
+  const state = text(identity.propertyState)
+  const zip = text(identity.propertyZip)
+  const county = text(identity.propertyCounty)
+  const street = text(identity.propertyAddress)
+  const fullAddress = text(identity.propertyAddressFull)
+    || [street, city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+
   return {
     seller_first_name: sellerFirstName,
     seller_name: sellerFirstName,
@@ -1177,8 +1313,17 @@ export const buildOwnershipCheckTemplateContext = (
     first_name: sellerFirstName,
     nickname: sellerFirstName,
     owner_name: identity.ownerDisplayName,
-    property_address: identity.propertyAddress,
-    street_address: identity.propertyAddress,
+    property_address: street,
+    street_address: street,
+    property_address_full: fullAddress,
+    property_city: city,
+    property_state: state,
+    property_zip: zip,
+    property_county: county,
+    city,
+    state,
+    zip,
+    county,
     agent_name: identity.agentFirstName,
     agent_first_name: identity.agentFirstName,
   }

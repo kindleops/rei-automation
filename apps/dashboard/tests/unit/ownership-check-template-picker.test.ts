@@ -11,6 +11,7 @@ import {
   languagesMatchForTemplate,
   pickOwnershipCheckTemplateForMap,
   pickRandomOwnershipCheckTemplate,
+  pickUniformRandom,
   pickWeightedRandom,
   resolveMapOwnerLanguage,
 } from '../../src/views/map/seller-card/ownership-check-template-picker'
@@ -198,6 +199,39 @@ describe('ownership check template picker', () => {
       { weight: 99, id: 'b' },
     ] as Array<{ weight: number; id: string }>)
     expect(winner?.id).toBeDefined()
+  })
+
+  it('rotates across the catalog by excluding multiple recent template ids', () => {
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, quick question about {{property_address}}' }),
+      makeTemplate({ id: 'en-2', language: 'English', templateText: 'Hello {{seller_first_name}}, checking ownership for {{property_address}}' }),
+      makeTemplate({ id: 'en-3', language: 'English', templateText: 'Hey {{seller_first_name}}, is this still your property at {{property_address}}?' }),
+      makeTemplate({ id: 'en-4', language: 'English', templateText: 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}' }),
+    ]
+
+    const selection = pickRandomOwnershipCheckTemplate(templates, context, 'English', {
+      excludeTemplateIds: ['en-1', 'en-2', 'en-3'],
+    })
+
+    expect(selection?.templateId).toBe('en-4')
+    expect(selection?.selectionReason).toBe('catalog_rotation_excluding_recent')
+    expect(selection?.excludedRecentTemplateIds).toEqual(['en-1', 'en-2', 'en-3'])
+  })
+
+  it('uses uniform random selection across eligible ownership_check templates', () => {
+    const picks = new Set<string>()
+    const templates = [
+      makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, quick question about {{property_address}}' }),
+      makeTemplate({ id: 'en-2', language: 'English', templateText: 'Hello {{seller_first_name}}, checking ownership for {{property_address}}' }),
+      makeTemplate({ id: 'en-3', language: 'English', templateText: 'Hey {{seller_first_name}}, is this still your property at {{property_address}}?' }),
+    ]
+
+    for (let i = 0; i < 40; i += 1) {
+      const picked = pickUniformRandom(templates)
+      if (picked?.id) picks.add(picked.id)
+    }
+
+    expect(picks.size).toBeGreaterThan(1)
   })
 
   describe('entity-name greeting guard (launch blocker: Master Owner as SMS recipient)', () => {

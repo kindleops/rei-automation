@@ -9,6 +9,7 @@ import {
 import { safeHumanName } from '../../lib/identity/entityDetection'
 import {
   buildMapOwnershipCheckHints,
+  parsePropertyAddressParts,
   resolveMapOwnershipCheckIdentity,
   type MapOwnershipCheckHints,
   type MapOwnershipCheckResolveResult,
@@ -204,19 +205,33 @@ export const resolveMapOwnershipCheckForSend = async (
   const result = await resolveMapOwnershipCheckIdentity(normalizedPropertyId, { hints })
   if (!result.ok) return result
 
-  const propertyAddress = text(firstDefined(
-    record.property_address,
-    record.propertyAddress,
-  )) || (() => {
-    const full = text(firstDefined(
-      record.property_address_full,
-      record.propertyAddressFull,
-      viewModel.property.address,
-    ))
-    return full.split(',')[0]?.trim() || full
-  })()
+  const addressParts = parsePropertyAddressParts(
+    {
+      property_address: text(firstDefined(record.property_address, record.propertyAddress)),
+      property_address_full: text(firstDefined(
+        record.property_address_full,
+        record.propertyAddressFull,
+        viewModel.property.address,
+      )),
+      property_address_city: firstDefined(record.property_address_city, record.city),
+      property_address_state: firstDefined(record.property_address_state, record.state),
+      property_address_zip: firstDefined(record.property_address_zip, record.zip),
+      property_address_county_name: firstDefined(
+        record.property_address_county_name,
+        record.county,
+      ),
+    },
+    record,
+  )
+  const propertyAddress = addressParts.street || result.identity.propertyAddress
 
-  if (!propertyAddress || propertyAddress === result.identity.propertyAddress) {
+  if (
+    propertyAddress === result.identity.propertyAddress
+    && !addressParts.city
+    && !addressParts.state
+    && !addressParts.zip
+    && !addressParts.county
+  ) {
     return result
   }
 
@@ -225,6 +240,11 @@ export const resolveMapOwnershipCheckForSend = async (
     identity: {
       ...result.identity,
       propertyAddress,
+      propertyCity: addressParts.city || result.identity.propertyCity,
+      propertyState: addressParts.state || result.identity.propertyState,
+      propertyZip: addressParts.zip || result.identity.propertyZip,
+      propertyCounty: addressParts.county || result.identity.propertyCounty,
+      propertyAddressFull: addressParts.full || result.identity.propertyAddressFull,
     },
   }
 }
