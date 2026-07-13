@@ -67,6 +67,7 @@ function buildRowPersonalization(queue_row = {}) {
   return {
     first_name: first_name || null,
     seller_first_name: first_name || null,
+    agent_name: clean(queue_row.agent_name) || null,
     owner_name: display_name || first_name || null,
     seller_display_name: display_name || first_name || null,
     property_address: clean(queue_row.property_address) || null,
@@ -107,7 +108,21 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
   }
 
   const intent = nurtureIntentFromRow(queue_row);
-  const candidates = NURTURE_TEMPLATE_CANDIDATES[intent] || NURTURE_TEMPLATE_CANDIDATES.unclear;
+  // Stage-layer no-reply follow-ups carry the outbound's REAL use case
+  // (metadata.followup_use_case / use_case_template, e.g. ownership_check).
+  // They resolve exactly that use case and fail closed — never the "unclear"
+  // nurture pool, which would misattribute a silent seller as an unclear one.
+  let candidates;
+  if (intent === "stage_no_reply") {
+    const meta = queue_row?.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+    const declared_use_case = lower(meta.followup_use_case || queue_row.use_case_template);
+    if (!declared_use_case || declared_use_case === "stage_no_reply") {
+      return { ok: false, resolved: false, reason: "stage_no_reply_use_case_missing" };
+    }
+    candidates = [declared_use_case];
+  } else {
+    candidates = NURTURE_TEMPLATE_CANDIDATES[intent] || NURTURE_TEMPLATE_CANDIDATES.unclear;
+  }
 
   let templates = [];
   try {

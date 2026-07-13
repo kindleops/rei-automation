@@ -13,6 +13,7 @@ export const RELATIONSHIP_CLAIMS = Object.freeze([
   "former_owner",
   "tenant",
   "property_manager",
+  "family_member",
   "agent",
   "spouse_co_owner",
   "executor_heir",
@@ -26,6 +27,7 @@ export const PROPERTY_SCOPED_CLAIMS = new Set([
   "former_owner",
   "tenant",
   "property_manager",
+  "family_member",
   "agent",
   "spouse_co_owner",
   "executor_heir",
@@ -66,7 +68,71 @@ const FORMER_OWNER_PHRASES = [
   "former owner",
 ];
 const TENANT_PHRASES = ["tenant", "renter", "lease", "leasing", "occupied by tenant"];
-const PROPERTY_MANAGER_PHRASES = ["property manager", "manages the property", "management company"];
+const PROPERTY_MANAGER_PHRASES = [
+  "property manager",
+  "manages the property",
+  "management company",
+  // First-person claims ("I manage the property for the owner").
+  "i manage the property",
+  "manage the property",
+  "i manage this property",
+  "manage this property",
+  "i'm the property manager",
+  "im the property manager",
+  "i am the property manager",
+  // Spanish
+  "administro la propiedad",
+  "administrador de la propiedad",
+  "soy el administrador",
+  "soy la administradora",
+  "empresa de administración",
+  "empresa de administracion",
+];
+// Family member speaking for the owner ("This is her son, my mom owns the
+// house"). Never an ownership claim and never signing authority — a
+// relationship lane that preserves contact and routes to review/referral.
+const FAMILY_MEMBER_PHRASES = [
+  "her son",
+  "his son",
+  "her daughter",
+  "his daughter",
+  "their son",
+  "their daughter",
+  "i'm the son",
+  "im the son",
+  "i am the son",
+  "i'm the daughter",
+  "im the daughter",
+  "i am the daughter",
+  "my mom owns",
+  "my mother owns",
+  "my dad owns",
+  "my father owns",
+  "my parents own",
+  "my grandmother owns",
+  "my grandfather owns",
+  "my aunt owns",
+  "my uncle owns",
+  "son of the owner",
+  "daughter of the owner",
+  // Spanish
+  "soy su hijo",
+  "soy su hija",
+  "soy el hijo",
+  "soy la hija",
+  "mi mamá es la dueña",
+  "mi mama es la duena",
+  "mi madre es la dueña",
+  "mi madre es la duena",
+  "mi papá es el dueño",
+  "mi papa es el dueno",
+  "mi padre es el dueño",
+  "mi padre es el dueno",
+  "la casa es de mi mamá",
+  "la casa es de mi mama",
+  "la casa es de mi madre",
+  "la casa es de mi padre",
+];
 const AGENT_PHRASES = ["realtor", "real estate agent", "listing agent", "my agent"];
 const SPOUSE_PHRASES = ["my wife owns", "my husband owns", "spouse owns", "co-owner", "co owner"];
 const EXECUTOR_PHRASES = ["executor", "heir", "estate", "probate", "trustee"];
@@ -121,6 +187,7 @@ function detectRelationshipClaim(message = "") {
   if (includesAny(text, FORMER_OWNER_PHRASES)) return "former_owner";
   if (includesAny(text, TENANT_PHRASES)) return "tenant";
   if (includesAny(text, PROPERTY_MANAGER_PHRASES)) return "property_manager";
+  if (includesAny(text, FAMILY_MEMBER_PHRASES)) return "family_member";
   if (includesAny(text, AGENT_PHRASES)) return "agent";
   if (includesAny(text, SPOUSE_PHRASES)) return "spouse_co_owner";
   if (includesAny(text, EXECUTOR_PHRASES)) return "executor_heir";
@@ -163,6 +230,7 @@ function deriveCanonicalIntent({
   if (relationship_claim === "tenant") return "tenant_respondent";
   if (relationship_claim === "former_owner") return "former_owner_respondent";
   if (relationship_claim === "property_manager") return "property_manager_respondent";
+  if (relationship_claim === "family_member") return "family_member_respondent";
   if (relationship_claim === "agent") return "agent_representative_respondent";
   if (relationship_claim === "spouse_co_owner") return "co_owner_respondent";
   if (relationship_claim === "executor_heir") return "executor_heir_respondent";
@@ -184,6 +252,7 @@ function deriveIdentityClass({
   if (relationship_claim === "tenant") return "renter_occupant";
   if (relationship_claim === "agent") return "agent_representative";
   if (relationship_claim === "property_manager") return "property_manager";
+  if (relationship_claim === "family_member") return "family_member";
   if (relationship_claim === "former_owner") return "former_owner";
   if (relationship_claim === "spouse_co_owner") return "authorized_spouse";
   if (relationship_claim === "executor_heir") return "executor_or_heir";
@@ -203,6 +272,7 @@ function deriveRelationshipOutcome({
     return "confirmed_owner";
   }
   if (relationship_claim === "spouse_co_owner") return "co_owner";
+  if (relationship_claim === "family_member") return "family_member";
   if (relationship_claim === "executor_heir") return "executor_or_heir";
   if (relationship_claim === "llc_representative") return "entity_representative";
   if (PROPERTY_SCOPED_CLAIMS.has(relationship_claim)) return "property_specific_non_owner";

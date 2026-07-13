@@ -51,6 +51,7 @@ export const CANONICAL_INTENTS = Object.freeze([
   "tenant_respondent",
   "former_owner_respondent",
   "property_manager_respondent",
+  "family_member_respondent",
   "agent_representative_respondent",
   "co_owner_respondent",
   "executor_heir_respondent",

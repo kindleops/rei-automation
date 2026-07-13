@@ -50,7 +50,7 @@ export const SELLER_LIFECYCLE_STAGE_REGISTRY = Object.freeze({
   [C.OWNERSHIP_CONFIRMATION]: {
     number: 1,
     entry_condition: "always_first_milestone",
-    valid_intents: ["ownership_confirmed", "wrong_number", "wrong_person", "not_interested", "info_request", "who_is_this", "opt_out", "unclear", "non_owner_referral", "property_specific_non_owner", "former_owner_respondent", "tenant_respondent", "property_manager_respondent", "agent_representative_respondent", "co_owner_respondent", "executor_heir_respondent", "entity_representative_respondent", "hostile_or_legal"],
+    valid_intents: ["ownership_confirmed", "wrong_number", "wrong_person", "not_interested", "info_request", "who_is_this", "opt_out", "unclear", "non_owner_referral", "property_specific_non_owner", "former_owner_respondent", "tenant_respondent", "property_manager_respondent", "family_member_respondent", "agent_representative_respondent", "co_owner_respondent", "executor_heir_respondent", "entity_representative_respondent", "hostile_or_legal"],
     valid_facts: ["ownership_claim", "authority_claims", "language_claim"],
     allowed_previous: [],
     automated_entry: { allowed: true, requires_authority_evidence: false },

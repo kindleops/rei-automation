@@ -814,11 +814,17 @@ export async function selectSafeAutoReplyTemplate({
     ? "English"
     : language_resolution.language;
   const languages = language === "English" ? ["English"] : [language, "English"];
-  const allowed_matches = uniq([
-    ...asArray(decision?.allowed_template_stages).map(lower),
-    lower(decision?.route_hint),
-    ...templateCandidateSet(decision, classification).map(lower),
-  ]);
+  // Lifecycle-resolver authority (see executeInboundAutomationDecision): a
+  // required use case restricts matching to EXACTLY that use case so the
+  // intent profile's candidates cannot leak a stage-earlier question back in.
+  const required_use_case = lower(clean(decision?.required_template_use_case));
+  const allowed_matches = required_use_case
+    ? [required_use_case]
+    : uniq([
+        ...asArray(decision?.allowed_template_stages).map(lower),
+        lower(decision?.route_hint),
+        ...templateCandidateSet(decision, classification).map(lower),
+      ]);
   const property_type_scope = derivePropertyTypeScope(context);
 
   if (!supabase || allowed_matches.length === 0) {
@@ -1386,6 +1392,7 @@ export async function executeInboundAutomationDecision({
   contactWindowOverride = null,
   dealAuthority = null,
   strategyDirective = null,
+  transitionDirective = null,
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
@@ -1417,6 +1424,12 @@ export async function executeInboundAutomationDecision({
   // and opt-out handling above/below always win — the directive never
   // reactivates a suppressed contact, and a review-tier strategy blocks
   // queueing outright.
+  const strategy_directive_applied = Boolean(
+    strategyDirective &&
+      typeof strategyDirective === "object" &&
+      !base_decision.should_suppress_contact &&
+      (strategyDirective.review_required || clean(strategyDirective.template_use_case))
+  );
   if (strategyDirective && typeof strategyDirective === "object" && !base_decision.should_suppress_contact) {
     if (strategyDirective.review_required) {
       base_decision = {
@@ -1439,6 +1452,35 @@ export async function executeInboundAutomationDecision({
         audit_reason: strategyDirective.reason_code || base_decision.audit_reason,
       };
     }
+  }
+
+  // Canonical lifecycle template authority: when the stage resolver ADVANCED
+  // the lifecycle, its required_template_use_case is the next outstanding
+  // question and overrides the intent-profile route — the profile only sees
+  // the intent, never the extracted facts, so a Spanish "owner + price" reply
+  // would otherwise get the S2 interest question instead of the S4 condition
+  // probe. The S5+ strategy directive keeps precedence, suppression always
+  // wins, and lateral intents (who_is_this, callbacks) never advance so they
+  // keep conversational routing. Selection treats this as strict authority:
+  // no matching language template ⇒ the existing fail-closed review path,
+  // never a profile fallback.
+  if (
+    !strategy_directive_applied &&
+    transitionDirective &&
+    typeof transitionDirective === "object" &&
+    clean(transitionDirective.required_template_use_case) &&
+    !base_decision.should_suppress_contact &&
+    base_decision.should_queue_reply
+  ) {
+    const required_use_case = clean(transitionDirective.required_template_use_case);
+    base_decision = {
+      ...base_decision,
+      route_hint: required_use_case,
+      allowed_template_stages: [required_use_case],
+      required_template_use_case: required_use_case,
+      template_authority: "lifecycle_resolver",
+      template_authority_reason: transitionDirective.reasoning_code || null,
+    };
   }
 
   info("[AUTO_REPLY_DECISION]", {

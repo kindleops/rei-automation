@@ -47,6 +47,16 @@ const ACTIVE_INTENTS = new Set([
 /** Intents with no approved follow-up schedule yet — explicit safe hold state. */
 const UNAPPROVED_FOLLOWUP_INTENTS = new Set(["condition_disclosed", "latent_interest"]);
 
+/**
+ * Stage-layer no-reply follow-up marker (followup-policy-registry.js). This is
+ * an OUTBOUND-PURPOSE plan — "the delivered stage question got no reply" —
+ * never a seller intent: nothing about the seller is asserted before they
+ * respond. Cadence comes from the stage registry via opts.stage_no_reply_days;
+ * the follow-up row is attributed to the outbound's actual template use case
+ * (e.g. ownership_check), not a nurture bucket.
+ */
+export const STAGE_NO_REPLY_FOLLOWUP_INTENT = "stage_no_reply";
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -144,6 +154,23 @@ export function resolveFollowUpPlan(intent, opts = {}) {
     return { suppressed: true, followup_created: false, reason: "thread_already_suppressed" };
   }
 
+  if (intent === STAGE_NO_REPLY_FOLLOWUP_INTENT) {
+    const days = Number(opts.stage_no_reply_days);
+    const stage = clean(opts.stage);
+    if (!Number.isFinite(days) || days <= 0 || !stage) {
+      // No stage-policy authority ⇒ fail closed; never borrow a nurture rule.
+      return { suppressed: false, followup_created: false, reason: "stage_no_reply_policy_missing" };
+    }
+    return {
+      suppressed: false,
+      followup_created: true,
+      scheduled_for: addDays(new Date(), days),
+      days,
+      reason: `stage_no_reply_followup:${stage}`,
+      thread_key: thread_key || null,
+    };
+  }
+
   if (SUPPRESSED_INTENTS.has(intent)) {
     return { suppressed: true, followup_created: false, reason: `permanent_suppression:${intent}` };
   }
@@ -186,7 +213,12 @@ export function resolveFollowUpPlan(intent, opts = {}) {
  * Message/template resolution happens later at send time.
  */
 export async function scheduleFollowUp(intent, thread_key, context = {}, supabase = defaultSupabase) {
-  const plan = resolveFollowUpPlan(intent, { thread_key, is_suppressed: context.is_suppressed });
+  const plan = resolveFollowUpPlan(intent, {
+    thread_key,
+    is_suppressed: context.is_suppressed,
+    stage_no_reply_days: context.stage_no_reply_days,
+    stage: context.stage,
+  });
 
   if (plan.suppressed || !plan.followup_created) {
     return { ok: false, skipped: true, ...plan };
@@ -219,9 +251,18 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       scheduled_for_utc: scheduled_for,
       scheduled_for_local: scheduled_for,
       message_type: "followup",
-      use_case_template: `nurture_${intent}`,
+      // Stage-layer no-reply follow-ups are attributed to the OUTBOUND's real
+      // use case (e.g. ownership_check) so KPI/template rollups never see a
+      // fabricated nurture bucket for a seller who simply hasn't replied yet.
+      use_case_template:
+        intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
+          ? clean(context.followup_use_case) || "stage_no_reply"
+          : `nurture_${intent}`,
       master_owner_id: clean(context.master_owner_id) || null,
       property_id: clean(context.property_id) || null,
+      // Agent identity so deferred resolution can render agent-identifying
+      // templates (e.g. the S1 ownership check) at send time.
+      agent_name: clean(context.agent_name) || null,
       metadata: {
         deferred_message_resolution: true,
         source: clean(context.source) || "seller_followup_scheduler",

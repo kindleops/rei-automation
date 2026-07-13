@@ -52,3 +52,35 @@ export function partitionByInternalTest(phones) {
   }
   return { real, internal };
 }
+
+// ── Internal canary record quarantine ───────────────────────────────────────
+// Canonical row-level marker contract for internal canary / proof traffic.
+// A record is canary-quarantined when ANY of these hold:
+//   • its seller-side phone (thread_key / to_phone_number / canonical_e164 /
+//     inbound from_phone_number) is in the internal test registry, or
+//   • it is explicitly stamped (source === "internal_canary" or
+//     metadata.internal_canary === true).
+// Quarantined records must be excluded from normal production selection and
+// KPI aggregation, while remaining addressable by EXPLICITLY authorized
+// internal canary execution (queue-run proof mode / scoped canary).
+
+export const INTERNAL_CANARY_SOURCE = "internal_canary";
+
+/** True when a fact/queue/event row belongs to internal canary traffic. */
+export function isInternalCanaryFactRow(row = {}) {
+  if (!row || typeof row !== "object") return false;
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  if (metadata.internal_canary === true) return true;
+  // Queue-runner proof vocabulary (queue-run-request.js) counts too.
+  if (metadata.exclude_from_kpis === true || metadata.internal_test_phone === true) return true;
+  const source = String(row.source ?? metadata.source ?? "").trim().toLowerCase();
+  if (source === INTERNAL_CANARY_SOURCE) return true;
+  return [row.thread_key, row.to_phone_number, row.canonical_e164, row.from_phone_number].some(
+    (phone) => isInternalTestPhone(phone)
+  );
+}
+
+/** Aggregation helper: drop internal canary rows from KPI fact sets. */
+export function excludeInternalCanaryRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => !isInternalCanaryFactRow(row));
+}
