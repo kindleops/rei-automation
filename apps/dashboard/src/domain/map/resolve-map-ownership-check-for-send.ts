@@ -25,6 +25,26 @@ const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)
 const firstDefined = (...values: unknown[]): unknown =>
   values.find((value) => value != null && text(value))
 
+const readPropertyProspectLink = async (
+  propertyId: string,
+): Promise<{ masterOwnerId: string; prospectId: string } | null> => {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('map_filter_property_prospect_links')
+    .select('master_owner_id, prospect_id')
+    .eq('property_id', propertyId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return null
+  const row = data as Record<string, unknown>
+  const masterOwnerId = text(row.master_owner_id)
+  const prospectId = text(row.prospect_id)
+  if (!masterOwnerId && !prospectId) return null
+  return { masterOwnerId, prospectId }
+}
+
 const readSellerWorkItemOwnership = async (
   propertyId: string,
 ): Promise<{
@@ -65,6 +85,49 @@ const enrichHintsFromWorkItem = (
     prospectFirstName: hints.prospectFirstName
       || (workItemFullName ? safeHumanName(firstToken(workItemFullName)) : null),
     recipientPhone: hints.recipientPhone || workItem.recipientPhone || null,
+  }
+}
+
+const enrichHintsFromPropertyLink = async (
+  propertyId: string,
+  hints: MapOwnershipCheckHints,
+): Promise<MapOwnershipCheckHints> => {
+  if (hints.masterOwnerId && hints.prospectId) return hints
+  const link = await readPropertyProspectLink(propertyId)
+  if (!link) return hints
+  return {
+    ...hints,
+    masterOwnerId: hints.masterOwnerId || link.masterOwnerId || null,
+    prospectId: hints.prospectId || link.prospectId || null,
+  }
+}
+
+const enrichHintsFromMasterOwner = async (
+  hints: MapOwnershipCheckHints,
+): Promise<MapOwnershipCheckHints> => {
+  const masterOwnerId = text(hints.masterOwnerId)
+  if (!masterOwnerId) return hints
+  if (hints.recipientPhone && hints.phoneId && (hints.agentPersona || hints.agentFamily)) {
+    return hints
+  }
+
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('master_owners')
+    .select('best_phone_1, primary_phone_id, agent_persona, agent_family, display_name, best_language')
+    .eq('master_owner_id', masterOwnerId)
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return hints
+  const row = data as Record<string, unknown>
+  return {
+    ...hints,
+    recipientPhone: hints.recipientPhone || dialablePhone(row.best_phone_1) || null,
+    phoneId: hints.phoneId || text(row.primary_phone_id) || null,
+    agentPersona: hints.agentPersona || text(row.agent_persona) || null,
+    agentFamily: hints.agentFamily || text(row.agent_family) || null,
+    ownerDisplayName: hints.ownerDisplayName || text(row.display_name) || null,
   }
 }
 
@@ -133,6 +196,8 @@ export const resolveMapOwnershipCheckForSend = async (
     buildMapOwnershipCheckHints(viewModel, record),
     workItem,
   )
+  hints = await enrichHintsFromPropertyLink(normalizedPropertyId, hints)
+  hints = await enrichHintsFromMasterOwner(hints)
   hints = await enrichHintsFromLiveIdentity(hints)
   hints = await enrichHintsFromPhoneResolution(normalizedPropertyId, hints)
 

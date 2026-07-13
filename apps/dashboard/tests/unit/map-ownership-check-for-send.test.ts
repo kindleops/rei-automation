@@ -212,6 +212,51 @@ describe('resolveMapOwnershipCheckForSend', () => {
     expect(result.identity.agentFirstName).toBe('Carlos')
   })
 
+  it('resolves LLC property from prospect link + master owner when properties.master_owner_id is null', async () => {
+    vi.mocked(getSupabaseClient).mockReturnValue(makeSupabase({
+      properties: {
+        property_id: '2100277107',
+        master_owner_id: null,
+        property_address: '5114 Zulas Pl',
+        property_address_full: '5114 Zulas Pl, Wilson, Nc 27893',
+      },
+      map_filter_property_prospect_links: {
+        property_id: '2100277107',
+        master_owner_id: 'mo_llc',
+        prospect_id: 'pros_maria',
+      },
+      master_owners: {
+        master_owner_id: 'mo_llc',
+        best_phone_1: '+13366847992',
+        primary_phone_id: 'ph_llc',
+        display_name: 'Vick Land LLC',
+        best_language: 'English',
+        agent_persona: 'Michael Hargrove',
+        agent_family: null,
+      },
+      v_seller_work_items: {
+        property_id: '2100277107',
+        master_owner_id: 'mo_llc',
+        prospect_id: 'pros_maria',
+        prospect_full_name: 'Maria Lopez',
+        prospect_best_phone: '+13366847992',
+        display_phone: '+13366847992',
+      },
+    }))
+
+    const result = await resolveMapOwnershipCheckForSend(
+      '2100277107',
+      viewModelFor('2100277107', null as never, 'Vick Land LLC', '5114 Zulas Pl, Wilson, Nc 27893'),
+      { property_id: '2100277107', property_address: '5114 Zulas Pl' },
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.recipientPhone).toBe('+13366847992')
+    expect(result.identity.prospectFirstName).toBe('Maria')
+    expect(result.identity.phoneId).toBe('ph_llc')
+  })
+
   it('enriches stripped records from v_seller_work_items when graph hints are missing', async () => {
     vi.mocked(getSupabaseClient).mockReturnValue(makeSupabase({
       ...davidFixture,

@@ -564,6 +564,52 @@ const phoneMatchesOwnerBestContact = (
   return toE164(row.canonical_e164) === normalizedBestPhone
 }
 
+const loadBrowserSafeProspectContext = async (
+  supabase: SupabaseClient,
+  propertyId: string,
+  prospectId: string,
+  masterOwnerId: string,
+  hints: MapOwnershipCheckHints,
+): Promise<AnyRecord | null> => {
+  const { data: workItem, error: workItemError } = await supabase
+    .from('v_seller_work_items')
+    .select('prospect_id, prospect_full_name, prospect_best_phone, display_phone, sms_eligible, master_owner_id')
+    .eq('property_id', propertyId)
+    .limit(1)
+    .maybeSingle()
+
+  if (!workItemError && workItem) {
+    const row = workItem as AnyRecord
+    const fullFromWorkItem = safeHumanName(text(row.prospect_full_name))
+    const firstFromWorkItem = fullFromWorkItem ? firstToken(fullFromWorkItem) : ''
+    const firstFromHints = safeHumanName(text(hints.prospectFirstName))
+    const fullFromHints = safeHumanName(text(hints.prospectFullName))
+    const firstName = firstFromHints || firstFromWorkItem
+    const fullName = fullFromHints || fullFromWorkItem || firstName
+    if (firstName || fullName) {
+      return {
+        prospect_id: text(row.prospect_id) || prospectId,
+        first_name: firstName,
+        full_name: fullName,
+        sms_eligible: row.sms_eligible === true || hints.smsEligible === true,
+        master_owner_id: text(row.master_owner_id) || masterOwnerId,
+      }
+    }
+  }
+
+  const firstFromHints = safeHumanName(text(hints.prospectFirstName))
+  const fullFromHints = safeHumanName(text(hints.prospectFullName))
+  if (!firstFromHints && !fullFromHints) return null
+
+  return {
+    prospect_id: prospectId,
+    first_name: firstFromHints || (fullFromHints ? firstToken(fullFromHints) : ''),
+    full_name: fullFromHints || firstFromHints,
+    sms_eligible: hints.smsEligible === true,
+    master_owner_id: masterOwnerId,
+  }
+}
+
 const resolveRecipientPhoneForOwnershipCheck = async (
   propertyId: string,
   masterOwnerId: string,
@@ -881,20 +927,37 @@ const tryResolveFromHydratedMapHints = async (
   let prospectFirstName = safeHumanName(text(hints.prospectFirstName))
   let prospectFullName = safeHumanName(text(hints.prospectFullName)) || prospectFirstName
   if (!prospectFirstName || !prospectFullName) {
-    const { data: prospectRow, error: prospectError } = await supabase
+    const { data: prospectRow } = await supabase
       .from('prospects')
       .select('first_name, full_name')
       .eq('prospect_id', prospectId)
       .limit(1)
       .maybeSingle()
-    if (prospectError || !prospectRow) return null
-    const prospect = prospectRow as AnyRecord
-    const loadedFirst = safeHumanName(text(prospect.first_name))
-    const loadedFull = safeHumanName(text(prospect.full_name))
+    const prospect = prospectRow as AnyRecord | null
+    const loadedFirst = safeHumanName(text(prospect?.first_name))
+    const loadedFull = safeHumanName(text(prospect?.full_name))
     prospectFirstName = prospectFirstName || (loadedFirst ? firstToken(loadedFirst) : '')
     prospectFullName = prospectFullName || loadedFull || prospectFirstName
     if (!prospectFirstName && loadedFull) {
       prospectFirstName = firstToken(loadedFull)
+    }
+    if (!prospectFirstName || !prospectFullName) {
+      const fallback = await loadBrowserSafeProspectContext(
+        supabase,
+        propertyId,
+        prospectId,
+        masterOwnerId,
+        hints,
+      )
+      if (fallback) {
+        const fallbackFirst = safeHumanName(text(fallback.first_name))
+        const fallbackFull = safeHumanName(text(fallback.full_name))
+        prospectFirstName = prospectFirstName || (fallbackFirst ? firstToken(fallbackFirst) : '')
+        prospectFullName = prospectFullName || fallbackFull || prospectFirstName
+        if (!prospectFirstName && fallbackFull) {
+          prospectFirstName = firstToken(fallbackFull)
+        }
+      }
     }
   }
   if (!prospectFirstName) return null
@@ -1043,14 +1106,23 @@ export const resolveMapOwnershipCheckIdentity = async (
     .limit(1)
     .maybeSingle()
 
-  if (prospectError) {
-    return { ok: false, error: prospectError.message || 'prospect_lookup_failed' }
-  }
-  if (!prospectRow) {
-    return { ok: false, error: 'property_owner_link_missing' }
+  let prospect = (prospectRow as AnyRecord | null)
+  if (!prospect) {
+    prospect = await loadBrowserSafeProspectContext(
+      supabase,
+      normalizedPropertyId,
+      prospectId,
+      masterOwnerId,
+      hints,
+    )
   }
 
-  const prospect = prospectRow as AnyRecord
+  if (prospectError && !prospect) {
+    return { ok: false, error: prospectError.message || 'prospect_lookup_failed' }
+  }
+  if (!prospect) {
+    return { ok: false, error: 'property_owner_link_missing' }
+  }
   const loadedFirst = safeHumanName(text(prospect.first_name) || text(hints.prospectFirstName))
   const loadedFull = safeHumanName(text(prospect.full_name) || text(hints.prospectFullName))
   const prospectFirstName = loadedFirst
