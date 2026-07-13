@@ -281,7 +281,8 @@ async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
 
 export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<CampaignSummary[]>> => {
   const backend = await listCampaignsBackend()
-  if (backend.ok && backend.data?.campaigns) {
+  // Only trust a successful backend list. Empty arrays are valid true-zero results.
+  if (backend.ok && Array.isArray(backend.data?.campaigns)) {
     const campaigns = backend.data.campaigns.map((row) =>
       mapCampaignSummaryRow(row as CampaignApiSummary & Record<string, unknown>),
     )
@@ -290,7 +291,11 @@ export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<Campaign
 
   const backendFail = backend.ok ? null : backend
   const backendMessage = backendFail?.message || backendFail?.error || 'campaign_backend_unavailable'
-  const backendErrorType = classifyBackendFailure(backend)
+  const backendErrorType = classifyBackendFailure(
+    backend.ok
+      ? { ok: false, status: backend.status, error: 'campaign_list_shape_invalid', message: backendMessage }
+      : backend,
+  )
   if (backendErrorType === 'auth_error') {
     return opsError([], 'auth_error', backendMessage || 'campaign_auth_failed', {
       retryable: true,
@@ -307,8 +312,14 @@ export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<Campaign
 
   try {
     const campaigns = await fetchCampaignsCanonicalFallback()
+    // Empty anon/RLS fallback must not masquerade as a successful true-zero list when
+    // the canonical backend already failed. RLS often returns [] with no error.
     if (campaigns.length === 0) {
-      return { ...opsSuccess(campaigns, 'supabase_campaigns'), degraded: true }
+      return opsError([], backendErrorType, backendMessage, {
+        degraded: true,
+        retryable: backendErrorType !== 'missing_view',
+        source: 'supabase_campaigns',
+      })
     }
     return {
       ...opsSuccess(campaigns, 'supabase_campaigns'),
@@ -321,8 +332,8 @@ export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<Campaign
     const missingView = err.code === 'missing_view' || /does not exist|relation/i.test(err.message ?? '')
     return opsError(
       [],
-      missingView ? 'missing_view' : 'query_failed',
-      err.message || 'campaign_query_failed',
+      missingView ? 'missing_view' : backendErrorType,
+      err.message || backendMessage || 'campaign_query_failed',
       { degraded: true, retryable: !missingView, source: 'supabase_campaigns' },
     )
   }

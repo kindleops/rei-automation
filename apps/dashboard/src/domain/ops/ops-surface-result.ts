@@ -61,8 +61,12 @@ export function classifyBackendFailure(result: BackendFailureLike): OpsSurfaceEr
     || err.includes('backend_not_configured')
     || err.includes('backend_unavailable')
     || err.includes('backend_proxy_failed')
+    || err.includes('backend_html_error')
+    || err.includes('backend_network_error')
     || err.includes('network')
     || msg.includes('failed to fetch')
+    || msg.includes('html error page')
+    || msg.includes('backend unreachable')
   ) {
     return 'backend_unavailable'
   }

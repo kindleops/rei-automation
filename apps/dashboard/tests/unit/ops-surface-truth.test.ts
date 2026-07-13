@@ -10,9 +10,45 @@ import { loadWorkflowAutomationActivitySurface } from '../../src/views/workflow-
 import { loadWorkflowStudioSurface } from '../../src/views/workflow-studio/workflowStudio.adapter'
 import * as backendClient from '../../src/lib/api/backendClient'
 
+const { supabaseMockState } = vi.hoisted(() => ({
+  supabaseMockState: {
+    hasEnv: false,
+    campaigns: [] as Array<Record<string, unknown>>,
+    campaignTargets: [] as Array<Record<string, unknown>>,
+  },
+}))
+
 vi.mock('../../src/lib/supabaseClient', () => ({
-  hasSupabaseEnv: false,
-  getSupabaseClient: () => ({ from: () => ({ select: () => ({ order: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }) }) }) }),
+  get hasSupabaseEnv() {
+    return supabaseMockState.hasEnv
+  },
+  getSupabaseClient: () => ({
+    from: (table: string) => {
+      if (table === 'campaigns') {
+        return {
+          select: () => ({
+            order: () => ({
+              limit: async () => ({ data: supabaseMockState.campaigns, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === 'campaign_targets') {
+        return {
+          select: () => ({
+            in: async () => ({ data: supabaseMockState.campaignTargets, error: null }),
+          }),
+        }
+      }
+      return {
+        select: () => ({
+          order: () => ({
+            limit: async () => ({ data: [], error: null }),
+          }),
+        }),
+      }
+    },
+  }),
 }))
 
 describe('ops surface shared handling', () => {
@@ -27,12 +63,21 @@ describe('ops surface shared handling', () => {
   it('classifies auth failures distinctly from query failures', () => {
     expect(classifyBackendFailure({ ok: false, status: 401, error: 'unauthorized', message: 'unauthorized' })).toBe('auth_error')
     expect(classifyBackendFailure({ ok: false, status: 500, error: 'query_failed', message: 'db error' })).toBe('query_failed')
+    expect(classifyBackendFailure({
+      ok: false,
+      status: 404,
+      error: 'BACKEND_HTML_ERROR',
+      message: 'Backend returned an HTML error page instead of JSON.',
+    })).toBe('backend_unavailable')
   })
 })
 
 describe('Campaign Command surface truth', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    supabaseMockState.hasEnv = false
+    supabaseMockState.campaigns = []
+    supabaseMockState.campaignTargets = []
   })
 
   it('1. backend auth failure does not return empty successful campaigns', async () => {
@@ -113,6 +158,55 @@ describe('Campaign Command surface truth', () => {
     expect(result.ok).toBe(true)
     expect(result.data).toEqual([])
     expect(result.errorType).toBeUndefined()
+  })
+
+  it('4b. empty RLS fallback after backend failure is not a successful empty list', async () => {
+    supabaseMockState.hasEnv = true
+    supabaseMockState.campaigns = []
+    vi.spyOn(backendClient, 'listCampaignsBackend').mockResolvedValue({
+      ok: false,
+      status: 404,
+      error: 'BACKEND_HTML_ERROR',
+      message: 'Backend returned an HTML error page instead of JSON.',
+    })
+    const result = await fetchCampaignsSurface()
+    expect(result.ok).toBe(false)
+    expect(result.data).toEqual([])
+    expect(result.errorType).toBe('backend_unavailable')
+    expect(result.degraded).toBe(true)
+    expect(result.source).toBe('supabase_campaigns')
+  })
+
+  it('4c. non-empty RLS fallback still degrades when backend fails', async () => {
+    supabaseMockState.hasEnv = true
+    supabaseMockState.campaigns = [{
+      id: 'c-fallback',
+      name: 'Fallback Campaign',
+      status: 'active',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      metadata: {},
+      auto_send_enabled: false,
+      send_interval_seconds: 900,
+      send_window_start: null,
+      send_window_end: null,
+    }]
+    supabaseMockState.campaignTargets = [
+      { campaign_id: 'c-fallback', status: 'ready' },
+      { campaign_id: 'c-fallback', status: 'sent' },
+    ]
+    vi.spyOn(backendClient, 'listCampaignsBackend').mockResolvedValue({
+      ok: false,
+      status: 502,
+      error: 'BACKEND_UNAVAILABLE',
+      message: 'backend down',
+    })
+    const result = await fetchCampaignsSurface()
+    expect(result.ok).toBe(true)
+    expect(result.degraded).toBe(true)
+    expect(result.data).toHaveLength(1)
+    expect(result.data[0]?.campaign_name).toBe('Fallback Campaign')
+    expect(result.source).toBe('supabase_campaigns')
   })
 })
 
