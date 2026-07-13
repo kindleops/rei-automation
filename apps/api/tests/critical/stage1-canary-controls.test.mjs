@@ -137,16 +137,18 @@ test("canary first touch uses the combined variant with complete attribution and
   assert.equal(built.assignment.variant_id, "ownership_interest_combo_B");
   assert.equal(built.assignment.assignment_source, "deterministic_hash");
 
-  // Exact rendered copy: agent name + truthful descriptor + property +
-  // ownership question + soft offer interest. No company name.
+  // Exact rendered copy: agent name + truthful descriptor (buyer looking in
+  // the city) + property + ownership question + soft selling interest. No
+  // company name, no "reviewing an offer" (retired _A copy was terminally
+  // blocked by the TextGrid content filter).
   assert.equal(
     built.rendered_message,
-    "Hi Ryan, this is Scott, a local investor. Do you still own 4157 Pillsbury Ave S Unit B? If so, would you be open to reviewing an offer for it?"
+    "Hi Ryan, this is Scott, a buyer looking in Minneapolis. Do you still own 4157 Pillsbury Ave S Unit B, and would you consider selling it?"
   );
 
   // Complete attribution contract.
   const a = built.attribution;
-  assert.equal(a.template_id, "ownership_interest_combo_v1_en_A");
+  assert.equal(a.template_id, "ownership_interest_combo_v1_en_B");
   assert.match(String(a.template_version_id), /^sha1:[0-9a-f]{40}$/);
   assert.equal(a.template_key, "ownership_interest_combo_v1");
   assert.equal(a.stage, "S1");
