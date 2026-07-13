@@ -128,16 +128,28 @@ const captureAssetProofs = async (
   const prospect = focus.locator('.smc-section--prospect').first()
   if (await prospect.isVisible().catch(() => false)) {
     await prospect.screenshot({ path: `${OUT_DIR}/prospect-contactability-desktop.png` })
+    const meterLabel = await prospect.locator('.smc-contact-meter__head strong').innerText().catch(() => '')
+    if (/ready/i.test(meterLabel)) {
+      await prospect.screenshot({ path: `${OUT_DIR}/contactable-prospect-state-desktop.png` })
+    }
+    if (/not ready|partial/i.test(meterLabel)) {
+      await prospect.screenshot({ path: `${OUT_DIR}/no-resolved-prospect-state-desktop.png` })
+    }
   }
 
-  const activity = focus.locator('.smc-activity').first()
-  if (await activity.isVisible().catch(() => false)) {
-    const headline = await activity.locator('.smc-activity__head').innerText().catch(() => '')
-    if (/active|reply|contacted/i.test(headline)) {
-      await focus.screenshot({ path: `${OUT_DIR}/active-communication-card-desktop.png` })
-    }
-    if (/no contact/i.test(headline)) {
+  const propertyProfile = focus.locator('.smc-section--profile').first()
+  if (await propertyProfile.isVisible().catch(() => false)) {
+    await propertyProfile.screenshot({ path: `${OUT_DIR}/property-profile-desktop.png` })
+  }
+
+  const contactPill = focus.locator('.smc-contact-state__pill').first()
+  if (await contactPill.isVisible().catch(() => false)) {
+    const pillText = await contactPill.innerText().catch(() => '')
+    if (/not contacted/i.test(pillText)) {
       await focus.screenshot({ path: `${OUT_DIR}/no-contact-card-desktop.png` })
+    }
+    if (/contacted|reply|follow/i.test(pillText)) {
+      await focus.screenshot({ path: `${OUT_DIR}/active-communication-card-desktop.png` })
     }
   }
 
