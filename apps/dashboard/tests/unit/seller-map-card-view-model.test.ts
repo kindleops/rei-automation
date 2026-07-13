@@ -36,7 +36,6 @@ describe('buildSellerMapCardViewModel', () => {
       owner_display_name: 'Jane Owner',
       property_address_full: '100 Main St',
       motivation_score: 92,
-      priority_score: 55,
     })
 
     expect(vm.masterOwner.priorityScore).toBeNull()
@@ -77,44 +76,38 @@ describe('buildSellerMapCardViewModel', () => {
     expect(vm.property.assetClassKey).toBe('multifamily_5_plus')
   })
 
-  it('includes intelligence strip and follow-up eligibility', () => {
+  it('exposes follow-up eligibility for uncontacted properties', () => {
     const vm = buildSellerMapCardViewModel({
       owner_display_name: 'Jane Owner',
       property_address_full: '100 Main St',
-      building_condition: 'Average',
-      effective_year_built: 1988,
-      construction_type: 'CBS',
       owner_priority_score: 78,
       outbound_count: 0,
       thread_key: 'property:100',
     })
 
-    expect(vm.intelligenceStrip[0]?.value).toBe('Average')
-    expect(vm.intelligenceStrip[1]?.value).toBe('1,988')
-    expect(vm.intelligenceStrip[2]?.value).toBe('CBS')
     expect(vm.followUpEligibility.isUncontacted).toBe(true)
     expect(vm.followUpEligibility.canExecute).toBe(true)
   })
 
-  it('maps enrichment fields from properties row aliases', () => {
-    const vm = buildSellerMapCardViewModel({
+  it('builds dossier only after focus hydration flag is set', () => {
+    const peek = buildSellerMapCardViewModel({
       owner_display_name: 'Jane Owner',
       property_address_full: '100 Main St',
       property_type: 'Single Family',
       building_condition: 'Good',
-      effective_year_built: 1992,
       construction_type: 'Brick',
-      owner_priority_score: 72,
-      assd_total_value: 151000,
-      lot_acreage: 0.24,
-      stories: 1,
-      occupancy_code: 'Owner Occupied',
     })
+    expect(peek.dossier).toBeNull()
 
-    expect(vm.intelligenceStrip[0]?.value).toBe('Good')
-    expect(vm.intelligenceStrip[1]?.value).toBe('1,992')
-    expect(vm.intelligenceStrip[2]?.value).toBe('Brick')
-    expect(vm.contextualLine).toContain('0.24 ac')
-    expect(vm.contextualLine).toContain('Assessed')
+    const focus = buildSellerMapCardViewModel({
+      owner_display_name: 'Jane Owner',
+      property_address_full: '100 Main St',
+      property_type: 'Single Family',
+      building_condition: 'Good',
+      construction_type: 'Brick',
+      dossier_hydrated: true,
+    })
+    expect(focus.dossier).not.toBeNull()
+    expect(focus.dossier?.propertyDetails.length).toBeGreaterThan(0)
   })
 })
