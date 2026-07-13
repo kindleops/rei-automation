@@ -695,6 +695,63 @@ describe('map ownership check canonical resolver', () => {
     expect(sendResult.queueId).toBeNull()
   })
 
+  it('15. resolves phone from graph candidate when master owner best_phone_1 is missing', async () => {
+    const fixture = {
+      properties: {
+        property_id: 'prop-graph-phone',
+        master_owner_id: null,
+        property_address_full: '100 Graph St, Minneapolis, MN',
+      },
+      property_participant_graph: {
+        property_id: 'prop-graph-phone',
+        master_owner_id: 'mo-graph',
+        prospect_id: 'pros-graph',
+        phone_id: 'ph-graph',
+        canonical_e164: '+16125550999',
+        ownership_confidence: 0.95,
+        contact_rank: 1,
+        is_primary_owner_record: true,
+        is_current_participant: true,
+        safe_to_contact: true,
+        suppression_status: null,
+      },
+      master_owners: {
+        master_owner_id: 'mo-graph',
+        best_phone_1: null,
+        primary_phone_id: 'ph-graph',
+        display_name: 'Graph Owner LLC',
+        best_language: 'English',
+        agent_persona: 'Jake Peterson',
+        agent_family: null,
+      },
+      phones: {
+        phone_id: 'ph-graph',
+        master_owner_id: 'mo-graph',
+        canonical_e164: '+16125550999',
+        canonical_prospect_id: 'pros-graph',
+        primary_prospect_id: null,
+        linked_prospect_ids_json: ['pros-graph'],
+      },
+      prospects: {
+        prospect_id: 'pros-graph',
+        first_name: 'Nina',
+        full_name: 'Nina Patel',
+        sms_eligible: true,
+        master_owner_id: 'mo-graph',
+      },
+    }
+
+    const result = await resolveMapOwnershipCheckIdentity('prop-graph-phone', {
+      supabase: makeSupabase(fixture),
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.identity.recipientPhone).toBe('+16125550999')
+    expect(result.identity.prospectFirstName).toBe('Nina')
+    expect(result.identity.phoneId).toBe('ph-graph')
+  })
+
   it('renders David as Hi David', () => {
     const context = buildOwnershipCheckTemplateContext(identityFixture)
     const evaluated = evaluateOwnershipTemplate(

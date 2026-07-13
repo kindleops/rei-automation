@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import { asString, type AnyRecord } from '../../lib/data/shared'
+import { resolveCommandMapSellerPhone } from '../../lib/data/commandMapData'
 import { safeHumanName } from '../../lib/identity/entityDetection'
 
 const firstToken = (value: string): string => value.split(/\s+/).filter(Boolean)[0] ?? ''
@@ -563,6 +564,69 @@ const phoneMatchesOwnerBestContact = (
   return toE164(row.canonical_e164) === normalizedBestPhone
 }
 
+const resolveRecipientPhoneForOwnershipCheck = async (
+  propertyId: string,
+  masterOwnerId: string,
+  owner: AnyRecord,
+  hints: MapOwnershipCheckHints,
+  candidate: OwnerCandidate,
+  prospectId?: string | null,
+): Promise<string> => {
+  const direct = toE164(owner.best_phone_1)
+    || toE164(hints.recipientPhone)
+    || toE164(candidate.recipientPhone)
+  if (direct) return direct
+
+  const resolved = await resolveCommandMapSellerPhone(propertyId, {
+    prospectId: prospectId || hints.prospectId,
+    masterOwnerId,
+  })
+  return toE164(resolved.phone)
+}
+
+const resolveOwnershipCheckPhoneBinding = async (
+  supabase: SupabaseClient,
+  params: {
+    masterOwnerId: string
+    recipientPhone: string
+    owner: AnyRecord
+    hints: MapOwnershipCheckHints
+    candidate: OwnerCandidate
+    prospectId: string
+  },
+): Promise<{ phoneId: string; phoneRow: AnyRecord | null } | null> => {
+  const { masterOwnerId, recipientPhone, owner, hints, candidate, prospectId } = params
+  const primaryPhoneId = text(owner.primary_phone_id)
+  const hintPhoneId = text(candidate.phoneId) || text(hints.phoneId)
+
+  const initialPhoneRow = await resolvePhoneRow(
+    supabase,
+    masterOwnerId,
+    recipientPhone,
+    primaryPhoneId,
+    hintPhoneId,
+    null,
+    recipientPhone,
+  )
+
+  const phoneRow = await resolvePhoneRow(
+    supabase,
+    masterOwnerId,
+    recipientPhone,
+    primaryPhoneId,
+    hintPhoneId,
+    prospectId,
+    recipientPhone,
+  ) || initialPhoneRow
+
+  const phoneId = text(phoneRow?.phone_id)
+    || hintPhoneId
+    || primaryPhoneId
+
+  if (!phoneId || !recipientPhone) return null
+  return { phoneId, phoneRow }
+}
+
 const resolvePhoneRow = async (
   supabase: SupabaseClient,
   masterOwnerId: string,
@@ -777,26 +841,42 @@ const tryResolveFromHydratedMapHints = async (
   if (ownerError || !ownerRow) return null
 
   const owner = ownerRow as AnyRecord
-  const recipientPhone = toE164(owner.best_phone_1) || toE164(hints.recipientPhone)
+  const recipientPhone = await resolveRecipientPhoneForOwnershipCheck(
+    propertyId,
+    masterOwnerId,
+    owner,
+    hints,
+    {
+      masterOwnerId,
+      source: 'hydrated_map_identity',
+      confidence: 1,
+      prospectId,
+      phoneId: hints.phoneId,
+      recipientPhone: hints.recipientPhone,
+    },
+    prospectId,
+  )
   if (!recipientPhone) {
     return { ok: false, error: 'master_owner_missing_best_phone' }
   }
 
-  let phoneId = text(hints.phoneId) || text(owner.primary_phone_id)
-  if (!phoneId) {
-    const phoneRow = await resolvePhoneRow(
-      supabase,
+  const phoneBinding = await resolveOwnershipCheckPhoneBinding(supabase, {
+    masterOwnerId,
+    recipientPhone,
+    owner,
+    hints,
+    candidate: {
       masterOwnerId,
-      recipientPhone,
-      text(owner.primary_phone_id),
-      hints.phoneId,
+      source: 'hydrated_map_identity',
+      confidence: 1,
       prospectId,
-      recipientPhone,
-    )
-    phoneId = text(phoneRow?.phone_id)
-  }
-
-  if (!phoneId) return null
+      phoneId: hints.phoneId,
+      recipientPhone: hints.recipientPhone,
+    },
+    prospectId,
+  })
+  if (!phoneBinding) return null
+  const phoneId = phoneBinding.phoneId
 
   let prospectFirstName = safeHumanName(text(hints.prospectFirstName))
   let prospectFullName = safeHumanName(text(hints.prospectFullName)) || prospectFirstName
@@ -901,20 +981,21 @@ export const resolveMapOwnershipCheckIdentity = async (
   }
 
   const owner = ownerRow as AnyRecord
-  const recipientPhone = toE164(owner.best_phone_1)
-  if (!recipientPhone) {
-    return { ok: false, error: 'master_owner_missing_best_phone' }
-  }
+  const preliminaryPhone = toE164(owner.best_phone_1)
+    || toE164(hints.recipientPhone)
+    || toE164(candidate.recipientPhone)
 
-  const initialPhoneRow = await resolvePhoneRow(
-    supabase,
-    masterOwnerId,
-    recipientPhone,
-    text(owner.primary_phone_id),
-    candidate.phoneId || hints.phoneId,
-    null,
-    recipientPhone,
-  )
+  const initialPhoneRow = preliminaryPhone
+    ? await resolvePhoneRow(
+      supabase,
+      masterOwnerId,
+      preliminaryPhone,
+      text(owner.primary_phone_id),
+      candidate.phoneId || hints.phoneId,
+      null,
+      preliminaryPhone,
+    )
+    : null
 
   const prospectId = await resolveProspectForPropertyOwner(
     supabase,
@@ -923,28 +1004,37 @@ export const resolveMapOwnershipCheckIdentity = async (
     candidate,
     hints,
     initialPhoneRow,
-    recipientPhone,
+    preliminaryPhone || '',
   )
 
   if (!prospectId) {
     return { ok: false, error: 'property_owner_link_missing' }
   }
 
-  const phoneRow = await resolvePhoneRow(
-    supabase,
+  const recipientPhone = await resolveRecipientPhoneForOwnershipCheck(
+    normalizedPropertyId,
     masterOwnerId,
-    recipientPhone,
-    text(owner.primary_phone_id),
-    candidate.phoneId || hints.phoneId,
+    owner,
+    hints,
+    candidate,
     prospectId,
-    recipientPhone,
-  ) || initialPhoneRow
-
-  const phoneLinkedToProspect = Boolean(phoneRow?.phone_id && phoneLinksToProspect(phoneRow, prospectId))
-  const phoneIsOwnerBestContact = phoneMatchesOwnerBestContact(phoneRow, recipientPhone)
-  if (!phoneRow?.phone_id || (!phoneLinkedToProspect && !phoneIsOwnerBestContact)) {
+  )
+  if (!recipientPhone) {
     return { ok: false, error: 'master_owner_missing_best_phone' }
   }
+
+  const phoneBinding = await resolveOwnershipCheckPhoneBinding(supabase, {
+    masterOwnerId,
+    recipientPhone,
+    owner,
+    hints,
+    candidate,
+    prospectId,
+  })
+  if (!phoneBinding) {
+    return { ok: false, error: 'master_owner_missing_best_phone' }
+  }
+  const phoneId = phoneBinding.phoneId
 
   const { data: prospectRow, error: prospectError } = await supabase
     .from('prospects')
@@ -983,7 +1073,7 @@ export const resolveMapOwnershipCheckIdentity = async (
     prospectFirstName,
     prospectFullName,
     recipientPhone,
-    phoneId: text(phoneRow.phone_id),
+    phoneId,
     resolutionSource: candidate.source,
     candidateCount: candidates.length,
   })

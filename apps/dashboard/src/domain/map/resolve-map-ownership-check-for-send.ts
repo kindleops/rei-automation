@@ -4,6 +4,7 @@ import {
   normalizeSellerDialablePhone,
   pickSellerContactPhone,
   resolveCommandMapSellerIdentity,
+  resolveCommandMapSellerPhone,
 } from '../../lib/data/commandMapData'
 import { safeHumanName } from '../../lib/identity/entityDetection'
 import {
@@ -67,6 +68,25 @@ const enrichHintsFromWorkItem = (
   }
 }
 
+const enrichHintsFromPhoneResolution = async (
+  propertyId: string,
+  hints: MapOwnershipCheckHints,
+): Promise<MapOwnershipCheckHints> => {
+  if (hints.recipientPhone) return hints
+
+  const resolved = await resolveCommandMapSellerPhone(propertyId, {
+    prospectId: hints.prospectId,
+    masterOwnerId: hints.masterOwnerId,
+  })
+  if (!resolved.phone) return hints
+
+  return {
+    ...hints,
+    recipientPhone: resolved.phone,
+    prospectId: hints.prospectId || resolved.prospectId || null,
+  }
+}
+
 const enrichHintsFromLiveIdentity = async (
   hints: MapOwnershipCheckHints,
 ): Promise<MapOwnershipCheckHints> => {
@@ -114,6 +134,7 @@ export const resolveMapOwnershipCheckForSend = async (
     workItem,
   )
   hints = await enrichHintsFromLiveIdentity(hints)
+  hints = await enrichHintsFromPhoneResolution(normalizedPropertyId, hints)
 
   const result = await resolveMapOwnershipCheckIdentity(normalizedPropertyId, { hints })
   if (!result.ok) return result

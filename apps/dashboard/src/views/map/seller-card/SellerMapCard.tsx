@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { ThreadContext } from '../../../lib/data/inboxData'
@@ -241,11 +241,19 @@ export const SellerMapCard = ({
     <SellerMapCardWeightedTags flags={visibleSignals} hiddenCount={hiddenSignalCount} />
   ) : null
 
+  const stopPeekExpand = (event: MouseEvent) => {
+    event.stopPropagation()
+  }
+
+  const openConversation = () => {
+    setCardMode('conversation')
+    setSheetSnap('expanded')
+  }
+
   const handlePrimaryAction = () => {
     const action = viewModel.actionBar.primary.action
     if (action === 'reply') {
-      setCardMode('conversation')
-      setSheetSnap('expanded')
+      openConversation()
       return
     }
     if (action === 'ownership_check' || action === 'follow_up') {
@@ -254,7 +262,7 @@ export const SellerMapCard = ({
   }
 
   const actionFooter = (
-    <footer className="smc-actions smc-actions--sticky">
+    <footer className="smc-actions smc-actions--sticky" onClick={stopPeekExpand}>
       <button
         type="button"
         className={cls(
@@ -265,7 +273,10 @@ export const SellerMapCard = ({
         )}
         disabled={!viewModel.actionBar.primary.enabled || followUpState === 'sending'}
         title={followUpError || viewModel.actionBar.primary.disabledReason || undefined}
-        onClick={handlePrimaryAction}
+        onClick={(event) => {
+          stopPeekExpand(event)
+          handlePrimaryAction()
+        }}
       >
         {viewModel.actionBar.primary.enabled
           ? followUpButtonLabel(followUpState, viewModel.actionBar.primary.label, followUpError)
@@ -276,9 +287,9 @@ export const SellerMapCard = ({
           type="button"
           className="smc-action smc-action--message"
           disabled={!viewModel.actionBar.secondary.enabled || viewModel.messagingBlocked}
-          onClick={() => {
-            setCardMode('conversation')
-            setSheetSnap('expanded')
+          onClick={(event) => {
+            stopPeekExpand(event)
+            openConversation()
           }}
         >
           {viewModel.actionBar.secondary.label}
@@ -303,7 +314,7 @@ export const SellerMapCard = ({
         {signalsBlock}
         <SellerMapCardOperationalState state={viewModel.operationalState} />
       </div>
-      {!isMobile ? actionFooter : null}
+      {actionFooter}
     </>
   )
 
@@ -468,14 +479,14 @@ export const SellerMapCard = ({
           onMouseLeave={onMouseLeave}
           onClick={(event) => {
             event.stopPropagation()
-            if (isPeek) {
+            if (isPeek && !isConversation) {
               setCardMode('focus')
               setSheetSnap('expanded')
               onPeekToFocus?.()
             }
           }}
-          role={isPeek ? 'button' : 'region'}
-          aria-label={isPeek ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
+          role={isPeek && !isConversation ? 'button' : 'region'}
+          aria-label={isPeek && !isConversation ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
         >
           {shellInner}
         </article>
@@ -492,10 +503,10 @@ export const SellerMapCard = ({
       onMouseLeave={onMouseLeave}
       onClick={(event) => {
         event.stopPropagation()
-        if (isPeek) onPeekToFocus?.()
+        if (isPeek && !isConversation) onPeekToFocus?.()
       }}
-      role={isPeek ? 'button' : 'region'}
-      aria-label={isPeek ? 'Seller property preview' : 'Seller property card'}
+      role={isPeek && !isConversation ? 'button' : 'region'}
+      aria-label={isPeek && !isConversation ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
     >
       {shellInner}
     </article>
