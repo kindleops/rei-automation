@@ -33,7 +33,7 @@ export const resolveSellerActionBar = (params: {
       },
       secondary: {
         label: 'Message',
-        action: 'message',
+        action: 'none',
         enabled: false,
       },
     }

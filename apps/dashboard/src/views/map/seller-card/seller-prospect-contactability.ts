@@ -24,6 +24,9 @@ export type ProspectContactabilityProfile = {
   meterLabel: string
   badges: Array<{ key: string; label: string; tone: 'ready' | 'warn' | 'neutral' }>
   emptyState: string | null
+  activityLine: string | null
+  channelLine: string | null
+  ownershipCheckAvailable: boolean
 }
 
 const hasDialablePhone = (record: Record<string, unknown>): boolean => {
@@ -48,7 +51,19 @@ const resolveRelationshipConfidence = (
   return 'medium'
 }
 
+const hasValidSendPath = (
+  prospectName: string | null,
+  smsEligible: boolean | null,
+  hasPhone: boolean,
+  suppressed: boolean,
+): boolean => {
+  if (suppressed) return false
+  if (prospectName && smsEligible === true && hasPhone) return true
+  return false
+}
+
 const computeMeter = (
+  prospectName: string | null,
   smsEligible: boolean | null,
   hasPhone: boolean,
   hasEmail: boolean,
@@ -58,24 +73,34 @@ const computeMeter = (
 ): { percent: number; label: string } => {
   if (suppressed) return { percent: 0, label: 'Restricted' }
 
-  let percent = 0
-  if (hasPhone) percent += 35
-  if (smsEligible === true) percent += 30
-  else if (smsEligible === false) percent -= 20
-  if (hasEmail) percent += 10
-  if ((contactScore ?? 0) > 0) percent += Math.min(15, Math.round((contactScore ?? 0) * 0.15))
-  if ((phoneScore ?? 0) > 0) percent += Math.min(10, Math.round((phoneScore ?? 0) * 0.1))
+  if (prospectName && smsEligible === true && hasPhone) {
+    let percent = 82
+    if (hasEmail) percent += 6
+    if ((contactScore ?? 0) > 0) percent += Math.min(8, Math.round((contactScore ?? 0) * 0.08))
+    if ((phoneScore ?? 0) > 0) percent += Math.min(4, Math.round((phoneScore ?? 0) * 0.04))
+    const clamped = Math.max(0, Math.min(100, percent))
+    return { percent: clamped, label: 'Ready' }
+  }
 
-  const clamped = Math.max(0, Math.min(100, percent))
-  if (clamped >= 75) return { percent: clamped, label: 'Ready' }
-  if (clamped >= 45) return { percent: clamped, label: 'Partial' }
-  if (clamped > 0) return { percent: clamped, label: 'Limited' }
+  if (!prospectName && hasPhone) {
+    return { percent: 42, label: 'Partial' }
+  }
+
+  if (!prospectName && !hasPhone && hasEmail) {
+    return { percent: 18, label: 'Limited' }
+  }
+
   return { percent: 0, label: 'Not ready' }
 }
 
 export const buildProspectContactabilityProfile = (
   record: Record<string, unknown>,
-  options: { suppressed: boolean; suppressionReason: string | null },
+  options: {
+    suppressed: boolean
+    suppressionReason: string | null
+    isUncontacted?: boolean
+    hasPriorContact?: boolean
+  },
 ): ProspectContactabilityProfile => {
   const prospectName = safeHumanName(text(firstDefined(record, [
     'prospect_full_name',
@@ -117,13 +142,42 @@ export const buildProspectContactabilityProfile = (
     ? (options.suppressionReason || text(firstDefined(record, ['suppression_reason'])) || 'Suppressed')
     : null
 
-  const meter = computeMeter(smsEligible, hasPhone, hasEmail, contactScore, phoneScore, restricted)
+  const meter = computeMeter(prospectName, smsEligible, hasPhone, hasEmail, contactScore, phoneScore, restricted)
+  const ownershipCheckAvailable = options.isUncontacted === true && !restricted
 
   const badges: ProspectContactabilityProfile['badges'] = []
-  if (smsEligible === true) badges.push({ key: 'sms', label: 'SMS ready', tone: 'ready' })
-  if (hasPhone) badges.push({ key: 'phone', label: 'Phone', tone: 'ready' })
-  if (hasEmail) badges.push({ key: 'email', label: 'Email', tone: 'neutral' })
+  if (restricted) {
+    badges.push({ key: 'restricted', label: 'Contact restricted', tone: 'warn' })
+  } else if (prospectName && smsEligible === true) {
+    badges.push({ key: 'sms', label: 'SMS eligible', tone: 'ready' })
+  }
+  if (hasPhone && !restricted) badges.push({ key: 'phone', label: 'Phone coverage', tone: hasPhone && !prospectName ? 'neutral' : 'ready' })
+  if (hasEmail && !restricted) badges.push({ key: 'email', label: 'Email', tone: 'neutral' })
   if (restricted) badges.push({ key: 'suppressed', label: 'Suppressed', tone: 'warn' })
+
+  let emptyState: string | null = null
+  let activityLine: string | null = null
+  let channelLine: string | null = null
+
+  if (restricted) {
+    emptyState = 'Contact restricted'
+    activityLine = restrictionLabel
+  } else if (!prospectName && hasPhone) {
+    emptyState = 'No resolved prospect'
+    channelLine = 'Phone coverage available'
+    activityLine = options.hasPriorContact ? null : 'No contact activity yet'
+  } else if (!prospectName) {
+    emptyState = 'No resolved prospect yet'
+    activityLine = options.hasPriorContact ? null : 'No contact activity yet'
+  } else if (!hasValidSendPath(prospectName, smsEligible, hasPhone, restricted)) {
+    channelLine = hasPhone ? 'Phone on file — SMS path not confirmed' : 'No dialable phone on file'
+  }
+
+  if (ownershipCheckAvailable && !options.hasPriorContact && !restricted) {
+    activityLine = activityLine
+      ? `${activityLine} · Ownership check available`
+      : 'Ownership check available'
+  }
 
   return {
     resolvedName: prospectName,
@@ -140,14 +194,32 @@ export const buildProspectContactabilityProfile = (
     meterPercent: meter.percent,
     meterLabel: meter.label,
     badges,
-    emptyState: prospectName ? null : 'No resolved prospect yet',
+    emptyState,
+    activityLine,
+    channelLine,
+    ownershipCheckAvailable,
   }
 }
 
 export const buildProspectContactabilityFields = (
   profile: ProspectContactabilityProfile,
 ): Array<{ label: string; value: string }> => {
-  if (profile.emptyState) return [{ label: 'Prospect', value: profile.emptyState }]
+  if (profile.suppressed) {
+    return [
+      { label: 'Status', value: 'Contact restricted' },
+      { label: 'Restriction', value: profile.restrictionLabel || 'Suppressed' },
+    ]
+  }
+
+  if (profile.emptyState && !profile.resolvedName) {
+    const fields: Array<{ label: string; value: string }> = [
+      { label: 'Prospect', value: profile.emptyState },
+      { label: 'Contactability', value: profile.meterLabel },
+    ]
+    if (profile.channelLine) fields.push({ label: 'Channel', value: profile.channelLine })
+    if (profile.activityLine) fields.push({ label: 'Activity', value: profile.activityLine })
+    return fields
+  }
 
   return [
     { label: 'Primary Prospect', value: profile.resolvedName || '—' },

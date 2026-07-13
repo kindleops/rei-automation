@@ -41,12 +41,25 @@ export type SellerMapCardFinancialMeter = {
   caption: string | null
 }
 
+export type SellerMapCardPressureDriver = {
+  label: string
+  impact: 'positive' | 'negative'
+}
+
 export type SellerMapCardOwnerPressure = {
   score: number | null
   tier: string | null
   label: string
-  drivers: Array<{ label: string; impact: 'positive' | 'negative' }>
+  drivers: SellerMapCardPressureDriver[]
   confidence: string
+  summary: string | null
+}
+
+export type SellerMapCardAcquisitionFit = {
+  score: number | null
+  tier: string | null
+  label: string
+  drivers: SellerMapCardPressureDriver[]
   summary: string | null
 }
 
@@ -63,6 +76,9 @@ export type SellerMapCardProspectProfile = {
   meterLabel: string
   badges: Array<{ key: string; label: string; tone: 'ready' | 'warn' | 'neutral' }>
   emptyState: string | null
+  activityLine: string | null
+  channelLine: string | null
+  ownershipCheckAvailable: boolean
   fields: Array<{ label: string; value: string }>
 }
 
@@ -189,9 +205,11 @@ export type SellerMapCardViewModel = {
   financialProfile: {
     fields: Array<{ label: string; value: string }>
     meters: SellerMapCardFinancialMeter[]
+    summaryChips: Array<{ label: string; value: string }>
     pressureCaption: string | null
   }
   ownerPressure: SellerMapCardOwnerPressure
+  acquisitionFit: SellerMapCardAcquisitionFit
   prospectProfile: SellerMapCardProspectProfile
   propertyProfileGroups: SellerMapCardPropertyProfileGroup[]
   focusProfileFields: Array<{ label: string; value: string }>
