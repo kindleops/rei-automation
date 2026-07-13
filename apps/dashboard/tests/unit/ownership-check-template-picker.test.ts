@@ -21,7 +21,7 @@ vi.mock('../../src/lib/data/templateData', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/lib/data/templateData')>()
   return {
     ...actual,
-    fetchTemplatesByUseCase: vi.fn(actual.fetchTemplatesByUseCase),
+    fetchTemplatesByUseCaseAndLanguage: vi.fn(actual.fetchTemplatesByUseCaseAndLanguage),
   }
 })
 
@@ -66,13 +66,13 @@ describe('ownership check template picker', () => {
   })
 
   it('randomizes ownership_check templates for the resolved prospect language', async () => {
-    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+    const { fetchTemplatesByUseCaseAndLanguage } = await import('../../src/lib/data/templateData')
     const templates = [
       makeTemplate({ id: 'en-1', language: 'English', templateText: 'Hi {{seller_first_name}}, question about {{property_address}}' }),
       makeTemplate({ id: 'es-1', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, pregunta sobre {{property_address}}' }),
       makeTemplate({ id: 'es-2', language: 'Spanish', templateText: 'Hola {{seller_first_name}}, ¿sigue siendo su propiedad en {{property_address}}?' }),
     ]
-    vi.mocked(fetchTemplatesByUseCase).mockResolvedValue(templates)
+    vi.mocked(fetchTemplatesByUseCaseAndLanguage).mockResolvedValue(templates.filter((t) => t.language === 'Spanish'))
 
     const selection = await pickOwnershipCheckTemplateForMap(
       context,
@@ -85,8 +85,22 @@ describe('ownership check template picker', () => {
     expect(selection?.selectionReason).toMatch(/catalog/)
   })
 
-  it('loads active ownership_check templates from Supabase via fetchTemplatesByUseCase', async () => {
-    const { fetchTemplatesByUseCase } = await import('../../src/lib/data/templateData')
+  it('fetches ownership_check templates scoped by seller language to avoid the 1000-row PostgREST cap', async () => {
+    const { fetchTemplatesByUseCaseAndLanguage } = await import('../../src/lib/data/templateData')
+    const englishCatalog = Array.from({ length: 46 }, (_, index) => makeTemplate({
+      id: `en-${index + 1}`,
+      language: 'English',
+      templateText: `Hi {{seller_first_name}}, ownership check ${index + 1} for {{property_address}}`,
+    }))
+    vi.mocked(fetchTemplatesByUseCaseAndLanguage).mockResolvedValueOnce(englishCatalog)
+
+    const templates = await fetchOwnershipCheckTemplates('English')
+    expect(fetchTemplatesByUseCaseAndLanguage).toHaveBeenCalledWith('ownership_check', 'English')
+    expect(templates).toHaveLength(46)
+  })
+
+  it('loads active ownership_check templates from Supabase via language-scoped fetch', async () => {
+    const { fetchTemplatesByUseCaseAndLanguage } = await import('../../src/lib/data/templateData')
     const catalog = [
       makeTemplate({
         id: 'supabase-oc-1',
@@ -94,10 +108,10 @@ describe('ownership check template picker', () => {
         templateText: 'Hi {{seller_first_name}}, this is {{agent_first_name}} about {{property_address}}.',
       }),
     ]
-    vi.mocked(fetchTemplatesByUseCase).mockResolvedValueOnce(catalog)
+    vi.mocked(fetchTemplatesByUseCaseAndLanguage).mockResolvedValueOnce(catalog)
 
-    const templates = await fetchOwnershipCheckTemplates()
-    expect(fetchTemplatesByUseCase).toHaveBeenCalledWith('ownership_check')
+    const templates = await fetchOwnershipCheckTemplates('English')
+    expect(fetchTemplatesByUseCaseAndLanguage).toHaveBeenCalledWith('ownership_check', 'English')
     expect(templates).toEqual(catalog)
     expect(templates.every((template) => template.useCaseSlug === 'ownership_check')).toBe(true)
   })

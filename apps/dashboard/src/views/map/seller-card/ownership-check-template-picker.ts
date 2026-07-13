@@ -5,7 +5,7 @@ import {
   resolveOwnershipCheckSellerLanguage,
 } from '../../../domain/map/ownership-check-language'
 import {
-  fetchTemplatesByUseCase,
+  fetchTemplatesByUseCaseAndLanguage,
   renderTemplate,
   type SmsTemplate,
 } from '../../../lib/data/templateData'
@@ -24,28 +24,12 @@ export const computeRotationExclusionLimit = (poolSize: number): number => {
   return Math.min(poolSize - 1, Math.max(12, Math.floor(poolSize * 0.85)))
 }
 
-const usesNonLatinSellerNameMatching = (sellerFirstName: string): boolean =>
-  /[\u3040-\u9fff\u3400-\u4dbf\uac00-\ud7af\u0600-\u06ff\u0590-\u05ff]/.test(sellerFirstName)
-
 // Mirror apps/api textgrid.js BLANK_GREETING_RE — any "Hi," opener is provider-blocked.
 export const TEXTGRID_BLANK_GREETING_RE =
   /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i
 
 export const hasTextgridBlockedGreeting = (message: string): boolean =>
   TEXTGRID_BLANK_GREETING_RE.test(message.trim())
-
-const hasBlankGreeting = (message: string): boolean =>
-  hasTextgridBlockedGreeting(message)
-
-const hasHiThereGreeting = (message: string): boolean =>
-  /^(hi|hey|hello|hola|ola|marhaba)\s+there\b/i.test(message.trim())
-
-const hasGenericRightPersonWording = (message: string): boolean =>
-  /\bright person\b/i.test(message)
-  || /\bwho handles\b/i.test(message)
-  || /\btrying to reach\b/i.test(message)
-  || /\bhad a quick question\b/i.test(message)
-  || /\bare you connected with\b/i.test(message)
 
 const hasUnresolvedTemplateTokens = (message: string): boolean =>
   /\[\[[a-z0-9_]+\]\]/i.test(message) || /\{\{[^}]+\}\}/.test(message)
@@ -64,16 +48,6 @@ export const resolveProspectGreetingFirstName = (
   if (fromFirst) return firstToken(fromFirst)
   if (fromFull) return firstToken(fromFull)
   return ''
-}
-
-const greetingUsesFullNameInsteadOfFirst = (message: string, sellerFirstName: string): boolean => {
-  const first = asString(sellerFirstName, '').trim()
-  if (!first || first.includes(' ')) return false
-  const match = message.trim().match(GREETING_NAME_PATTERN)
-  if (!match) return false
-  const greeted = match[1].trim()
-  if (greeted.toLowerCase() === first.toLowerCase()) return false
-  return greeted.toLowerCase().startsWith(`${first.toLowerCase()} `)
 }
 
 const hasEntityGreeting = (message: string): boolean => {
@@ -107,16 +81,6 @@ const containsForbiddenEntityGreeting = (
   }
 
   return false
-}
-
-const greetingIncludesSellerFirstName = (message: string, sellerFirstName: string): boolean => {
-  const first = asString(sellerFirstName, '').trim()
-  if (!first) return false
-  if (usesNonLatinSellerNameMatching(first)) {
-    return message.includes(first)
-  }
-  const pattern = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i')
-  return pattern.test(message)
 }
 
 export type OwnershipTemplateCandidate = {
@@ -290,24 +254,26 @@ export const pickRandomOwnershipCheckTemplate = (
   }
 }
 
-let ownershipTemplateCache: { expiresAt: number; templates: SmsTemplate[] } | null = null
+const ownershipTemplateCache = new Map<string, { expiresAt: number; templates: SmsTemplate[] }>()
 
 export const resetOwnershipCheckTemplateCacheForTests = (): void => {
-  ownershipTemplateCache = null
+  ownershipTemplateCache.clear()
 }
 
-/** Active ownership_check rows from Supabase sms_templates (via authenticated template API). */
-export const fetchOwnershipCheckTemplates = async (): Promise<SmsTemplate[]> => {
+/** Active ownership_check rows for one seller language — server-filtered to avoid the 1000-row cap. */
+export const fetchOwnershipCheckTemplates = async (ownerLanguage: string): Promise<SmsTemplate[]> => {
+  const language = canonicalizeOwnershipCheckLanguage(ownerLanguage)
   const now = Date.now()
-  if (ownershipTemplateCache && ownershipTemplateCache.expiresAt > now) {
-    return ownershipTemplateCache.templates
+  const cached = ownershipTemplateCache.get(language)
+  if (cached && cached.expiresAt > now) {
+    return cached.templates
   }
 
-  const templates = await fetchTemplatesByUseCase(OWNERSHIP_CHECK_USE_CASE)
-  ownershipTemplateCache = {
+  const templates = await fetchTemplatesByUseCaseAndLanguage(OWNERSHIP_CHECK_USE_CASE, language)
+  ownershipTemplateCache.set(language, {
     templates,
     expiresAt: now + 60_000,
-  }
+  })
   return templates
 }
 
@@ -449,7 +415,7 @@ export const pickOwnershipCheckTemplateForMap = async (
   } = {},
 ): Promise<OwnershipTemplateSelection | null> => {
   const sellerLanguage = canonicalizeOwnershipCheckLanguage(ownerLanguage)
-  const templates = await fetchOwnershipCheckTemplates()
+  const templates = await fetchOwnershipCheckTemplates(sellerLanguage)
   const languageCatalog = filterOwnershipTemplatesForLanguage(templates, sellerLanguage)
   const rotationWindow = computeRotationExclusionLimit(languageCatalog.length)
 

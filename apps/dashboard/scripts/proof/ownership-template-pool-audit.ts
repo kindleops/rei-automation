@@ -42,44 +42,52 @@ const sampleContext = {
 const REJECTION_CHECKS: Array<{ name: string; test: (t: ReturnType<typeof normalizeSmsTemplate>) => boolean }> = []
 
 async function main() {
-  const { data, error } = await supabase
+  const { count: totalCount, error: countError } = await supabase
     .from('sms_templates')
-    .select('*')
+    .select('*', { count: 'exact', head: true })
+    .eq('use_case', 'ownership_check')
+    .eq('is_active', true)
+
+  if (countError) {
+    console.error('Count query failed:', countError.message)
+    process.exit(1)
+  }
+
+  const fetchLanguageCatalog = async (language: string) => {
+    const { data, error } = await supabase
+      .from('sms_templates')
+      .select('*')
+      .eq('use_case', 'ownership_check')
+      .eq('is_active', true)
+      .eq('language', language)
+    if (error) throw error
+    return (data || []).map(normalizeSmsTemplate)
+  }
+
+  const { data: languageRows, error: languageError } = await supabase
+    .from('sms_templates')
+    .select('language')
     .eq('use_case', 'ownership_check')
     .eq('is_active', true)
     .limit(5000)
 
-  if (error) {
-    console.error('Query failed:', error.message)
+  if (languageError) {
+    console.error('Language query failed:', languageError.message)
     process.exit(1)
   }
 
-  const templates = (data || []).map(normalizeSmsTemplate)
-  console.log(`Active ownership_check templates: ${templates.length}`)
+  console.log(`Active ownership_check templates in DB: ${totalCount}`)
+  console.log(`Rows returned without language filter (PostgREST cap): ${languageRows?.length ?? 0}`)
 
-  const byLanguage = new Map<string, number>()
-  for (const t of templates) {
-    byLanguage.set(t.language, (byLanguage.get(t.language) || 0) + 1)
-  }
-  console.log('By language:', Object.fromEntries([...byLanguage.entries()].sort()))
+  const englishTemplates = await fetchLanguageCatalog('English')
+  const spanishTemplates = await fetchLanguageCatalog('Spanish')
+  console.log('English catalog (language-filtered):', englishTemplates.length)
+  console.log('Spanish catalog (language-filtered):', spanishTemplates.length)
 
-  const weights = templates.map((t) => Number(t.raw.traffic_weight ?? t.raw.metadata?.traffic_weight ?? 1) || 1)
-  const highWeight = templates.filter((_, i) => weights[i] > 5)
-  console.log(`Templates with traffic_weight > 5: ${highWeight.length}`)
-  if (highWeight.length) {
-    console.log('High-weight sample:', highWeight.slice(0, 5).map((t) => ({
-      id: t.templateId || t.id,
-      weight: t.raw.traffic_weight,
-      lang: t.language,
-      text: t.templateText.slice(0, 60),
-    })))
-  }
-
-  const pool = buildOwnershipTemplatePool(templates, sampleContext, 'English')
+  const pool = buildOwnershipTemplatePool(englishTemplates, sampleContext, 'English')
   console.log(`\nEnglish pool size (Maria/Chris context): ${pool.length}`)
 
   const rejectionReasons = new Map<string, number>()
-  const englishTemplates = templates.filter((t) => t.language === 'English')
   for (const template of englishTemplates) {
     const result = evaluateOwnershipTemplate(template, sampleContext)
     if (result) continue
@@ -108,9 +116,12 @@ async function main() {
     console.log('\nEligible English template IDs:', pool.map((p) => p.templateKey).join(', '))
   }
 
-  for (const lang of ['Spanish', 'Mandarin']) {
-    const langPool = buildOwnershipTemplatePool(templates, sampleContext, lang)
-    console.log(`\n${lang} pool size: ${langPool.length}`)
+  for (const lang of ['Spanish', 'Mandarin'] as const) {
+    const langTemplates = lang === 'Spanish'
+      ? spanishTemplates
+      : await fetchLanguageCatalog('Mandarin')
+    const langPool = buildOwnershipTemplatePool(langTemplates, sampleContext, lang)
+    console.log(`\n${lang} pool size: ${langPool.length} / ${langTemplates.length} catalog`)
   }
 
   const failedEnglish = englishTemplates.filter((t) => !evaluateOwnershipTemplate(t, sampleContext))

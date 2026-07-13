@@ -204,7 +204,9 @@ const applyFilters = (templates: SmsTemplate[], filters: SmsTemplateFilters): Sm
 
 export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Promise<SmsTemplate[]> => {
   const limit = Math.max(1, params.limit ?? 200)
-  const cacheKey = `${limit}:${params.includeInactive ? 'all' : 'active'}`
+  const useCase = params.useCase && params.useCase !== 'all' ? params.useCase : ''
+  const language = params.language && params.language !== 'all' ? params.language : ''
+  const cacheKey = `${limit}:${params.includeInactive ? 'all' : 'active'}:${useCase}:${language}`
   const now = Date.now()
   if (_templatesCache && _templatesCache.key === cacheKey && _templatesCache.expiresAt > now) {
     return applyFilters(_templatesCache.templates, params)
@@ -213,7 +215,8 @@ export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Pr
   const apiResult = await fetchSmsTemplatesFromApi({
     limit,
     includeInactive: params.includeInactive,
-    useCase: params.useCase && params.useCase !== 'all' ? params.useCase : undefined,
+    useCase: useCase || undefined,
+    language: language || undefined,
   })
   if (!apiResult.ok) {
     const err = apiResult as { message?: string; error?: string }
@@ -264,6 +267,12 @@ export const fetchTemplateLanguages = async (): Promise<string[]> => {
 
 export const fetchTemplatesByUseCase = async (useCase: string): Promise<SmsTemplate[]> =>
   fetchSmsTemplates({ useCase, limit: 5000 })
+
+export const fetchTemplatesByUseCaseAndLanguage = async (
+  useCase: string,
+  language: string,
+): Promise<SmsTemplate[]> =>
+  fetchSmsTemplates({ useCase, language, limit: 5000 })
 
 export const fetchTemplatesByLanguage = async (language: string): Promise<SmsTemplate[]> =>
   fetchSmsTemplates({ language, limit: 1000 })
