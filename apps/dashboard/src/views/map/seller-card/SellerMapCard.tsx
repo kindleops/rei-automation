@@ -301,12 +301,18 @@ export const SellerMapCard = ({
     <SellerMapCardWeightedTags flags={visibleFlags} hiddenCount={hiddenFlagCount} />
   ) : null
 
-  const activityBlock = (
+  const showActivityDetail = viewModel.activity.kind !== 'none'
+    && (viewModel.activity.detail || viewModel.activity.kind === 'last_reply'
+      || viewModel.activity.kind === 'delivery_failed'
+      || viewModel.activity.kind === 'suppressed')
+
+  const activityBlock = showActivityDetail ? (
     <section className={cls('smc-activity', `is-${viewModel.activity.kind}`)}>
-      <div className="smc-activity__head">{viewModel.activity.headline}</div>
-      {viewModel.activity.detail ? <p className="smc-activity__copy">{viewModel.activity.detail}</p> : null}
+      {viewModel.activity.detail ? (
+        <p className="smc-activity__copy">{viewModel.activity.detail}</p>
+      ) : null}
     </section>
-  )
+  ) : null
 
   const handlePrimaryAction = () => {
     const action = viewModel.actionBar.primary.action
@@ -368,13 +374,9 @@ export const SellerMapCard = ({
       </div>
       <div className="smc-body smc-body--peek smc-body--peek-dense">
         {identityHeader}
-        <SellerMapCardContactStateStrip
-          label={viewModel.contactStateLabel}
-          activeCommunication={viewModel.activeCommunication}
-        />
+        <SellerMapCardContactStateStrip label={viewModel.contactStateLabel} />
         {metricsBlock(viewModel.peekMetrics, 'peek')}
         {flagsBlock}
-        {activityBlock}
       </div>
       {!isMobile ? actionFooter : null}
     </>
@@ -398,6 +400,7 @@ export const SellerMapCard = ({
       <SellerMapCardFinancialSection financialProfile={viewModel.financialProfile} />
       <SellerMapCardOwnerPressureSection
         ownerPressure={viewModel.ownerPressure}
+        acquisitionFit={viewModel.acquisitionFit}
         ownerFields={viewModel.focusOwnerFields}
       />
       <SellerMapCardProspectSection prospectProfile={viewModel.prospectProfile} />
@@ -426,10 +429,7 @@ export const SellerMapCard = ({
         <div className="smc-body smc-body--focus-head">
           {stateBadges}
           {identityHeader}
-          <SellerMapCardContactStateStrip
-            label={viewModel.contactStateLabel}
-            activeCommunication={viewModel.activeCommunication}
-          />
+          <SellerMapCardContactStateStrip label={viewModel.contactStateLabel} />
         </div>
       </div>
       <div className="smc-body smc-body--focus smc-body--focus-dense">

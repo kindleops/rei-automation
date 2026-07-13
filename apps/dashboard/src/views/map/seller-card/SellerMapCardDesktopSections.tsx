@@ -61,8 +61,18 @@ export const SellerMapCardFinancialSection = ({
   return (
     <section className="smc-section smc-section--financial" aria-label="Financial profile">
       <h4>Financial Profile</h4>
+      {financialProfile.summaryChips.length > 0 ? (
+        <div className="smc-fin-summary">
+          {financialProfile.summaryChips.map((chip) => (
+            <div key={chip.label} className="smc-fin-summary__chip">
+              <span>{chip.label}</span>
+              <strong>{chip.value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {financialProfile.meters.length > 0 ? (
-        <div className="smc-fin-meters">
+        <div className="smc-fin-meters smc-fin-meters--compact">
           {financialProfile.meters.map((meter) => (
             <div key={meter.key} className="smc-fin-meter">
               <div className="smc-fin-meter__head">
@@ -76,12 +86,9 @@ export const SellerMapCardFinancialSection = ({
           ))}
         </div>
       ) : null}
-      {financialProfile.pressureCaption ? (
-        <p className="smc-fin-caption">{financialProfile.pressureCaption}</p>
-      ) : null}
-      <div className="smc-kv-grid smc-kv-grid--compact">
+      <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
         {financialProfile.fields.map((field) => (
-          <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+          <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
         ))}
       </div>
     </section>
@@ -90,25 +97,27 @@ export const SellerMapCardFinancialSection = ({
 
 export const SellerMapCardOwnerPressureSection = ({
   ownerPressure,
+  acquisitionFit,
   ownerFields,
 }: {
   ownerPressure: SellerMapCardViewModel['ownerPressure']
+  acquisitionFit: SellerMapCardViewModel['acquisitionFit']
   ownerFields: SellerMapCardViewModel['focusOwnerFields']
 }) => {
-  if (ownerPressure.score == null && ownerFields.length === 0) return null
+  if (ownerPressure.score == null && acquisitionFit.score == null && ownerFields.length === 0) return null
   return (
-    <section className="smc-section smc-section--owner-pressure" aria-label="Master owner profile">
-      <h4>Ownership / Master Owner</h4>
-      {ownerPressure.score != null ? (
-        <div className="smc-pressure-card">
+    <section className="smc-section smc-section--owner-pressure" aria-label="Owner pressure and acquisition fit">
+      <h4>Ownership / Acquisition Fit</h4>
+      <div className="smc-pressure-dual">
+        <div className="smc-pressure-card smc-pressure-card--distress">
           <div className="smc-pressure-card__head">
             <span>Owner Pressure</span>
-            <strong>{ownerPressure.score} · {ownerPressure.label}</strong>
+            <strong>{ownerPressure.label}</strong>
           </div>
           {ownerPressure.summary ? <p className="smc-pressure-card__summary">{ownerPressure.summary}</p> : null}
           {ownerPressure.drivers.length > 0 ? (
             <div className="smc-pressure-card__drivers">
-              {ownerPressure.drivers.slice(0, 4).map((driver) => (
+              {ownerPressure.drivers.filter((d) => d.impact === 'negative').slice(0, 3).map((driver) => (
                 <span key={driver.label} className={cls('smc-pressure-driver', `is-${driver.impact}`)}>
                   {driver.label}
                 </span>
@@ -116,11 +125,29 @@ export const SellerMapCardOwnerPressureSection = ({
             </div>
           ) : null}
         </div>
-      ) : null}
+        {acquisitionFit.score != null ? (
+          <div className="smc-pressure-card smc-pressure-card--fit">
+            <div className="smc-pressure-card__head">
+              <span>Acquisition Fit</span>
+              <strong>{acquisitionFit.label}</strong>
+            </div>
+            {acquisitionFit.summary ? <p className="smc-pressure-card__summary">{acquisitionFit.summary}</p> : null}
+            {acquisitionFit.drivers.length > 0 ? (
+              <div className="smc-pressure-card__drivers">
+                {acquisitionFit.drivers.slice(0, 4).map((driver) => (
+                  <span key={driver.label} className={cls('smc-pressure-driver', `is-${driver.impact}`)}>
+                    {driver.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {ownerFields.length > 0 ? (
-        <div className="smc-kv-grid smc-kv-grid--compact">
+        <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
           {ownerFields.map((field) => (
-            <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+            <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
           ))}
         </div>
       ) : null}
@@ -135,31 +162,30 @@ export const SellerMapCardProspectSection = ({
 }) => (
   <section className="smc-section smc-section--prospect" aria-label="Prospect contactability">
     <h4>Prospect / Contactability</h4>
-    {prospectProfile.emptyState ? (
-      <p className="smc-empty-line">{prospectProfile.emptyState}</p>
-    ) : (
-      <>
-        <div className="smc-contact-meter">
-          <div className="smc-contact-meter__head">
-            <span>Contactability</span>
-            <strong>{prospectProfile.meterLabel}</strong>
-          </div>
-          <div className="smc-contact-meter__track" aria-hidden="true">
-            <span className="smc-contact-meter__fill" style={{ width: `${prospectProfile.meterPercent}%` }} />
-          </div>
-          <div className="smc-contact-badges">
-            {prospectProfile.badges.map((badge) => (
-              <span key={badge.key} className={cls('smc-contact-badge', `is-${badge.tone}`)}>{badge.label}</span>
-            ))}
-          </div>
-        </div>
-        <div className="smc-kv-grid smc-kv-grid--compact">
-          {prospectProfile.fields.map((field) => (
-            <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>
+    <div className="smc-contact-meter">
+      <div className="smc-contact-meter__head">
+        <span>Contactability</span>
+        <strong>{prospectProfile.meterLabel}</strong>
+      </div>
+      <div className="smc-contact-meter__track" aria-hidden="true">
+        <span className="smc-contact-meter__fill" style={{ width: `${prospectProfile.meterPercent}%` }} />
+      </div>
+      {prospectProfile.badges.length > 0 ? (
+        <div className="smc-contact-badges">
+          {prospectProfile.badges.map((badge) => (
+            <span key={badge.key} className={cls('smc-contact-badge', `is-${badge.tone}`)}>{badge.label}</span>
           ))}
         </div>
-      </>
-    )}
+      ) : null}
+    </div>
+    {prospectProfile.activityLine ? (
+      <p className="smc-empty-line">{prospectProfile.activityLine}</p>
+    ) : null}
+    <div className="smc-kv-grid smc-kv-grid--compact">
+      {prospectProfile.fields.map((field) => (
+        <div key={field.label} className="smc-kv smc-kv--flat"><span>{field.label}</span><strong>{field.value}</strong></div>
+      ))}
+    </div>
   </section>
 )
 
@@ -204,9 +230,9 @@ export const SellerMapCardPropertyProfileSection = ({
       {groups.map((group) => (
         <div key={group.key} className="smc-profile-group">
           <h5>{group.label}</h5>
-          <div className="smc-kv-grid smc-kv-grid--compact">
+          <div className="smc-kv-grid smc-kv-grid--compact smc-kv-grid--micro">
             {group.fields.map((field) => (
-              <div key={`${group.key}-${field.label}`} className="smc-kv">
+              <div key={`${group.key}-${field.label}`} className="smc-kv smc-kv--flat">
                 <span>{field.label}</span>
                 <strong>{field.value}</strong>
               </div>
@@ -220,14 +246,11 @@ export const SellerMapCardPropertyProfileSection = ({
 
 export const SellerMapCardContactStateStrip = ({
   label,
-  activeCommunication,
 }: {
   label: string
-  activeCommunication: boolean
 }) => (
   <div className="smc-contact-state" aria-label="Contact state">
-    <span className={cls('smc-contact-state__pill', activeCommunication && 'is-active')}>{label}</span>
-    {activeCommunication ? <span className="smc-contact-state__badge">Active Communication</span> : null}
+    <span className="smc-contact-state__pill">{label}</span>
   </div>
 )
 
@@ -238,8 +261,8 @@ export const SellerMapCardOperationSection = ({
 }) => {
   if (fields.length === 0) return null
   return (
-    <section className="smc-section smc-section--ops" aria-label="Contact state and automation">
-      <h4>Contact State</h4>
+    <section className="smc-section smc-section--ops" aria-label="Automation and outreach operations">
+      <h4>Automation</h4>
       <div className="smc-kv-grid smc-kv-grid--compact">
         {fields.map((field) => (
           <div key={field.label} className="smc-kv"><span>{field.label}</span><strong>{field.value}</strong></div>

@@ -10,7 +10,11 @@ import { buildCanonicalLeadStatePresentation } from './seller-lead-state-present
 import { resolveFollowUpEligibility, hasPriorOutboundContact } from './seller-follow-up-eligibility'
 import { resolveSellerActionBar } from './seller-action-bar'
 import { buildFinancialProfile } from './seller-financial-profile'
-import { buildOwnerPressureInput, computeOwnerPressureProfile } from './seller-owner-pressure'
+import {
+  buildOwnerPressureInput,
+  computeAcquisitionFitProfile,
+  computeOwnerPressureProfile,
+} from './seller-owner-pressure'
 import {
   buildProspectContactabilityFields,
   buildProspectContactabilityProfile,
@@ -70,8 +74,7 @@ const resolveCanonicalPhone = (record: Record<string, unknown>): string | null =
 
 const resolveContactStateLabel = (
   canonical: ReturnType<typeof buildCanonicalLeadStatePresentation>,
-  activity: SellerMapCardViewModel['activity'],
-): string => canonical.statusLabel || activity.headline
+): string => canonical.statusLabel || 'Not Contacted'
 
 const resolvePropertyImage = (record: Record<string, unknown>, address: string): string | null => {
   const direct = text(firstDefined(record, [
@@ -227,7 +230,9 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     sqft: assetInput.sqft,
   }, presentation.key)
 
-  const ownerPressureRaw = computeOwnerPressureProfile(buildOwnerPressureInput(record))
+  const ownerPressureInput = buildOwnerPressureInput(record)
+  const ownerPressureRaw = computeOwnerPressureProfile(ownerPressureInput)
+  const acquisitionFitRaw = computeAcquisitionFitProfile(ownerPressureInput)
 
   const focusFinancialFields = financialProfile.fields.length > 0
     ? financialProfile.fields
@@ -250,7 +255,6 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     { label: 'Out of State', value: asBoolean(firstDefined(record, ['out_of_state_owner'])) === true ? 'Yes' : asBoolean(firstDefined(record, ['out_of_state_owner'])) === false ? 'No' : '—' },
     { label: 'Free & Clear', value: (equityPercent ?? 0) >= 95 ? 'Yes' : equityPercent != null ? 'No' : '—' },
     { label: 'Portfolio', value: portfolioCount != null ? formatInteger(portfolioCount) : '—' },
-    { label: 'Contactability', value: canonical.contactabilityLabel },
   ].filter((field) => field.value !== '—')
 
   const peekMetrics = presentation.buildPeekMetrics(assetInput)
@@ -289,6 +293,8 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
   const prospectProfileRaw = buildProspectContactabilityProfile(record, {
     suppressed: canonical.messagingBlocked,
     suppressionReason,
+    isUncontacted: followUpEligibility.isUncontacted,
+    hasPriorContact,
   })
   const prospectProfile = {
     ...prospectProfileRaw,
@@ -411,6 +417,13 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
       confidence: ownerPressureRaw.confidence,
       summary: ownerPressureRaw.summary,
     },
+    acquisitionFit: {
+      score: acquisitionFitRaw.score,
+      tier: acquisitionFitRaw.tier,
+      label: acquisitionFitRaw.label,
+      drivers: acquisitionFitRaw.drivers,
+      summary: acquisitionFitRaw.summary,
+    },
     prospectProfile,
     focusProfileFields: presentation.buildFocusProfileFields(assetInput).filter((field) => field.value !== '—'),
     focusFinancialFields,
@@ -420,7 +433,7 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     edgeAccent: resolveEdgeAccent(activity, canonical),
     messagingBlocked: canonical.messagingBlocked,
     messagingBlockReason,
-    contactStateLabel: resolveContactStateLabel(canonical, activity),
+    contactStateLabel: resolveContactStateLabel(canonical),
     activeCommunication,
   }
 
