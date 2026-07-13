@@ -1046,6 +1046,7 @@ const tryResolveFromHydratedMapHints = async (
     {
       masterOwnerId,
       source: 'hydrated_map_identity',
+      rank: OWNER_SOURCE_RANK.hydrated_map_identity,
       confidence: 1,
       prospectId,
       phoneId: hints.phoneId,
@@ -1065,6 +1066,7 @@ const tryResolveFromHydratedMapHints = async (
     candidate: {
       masterOwnerId,
       source: 'hydrated_map_identity',
+      rank: OWNER_SOURCE_RANK.hydrated_map_identity,
       confidence: 1,
       prospectId,
       phoneId: hints.phoneId,
