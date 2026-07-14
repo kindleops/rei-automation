@@ -34,6 +34,10 @@ import {
 import { updateMasterOwnerAfterInbound } from "@/lib/domain/master-owners/update-master-owner-after-inbound.js";
 import { isNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
 import { cancelPendingQueueItemsForOwner } from "@/lib/domain/queue/cancel-pending-queue-items.js";
+import {
+  cancelSupabasePendingOutbound,
+  CANCELLATION_POLICIES,
+} from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
 import { isEmergencyStopActive } from "@/lib/domain/queue/queue-control-safety.js";
 import { extractUnderwritingSignals } from "@/lib/domain/underwriting/extract-underwriting-signals.js";
 import { buildInboundConversationState } from "@/lib/domain/communications-engine/state-machine.js";
@@ -87,6 +91,7 @@ const defaultDeps = {
   updateMasterOwnerAfterInbound,
   isNegativeReply,
   cancelPendingQueueItemsForOwner,
+  cancelSupabasePendingOutbound,
   extractUnderwritingSignals,
   buildInboundConversationState,
   beginIdempotentProcessing,
@@ -1227,7 +1232,27 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       inbound_is_negative = runtimeDeps.isNegativeReply(message_body);
       queue_cancellation = null;
 
-      if (inbound_is_negative && (master_owner_id || phone_item_id)) {
+      if (inbound_is_negative && (master_owner_id || phone_item_id || inbound_from)) {
+        const supabase_client = runtimeDeps.getSupabaseClient?.() || null;
+        const supabase_queue_cancellation = supabase_client
+          ? await runtimeDeps.cancelSupabasePendingOutbound(
+              {
+                thread_key: inbound_from,
+                to_phone_number: inbound_from,
+                phone_id: phone_item_id,
+                master_owner_id,
+                property_id,
+                prospect_id,
+                policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL,
+                reason: "inbound_negative_reply",
+                suppression_reason: "inbound_negative_reply",
+                inbound_event_id: inbound_message_event_id || extracted.message_id,
+                cancelled_by: "textgrid_inbound_negative_fast_path",
+              },
+              { supabase: supabase_client }
+            )
+          : { ok: false, cancelled: 0, reason: "missing_supabase_client" };
+
         queue_cancellation = await runtimeDeps.cancelPendingQueueItemsForOwner({
           master_owner_id,
           phone_item_id,
@@ -1239,7 +1264,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           inbound_from,
           master_owner_id,
           phone_item_id,
-          canceled_count: queue_cancellation?.canceled_count ?? 0,
+          supabase_cancelled_count: supabase_queue_cancellation?.cancelled ?? 0,
+          podio_canceled_count: queue_cancellation?.canceled_count ?? 0,
           items_checked: queue_cancellation?.items_checked ?? 0,
         });
       }

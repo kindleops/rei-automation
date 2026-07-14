@@ -23,6 +23,10 @@ import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound
 import { resolveThreadLanguage } from "@/lib/domain/seller-flow/resolve-thread-language.js";
 import { buildOutboundTemplateAttribution } from "@/lib/domain/templates/outbound-attribution.js";
 import { resolveOwnershipProbeDisinterestTransition } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
+import {
+  cancelSupabasePendingOutbound,
+  CANCELLATION_POLICIES,
+} from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
 
 const DEFAULT_DUPLICATE_WINDOW_MINUTES = 10;
 const ACTIVE_AUTO_REPLY_STATUSES = new Set([
@@ -1539,16 +1543,37 @@ export async function executeInboundAutomationDecision({
   }
 
   if (base_decision.should_suppress_contact) {
+    const suppression_reason = base_decision.suppression_reason || "opt_out";
     const suppression_result = applySuppression
       ? await applyInboundSuppression({
           supabaseClient: supabase,
           phoneNumber: inboundFrom || threadKey,
           phoneId,
-          reason: base_decision.suppression_reason || "opt_out",
+          reason: suppression_reason,
           threadKey,
           dryRun,
         })
       : { ok: false, skipped: true, reason: "suppression_disabled" };
+
+    let queue_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
+    if (!dryRun && supabase) {
+      queue_cancellation = await cancelSupabasePendingOutbound(
+        {
+          thread_key: threadKey || inboundFrom,
+          to_phone_number: inboundFrom || threadKey,
+          phone_id: phoneId,
+          prospect_id: prospectId,
+          master_owner_id: ownerId,
+          property_id: propertyId,
+          policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL,
+          reason: "inbound_compliance_suppression",
+          suppression_reason,
+          inbound_event_id: inboundEventId,
+          cancelled_by: "inbound_automation_decision",
+        },
+        { supabase }
+      );
+    }
 
     return {
       ok: true,
@@ -1560,6 +1585,7 @@ export async function executeInboundAutomationDecision({
       queue_row_id: null,
       queue_result: null,
       suppression_applied: Boolean(suppression_result?.ok),
+      queue_cancellation,
       duplicate_suppressed: false,
       dry_run: Boolean(dryRun),
       auto_reply_mode: effective_auto_reply_mode,

@@ -58,6 +58,7 @@ import {
   isDeferredQueueRow,
   resolveDeferredQueueMessage,
 } from "@/lib/domain/queue/resolve-deferred-queue-message.js";
+import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -1161,6 +1162,16 @@ async function processLegacyQueueItem(resolved_queue_row, deps = {}) {
       };
     }
 
+    const compliance_block = await evaluateAndBlockSendAtCompliance(resolved_queue_row, {
+      ...deps,
+      supabase: getSupabase(deps),
+      claimedLockToken: legacy_lock_token,
+      now: deps.now || new Date().toISOString(),
+    });
+    if (compliance_block.blocked) {
+      return compliance_block.result;
+    }
+
     console.log("ABOUT TO SEND MESSAGE");
     console.log("SENDING SMS", {
       to: message_fields.to,
@@ -1827,6 +1838,17 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         queue_row_id,
         queue_item_id: queue_row_id,
       };
+    }
+
+    const compliance_block = await evaluateAndBlockSendAtCompliance(queue_row, {
+      ...deps,
+      supabase: getSupabase(deps),
+      claimedLockToken: lock_token,
+      manual_operator_send: manual_inbox_send,
+      now,
+    });
+    if (compliance_block.blocked) {
+      return compliance_block.result;
     }
 
     const send_result = await send_textgrid_sms({
