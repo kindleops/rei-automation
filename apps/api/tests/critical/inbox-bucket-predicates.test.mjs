@@ -92,7 +92,7 @@ const staleOutboundState = resolveOutboundReplyState({
   lastInboundAt: null,
   now: NOW,
 });
-assert.equal(staleOutboundState.inbox_bucket, "cold");
+assert.equal(staleOutboundState.inbox_bucket, null);
 assert.equal(staleOutboundState.automation_lane, "cold_reactivation");
 
 console.log("PASS inbox-bucket-predicates.test.mjs");

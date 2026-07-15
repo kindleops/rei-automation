@@ -2,10 +2,10 @@ import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { classifyInboxMessage, findMatchedKeywords, KEYWORD_GROUPS } from "@/lib/domain/inbox/keywords.js";
 import {
   WAITING_REPLY_WINDOW_MS,
-  buildColdTransitionPatch,
   isOutboundLastWithoutReply,
   parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
+import { transitionStaleWaitingThreads } from "@/lib/domain/inbox/reconcile-inbox-thread-state.js";
 import { threadMatchesBucketFilter } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
@@ -2164,41 +2164,6 @@ export async function getLiveCounts(params = {}, deps = {}) {
   return result.counts;
 }
 
-async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
-  const cutoffIso = new Date(now - WAITING_REPLY_WINDOW_MS).toISOString();
-  const { data: staleRows, error } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key,inbox_bucket,last_outbound_at,last_inbound_at")
-    .eq("inbox_bucket", "waiting")
-    .lt("last_outbound_at", cutoffIso)
-    .limit(500);
-
-  if (error) throw error;
-
-  let transitioned = 0;
-  for (const row of staleRows || []) {
-    const patch = buildColdTransitionPatch({
-      inbox_bucket: row.inbox_bucket,
-      lastOutboundAt: row.last_outbound_at,
-      lastInboundAt: row.last_inbound_at,
-      now,
-    });
-    if (!patch) continue;
-
-    const { error: updateError } = await supabase
-      .from("inbox_thread_state")
-      .update(patch)
-      .eq("thread_key", row.thread_key);
-    if (!updateError) transitioned += 1;
-  }
-
-  if (transitioned > 0) {
-    console.log("[INBOX_WAITING_COLD_TRANSITION]", { transitioned, cutoffIso });
-  }
-
-  return transitioned;
-}
-
 async function countThreadsMatchingTab(supabase, tab, { pageSize = 1000, nowMs = Date.now() } = {}) {
   let offset = 0;
   let total = 0;
@@ -2307,43 +2272,6 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   return counts;
 }
 
-async function reconcileExecutionStateCounts(supabase, counts = {}, nowMs = Date.now()) {
-  if (lower(process.env.NODE_ENV) === "test") {
-    return counts;
-  }
-
-  const sample = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key")
-    .limit(1);
-  if (sample?.error || !Array.isArray(sample?.data) || sample.data.length === 0) {
-    return counts;
-  }
-
-  try {
-    await transitionStaleWaitingThreads(supabase, nowMs);
-  } catch (error) {
-    console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
-  }
-
-  const executionTabs = ["priority", "new_replies", "needs_review", "waiting", "all_messages"];
-  const next = { ...counts };
-  for (const tab of executionTabs) {
-    next[tab] = await countThreadsMatchingTab(supabase, tab, { nowMs });
-  }
-  next.active = Number(next.priority || 0)
-    + Number(next.new_replies || 0)
-    + Number(next.needs_review || 0)
-    + Number(next.follow_up || counts.follow_up || 0);
-  next.hot_leads = next.priority;
-  next.new_inbound = next.new_replies;
-  next.needs_reply = next.new_replies;
-  next.manual_review = next.needs_review;
-  next.automated = next.needs_review;
-  next.waiting_on_seller = next.waiting;
-  return next;
-}
-
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
@@ -2362,11 +2290,11 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
 
         const row = Array.isArray(data) ? data[0] : null;
         if (row && hasConcreteCountRow(row)) {
-          const counts = await reconcileExecutionStateCounts(supabase, countFromRow(row), nowMs);
+          const counts = countFromRow(row);
           console.log("[INBOX_COUNTS_UPDATED]", counts);
           return {
             counts,
-            source: `${sourceConfig.countSource}:reconciled`,
+            source: `${sourceConfig.countSource}:view`,
             approximate: false,
             degraded: false,
           };
@@ -2456,14 +2384,6 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       if (Number.isFinite(numericCursor) && numericCursor >= 0) {
         offset = Math.trunc(numericCursor);
       }
-    }
-  }
-
-  if (!initialBootMode && !fastBucketMode) {
-    try {
-      await transitionStaleWaitingThreads(supabase);
-    } catch (error) {
-      console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
     }
   }
 
