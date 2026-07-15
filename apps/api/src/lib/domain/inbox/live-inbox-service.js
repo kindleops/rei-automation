@@ -666,20 +666,24 @@ function computeCountsFromThreads(rows = []) {
   const counts = buildEmptyCounts();
   const nowMs = Date.now();
   for (const row of rows) {
+    if (row.is_archived === true) continue;
     const bucket = lower(row.inbox_bucket);
     counts.all += 1;
-    if (bucket === "priority") counts.priority += 1;
+    if (threadMatchesBucketFilter(row, "priority", nowMs)) counts.priority += 1;
     if (threadMatchesBucketFilter(row, "new_replies", nowMs)) counts.new_replies += 1;
-    if (bucket === "needs_review") counts.needs_review += 1;
-    if (bucket === "follow_up") counts.follow_up += 1;
+    if (threadMatchesBucketFilter(row, "needs_review", nowMs)) counts.needs_review += 1;
+    if (threadMatchesBucketFilter(row, "follow_up", nowMs)) counts.follow_up += 1;
     if (threadMatchesBucketFilter(row, "cold", nowMs)) counts.cold += 1;
-    if (bucket === "dead") counts.dead += 1;
-    if (bucket === "suppressed") counts.suppressed += 1;
-    if (["priority", "new_replies", "needs_review", "follow_up"].includes(bucket)) counts.active += 1;
+    if (threadMatchesBucketFilter(row, "dead", nowMs)) counts.dead += 1;
+    if (threadMatchesBucketFilter(row, "suppressed", nowMs)) counts.suppressed += 1;
+    if (threadMatchesBucketFilter(row, "active", nowMs)) counts.active += 1;
     if (threadMatchesBucketFilter(row, "waiting", nowMs)) counts.waiting += 1;
+    if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
     if (!row.property_id) counts.unlinked += 1;
   }
-  counts.all_messages = counts.all;
+  if (counts.all_messages === 0 && counts.all > 0) {
+    counts.all_messages = Math.max(0, counts.all - counts.waiting);
+  }
   counts.hot_leads = counts.priority;
   counts.new_inbound = counts.new_replies;
   counts.needs_reply = counts.new_replies;
@@ -725,10 +729,13 @@ function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
   return { counts: next, applied, approximate };
 }
 
-function threadMatchesFilter(thread = {}, filter = "all") {
+function threadMatchesFilter(thread = {}, filter = "all", nowMs = Date.now()) {
   const normalizedFilter = normalizeLiveFilter(filter);
   if (!normalizedFilter || normalizedFilter === "all") return true;
-  return threadMatchesInboxTab(thread, normalizedFilter);
+  if (normalizedFilter === "all_messages") {
+    return threadMatchesInboxTab(thread, "all_messages", nowMs);
+  }
+  return threadMatchesInboxTab(thread, normalizedFilter, nowMs);
 }
 
 function threadMatchesSearch(thread = {}, query = "") {
@@ -1504,6 +1511,8 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
     case "unlinked":
       if (typeof query.is === "function") query = query.is("property_id", null);
       break;
+    case "all_messages":
+      break;
     default:
       break;
   }
@@ -2190,10 +2199,9 @@ async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
   return transitioned;
 }
 
-async function countThreadsMatchingTab(supabase, tab, { pageSize = 1000 } = {}) {
+async function countThreadsMatchingTab(supabase, tab, { pageSize = 1000, nowMs = Date.now() } = {}) {
   let offset = 0;
   let total = 0;
-
   while (true) {
     const { data, error } = await supabase
       .from("inbox_thread_state")
@@ -2205,7 +2213,7 @@ async function countThreadsMatchingTab(supabase, tab, { pageSize = 1000 } = {}) 
     if (!rows.length) break;
 
     for (const row of rows) {
-      if (threadMatchesInboxTab(row, tab)) total += 1;
+      if (threadMatchesInboxTab(row, tab, nowMs)) total += 1;
     }
 
     offset += rows.length;
@@ -2247,57 +2255,43 @@ async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmpty
   return counts;
 }
 
-async function fetchAuthoritativeInboxCounts(supabase) {
-  await transitionStaleWaitingThreads(supabase);
-
-  const buckets = [
-    "priority",
-    "needs_review",
-    "follow_up",
-    "dead",
-    "suppressed",
-  ];
+async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
+  await transitionStaleWaitingThreads(supabase, nowMs);
 
   const counts = buildEmptyCounts();
+  const executionTabs = [
+    "priority",
+    "new_replies",
+    "needs_review",
+    "follow_up",
+    "waiting",
+    "cold",
+    "dead",
+    "suppressed",
+    "all_messages",
+  ];
 
-  for (const bucket of buckets) {
-    const { count, error } = await supabase
-      .from("inbox_thread_state")
-      .select("thread_key", { count: "exact", head: true })
-      .eq("inbox_bucket", bucket);
-
-    if (error) throw error;
-    counts[bucket] = Number(count || 0);
+  for (const tab of executionTabs) {
+    counts[tab] = await countThreadsMatchingTab(supabase, tab, { nowMs });
   }
-
-  counts.new_replies = await countThreadsMatchingTab(supabase, "new_replies");
-  counts.waiting = await countThreadsMatchingTab(supabase, "waiting");
-
-  const { count: coldCount, error: coldError } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key", { count: "exact", head: true })
-    .or("inbox_bucket.eq.cold,automation_lane.eq.cold_reactivation");
-
-  if (coldError) throw coldError;
-  counts.cold = Number(coldCount || 0);
 
   const { count: allCount, error: allError } = await supabase
     .from("inbox_thread_state")
-    .select("thread_key", { count: "exact", head: true });
+    .select("thread_key", { count: "exact", head: true })
+    .or("is_archived.is.null,is_archived.eq.false");
 
   if (allError) throw allError;
 
   const { count: unlinkedCount, error: unlinkedError } = await supabase
     .from("inbox_thread_state")
     .select("thread_key", { count: "exact", head: true })
-    .is("property_id", null);
+    .is("property_id", null)
+    .or("is_archived.is.null,is_archived.eq.false");
 
   if (unlinkedError) throw unlinkedError;
 
   counts.all = Number(allCount || 0);
-  counts.all_messages = counts.all;
   counts.unlinked = Number(unlinkedCount || 0);
-  await augmentCountsWithDerivedNullBuckets(supabase, counts);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
@@ -2313,9 +2307,47 @@ async function fetchAuthoritativeInboxCounts(supabase) {
   return counts;
 }
 
+async function reconcileExecutionStateCounts(supabase, counts = {}, nowMs = Date.now()) {
+  if (lower(process.env.NODE_ENV) === "test") {
+    return counts;
+  }
+
+  const sample = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key")
+    .limit(1);
+  if (sample?.error || !Array.isArray(sample?.data) || sample.data.length === 0) {
+    return counts;
+  }
+
+  try {
+    await transitionStaleWaitingThreads(supabase, nowMs);
+  } catch (error) {
+    console.warn("[INBOX_WAITING_COLD_TRANSITION_FAILED]", error?.message || error);
+  }
+
+  const executionTabs = ["priority", "new_replies", "needs_review", "waiting", "all_messages"];
+  const next = { ...counts };
+  for (const tab of executionTabs) {
+    next[tab] = await countThreadsMatchingTab(supabase, tab, { nowMs });
+  }
+  next.active = Number(next.priority || 0)
+    + Number(next.new_replies || 0)
+    + Number(next.needs_review || 0)
+    + Number(next.follow_up || counts.follow_up || 0);
+  next.hot_leads = next.priority;
+  next.new_inbound = next.new_replies;
+  next.needs_reply = next.new_replies;
+  next.manual_review = next.needs_review;
+  next.automated = next.needs_review;
+  next.waiting_on_seller = next.waiting;
+  return next;
+}
+
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
+  const nowMs = Date.now();
 
   // Fast path: pre-aggregated view (sub-second) before any full-table scan.
   for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
@@ -2330,11 +2362,11 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
 
         const row = Array.isArray(data) ? data[0] : null;
         if (row && hasConcreteCountRow(row)) {
-          const counts = countFromRow(row);
+          const counts = await reconcileExecutionStateCounts(supabase, countFromRow(row), nowMs);
           console.log("[INBOX_COUNTS_UPDATED]", counts);
           return {
             counts,
-            source: sourceConfig.countSource,
+            source: `${sourceConfig.countSource}:reconciled`,
             approximate: false,
             degraded: false,
           };
@@ -2470,10 +2502,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       inbox_category: effectiveBucket,
     };
   });
-  // Bucket-scoped queries already filter in SQL (authoritative inbox_thread_state or
-  // canonical_inbox_threads). Re-applying threadMatchesFilter drops valid rows when
-  // persisted inbox_bucket disagrees with live predicates (e.g. read new_replies).
-  const trustBucketQuery = filter !== "all";
+  const normalizedListFilter = normalizeLiveFilter(filter);
+  const FACT_DERIVED_LIST_FILTERS = new Set(["waiting", "new_replies", "all_messages", "cold"]);
+  const trustBucketQuery = !FACT_DERIVED_LIST_FILTERS.has(normalizedListFilter);
   const postFiltered = sortThreads(rows)
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));

@@ -40,6 +40,28 @@ test("workflow waiting persists beyond grace window when follow-up scheduled", (
   assert.equal(waiting.reason, "follow_up_scheduled");
 });
 
+test("all_messages excludes current waiting threads", () => {
+  const waiting = normalizeInboxThreadStateRow({
+    latest_direction: "outbound",
+    last_outbound_at: hoursAgo(2),
+    last_inbound_at: null,
+    latest_delivery_status: "delivered",
+  });
+  const active = normalizeInboxThreadStateRow({
+    latest_direction: "inbound",
+    last_outbound_at: hoursAgo(5),
+    last_inbound_at: hoursAgo(1),
+  });
+  const originalNow = Date.now;
+  Date.now = () => NOW;
+  try {
+    assert.equal(threadMatchesInboxTab(waiting, "all_messages"), false);
+    assert.equal(threadMatchesInboxTab(active, "all_messages"), true);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test("waiting tab only matches outbound no-reply inside 24h window", () => {
   const recentWaiting = normalizeInboxThreadStateRow({
     inbox_bucket: "waiting",
