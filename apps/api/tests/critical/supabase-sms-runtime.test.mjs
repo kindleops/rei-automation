@@ -72,12 +72,23 @@ function makeFinalizeSuccessImpl(row) {
   });
 }
 
+import { extendSupabaseForHealthyCompliance } from "../helpers/compliance-test-harness.js";
+
 function makeIdempotencySupabase() {
-  return {
+  const base = {
     rpc: makeQueueTestRpc(),
     from() {
       const query = {
         select() {
+          return query;
+        },
+        or() {
+          return query;
+        },
+        in() {
+          return query;
+        },
+        order() {
           return query;
         },
         eq() {
@@ -86,8 +97,11 @@ function makeIdempotencySupabase() {
         gte() {
           return query;
         },
+        ilike() {
+          return query;
+        },
         limit() {
-          return Promise.resolve({ data: [], error: null });
+          return Promise.resolve({ data: [], error: null, count: 0 });
         },
         maybeSingle() {
           return Promise.resolve({ data: null, error: null });
@@ -112,6 +126,7 @@ function makeIdempotencySupabase() {
       return query;
     },
   };
+  return extendSupabaseForHealthyCompliance(base);
 }
 
 function makeNumbersSupabase(rows = []) {

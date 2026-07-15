@@ -211,7 +211,18 @@ test("Proof C (takeover): inbound cancels pending no-reply follow-ups", async ()
   const log = [];
   const supabase = createFakeSupabase((ctx) => {
     if (ctx.table === "send_queue" && ctx.op === "select") {
-      return { data: [{ id: "q1", metadata: {}, queue_status: "scheduled", type: "followup" }] };
+      return {
+        data: [
+          {
+            id: "q1",
+            thread_key: INTERNAL_PHONE,
+            to_phone_number: INTERNAL_PHONE,
+            metadata: {},
+            queue_status: "scheduled",
+            type: "followup",
+          },
+        ],
+      };
     }
     return { data: null };
   }, log);

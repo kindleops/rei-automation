@@ -9,6 +9,12 @@ import {
   SEND_TIME_BLOCK_REASONS,
   TERMINAL_QUEUE_OUTCOMES,
 } from "@/lib/domain/compliance/canonical-no-contact-states.js";
+import { queryActiveSuppression } from "@/lib/domain/compliance/query-active-suppression.js";
+
+export const CONTACT_CHECK_MODES = Object.freeze({
+  ENQUEUE: "enqueue",
+  SEND_TIME: "send_time",
+});
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -16,10 +22,6 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
-}
-
-function quotePostgrestValue(value) {
-  return `"${clean(value).replaceAll('"', '""')}"`;
 }
 
 function mapToSendTimeReason(internal_reason = "") {
@@ -81,10 +83,12 @@ export async function evaluateCanonicalContactability(
     queue_status = null,
     manual_operator_send = false,
     fail_closed_for_automated = true,
+    contact_check_mode = CONTACT_CHECK_MODES.SEND_TIME,
   } = {},
   deps = {}
 ) {
   const supabase = deps.supabase || deps.supabaseClient;
+  const is_enqueue_check = contact_check_mode === CONTACT_CHECK_MODES.ENQUEUE;
   const normalized_thread =
     normalizePhone(thread_key) || normalizePhone(to_phone_number) || clean(thread_key);
   const normalized_to = normalizePhone(to_phone_number) || normalized_thread;
@@ -109,7 +113,7 @@ export async function evaluateCanonicalContactability(
     }
   }
 
-  if (queue_row_id) {
+  if (!is_enqueue_check && queue_row_id) {
     try {
       const { data: live_row, error } = await supabase
         .from("send_queue")
@@ -158,45 +162,29 @@ export async function evaluateCanonicalContactability(
     };
   }
 
-  const phone_filter = [
-    normalized_to ? `phone_number.eq.${quotePostgrestValue(normalized_to)}` : null,
-    normalized_to ? `phone_e164.eq.${quotePostgrestValue(normalized_to)}` : null,
-  ]
-    .filter(Boolean)
-    .join(",");
-
-  try {
-    if (phone_filter) {
-      const { data: suppression_rows, error } = await supabase
-        .from("sms_suppression_list")
-        .select("id,suppression_reason,suppression_type,is_active")
-        .or(phone_filter)
-        .eq("is_active", true)
-        .limit(1);
-      if (error) throw error;
-      if (Array.isArray(suppression_rows) && suppression_rows.length > 0) {
-        const suppression_reason = clean(suppression_rows[0]?.suppression_reason) || "phone_suppressed";
+  if (normalized_to) {
+    const suppression = await queryActiveSuppression(supabase, normalized_to);
+    if (suppression.lookup_error) {
+      if (fail_closed_for_automated && !manual_operator_send) {
         return {
           blocked: true,
-          reason: "phone_suppressed",
-          detail_reason: suppression_reason,
-          reason_code: mapToSendTimeReason(suppression_reason),
-          fail_closed: false,
+          reason: "suppression_check_unavailable",
+          reason_code: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
+          fail_closed: true,
         };
       }
-    }
-  } catch {
-    if (fail_closed_for_automated && !manual_operator_send) {
+    } else if (suppression.suppressed) {
       return {
         blocked: true,
-        reason: "suppression_check_unavailable",
-        reason_code: SEND_TIME_BLOCK_REASONS.SUPPRESSION_LOOKUP_FAILED,
-        fail_closed: true,
+        reason: "phone_suppressed",
+        detail_reason: suppression.suppression_reason,
+        reason_code: mapToSendTimeReason(suppression.suppression_reason),
+        fail_closed: false,
       };
     }
   }
 
-  if (phone_id || normalized_to) {
+  if (!is_enqueue_check && (phone_id || normalized_to)) {
     try {
       let phone_query = supabase
         .from("phones")
@@ -252,36 +240,42 @@ export async function evaluateCanonicalContactability(
         .eq("thread_key", normalized_thread)
         .maybeSingle();
       if (!error && thread_state) {
-        if (thread_state.status === "paused_review") {
-          return {
-            blocked: true,
-            reason: "thread_paused_review",
-            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-            fail_closed: false,
-          };
+        if (!manual_operator_send) {
+          if (thread_state.status === "paused_review") {
+            return {
+              blocked: true,
+              reason: "thread_paused_review",
+              reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+              fail_closed: false,
+            };
+          }
+          if (thread_state.metadata?.incident_quarantine === true) {
+            return {
+              blocked: true,
+              reason: "thread_quarantined",
+              reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+              fail_closed: false,
+            };
+          }
         }
-        if (thread_state.metadata?.incident_quarantine === true) {
-          return {
-            blocked: true,
-            reason: "thread_quarantined",
-            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-            fail_closed: false,
-          };
-        }
-        const contactability = normalizeContactability(thread_state.contactability_status);
-        if (contactabilityBlocksSend(contactability)) {
-          return {
-            blocked: true,
-            reason: `contactability_${contactability}`,
-            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-            fail_closed: false,
-          };
+        if (!is_enqueue_check) {
+          const contactability = normalizeContactability(thread_state.contactability_status);
+          if (contactabilityBlocksSend(contactability)) {
+            return {
+              blocked: true,
+              reason: `contactability_${contactability}`,
+              reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+              fail_closed: false,
+            };
+          }
         }
       }
     } catch {
       // non-fatal
     }
+  }
 
+  if (!is_enqueue_check && normalized_thread) {
     try {
       const { data: legacy_thread, error } = await supabase
         .from("deal_thread_state")
@@ -375,7 +369,7 @@ export async function evaluateCanonicalContactability(
     }
   }
 
-  if (normalized_to && from_phone_number) {
+  if (!is_enqueue_check && normalized_to && from_phone_number) {
     const blacklist = await checkBlacklistPriorFailure(
       {
         to_phone_number: normalized_to,

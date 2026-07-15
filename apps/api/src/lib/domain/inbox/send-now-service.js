@@ -23,7 +23,10 @@ import {
 } from "@/lib/supabase/sms-engine.js";
 import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
 import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
-import { evaluateCanonicalContactability } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
+import {
+  CONTACT_CHECK_MODES,
+  evaluateCanonicalContactability,
+} from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
@@ -138,6 +141,7 @@ export async function canSend(input = {}, deps = {}) {
       master_owner_id: input.master_owner_id,
       manual_operator_send,
       fail_closed_for_automated: !manual_operator_send,
+      contact_check_mode: CONTACT_CHECK_MODES.ENQUEUE,
     },
     { supabase }
   );
@@ -1651,35 +1655,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   let send_result = null;
   let provider_error = null;
 
-  // 3. Final send-time compliance guard (claim-to-send race protection)
-  const compliance_block = await evaluateAndBlockSendAtCompliance(normalized_row, {
-    supabase,
-    claimedLockToken: manual_lock_token,
-    manual_operator_send: true,
-    now,
-  });
-  if (compliance_block.blocked) {
-    return {
-      ok: false,
-      status: 423,
-      error: "compliance_blocked",
-      reason: compliance_block.result?.reason || "compliance_blocked",
-      detail_reason: compliance_block.compliance?.reason || compliance_block.result?.reason,
-      queue_row_id,
-      queue_created: true,
-      queue_inserted: true,
-      sent: false,
-      proof: buildManualSendProof({
-        input: manual_input,
-        normalized: normalized_row,
-        queue_inserted: true,
-        queue_row_id,
-        detail_reason: compliance_block.result?.reason,
-      }),
-    };
-  }
-
-  // 4. Provider Dispatch
+  // 3. Provider Dispatch
   try {
     send_result = await sendTextgridImpl({
       to: to_phone,
