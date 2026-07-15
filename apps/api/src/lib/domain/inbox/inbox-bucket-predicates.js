@@ -109,6 +109,34 @@ export function threadMatchesAllMessagesFacts(thread = {}, nowMs = Date.now()) {
   return !threadMatchesWaitingFacts(thread, nowMs);
 }
 
+export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
+  if (isArchivedThread(thread)) return false;
+  if (isTerminalNoContactThread(thread)) return false;
+
+  const bucket = lower(thread.inbox_bucket);
+  if (["priority", "needs_review", "waiting", "cold"].includes(bucket)) return false;
+
+  if (bucket === "new_replies" && !isStaleExplicitInboxBucket(thread, "new_replies", nowMs)) {
+    return true;
+  }
+
+  const direction = normalizeDirection(
+    thread.latest_message_direction || thread.latest_direction || thread.direction,
+  );
+  if (direction !== "inbound") return false;
+  if (Number(thread.pending_queue_count || 0) > 0) return false;
+
+  const lastOut = thread.last_outbound_at || thread.lastOutboundAt;
+  const lastIn = thread.last_inbound_at || thread.lastInboundAt || thread.latest_message_at;
+  const inMs = parseTimestampMs(lastIn);
+  const outMs = parseTimestampMs(lastOut);
+  if (!inMs) return false;
+  if (outMs > 0 && inMs < outMs) return false;
+
+  if (thread.needs_review === true || bucket === "needs_review") return false;
+  return true;
+}
+
 export function isStaleExplicitInboxBucket(row = {}, explicitBucket = "", nowMs = Date.now()) {
   const explicit = lower(explicitBucket || row.inbox_bucket);
   if (!explicit) return false;
@@ -147,21 +175,7 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
       return bucket === "priority";
     case "new_replies":
-      if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
-      if (["priority", "needs_review", "waiting", "cold"].includes(bucket)) return false;
-      if (bucket === "new_replies" && !isStaleExplicitInboxBucket(thread, "new_replies", nowMs)) return true;
-      if (direction !== "inbound") return false;
-      if (Number(thread.pending_queue_count || 0) > 0) return false;
-      {
-        const lastOut = thread.last_outbound_at || thread.lastOutboundAt;
-        const lastIn = thread.last_inbound_at || thread.lastInboundAt || thread.latest_message_at;
-        const inMs = parseTimestampMs(lastIn);
-        const outMs = parseTimestampMs(lastOut);
-        if (!inMs) return false;
-        if (outMs > 0 && inMs < outMs) return false;
-      }
-      if (thread.needs_review === true || lower(bucket) === "needs_review") return false;
-      return true;
+      return threadMatchesNewRepliesFacts(thread, nowMs);
     case "needs_review":
       if (isArchivedThread(thread)) return false;
       if (bucket === "needs_review") return true;

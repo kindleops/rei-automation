@@ -148,7 +148,7 @@ export function resolveOutboundReplyState({
   }
 
   return {
-    inbox_bucket: "cold",
+    inbox_bucket: null,
     automation_lane: "cold_reactivation",
     disposition: null,
   };
@@ -166,7 +166,7 @@ export function shouldTransitionWaitingToCold({
     lastInboundAt,
     now,
   });
-  return coldState.inbox_bucket === "cold" && coldState.automation_lane === "cold_reactivation";
+  return coldState.inbox_bucket == null && coldState.automation_lane === "cold_reactivation";
 }
 
 export function buildColdTransitionPatch({
@@ -180,7 +180,7 @@ export function buildColdTransitionPatch({
   }
 
   return {
-    inbox_bucket: "cold",
+    inbox_bucket: null,
     automation_lane: "cold_reactivation",
     updated_at: new Date(now).toISOString(),
   };
