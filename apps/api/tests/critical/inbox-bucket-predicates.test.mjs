@@ -14,9 +14,11 @@ assert.equal(threadMatchesBucketFilter({
 
 assert.equal(threadMatchesBucketFilter({
   inbox_bucket: "waiting",
+  latest_direction: "outbound",
   latest_message_direction: "outbound",
   last_outbound_at: hoursAgo(30),
   last_inbound_at: null,
+  latest_delivery_status: "delivered",
 }, "waiting", NOW), false, "stale waiting bucket must not match without reply inside 24h");
 
 assert.equal(threadMatchesBucketFilter({

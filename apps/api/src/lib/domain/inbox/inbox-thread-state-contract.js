@@ -54,6 +54,7 @@ export const INBOX_THREAD_STATE_SELECT_FIELDS = [
   "status",
   "disposition",
   "is_suppressed",
+  "is_archived",
   "automation_lane",
   "automation_status",
   "automation_state",
@@ -77,6 +78,7 @@ const TERMINAL_BUCKETS = new Set(["dead", "suppressed"]);
 
 export function normalizeInboxThreadStateRow(row = {}) {
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const disposition = lower(row.disposition);
   return {
     ...row,
     latest_message_direction: row.latest_direction ?? row.latest_message_direction ?? null,
@@ -84,6 +86,8 @@ export function normalizeInboxThreadStateRow(row = {}) {
     detected_intent: row.last_intent ?? row.detected_intent ?? null,
     universal_status: row.status ?? row.universal_status ?? null,
     needs_review: row.needs_review === true || metadata.needs_review === true,
+    wrong_number: row.wrong_number === true || disposition === "wrong_number" || disposition === "wrong_person",
+    opt_out: row.opt_out === true || row.is_suppressed === true,
     compliance_flag: row.compliance_flag ?? metadata.compliance_flag ?? null,
     objection: row.objection ?? metadata.objection ?? null,
     automation_decision: row.automation_decision ?? metadata.automation_decision ?? null,
@@ -115,26 +119,38 @@ function tabToBuckets(tab) {
   return [normalized];
 }
 
-export function threadMatchesInboxTab(row = {}, tab = "all") {
+export function threadMatchesInboxTab(row = {}, tab = "all", nowMs = Date.now()) {
   const normalizedTab = lower(tab);
   if (!normalizedTab || normalizedTab === "all") return true;
   if (normalizedTab === "unlinked") return row.property_id == null;
 
   const normalized = normalizeInboxThreadStateRow(row);
-  const effectiveBucket = resolveEffectiveInboxBucket(normalized);
-
-  if (normalizedTab === "cold") {
-    return threadMatchesBucketFilter(normalized, "cold", Date.now());
+  if (normalized.is_archived === true) {
+    return normalizedTab === "archived";
   }
 
-  if (normalizedTab === "waiting") {
-    return threadMatchesBucketFilter(normalized, "waiting", Date.now());
+  if (normalizedTab === "archived") return false;
+
+  if (normalizedTab === "all_messages") {
+    return threadMatchesBucketFilter(normalized, "all_messages", nowMs);
   }
 
-  if (normalizedTab === "new_replies") {
-    return threadMatchesBucketFilter(normalized, "new_replies", Date.now());
+  const executionTabs = new Set([
+    "cold",
+    "waiting",
+    "new_replies",
+    "priority",
+    "needs_review",
+    "follow_up",
+    "dead",
+    "suppressed",
+    "active",
+  ]);
+  if (executionTabs.has(normalizedTab)) {
+    return threadMatchesBucketFilter(normalized, normalizedTab, nowMs);
   }
 
+  const effectiveBucket = resolveEffectiveInboxBucket(normalized, nowMs);
   const allowed = tabToBuckets(normalizedTab);
   if (!allowed.length) return false;
   if (TERMINAL_BUCKETS.has(effectiveBucket) && ACTIVE_TABS.has(normalizedTab)) {

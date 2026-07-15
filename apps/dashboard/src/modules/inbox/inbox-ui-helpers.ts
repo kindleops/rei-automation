@@ -13,6 +13,7 @@ import {
   isActiveCanonicalBucket,
   isWaitingInboxState,
   resolveInboxThreadState,
+  type CanonicalBucket,
 } from '../../domain/inbox/resolveInboxThreadState'
 
 import type { InboxStageSelectValue, InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
@@ -471,10 +472,47 @@ const bucketFromView = (view: InboxViewSelectValue): InboxBucket | null => {
   return null
 }
 
+const EXECUTION_VIEW_BUCKETS = new Set([
+  'priority',
+  'new_replies',
+  'needs_review',
+  'follow_up',
+  'waiting',
+  'waiting_on_seller',
+  'cold',
+  'cold_no_response',
+  'dead',
+  'suppressed',
+  'dnc_suppressed',
+  'opt_out',
+  'active',
+  'all_conversations',
+])
+
+const resolveApiExecutionBucket = (thread: InboxWorkflowThread): string => {
+  const raw = String(
+    getField(thread, 'inbox_bucket')
+    || getField(thread, 'inboxBucket')
+    || getField(thread, 'inbox_category')
+    || getField(thread, 'inboxCategory')
+    || getField(thread, 'priority_bucket')
+    || getField(thread, 'priorityBucket')
+    || '',
+  ).trim().toLowerCase()
+  if (raw === 'waiting_on_seller') return 'waiting'
+  if (raw === 'cold_no_response') return 'cold'
+  if (raw === 'dnc_suppressed' || raw === 'opt_out') return 'suppressed'
+  if (raw === 'hot_leads') return 'priority'
+  if (raw === 'new_inbound' || raw === 'needs_reply') return 'new_replies'
+  if (raw === 'manual_review') return 'needs_review'
+  return raw
+}
+
 export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxViewSelectValue): boolean => {
   const decision = buildConversationDecision(thread)
   const canonical = resolveInboxThreadState(thread)
   const isArchived = Boolean(thread.isArchived || thread.inboxStatus === 'closed')
+  const apiBucket = resolveApiExecutionBucket(thread)
 
   let matches = true
   if (view === 'archived') matches = isArchived
@@ -489,30 +527,17 @@ export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxVie
   else if (view === 'spanish_language') matches = decision.language === 'spanish'
   else if (view === 'inbound') matches = canonical.flags.latest_direction === 'inbound' && !isArchived
   else if (view === 'outbound') matches = canonical.flags.latest_direction === 'outbound' && !isArchived
-  else if (view === 'active') matches = isActiveCanonicalBucket(canonical.bucket) && decision.suppression_status === 'clear' && !isArchived
+  else if (view === 'active') matches = isActiveCanonicalBucket(apiBucket as CanonicalBucket) && !isArchived
   else if (view === 'sent') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'sent' && !isArchived
   else if (view === 'failed') matches = toLower(getField(thread, 'uiIntent') || getField(thread, 'ui_intent')) === 'failed' && !isArchived
   else {
     const bucket = bucketFromView(view)
     matches = bucket ? (
       bucket === 'all_conversations'
-        ? true
-        : (
-          bucket === 'waiting'
-            ? (
-              String(getField(thread, 'inbox_bucket') || getField(thread, 'inboxBucket') || getField(thread, 'inbox_category') || getField(thread, 'inboxCategory') || '').toLowerCase() === 'waiting'
-              || canonical.bucket === 'waiting'
-            ) && !isArchived
-            : bucket === 'waiting_on_seller'
-              ? canonical.bucket === 'waiting' && !isArchived
-            : bucket === 'follow_up_due'
-              ? canonical.bucket === 'follow_up'
-              : bucket === 'cold_no_response'
-                ? canonical.bucket === 'cold'
-                : bucket === 'dnc_suppressed'
-                  ? canonical.bucket === 'suppressed'
-                  : canonical.bucket === bucket
-        )
+        ? apiBucket !== 'waiting' && !isArchived
+        : EXECUTION_VIEW_BUCKETS.has(bucket)
+          ? (bucket === 'waiting_on_seller' ? apiBucket === 'waiting' : apiBucket === bucket) && !isArchived
+          : canonical.bucket === bucket
     ) : true
   }
 
