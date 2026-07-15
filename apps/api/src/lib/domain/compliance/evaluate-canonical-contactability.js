@@ -10,6 +10,14 @@ import {
   TERMINAL_QUEUE_OUTCOMES,
 } from "@/lib/domain/compliance/canonical-no-contact-states.js";
 import { queryActiveSuppression } from "@/lib/domain/compliance/query-active-suppression.js";
+import {
+  lookupCanonicalPhoneRow,
+  evaluatePhoneRowContactability,
+} from "@/lib/domain/compliance/lookup-canonical-phone-row.js";
+import {
+  hasTerminalComplianceIntent,
+  resolveTerminalThreadIntents,
+} from "@/lib/domain/compliance/resolve-terminal-thread-intent.js";
 
 export const CONTACT_CHECK_MODES = Object.freeze({
   ENQUEUE: "enqueue",
@@ -26,7 +34,14 @@ function lower(value) {
 
 function mapToSendTimeReason(internal_reason = "") {
   const reason = lower(internal_reason);
-  if (reason.includes("wrong_number")) return SEND_TIME_BLOCK_REASONS.WRONG_NUMBER;
+  if (
+    reason.includes("wrong_number") ||
+    reason.includes("wrong number") ||
+    reason.includes("wrong_person") ||
+    reason.includes("wrong person")
+  ) {
+    return SEND_TIME_BLOCK_REASONS.WRONG_NUMBER;
+  }
   if (
     reason.includes("opt_out") ||
     reason.includes("opted_out") ||
@@ -165,7 +180,8 @@ export async function evaluateCanonicalContactability(
   if (normalized_to) {
     const suppression = await queryActiveSuppression(supabase, normalized_to);
     if (suppression.lookup_error) {
-      if (fail_closed_for_automated && !manual_operator_send) {
+      const fail_closed_at_send_time = !is_enqueue_check;
+      if (fail_closed_at_send_time || (fail_closed_for_automated && !manual_operator_send)) {
         return {
           blocked: true,
           reason: "suppression_check_unavailable",
@@ -186,59 +202,27 @@ export async function evaluateCanonicalContactability(
 
   if (!is_enqueue_check && (phone_id || normalized_to)) {
     try {
-      let phone_query = supabase
-        .from("phones")
-        .select("id,phone_contact_status,wrong_number_at,activity_status,is_opt_out,is_dnc,wrong_number");
-      if (phone_id) {
-        phone_query = phone_query.eq("id", phone_id);
-      } else {
-        phone_query = phone_query.eq("canonical_e164", normalized_to);
-      }
-      const { data: phone_row, error } = await phone_query.maybeSingle();
-      if (!error && phone_row) {
-        const contact_status = lower(phone_row.phone_contact_status);
-        if (
-          phone_row.wrong_number === true ||
-          contact_status === "wrong_number" ||
-          clean(phone_row.wrong_number_at)
-        ) {
-          return {
-            blocked: true,
-            reason: "wrong_number",
-            reason_code: SEND_TIME_BLOCK_REASONS.WRONG_NUMBER,
-            fail_closed: false,
-          };
-        }
-        if (phone_row.is_opt_out === true || phone_row.is_dnc === true) {
-          return {
-            blocked: true,
-            reason: "opt_out",
-            reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
-            fail_closed: false,
-          };
-        }
-        const activity = lower(phone_row.activity_status);
-        if (activity && !activity.startsWith("active") && activity !== "unknown") {
-          return {
-            blocked: true,
-            reason: `phone_not_active:${activity}`,
-            reason_code: SEND_TIME_BLOCK_REASONS.INVALID_CONTACT,
-            fail_closed: false,
-          };
-        }
-      }
+      const { row: phone_row } = await lookupCanonicalPhoneRow(
+        { phone_id, canonical_e164: normalized_to, to_phone_number: normalized_to },
+        supabase
+      );
+      const phone_block = evaluatePhoneRowContactability(phone_row);
+      if (phone_block) return phone_block;
     } catch {
       // non-fatal; later checks remain authoritative
     }
   }
 
+  let inbox_thread_state = null;
+
   if (normalized_thread) {
     try {
       const { data: thread_state, error } = await supabase
         .from("inbox_thread_state")
-        .select("status,contactability_status,metadata")
+        .select("status,contactability_status,metadata,reply_intent")
         .eq("thread_key", normalized_thread)
         .maybeSingle();
+      inbox_thread_state = thread_state;
       if (!error && thread_state) {
         if (!manual_operator_send) {
           if (thread_state.status === "paused_review") {
@@ -276,96 +260,90 @@ export async function evaluateCanonicalContactability(
   }
 
   if (!is_enqueue_check && normalized_thread) {
+    let legacy_thread = null;
+    let event_rows = [];
+
     try {
-      const { data: legacy_thread, error } = await supabase
+      const { data, error } = await supabase
         .from("deal_thread_state")
-        .select("thread_key,universal_status,inbox_bucket,primary_intent,universal_stage,opt_out")
+        .select("thread_key,universal_status,inbox_bucket,universal_stage,opt_out")
         .eq("thread_key", normalized_thread)
         .maybeSingle();
-      if (!error && legacy_thread) {
-        const thread_intent = lower(legacy_thread.primary_intent);
-        const status_bucket = lower(legacy_thread.inbox_bucket);
-        const stage = lower(legacy_thread.universal_stage);
-        if (
-          legacy_thread.opt_out === true ||
-          legacy_thread.universal_status === "suppressed" ||
-          status_bucket === "suppressed" ||
-          COMPLIANCE_TERMINAL_INTENTS.has(thread_intent) ||
-          COMPLIANCE_TERMINAL_INTENTS.has(stage)
-        ) {
-          return {
-            blocked: true,
-            reason: "compliance_suppressed_thread",
-            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-            fail_closed: false,
-          };
-        }
-      }
+      if (!error) legacy_thread = data;
     } catch {
       // non-fatal
     }
 
     try {
-      const { data: event_rows, error } = await supabase
+      const { data, error } = await supabase
         .from("message_events")
-        .select("id,is_opt_out,is_dnc,is_wrong_number,opt_out_keyword,detected_intent,message_body")
+        .select("id,is_opt_out,detected_intent,message_body,metadata")
         .eq("thread_key", normalized_thread)
         .order("created_at", { ascending: false })
         .limit(50);
-      if (!error && Array.isArray(event_rows)) {
-        if (event_rows.some((row) => row?.is_opt_out === true)) {
-          return {
-            blocked: true,
-            reason: "compliance_opt_out_event",
-            reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
-            fail_closed: false,
-          };
-        }
-        if (event_rows.some((row) => row?.is_wrong_number === true)) {
-          return {
-            blocked: true,
-            reason: "wrong_number",
-            reason_code: SEND_TIME_BLOCK_REASONS.WRONG_NUMBER,
-            fail_closed: false,
-          };
-        }
-        if (event_rows.some((row) => row?.is_dnc === true)) {
-          return {
-            blocked: true,
-            reason: "dnc",
-            reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
-            fail_closed: false,
-          };
-        }
-        if (
-          event_rows.some((row) =>
-            COMPLIANCE_TERMINAL_INTENTS.has(lower(row?.detected_intent))
-          )
-        ) {
-          return {
-            blocked: true,
-            reason: "compliance_hard_intent",
-            reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
-            fail_closed: false,
-          };
-        }
-        if (
-          event_rows.some((row) => {
-            const keyword = lower(row?.opt_out_keyword);
-            const body = lower(row?.message_body);
-            return keyword === "stop" || body === "stop";
-          })
-        ) {
-          return {
-            blocked: true,
-            reason: "compliance_stop",
-            reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
-            fail_closed: false,
-          };
-        }
-      }
+      if (!error && Array.isArray(data)) event_rows = data;
     } catch {
       // non-fatal
+    }
+
+    if (legacy_thread) {
+      const status_bucket = lower(legacy_thread.inbox_bucket);
+      if (
+        legacy_thread.opt_out === true ||
+        legacy_thread.universal_status === "suppressed" ||
+        status_bucket === "suppressed"
+      ) {
+        return {
+          blocked: true,
+          reason: "compliance_suppressed_thread",
+          reason_code: SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+          fail_closed: false,
+        };
+      }
+    }
+
+    const terminal_intents = resolveTerminalThreadIntents({
+      inbox_thread_state,
+      deal_thread_state: legacy_thread,
+      message_events: event_rows,
+    });
+    if (hasTerminalComplianceIntent(terminal_intents)) {
+      const wrong_number_intent = terminal_intents.some((intent) =>
+        ["wrong_number", "wrong_person"].includes(lower(intent))
+      );
+      return {
+        blocked: true,
+        reason: wrong_number_intent ? "wrong_number" : "compliance_hard_intent",
+        reason_code: wrong_number_intent
+          ? SEND_TIME_BLOCK_REASONS.WRONG_NUMBER
+          : SEND_TIME_BLOCK_REASONS.NO_CONTACT_TERMINAL,
+        fail_closed: false,
+      };
+    }
+
+    if (Array.isArray(event_rows) && event_rows.length) {
+      if (event_rows.some((row) => row?.is_opt_out === true)) {
+        return {
+          blocked: true,
+          reason: "compliance_opt_out_event",
+          reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
+          fail_closed: false,
+        };
+      }
+      if (
+        event_rows.some((row) => {
+          const keyword = lower(row?.metadata?.opt_out_keyword || row?.opt_out_keyword);
+          const body = lower(row?.message_body);
+          return keyword === "stop" || body === "stop";
+        })
+      ) {
+        return {
+          blocked: true,
+          reason: "compliance_stop",
+          reason_code: SEND_TIME_BLOCK_REASONS.OPTED_OUT,
+          fail_closed: false,
+        };
+      }
     }
   }
 

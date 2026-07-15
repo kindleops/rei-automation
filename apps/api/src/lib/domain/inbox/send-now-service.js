@@ -1375,6 +1375,7 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
 function isManualSendHardBlockReason(reason = "") {
   return new Set([
     "compliance_blocked",
+    "compliance_blocked_at_send_time",
     "duplicate_blocked",
     "missing_routing",
     "invalid_payload",
@@ -1382,6 +1383,11 @@ function isManualSendHardBlockReason(reason = "") {
     "provider_configuration_missing",
     "outbound_sms_disabled",
   ]).has(clean(reason).toLowerCase());
+}
+
+function maskPhoneForLog(value = "") {
+  const normalized = clean(value);
+  return normalized.length >= 5 ? `${normalized.slice(0, 5)}***` : "***";
 }
 
 function isManualSendOperatorOverrideAllowed(reason = "") {
@@ -1640,6 +1646,84 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   const to_phone = normalizePhone(normalized_row.to_phone_number);
   const from_phone = normalizePhone(normalized_row.from_phone_number);
 
+  const compliance_block = await evaluateAndBlockSendAtCompliance(
+    {
+      ...normalized_row,
+      id: queue_row_id,
+      queue_status: "processing",
+      phone_number_id:
+        normalized_row.phone_number_id ||
+        resolved_canonical_phone_id ||
+        normalized_row.metadata?.canonical_phone_id ||
+        null,
+    },
+    {
+      ...deps,
+      supabase,
+      claimedLockToken: manual_lock_token,
+      manual_operator_send: true,
+      now,
+    }
+  );
+
+  if (compliance_block.blocked) {
+    const reason_code =
+      clean(compliance_block.compliance?.reason_code) ||
+      clean(compliance_block.result?.reason) ||
+      "suppressed_at_send_time";
+    const compliance_reason =
+      clean(compliance_block.compliance?.reason) ||
+      clean(compliance_block.result?.compliance_reason) ||
+      "compliance_blocked";
+
+    logger.warn("inbox_send_now.compliance_blocked_at_send_time", {
+      queue_row_id,
+      thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
+      source: resolved_source,
+      send_source: clean(manual_input.send_source) || resolved_source,
+      route_source: resolved_source,
+      compliance_reason,
+      reason_code,
+      manual_operator_send: true,
+      provider_skipped: true,
+      retryable: false,
+      to_mask: maskPhoneForLog(to_phone),
+    });
+
+    return {
+      ok: false,
+      status: 423,
+      action: "send-now",
+      error: "compliance_blocked_at_send_time",
+      reason: "compliance_blocked_at_send_time",
+      detail_reason: reason_code,
+      compliance_block_reason: compliance_reason,
+      compliance_reason_code: reason_code,
+      queue_created: true,
+      queue_inserted: true,
+      queue_row_id,
+      queue_audit_id: queue_row_id,
+      queue_id: audit_result?.queue_id || queue_row_id,
+      queue_key: audit_result?.queue_key || null,
+      queue_status: compliance_block.result?.final_queue_status || "cancelled",
+      message_event_id: null,
+      provider_message_id: null,
+      provider_message_sid: null,
+      provider_skipped: true,
+      retryable: false,
+      sent: false,
+      delivery_status_display: "blocked",
+      hard_block: true,
+      operator_override_allowed: false,
+      warning_codes: audit_result?.warning_codes || [],
+      proof: audit_result?.proof || null,
+      diagnostics: {
+        compliance_block: compliance_block.result || null,
+        provider_skipped: true,
+      },
+    };
+  }
+
   logger.info("inbox_send_now.dispatching_to_provider", {
     queue_row_id,
     thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
@@ -1647,9 +1731,10 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     master_owner_id: clean(normalized_row.master_owner_id) || null,
     message_intent_id: clean(normalized_row.idempotency_key || normalized_row.queue_key) || null,
     provider: "textgrid",
-    to: to_phone,
-    from: from_phone,
+    to_mask: maskPhoneForLog(to_phone),
+    from_mask: maskPhoneForLog(from_phone),
     textgrid_number_id: clean(normalized_row.textgrid_number_id) || null,
+    source: resolved_source,
   });
 
   let send_result = null;
