@@ -23,6 +23,11 @@ import {
 } from "@/lib/supabase/sms-engine.js";
 import { validateOutboundSmsPayload } from "@/lib/domain/messaging/MessageValidationService.js";
 import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
+import {
+  CONTACT_CHECK_MODES,
+  evaluateCanonicalContactability,
+} from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
+import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -121,69 +126,37 @@ function isManualOperatorSend(input = {}) {
 
 export async function canSend(input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
-  const thread_key = clean(input.thread_key) || normalizePhone(input.to_phone_number);
   const manual_operator_send = isManualOperatorSend(input);
 
   const validation = validateOutboundSmsPayload(input);
   if (!validation.ok) return validation;
 
-  if (!manual_operator_send && thread_key) {
-    try {
-      const { data: thread_state } = await supabase
-        .from("inbox_thread_state")
-        .select("status,metadata")
-        .eq("thread_key", thread_key)
-        .maybeSingle();
+  const contactability = await evaluateCanonicalContactability(
+    {
+      thread_key: clean(input.thread_key) || normalizePhone(input.to_phone_number),
+      to_phone_number: input.to_phone_number,
+      from_phone_number: input.from_phone_number,
+      phone_id: input.phone_id || input.phone_number_id,
+      prospect_id: input.prospect_id,
+      master_owner_id: input.master_owner_id,
+      manual_operator_send,
+      fail_closed_for_automated: !manual_operator_send,
+      contact_check_mode: CONTACT_CHECK_MODES.ENQUEUE,
+    },
+    { supabase }
+  );
 
-      if (thread_state?.status === "paused_review") {
-        return { ok: false, reason: "thread_paused_review" };
-      }
-      if (thread_state?.metadata?.incident_quarantine === true) {
-        return { ok: false, reason: "thread_quarantined" };
-      }
-    } catch {
-      // non-fatal; suppression check remains authoritative
+  if (contactability.blocked) {
+    if (contactability.reason === "thread_paused_review") {
+      return { ok: false, reason: "thread_paused_review" };
     }
-  }
-
-  const normalized_to = normalizePhone(input.to_phone_number);
-  if (!normalized_to) {
-    return { ok: true, reason: null };
-  }
-
-  const phone_filter = [
-    `phone_number.eq.${quotePostgrestValue(normalized_to)}`,
-    `phone_e164.eq.${quotePostgrestValue(normalized_to)}`,
-  ].join(",");
-
-  try {
-    const base_query = supabase.from("sms_suppression_list").select("id");
-    let count = 0;
-
-    if (typeof base_query.eq === "function") {
-      const scoped = base_query.eq("is_active", true);
-      if (typeof scoped.or === "function") {
-        const filtered = scoped.or(phone_filter);
-        const terminal =
-          typeof filtered.eq === "function" ? filtered.eq("is_active", true) : filtered;
-        const result = await Promise.resolve(terminal);
-        count = Number(result?.count ?? 0);
-      }
+    if (contactability.reason === "thread_quarantined") {
+      return { ok: false, reason: "thread_quarantined" };
     }
-
-    if (count === 0 && typeof base_query.or === "function") {
-      const filtered = base_query.or(phone_filter);
-      const terminal =
-        typeof filtered.eq === "function" ? filtered.eq("is_active", true) : filtered;
-      const result = await Promise.resolve(terminal);
-      count = Number(result?.count ?? 0);
+    if (contactability.fail_closed) {
+      return { ok: false, reason: "suppression_check_unavailable" };
     }
-
-    if (count > 0) {
-      return { ok: false, reason: "phone_suppressed" };
-    }
-  } catch {
-    return { ok: false, reason: "suppression_check_unavailable" };
+    return { ok: false, reason: "phone_suppressed" };
   }
 
   return { ok: true, reason: null };

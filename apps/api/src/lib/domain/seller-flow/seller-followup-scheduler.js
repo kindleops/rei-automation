@@ -334,47 +334,19 @@ export async function cancelPendingFollowUpsForThread({
     return { ok: false, cancelled: 0, reason: "missing_thread_key_or_client" };
   }
 
-  try {
-    const { data: pending, error: pending_error } = await supabase
-      .from("send_queue")
-      .select("id,metadata,queue_status,type,message_type")
-      .eq("thread_key", normalized_thread_key)
-      .in("queue_status", ["scheduled", "queued"])
-      .in("type", ["followup"]);
+  const { cancelSupabasePendingOutbound, CANCELLATION_POLICIES } = await import(
+    "@/lib/domain/queue/cancel-supabase-pending-outbound.js"
+  );
 
-    if (pending_error) {
-      return { ok: false, cancelled: 0, reason: pending_error.message };
-    }
-    if (!pending?.length) {
-      return { ok: true, cancelled: 0, reason: "no_pending_followups" };
-    }
-
-    let cancelled = 0;
-    const cancelled_ids = [];
-    for (const row of pending) {
-      const { error: cancel_error } = await supabase
-        .from("send_queue")
-        .update({
-          queue_status: "cancelled",
-          updated_at: now,
-          metadata: {
-            ...(row.metadata || {}),
-            skip_reason: reason,
-            cancelled_by: "inbound_takeover",
-            cancelled_by_inbound_event_id: inbound_event_id || null,
-            finalized_at: now,
-          },
-        })
-        .eq("id", row.id)
-        .in("queue_status", ["scheduled", "queued"]);
-      if (!cancel_error) {
-        cancelled += 1;
-        cancelled_ids.push(row.id);
-      }
-    }
-
-    return { ok: true, cancelled, cancelled_ids, reason };
-  } catch (error) {
-    return { ok: false, cancelled: 0, reason: error?.message || "cancel_failed" };
-  }
+  return cancelSupabasePendingOutbound(
+    {
+      thread_key: normalized_thread_key,
+      policy: CANCELLATION_POLICIES.INBOUND_TAKEOVER,
+      reason,
+      inbound_event_id,
+      cancelled_by: "inbound_takeover",
+      now,
+    },
+    { supabase }
+  );
 }
