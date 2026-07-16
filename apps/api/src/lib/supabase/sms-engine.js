@@ -4147,7 +4147,14 @@ const TERMINAL_ENQUEUE_STATUSES = new Set([
   "suppressed",
 ]);
 
-async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number }, deps = {}) {
+/**
+ * 21610 / TextGrid From-To blacklist gate.
+ * - Only is_active=true sms_suppression_list rows block (historical inactive rows stay queryable).
+ * - Pair-scoped list rows (sender_phone_e164 set) block only that From/To pair.
+ * - Recipient-scoped list rows (sender_phone_e164 null) block any sender for that to-number.
+ * - Lookup errors fail closed.
+ */
+export async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number }, deps = {}) {
   const to_phone = normalizePhone(to_phone_number);
   if (!to_phone) return { suppressed: false };
 
@@ -4168,25 +4175,35 @@ async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number },
           .eq("to_phone_number", to_phone)
           .eq("from_phone_number", from_phone)
           .eq("failure_bucket", "provider_blacklist_pair"),
+        // Active pair suppressions stamped with this exact sender.
         supabase_client
           .from("sms_suppression_list")
           .select("id", { count: "exact", head: true })
           .eq("phone_e164", to_phone)
-          .eq("suppression_type", "provider_blacklist_pair")
-          .ilike("suppression_reason", "%21610%"),
+          .eq("is_active", true)
+          .eq("sender_phone_e164", from_phone)
+          .or("suppression_reason.ilike.%21610%,reason.ilike.%21610%"),
       ]);
 
-      const pair_blocked = pair_checks.some((result) => Number(result.count || 0) > 0);
+      const pair_blocked = pair_checks.some((result) => {
+        if (result?.error) throw result.error;
+        return Number(result.count || 0) > 0;
+      });
       if (pair_blocked) {
         return { suppressed: true, reason: "phone_suppressed_21610", scope: "pair" };
       }
     }
 
+    // Recipient-scoped: active 21610 rows with no sender stamp (block all senders).
+    // Pair-stamped rows are intentionally excluded so a different From can still send.
     const recipient_result = await supabase_client
       .from("sms_suppression_list")
       .select("id", { count: "exact", head: true })
       .eq("phone_e164", to_phone)
-      .ilike("suppression_reason", "%21610%");
+      .eq("is_active", true)
+      .is("sender_phone_e164", null)
+      .or("suppression_reason.ilike.%21610%,reason.ilike.%21610%");
+    if (recipient_result?.error) throw recipient_result.error;
     if ((recipient_result.count ?? 0) > 0) {
       return { suppressed: true, reason: "phone_suppressed_21610", scope: "recipient" };
     }
@@ -4194,6 +4211,13 @@ async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number },
     warn("enqueue_21610_suppression_check_failed", {
       message: check_error?.message || "unknown_error",
     });
+    // Fail closed: never allow enqueue when the suppression gate cannot be evaluated.
+    return {
+      suppressed: true,
+      reason: "phone_suppressed_21610",
+      scope: "lookup_failed",
+      lookup_error: check_error?.message || "unknown_error",
+    };
   }
   return { suppressed: false };
 }
