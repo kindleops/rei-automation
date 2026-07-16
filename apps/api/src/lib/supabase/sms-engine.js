@@ -4148,78 +4148,192 @@ const TERMINAL_ENQUEUE_STATUSES = new Set([
 ]);
 
 /**
- * 21610 / TextGrid From-To blacklist gate.
- * - Only is_active=true sms_suppression_list rows block (historical inactive rows stay queryable).
- * - Pair-scoped list rows (sender_phone_e164 set) block only that From/To pair.
- * - Recipient-scoped list rows (sender_phone_e164 null) block any sender for that to-number.
- * - Lookup errors fail closed.
+ * Build a deterministic reconciliation contract when historical 21610 send_queue
+ * evidence exists but no matching canonical sms_suppression_list row is present.
+ * Read-only — never authorizes send and never writes production rows.
+ */
+export function build21610ReconciliationResult({
+  recipient = null,
+  sender = null,
+  legacy_evidence_row_ids = [],
+  scope = "pair",
+} = {}) {
+  return {
+    reconciliation_required: true,
+    suppressed: true,
+    authorized_to_send: false,
+    reason: "legacy_21610_history_requires_reconciliation",
+    reason_code: "legacy_21610_history_requires_reconciliation",
+    scope,
+    recipient: recipient || null,
+    sender_scope: sender || null,
+    legacy_evidence_row_ids: Array.isArray(legacy_evidence_row_ids)
+      ? legacy_evidence_row_ids.filter(Boolean)
+      : [],
+  };
+}
+
+function is21610Text(value) {
+  return /21610/i.test(String(value ?? ""));
+}
+
+/**
+ * 21610 / TextGrid From-To blacklist gate — canonical list is authoritative.
+ *
+ * Precedence:
+ *   A. Matching active canonical sms_suppression_list row → BLOCK
+ *   B. Matching canonical rows exist and all are inactive → CLEAR
+ *      (historical send_queue 21610 evidence does NOT override)
+ *   C. No canonical match, but matching historical 21610 send_queue/message
+ *      evidence exists → BLOCK with legacy_21610_history_requires_reconciliation
+ *   D. No canonical match and no history → CLEAR
+ *   E. Canonical lookup failure → FAIL CLOSED
+ *
+ * Scope:
+ *   - recipient-wide: sender_phone_e164 IS NULL
+ *   - pair: sender_phone_e164 equals the From number
+ *
+ * Internal-canary markers do not change this decision.
  */
 export async function isPhoneSuppressedFor21610({ to_phone_number, from_phone_number }, deps = {}) {
   const to_phone = normalizePhone(to_phone_number);
-  if (!to_phone) return { suppressed: false };
+  if (!to_phone) return { suppressed: false, blocked_by_active_21610: false, reconciliation_required: false };
 
   const supabase_client = deps.supabase || deps.supabaseClient || defaultSupabase;
   const from_phone = normalizePhone(from_phone_number);
+
   try {
+    // ── Canonical list (active + inactive) ──────────────────────────────────
+    const list_result = await supabase_client
+      .from("sms_suppression_list")
+      .select("id, is_active, sender_phone_e164, suppression_type, reason, suppression_reason")
+      .eq("phone_e164", to_phone);
+
+    if (list_result?.error) throw list_result.error;
+
+    const all_list_rows = Array.isArray(list_result?.data) ? list_result.data : [];
+    const matching_canonical = all_list_rows.filter((row) => {
+      if (!is21610Text(row?.reason) && !is21610Text(row?.suppression_reason)) return false;
+      const sender = row?.sender_phone_e164 ? normalizePhone(row.sender_phone_e164) : null;
+      if (!sender) return true; // recipient-wide
+      if (!from_phone) return false; // pair row only applies when From is known
+      return sender === from_phone;
+    });
+
+    const active_matching = matching_canonical.filter((row) => row?.is_active === true);
+    const inactive_matching = matching_canonical.filter((row) => row?.is_active !== true);
+
+    // A. Active canonical match → BLOCK
+    if (active_matching.length > 0) {
+      const has_recipient = active_matching.some((row) => !row?.sender_phone_e164);
+      const scope = has_recipient ? "recipient" : "pair";
+      return {
+        suppressed: true,
+        reason: "phone_suppressed_21610",
+        scope,
+        blocked_by_active_21610: true,
+        reconciliation_required: false,
+        historical_evidence_preserved: true,
+        active_canonical_suppression_ids: active_matching.map((r) => r.id).filter(Boolean),
+        inactive_canonical_suppression_ids: inactive_matching.map((r) => r.id).filter(Boolean),
+        "21610_gate": "blocked",
+      };
+    }
+
+    // B. Canonical match exists, all inactive → CLEAR (history cannot override)
+    if (matching_canonical.length > 0) {
+      // Load historical queue evidence for audit only (not for blocking).
+      let historical_queue_ids = [];
+      if (from_phone) {
+        const hist = await supabase_client
+          .from(SEND_QUEUE_TABLE)
+          .select("id")
+          .eq("to_phone_number", to_phone)
+          .eq("from_phone_number", from_phone)
+          .or("failed_reason.ilike.%21610%,metadata->>non_retryable_reason.eq.textgrid_21610_blacklist");
+        if (hist?.error) throw hist.error;
+        historical_queue_ids = (Array.isArray(hist?.data) ? hist.data : []).map((r) => r.id).filter(Boolean);
+      }
+
+      return {
+        suppressed: false,
+        reason: null,
+        blocked_by_active_21610: false,
+        reconciliation_required: false,
+        historical_evidence_count:
+          inactive_matching.length + historical_queue_ids.length,
+        historical_evidence_preserved: true,
+        inactive_canonical_suppression_ids: inactive_matching.map((r) => r.id).filter(Boolean),
+        historical_queue_evidence_ids: historical_queue_ids,
+        "21610_gate": "clear",
+      };
+    }
+
+    // C/D. No canonical match → consult historical evidence for THIS pair only
     if (from_phone) {
-      const pair_checks = await Promise.all([
+      const [queue_hist, event_hist] = await Promise.all([
         supabase_client
           .from(SEND_QUEUE_TABLE)
-          .select("id", { count: "exact", head: true })
+          .select("id")
           .eq("to_phone_number", to_phone)
           .eq("from_phone_number", from_phone)
           .or("failed_reason.ilike.%21610%,metadata->>non_retryable_reason.eq.textgrid_21610_blacklist"),
         supabase_client
           .from(MESSAGE_EVENTS_TABLE)
-          .select("id", { count: "exact", head: true })
+          .select("id")
           .eq("to_phone_number", to_phone)
           .eq("from_phone_number", from_phone)
           .eq("failure_bucket", "provider_blacklist_pair"),
-        // Active pair suppressions stamped with this exact sender.
-        supabase_client
-          .from("sms_suppression_list")
-          .select("id", { count: "exact", head: true })
-          .eq("phone_e164", to_phone)
-          .eq("is_active", true)
-          .eq("sender_phone_e164", from_phone)
-          .or("suppression_reason.ilike.%21610%,reason.ilike.%21610%"),
       ]);
+      if (queue_hist?.error) throw queue_hist.error;
+      if (event_hist?.error) throw event_hist.error;
 
-      const pair_blocked = pair_checks.some((result) => {
-        if (result?.error) throw result.error;
-        return Number(result.count || 0) > 0;
-      });
-      if (pair_blocked) {
-        return { suppressed: true, reason: "phone_suppressed_21610", scope: "pair" };
+      const legacy_ids = [
+        ...(Array.isArray(queue_hist?.data) ? queue_hist.data : []).map((r) => r.id),
+        ...(Array.isArray(event_hist?.data) ? event_hist.data : []).map((r) => r.id),
+      ].filter(Boolean);
+
+      if (legacy_ids.length > 0) {
+        return {
+          ...build21610ReconciliationResult({
+            recipient: to_phone,
+            sender: from_phone,
+            legacy_evidence_row_ids: legacy_ids,
+            scope: "pair",
+          }),
+          blocked_by_active_21610: false,
+          historical_evidence_count: legacy_ids.length,
+          historical_evidence_preserved: true,
+          "21610_gate": "blocked_reconciliation_required",
+        };
       }
     }
 
-    // Recipient-scoped: active 21610 rows with no sender stamp (block all senders).
-    // Pair-stamped rows are intentionally excluded so a different From can still send.
-    const recipient_result = await supabase_client
-      .from("sms_suppression_list")
-      .select("id", { count: "exact", head: true })
-      .eq("phone_e164", to_phone)
-      .eq("is_active", true)
-      .is("sender_phone_e164", null)
-      .or("suppression_reason.ilike.%21610%,reason.ilike.%21610%");
-    if (recipient_result?.error) throw recipient_result.error;
-    if ((recipient_result.count ?? 0) > 0) {
-      return { suppressed: true, reason: "phone_suppressed_21610", scope: "recipient" };
-    }
+    // D. Clear
+    return {
+      suppressed: false,
+      reason: null,
+      blocked_by_active_21610: false,
+      reconciliation_required: false,
+      historical_evidence_count: 0,
+      historical_evidence_preserved: true,
+      "21610_gate": "clear",
+    };
   } catch (check_error) {
     warn("enqueue_21610_suppression_check_failed", {
       message: check_error?.message || "unknown_error",
     });
-    // Fail closed: never allow enqueue when the suppression gate cannot be evaluated.
+    // E. Fail closed
     return {
       suppressed: true,
       reason: "phone_suppressed_21610",
       scope: "lookup_failed",
+      blocked_by_active_21610: false,
+      reconciliation_required: false,
       lookup_error: check_error?.message || "unknown_error",
+      "21610_gate": "fail_closed",
     };
   }
-  return { suppressed: false };
 }
 
 /**

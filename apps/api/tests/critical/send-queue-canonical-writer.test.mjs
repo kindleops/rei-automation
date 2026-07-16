@@ -13,7 +13,19 @@ function makeInsertSupabase({ conflict = false, suppressed_21610 = false, existi
   //   a) suppression count: .select("id", {count,head}).eq().eq().ilike() -> { count }
   //   b) post-23505 lookup: .select("*").eq("queue_key",...).maybeSingle() -> { data, error }
   function makeSelectChain() {
-    const countResult = { data: null, error: null, count: suppressed_21610 ? 1 : 0 };
+    // Canonical-first 21610 resolver expects data arrays on list lookups.
+    const listData = suppressed_21610
+      ? [
+          {
+            id: "mock-active-21610",
+            is_active: true,
+            sender_phone_e164: null,
+            reason: "21610",
+            suppression_reason: "21610",
+          },
+        ]
+      : [];
+    const countResult = { data: listData, error: null, count: listData.length };
     const chain = {
       eq: () => chain,
       order: () => chain,
