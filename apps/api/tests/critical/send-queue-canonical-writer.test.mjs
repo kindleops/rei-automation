@@ -13,13 +13,17 @@ function makeInsertSupabase({ conflict = false, suppressed_21610 = false, existi
   //   a) suppression count: .select("id", {count,head}).eq().eq().ilike() -> { count }
   //   b) post-23505 lookup: .select("*").eq("queue_key",...).maybeSingle() -> { data, error }
   function makeSelectChain() {
+    const countResult = { data: null, error: null, count: suppressed_21610 ? 1 : 0 };
     const chain = {
       eq: () => chain,
       order: () => chain,
       limit: () => chain,
-      ilike: () => Promise.resolve({ count: suppressed_21610 ? 1 : 0 }),
+      is: () => chain,
+      in: () => chain,
+      or: () => chain,
+      ilike: () => Promise.resolve(countResult),
       maybeSingle: () => Promise.resolve({ data: conflict ? existing : null, error: null }),
-      then: (resolve) => resolve({ count: suppressed_21610 ? 1 : 0 }),
+      then: (resolve) => resolve(countResult),
     };
     return chain;
   }
