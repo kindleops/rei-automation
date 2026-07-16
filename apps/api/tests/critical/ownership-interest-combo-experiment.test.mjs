@@ -84,9 +84,11 @@ test("combo renders Spanish and does not fall back to English", () => {
   assert.equal(result.ok, true);
   assert.equal(result.language, "Spanish");
   assert.ok(result.text.includes("dueño"));
-  assert.ok(result.text.includes("venderla"));
-  // The retired _A copy's offer phrasing is gone in both languages.
-  assert.doesNotMatch(result.text, /oferta/i);
+  assert.ok(result.text.includes("propuesta"));
+  assert.ok(result.text.includes("propiedad"));
+  assert.doesNotMatch(result.text, /\boferta\b/i);
+  assert.doesNotMatch(result.text, /\bvender\b/i);
+  assert.doesNotMatch(result.text, /\bcomprador\b/i);
 });
 
 test("combo fails closed for a non-English language with no variant — no English fallback", () => {

@@ -4,6 +4,7 @@
  * Guards the internal test-phone allowlist and the internal_only inbound gate.
  * The live negotiation certification depends on:
  *   - the approved physical phone (+16124515970) being recognized in any format
+ *   - the Stage 1 canary recipient (+16128072000) being recognized
  *   - the existing control phone (+16127433952) remaining allowlisted
  *   - a random non-internal number being blocked under internal_only
  */
@@ -18,12 +19,21 @@ import {
 import { autoReplyModeAllowsQueue } from '../../src/lib/domain/seller-flow/auto-reply-mode.js'
 
 const NEW_INTERNAL = '+16124515970'
+const CANARY_INTERNAL = '+16128072000'
 const EXISTING_INTERNAL = '+16127433952'
 const RANDOM_NON_INTERNAL = '+14155550123'
 
-test('both approved internal numbers are in INTERNAL_TEST_PHONE_SET', () => {
+test('all approved internal numbers are in INTERNAL_TEST_PHONE_SET', () => {
   assert.equal(INTERNAL_TEST_PHONE_SET.has(NEW_INTERNAL), true)
+  assert.equal(INTERNAL_TEST_PHONE_SET.has(CANARY_INTERNAL), true)
   assert.equal(INTERNAL_TEST_PHONE_SET.has(EXISTING_INTERNAL), true)
+})
+
+test('+16128072000 is recognized in E.164, 10-digit, 11-digit, and formatted forms', () => {
+  assert.equal(isInternalTestPhone('+16128072000'), true)
+  assert.equal(isInternalTestPhone('6128072000'), true)
+  assert.equal(isInternalTestPhone('16128072000'), true)
+  assert.equal(isInternalTestPhone('(612) 807-2000'), true)
 })
 
 test('+16124515970 is recognized in E.164, 10-digit, 11-digit, and formatted forms', () => {
@@ -46,7 +56,14 @@ test('a random non-internal number is not an internal test phone', () => {
   assert.equal(isInternalTestPhone(''), false)
 })
 
-test('under internal_only, the new internal number is allowed (internal_test_phone)', () => {
+test('under internal_only, the canary internal number is allowed (internal_test_phone)', () => {
+  const gate = autoReplyModeAllowsQueue({ mode: 'internal_only', inboundFrom: CANARY_INTERNAL })
+  assert.equal(gate.allowed, true)
+  assert.equal(gate.reason, 'internal_test_phone')
+  assert.equal(gate.internal_test_phone, true)
+})
+
+test('under internal_only, the alternate internal number is allowed (internal_test_phone)', () => {
   const gate = autoReplyModeAllowsQueue({ mode: 'internal_only', inboundFrom: NEW_INTERNAL })
   assert.equal(gate.allowed, true)
   assert.equal(gate.reason, 'internal_test_phone')

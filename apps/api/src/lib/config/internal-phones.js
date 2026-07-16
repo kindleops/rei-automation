@@ -10,6 +10,7 @@
 export const INTERNAL_TEST_PHONE_SET = new Set([
   "+16127433952", // Ryan's internal test number (107-touch control)
   "+16124515970", // Approved internal test number (live negotiation certification, alternate physical phone)
+  "+16128072000", // Approved internal canary recipient (Stage 1 transport-chain proof)
 ]);
 
 /**
