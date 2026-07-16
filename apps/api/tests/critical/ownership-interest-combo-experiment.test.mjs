@@ -15,6 +15,7 @@ const CONTEXT = {
   seller_first_name: "Maria",
   agent_first_name: "Alex",
   property_address: "123 Oak St",
+  city: "Miami",
 };
 
 // ── Safety: dormant by default, never touches production selection ───────────
@@ -82,8 +83,12 @@ test("combo renders Spanish and does not fall back to English", () => {
   });
   assert.equal(result.ok, true);
   assert.equal(result.language, "Spanish");
-  assert.ok(result.text.includes("propietario"));
-  assert.ok(result.text.includes("oferta"));
+  assert.ok(result.text.includes("dueño"));
+  assert.ok(result.text.includes("propuesta"));
+  assert.ok(result.text.includes("propiedad"));
+  assert.doesNotMatch(result.text, /\boferta\b/i);
+  assert.doesNotMatch(result.text, /\bvender\b/i);
+  assert.doesNotMatch(result.text, /\bcomprador\b/i);
 });
 
 test("combo fails closed for a non-English language with no variant — no English fallback", () => {

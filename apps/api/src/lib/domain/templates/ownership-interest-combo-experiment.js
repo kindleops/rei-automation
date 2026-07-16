@@ -18,6 +18,11 @@
 //     path that flips it on in production.
 //   • Rendering rejects any unresolved {{placeholder}} and never falls back to
 //     English for a non-English thread.
+//
+// TextGrid content-filter policy (2026-07-15): the allowed commercial term is
+// "proposal". Prohibited in first-touch copy: offer, selling, sell, purchase,
+// buy, buyer, cash offer, reviewing an offer, consider selling (and Spanish
+// equivalents). Retired revisions below preserve immutable attribution history.
 
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
@@ -35,24 +40,70 @@ export const OWNERSHIP_INTEREST_COMBO_CANONICAL = Object.freeze({
 /**
  * Language-keyed draft bodies. Tokens use the canonical personalizer names
  * (seller_first_name / property_address / agent_first_name) so there are no
- * unresolved placeholders and the sender identity — never a company name in
- * the greeting slot — provides brand identification exactly like the existing
- * Stage 1 templates. Opt-out/compliance is appended by the send pipeline, the
- * same as every production template (this body carries none itself).
+ * unresolved placeholders and the sender identity — never a company name in the
+ * greeting slot — provides brand identification exactly like the existing Stage 1
+ * templates. Opt-out/compliance is appended by the send pipeline.
+ *
+ * Copy revision _C (2026-07-15): proposal-only wording after TextGrid policy
+ * review blocked _B's "selling" phrasing before merge. Ownership question +
+ * reason-for-contact remain explicit; no buyer/local-investor/city framing.
  */
 export const OWNERSHIP_INTEREST_COMBO_VARIANTS = Object.freeze({
   English: Object.freeze({
-    variant_id: "ownership_interest_combo_v1_en_A",
+    variant_id: "ownership_interest_combo_v1_en_C",
     language: "English",
-    // Identifies the agent by name with the truthful "local investor"
-    // descriptor (reason for contact), the property, and the soft offer
-    // interest. Never a company name in the greeting slot.
-    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}, a local investor. Do you still own {{property_address}}? If so, would you be open to reviewing an offer for it?",
+    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}. Do you still own {{property_address}}? I'm reaching out about a proposal for the property.",
   }),
   Spanish: Object.freeze({
+    variant_id: "ownership_interest_combo_v1_es_C",
+    language: "Spanish",
+    text: "Hola {{seller_first_name}}, soy {{agent_first_name}}. ¿Aún es dueño de {{property_address}}? Le escribo sobre una propuesta para la propiedad.",
+  }),
+});
+
+/**
+ * Retired copy revisions — attribution history, never sendable. Every send is
+ * attributed to an immutable content hash (outbound-attribution.js
+ * templateVersionHash of the UNRENDERED body), so these bodies and their
+ * hashes must never change.
+ *
+ *   _A — terminally blocked by TextGrid on prod canary send 2026-07-13
+ *        (queue row 3f540d6c-83e4-43e9-8eb1-20449e2cdcc6).
+ *   _B — pre-merge PR wording retired 2026-07-15 before dispatch; "selling"
+ *        phrasing violates TextGrid content-filter policy.
+ */
+export const OWNERSHIP_INTEREST_COMBO_RETIRED_VARIANTS = Object.freeze({
+  ownership_interest_combo_v1_en_A: Object.freeze({
+    variant_id: "ownership_interest_combo_v1_en_A",
+    language: "English",
+    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}, a local investor. Do you still own {{property_address}}? If so, would you be open to reviewing an offer for it?",
+    template_version_id: "sha1:047654d2e68020c2b3611e3b937324eb0d0acd8a",
+    retired_at: "2026-07-13",
+    retired_reason: "blocked_by_textgrid_content_filter",
+  }),
+  ownership_interest_combo_v1_es_A: Object.freeze({
     variant_id: "ownership_interest_combo_v1_es_A",
     language: "Spanish",
     text: "Hola {{seller_first_name}}, le escribe {{agent_first_name}}, un inversionista local. ¿Sigue siendo el propietario de {{property_address}}? De ser así, ¿estaría dispuesto a considerar una oferta?",
+    template_version_id: "sha1:1e1efb5b1a7451dbae29efad2c19a91e1c60878a",
+    retired_at: "2026-07-13",
+    retired_reason: "blocked_by_textgrid_content_filter",
+  }),
+  ownership_interest_combo_v1_en_B: Object.freeze({
+    variant_id: "ownership_interest_combo_v1_en_B",
+    language: "English",
+    text: "Hi {{seller_first_name}}, this is {{agent_first_name}}, a buyer looking in {{city}}. Do you still own {{property_address}}, and would you consider selling it?",
+    template_version_id: "sha1:e4155461576c931c10d0bfda16869f49275ef2ad",
+    retired_at: "2026-07-15",
+    retired_reason: "pre_merge_selling_blocked_by_textgrid_policy",
+  }),
+  ownership_interest_combo_v1_es_B: Object.freeze({
+    variant_id: "ownership_interest_combo_v1_es_B",
+    language: "Spanish",
+    text: "Hola {{seller_first_name}}, soy {{agent_first_name}}, un comprador buscando en {{city}}. ¿Aún es dueño de {{property_address}} y consideraría venderla?",
+    template_version_id: "sha1:02e98547c194450828d7efcd1605b007ae1bf733",
+    retired_at: "2026-07-15",
+    retired_reason: "pre_merge_selling_blocked_by_textgrid_policy",
   }),
 });
 

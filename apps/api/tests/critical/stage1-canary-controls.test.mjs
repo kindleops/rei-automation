@@ -36,7 +36,7 @@ import {
   INTERNAL_CANARY_SOURCE,
 } from "@/lib/config/internal-phones.js";
 
-const CANARY_PHONE_B = "+16124515970"; // deterministic experiment variant B (combo)
+const CANARY_PHONE_B = "+16128072000"; // deterministic experiment variant B (combo canary recipient)
 const CANARY_PHONE_A = "+16127433952"; // deterministic experiment variant A (control)
 const SENDER = "+16128060495";
 const TEXTGRID_ID = "673d34f8-1d3c-47c8-bb1d-c8fda559ec9f";
@@ -137,16 +137,16 @@ test("canary first touch uses the combined variant with complete attribution and
   assert.equal(built.assignment.variant_id, "ownership_interest_combo_B");
   assert.equal(built.assignment.assignment_source, "deterministic_hash");
 
-  // Exact rendered copy: agent name + truthful descriptor + property +
-  // ownership question + soft offer interest. No company name.
+  // Exact rendered copy: agent name + ownership question + proposal-only
+  // reason for contact. No company name, no offer/selling/buyer phrasing.
   assert.equal(
     built.rendered_message,
-    "Hi Ryan, this is Scott, a local investor. Do you still own 4157 Pillsbury Ave S Unit B? If so, would you be open to reviewing an offer for it?"
+    "Hi Ryan, this is Scott. Do you still own 4157 Pillsbury Ave S Unit B? I'm reaching out about a proposal for the property."
   );
 
   // Complete attribution contract.
   const a = built.attribution;
-  assert.equal(a.template_id, "ownership_interest_combo_v1_en_A");
+  assert.equal(a.template_id, "ownership_interest_combo_v1_en_C");
   assert.match(String(a.template_version_id), /^sha1:[0-9a-f]{40}$/);
   assert.equal(a.template_key, "ownership_interest_combo_v1");
   assert.equal(a.stage, "S1");
