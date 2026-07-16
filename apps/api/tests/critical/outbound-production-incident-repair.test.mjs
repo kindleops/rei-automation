@@ -237,17 +237,32 @@ test("insertSupabaseSendQueueRow: dedupe conflict returns idempotent replay", as
   assert.equal(result.queue_row_id, 99);
 });
 
-function makeCountSelectChain(count = 0) {
+function makeCountSelectChain(count = 0, rows = null) {
+  const data =
+    rows ??
+    (count > 0
+      ? Array.from({ length: count }, (_, i) => ({
+          id: `hist-${i}`,
+          is_active: true,
+          sender_phone_e164: null,
+          reason: "21610",
+          suppression_reason: "21610",
+        }))
+      : []);
+  const payload = { data, count: data.length, error: null };
   const chain = {
     eq() {
+      return chain;
+    },
+    is() {
       return chain;
     },
     or() {
       return chain;
     },
-    ilike: async () => ({ count, error: null }),
+    ilike: async () => payload,
     then(resolve) {
-      return resolve({ count, error: null });
+      return resolve(payload);
     },
   };
   return chain;
@@ -256,9 +271,31 @@ function makeCountSelectChain(count = 0) {
 test("enqueueSendQueueItem: blocks 21610-suppressed phone", async () => {
   const client = {
     from(table) {
+      if (table === "sms_suppression_list") {
+        return {
+          select: () =>
+            makeCountSelectChain(1, [
+              {
+                id: "active-21610",
+                is_active: true,
+                sender_phone_e164: null,
+                reason: "21610",
+                suppression_reason: "21610",
+              },
+            ]),
+        };
+      }
       if (table === "send_queue") {
         return {
-          select: () => makeCountSelectChain(1),
+          select: () => makeCountSelectChain(0),
+          insert: () => ({
+            select: () => ({
+              maybeSingle: async () => ({
+                data: null,
+                error: new Error("must not insert when 21610 blocked"),
+              }),
+            }),
+          }),
         };
       }
       if (table === "message_events") {
