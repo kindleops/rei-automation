@@ -1234,39 +1234,78 @@ export async function processSellerInboundMessage({
   // Never enqueues, never sends, never mutates stages. Legacy path remains
   // transport-authoritative. Failures must not break inbound processing.
   let acquisition_brain_shadow = null;
+  let acquisition_brain_shadow_fact_state = null;
   try {
     const {
       evaluateAcquisitionBrainShadow,
       emitAcquisitionBrainShadowDecision,
     } = await import("@/lib/domain/acquisition-brain/shadow-inbound-decision.js");
+    const {
+      loadPriorShadowFacts,
+      evaluateShadowWithFactState,
+      emitShadowFactStateEvents,
+    } = await import("@/lib/domain/acquisition-brain/shadow-fact-state.js");
+
+    const thread_for_shadow = threadKey || inboundFrom;
+    let prior_facts = [];
+    if (cancellation_client_available && thread_for_shadow) {
+      try {
+        const prior = await loadPriorShadowFacts({
+          thread_key: thread_for_shadow,
+          supabase,
+        });
+        prior_facts = prior.facts || [];
+      } catch {
+        prior_facts = [];
+      }
+    }
+
+    const legacy_snapshot = {
+      stage_before: decision.stage_before || null,
+      stage_after: decision.stage_after || null,
+      effective_action: execution_view.effective_action || null,
+      use_case:
+        seller_stage_reply?.plan?.selected_use_case ||
+        seller_stage_reply?.plan?.use_case ||
+        decision?.required_template_use_case ||
+        decision?.route_hint ||
+        null,
+      selected_template_id:
+        seller_stage_reply?.plan?.selected_template_id ||
+        execution?.selected_template_id ||
+        null,
+      timing_policy: seller_stage_reply?.plan?.timing_policy || null,
+    };
+
+    acquisition_brain_shadow_fact_state = evaluateShadowWithFactState({
+      facts_before: prior_facts,
+      message,
+      classification,
+      message_event_id: inboundEventId || providerMessageId,
+      thread_key: thread_for_shadow,
+      stage_before: decision.stage_before || stageBefore || null,
+      classifier_version: CLASSIFY_VERSION,
+      legacy_decision: legacy_snapshot,
+    });
+
     acquisition_brain_shadow = evaluateAcquisitionBrainShadow({
       classification,
       fact_extraction: fact_extraction || null,
       message,
       current_stage: decision.stage_before || stageBefore || null,
-      thread_key: threadKey || inboundFrom,
+      thread_key: thread_for_shadow,
       inbound_event_id: inboundEventId,
       message_event_id: inboundEventId || providerMessageId,
       classification_version: CLASSIFY_VERSION,
       inbound_timestamp: new Date().toISOString(),
-      legacy_decision: {
-        stage_before: decision.stage_before || null,
-        stage_after: decision.stage_after || null,
-        effective_action: execution_view.effective_action || null,
-        use_case:
-          seller_stage_reply?.plan?.selected_use_case ||
-          seller_stage_reply?.plan?.use_case ||
-          decision?.required_template_use_case ||
-          decision?.route_hint ||
-          null,
-        selected_template_id:
-          seller_stage_reply?.plan?.selected_template_id ||
-          execution?.selected_template_id ||
-          null,
-        timing_policy: seller_stage_reply?.plan?.timing_policy || null,
-      },
+      legacy_decision: legacy_snapshot,
     });
+
     if (!writes_suppressed && cancellation_client_available) {
+      await emitShadowFactStateEvents(acquisition_brain_shadow_fact_state, {
+        emitAutomationEvent: runtimeDeps.emitAutomationEvent,
+        supabase,
+      });
       await emitAcquisitionBrainShadowDecision(acquisition_brain_shadow, {
         emitAutomationEvent: runtimeDeps.emitAutomationEvent,
         supabase,
@@ -1356,6 +1395,7 @@ export async function processSellerInboundMessage({
     transition,
     deal_persistence,
     acquisition_brain_shadow,
+    acquisition_brain_shadow_fact_state,
   };
 }
 
