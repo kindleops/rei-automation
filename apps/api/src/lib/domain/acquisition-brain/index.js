@@ -58,3 +58,15 @@ export {
   evaluateShadowWithFactState,
   emitShadowFactStateEvents,
 } from "./shadow-fact-state.js";
+
+export {
+  SHADOW_BURST_EVENT,
+  BURST_DEBOUNCE_MIN_MS,
+  BURST_DEBOUNCE_MAX_MS,
+  TIMING_POLICIES,
+  seededUnit,
+  seededInRange,
+  evaluateContactWindowShadow,
+  selectTimingPolicy,
+  planShadowBurst,
+} from "./shadow-burst-timing.js";
