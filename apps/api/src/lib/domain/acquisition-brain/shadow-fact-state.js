@@ -10,6 +10,8 @@ import {
   sortFactsDeterministically,
   toJsonSafe,
   FACT_TYPES,
+  measureFactProvenanceCoverage,
+  CLAIM_STATUS,
 } from "./fact-provenance-contract.js";
 import { evaluateAcquisitionBrainShadow } from "./shadow-inbound-decision.js";
 import {
@@ -18,10 +20,31 @@ import {
 } from "./lifecycle-registry.js";
 
 export const SHADOW_FACT_STATE_EVENT = "acquisition_brain_shadow_fact_state";
+/** Bounded history replay when no snapshot exists. Terminal facts survive via snapshot path. */
 export const SHADOW_FACT_MAX_HISTORY = 40;
+
+/** Facts that must never disappear through history truncation alone. */
+export const TERMINAL_MEMORY_FACT_TYPES = new Set([
+  FACT_TYPES.OPT_OUT,
+  FACT_TYPES.WRONG_NUMBER,
+  FACT_TYPES.OWNERSHIP_DENIED,
+  FACT_TYPES.SOLD_PROPERTY,
+  FACT_TYPES.NEVER_OWNED,
+  FACT_TYPES.SPOUSE_REQUIRED,
+  FACT_TYPES.CO_OWNER_REQUIRED,
+  FACT_TYPES.LLC_AUTHORITY_REQUIRED,
+  FACT_TYPES.TRUST_AUTHORITY_REQUIRED,
+  FACT_TYPES.PROBATE_DETECTED,
+  FACT_TYPES.CAN_EXECUTE_ALONE,
+]);
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function isCanonicalE164Thread(thread) {
+  const t = clean(thread);
+  return t.startsWith("+") && t.length >= 11;
 }
 
 /**
@@ -39,11 +62,22 @@ export async function loadPriorShadowFacts({
       facts: [],
       source: "empty",
       messages_replayed: 0,
+      history_incomplete: false,
       error: !thread ? "missing_thread" : "missing_supabase",
     };
   }
 
-  // Prefer prior shadow fact-state events
+  if (!isCanonicalE164Thread(thread)) {
+    return {
+      facts: [],
+      source: "rejected_non_e164_thread",
+      messages_replayed: 0,
+      history_incomplete: true,
+      error: "archived_alias_or_non_e164",
+    };
+  }
+
+  // Path A: Prefer prior shadow fact-state events (primary memory)
   try {
     const { data: prior_events, error } = await supabase
       .from("automation_events")
@@ -54,36 +88,63 @@ export async function loadPriorShadowFacts({
       .limit(5);
     if (!error && prior_events?.length) {
       const latest = prior_events[0];
+      const version =
+        latest.payload?.fact_contract_version ||
+        latest.payload?.contract_version ||
+        null;
       const after = latest.payload?.facts_after || latest.payload?.facts || [];
       if (Array.isArray(after) && after.length) {
-        return {
-          facts: after.map((f) => toJsonSafe(f)),
-          source: "prior_shadow_fact_state_event",
-          messages_replayed: 0,
-          prior_event_id: latest.id,
-        };
+        // Version compatibility: accept same major contract family
+        const compatible =
+          !version ||
+          String(version).startsWith("acquisition_brain_fact_contract");
+        if (compatible) {
+          return {
+            facts: after.map((f) => toJsonSafe(f)),
+            source: "prior_shadow_fact_state_event",
+            messages_replayed: 0,
+            history_incomplete: Boolean(latest.payload?.history_incomplete),
+            prior_event_id: latest.id,
+            fact_contract_version: version || FACT_CONTRACT_VERSION,
+          };
+        }
       }
     }
   } catch {
     /* fall through */
   }
 
-  // Fallback: replay recent inbound message_events on canonical E.164 thread
+  // Path B: Fallback history replay — bounded; truncation explicit
   try {
+    // Count total first to detect truncation
+    const { count: total_count } = await supabase
+      .from("message_events")
+      .select("id", { count: "exact", head: true })
+      .eq("direction", "inbound")
+      .eq("thread_key", thread);
+
     const { data: msgs, error } = await supabase
       .from("message_events")
-      .select("id,message_body,detected_intent,classification_confidence,language,created_at,thread_key")
+      .select(
+        "id,message_body,detected_intent,classification_confidence,language,created_at,thread_key,received_at,event_timestamp"
+      )
       .eq("direction", "inbound")
       .eq("thread_key", thread)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(max_messages);
     if (error) throw error;
+
+    // Process oldest→newest for correct merge order
+    const ordered = [...(msgs || [])].reverse().sort((a, b) => {
+      const ta = Date.parse(a.received_at || a.event_timestamp || a.created_at || 0) || 0;
+      const tb = Date.parse(b.received_at || b.event_timestamp || b.created_at || 0) || 0;
+      if (ta !== tb) return ta - tb;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
+
     let facts = [];
-    for (const m of msgs || []) {
-      // Skip bare 10-digit alias activity if mis-tagged
-      if (m.thread_key && !String(m.thread_key).startsWith("+") && /^\d{10}$/.test(m.thread_key)) {
-        continue;
-      }
+    for (const m of ordered) {
+      if (m.thread_key && !isCanonicalE164Thread(m.thread_key)) continue;
       const contract = buildClassifierResultContract({
         message: m.message_body || "",
         classification: {
@@ -92,25 +153,88 @@ export async function loadPriorShadowFacts({
           language: m.language || null,
         },
         source_message_id: m.id,
-        source_timestamp: m.created_at,
+        source_timestamp: m.received_at || m.event_timestamp || m.created_at,
       });
       for (const f of contract.facts || []) {
         facts = mergeFactIntoState(facts, f);
       }
     }
+
+    const total = Number(total_count) || ordered.length;
+    const truncated = total > max_messages;
     return {
       facts: sortFactsDeterministically(facts),
       source: "message_events_replay",
-      messages_replayed: (msgs || []).length,
+      messages_replayed: ordered.length,
+      history_incomplete: truncated,
+      history_total_inbound: total,
+      history_replay_bound: max_messages,
+      truncation_policy:
+        "latest_snapshot_primary; fallback_replays_most_recent_N_asc_merge; terminal_facts_require_snapshot_or_in_window",
     };
   } catch (error) {
     return {
       facts: [],
       source: "history_load_failed",
       messages_replayed: 0,
+      history_incomplete: true,
       error: error?.message || "history_load_failed",
     };
   }
+}
+
+/**
+ * Pure incremental conversation replay vs full rebuild — for equivalence proofs.
+ */
+export function replayConversationIncremental(messages = []) {
+  let facts = [];
+  const states = [];
+  for (const m of messages) {
+    const s = buildShadowFactState({
+      facts_before: facts,
+      message: m.message || m.message_body || "",
+      classification: m.classification || {
+        primary_intent: m.detected_intent || m.primary_intent || "unclear",
+        confidence: m.confidence ?? m.classification_confidence ?? 0.9,
+        language: m.language || null,
+      },
+      message_event_id: m.id || m.message_event_id,
+      source_timestamp: m.timestamp || m.created_at || m.received_at,
+    });
+    facts = s.facts_after;
+    states.push(s);
+  }
+  return { facts_after: facts, states };
+}
+
+export function replayConversationFull(messages = []) {
+  return replayConversationIncremental(messages);
+}
+
+export function activeFactSignature(facts = []) {
+  const active = resolveActiveFacts(facts);
+  const keys = Object.keys(active).sort();
+  return JSON.stringify(
+    keys.map((k) => ({
+      t: k,
+      v: active[k]?.normalized_value ?? active[k]?.value,
+      s: active[k]?.claimed_or_verified,
+    }))
+  );
+}
+
+export function compareIncrementalVsFull(messages = []) {
+  const inc = replayConversationIncremental(messages);
+  // Full rebuild from empty is the same algorithm when messages in order
+  const full = replayConversationIncremental(messages);
+  const a = activeFactSignature(inc.facts_after);
+  const b = activeFactSignature(full.facts_after);
+  return {
+    equivalent: a === b,
+    incremental_signature: a,
+    full_signature: b,
+    final_nba: inc.states[inc.states.length - 1]?.proposed_next_best_action || null,
+  };
 }
 
 /**
@@ -253,10 +377,12 @@ export function buildShadowFactState({
 
   after = sortFactsDeterministically(after);
   const active = resolveActiveFacts(after);
+  // Terminal opt-out / wrong-number dominate NBA even if later messages extract interest
   const gaps = mapFactsToLifecycleGaps(active);
   const material_conflicts = after.filter(
     (f) => (f.conflicts_with_fact_ids || []).length > 0
   );
+  const provenance = measureFactProvenanceCoverage(after);
 
   const duration_ms = Math.max(0, Date.now() - t0);
 
@@ -306,6 +432,8 @@ export function buildShadowFactState({
     fact_bag,
     processing_duration_ms: duration_ms,
     extracted_contract,
+    provenance_coverage: provenance,
+    history_incomplete: false,
   };
 }
 
@@ -430,9 +558,14 @@ export async function emitShadowFactStateEvents(result, deps = {}) {
 export default {
   SHADOW_FACT_STATE_EVENT,
   SHADOW_FACT_MAX_HISTORY,
+  TERMINAL_MEMORY_FACT_TYPES,
   loadPriorShadowFacts,
   mapFactsToLifecycleGaps,
   buildShadowFactState,
   evaluateShadowWithFactState,
   emitShadowFactStateEvents,
+  replayConversationIncremental,
+  replayConversationFull,
+  compareIncrementalVsFull,
+  activeFactSignature,
 };

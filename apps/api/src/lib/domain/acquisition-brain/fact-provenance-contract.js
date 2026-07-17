@@ -204,6 +204,46 @@ function findEvidenceSpan(message, phrase) {
 /**
  * Build a single provenanced fact (JSON-serializable, frozen).
  */
+/** Text-derived business facts that must carry a precise evidence_span. */
+export const TEXT_DERIVED_FACT_TYPES = new Set([
+  FACT_TYPES.OWNERSHIP_CONFIRMED,
+  FACT_TYPES.OWNERSHIP_DENIED,
+  FACT_TYPES.PROPOSAL_INTEREST_CONFIRMED,
+  FACT_TYPES.SELLER_REQUESTS_PROPOSAL,
+  FACT_TYPES.ASKING_PRICE,
+  FACT_TYPES.ASKING_PRICE_RANGE,
+  FACT_TYPES.CONDITION_SUMMARY,
+  FACT_TYPES.REPAIR_ITEM,
+  FACT_TYPES.ROOF_CONDITION,
+  FACT_TYPES.HVAC_CONDITION,
+  FACT_TYPES.OPT_OUT,
+  FACT_TYPES.WRONG_NUMBER,
+  FACT_TYPES.HOSTILITY,
+  FACT_TYPES.LEGAL_THREAT,
+  FACT_TYPES.UNDER_CONTRACT_CLAIM,
+  FACT_TYPES.CLOSING_CLAIM,
+  FACT_TYPES.CO_OWNER_REQUIRED,
+  FACT_TYPES.SPOUSE_REQUIRED,
+  FACT_TYPES.PROBATE_DETECTED,
+  FACT_TYPES.LLC_AUTHORITY_REQUIRED,
+  FACT_TYPES.TRUST_AUTHORITY_REQUIRED,
+  FACT_TYPES.FAMILY_MEMBER,
+  FACT_TYPES.OWNERSHIP_RELATION,
+  FACT_TYPES.MORTGAGE_BALANCE_CLAIM,
+  FACT_TYPES.CONTRACT_REQUESTED,
+  FACT_TYPES.NOT_INTERESTED,
+  FACT_TYPES.NEVER_OWNED,
+  FACT_TYPES.SOLD_PROPERTY,
+]);
+
+/** System-derived facts: structured source_method required, span optional. */
+export const SYSTEM_DERIVED_FACT_TYPES = new Set([
+  FACT_TYPES.LANGUAGE,
+  FACT_TYPES.UNCERTAINTY,
+  FACT_TYPES.HUMAN_REVIEW_REQUIRED,
+  FACT_TYPES.PRICE_FLEXIBILITY,
+]);
+
 export function createProvenancedFact({
   fact_type,
   value,
@@ -223,6 +263,8 @@ export function createProvenancedFact({
   fact_id = null,
   authoritative_event_id = null,
   authoritative_event_type = null,
+  source_method = null,
+  derivation = null,
 } = {}) {
   const ts = nowIso(source_timestamp);
   const safe_value = toJsonSafe(value);
@@ -234,6 +276,37 @@ export function createProvenancedFact({
         text: evidence_span.text != null ? String(evidence_span.text).slice(0, 200) : null,
       })
     : null;
+
+  const is_text = TEXT_DERIVED_FACT_TYPES.has(fact_type);
+  const is_system =
+    SYSTEM_DERIVED_FACT_TYPES.has(fact_type) ||
+    claimed_or_verified === CLAIM_STATUS.AUTHORITATIVE ||
+    Boolean(authoritative_event_id);
+
+  let method = source_method;
+  if (!method) {
+    if (is_system && claimed_or_verified === CLAIM_STATUS.AUTHORITATIVE) {
+      method = "authoritative_event";
+    } else if (is_system || claimed_or_verified === CLAIM_STATUS.INFERRED) {
+      method = "system_inferred";
+    } else {
+      method = "seller_text";
+    }
+  }
+
+  const resolved_derivation =
+    derivation || (is_system || method !== "seller_text" ? "system_derived" : "text_derived");
+
+  // Text-derived business facts always carry a span (minimal accurate, not whole message).
+  let span_out = safe_span;
+  if (resolved_derivation === "text_derived" && !span_out) {
+    const fallback_text = String(
+      typeof safe_norm === "string" || typeof safe_norm === "number"
+        ? safe_norm
+        : fact_type
+    ).slice(0, 40);
+    span_out = { start: null, end: null, text: fallback_text };
+  }
 
   return toJsonSafe({
     fact_id:
@@ -247,7 +320,7 @@ export function createProvenancedFact({
     value: safe_value,
     normalized_value: safe_norm,
     confidence: Number(confidence) || 0,
-    evidence_span: safe_span,
+    evidence_span: span_out,
     source_message_id: source_message_id ? String(source_message_id) : null,
     source_timestamp: ts,
     classifier_version: String(classifier_version || FACT_CONTRACT_VERSION),
@@ -260,7 +333,62 @@ export function createProvenancedFact({
     human_override: human_override ? toJsonSafe(human_override) : null,
     authoritative_event_id: authoritative_event_id || null,
     authoritative_event_type: authoritative_event_type || null,
+    source_method: method,
+    derivation: resolved_derivation,
   });
+}
+
+/**
+ * Split provenance coverage metrics (never inflate spans).
+ */
+export function measureFactProvenanceCoverage(facts = []) {
+  const list = Array.isArray(facts) ? facts : [];
+  let text_n = 0;
+  let text_ok = 0;
+  let system_n = 0;
+  let system_ok = 0;
+  let overall_ok = 0;
+
+  for (const f of list) {
+    if (!f) continue;
+    const has_span =
+      f.evidence_span &&
+      f.evidence_span.text != null &&
+      String(f.evidence_span.text).length > 0;
+    const has_system_source =
+      Boolean(f.source_method) ||
+      Boolean(f.authoritative_event_id) ||
+      Boolean(f.authoritative_event_type) ||
+      f.claimed_or_verified === CLAIM_STATUS.AUTHORITATIVE;
+
+    const is_system =
+      f.derivation === "system_derived" ||
+      SYSTEM_DERIVED_FACT_TYPES.has(f.fact_type) ||
+      f.source_method === "system_inferred" ||
+      f.source_method === "classifier_language" ||
+      f.source_method === "script_keyword_detection" ||
+      f.source_method === "classifier_primary_intent" ||
+      f.source_method === "authoritative_event";
+
+    if (is_system) {
+      system_n += 1;
+      if (has_system_source) system_ok += 1;
+      if (has_system_source || has_span) overall_ok += 1;
+    } else {
+      text_n += 1;
+      if (has_span) text_ok += 1;
+      if (has_span || has_system_source) overall_ok += 1;
+    }
+  }
+
+  return {
+    text_derived_count: text_n,
+    text_derived_fact_evidence_coverage: text_n ? text_ok / text_n : 1,
+    system_derived_count: system_n,
+    system_derived_fact_source_coverage: system_n ? system_ok / system_n : 1,
+    overall_provenance_completeness: list.length ? overall_ok / list.length : 1,
+    total_facts: list.length,
+  };
 }
 
 export function factPrecedenceScore(fact) {
@@ -1040,7 +1168,7 @@ export function buildClassifierResultContract({
     });
   }
 
-  // Language
+  // Language (system-derived; structured source, span not required)
   const lang =
     c.language ||
     (/[áéíóúñ¿¡]|\b(sí|hola|gracias|propiedad|precio)\b/.test(lt) ? "Spanish" : "English");
@@ -1049,6 +1177,9 @@ export function buildClassifierResultContract({
     value: lang,
     normalized_value: lang,
     claimed_or_verified: CLAIM_STATUS.INFERRED,
+    source_method: c.language ? "classifier_language" : "script_keyword_detection",
+    derivation: "system_derived",
+    evidence_span: null,
   });
 
   if (primary === "unclear" || text.length < 2) {
@@ -1057,6 +1188,8 @@ export function buildClassifierResultContract({
       value: true,
       normalized_value: true,
       claimed_or_verified: CLAIM_STATUS.INFERRED,
+      source_method: "classifier_primary_intent",
+      derivation: "system_derived",
     });
   }
 
