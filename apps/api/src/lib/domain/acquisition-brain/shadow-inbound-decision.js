@@ -9,7 +9,6 @@ import {
   canAdvanceLifecycleStage,
   evaluateStage5Readiness,
   evaluateStage6Readiness,
-  isTransactionGatedStage,
   normalizeLifecycleStage,
   recommendStageFromFacts,
 } from "./lifecycle-registry.js";
@@ -17,18 +16,36 @@ import {
   resolveNextBestAction,
   NBA_ACTION_TYPES,
 } from "./next-best-action-registry.js";
+import {
+  COMPARISON_CATEGORY,
+  compareNormalizedDecisions,
+  NORMALIZED_ACTIONS,
+  NORMALIZED_STAGES,
+} from "./shadow-comparison.js";
 
 export const SHADOW_EVENT_TYPE = "acquisition_brain_shadow_decision";
+/** @deprecated Prefer COMPARISON_CATEGORY — kept for test/back-compat aliases */
 export const SHADOW_COMPARISON = Object.freeze({
-  EXACT_MATCH: "exact_match",
-  COMPATIBLE_MATCH: "compatible_match",
-  STAGE_DIVERGENCE: "stage_divergence",
-  ACTION_DIVERGENCE: "action_divergence",
-  TEMPLATE_DIVERGENCE: "template_divergence",
-  SAFETY_DIVERGENCE: "safety_divergence",
-  LEGACY_ONLY: "legacy_only",
-  BRAIN_ONLY: "brain_only",
+  EXACT_MATCH: COMPARISON_CATEGORY.EXACT_MATCH,
+  COMPATIBLE_MATCH: COMPARISON_CATEGORY.COMPATIBLE_MATCH,
+  BRAIN_IMPROVEMENT: COMPARISON_CATEGORY.BRAIN_IMPROVEMENT,
+  LEGACY_IMPROVEMENT: COMPARISON_CATEGORY.LEGACY_IMPROVEMENT,
+  BEHAVIORAL_DIVERGENCE: COMPARISON_CATEGORY.BEHAVIORAL_DIVERGENCE,
+  SAFETY_DIVERGENCE: COMPARISON_CATEGORY.SAFETY_DIVERGENCE,
+  // Legacy labels mapped into behavioral for older callers
+  STAGE_DIVERGENCE: COMPARISON_CATEGORY.BEHAVIORAL_DIVERGENCE,
+  ACTION_DIVERGENCE: COMPARISON_CATEGORY.BEHAVIORAL_DIVERGENCE,
+  TEMPLATE_DIVERGENCE: COMPARISON_CATEGORY.BEHAVIORAL_DIVERGENCE,
+  LEGACY_ONLY: COMPARISON_CATEGORY.COMPATIBLE_MATCH,
+  BRAIN_ONLY: COMPARISON_CATEGORY.COMPATIBLE_MATCH,
 });
+
+export {
+  COMPARISON_CATEGORY,
+  NORMALIZED_ACTIONS,
+  NORMALIZED_STAGES,
+  compareNormalizedDecisions,
+} from "./shadow-comparison.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -138,159 +155,11 @@ export function extractBrainFactsFromInbound({
   return facts;
 }
 
-function normalizeLegacyAction(legacy = {}) {
-  const action = lower(
-    legacy.effective_action ||
-      legacy.action ||
-      legacy.queue_action ||
-      legacy.next_action ||
-      ""
-  );
-  const use_case = lower(
-    legacy.use_case ||
-      legacy.selected_use_case ||
-      legacy.required_template_use_case ||
-      legacy.template_use_case ||
-      ""
-  );
-  const stage = normalizeLifecycleStage(
-    legacy.stage_after || legacy.stage || legacy.route_hint || null
-  );
-  return { action, use_case, stage, raw: legacy };
-}
-
-function mapBrainActionToLegacyFamily(action_type) {
-  switch (action_type) {
-    case NBA_ACTION_TYPES.SEND_TEMPLATE:
-    case NBA_ACTION_TYPES.REQUEST_CLARIFICATION:
-      return "queue_auto_reply";
-    case NBA_ACTION_TYPES.OPT_OUT:
-    case NBA_ACTION_TYPES.SUPPRESS:
-      return "suppress";
-    case NBA_ACTION_TYPES.HUMAN_REVIEW:
-      return "human_review";
-    case NBA_ACTION_TYPES.SCHEDULE_FOLLOWUP:
-      return "schedule_followup";
-    case NBA_ACTION_TYPES.UPDATE_FACTS_ONLY:
-    case NBA_ACTION_TYPES.REMAIN_IN_STAGE:
-    case NBA_ACTION_TYPES.TERMINAL_NO_ACTION:
-      return "no_send";
-    default:
-      return lower(action_type);
-  }
-}
-
 /**
- * Compare legacy seller-flow decision vs brain NBA.
+ * Compare legacy seller-flow decision vs brain NBA (normalized vocabulary).
  */
-export function compareShadowDecisions({ brain = null, legacy = null } = {}) {
-  if (!brain && legacy) {
-    return {
-      result: SHADOW_COMPARISON.LEGACY_ONLY,
-      divergence_reason: "brain_missing",
-      safety_divergence: false,
-    };
-  }
-  if (brain && !legacy) {
-    return {
-      result: SHADOW_COMPARISON.BRAIN_ONLY,
-      divergence_reason: "legacy_missing",
-      safety_divergence: false,
-    };
-  }
-  if (!brain && !legacy) {
-    return {
-      result: SHADOW_COMPARISON.COMPATIBLE_MATCH,
-      divergence_reason: "both_empty",
-      safety_divergence: false,
-    };
-  }
-
-  const leg = normalizeLegacyAction(legacy);
-  const brain_action = mapBrainActionToLegacyFamily(brain.action_type);
-  const brain_use = lower(brain.required_template_use_case || "");
-  const brain_stage = normalizeLifecycleStage(brain.lifecycle_stage_after);
-
-  const brain_safety =
-    brain.action_type === NBA_ACTION_TYPES.OPT_OUT ||
-    brain.action_type === NBA_ACTION_TYPES.SUPPRESS;
-  const legacy_safety =
-    leg.action.includes("suppress") ||
-    leg.action.includes("opt") ||
-    leg.action === "stop" ||
-    leg.use_case.includes("opt_out") ||
-    leg.use_case.includes("wrong");
-
-  if (brain_safety !== legacy_safety) {
-    return {
-      result: SHADOW_COMPARISON.SAFETY_DIVERGENCE,
-      divergence_reason: `safety brain=${brain_safety} legacy=${legacy_safety}`,
-      safety_divergence: true,
-    };
-  }
-
-  // Transaction stage claims from text must not advance brain to 7–10
-  if (
-    brain_stage &&
-    isTransactionGatedStage(brain_stage) &&
-    brain.action_type !== NBA_ACTION_TYPES.UPDATE_FACTS_ONLY
-  ) {
-    return {
-      result: SHADOW_COMPARISON.SAFETY_DIVERGENCE,
-      divergence_reason: `unsupported_transaction_stage_advance:${brain_stage}`,
-      safety_divergence: true,
-    };
-  }
-
-  const stage_match =
-    !leg.stage || !brain_stage || leg.stage === brain_stage ||
-    // Compatible: legacy consider_selling vs interest_proposal_confirmation alias already normalized
-    leg.stage === brain_stage;
-
-  const action_match =
-    !leg.action ||
-    leg.action === brain_action ||
-    (leg.action.includes("queue") && brain_action === "queue_auto_reply") ||
-    (leg.action.includes("suppress") && brain_action === "suppress") ||
-    (leg.action.includes("review") && brain_action === "human_review");
-
-  const template_match =
-    !leg.use_case ||
-    !brain_use ||
-    leg.use_case === brain_use ||
-    (leg.use_case.includes("asking") && brain_use.includes("asking")) ||
-    (leg.use_case.includes("consider") && brain_use.includes("consider"));
-
-  if (stage_match && action_match && template_match) {
-    const exact =
-      (!leg.stage || leg.stage === brain_stage) &&
-      (!leg.use_case || leg.use_case === brain_use) &&
-      action_match;
-    return {
-      result: exact ? SHADOW_COMPARISON.EXACT_MATCH : SHADOW_COMPARISON.COMPATIBLE_MATCH,
-      divergence_reason: null,
-      safety_divergence: false,
-    };
-  }
-  if (!stage_match) {
-    return {
-      result: SHADOW_COMPARISON.STAGE_DIVERGENCE,
-      divergence_reason: `stage brain=${brain_stage} legacy=${leg.stage}`,
-      safety_divergence: false,
-    };
-  }
-  if (!action_match) {
-    return {
-      result: SHADOW_COMPARISON.ACTION_DIVERGENCE,
-      divergence_reason: `action brain=${brain_action} legacy=${leg.action}`,
-      safety_divergence: false,
-    };
-  }
-  return {
-    result: SHADOW_COMPARISON.TEMPLATE_DIVERGENCE,
-    divergence_reason: `template brain=${brain_use} legacy=${leg.use_case}`,
-    safety_divergence: false,
-  };
+export function compareShadowDecisions({ brain = null, legacy = null, facts = {} } = {}) {
+  return compareNormalizedDecisions({ brain, legacy, facts });
 }
 
 /**
@@ -335,7 +204,11 @@ export function evaluateAcquisitionBrainShadow({
       human_review_flag: false,
       idempotency_key: `nba:update_facts_only:${inbound_event_id || ""}`,
     };
-    const comparison = compareShadowDecisions({ brain: nba, legacy: legacy_decision });
+    const comparison = compareShadowDecisions({
+      brain: nba,
+      legacy: legacy_decision,
+      facts,
+    });
     return finalizeShadow({
       facts,
       stage_before,
@@ -416,6 +289,7 @@ export function evaluateAcquisitionBrainShadow({
   const comparison = compareShadowDecisions({
     brain: final_nba,
     legacy: legacy_decision,
+    facts,
   });
 
   return finalizeShadow({
@@ -436,6 +310,23 @@ export function evaluateAcquisitionBrainShadow({
     started,
     unsupported_transition_reason,
   });
+}
+
+/** Build stable dedupe key; refuse empty/missing message ids. */
+export function buildShadowDedupeKey(message_event_id = null) {
+  const id = clean(message_event_id);
+  if (!id || id === "none") {
+    return {
+      ok: false,
+      dedupe_key: null,
+      reason: "missing_message_event_id",
+    };
+  }
+  return {
+    ok: true,
+    dedupe_key: `acquisition_brain_shadow:${id}`,
+    reason: null,
+  };
 }
 
 function finalizeShadow({
@@ -509,6 +400,40 @@ function finalizeShadow({
       }
     : null;
 
+  const dedupe = buildShadowDedupeKey(message_event_id || inbound_event_id);
+  const event =
+    dedupe.ok
+      ? {
+          event_type: SHADOW_EVENT_TYPE,
+          dedupe_key: dedupe.dedupe_key,
+          conversation_thread_id: thread_key || null,
+          payload: {
+            message_event_id: message_event_id || inbound_event_id || null,
+            thread_key,
+            inbound_timestamp: inbound_timestamp || null,
+            classifier_output: {
+              primary_intent:
+                classification?.primary_intent || classification?.detected_intent || null,
+              confidence: classification?.confidence ?? null,
+              language: classification?.language || null,
+              version: brain_decision.classification_version,
+            },
+            legacy_decision: legacy_snapshot,
+            brain_decision,
+            comparison_result: comparison.result || comparison.category,
+            reason_codes: comparison.reason_codes || [],
+            divergence_reason: comparison.divergence_reason,
+            brain_normalized: comparison.brain_normalized || null,
+            legacy_normalized: comparison.legacy_normalized || null,
+            safety_divergence: Boolean(comparison.safety_divergence),
+            evidence: comparison.evidence || null,
+            registry_version: ACQUISITION_BRAIN_VERSION,
+            internal_public_eligibility: "shadow_read_only",
+            processing_duration_ms: duration_ms,
+          },
+        }
+      : null;
+
   return {
     ok: true,
     shadow: true,
@@ -516,38 +441,24 @@ function finalizeShadow({
     may_enqueue: false,
     may_send: false,
     may_mutate_stages: false,
+    may_write_send_queue: false,
+    may_invoke_provider: false,
     brain_decision,
     legacy_decision: legacy_snapshot,
     comparison: {
-      result: comparison.result,
+      result: comparison.result || comparison.category,
+      category: comparison.category || comparison.result,
+      reason_codes: comparison.reason_codes || [],
       divergence_reason: comparison.divergence_reason,
       safety_divergence: Boolean(comparison.safety_divergence),
+      brain_normalized: comparison.brain_normalized || null,
+      legacy_normalized: comparison.legacy_normalized || null,
+      evidence: comparison.evidence || null,
     },
     facts,
     processing_duration_ms: duration_ms,
-    event: {
-      event_type: SHADOW_EVENT_TYPE,
-      dedupe_key: `acquisition_brain_shadow:${clean(message_event_id || inbound_event_id || "none")}`,
-      conversation_thread_id: thread_key || null,
-      payload: {
-        message_event_id: message_event_id || inbound_event_id || null,
-        thread_key,
-        inbound_timestamp: inbound_timestamp || null,
-        classifier_output: {
-          primary_intent: classification?.primary_intent || classification?.detected_intent || null,
-          confidence: classification?.confidence ?? null,
-          language: classification?.language || null,
-          version: brain_decision.classification_version,
-        },
-        legacy_decision: legacy_snapshot,
-        brain_decision,
-        comparison_result: comparison.result,
-        divergence_reason: comparison.divergence_reason,
-        registry_version: ACQUISITION_BRAIN_VERSION,
-        internal_public_eligibility: "shadow_read_only",
-        processing_duration_ms: duration_ms,
-      },
-    },
+    dedupe,
+    event,
   };
 }
 
@@ -556,14 +467,18 @@ function finalizeShadow({
  */
 export async function emitAcquisitionBrainShadowDecision(shadow_result, deps = {}) {
   if (!shadow_result?.event) {
-    return { ok: false, reason: "missing_shadow_event" };
+    return {
+      ok: false,
+      reason: shadow_result?.dedupe?.reason || "missing_shadow_event",
+      emitted: false,
+    };
   }
   const emit = deps.emitAutomationEvent;
   if (typeof emit !== "function") {
-    return { ok: false, reason: "emit_unavailable", dry: true };
+    return { ok: false, reason: "emit_unavailable", dry: true, emitted: false };
   }
   try {
-    await emit(
+    const result = await emit(
       {
         event_type: shadow_result.event.event_type,
         dedupe_key: shadow_result.event.dedupe_key,
@@ -573,8 +488,15 @@ export async function emitAcquisitionBrainShadowDecision(shadow_result, deps = {
       },
       deps.supabase ? { supabase: deps.supabase, supabaseClient: deps.supabase } : {}
     );
-    return { ok: true, emitted: true, dedupe_key: shadow_result.event.dedupe_key };
+    return {
+      ok: true,
+      emitted: !result?.duplicate,
+      duplicate: Boolean(result?.duplicate),
+      dedupe_key: shadow_result.event.dedupe_key,
+      event_id: result?.event?.id || result?.id || null,
+    };
   } catch (error) {
+    // Shadow persistence failure must never affect seller reply processing.
     return {
       ok: false,
       reason: error?.message || "emit_failed",

@@ -218,3 +218,64 @@ test("safety divergence when legacy suppresses but brain would send", () => {
   assert.equal(cmp.result, SHADOW_COMPARISON.SAFETY_DIVERGENCE);
   assert.equal(cmp.safety_divergence, true);
 });
+
+test("compatible_match when legacy action labels are missing", () => {
+  const cmp = compareShadowDecisions({
+    brain: {
+      action_type: NBA_ACTION_TYPES.SEND_TEMPLATE,
+      required_template_use_case: "consider_selling",
+      lifecycle_stage_after: S.INTEREST_PROPOSAL_CONFIRMATION,
+    },
+    legacy: { stage_after: "consider_selling" },
+    facts: { ownership_confirmed: true },
+  });
+  assert.ok(
+    cmp.result === SHADOW_COMPARISON.COMPATIBLE_MATCH ||
+      cmp.result === SHADOW_COMPARISON.EXACT_MATCH ||
+      cmp.result === SHADOW_COMPARISON.BRAIN_IMPROVEMENT,
+    `got ${cmp.result}`
+  );
+  assert.equal(cmp.safety_divergence, false);
+});
+
+test("brain improvement: proposal request vs legacy consider_selling", () => {
+  const cmp = compareShadowDecisions({
+    brain: {
+      action_type: NBA_ACTION_TYPES.SEND_TEMPLATE,
+      required_template_use_case: "seller_asking_price",
+      lifecycle_stage_after: S.ASKING_PRICE,
+    },
+    legacy: {
+      effective_action: "queue_auto_reply",
+      use_case: "consider_selling",
+      stage_after: "consider_selling",
+    },
+    facts: {
+      ownership_confirmed: true,
+      seller_requests_proposal: true,
+      proposal_interest_confirmed: true,
+    },
+  });
+  assert.equal(cmp.result, SHADOW_COMPARISON.BRAIN_IMPROVEMENT);
+  assert.equal(cmp.safety_divergence, false);
+});
+
+test("missing message_event_id does not emit duplicate-risk dedupe key", () => {
+  const r = evaluateAcquisitionBrainShadow({
+    message: "Yeah",
+    classification: { primary_intent: "ownership_confirmed", confidence: 0.95 },
+    thread_key: "+16128072000",
+    // no message_event_id
+  });
+  assert.equal(r.event, null);
+  assert.equal(r.dedupe.ok, false);
+  assert.equal(r.may_enqueue, false);
+  assert.equal(r.may_send, false);
+});
+
+test("shadow side-effect flags are all false", () => {
+  const r = run("Yeah", { primary_intent: "ownership_confirmed" });
+  assert.equal(r.may_write_send_queue, false);
+  assert.equal(r.may_invoke_provider, false);
+  assert.equal(r.may_mutate_stages, false);
+});
