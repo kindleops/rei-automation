@@ -1230,6 +1230,56 @@ export async function processSellerInboundMessage({
     block_reason: decision.block_reason,
   });
 
+  // ── Acquisition Brain shadow evaluation (read-only) ────────────────────
+  // Never enqueues, never sends, never mutates stages. Legacy path remains
+  // transport-authoritative. Failures must not break inbound processing.
+  let acquisition_brain_shadow = null;
+  try {
+    const {
+      evaluateAcquisitionBrainShadow,
+      emitAcquisitionBrainShadowDecision,
+    } = await import("@/lib/domain/acquisition-brain/shadow-inbound-decision.js");
+    acquisition_brain_shadow = evaluateAcquisitionBrainShadow({
+      classification,
+      fact_extraction: fact_extraction || null,
+      message,
+      current_stage: decision.stage_before || stageBefore || null,
+      thread_key: threadKey || inboundFrom,
+      inbound_event_id: inboundEventId,
+      message_event_id: inboundEventId || providerMessageId,
+      classification_version: CLASSIFY_VERSION,
+      inbound_timestamp: new Date().toISOString(),
+      legacy_decision: {
+        stage_before: decision.stage_before || null,
+        stage_after: decision.stage_after || null,
+        effective_action: execution_view.effective_action || null,
+        use_case:
+          seller_stage_reply?.plan?.selected_use_case ||
+          seller_stage_reply?.plan?.use_case ||
+          decision?.required_template_use_case ||
+          decision?.route_hint ||
+          null,
+        selected_template_id:
+          seller_stage_reply?.plan?.selected_template_id ||
+          execution?.selected_template_id ||
+          null,
+        timing_policy: seller_stage_reply?.plan?.timing_policy || null,
+      },
+    });
+    if (!writes_suppressed && cancellation_client_available) {
+      await emitAcquisitionBrainShadowDecision(acquisition_brain_shadow, {
+        emitAutomationEvent: runtimeDeps.emitAutomationEvent,
+        supabase,
+      });
+    }
+  } catch (shadow_error) {
+    runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_FAILED]", {
+      thread_key: threadKey || inboundFrom,
+      inbound_event_id: inboundEventId,
+      error: shadow_error?.message || "shadow_failed",
+    });
+  }
+
   const intelligence_message_event_patch =
     buildIntelligenceMessageEventPatch(intelligence_snapshot);
 
@@ -1305,6 +1355,7 @@ export async function processSellerInboundMessage({
     seller_automation_execution,
     transition,
     deal_persistence,
+    acquisition_brain_shadow,
   };
 }
 

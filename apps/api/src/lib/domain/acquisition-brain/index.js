@@ -22,3 +22,12 @@ export {
   STAGE_PRIMARY_USE_CASES,
   resolveNextBestAction,
 } from "./next-best-action-registry.js";
+
+export {
+  SHADOW_EVENT_TYPE,
+  SHADOW_COMPARISON,
+  extractBrainFactsFromInbound,
+  compareShadowDecisions,
+  evaluateAcquisitionBrainShadow,
+  emitAcquisitionBrainShadowDecision,
+} from "./shadow-inbound-decision.js";
