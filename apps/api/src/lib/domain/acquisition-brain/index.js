@@ -12,6 +12,8 @@ export {
   isTransactionGatedStage,
   canAdvanceLifecycleStage,
   recommendStageFromFacts,
+  evaluateStage5Readiness,
+  evaluateStage6Readiness,
 } from "./lifecycle-registry.js";
 
 export {

@@ -16,6 +16,8 @@ import {
   isTransactionGatedStage,
   canAdvanceLifecycleStage,
   recommendStageFromFacts,
+  evaluateStage5Readiness,
+  evaluateStage6Readiness,
   resolveNextBestAction,
   NBA_ACTION_TYPES,
   STAGE_PRIMARY_USE_CASES,
@@ -156,4 +158,77 @@ test("forbidden jump S1→actual_proposal blocked", () => {
     advance_source: "seller_text",
   });
   assert.equal(gate.ok, false);
+});
+
+// ── Stage 5 / Stage 6 contract tests (closes former 13/17 PR-body gap) ─────
+
+test("Stage 5 registry lists required substates and tight entry requirements", () => {
+  const s5 = getLifecycleStage(S.ACTUAL_PROPOSAL);
+  assert.ok(s5.stage_substates.includes("proposal_calculation_ready"));
+  assert.ok(s5.stage_substates.includes("seller_accepted_verbally"));
+  assert.ok(s5.stage_substates.includes("insufficient_facts"));
+  assert.ok(
+    s5.entry_requirements.some((r) => String(r).includes("ownership_confirmed"))
+  );
+  assert.ok(
+    s5.entry_requirements.some((r) => String(r).includes("proposal_interest"))
+  );
+});
+
+test("Stage 5: enthusiasm alone cannot open Actual Proposal", () => {
+  const blocked = evaluateStage5Readiness({
+    ownership_confirmed: true,
+    proposal_interest_confirmed: true,
+    // missing price, condition, valuation, authority
+  });
+  assert.equal(blocked.entry_allowed, false);
+  assert.equal(blocked.substate, "insufficient_facts");
+  assert.ok(blocked.missing_facts.length >= 2);
+
+  const ready = evaluateStage5Readiness({
+    ownership_confirmed: true,
+    proposal_interest_confirmed: true,
+    asking_price: { value: 250000 },
+    condition_summary: "needs roof",
+    underwriting_ready: true,
+    authority_risks_identified: true,
+  });
+  assert.equal(ready.entry_allowed, true);
+  assert.equal(ready.substate, "proposal_calculation_ready");
+});
+
+test("Stage 6: paperwork request without proposal outcome is not contract_ready", () => {
+  const blocked = evaluateStage6Readiness({
+    ownership_confirmed: true,
+    contract_requested: true, // "send me the paperwork" alone
+  });
+  assert.equal(blocked.entry_allowed, false);
+  assert.ok(blocked.missing_facts.includes("proposal_accepted_or_contract_intent"));
+
+  const ready = evaluateStage6Readiness({
+    ownership_confirmed: true,
+    proposal_accepted: true,
+    can_execute_alone: true,
+  });
+  assert.equal(ready.entry_allowed, true);
+  assert.equal(ready.substate, "contract_ready");
+});
+
+test("Stage 6: co-owner / probate never assume solo execution", () => {
+  const spouse = evaluateStage6Readiness({
+    ownership_confirmed: true,
+    proposal_accepted: true,
+    spouse_co_owner: true,
+  });
+  assert.equal(spouse.can_execute_alone, false);
+  assert.equal(spouse.substate, "waiting_on_spouse");
+
+  const probate = evaluateStage6Readiness({
+    ownership_confirmed: true,
+    proposal_accepted: true,
+    probate: true,
+  });
+  assert.equal(probate.human_review, true);
+  assert.equal(probate.substate, "probate_heirship");
+  assert.equal(probate.can_execute_alone, false);
 });

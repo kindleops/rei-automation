@@ -105,6 +105,7 @@ function stageDef(partial) {
     required_facts: partial.required_facts || [],
     optional_facts: partial.optional_facts || [],
     completion_conditions: partial.completion_conditions || [],
+    stage_substates: partial.stage_substates || [],
     allowed_next_stages: partial.allowed_next_stages || [],
     forbidden_transitions: partial.forbidden_transitions || [],
     next_best_actions: partial.next_best_actions || [],
@@ -310,17 +311,58 @@ export const LIFECYCLE_REGISTRY = freezeDeep({
   [S.ACTUAL_PROPOSAL]: stageDef({
     stage_id: S.ACTUAL_PROPOSAL,
     display_name: "Actual Proposal",
-    entry_requirements: ["ownership_confirmed", "asking_price || underwriting_ready"],
+    // Seller enthusiasm alone is never enough — acquisition facts required.
+    entry_requirements: [
+      "ownership_confirmed",
+      "proposal_interest_confirmed || seller_requests_proposal",
+      "asking_price_known || asking_price_explicitly_unavailable",
+      "property_condition_sufficiently_known",
+      "valuation_or_proposal_review_available",
+      "authority_risks_identified",
+    ],
     supported_facts: [
+      "proposal_calculation_ready",
+      "proposal_pending_review",
+      "proposal_presented",
+      "seller_countered",
+      "seller_accepted_verbally",
+      "proposal_rejected",
+      "creative_terms_candidate",
+      "insufficient_facts",
+      "human_review_required",
       "proposal_sent",
       "proposal_accepted",
-      "proposal_rejected",
       "counter_offer",
       "price_flexibility",
+      "asking_price",
+      "condition_summary",
+      "authority_risks",
     ],
-    required_facts: ["ownership_confirmed"],
-    optional_facts: ["asking_price", "condition_summary"],
-    completion_conditions: ["proposal_accepted === true || counter_terms_agreed"],
+    required_facts: [
+      "ownership_confirmed",
+      "proposal_interest_confirmed || seller_requests_proposal",
+    ],
+    optional_facts: [
+      "asking_price",
+      "condition_summary",
+      "underwriting_ready",
+      "creative_terms_candidate",
+    ],
+    completion_conditions: [
+      "proposal_accepted === true || seller_accepted_verbally === true || counter_terms_agreed",
+    ],
+    // Discrete Stage 5 substates (facts/status, not free-form stage jumps).
+    stage_substates: [
+      "proposal_calculation_ready",
+      "proposal_pending_review",
+      "proposal_presented",
+      "seller_countered",
+      "seller_accepted_verbally",
+      "proposal_rejected",
+      "creative_terms_candidate",
+      "insufficient_facts",
+      "human_review_required",
+    ],
     allowed_next_stages: [S.FORMAL_CONTRACT],
     forbidden_transitions: [
       S.OWNERSHIP_CHECK,
@@ -334,6 +376,7 @@ export const LIFECYCLE_REGISTRY = freezeDeep({
       "send_template",
       "human_review",
       "schedule_followup",
+      "update_facts_only",
     ],
     reply_use_cases: ["offer_reveal_cash", "counter_offer", "final_offer"],
     follow_up_policy: {
@@ -344,26 +387,71 @@ export const LIFECYCLE_REGISTRY = freezeDeep({
       use_case: "proposal_review_follow_up",
     },
     timeout_policy: { silence_days: 2, on_timeout: "schedule_followup" },
-    human_review_conditions: ["negotiation_deadlock", "legal_threat"],
-    terminal_outcomes: ["not_interested", "opt_out", "deal_dead"],
+    human_review_conditions: [
+      "negotiation_deadlock",
+      "legal_threat",
+      "insufficient_facts",
+      "authority_risk_unresolved",
+    ],
+    terminal_outcomes: ["not_interested", "opt_out", "deal_dead", "proposal_rejected"],
     seller_text_may_advance: true,
   }),
 
   [S.FORMAL_CONTRACT]: stageDef({
     stage_id: S.FORMAL_CONTRACT,
     display_name: "Formal Contract",
-    entry_requirements: ["proposal_accepted || operator_contract_start"],
+    // Requires a real proposal outcome + contract intent — not verbal interest alone.
+    entry_requirements: [
+      "proposal_accepted || seller_accepted_verbally || operator_contract_start",
+      "contract_intent",
+    ],
     supported_facts: [
+      "contract_ready",
+      "contract_requested",
+      "email_required",
+      "contract_sent",
+      "partially_signed",
+      "signed",
+      "waiting_on_spouse",
+      "waiting_on_co_owner",
+      "llc_authority",
+      "trust_authority",
+      "executor_authority",
+      "title_issue",
+      "probate_heirship",
+      "contract_declined",
+      "contract_expired",
+      "human_review_required",
       "signer_authority",
       "can_execute_alone",
       "additional_signers",
       "entity_type",
-      "contract_sent",
       "contract_executed",
     ],
-    required_facts: ["ownership_confirmed"],
-    optional_facts: ["signer_authority", "entity_type"],
-    completion_conditions: ["contract_executed === true"],
+    required_facts: [
+      "ownership_confirmed",
+      "proposal_accepted || seller_accepted_verbally || operator_contract_start",
+    ],
+    optional_facts: ["signer_authority", "entity_type", "email_required"],
+    completion_conditions: ["contract_executed === true || signed === true"],
+    stage_substates: [
+      "contract_ready",
+      "contract_requested",
+      "email_required",
+      "contract_sent",
+      "partially_signed",
+      "signed",
+      "waiting_on_spouse",
+      "waiting_on_co_owner",
+      "llc_authority",
+      "trust_authority",
+      "executor_authority",
+      "title_issue",
+      "probate_heirship",
+      "contract_declined",
+      "contract_expired",
+      "human_review",
+    ],
     allowed_next_stages: [S.DISPOSITION],
     forbidden_transitions: [S.OWNERSHIP_CHECK, S.INTEREST_PROPOSAL_CONFIRMATION],
     next_best_actions: [
@@ -371,6 +459,7 @@ export const LIFECYCLE_REGISTRY = freezeDeep({
       "send_template",
       "human_review",
       "schedule_followup",
+      "update_facts_only",
     ],
     reply_use_cases: ["contract_information_request", "close_handoff"],
     follow_up_policy: {
@@ -383,12 +472,20 @@ export const LIFECYCLE_REGISTRY = freezeDeep({
     timeout_policy: { silence_days: 2, on_timeout: "human_review" },
     human_review_conditions: [
       "probate_uncertainty",
+      "probate_heirship",
       "trust_llc_signer_uncertainty",
+      "llc_authority",
+      "trust_authority",
+      "executor_authority",
       "disputed_authority",
+      "title_issue",
       "contract_modification_request",
+      "waiting_on_spouse",
+      "waiting_on_co_owner",
     ],
-    terminal_outcomes: ["opt_out", "deal_dead"],
+    terminal_outcomes: ["opt_out", "deal_dead", "contract_declined", "contract_expired"],
     advance_sources: ["seller_text", "operator", "system", "authoritative_event"],
+    // Seller text may update substates/facts; must not invent contract_ready alone.
     seller_text_may_advance: true,
   }),
 
@@ -674,6 +771,271 @@ export function recommendStageFromFacts(facts = {}) {
   return { stage: S.OWNERSHIP_CHECK, terminal: null, reason: "default_stage_1" };
 }
 
+/**
+ * Stage 5 readiness — enthusiasm alone cannot open Actual Proposal.
+ * Returns substate + whether entry is allowed.
+ */
+export function evaluateStage5Readiness(facts = {}) {
+  const f = facts && typeof facts === "object" ? facts : {};
+  const missing = [];
+  if (f.ownership_confirmed !== true) missing.push("ownership_confirmed");
+  if (!(f.proposal_interest_confirmed === true || f.seller_requests_proposal === true)) {
+    missing.push("proposal_interest_confirmed");
+  }
+  const price_ok =
+    f.asking_price_known === true ||
+    f.asking_price_explicitly_unavailable === true ||
+    (f.asking_price && Number(f.asking_price.value || f.asking_price) > 0) ||
+    f.asking_price_provided === true;
+  if (!price_ok) missing.push("asking_price_known_or_unavailable");
+  const condition_ok =
+    f.property_condition_sufficiently_known === true ||
+    Boolean(f.condition_summary) ||
+    f.roof === true ||
+    f.hvac === true ||
+    Boolean(f.repairs);
+  if (!condition_ok) missing.push("property_condition_sufficiently_known");
+  const valuation_ok =
+    f.valuation_or_proposal_review_available === true ||
+    f.underwriting_ready === true ||
+    f.proposal_calculation_ready === true;
+  if (!valuation_ok) missing.push("valuation_or_proposal_review_available");
+  // Authority risks must be acknowledged (identified or none_known)
+  const authority_ok =
+    f.authority_risks_identified === true ||
+    f.authority_risks === "none" ||
+    f.can_execute_alone === true ||
+    f.additional_signers != null;
+  if (!authority_ok) missing.push("authority_risks_identified");
+
+  if (f.human_review_required === true || f.hostile === true) {
+    return {
+      entry_allowed: false,
+      substate: "human_review_required",
+      missing_facts: missing,
+      reason: "human_review_required",
+    };
+  }
+  if (f.proposal_rejected === true) {
+    return {
+      entry_allowed: false,
+      substate: "proposal_rejected",
+      missing_facts: [],
+      reason: "proposal_rejected",
+    };
+  }
+  if (missing.length) {
+    return {
+      entry_allowed: false,
+      substate: "insufficient_facts",
+      missing_facts: missing,
+      reason: "stage5_entry_requirements_unmet",
+    };
+  }
+  if (f.seller_accepted_verbally === true || f.proposal_accepted === true) {
+    return {
+      entry_allowed: true,
+      substate: "seller_accepted_verbally",
+      missing_facts: [],
+      reason: "proposal_accepted",
+    };
+  }
+  if (f.seller_countered === true || f.counter_offer) {
+    return {
+      entry_allowed: true,
+      substate: "seller_countered",
+      missing_facts: [],
+      reason: "seller_countered",
+    };
+  }
+  if (f.proposal_presented === true || f.proposal_sent === true) {
+    return {
+      entry_allowed: true,
+      substate: "proposal_presented",
+      missing_facts: [],
+      reason: "proposal_presented",
+    };
+  }
+  if (f.creative_terms_candidate === true) {
+    return {
+      entry_allowed: true,
+      substate: "creative_terms_candidate",
+      missing_facts: [],
+      reason: "creative_terms",
+    };
+  }
+  if (f.proposal_pending_review === true) {
+    return {
+      entry_allowed: true,
+      substate: "proposal_pending_review",
+      missing_facts: [],
+      reason: "pending_review",
+    };
+  }
+  return {
+    entry_allowed: true,
+    substate: "proposal_calculation_ready",
+    missing_facts: [],
+    reason: "calculation_ready",
+  };
+}
+
+/**
+ * Stage 6 readiness — contract_ready requires proposal outcome + intent.
+ * Seller text cannot fabricate solo execution when co-owners exist.
+ */
+export function evaluateStage6Readiness(facts = {}) {
+  const f = facts && typeof facts === "object" ? facts : {};
+  const missing = [];
+  const proposal_outcome =
+    f.proposal_accepted === true ||
+    f.seller_accepted_verbally === true ||
+    f.operator_contract_start === true;
+  if (!proposal_outcome) missing.push("proposal_accepted_or_contract_intent");
+  if (f.ownership_confirmed !== true) missing.push("ownership_confirmed");
+
+  if (f.contract_declined === true) {
+    return {
+      entry_allowed: false,
+      substate: "contract_declined",
+      missing_facts: [],
+      reason: "contract_declined",
+      can_execute_alone: false,
+    };
+  }
+  if (f.contract_expired === true) {
+    return {
+      entry_allowed: false,
+      substate: "contract_expired",
+      missing_facts: [],
+      reason: "contract_expired",
+      can_execute_alone: false,
+    };
+  }
+
+  // Authority complexity → human review, never assume solo execution
+  if (f.probate === true || f.probate_heirship === true || f.estate === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "probate_heirship",
+      missing_facts: missing,
+      reason: "executor_authority_review",
+      can_execute_alone: false,
+      human_review: true,
+    };
+  }
+  if (f.entity_type === "llc" || f.llc_authority === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "llc_authority",
+      missing_facts: missing,
+      reason: "llc_signer_required",
+      can_execute_alone: false,
+      human_review: true,
+    };
+  }
+  if (f.entity_type === "trust" || f.trust_authority === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "trust_authority",
+      missing_facts: missing,
+      reason: "trust_authority_required",
+      can_execute_alone: false,
+      human_review: true,
+    };
+  }
+  if (f.spouse_co_owner === true || f.waiting_on_spouse === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "waiting_on_spouse",
+      missing_facts: missing,
+      reason: "spouse_signature_required",
+      can_execute_alone: false,
+    };
+  }
+  if (f.additional_signers === true || f.waiting_on_co_owner === true || f.co_owner === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "waiting_on_co_owner",
+      missing_facts: missing,
+      reason: "co_owner_signature_required",
+      can_execute_alone: false,
+    };
+  }
+  if (f.title_issue === true) {
+    return {
+      entry_allowed: proposal_outcome,
+      substate: "title_issue",
+      missing_facts: missing,
+      reason: "title_issue",
+      can_execute_alone: false,
+      human_review: true,
+    };
+  }
+  if (missing.length) {
+    return {
+      entry_allowed: false,
+      substate: "human_review",
+      missing_facts: missing,
+      reason: "stage6_entry_requirements_unmet",
+      // Enthusiasm ("send paperwork") without proposal outcome ≠ contract_ready
+      can_execute_alone: false,
+    };
+  }
+  if (f.signed === true || f.contract_executed === true) {
+    return {
+      entry_allowed: true,
+      substate: "signed",
+      missing_facts: [],
+      reason: "contract_executed",
+      can_execute_alone: f.can_execute_alone === true,
+    };
+  }
+  if (f.partially_signed === true) {
+    return {
+      entry_allowed: true,
+      substate: "partially_signed",
+      missing_facts: [],
+      reason: "partially_signed",
+      can_execute_alone: false,
+    };
+  }
+  if (f.contract_sent === true) {
+    return {
+      entry_allowed: true,
+      substate: "contract_sent",
+      missing_facts: [],
+      reason: "contract_sent",
+      can_execute_alone: f.can_execute_alone === true,
+    };
+  }
+  if (f.email_required === true) {
+    return {
+      entry_allowed: true,
+      substate: "email_required",
+      missing_facts: [],
+      reason: "email_required",
+      can_execute_alone: f.can_execute_alone === true,
+    };
+  }
+  if (f.contract_requested === true) {
+    return {
+      entry_allowed: true,
+      substate: "contract_requested",
+      missing_facts: [],
+      reason: "contract_requested",
+      can_execute_alone: f.can_execute_alone !== false,
+    };
+  }
+  return {
+    entry_allowed: true,
+    substate: "contract_ready",
+    missing_facts: [],
+    reason: "contract_ready",
+    can_execute_alone: f.can_execute_alone === true && f.additional_signers !== true,
+  };
+}
+
 export default {
   ACQUISITION_BRAIN_VERSION,
   ACQUISITION_LIFECYCLE_STAGES,
@@ -686,4 +1048,6 @@ export default {
   isTransactionGatedStage,
   canAdvanceLifecycleStage,
   recommendStageFromFacts,
+  evaluateStage5Readiness,
+  evaluateStage6Readiness,
 };
