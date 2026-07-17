@@ -1263,6 +1263,29 @@ export function evaluateContactWindow(row, deps = {}) {
   const current_minutes = local_parts.minutes_of_day;
 
   if (current_minutes < LOCAL_SEND_START || current_minutes >= LOCAL_SEND_END) {
+    // Next eligible: next local 08:00 (today if before open, else tomorrow).
+    let next_open_at = null;
+    try {
+      const probe = new Date(current_time.getTime());
+      // Walk forward in 15-minute steps until local time hits the open minute.
+      for (let i = 0; i < 96 * 2; i += 1) {
+        probe.setUTCMinutes(probe.getUTCMinutes() + 15);
+        const p = buildDateParts(probe, resolved_timezone);
+        if (p.minutes_of_day === LOCAL_SEND_START ||
+            (p.minutes_of_day > LOCAL_SEND_START && p.minutes_of_day < LOCAL_SEND_START + 15)) {
+          // Snap to start of that local hour block approximately via ISO
+          next_open_at = new Date(probe.getTime());
+          // refine: back up to nearest start boundary
+          const overshoot = p.minutes_of_day - LOCAL_SEND_START;
+          if (overshoot > 0) next_open_at = new Date(next_open_at.getTime() - overshoot * 60_000);
+          next_open_at = next_open_at.toISOString();
+          break;
+        }
+      }
+    } catch {
+      next_open_at = null;
+    }
+
     return {
       allowed: false,
       reason: "outside_local_send_window",
@@ -1271,6 +1294,8 @@ export function evaluateContactWindow(row, deps = {}) {
       current_minutes,
       start_minutes: LOCAL_SEND_START,
       end_minutes: LOCAL_SEND_END,
+      next_open_at,
+      next_eligible_at: next_open_at,
     };
   }
 
@@ -1909,6 +1934,41 @@ export async function finalizeSendQueueSuccess(row, lock_token, send_result, opt
   }
 
   const now = options.now || nowIso();
+
+  // Preserve immutable prior failures (e.g. 21610) under provider_attempts while
+  // aggregate queue status becomes sent/delivered after an authorized success.
+  let metadata = {
+    ...(normalized.metadata && typeof normalized.metadata === "object"
+      ? normalized.metadata
+      : {}),
+  };
+  const prior_failed =
+    ["failed", "failed_transport"].includes(lower(normalized.queue_status)) ||
+    Boolean(metadata.provider_error) ||
+    Boolean(normalized.failed_reason);
+  if (prior_failed || options.authorized_retry === true) {
+    try {
+      const { buildSuccessfulRetryAggregatePatch } = await import(
+        "@/lib/domain/queue/provider-attempt-history.js"
+      );
+      const attempt_patch = buildSuccessfulRetryAggregatePatch({
+        previous_status: normalized.queue_status,
+        previous_failed_reason: normalized.failed_reason,
+        previous_metadata: metadata,
+        success_sid: provider_message_id,
+        success_at: now,
+        authorized_retry_at: options.authorized_retry_at || now,
+      });
+      metadata = {
+        ...metadata,
+        ...attempt_patch.metadata_patch,
+        authorized_retry: options.authorized_retry === true,
+      };
+    } catch {
+      // best-effort; never block transport success on history bookkeeping
+    }
+  }
+
   const payload = {
     queue_status: "sent",
     sent_at: now,
@@ -1922,6 +1982,7 @@ export async function finalizeSendQueueSuccess(row, lock_token, send_result, opt
     failed_reason: null,
     from_phone_number: normalized.from_phone_number,
     textgrid_number_id: normalized.textgrid_number_id,
+    metadata,
   };
 
   const updated_row = await updateSendQueueRowWithLock(
@@ -2477,20 +2538,30 @@ export async function releaseSkippedQueueRow(row, lock_token, reason, options = 
   const normalized = normalizeSendQueueRow(row);
   const now = options.now || nowIso();
   const skip_reason = clean(reason) || "skipped";
+  const release_status = clean(options.queue_status) || "queued";
+  const metadata_patch =
+    options.metadata_patch && typeof options.metadata_patch === "object"
+      ? options.metadata_patch
+      : {};
 
   const payload = {
-    queue_status: "queued",
+    queue_status: release_status,
     is_locked: false,
     locked_at: null,
     lock_token: null,
     updated_at: now,
     metadata: {
       ...normalized.metadata,
+      ...metadata_patch,
       skip_reason,
-      final_queue_status: "queued",
+      final_queue_status: release_status,
       finalized_at: now,
     },
   };
+  if (metadata_patch.next_eligible_at) {
+    payload.scheduled_for = metadata_patch.next_eligible_at;
+    payload.scheduled_for_utc = metadata_patch.next_eligible_at;
+  }
 
   const updated_row = await updateSendQueueRowWithLock(
     normalized.id,

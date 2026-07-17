@@ -153,6 +153,30 @@ export const LOCAL_TEMPLATE_CANDIDATES = Object.freeze([
     text:
       "Checking back on {{property_address}}. Would you be open to hearing an offer if it made sense?",
   }),
+  // Stage 3 — Asking price (first reply after ownership + interest confirmed).
+  // Proposal-safe wording: no offer/sell/buyer/purchase/cash.
+  createLocalTemplate({
+    item_id: "local-template:seller_asking_price:v1",
+    use_case: "seller_asking_price",
+    variant_group: "Stage 3 — Asking Price",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    tone: "Warm",
+    paired_with_agent_type: "Warm Professional",
+    text: "Got it. What price would you have in mind for the property?",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:seller_asking_price:v1:es",
+    use_case: "seller_asking_price",
+    variant_group: "Stage 3 — Asking Price",
+    sequence_position: "V1",
+    category_secondary: "Negotiation",
+    tone: "Warm",
+    language: "Spanish",
+    paired_with_agent_type: "Warm Professional",
+    text: "Entendido. ¿Qué precio tendría en mente para la propiedad?",
+    english_translation: "Got it. What price would you have in mind for the property?",
+  }),
   createLocalTemplate({
     item_id: "local-template:follow_up:asking-price:v1",
     use_case: "asking_price_follow_up",

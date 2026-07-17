@@ -455,6 +455,7 @@ export async function processSellerInboundMessage({
   inboundFrom = "",
   inboundTo = "",
   inboundEventId = null,
+  inboundReceivedAt = null,
   providerMessageId = null,
   stageBefore = null,
   autoReplyMode = null,
@@ -504,9 +505,17 @@ export async function processSellerInboundMessage({
   const cancellation_client_available = Boolean(supabaseClient) || hasSupabaseConfig();
   if (!writes_suppressed && cancellation_client_available && (threadKey || inboundFrom)) {
     try {
+      // Cancel pending follow-ups and auto-replies superseded by this inbound.
+      // Auto-reply rows get reason superseded_by_newer_inbound (per-row in canceler).
       followup_cancellation = await runtimeDeps.cancelPendingFollowUpsForThread({
         thread_key: threadKey || inboundFrom,
         inbound_event_id: inboundEventId,
+        inbound_received_at:
+          inboundReceivedAt ||
+          context?.inbound_received_at ||
+          context?.received_at ||
+          null,
+        reason: "cancelled_followup_on_inbound_reply",
         supabase,
       });
     } catch (cancel_error) {

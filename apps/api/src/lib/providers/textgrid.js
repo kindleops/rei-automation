@@ -335,9 +335,19 @@ export function normalizePhone(value) {
   return normalizeUsPhoneToE164(value);
 }
 
+/**
+ * Canonical inbound phone normalization: always E.164 (+1XXXXXXXXXX for US).
+ * Never return bare 10-digit forms — those collide with archived non-E.164
+ * thread aliases (e.g. 6128072000 vs +16128072000).
+ */
 export function normalizeInboundTextgridPhone(value) {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (value == null || value === "") return null;
+  const e164 = normalizePhone(value);
+  if (e164) return e164;
+  const digits = String(value).replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -147,6 +147,9 @@ export async function cancelSupabasePendingOutbound(
     reason = "compliance_suppression",
     suppression_reason = null,
     inbound_event_id = null,
+    /** ISO timestamp of the inbound that is taking over; used to prevent
+     *  a slow older inbound handler from cancelling a newer inbound's reply. */
+    inbound_received_at = null,
     cancelled_by = "compliance_guard",
     now = new Date().toISOString(),
     dry_run = false,
@@ -202,10 +205,37 @@ export async function cancelSupabasePendingOutbound(
     return { ok: false, cancelled: 0, reason: error?.message || "fetch_failed", scope_key };
   }
 
+  const inbound_ts = inbound_received_at ? Date.parse(inbound_received_at) : NaN;
+
   const eligible = candidates.filter((row) => {
     if (TERMINAL_QUEUE_OUTCOMES.has(lower(row.queue_status))) return false;
     const row_type = lower(row.type || row.message_type);
     if (type_filter && !type_filter.has(row_type)) return false;
+
+    const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const row_inbound =
+      clean(meta.inbound_message_event_id) ||
+      clean(meta.source_inbound_event_id) ||
+      null;
+
+    // Never cancel a row owned by the same inbound event that is cancelling.
+    if (inbound_event_id && row_inbound && row_inbound === clean(inbound_event_id)) {
+      return false;
+    }
+
+    // Auto-reply supersession: only cancel rows created before this inbound
+    // arrived. A slow older inbound must not cancel a newer inbound's reply.
+    if (
+      policy === CANCELLATION_POLICIES.INBOUND_TAKEOVER &&
+      (row_type === "auto_reply" || row_type === "autopilot" || meta.source === "auto_reply") &&
+      Number.isFinite(inbound_ts)
+    ) {
+      const row_created = Date.parse(row.created_at || "");
+      if (Number.isFinite(row_created) && row_created >= inbound_ts) {
+        return false;
+      }
+    }
+
     return true;
   });
 
@@ -241,6 +271,17 @@ export async function cancelSupabasePendingOutbound(
       continue;
     }
 
+    // Inbound takeover: pending auto-replies are superseded by the newer inbound;
+    // pure no-reply follow-ups keep the follow-up cancellation reason.
+    const row_type = lower(row.type || row.message_type || meta.type || "");
+    let row_reason = reason;
+    if (
+      policy === CANCELLATION_POLICIES.INBOUND_TAKEOVER &&
+      (row_type === "auto_reply" || row_type === "autopilot" || meta.source === "auto_reply")
+    ) {
+      row_reason = "superseded_by_newer_inbound";
+    }
+
     const { error: update_error } = await supabase
       .from(SEND_QUEUE_TABLE)
       .update({
@@ -251,9 +292,9 @@ export async function cancelSupabasePendingOutbound(
         updated_at: now,
         metadata: {
           ...meta,
-          skip_reason: reason,
-          cancellation_reason: reason,
-          suppression_reason: suppression_reason || reason,
+          skip_reason: row_reason,
+          cancellation_reason: row_reason,
+          suppression_reason: suppression_reason || row_reason,
           cancelled_by,
           cancelled_at: now,
           compliance_cancelled_at: suppression_at,
@@ -261,6 +302,9 @@ export async function cancelSupabasePendingOutbound(
           compliance_cancel_idempotency_key: idempotency_key,
           finalized_at: now,
           final_queue_status: "cancelled",
+          ...(row_reason === "superseded_by_newer_inbound"
+            ? { superseded_by_newer_inbound: true }
+            : {}),
         },
       })
       .eq("id", row.id)

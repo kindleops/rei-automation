@@ -1443,17 +1443,33 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     });
 
     if (!contact_window.allowed && !manual_inbox_send) {
-      await releaseSkippedQueueRow(queue_row, lock_token, contact_window.reason, {
-        ...deps,
-        now,
-      });
+      const { buildContactWindowDeferral } = await import(
+        "@/lib/domain/queue/contact-window-deferral.js"
+      );
+      const deferral = buildContactWindowDeferral(contact_window, now);
+      await releaseSkippedQueueRow(
+        queue_row,
+        lock_token,
+        deferral.reason || contact_window.reason,
+        {
+          ...deps,
+          now,
+          queue_status: deferral.queue_status || "scheduled",
+          metadata_patch: {
+            ...(deferral.metadata || {}),
+            next_eligible_at: deferral.next_eligible_at,
+            deferred_contact_window: true,
+          },
+        }
+      );
 
       return {
         ok: true,
         skipped: true,
-        reason: "outside_contact_window",
-        queue_status: "queued",
-        final_queue_status: "queued",
+        reason: deferral.reason || "deferred_contact_window",
+        queue_status: deferral.queue_status || "scheduled",
+        final_queue_status: deferral.queue_status || "scheduled",
+        next_eligible_at: deferral.next_eligible_at,
         queue_row_id,
         queue_item_id: queue_row_id,
       };
