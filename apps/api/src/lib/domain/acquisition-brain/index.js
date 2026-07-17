@@ -87,3 +87,13 @@ export {
   emitShadowBurstPlan,
   evaluateAndEmitShadowBurst,
 } from "./shadow-burst-timing.js";
+
+export {
+  SHADOW_FOLLOWUP_EVENT,
+  FOLLOWUP_PLANNER_VERSION,
+  FOLLOWUP_POLICY_REGISTRY,
+  resolveFollowupPolicy,
+  planShadowFollowup,
+  cancelShadowFollowup,
+  proveStage1FollowupShadow,
+} from "./shadow-followup-planner.js";
