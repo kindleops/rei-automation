@@ -36,6 +36,23 @@ export {
   FACT_CONTRACT_VERSION,
   CLAIM_STATUS,
   FACT_TYPES,
+  FACT_TYPE_SET,
+  PRECEDENCE_BANDS,
+  toJsonSafe,
+  createProvenancedFact,
+  factPrecedenceScore,
+  applyHumanOverride,
+  mergeFactIntoState,
+  resolveActiveFacts,
+  sortFactsDeterministically,
+  buildClassifierResultContract,
+  applyAuthoritativeEvent,
+} from "./fact-provenance-contract.js";
+
+export {
+  FACT_CONTRACT_VERSION,
+  CLAIM_STATUS,
+  FACT_TYPES,
   createProvenancedFact,
   factPrecedenceScore,
   mergeFactIntoState,
