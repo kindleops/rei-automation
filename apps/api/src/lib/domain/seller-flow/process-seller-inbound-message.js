@@ -1235,6 +1235,7 @@ export async function processSellerInboundMessage({
   // transport-authoritative. Failures must not break inbound processing.
   let acquisition_brain_shadow = null;
   let acquisition_brain_shadow_fact_state = null;
+  let acquisition_brain_shadow_burst = null;
   try {
     const {
       evaluateAcquisitionBrainShadow,
@@ -1245,6 +1246,10 @@ export async function processSellerInboundMessage({
       evaluateShadowWithFactState,
       emitShadowFactStateEvents,
     } = await import("@/lib/domain/acquisition-brain/shadow-fact-state.js");
+    const {
+      evaluateAndEmitShadowBurst,
+      resolveShadowTimezone,
+    } = await import("@/lib/domain/acquisition-brain/shadow-burst-timing.js");
 
     const thread_for_shadow = threadKey || inboundFrom;
     let prior_facts = [];
@@ -1300,6 +1305,51 @@ export async function processSellerInboundMessage({
       inbound_timestamp: new Date().toISOString(),
       legacy_decision: legacy_snapshot,
     });
+
+    // Burst plan after fact-state + NBA (shadow only; fail-open)
+    try {
+      const inbound_ts =
+        inboundReceivedAt ||
+        context?.inbound_received_at ||
+        context?.received_at ||
+        new Date().toISOString();
+      const tz_from_override = timezoneOverride || contactWindowOverride?.timezone || null;
+      const tz_merged = resolveShadowTimezone({
+        property_timezone:
+          tz_from_override ||
+          context?.summary?.timezone ||
+          context?.summary?.market_timezone ||
+          context?.property?.timezone ||
+          null,
+        campaign_timezone: context?.summary?.campaign_timezone || null,
+        sender_timezone: context?.summary?.sender_timezone || null,
+        thread_timezone: context?.summary?.thread_timezone || null,
+      });
+      acquisition_brain_shadow_burst = await evaluateAndEmitShadowBurst({
+        thread_key: thread_for_shadow,
+        current_message: {
+          id: inboundEventId || providerMessageId,
+          message,
+          classification,
+          timestamp: inbound_ts,
+        },
+        facts_before: prior_facts,
+        now: new Date(),
+        timezone_context: tz_merged,
+        supabase: cancellation_client_available ? supabase : null,
+        emitAutomationEvent:
+          !writes_suppressed && cancellation_client_available
+            ? runtimeDeps.emitAutomationEvent
+            : null,
+        emit: !writes_suppressed && cancellation_client_available,
+      });
+    } catch (burst_error) {
+      runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_BURST_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        inbound_event_id: inboundEventId,
+        error: burst_error?.message || "burst_failed",
+      });
+    }
 
     if (!writes_suppressed && cancellation_client_available) {
       await emitShadowFactStateEvents(acquisition_brain_shadow_fact_state, {
@@ -1396,6 +1446,7 @@ export async function processSellerInboundMessage({
     deal_persistence,
     acquisition_brain_shadow,
     acquisition_brain_shadow_fact_state,
+    acquisition_brain_shadow_burst,
   };
 }
 

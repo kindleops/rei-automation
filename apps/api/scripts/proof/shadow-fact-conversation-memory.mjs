@@ -16,7 +16,16 @@ import {
   resolveActiveFacts,
   FACT_TYPES,
 } from "../../src/lib/domain/acquisition-brain/fact-provenance-contract.js";
-import { planShadowBurst } from "../../src/lib/domain/acquisition-brain/shadow-burst-timing.js";
+import {
+  planAllShadowBursts,
+  resolveShadowTimezone,
+} from "../../src/lib/domain/acquisition-brain/shadow-burst-timing.js";
+
+/**
+ * READ-ONLY proof. Tables/methods:
+ * - message_events: select (thread_key; inbound rows by thread)
+ * No insert/update/delete. Service role is used for select only.
+ */
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -291,31 +300,71 @@ async function main() {
     if (sequence.length >= 1) {
       metrics.bursts.eligible_threads += 1;
       const b0 = Date.now();
-      const burst = planShadowBurst({
+      const all = planAllShadowBursts({
         thread_key: thread,
-        messages: sequence.slice(0, Math.min(8, sequence.length)),
-        now: new Date("2026-07-17T15:00:00.000Z"),
+        messages: sequence,
+        now: new Date(sequence[sequence.length - 1].timestamp || Date.now()),
+        timezone_context: resolveShadowTimezone({ operational_fallback: "America/Chicago" }),
       });
       metrics.bursts.compute_ms.push(Date.now() - b0);
-      if (burst.ok) {
-        metrics.bursts.detected_bursts += 1;
-        metrics.bursts.messages_consolidated += burst.plan.inbound_message_ids.length;
-        if (burst.plan.inbound_message_ids.length >= 2) metrics.bursts.multi_msg_bursts += 1;
-        else metrics.bursts.single_msg_bursts += 1;
-        metrics.bursts.plans_superseded += (burst.plan.superseded_reply_plans || []).length;
-        if (burst.plan.timing_policy === "terminal_no_reply") metrics.bursts.opt_out_dominated += 1;
-        if (burst.plan.timing_policy === "deferred_contact_window") metrics.bursts.deferred_window += 1;
-        if (burst.plan.selected_delay_ms != null) metrics.bursts.timing.push(burst.plan.selected_delay_ms);
-        if (metrics.bursts.sample.length < 25) {
-          metrics.bursts.sample.push({
-            thread,
-            nba: burst.plan.final_proposed_nba,
-            msgs: burst.plan.inbound_message_ids.length,
-            timing: burst.plan.timing_policy,
-            delay_ms: burst.plan.selected_delay_ms,
-            superseded: (burst.plan.superseded_reply_plans || []).length,
-            next_missing: burst.plan.next_missing_fact,
-          });
+      if (all.ok) {
+        const burst_count = all.bursts.length;
+        metrics.bursts.detected_bursts += burst_count;
+        metrics.bursts.bursts_per_thread = metrics.bursts.bursts_per_thread || [];
+        metrics.bursts.bursts_per_thread.push(burst_count);
+        let gaps = metrics.bursts.gaps || [];
+        for (const b of all.bursts) {
+          const n_msgs = b.ordered_message_ids.length;
+          metrics.bursts.messages_consolidated += n_msgs;
+          if (n_msgs >= 2) metrics.bursts.multi_msg_bursts += 1;
+          else metrics.bursts.single_msg_bursts += 1;
+          for (let i = 1; i < b.ordered_timestamps.length; i += 1) {
+            const gap =
+              Date.parse(b.ordered_timestamps[i]) - Date.parse(b.ordered_timestamps[i - 1]);
+            if (Number.isFinite(gap)) gaps.push(gap);
+          }
+          if (b.status === "terminal" || b.terminal_kind) {
+            metrics.bursts.terminal = (metrics.bursts.terminal || 0) + 1;
+          }
+        }
+        metrics.bursts.gaps = gaps;
+        for (const planned of all.plans) {
+          const p = planned.plan;
+          metrics.bursts.plans_superseded += (p.superseded_reply_plans || []).length;
+          if (p.plan_status === "provisional") {
+            metrics.bursts.provisional = (metrics.bursts.provisional || 0) + 1;
+          } else {
+            metrics.bursts.final = (metrics.bursts.final || 0) + 1;
+          }
+          if (p.timing_policy === "terminal_no_reply") metrics.bursts.opt_out_dominated += 1;
+          if (p.timing_policy === "deferred_contact_window") metrics.bursts.deferred_window += 1;
+          if (p.timing_policy === "complex_authority" || p.final_proposed_nba === "human_review") {
+            metrics.bursts.authority = (metrics.bursts.authority || 0) + 1;
+          }
+          if (p.selected_reply_delay_ms != null) metrics.bursts.timing.push(p.selected_reply_delay_ms);
+          if (p.timezone_resolution?.source) {
+            metrics.bursts.tz_sources = metrics.bursts.tz_sources || {};
+            const src = p.timezone_resolution.source;
+            metrics.bursts.tz_sources[src] = (metrics.bursts.tz_sources[src] || 0) + 1;
+          }
+          if (metrics.bursts.sample.length < 25) {
+            const first = p.first_message_at;
+            const last = p.latest_message_at;
+            metrics.bursts.sample.push({
+              thread,
+              burst_id: p.burst_id,
+              nba: p.final_proposed_nba,
+              msgs: p.inbound_message_ids?.length,
+              first_message_at: first,
+              latest_message_at: last,
+              gap_ms: first && last ? Date.parse(last) - Date.parse(first) : 0,
+              timing: p.timing_policy,
+              plan_status: p.plan_status,
+              planned_send_at: p.final_planned_send_at,
+              delay_ms: p.selected_reply_delay_ms,
+              superseded: (p.superseded_reply_plans || []).length,
+            });
+          }
         }
       }
     }
@@ -370,7 +419,15 @@ async function main() {
     top_25_gaps: top_gaps,
     burst_replay: {
       eligible_threads: metrics.bursts.eligible_threads,
-      detected_bursts: metrics.bursts.detected_bursts,
+      true_bursts_detected: metrics.bursts.detected_bursts,
+      bursts_per_thread_avg:
+        (metrics.bursts.bursts_per_thread || []).length
+          ? metrics.bursts.bursts_per_thread.reduce((a, b) => a + b, 0) /
+            metrics.bursts.bursts_per_thread.length
+          : 0,
+      one_burst_per_thread_assumption_false:
+        (metrics.bursts.bursts_per_thread || []).some((n) => n !== 1) ||
+        metrics.bursts.detected_bursts !== metrics.bursts.eligible_threads,
       messages_consolidated: metrics.bursts.messages_consolidated,
       average_messages_per_burst:
         metrics.bursts.detected_bursts
@@ -378,14 +435,26 @@ async function main() {
           : 0,
       multi_message_bursts: metrics.bursts.multi_msg_bursts,
       single_message_bursts: metrics.bursts.single_msg_bursts,
+      median_gap_within_burst_ms: (() => {
+        const g = [...(metrics.bursts.gaps || [])].sort((a, b) => a - b);
+        if (!g.length) return null;
+        return g[Math.floor(g.length / 2)];
+      })(),
+      p95_gap_within_burst_ms: p95(metrics.bursts.gaps || []),
+      provisional_plans: metrics.bursts.provisional || 0,
+      final_plans: metrics.bursts.final || 0,
       reply_plans_superseded: metrics.bursts.plans_superseded,
+      terminal_bursts: metrics.bursts.terminal || 0,
+      authority_review_bursts: metrics.bursts.authority || 0,
       opt_out_dominated: metrics.bursts.opt_out_dominated,
       contact_window_deferrals: metrics.bursts.deferred_window,
+      timezone_source_distribution: metrics.bursts.tz_sources || {},
       p95_compute_latency_ms: p95(metrics.bursts.compute_ms),
       timing_sample_ms: metrics.bursts.timing.slice(0, 20),
       representative_decisions: metrics.bursts.sample,
       queue_writes: 0,
       provider_calls: 0,
+      duplicate_events: 0,
     },
     safety: {
       queue_writes: 0,
