@@ -31,3 +31,15 @@ export {
   evaluateAcquisitionBrainShadow,
   emitAcquisitionBrainShadowDecision,
 } from "./shadow-inbound-decision.js";
+
+export {
+  FACT_CONTRACT_VERSION,
+  CLAIM_STATUS,
+  FACT_TYPES,
+  createProvenancedFact,
+  factPrecedenceScore,
+  mergeFactIntoState,
+  buildClassifierResultContract,
+  resolveActiveFacts,
+} from "./fact-provenance-contract.js";
+
