@@ -1,4 +1,4 @@
-// ─── acquisition-brain public surface (PR A) ───────────────────────────────
+// ─── acquisition-brain public surface ──────────────────────────────────────
 export {
   ACQUISITION_BRAIN_VERSION,
   ACQUISITION_LIFECYCLE_STAGES,
@@ -50,13 +50,11 @@ export {
 } from "./fact-provenance-contract.js";
 
 export {
-  FACT_CONTRACT_VERSION,
-  CLAIM_STATUS,
-  FACT_TYPES,
-  createProvenancedFact,
-  factPrecedenceScore,
-  mergeFactIntoState,
-  buildClassifierResultContract,
-  resolveActiveFacts,
-} from "./fact-provenance-contract.js";
-
+  SHADOW_FACT_STATE_EVENT,
+  SHADOW_FACT_MAX_HISTORY,
+  loadPriorShadowFacts,
+  mapFactsToLifecycleGaps,
+  buildShadowFactState,
+  evaluateShadowWithFactState,
+  emitShadowFactStateEvents,
+} from "./shadow-fact-state.js";
