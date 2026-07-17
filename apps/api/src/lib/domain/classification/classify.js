@@ -1250,6 +1250,9 @@ const OBJECTION_MAP = [
     phrases: [
       // English
       "what's your offer", "what is your offer", "what's the offer",
+      "what's the proposal", "what is the proposal", "what's your proposal",
+      "what is your proposal", "send proposal", "send me a proposal",
+      "send me the proposal", "send a proposal", "the proposal",
       "send offer", "send me an offer", "send me the offer",
       "send me a number", "send me the number", "what's the number",
       "how much can you pay", "what can you pay", "what will you pay",
@@ -3493,6 +3496,13 @@ function resolveIntents(
       "what are you offering",
       "what's your offer",
       "what is your offer",
+      "what's the proposal",
+      "what is the proposal",
+      "what's your proposal",
+      "what is your proposal",
+      "send me a proposal",
+      "send me the proposal",
+      "send a proposal",
       "send me an offer",
       "send me offer",
       "make an offer",

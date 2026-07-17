@@ -6,6 +6,7 @@ import { classify } from "@/lib/domain/classification/classify.js";
 import { syncClassifiedInboxThreadState } from "@/lib/supabase/sms-engine.js";
 import { resolveRoute } from "@/lib/domain/routing/resolve-route.js";
 import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
+import { resolveCanonicalInboundThreadKey } from "@/lib/domain/inbox/resolve-canonical-inbound-thread.js";
 import { getPodioRetryAfterSeconds, isPodioRateLimitError } from "@/lib/providers/podio.js";
 import { logInboundMessageEvent } from "@/lib/domain/events/log-inbound-message-event.js";
 import { updateBrainAfterInbound } from "@/lib/domain/brain/update-brain-after-inbound.js";
@@ -847,11 +848,60 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     }
 
     inbound_from = runtimeDeps.normalizeInboundTextgridPhone(extracted.from);
+    // Force E.164: never leave bare 10-digit forms that collide with archived aliases.
+    if (inbound_from && !String(inbound_from).startsWith("+") && /^\d{10}$/.test(String(inbound_from))) {
+      inbound_from = `+1${inbound_from}`;
+    }
+    // Resolve active E.164 thread; archived non-E.164 aliases redirect only.
+    try {
+      const supabase_for_thread = runtimeDeps.getSupabaseClient?.();
+      if (supabase_for_thread && inbound_from) {
+        const digits = String(inbound_from).replace(/\D/g, "");
+        const bare10 =
+          digits.length === 11 && digits.startsWith("1")
+            ? digits.slice(1)
+            : digits.length === 10
+              ? digits
+              : null;
+        const keys = [...new Set([inbound_from, bare10, extracted.from].filter(Boolean))];
+        const { data: thread_rows } = await supabase_for_thread
+          .from("inbox_thread_state")
+          .select("id,thread_key,is_archived,metadata")
+          .in("thread_key", keys)
+          .limit(10);
+        const resolved = resolveCanonicalInboundThreadKey({
+          inbound_from,
+          threads: thread_rows || [],
+        });
+        if (resolved?.thread_key) {
+          if (resolved.thread_key !== inbound_from) {
+            safeInfo("textgrid.inbound_thread_alias_redirect", {
+              message_id: extracted.message_id,
+              from_raw: extracted.from,
+              from_normalized: inbound_from,
+              canonical_thread_key: resolved.thread_key,
+              resolved_from: resolved.resolved_from,
+              retired_alias: resolved.retired_alias || null,
+            });
+          }
+          inbound_from = resolved.thread_key;
+        }
+      }
+    } catch (thread_resolve_error) {
+      safeWarn("textgrid.inbound_canonical_thread_resolve_failed", {
+        message_id: extracted.message_id,
+        inbound_from,
+        error: thread_resolve_error?.message || "thread_resolve_failed",
+      });
+    }
     if (inbound_debug_stage === "after_normalize_from") {
-      return { ok: true, stage: "after_normalize_from" };
+      return { ok: true, stage: "after_normalize_from", inbound_from };
     }
 
     inbound_to = runtimeDeps.normalizeInboundTextgridPhone(extracted.to);
+    if (inbound_to && !String(inbound_to).startsWith("+") && /^\d{10}$/.test(String(inbound_to))) {
+      inbound_to = `+1${inbound_to}`;
+    }
     if (inbound_debug_stage === "after_normalize_to") {
       return { ok: true, stage: "after_normalize_to" };
     }
@@ -1595,6 +1645,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         inboundFrom: inbound_from,
         inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
         inboundEventId: inbound_message_event_id || extracted.message_id,
+        inboundReceivedAt:
+          extracted.received_at || payload?.http_received_at || new Date().toISOString(),
         providerMessageId: extracted.message_id,
         stageBefore: stage_before,
         autoReplyMode: auto_reply_mode_final,

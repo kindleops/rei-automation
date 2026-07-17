@@ -322,9 +322,13 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
  * conversation resumed. Same terminal semantics as the gap-recovery sweeper
  * (queue_status=cancelled + skip_reason), just synchronous.
  */
+/** Pending auto-replies cancelled because a newer inbound superseded them. */
+export const SUPERSEDED_BY_NEWER_INBOUND = "superseded_by_newer_inbound";
+
 export async function cancelPendingFollowUpsForThread({
   thread_key,
   inbound_event_id = null,
+  inbound_received_at = null,
   reason = "cancelled_followup_on_inbound_reply",
   now = new Date().toISOString(),
   supabase = defaultSupabase,
@@ -344,6 +348,7 @@ export async function cancelPendingFollowUpsForThread({
       policy: CANCELLATION_POLICIES.INBOUND_TAKEOVER,
       reason,
       inbound_event_id,
+      inbound_received_at,
       cancelled_by: "inbound_takeover",
       now,
     },

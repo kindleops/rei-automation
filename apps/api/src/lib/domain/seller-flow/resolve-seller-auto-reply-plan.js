@@ -46,8 +46,12 @@ const LEGACY_STAGE_ALIASES = Object.freeze({
   [SELLER_FLOW_STAGES.WHO_IS_THIS]: "info_source_explanation",
 });
 
+function clean(value) {
+  return String(value ?? "").trim();
+}
+
 function normalizeCurrentStage(stage = null) {
-  const value = String(stage ?? "").trim().toLowerCase();
+  const value = clean(stage).toLowerCase();
   if (!value) return null;
   if (["ownership confirmation", "ownership_check", "s1"].includes(value)) {
     return SELLER_FLOW_STAGES.OWNERSHIP_CHECK;
@@ -72,13 +76,46 @@ function toLegacyStageName(stage, intent = null) {
 }
 
 export function normalizeSellerInboundIntent(input) {
-  const text = String(input?.message_body || "").toLowerCase().trim();
+  const text = String(input?.message_body || input?.message || "").toLowerCase().trim();
   const classification = input?.classification || {};
-  
+  const classified_primary = clean(
+    classification.primary_intent || classification.source || input?.intent || ""
+  ).toLowerCase();
+
+  // Classification-authoritative intents when body is absent (plan unit tests)
+  // or when primary intent already captured a stronger Stage-3 signal.
+  if (!text && classified_primary) {
+    return classified_primary === "unclear" ? "unclear" : classified_primary;
+  }
   if (!text) return "unclear";
 
   const isMatch = (words) => words.some((w) => text.includes(w));
   const includesWholeWord = (word) => new RegExp(`(^|\\s)${word}(\\s|$)`, "i").test(text);
+
+  const isProposalOrOfferRequest = () =>
+    isMatch([
+      "what is your offer",
+      "what's your offer",
+      "whats your offer",
+      "what is the proposal",
+      "what's the proposal",
+      "whats the proposal",
+      "what is your proposal",
+      "what's your proposal",
+      "send me a proposal",
+      "send me the proposal",
+      "send a proposal",
+      "send me an offer",
+      "make an offer",
+      "give me an offer",
+      "how much",
+      "cuanto",
+      "cuánto",
+      "offer?",
+      "the proposal",
+    ]) ||
+    classified_primary === "asks_offer" ||
+    classification.source === "asks_offer";
 
   const isOwnershipAffirmation = () => {
     if (
@@ -106,6 +143,8 @@ export function normalizeSellerInboundIntent(input) {
     return (
       includesWholeWord("yes") ||
       text === "i do" ||
+      text === "yeah" ||
+      text === "yep" ||
       startsWithSi ||
       includesWholeWord("sí") ||
       includesWholeWord("si")
@@ -149,8 +188,10 @@ export function normalizeSellerInboundIntent(input) {
     return "tenant_or_occupancy";
   }
 
-  if (isOwnershipAffirmation()) {
-    return "ownership_confirmed";
+  // Stage-3 proposal/offer requests MUST win over bare "yes" ownership
+  // affirmations ("Yes, what's the proposal?" is not Stage 2).
+  if (isProposalOrOfferRequest()) {
+    return "asks_offer";
   }
 
   if (
@@ -177,8 +218,8 @@ export function normalizeSellerInboundIntent(input) {
     return "asking_price_value";
   }
 
-  if (isMatch(["what is your offer", "how much", "cuanto", "cuánto", "offer?"]) || classification.source === "asks_offer") {
-    return "asks_offer";
+  if (isOwnershipAffirmation()) {
+    return "ownership_confirmed";
   }
 
   // Condition
@@ -190,7 +231,7 @@ export function normalizeSellerInboundIntent(input) {
     return "unclear";
   }
 
-  return classification.source || "unclear";
+  return classification.source || classified_primary || "unclear";
 }
 
 export function resolveNextSellerStage(input) {
@@ -263,6 +304,10 @@ export function resolveAutoReplyUseCase(input) {
   if (next_stage === "tenant_or_occupancy") return "tenant_or_occupancy";
   if (next_stage === "unclear_clarifier") return "unclear_clarifier";
   if (next_stage === "manual_review") return null;
+  // Template registry / Outbound Command Center use_case for Stage 3
+  if (next_stage === SELLER_FLOW_STAGES.ASKING_PRICE || next_stage === "asking_price") {
+    return "seller_asking_price";
+  }
   return next_stage;
 }
 
