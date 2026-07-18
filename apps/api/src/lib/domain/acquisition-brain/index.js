@@ -90,10 +90,22 @@ export {
 
 export {
   SHADOW_FOLLOWUP_EVENT,
+  SHADOW_FOLLOWUP_CANCELLED_EVENT,
+  SHADOW_FOLLOWUP_COMPLETED_EVENT,
   FOLLOWUP_PLANNER_VERSION,
+  FOLLOWUP_PLAN_STATES,
+  CANCELLATION_REASONS,
   FOLLOWUP_POLICY_REGISTRY,
+  FOLLOWUP_STAGE_ALIASES,
+  STAGE_NUMBER_TO_CANONICAL,
+  resolveCanonicalFollowupStage,
+  normalizeDeliveryStatus,
   resolveFollowupPolicy,
   planShadowFollowup,
   cancelShadowFollowup,
+  evaluateFollowupCancellations,
   proveStage1FollowupShadow,
+  emitShadowFollowupEvent,
+  evaluateAndEmitShadowFollowupAfterDelivery,
+  evaluateAndEmitShadowFollowupCancellations,
 } from "./shadow-followup-planner.js";

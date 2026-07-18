@@ -1236,6 +1236,7 @@ export async function processSellerInboundMessage({
   let acquisition_brain_shadow = null;
   let acquisition_brain_shadow_fact_state = null;
   let acquisition_brain_shadow_burst = null;
+  let acquisition_brain_shadow_followup_cancel = null;
   try {
     const {
       evaluateAcquisitionBrainShadow,
@@ -1351,6 +1352,40 @@ export async function processSellerInboundMessage({
       });
     }
 
+    // Shadow follow-up cancellation on inbound (observability only)
+    try {
+      const {
+        evaluateAndEmitShadowFollowupCancellations,
+        CANCELLATION_REASONS,
+      } = await import("@/lib/domain/acquisition-brain/shadow-followup-planner.js");
+      const intent = String(classification?.primary_intent || "").toLowerCase();
+      let cancel_reason = CANCELLATION_REASONS.INBOUND_REPLY_RECEIVED;
+      if (intent === "opt_out") cancel_reason = CANCELLATION_REASONS.OPT_OUT;
+      else if (intent === "wrong_number") cancel_reason = CANCELLATION_REASONS.WRONG_NUMBER;
+      else if (intent === "never_owned") cancel_reason = CANCELLATION_REASONS.NEVER_OWNED;
+      else if (intent === "sold_property" || intent === "ownership_denied") {
+        cancel_reason =
+          intent === "sold_property"
+            ? CANCELLATION_REASONS.SOLD_PROPERTY
+            : CANCELLATION_REASONS.OWNERSHIP_DENIED;
+      }
+      if (!writes_suppressed && cancellation_client_available) {
+        acquisition_brain_shadow_followup_cancel =
+          await evaluateAndEmitShadowFollowupCancellations({
+            thread_key: thread_for_shadow,
+            reason: cancel_reason,
+            source_event_id: inboundEventId || providerMessageId,
+            source_timestamp: inboundReceivedAt || new Date().toISOString(),
+            supabase,
+            emitAutomationEvent: runtimeDeps.emitAutomationEvent,
+            emit: true,
+            load_active: true,
+          });
+      }
+    } catch {
+      /* fail open */
+    }
+
     if (!writes_suppressed && cancellation_client_available) {
       await emitShadowFactStateEvents(acquisition_brain_shadow_fact_state, {
         emitAutomationEvent: runtimeDeps.emitAutomationEvent,
@@ -1447,6 +1482,7 @@ export async function processSellerInboundMessage({
     acquisition_brain_shadow,
     acquisition_brain_shadow_fact_state,
     acquisition_brain_shadow_burst,
+    acquisition_brain_shadow_followup_cancel,
   };
 }
 
