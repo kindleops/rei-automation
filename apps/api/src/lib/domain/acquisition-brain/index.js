@@ -109,3 +109,25 @@ export {
   evaluateAndEmitShadowFollowupAfterDelivery,
   evaluateAndEmitShadowFollowupCancellations,
 } from "./shadow-followup-planner.js";
+
+export {
+  SHADOW_SELLER_INTEL_EVENT,
+  SELLER_INTEL_VERSION,
+  SELLER_INTEL_PROFILE_VERSION,
+  SELLER_INTEL_SCORING_VERSION,
+  SELLER_INTEL_EXCLUSIONS,
+  FACT_TYPE_ALIASES,
+  TRI_STATE,
+  resolveCanonicalFactType,
+  hasFactType,
+  getActiveFactsByType,
+  getBestActiveFact,
+  getFactEvidenceIds,
+  getNormalizedFactValue,
+  buildAuthorityProfile,
+  computeOpportunityScore,
+  computeProfileInputHash,
+  buildSellerIntelligenceProfile,
+  emitShadowSellerIntelligence,
+  buildCalibrationFixtures,
+} from "./shadow-seller-intelligence.js";

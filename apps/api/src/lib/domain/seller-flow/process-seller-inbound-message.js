@@ -1237,6 +1237,7 @@ export async function processSellerInboundMessage({
   let acquisition_brain_shadow_fact_state = null;
   let acquisition_brain_shadow_burst = null;
   let acquisition_brain_shadow_followup_cancel = null;
+  let acquisition_brain_shadow_seller_intelligence = null;
   try {
     const {
       evaluateAcquisitionBrainShadow,
@@ -1396,6 +1397,64 @@ export async function processSellerInboundMessage({
         supabase,
       });
     }
+
+    // Seller Intelligence shadow profile (observability only; fail-open)
+    try {
+      const {
+        buildSellerIntelligenceProfile,
+        emitShadowSellerIntelligence,
+      } = await import(
+        "@/lib/domain/acquisition-brain/shadow-seller-intelligence.js"
+      );
+      const as_of =
+        inboundReceivedAt ||
+        context?.inbound_received_at ||
+        new Date().toISOString();
+      const intel_messages = [
+        {
+          id: inboundEventId || providerMessageId,
+          message,
+          timestamp: as_of,
+          language: classification?.language || null,
+          direction: "inbound",
+        },
+      ];
+      acquisition_brain_shadow_seller_intelligence = buildSellerIntelligenceProfile({
+        thread_key: thread_for_shadow,
+        facts_after: acquisition_brain_shadow_fact_state?.fact_state?.facts_after || prior_facts,
+        messages: intel_messages,
+        fact_state_ref: acquisition_brain_shadow_fact_state?.fact_event?.dedupe_key || null,
+        decision_ref: acquisition_brain_shadow?.event?.dedupe_key || null,
+        burst_ref: acquisition_brain_shadow_burst?.event?.dedupe_key || null,
+        followup_ref:
+          acquisition_brain_shadow_followup_cancel?.cancellations?.[0]?.event?.dedupe_key ||
+          null,
+        current_stage: decision.stage_before || stageBefore || null,
+        burst_events: acquisition_brain_shadow_burst?.plan
+          ? [{ burst_id: acquisition_brain_shadow_burst.plan.burst_id }]
+          : [],
+        as_of,
+      });
+      if (
+        !writes_suppressed &&
+        cancellation_client_available &&
+        acquisition_brain_shadow_seller_intelligence?.ok
+      ) {
+        await emitShadowSellerIntelligence(
+          acquisition_brain_shadow_seller_intelligence,
+          {
+            emitAutomationEvent: runtimeDeps.emitAutomationEvent,
+            supabase,
+          }
+        );
+      }
+    } catch (intel_error) {
+      runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_INTEL_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        inbound_event_id: inboundEventId,
+        error: intel_error?.message || "intel_failed",
+      });
+    }
   } catch (shadow_error) {
     runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_FAILED]", {
       thread_key: threadKey || inboundFrom,
@@ -1483,6 +1542,7 @@ export async function processSellerInboundMessage({
     acquisition_brain_shadow_fact_state,
     acquisition_brain_shadow_burst,
     acquisition_brain_shadow_followup_cancel,
+    acquisition_brain_shadow_seller_intelligence,
   };
 }
 
