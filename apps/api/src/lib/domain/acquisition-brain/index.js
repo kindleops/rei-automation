@@ -131,3 +131,27 @@ export {
   emitShadowSellerIntelligence,
   buildCalibrationFixtures,
 } from "./shadow-seller-intelligence.js";
+
+export {
+  ACQUISITION_BRAIN_MODE_KEY,
+  ACQUISITION_BRAIN_MODES,
+  DEFAULT_ACQUISITION_BRAIN_MODE,
+  AUTHORITY_WRITERS,
+  REASON_CLASS,
+  AUTHORITY_GATE_VERSION,
+  SHADOW_AUTHORITY_EVENT,
+  CLASSIFIER_CALIBRATION_VERSION,
+  AUTHORITY_ELIGIBLE_INTENTS,
+  ROLLBACK_TRIGGERS,
+  validateCanonicalE164,
+  resolveCanonicalStageEvidence,
+  evaluateClassifierCalibration,
+  resolveAcquisitionBrainMode,
+  evaluateBrainAuthorityEligibility,
+  resolveAuthorityWriter,
+  buildBrainQueueIntent,
+  computeQueueIntentPreviewHash,
+  resolveRollbackAction,
+  evaluateShadowAuthorityDecision,
+  emitShadowAuthorityDecision,
+} from "./authority-gate.js";
