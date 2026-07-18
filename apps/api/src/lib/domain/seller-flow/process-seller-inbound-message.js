@@ -1238,6 +1238,7 @@ export async function processSellerInboundMessage({
   let acquisition_brain_shadow_burst = null;
   let acquisition_brain_shadow_followup_cancel = null;
   let acquisition_brain_shadow_seller_intelligence = null;
+  let acquisition_brain_shadow_authority = null;
   try {
     const {
       evaluateAcquisitionBrainShadow,
@@ -1455,6 +1456,123 @@ export async function processSellerInboundMessage({
         error: intel_error?.message || "intel_failed",
       });
     }
+
+    // Authority gate telemetry only (default internal_shadow; never enqueue)
+    try {
+      const {
+        evaluateShadowAuthorityDecision,
+        emitShadowAuthorityDecision,
+        resolveAcquisitionBrainMode,
+        DEFAULT_ACQUISITION_BRAIN_MODE,
+      } = await import("@/lib/domain/acquisition-brain/authority-gate.js");
+      const mode_res = await resolveAcquisitionBrainMode({
+        explicit_mode: DEFAULT_ACQUISITION_BRAIN_MODE,
+      });
+      const plan = acquisition_brain_shadow_burst?.plan || null;
+      const mid = inboundEventId || providerMessageId;
+      acquisition_brain_shadow_authority = evaluateShadowAuthorityDecision({
+        mode: mode_res.mode,
+        thread_key: thread_for_shadow,
+        is_internal_canary: Boolean(
+          queue_permission?.reason?.includes?.("internal") ||
+            String(thread_for_shadow || "").includes("16128072000")
+        ),
+        is_public_seller: !String(thread_for_shadow || "").includes("16128072000"),
+        canonical_thread_resolution_status: thread_for_shadow?.startsWith?.("+")
+          ? "resolved"
+          : "unresolved",
+        archived_alias: false,
+        resolved_inbound_identity: thread_for_shadow,
+        lifecycle_stage: decision.stage_before || stageBefore || null,
+        primary_intent: classification?.primary_intent || null,
+        language: classification?.language || null,
+        inbound_event_ids: mid ? [mid] : [],
+        opt_out: classification?.primary_intent === "opt_out",
+        wrong_number: classification?.primary_intent === "wrong_number",
+        material_conflict: Boolean(
+          acquisition_brain_shadow_fact_state?.fact_state?.material_conflicts?.length
+        ),
+        human_review_required: Boolean(
+          acquisition_brain_shadow_fact_state?.fact_state?.human_review_required
+        ),
+        brain_plan_ok: Boolean(plan),
+        template_evidence: {
+          template_id:
+            seller_stage_reply?.plan?.selected_template_id ||
+            execution?.selected_template_id ||
+            null,
+          template_version: "unknown",
+          use_case:
+            seller_stage_reply?.plan?.selected_use_case ||
+            seller_stage_reply?.plan?.use_case ||
+            null,
+          active: Boolean(seller_stage_reply?.plan?.selected_template_id),
+          language: classification?.language || "English",
+          placeholder_validation: false,
+          prohibited_term_validation: false,
+          resolved_at: new Date().toISOString(),
+        },
+        suppression_evidence: {
+          clear: true,
+          canonical_thread: thread_for_shadow,
+          lookup_source: "shadow_telemetry_default",
+          checked_at: new Date().toISOString(),
+          policy_version: "v0",
+          error_state: null,
+        },
+        contact_window_evidence: {
+          timezone: timezoneOverride || "America/Chicago",
+          timezone_source: timezoneOverride ? "override" : "operational_fallback",
+          final_planned_send_at: plan?.final_planned_send_at || null,
+          allowed: plan?.timing_policy !== "deferred_contact_window",
+          deferred: plan?.timing_policy === "deferred_contact_window",
+          next_eligible_at: plan?.next_eligible_at || null,
+          policy_version: "v1",
+        },
+        burst_evidence: plan
+          ? {
+              burst_id: plan.burst_id,
+              burst_content_hash: plan.burst_content_hash,
+              status: plan.plan_status || plan.burst_status,
+              plan_status: plan.plan_status,
+              superseded: false,
+              planner_version: plan.planner_version,
+            }
+          : null,
+        nba_evidence: {
+          action:
+            acquisition_brain_shadow_fact_state?.fact_state?.proposed_next_best_action ||
+            acquisition_brain_shadow?.brain?.nba ||
+            null,
+          reason: "shadow_telemetry",
+          lifecycle_stage: decision.stage_before || stageBefore || null,
+        },
+        health_evidence: {
+          emergency_stop: false,
+          queue_healthy: true,
+          provider_healthy: true,
+          observability_healthy: true,
+          checked_at: new Date().toISOString(),
+          as_of: new Date().toISOString(),
+        },
+      });
+      if (
+        !writes_suppressed &&
+        cancellation_client_available &&
+        acquisition_brain_shadow_authority?.ok
+      ) {
+        await emitShadowAuthorityDecision(acquisition_brain_shadow_authority, {
+          emitAutomationEvent: runtimeDeps.emitAutomationEvent,
+          supabase,
+        });
+      }
+    } catch (auth_error) {
+      runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_AUTHORITY_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        inbound_event_id: inboundEventId,
+        error: auth_error?.message || "authority_shadow_failed",
+      });
+    }
   } catch (shadow_error) {
     runtimeDeps.warn("[ACQUISITION_BRAIN_SHADOW_FAILED]", {
       thread_key: threadKey || inboundFrom,
@@ -1543,6 +1661,7 @@ export async function processSellerInboundMessage({
     acquisition_brain_shadow_burst,
     acquisition_brain_shadow_followup_cancel,
     acquisition_brain_shadow_seller_intelligence,
+    acquisition_brain_shadow_authority,
   };
 }
 
