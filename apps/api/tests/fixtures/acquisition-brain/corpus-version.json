@@ -1,0 +1,7 @@
+{
+  "corpus_version": "acquisition_brain_corpus_v1",
+  "created": "2026-07-18",
+  "classifier_entry": "classify.js",
+  "classifier_mode": "heuristicOnly",
+  "notes": "Gold labels are independent of classifier input; text runs through production classify(heuristicOnly) for accuracy metrics."
+}
