@@ -155,3 +155,14 @@ export {
   evaluateShadowAuthorityDecision,
   emitShadowAuthorityDecision,
 } from "./authority-gate.js";
+
+export {
+  CALIBRATION_MANIFEST_VERSION,
+  INTENT_TAXONOMY,
+  AUTHORITY_INTENT_ALLOWLIST,
+  HELD_OUT_GATES,
+  TAXONOMY_CORRECTIONS,
+  splitSeedFamily,
+  buildConfusionMatrix,
+  isAuthorityEligibleIntent,
+} from "./classifier-calibration.js";
