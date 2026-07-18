@@ -1,0 +1,113 @@
+{
+  "audit_version": "gold_label_audit_v1",
+  "notes": "Corrections are rationale-backed; not remapped solely to match broken classifier output.",
+  "corrections": [
+    {
+      "family": "never_owned",
+      "old_label": "never_owned",
+      "corrected_label": "wrong_number",
+      "rationale": "Production routing taxonomy maps sold/never-owned/not-owner identity disconnect to wrong_number for suppression; FACT_TYPES.NEVER_OWNED still extractable separately.",
+      "classification": "valid_taxonomy_alias"
+    },
+    {
+      "family": "sold",
+      "old_label": "sold_property",
+      "corrected_label": "wrong_number",
+      "rationale": "Same production disconnect routing as never_owned.",
+      "classification": "valid_taxonomy_alias"
+    },
+    {
+      "family": "es_never",
+      "old_label": "never_owned",
+      "corrected_label": "wrong_number",
+      "rationale": "Spanish never-owned uses same disconnect routing.",
+      "classification": "valid_taxonomy_alias"
+    },
+    {
+      "family": "es_sold",
+      "old_label": "sold_property",
+      "corrected_label": "wrong_number",
+      "rationale": "Spanish sold maps to disconnect/wrong_number in production classifier.",
+      "classification": "valid_taxonomy_alias"
+    },
+    {
+      "family": "pm",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "tenant_occupied",
+      "rationale": "Property manager is not verified sole owner; tenant/role path.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "agent",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "not_interested",
+      "rationale": "Listing agent historically routes not_interested in production regression suite.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "spouse",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "unclear",
+      "rationale": "Spouse on title is co-owner/authority path, not sole ownership_confirmed for respondent alone without stronger rule.",
+      "classification": "multi_label_or_authority",
+      "expected_secondary": ["ownership_relation"]
+    },
+    {
+      "family": "brother",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "unclear",
+      "rationale": "Family member owns it — not respondent sole owner confirmation.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "es_wife",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "unclear",
+      "rationale": "Spouse on title authority path.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "es_brother",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "unclear",
+      "rationale": "Family ownership not respondent sole owner.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "multi_fact",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "asking_price_provided",
+      "rationale": "Multi-label message; primary priority ranks asking_price above ownership when both present.",
+      "classification": "primary_versus_secondary",
+      "expected_secondary": ["ownership_confirmed", "asks_offer", "condition_disclosed"]
+    },
+    {
+      "family": "es_multi",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "asking_price_provided",
+      "rationale": "Multi-label Spanish; price outranks ownership in INTENT_PRIORITY.",
+      "classification": "primary_versus_secondary"
+    },
+    {
+      "family": "long",
+      "old_label": "ownership_confirmed",
+      "corrected_label": "seller_interested",
+      "rationale": "Explicit ready-to-sell language is seller_interested; ownership may be secondary.",
+      "classification": "primary_versus_secondary"
+    },
+    {
+      "family": "unclear2",
+      "old_label": "unclear",
+      "corrected_label": "acknowledgement",
+      "rationale": "ok/okay is acknowledgement in production intent set.",
+      "classification": "incorrect_gold_label"
+    },
+    {
+      "family": "price_refuse",
+      "old_label": "info_request",
+      "corrected_label": "not_interested",
+      "rationale": "Refusing price is not ownership; after negation guards, may map not_interested or info — prefer not_interested when refusing to engage on price.",
+      "classification": "ambiguous"
+    }
+  ]
+}

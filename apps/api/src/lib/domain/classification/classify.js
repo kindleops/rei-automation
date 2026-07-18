@@ -3296,23 +3296,71 @@ const INTENT_PRIORITY = Object.freeze([
   "unclear",
 ]);
 
-function matchesWrongNumberDisconnect(text = "") {
+/** True wrong-number / wrong-person at this phone (not sold/never-owned identity). */
+function matchesTrueWrongNumber(text = "") {
+  const normalized = lower(text);
+  return includesAny(normalized, [
+    "wrong number",
+    "wrong #",
+    "wrong person",
+    "incorrect number",
+    "not this person",
+    "this is not shirley",
+    "número equivocado",
+    "numero equivocado",
+    "equivocado",
+  ]) || (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized));
+}
+
+/** Sold / never owned / not owner — still routed as wrong_number for production suppression. */
+function matchesOwnershipDisconnect(text = "") {
   const normalized = lower(text);
   if (
     includesAny(normalized, [
-      "wrong number", "wrong #", "wrong person", "incorrect number",
-      "not the owner", "not the property owner", "not the homeowner",
-      "not this person", "don't own that", "dont own that",
-      "i don't own", "i dont own", "don't own this", "dont own this",
-      "no longer own", "not mine", "not my property", "never owned",
-      "sold it", "it sold", "no it sold", "already sold", "been sold",
-      "sold last week", "sold yrs ago", "sold years ago",
-      "this is not shirley",
-      "número equivocado", "equivocado", "no soy el dueño",
-      "no soy el propietario", "no soy la propietaria",
-      "la mía es", "la mia es", "no la mía", "no la mia",
-      "esa casa", "llanoesmia", "ya lo vendí", "ya lo vendi",
-      "no es mía", "no es mia", "no tengo esa propiedad",
+      "not the owner",
+      "not the property owner",
+      "not the homeowner",
+      "don't own that",
+      "dont own that",
+      "i don't own",
+      "i dont own",
+      "don't own this",
+      "dont own this",
+      "no longer own",
+      "not mine",
+      "not my property",
+      "never owned",
+      "never been the owner",
+      "sold it",
+      "it sold",
+      "no it sold",
+      "already sold",
+      "been sold",
+      "sold last week",
+      "sold yrs ago",
+      "sold years ago",
+      "i sold it",
+      "we sold it",
+      "no soy el dueño",
+      "no soy el dueno",
+      "no soy el propietario",
+      "no soy la propietaria",
+      "la mía es",
+      "la mia es",
+      "no la mía",
+      "no la mia",
+      "esa casa",
+      "llanoesmia",
+      "ya lo vendí",
+      "ya lo vendi",
+      "no es mía",
+      "no es mia",
+      "no tengo esa propiedad",
+      "nunca fui el dueño",
+      "nunca fui el dueno",
+      "not me",
+      "owns it not me",
+      "brother owns it not me",
     ])
   ) {
     return true;
@@ -3322,15 +3370,15 @@ function matchesWrongNumberDisconnect(text = "") {
     return true;
   }
 
-  if (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized)) {
-    return true;
-  }
-
   if (/\b(no|nah|nope)\b[\s\S]{0,24}\bsold\b/.test(normalized)) {
     return true;
   }
 
   return false;
+}
+
+function matchesWrongNumberDisconnect(text = "") {
+  return matchesTrueWrongNumber(text) || matchesOwnershipDisconnect(text);
 }
 
 function matchesPropertyTypeCorrection(text = "") {
@@ -3370,24 +3418,73 @@ function resolveIntents(
   const intents = [];
 
   // 1. OPT-OUT / COMPLIANCE (Highest Priority)
-  if (compliance_flag === "stop_texting" || includesAny(text, [
-    "stop", "remove", "unsubscribe", "opt out", "opt-out", "optout",
-    "stop texting", "stop messaging", "don't text", "dont text",
-    "don't contact", "dont contact", "remove me", "take me off",
-    "get me off", "off your list", "off this list", "off that list",
-    "quit", "cancel", "end", "stopall", "unsubscribe",
-    "don't bother", "dont bother", "stop bothering",
-    "legal action", "harassing", "harassment", "spam",
-    "buzz off", "get lost", "go away",
-    // Spanish
-    "para", "detente", "basta", "cancela", "elimíname", "eliminame",
-    "no me escribas", "no me contactes", "no más", "no mas",
-  ])) {
+  // Prefer wrong_number when message is primarily a wrong-number disconnect
+  // (e.g. "wrong number stop calling") over generic opt_out from "stop".
+  const is_true_wrong = matchesTrueWrongNumber(text);
+  const is_ownership_disconnect = matchesOwnershipDisconnect(text);
+  const is_opt_out =
+    compliance_flag === "stop_texting" ||
+    includesAny(text, [
+      "unsubscribe",
+      "opt out",
+      "opt-out",
+      "optout",
+      "stop texting",
+      "stop messaging",
+      "don't text",
+      "dont text",
+      "don't contact",
+      "dont contact",
+      "remove me",
+      "take me off",
+      "get me off",
+      "off your list",
+      "off this list",
+      "off that list",
+      "stopall",
+      "don't bother",
+      "dont bother",
+      "stop bothering",
+      "buzz off",
+      "get lost",
+      "go away",
+      "spam",
+      "harassing",
+      "harassment",
+      // Spanish opt-out (avoid bare "para" which is common in other phrases)
+      "detente",
+      "basta",
+      "cancela",
+      "elimíname",
+      "eliminame",
+      "no me escribas",
+      "no me contactes",
+      "no más mensajes",
+      "no mas mensajes",
+      "dejen de enviarme",
+      "alto",
+    ]) ||
+    /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim()) ||
+    (/\bstop\b/i.test(text) &&
+      includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]));
+
+  if (is_opt_out && !is_true_wrong && !is_ownership_disconnect) {
+    return { primary_intent: "opt_out", secondary_intent: null };
+  }
+  // Opt-out + ownership in same message: opt_out terminal wins
+  if (is_opt_out && !is_true_wrong && includesAny(text, ["never contact", "stop harassing"])) {
+    return { primary_intent: "opt_out", secondary_intent: null };
+  }
+  if (is_opt_out && is_true_wrong) {
+    // wrong number stop calling → wrong_number (recipient invalid)
+    intents.push("wrong_number");
+  } else if (is_opt_out) {
     return { primary_intent: "opt_out", secondary_intent: null };
   }
 
   // 2. WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
-  if (normalized_objection === "wrong_number" || matchesWrongNumberDisconnect(text)) {
+  // Production routing: sold/never_owned/not_owner map to wrong_number for suppression.
+  if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect) {
     intents.push("wrong_number");
   }
 
@@ -3447,10 +3544,27 @@ function resolveIntents(
   if (
     normalized_objection === "need_time" ||
     includesAny(text, [
-      "maybe later", "sometime later", "check back", "next week",
-      "next month", "next year", "in a few months", "not ready yet",
-      "thinking about it", "still deciding", "not at this time",
-      "maybe someday", "down the road", "no sell right now",
+      "maybe later",
+      "sometime later",
+      "check back",
+      "next week",
+      "next month",
+      "next year",
+      "in a few months",
+      "not ready yet",
+      "thinking about it",
+      "still deciding",
+      "not at this time",
+      "maybe someday",
+      "down the road",
+      "no sell right now",
+      "próximo mes",
+      "proximo mes",
+      "más adelante",
+      "mas adelante",
+      "tal vez más adelante",
+      "llámenme el próximo",
+      "llamenme el proximo",
     ])
   ) {
     intents.push("need_time");
@@ -3483,8 +3597,22 @@ function resolveIntents(
     }
   }
 
-  // 7. PRICE PROVIDED
-  if (matchesAnyPattern(text, ASKING_PRICE_PATTERNS)) {
+  // 7. PRICE PROVIDED (guard ZIP/year/phone false positives lightly)
+  const looks_like_zip_or_year =
+    /^\s*\d{5}(-\d{4})?\s*$/.test(text.trim()) ||
+    /^\s*(19|20)\d{2}\s*$/.test(text.trim());
+  if (
+    !looks_like_zip_or_year &&
+    (matchesAnyPattern(text, ASKING_PRICE_PATTERNS) ||
+      includesAny(text, [
+        "quiero 250 mil",
+        "250 mil",
+        "alrededor de",
+        "no menos de",
+        "entre 240",
+      ]) ||
+      /\b\d{5,7}\b/.test(text) && includesAny(text, ["around", "about", "around", "alrededor", "quiero"]))
+  ) {
     intents.push("asking_price_provided");
   }
 
@@ -3511,6 +3639,31 @@ function resolveIntents(
       "what is your number",
       "best offer take it",
       "accepting ofers",
+      "want a proposal",
+      "want an offer",
+      "send the paperwork",
+      "send paperwork",
+      "send the contract",
+      "email me the contract",
+      "send offr",
+      "send offer",
+      "pls send offr",
+      // Spanish proposal / offer
+      "cuál es la propuesta",
+      "cual es la propuesta",
+      "la propuesta",
+      "envíenme una oferta",
+      "envienme una oferta",
+      "envíe una oferta",
+      "envie una oferta",
+      "quiero oferta",
+      "quiero una oferta",
+      "cuánto ofrecen",
+      "cuanto ofrecen",
+      "mándeme los números",
+      "mandeme los numeros",
+      "envíen el contrato",
+      "envien el contrato",
     ])
   ) {
     intents.push("asks_offer");
@@ -3536,39 +3689,185 @@ function resolveIntents(
     }
   }
 
-  // 11. OWNERSHIP CONFIRMED (skip when seller is correcting property type/address)
+  // 11. OWNERSHIP CONFIRMED (skip when seller is correcting property type/address
+  // or when identity is family/agent/tenant — those are not verified sole owner)
   const is_property_correction = matchesPropertyTypeCorrection(text);
+  const is_non_owner_role = includesAny(text, [
+    "property manager",
+    "listing agent",
+    "real estate agent",
+    "realtor",
+    "i'm the agent",
+    "im the agent",
+    "just a tenant",
+    "i am a tenant",
+    "i'm a tenant",
+    "im a tenant",
+    "my brother owns",
+    "my sister owns",
+    "my wife owns",
+    "my husband owns",
+    "brother owns it",
+    "wife owns it",
+    "es de mi hermano",
+    "mi esposa",
+    "soy inquilino",
+    "soy el administrador",
+    "soy el agente",
+  ]);
+  const ownership_negated =
+    includesAny(text, [
+      "not selling",
+      "don't own",
+      "dont own",
+      "do not want",
+      "don't want",
+      "dont want",
+      "not mine",
+      "never owned",
+    ]) ||
+    /\bi do not\b/.test(text) ||
+    /\bi don't\b/.test(text);
+
   if (
     !is_property_correction &&
-    includesAny(text, [
-    "yes i own it",
-    "yes i do",
-    "i own it",
-    "still own it",
-    "that's mine",
-    "thats mine",
-    "i do",
-    "it is",
-    "yes",
-    "si",
-    "sí",
-    "yea",
-    "yeah",
-    "yep",
-    "yup",
-    "so y siempre lo seré",
-    "a si es",
-  ])
+    !is_non_owner_role &&
+    !is_ownership_disconnect &&
+    !ownership_negated &&
+    (includesAny(text, [
+      "yes i own it",
+      "yes i do",
+      "i own it",
+      "still own it",
+      "that's mine",
+      "thats mine",
+      "it's mine",
+      "its mine",
+      "it is mine",
+      "yep mine",
+      "yeah mine",
+      "mine lol",
+      "my house",
+      "my property",
+      "i own tht",
+      "i own that",
+      "yess i own",
+      "yes i own",
+      "right owner",
+      "correct owner",
+      "the right owner",
+      "i own this",
+      "we own it",
+      "we own this",
+      "owned this house",
+      "have owned",
+      "soy el dueño",
+      "soy el dueno",
+      "sí, soy el dueño",
+      "si soy el dueno",
+      "si, soy el dueño",
+      "es mía",
+      "es mia",
+      "es mi casa",
+      "todavía soy el dueño",
+      "todavia soy el dueno",
+      "sii soy el dueno",
+      "sip mía",
+      "sip mia",
+      "so y siempre lo seré",
+      "a si es",
+      "si cual",
+    ]) ||
+      // short affirmative only when not a price/interest-only context
+      (/^(yes|si|sí|yea|yeah|yep|yup|i do|it is)[\s?!.]*$/i.test(text.trim()) &&
+        !includesAny(text, ["price", "offer", "proposal"])) ||
+      // Spanish short "si ..." affirmatives (not "si no" negation)
+      (/^\s*s[ií]\b/i.test(text.trim()) &&
+        !/\bs[ií]\s+no\b/i.test(text) &&
+        !includesAny(text, ["no me interesa", "no quiero"])))
   ) {
     intents.push("ownership_confirmed");
   }
 
+  // LLC / entity ownership claim still ownership-related
+  if (
+    !is_ownership_disconnect &&
+    includesAny(text, ["llc owns", "the llc owns", "trust owns", "company owns"])
+  ) {
+    intents.push("ownership_confirmed");
+  }
+
+  // Probate / estate language — identity complexity; keep as ownership_confirmed
+  // only when speaker affirms connection without denying ownership outright
+  if (
+    !is_ownership_disconnect &&
+    includesAny(text, ["probate", "he passed away", "she passed away", "passed away", "estate"])
+  ) {
+    if (!intents.includes("ownership_confirmed") && !intents.includes("wrong_number")) {
+      intents.push("ownership_confirmed");
+    }
+  }
+
   // 12. MISC SIGNAL DRIVEN
-  if (normalized_objection === "tenant_issue" || includesAny(text, ["tenant", "tenants", "rented", "occupied", "renting", "lease"])) {
+  if (
+    normalized_objection === "tenant_issue" ||
+    includesAny(text, [
+      "tenant",
+      "tenants",
+      "rented",
+      "occupied",
+      "renting",
+      "lease",
+      "inquilino",
+      "property manager",
+      "i manage it",
+      "i manage the",
+      "administrador",
+    ])
+  ) {
     intents.push("tenant_occupied");
   }
 
-  if (normalized_objection === "condition_bad" || includesAny(text, ["needs work", "bad condition", "bad shape", "rough shape", "as is", "as-is", "needs everything"])) {
+  if (
+    includesAny(text, [
+      "listing agent",
+      "i am the agent",
+      "i'm the listing",
+      "im the listing",
+      "soy el agente",
+    ])
+  ) {
+    // Listing agent is not an owner; route as not interested in selling as owner
+    if (!intents.includes("not_interested")) intents.push("not_interested");
+  }
+
+  if (
+    normalized_objection === "condition_bad" ||
+    includesAny(text, [
+      "needs work",
+      "bad condition",
+      "bad shape",
+      "rough shape",
+      "as is",
+      "as-is",
+      "needs everything",
+      "needs a new roof",
+      "needs a roof",
+      "new roof",
+      "roof is",
+      "hvac",
+      "foundation",
+      "plumbing",
+      "electrical",
+      "needs replacement",
+      "need work",
+      "renovated",
+      "techo",
+      "aire acondicionado",
+      "techo malo",
+      "techo nuevo",
+    ])
+  ) {
     intents.push("condition_disclosed");
   }
 
@@ -3604,13 +3903,41 @@ function resolveIntents(
     if (intents.length === 0) intents.push("ownership_confirmed");
   }
 
+  // 16. INFO / COMPANY / TIMELINE / PRICE REFUSAL
+  if (
+    includesAny(text, [
+      "company name",
+      "what company",
+      "seller finance",
+      "owner finance",
+      "close in 30",
+      "close in 60",
+      "under contract",
+      "bajo contrato",
+      "say a price",
+      "giving a price",
+      "not giving a price",
+      "don't have a number",
+      "dont have a number",
+      "no tengo precio",
+    ])
+  ) {
+    intents.push("info_request");
+  }
+
   // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
   const unique_intents = [...new Set(intents)];
   const primary = pickPrimaryIntent(unique_intents);
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
+  const secondary_intents = unique_intents.filter((intent) => intent !== primary);
 
-  return { primary_intent: primary, secondary_intent: secondary };
+  return {
+    primary_intent: primary,
+    secondary_intent: secondary,
+    secondary_intents,
+    matched_intents: unique_intents,
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════

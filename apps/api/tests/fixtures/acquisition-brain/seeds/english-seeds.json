@@ -1,53 +1,314 @@
 [
-  {"family":"own_yes","text":"Yes I own it","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"own_yeah","text":"Yeah thats my house","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"own_mine","text":"Its mine","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"own_correct","text":"You have the right owner","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"own_typo","text":"yess i own tht property","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"wrong_num","text":"Wrong number","expected_primary_intent":"wrong_number","stage":"ownership_check","terminal":true},
-  {"family":"wrong_num2","text":"you have the wrong number stop calling","expected_primary_intent":"wrong_number","stage":"ownership_check","terminal":true},
-  {"family":"never_owned","text":"I never owned that property","expected_primary_intent":"never_owned","stage":"ownership_check","terminal":true},
-  {"family":"sold","text":"I sold it years ago","expected_primary_intent":"sold_property","stage":"ownership_check","terminal":true},
-  {"family":"tenant","text":"I am just a tenant on a lease","expected_primary_intent":"tenant_occupied","stage":"ownership_check"},
-  {"family":"pm","text":"I am the property manager for this building","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"agent","text":"I am the listing agent for this home","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"spouse","text":"My wife owns it but I can answer questions","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"brother","text":"Actually my brother owns it","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"stop","text":"STOP","expected_primary_intent":"opt_out","stage":"ownership_check","terminal":true},
-  {"family":"stop2","text":"Please stop texting me","expected_primary_intent":"opt_out","stage":"ownership_check","terminal":true},
-  {"family":"hostile","text":"I will sue you if you contact me again","expected_primary_intent":"hostile_or_legal","stage":"ownership_check"},
-  {"family":"unclear","text":"Hmm","expected_primary_intent":"unclear","stage":"ownership_check"},
-  {"family":"unclear2","text":"ok","expected_primary_intent":"unclear","stage":"ownership_check"},
-  {"family":"proposal","text":"What's the proposal?","expected_primary_intent":"asks_offer","stage":"interest_proposal_confirmation"},
-  {"family":"proposal2","text":"Send me an offer","expected_primary_intent":"asks_offer","stage":"interest_proposal_confirmation"},
-  {"family":"interest","text":"Maybe, depends on the price","expected_primary_intent":"latent_interest","stage":"interest_proposal_confirmation"},
-  {"family":"not_int","text":"Not interested","expected_primary_intent":"not_interested","stage":"interest_proposal_confirmation"},
-  {"family":"not_int2","text":"No thanks not selling","expected_primary_intent":"not_interested","stage":"interest_proposal_confirmation"},
-  {"family":"later","text":"Follow up with me next month","expected_primary_intent":"need_time","stage":"interest_proposal_confirmation"},
-  {"family":"who","text":"Who is this?","expected_primary_intent":"who_is_this","stage":"interest_proposal_confirmation"},
-  {"family":"price250","text":"I want 250k for it","expected_primary_intent":"asking_price_provided","stage":"asking_price"},
-  {"family":"price_around","text":"Around 180000","expected_primary_intent":"asking_price_provided","stage":"asking_price"},
-  {"family":"price_range","text":"Somewhere between 200k and 220k","expected_primary_intent":"asking_price_provided","stage":"asking_price"},
-  {"family":"price_firm","text":"250k firm not flexible","expected_primary_intent":"asking_price_provided","stage":"asking_price"},
-  {"family":"cond_roof","text":"Needs a new roof","expected_primary_intent":"condition_disclosed","stage":"property_condition"},
-  {"family":"cond_hvac","text":"HVAC is old and needs replacement","expected_primary_intent":"condition_disclosed","stage":"property_condition"},
-  {"family":"cond_multi","text":"Roof plumbing and foundation need work","expected_primary_intent":"condition_disclosed","stage":"property_condition"},
-  {"family":"cond_reno","text":"Recently renovated kitchen and baths","expected_primary_intent":"condition_disclosed","stage":"property_condition"},
-  {"family":"timeline","text":"Want to close in 30 days","expected_primary_intent":"info_request","stage":"property_condition"},
-  {"family":"under_contract","text":"We are already under contract","expected_primary_intent":"info_request","stage":"actual_proposal"},
-  {"family":"contract_req","text":"Send the paperwork I will sign","expected_primary_intent":"asks_offer","stage":"formal_contract"},
-  {"family":"llc","text":"The LLC owns the property","expected_primary_intent":"ownership_confirmed","stage":"formal_contract"},
-  {"family":"probate","text":"He passed away it is in probate","expected_primary_intent":"ownership_confirmed","stage":"formal_contract"},
-  {"family":"slang1","text":"yep mine lol","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"slang2","text":"nah not sellin","expected_primary_intent":"not_interested","stage":"interest_proposal_confirmation"},
-  {"family":"abbrev","text":"pls send offr asap","expected_primary_intent":"asks_offer","stage":"interest_proposal_confirmation"},
-  {"family":"nopunct","text":"yes i own it need cash offer","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"long","text":"I have owned this house for twenty years and I am finally ready to sell if the numbers make sense and you can close quickly without a lot of drama","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"multi_fact","text":"Yes I own it want a proposal around 200k roof is bad","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"correction","text":"Actually wait my brother owns it not me","expected_primary_intent":"ownership_confirmed","stage":"ownership_check"},
-  {"family":"callback","text":"Call me tomorrow afternoon","expected_primary_intent":"callback_requested","stage":"interest_proposal_confirmation"},
-  {"family":"info","text":"What is your company name","expected_primary_intent":"info_request","stage":"interest_proposal_confirmation"},
-  {"family":"price_refuse","text":"I do not want to say a price yet","expected_primary_intent":"info_request","stage":"asking_price"},
-  {"family":"creative","text":"Would you do seller finance","expected_primary_intent":"info_request","stage":"actual_proposal"},
-  {"family":"email","text":"Email me the contract at john@example.com","expected_primary_intent":"asks_offer","stage":"formal_contract"}
+  {
+    "family": "own_yes",
+    "text": "Yes I own it",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "own_yeah",
+    "text": "Yeah thats my house",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "own_mine",
+    "text": "Its mine",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "own_correct",
+    "text": "You have the right owner",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "own_typo",
+    "text": "yess i own tht property",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "wrong_num",
+    "text": "Wrong number",
+    "expected_primary_intent": "wrong_number",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "wrong_num2",
+    "text": "you have the wrong number stop calling",
+    "expected_primary_intent": "wrong_number",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "never_owned",
+    "text": "I never owned that property",
+    "expected_primary_intent": "wrong_number",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "sold",
+    "text": "I sold it years ago",
+    "expected_primary_intent": "wrong_number",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "tenant",
+    "text": "I am just a tenant on a lease",
+    "expected_primary_intent": "tenant_occupied",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "pm",
+    "text": "I am the property manager for this building",
+    "expected_primary_intent": "tenant_occupied",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "agent",
+    "text": "I am the listing agent for this home",
+    "expected_primary_intent": "not_interested",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "spouse",
+    "text": "My wife owns it but I can answer questions",
+    "expected_primary_intent": "unclear",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "brother",
+    "text": "Actually my brother owns it",
+    "expected_primary_intent": "unclear",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "stop",
+    "text": "STOP",
+    "expected_primary_intent": "opt_out",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "stop2",
+    "text": "Please stop texting me",
+    "expected_primary_intent": "opt_out",
+    "stage": "ownership_check",
+    "terminal": true
+  },
+  {
+    "family": "hostile",
+    "text": "I will sue you if you contact me again",
+    "expected_primary_intent": "hostile_or_legal",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "unclear",
+    "text": "Hmm",
+    "expected_primary_intent": "unclear",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "unclear2",
+    "text": "ok",
+    "expected_primary_intent": "acknowledgement",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "proposal",
+    "text": "What's the proposal?",
+    "expected_primary_intent": "asks_offer",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "proposal2",
+    "text": "Send me an offer",
+    "expected_primary_intent": "asks_offer",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "interest",
+    "text": "Maybe, depends on the price",
+    "expected_primary_intent": "latent_interest",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "not_int",
+    "text": "Not interested",
+    "expected_primary_intent": "not_interested",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "not_int2",
+    "text": "No thanks not selling",
+    "expected_primary_intent": "not_interested",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "later",
+    "text": "Follow up with me next month",
+    "expected_primary_intent": "need_time",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "who",
+    "text": "Who is this?",
+    "expected_primary_intent": "who_is_this",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "price250",
+    "text": "I want 250k for it",
+    "expected_primary_intent": "asking_price_provided",
+    "stage": "asking_price"
+  },
+  {
+    "family": "price_around",
+    "text": "Around 180000",
+    "expected_primary_intent": "asking_price_provided",
+    "stage": "asking_price"
+  },
+  {
+    "family": "price_range",
+    "text": "Somewhere between 200k and 220k",
+    "expected_primary_intent": "asking_price_provided",
+    "stage": "asking_price"
+  },
+  {
+    "family": "price_firm",
+    "text": "250k firm not flexible",
+    "expected_primary_intent": "asking_price_provided",
+    "stage": "asking_price"
+  },
+  {
+    "family": "cond_roof",
+    "text": "Needs a new roof",
+    "expected_primary_intent": "condition_disclosed",
+    "stage": "property_condition"
+  },
+  {
+    "family": "cond_hvac",
+    "text": "HVAC is old and needs replacement",
+    "expected_primary_intent": "condition_disclosed",
+    "stage": "property_condition"
+  },
+  {
+    "family": "cond_multi",
+    "text": "Roof plumbing and foundation need work",
+    "expected_primary_intent": "condition_disclosed",
+    "stage": "property_condition"
+  },
+  {
+    "family": "cond_reno",
+    "text": "Recently renovated kitchen and baths",
+    "expected_primary_intent": "condition_disclosed",
+    "stage": "property_condition"
+  },
+  {
+    "family": "timeline",
+    "text": "Want to close in 30 days",
+    "expected_primary_intent": "info_request",
+    "stage": "property_condition"
+  },
+  {
+    "family": "under_contract",
+    "text": "We are already under contract",
+    "expected_primary_intent": "info_request",
+    "stage": "actual_proposal"
+  },
+  {
+    "family": "contract_req",
+    "text": "Send the paperwork I will sign",
+    "expected_primary_intent": "asks_offer",
+    "stage": "formal_contract"
+  },
+  {
+    "family": "llc",
+    "text": "The LLC owns the property",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "formal_contract"
+  },
+  {
+    "family": "probate",
+    "text": "He passed away it is in probate",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "formal_contract"
+  },
+  {
+    "family": "slang1",
+    "text": "yep mine lol",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "slang2",
+    "text": "nah not sellin",
+    "expected_primary_intent": "not_interested",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "abbrev",
+    "text": "pls send offr asap",
+    "expected_primary_intent": "asks_offer",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "nopunct",
+    "text": "yes i own it need cash offer",
+    "expected_primary_intent": "ownership_confirmed",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "long",
+    "text": "I have owned this house for twenty years and I am finally ready to sell if the numbers make sense and you can close quickly without a lot of drama",
+    "expected_primary_intent": "seller_interested",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "multi_fact",
+    "text": "Yes I own it want a proposal around 200k roof is bad",
+    "expected_primary_intent": "asking_price_provided",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "correction",
+    "text": "Actually wait my brother owns it not me",
+    "expected_primary_intent": "wrong_number",
+    "stage": "ownership_check"
+  },
+  {
+    "family": "callback",
+    "text": "Call me tomorrow afternoon",
+    "expected_primary_intent": "callback_requested",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "info",
+    "text": "What is your company name",
+    "expected_primary_intent": "info_request",
+    "stage": "interest_proposal_confirmation"
+  },
+  {
+    "family": "price_refuse",
+    "text": "I do not want to say a price yet",
+    "expected_primary_intent": "info_request",
+    "stage": "asking_price"
+  },
+  {
+    "family": "creative",
+    "text": "Would you do seller finance",
+    "expected_primary_intent": "info_request",
+    "stage": "actual_proposal"
+  },
+  {
+    "family": "email",
+    "text": "Email me the contract at john@example.com",
+    "expected_primary_intent": "asks_offer",
+    "stage": "formal_contract"
+  }
 ]
