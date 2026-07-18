@@ -131,3 +131,17 @@ export {
   emitShadowSellerIntelligence,
   buildCalibrationFixtures,
 } from "./shadow-seller-intelligence.js";
+
+export {
+  ACQUISITION_BRAIN_MODE_KEY,
+  ACQUISITION_BRAIN_MODES,
+  DEFAULT_ACQUISITION_BRAIN_MODE,
+  AUTHORITY_WRITERS,
+  AUTHORITY_GATE_VERSION,
+  ROLLBACK_TRIGGERS,
+  resolveAcquisitionBrainMode,
+  evaluateBrainAuthorityEligibility,
+  resolveAuthorityWriter,
+  buildBrainQueueIntent,
+  resolveRollbackAction,
+} from "./authority-gate.js";
