@@ -1,0 +1,238 @@
+{
+  "ic2_own_affirm_yes": [
+    "ic2-own-en-01"
+  ],
+  "ic2_own_affirm_yeah": [
+    "ic2-own-en-02"
+  ],
+  "ic2_own_affirm_yep": [
+    "ic2-own-en-03"
+  ],
+  "ic2_own_affirm_correct": [
+    "ic2-own-en-04"
+  ],
+  "ic2_own_affirm_i_do": [
+    "ic2-own-en-05"
+  ],
+  "ic2_own_affirm_we_do": [
+    "ic2-own-en-06"
+  ],
+  "ic2_own_still": [
+    "ic2-own-en-07"
+  ],
+  "ic2_own_explicit": [
+    "ic2-own-en-08"
+  ],
+  "ic2_own_affirm_thats_me": [
+    "ic2-own-en-09"
+  ],
+  "ic2_own_affirm_affirmative": [
+    "ic2-own-en-10"
+  ],
+  "ic2_own_still_yes": [
+    "ic2-own-en-11"
+  ],
+  "ic2_own_we_own": [
+    "ic2-own-en-12"
+  ],
+  "ic2_prop_whats": [
+    "ic2-prop-en-01"
+  ],
+  "ic2_prop_send_proposal": [
+    "ic2-prop-en-02"
+  ],
+  "ic2_prop_offering": [
+    "ic2-prop-en-03"
+  ],
+  "ic2_prop_numbers": [
+    "ic2-prop-en-04"
+  ],
+  "ic2_prop_look": [
+    "ic2-prop-en-05"
+  ],
+  "ic2_prop_propose": [
+    "ic2-prop-en-06"
+  ],
+  "ic2_prop_make_offer": [
+    "ic2-prop-en-07"
+  ],
+  "ic2_prop_your_offer": [
+    "ic2-prop-en-08"
+  ],
+  "ic2_prop_send_offer": [
+    "ic2-prop-en-09"
+  ],
+  "ic2_prop_best_number": [
+    "ic2-prop-en-10"
+  ],
+  "ic2_price_want_250": [
+    "ic2-price-en-01"
+  ],
+  "ic2_price_around_dollar": [
+    "ic2-price-en-02"
+  ],
+  "ic2_price_no_less": [
+    "ic2-price-en-03"
+  ],
+  "ic2_price_between": [
+    "ic2-price-en-04"
+  ],
+  "ic2_price_asking": [
+    "ic2-price-en-05"
+  ],
+  "ic2_price_about": [
+    "ic2-price-en-06"
+  ],
+  "ic2_price_firm": [
+    "ic2-price-en-07"
+  ],
+  "ic2_price_range_dash": [
+    "ic2-price-en-08"
+  ],
+  "ic2_price_looking": [
+    "ic2-price-en-09"
+  ],
+  "ic2_price_min": [
+    "ic2-price-en-10"
+  ],
+  "ic2_own_es_si": [
+    "ic2-own-es-01"
+  ],
+  "ic2_own_es_dueno": [
+    "ic2-own-es-02"
+  ],
+  "ic2_prop_es_propuesta": [
+    "ic2-prop-es-01"
+  ],
+  "ic2_prop_es_oferta": [
+    "ic2-prop-es-02"
+  ],
+  "ic2_price_es_250": [
+    "ic2-price-es-01"
+  ],
+  "ic2_price_es_alrededor": [
+    "ic2-price-es-02"
+  ],
+  "ic2_adv_sold_after_yes": [
+    "ic2-adv-own-01"
+  ],
+  "ic2_adv_years_ago": [
+    "ic2-adv-own-02"
+  ],
+  "ic2_adv_brother": [
+    "ic2-adv-own-03"
+  ],
+  "ic2_adv_wife": [
+    "ic2-adv-own-04"
+  ],
+  "ic2_adv_manage": [
+    "ic2-adv-own-05"
+  ],
+  "ic2_adv_tenant": [
+    "ic2-adv-own-06"
+  ],
+  "ic2_adv_agent": [
+    "ic2-adv-own-07"
+  ],
+  "ic2_adv_no": [
+    "ic2-adv-own-08"
+  ],
+  "ic2_adv_never": [
+    "ic2-adv-own-09"
+  ],
+  "ic2_adv_wrong": [
+    "ic2-adv-own-10"
+  ],
+  "ic2_adv_stop": [
+    "ic2-adv-own-11"
+  ],
+  "ic2_adv_yes_not_int": [
+    "ic2-adv-own-12"
+  ],
+  "ic2_adv_wrong_person": [
+    "ic2-adv-own-13"
+  ],
+  "ic2_adv_what_property": [
+    "ic2-adv-own-14"
+  ],
+  "ic2_adv_stop_yes": [
+    "ic2-adv-own-15"
+  ],
+  "ic2_adv_company": [
+    "ic2-adv-prop-01"
+  ],
+  "ic2_adv_who": [
+    "ic2-adv-prop-02"
+  ],
+  "ic2_adv_what_prop": [
+    "ic2-adv-prop-03"
+  ],
+  "ic2_adv_how_number": [
+    "ic2-adv-prop-04"
+  ],
+  "ic2_adv_no_proposal": [
+    "ic2-adv-prop-05"
+  ],
+  "ic2_adv_not_int_proposal": [
+    "ic2-adv-prop-06"
+  ],
+  "ic2_adv_agent_proposal": [
+    "ic2-adv-prop-07"
+  ],
+  "ic2_adv_under_contract": [
+    "ic2-adv-prop-08"
+  ],
+  "ic2_adv_stop_proposals": [
+    "ic2-adv-prop-09"
+  ],
+  "ic2_adv_zip": [
+    "ic2-adv-price-01"
+  ],
+  "ic2_adv_year": [
+    "ic2-adv-price-02"
+  ],
+  "ic2_adv_sqft": [
+    "ic2-adv-price-03"
+  ],
+  "ic2_adv_roof_cost": [
+    "ic2-adv-price-04"
+  ],
+  "ic2_adv_bought": [
+    "ic2-adv-price-05"
+  ],
+  "ic2_adv_owe": [
+    "ic2-adv-price-06"
+  ],
+  "ic2_adv_would_you": [
+    "ic2-adv-price-07"
+  ],
+  "ic2_adv_not_asking": [
+    "ic2-adv-price-08"
+  ],
+  "ic2_adv_phone": [
+    "ic2-adv-price-09"
+  ],
+  "ic2_adv_rent": [
+    "ic2-adv-price-10"
+  ],
+  "ic2_ctx_yes": [
+    "ic2-ctx-yes-own",
+    "ic2-ctx-yes-prop",
+    "ic2-ctx-yes-price"
+  ],
+  "ic2_term_es_stop": [
+    "ic2-term-es-01"
+  ],
+  "ic2_term_es_wrong": [
+    "ic2-term-es-02"
+  ],
+  "ic2_hist_own_still": [
+    "ic2-hist-own-01"
+  ],
+  "ic2_hist_prop_numbers": [
+    "ic2-hist-prop-01"
+  ],
+  "ic2_hist_price_bottom": [
+    "ic2-hist-price-01"
+  ]
+}

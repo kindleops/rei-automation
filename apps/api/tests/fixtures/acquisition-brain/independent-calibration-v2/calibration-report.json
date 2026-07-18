@@ -1,0 +1,114 @@
+{
+  "corpus_version": "independent_calibration_v2",
+  "manifest_hash": "375ef3b76f340bf93cb5fe8bdf6c62b919ff9667d6eb9efd357a6504174aa293",
+  "gold_hash": "c22a271d0e8b28dd8abd6d1a9ebf34237e8a172486dafed571ccea3d68b4a097",
+  "classifier": "classify.js heuristicOnly",
+  "classifier_sha": "main:32c182e1 (unchanged in this PR)",
+  "calibration_runner_version": "independent_calibration_runner_v2",
+  "evaluation_timestamp": "2026-07-18T23:31:21.188Z",
+  "example_count": 80,
+  "evaluated_count": 80,
+  "english_count": 72,
+  "spanish_count": 8,
+  "semantic_family_count": 78,
+  "source_category_distribution": {
+    "authored": 38,
+    "adversarial": 36,
+    "context": 3,
+    "historical_style_deid": 3
+  },
+  "leakage_audit": {
+    "exact_overlap": 0,
+    "normalized_overlap": 0,
+    "known_semantic_family_overlap": 0,
+    "leaked_examples": [],
+    "excluded_before_eval": [],
+    "pass": true
+  },
+  "overall_label_accuracy": 0.6125,
+  "candidates": [
+    {
+      "candidate": "clear_ownership_confirmation",
+      "positive_intent": "ownership_confirmed",
+      "predicted_positive_count": 6,
+      "gold_positive_count": 13,
+      "true_positives": 6,
+      "false_positives": 0,
+      "false_negatives": 7,
+      "precision": 1,
+      "recall": 0.46153846153846156,
+      "f1": 0.631578947368421,
+      "precision_lb_95": 0.5,
+      "recall_lb_95": 0.26113348533036346,
+      "semantic_family_count": 13,
+      "independent_example_count": 13,
+      "status": "insufficient_independent_support",
+      "authority_eligible": false
+    },
+    {
+      "candidate": "clear_seller_requests_proposal",
+      "positive_intent": "asks_offer",
+      "predicted_positive_count": 3,
+      "gold_positive_count": 11,
+      "true_positives": 3,
+      "false_positives": 0,
+      "false_negatives": 8,
+      "precision": 1,
+      "recall": 0.2727272727272727,
+      "f1": 0.42857142857142855,
+      "precision_lb_95": 0,
+      "recall_lb_95": 0.11468533801866815,
+      "semantic_family_count": 11,
+      "independent_example_count": 11,
+      "status": "insufficient_independent_support",
+      "authority_eligible": false
+    },
+    {
+      "candidate": "clear_asking_price_disclosure",
+      "positive_intent": "asking_price_provided",
+      "predicted_positive_count": 12,
+      "gold_positive_count": 11,
+      "true_positives": 9,
+      "false_positives": 3,
+      "false_negatives": 2,
+      "precision": 0.75,
+      "recall": 0.8181818181818182,
+      "f1": 0.7826086956521738,
+      "precision_lb_95": 0.5126405909026421,
+      "recall_lb_95": 0.5728339439034859,
+      "semantic_family_count": 11,
+      "independent_example_count": 11,
+      "status": "insufficient_independent_support",
+      "authority_eligible": false
+    }
+  ],
+  "terminal_safety": {
+    "opt_out_as_ownership": 0,
+    "wrong_number_as_ownership": 0,
+    "tenant_family_agent_as_owner": 0,
+    "unsafe_continuation": 0
+  },
+  "deterministic_replay_sample": {
+    "n": 20,
+    "matches": 20,
+    "rate": 1
+  },
+  "authority_eligible_coverage": 0,
+  "allowlist_mutated": false,
+  "classify_js_changed": false,
+  "production_mode": "internal_shadow",
+  "queue_writes": 0,
+  "provider_calls": 0,
+  "sms_sent": 0,
+  "historical_shadow_distribution": {
+    "note": "Historical rows without independent gold are not accuracy evidence",
+    "messages_evaluated": 0,
+    "status": "not_run_as_accuracy_evidence"
+  },
+  "candidate_decisions": {
+    "clear_ownership_confirmation": "insufficient_independent_support",
+    "clear_seller_requests_proposal": "insufficient_independent_support",
+    "clear_asking_price_disclosure": "insufficient_independent_support"
+  },
+  "qualifying_for_later_allowlist_pr": []
+}

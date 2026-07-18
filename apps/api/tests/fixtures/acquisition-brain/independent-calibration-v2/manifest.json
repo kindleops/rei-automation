@@ -1,0 +1,22 @@
+{
+  "corpus_version": "independent_calibration_v2",
+  "calibration_runner_version": "independent_calibration_runner_v2",
+  "frozen": true,
+  "gold_labels": "gold-labels.jsonl",
+  "content_hashes": "immutable-content-hashes.json",
+  "candidates": [
+    "clear_ownership_confirmation",
+    "clear_seller_requests_proposal",
+    "clear_asking_price_disclosure"
+  ],
+  "gates": {
+    "precision_min": 0.99,
+    "precision_lb_95_min": 0.99,
+    "recall_min": 0.95,
+    "recall_lb_95_min": 0.95,
+    "min_predicted_positives_for_precision_lb": 300,
+    "min_independent_families": 20
+  },
+  "allowlist_mutation_forbidden": true,
+  "classify_js_mutation_forbidden": true
+}

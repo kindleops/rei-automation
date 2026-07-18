@@ -1,0 +1,12 @@
+{
+  "corpus_version": "independent_calibration_v2",
+  "frozen_at": "2026-07-18T00:00:00.000Z",
+  "policy": "independent_blind_calibration_v2",
+  "sources": {
+    "authored": 38,
+    "adversarial": 36,
+    "context": 3,
+    "historical_style_deid": 3
+  },
+  "note": "No production row IDs. De-identified. Not derived from development seed families."
+}
