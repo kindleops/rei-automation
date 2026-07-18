@@ -8,6 +8,7 @@ import {
 } from '@/lib/supabase/sms-engine.js'
 import { syncCampaignMetrics } from '@/lib/domain/campaigns/campaign-sync-metrics.js'
 import { maybeScheduleFollowUpAfterDelivery } from '@/lib/domain/seller-flow/delivery-triggered-followup.js'
+import { emitAutomationEvent as defaultEmitAutomationEvent } from '@/lib/domain/automation/automation-events.js'
 import { resolveDeployGitSha } from '@/lib/domain/deploy/resolve-deploy-sha.js'
 import { handleTextgridInbound } from '@/lib/flows/handle-textgrid-inbound.js'
 import { warn, info } from '@/lib/logging/logger.js'
@@ -217,12 +218,79 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       })
     }
 
+    // Acquisition Brain shadow follow-up plan (observability only; fail-open).
+    // Never creates send_queue rows or invokes providers.
+    let acquisition_brain_shadow_followup = null
+    if (matched) {
+      try {
+        const { evaluateAndEmitShadowFollowupAfterDelivery } = await import(
+          '@/lib/domain/acquisition-brain/shadow-followup-planner.js'
+        )
+        const { resolveShadowTimezone } = await import(
+          '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
+        )
+        const sid = normalized.provider_message_sid
+        let outbound = null
+        if (supabase?.from && sid) {
+          const { data } = await supabase
+            .from('message_events')
+            .select(
+              'id,thread_key,provider_message_sid,provider_message_id,delivery_status,delivered_at,sent_at,metadata,event_timestamp'
+            )
+            .or(`provider_message_sid.eq.${sid},provider_message_id.eq.${sid}`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          outbound = data
+        }
+        const meta =
+          outbound?.metadata && typeof outbound.metadata === 'object' ? outbound.metadata : {}
+        const provenance = meta.automation_provenance || {}
+        const delivered_at =
+          outbound?.delivered_at ||
+          normalized.delivered_at ||
+          result?.delivered_at ||
+          new Date().toISOString()
+        const emitFn = deps.emitAutomationEvent || defaultEmitAutomationEvent
+        acquisition_brain_shadow_followup = await evaluateAndEmitShadowFollowupAfterDelivery({
+          thread_key: outbound?.thread_key || null,
+          triggering_outbound_id: outbound?.id || null,
+          delivery_event_id: outbound?.id || sid,
+          delivery_status: processing_result.final_delivery_status,
+          delivered_at,
+          provider_sid: sid,
+          stage: provenance.lifecycle_stage || meta.lifecycle_stage || null,
+          outbound_use_case:
+            provenance.template_use_case || meta.template_use_case || meta.use_case || null,
+          template_use_case: provenance.template_use_case || meta.template_use_case || null,
+          template_id: provenance.template_id || meta.template_id || null,
+          automation_provenance: provenance,
+          timezone_context: resolveShadowTimezone({
+            property_timezone: meta.timezone || provenance.timezone || null,
+            campaign_timezone: meta.campaign_timezone || null,
+          }),
+          supabase,
+          emitAutomationEvent: emitFn,
+          emit: true,
+        })
+      } catch (shadow_err) {
+        acquisition_brain_shadow_followup = {
+          ok: false,
+          reason: shadow_err?.message || 'shadow_followup_failed',
+          may_enqueue: false,
+          may_send: false,
+        }
+      }
+    }
+
     info('webhook_processor.delivery_live_processed', {
       provider_message_sid: normalized.provider_message_sid,
       matched,
       final_delivery_status: processing_result.final_delivery_status,
       delivery_followup_scheduled: delivery_followup.scheduled,
       delivery_followup_reason: delivery_followup.reason,
+      shadow_followup_ok: acquisition_brain_shadow_followup?.ok ?? null,
+      shadow_followup_reason: acquisition_brain_shadow_followup?.reason ?? null,
       latency_ms: Date.now() - started,
     })
 
@@ -232,6 +300,7 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       matched,
       ...processing_result,
       delivery_followup,
+      acquisition_brain_shadow_followup,
       latency_ms: Date.now() - started,
       execution_id,
     }
