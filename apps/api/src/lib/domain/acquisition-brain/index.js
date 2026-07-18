@@ -109,3 +109,10 @@ export {
   evaluateAndEmitShadowFollowupAfterDelivery,
   evaluateAndEmitShadowFollowupCancellations,
 } from "./shadow-followup-planner.js";
+
+export {
+  SHADOW_SELLER_INTEL_EVENT,
+  SELLER_INTEL_VERSION,
+  SELLER_INTEL_EXCLUSIONS,
+  buildSellerIntelligenceProfile,
+} from "./shadow-seller-intelligence.js";
