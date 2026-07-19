@@ -1,0 +1,9 @@
+{
+  "corpus_version": "independent_calibration_v3.1",
+  "status": "empty",
+  "gold_labels_jsonl_sha256": null,
+  "manifest_json_sha256": null,
+  "example_count": 0,
+  "predictions_sha256": null,
+  "predictions_must_be_null_until_separate_run": true
+}

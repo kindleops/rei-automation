@@ -1,0 +1,13 @@
+{
+  "corpus_version": "independent_calibration_v3.1",
+  "status": "empty_workspace",
+  "example_count": 0,
+  "predictions": null,
+  "predictions_forbidden_until_dual_curator_freeze": true,
+  "gold_hash": null,
+  "manifest_hash": null,
+  "notes": [
+    "Populate only after dual independent curation and adjudication.",
+    "Do not seed from development pack v3 examples."
+  ]
+}

@@ -1,0 +1,1482 @@
+{
+  "development_pack_version": "acquisition_brain_adversarial_development_pack_v3",
+  "gold_hash_verified": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+  "example_count": 791,
+  "true_semantic_family_count": 129,
+  "original_claimed_family_count": 791,
+  "singleton_families": 39,
+  "multi_member_families": 90,
+  "family_size_distribution": {
+    "1": 39,
+    "2": 22,
+    "3": 12,
+    "4": 6,
+    "5": 5,
+    "6": 10,
+    "7": 4,
+    "8": 3,
+    "9": 4,
+    "10": 3,
+    "11": 1,
+    "12": 1,
+    "13": 3,
+    "14": 3,
+    "15": 3,
+    "16": 2,
+    "17": 1,
+    "24": 1,
+    "25": 1,
+    "27": 1,
+    "29": 1,
+    "37": 1,
+    "40": 1,
+    "65": 1
+  },
+  "examples_per_family_mean": 6.131782945736434,
+  "examples_per_family_median": 3,
+  "max_family_size": 65,
+  "clustering_rationale": [
+    "Families group shared underlying constructions (title/deed, still-own, property-is-mine, written proposal, cash offer, floor price, zip neighbor, tenant role, sold disconnect, etc.).",
+    "Context short replies cluster by (language × outbound use case × reply token), not by unique punctuation.",
+    "Paraphrases of the same construction share one family even if surface wording differs.",
+    "Statistical evaluation of this pack must use family-cluster-aware metrics; singleton paraphrase inflation is disallowed for authority claims."
+  ],
+  "families": {
+    "unclear|en|other": {
+      "size": 65,
+      "example_ids": [
+        "ic3-en-own-a10",
+        "ic3-en-own-a23",
+        "ic3-en-own-a24",
+        "ic3-en-own-a25",
+        "ic3-en-own-a26",
+        "ic3-en-own-a27",
+        "ic3-en-own-a28",
+        "ic3-en-own-a33",
+        "ic3-en-own-a34",
+        "ic3-en-own-a35",
+        "ic3-en-own-a37",
+        "ic3-en-own-a42",
+        "ic3-en-own-a43",
+        "ic3-en-own-a44",
+        "ic3-en-own-a54",
+        "ic3-en-own-a64",
+        "ic3-en-own-a65",
+        "ic3-en-own-a66",
+        "ic3-en-own-a67",
+        "ic3-en-own-a68",
+        "ic3-en-own-a69",
+        "ic3-en-own-a70",
+        "ic3-en-own-a76",
+        "ic3-en-own-a77",
+        "ic3-en-own-a78",
+        "ic3-en-own-a79",
+        "ic3-en-own-a80",
+        "ic3-en-prop-a04",
+        "ic3-en-prop-a49",
+        "ic3-en-prop-a50",
+        "ic3-en-prop-a57",
+        "ic3-en-prop-a68",
+        "ic3-en-price-a11",
+        "ic3-en-price-a27",
+        "ic3-en-price-a28",
+        "ic3-en-price-a31",
+        "ic3-en-price-a33",
+        "ic3-en-price-a38",
+        "ic3-en-price-a39",
+        "ic3-en-price-a44",
+        "ic3-en-price-a46",
+        "ic3-en-price-a47",
+        "ic3-en-price-a49",
+        "ic3-en-price-a50",
+        "ic3-en-price-a54",
+        "ic3-en-price-a55",
+        "ic3-en-price-a56",
+        "ic3-en-price-a57",
+        "ic3-en-price-a58",
+        "ic3-en-price-a59",
+        "ic3-en-price-a69",
+        "ic3-en-price-a70",
+        "ic3-en-price-a71",
+        "ic3-en-price-a72",
+        "ic3-en-price-a73",
+        "ic3-en-price-a74",
+        "ic3-en-price-a75",
+        "ic3-en-price-a76",
+        "ic3-en-price-a77",
+        "ic3-en-price-a82",
+        "ic3-en-price-a83",
+        "ic3-en-price-a84",
+        "ic3-en-price-a85",
+        "ic3-en-price-a86",
+        "ic3-en-price-a89"
+      ]
+    },
+    "price|en|stated_desired_amount": {
+      "size": 40,
+      "example_ids": [
+        "ic3-en-price-p02",
+        "ic3-en-price-p05",
+        "ic3-en-price-p06",
+        "ic3-en-price-p08",
+        "ic3-en-price-p11",
+        "ic3-en-price-p15",
+        "ic3-en-price-p16",
+        "ic3-en-price-p18",
+        "ic3-en-price-p20",
+        "ic3-en-price-p21",
+        "ic3-en-price-p23",
+        "ic3-en-price-p24",
+        "ic3-en-price-p29",
+        "ic3-en-price-p31",
+        "ic3-en-price-p32",
+        "ic3-en-price-p35",
+        "ic3-en-price-p36",
+        "ic3-en-price-p37",
+        "ic3-en-price-p38",
+        "ic3-en-price-p40",
+        "ic3-en-price-p41",
+        "ic3-en-price-p42",
+        "ic3-en-price-p43",
+        "ic3-en-price-p46",
+        "ic3-en-price-p47",
+        "ic3-en-price-p50",
+        "ic3-en-price-p52",
+        "ic3-en-price-p53",
+        "ic3-en-price-p54",
+        "ic3-en-price-p56",
+        "ic3-en-price-p59",
+        "ic3-en-price-p60",
+        "ic3-en-price-p64",
+        "ic3-en-price-p68",
+        "ic3-en-price-p69",
+        "ic3-en-price-p71",
+        "ic3-en-price-p73",
+        "ic3-en-price-p74",
+        "ic3-en-price-p79",
+        "ic3-en-hist-price-01"
+      ]
+    },
+    "own|en|general_ownership_affirmation": {
+      "size": 37,
+      "example_ids": [
+        "ic3-en-own-p09",
+        "ic3-en-own-p12",
+        "ic3-en-own-p13",
+        "ic3-en-own-p14",
+        "ic3-en-own-p17",
+        "ic3-en-own-p18",
+        "ic3-en-own-p24",
+        "ic3-en-own-p25",
+        "ic3-en-own-p26",
+        "ic3-en-own-p29",
+        "ic3-en-own-p31",
+        "ic3-en-own-p36",
+        "ic3-en-own-p38",
+        "ic3-en-own-p39",
+        "ic3-en-own-p41",
+        "ic3-en-own-p42",
+        "ic3-en-own-p43",
+        "ic3-en-own-p44",
+        "ic3-en-own-p47",
+        "ic3-en-own-p50",
+        "ic3-en-own-p55",
+        "ic3-en-own-p56",
+        "ic3-en-own-p57",
+        "ic3-en-own-p58",
+        "ic3-en-own-p60",
+        "ic3-en-own-p61",
+        "ic3-en-own-p62",
+        "ic3-en-own-p63",
+        "ic3-en-own-p64",
+        "ic3-en-own-p66",
+        "ic3-en-own-p67",
+        "ic3-en-own-p68",
+        "ic3-en-own-p69",
+        "ic3-en-own-p70",
+        "ic3-en-own-p71",
+        "ic3-en-own-p75",
+        "ic3-en-own-p76"
+      ]
+    },
+    "unclear|es|other": {
+      "size": 29,
+      "example_ids": [
+        "ic3-es-own-a17",
+        "ic3-es-own-a18",
+        "ic3-es-own-a19",
+        "ic3-es-own-a27",
+        "ic3-es-own-a28",
+        "ic3-es-own-a29",
+        "ic3-es-own-a36",
+        "ic3-es-own-a37",
+        "ic3-es-own-a39",
+        "ic3-es-prop-a04",
+        "ic3-es-prop-a27",
+        "ic3-es-price-a06",
+        "ic3-es-price-a16",
+        "ic3-es-price-a17",
+        "ic3-es-price-a19",
+        "ic3-es-price-a20",
+        "ic3-es-price-a23",
+        "ic3-es-price-a24",
+        "ic3-es-price-a25",
+        "ic3-es-price-a26",
+        "ic3-es-price-a28",
+        "ic3-es-price-a30",
+        "ic3-es-price-a31",
+        "ic3-es-price-a35",
+        "ic3-es-price-a36",
+        "ic3-es-price-a37",
+        "ic3-es-price-a38",
+        "ic3-es-price-a43",
+        "ic3-es-price-a45"
+      ]
+    },
+    "price|es|stated_desired_amount": {
+      "size": 27,
+      "example_ids": [
+        "ic3-es-price-p04",
+        "ic3-es-price-p07",
+        "ic3-es-price-p08",
+        "ic3-es-price-p13",
+        "ic3-es-price-p15",
+        "ic3-es-price-p16",
+        "ic3-es-price-p17",
+        "ic3-es-price-p19",
+        "ic3-es-price-p20",
+        "ic3-es-price-p22",
+        "ic3-es-price-p23",
+        "ic3-es-price-p25",
+        "ic3-es-price-p26",
+        "ic3-es-price-p28",
+        "ic3-es-price-p30",
+        "ic3-es-price-p32",
+        "ic3-es-price-p33",
+        "ic3-es-price-p34",
+        "ic3-es-price-p35",
+        "ic3-es-price-p37",
+        "ic3-es-price-p40",
+        "ic3-es-price-p41",
+        "ic3-es-price-p44",
+        "ic3-es-price-p45",
+        "ic3-es-price-p48",
+        "ic3-es-price-p49",
+        "ic3-es-hist-price-01"
+      ]
+    },
+    "price|en|explicit_asking_price": {
+      "size": 25,
+      "example_ids": [
+        "ic3-en-price-p01",
+        "ic3-en-price-p03",
+        "ic3-en-price-p07",
+        "ic3-en-price-p13",
+        "ic3-en-price-p17",
+        "ic3-en-price-p22",
+        "ic3-en-price-p28",
+        "ic3-en-price-p34",
+        "ic3-en-price-p39",
+        "ic3-en-price-p44",
+        "ic3-en-price-p45",
+        "ic3-en-price-p48",
+        "ic3-en-price-p49",
+        "ic3-en-price-p51",
+        "ic3-en-price-p55",
+        "ic3-en-price-p57",
+        "ic3-en-price-p58",
+        "ic3-en-price-p61",
+        "ic3-en-price-p62",
+        "ic3-en-price-p63",
+        "ic3-en-price-p67",
+        "ic3-en-price-p70",
+        "ic3-en-price-p72",
+        "ic3-en-price-p75",
+        "ic3-en-price-p80"
+      ]
+    },
+    "info|en|info_request": {
+      "size": 24,
+      "example_ids": [
+        "ic3-en-prop-a10",
+        "ic3-en-prop-a14",
+        "ic3-en-prop-a15",
+        "ic3-en-prop-a16",
+        "ic3-en-prop-a25",
+        "ic3-en-prop-a30",
+        "ic3-en-prop-a34",
+        "ic3-en-prop-a42",
+        "ic3-en-prop-a43",
+        "ic3-en-prop-a44",
+        "ic3-en-prop-a53",
+        "ic3-en-prop-a54",
+        "ic3-en-prop-a55",
+        "ic3-en-prop-a60",
+        "ic3-en-prop-a63",
+        "ic3-en-prop-a70",
+        "ic3-en-prop-a71",
+        "ic3-en-prop-a72",
+        "ic3-en-prop-a78",
+        "ic3-en-prop-a79",
+        "ic3-en-prop-a80",
+        "ic3-en-price-a78",
+        "ic3-en-price-a79",
+        "ic3-en-price-a87"
+      ]
+    },
+    "own|en|title_holder_of_record": {
+      "size": 17,
+      "example_ids": [
+        "ic3-en-own-p01",
+        "ic3-en-own-p02",
+        "ic3-en-own-p03",
+        "ic3-en-own-p05",
+        "ic3-en-own-p07",
+        "ic3-en-own-p11",
+        "ic3-en-own-p15",
+        "ic3-en-own-p22",
+        "ic3-en-own-p23",
+        "ic3-en-own-p28",
+        "ic3-en-own-p30",
+        "ic3-en-own-p35",
+        "ic3-en-own-p40",
+        "ic3-en-own-p51",
+        "ic3-en-own-p53",
+        "ic3-en-own-p54",
+        "ic3-en-own-p78"
+      ]
+    },
+    "prop|en|written_formal_proposal": {
+      "size": 16,
+      "example_ids": [
+        "ic3-en-prop-p01",
+        "ic3-en-prop-p05",
+        "ic3-en-prop-p11",
+        "ic3-en-prop-p15",
+        "ic3-en-prop-p23",
+        "ic3-en-prop-p26",
+        "ic3-en-prop-p32",
+        "ic3-en-prop-p47",
+        "ic3-en-prop-p48",
+        "ic3-en-prop-p52",
+        "ic3-en-prop-p57",
+        "ic3-en-prop-p60",
+        "ic3-en-prop-p69",
+        "ic3-en-prop-p73",
+        "ic3-en-prop-p79",
+        "ic3-en-hist-prop-01"
+      ]
+    },
+    "prop|es|generic_proposal_request": {
+      "size": 16,
+      "example_ids": [
+        "ic3-es-prop-p06",
+        "ic3-es-prop-p15",
+        "ic3-es-prop-p18",
+        "ic3-es-prop-p29",
+        "ic3-es-prop-p31",
+        "ic3-es-prop-p32",
+        "ic3-es-prop-p34",
+        "ic3-es-prop-p35",
+        "ic3-es-prop-p37",
+        "ic3-es-prop-p38",
+        "ic3-es-prop-p39",
+        "ic3-es-prop-p41",
+        "ic3-es-prop-p45",
+        "ic3-es-prop-p46",
+        "ic3-es-prop-p47",
+        "ic3-es-prop-p50"
+      ]
+    },
+    "prop|en|generic_proposal_request": {
+      "size": 15,
+      "example_ids": [
+        "ic3-en-prop-p22",
+        "ic3-en-prop-p24",
+        "ic3-en-prop-p27",
+        "ic3-en-prop-p29",
+        "ic3-en-prop-p33",
+        "ic3-en-prop-p36",
+        "ic3-en-prop-p44",
+        "ic3-en-prop-p54",
+        "ic3-en-prop-p63",
+        "ic3-en-prop-p64",
+        "ic3-en-prop-p66",
+        "ic3-en-prop-p70",
+        "ic3-en-prop-p77",
+        "ic3-en-prop-p80",
+        "ic3-en-price-a67"
+      ]
+    },
+    "own|es|explicit_owner_claim": {
+      "size": 15,
+      "example_ids": [
+        "ic3-es-own-p03",
+        "ic3-es-own-p07",
+        "ic3-es-own-p10",
+        "ic3-es-own-p18",
+        "ic3-es-own-p20",
+        "ic3-es-own-p22",
+        "ic3-es-own-p25",
+        "ic3-es-own-p27",
+        "ic3-es-own-p32",
+        "ic3-es-own-p34",
+        "ic3-es-own-p37",
+        "ic3-es-own-p38",
+        "ic3-es-own-p42",
+        "ic3-es-own-p46",
+        "ic3-es-own-p49"
+      ]
+    },
+    "price|es|explicit_asking_price": {
+      "size": 15,
+      "example_ids": [
+        "ic3-es-price-p01",
+        "ic3-es-price-p02",
+        "ic3-es-price-p03",
+        "ic3-es-price-p06",
+        "ic3-es-price-p14",
+        "ic3-es-price-p18",
+        "ic3-es-price-p21",
+        "ic3-es-price-p24",
+        "ic3-es-price-p31",
+        "ic3-es-price-p38",
+        "ic3-es-price-p39",
+        "ic3-es-price-p42",
+        "ic3-es-price-p46",
+        "ic3-es-price-p47",
+        "ic3-es-price-p50"
+      ]
+    },
+    "term|en|opt_out": {
+      "size": 14,
+      "example_ids": [
+        "ic3-en-own-a19",
+        "ic3-en-own-a20",
+        "ic3-en-own-a39",
+        "ic3-en-own-a40",
+        "ic3-en-own-a75",
+        "ic3-en-prop-a11",
+        "ic3-en-prop-a12",
+        "ic3-en-prop-a51",
+        "ic3-en-prop-a52",
+        "ic3-en-prop-a66",
+        "ic3-en-prop-a74",
+        "ic3-en-price-a36",
+        "ic3-en-price-a80",
+        "ic3-en-price-a90"
+      ]
+    },
+    "prop|en|send_numbers_economics": {
+      "size": 14,
+      "example_ids": [
+        "ic3-en-prop-p03",
+        "ic3-en-prop-p10",
+        "ic3-en-prop-p12",
+        "ic3-en-prop-p19",
+        "ic3-en-prop-p20",
+        "ic3-en-prop-p35",
+        "ic3-en-prop-p41",
+        "ic3-en-prop-p46",
+        "ic3-en-prop-p50",
+        "ic3-en-prop-p58",
+        "ic3-en-prop-p67",
+        "ic3-en-prop-p68",
+        "ic3-en-prop-p74",
+        "ic3-en-prop-p75"
+      ]
+    },
+    "prop|en|cash_offer_request": {
+      "size": 14,
+      "example_ids": [
+        "ic3-en-prop-p04",
+        "ic3-en-prop-p08",
+        "ic3-en-prop-p14",
+        "ic3-en-prop-p30",
+        "ic3-en-prop-p31",
+        "ic3-en-prop-p37",
+        "ic3-en-prop-p39",
+        "ic3-en-prop-p42",
+        "ic3-en-prop-p45",
+        "ic3-en-prop-p53",
+        "ic3-en-prop-p55",
+        "ic3-en-prop-p59",
+        "ic3-en-prop-p62",
+        "ic3-en-prop-p78"
+      ]
+    },
+    "role|en|agent_broker": {
+      "size": 13,
+      "example_ids": [
+        "ic3-en-own-a05",
+        "ic3-en-own-a06",
+        "ic3-en-own-a31",
+        "ic3-en-own-a32",
+        "ic3-en-own-a49",
+        "ic3-en-prop-a07",
+        "ic3-en-prop-a08",
+        "ic3-en-prop-a21",
+        "ic3-en-prop-a28",
+        "ic3-en-prop-a29",
+        "ic3-en-prop-a47",
+        "ic3-en-prop-a48",
+        "ic3-en-price-a53"
+      ]
+    },
+    "prop|en|other_proposal_request": {
+      "size": 13,
+      "example_ids": [
+        "ic3-en-prop-p13",
+        "ic3-en-prop-p16",
+        "ic3-en-prop-p17",
+        "ic3-en-prop-p18",
+        "ic3-en-prop-p21",
+        "ic3-en-prop-p34",
+        "ic3-en-prop-p65",
+        "ic3-en-prop-p71",
+        "ic3-en-prop-p76",
+        "ic3-en-price-a22",
+        "ic3-en-price-a23",
+        "ic3-en-price-a65",
+        "ic3-en-price-a66"
+      ]
+    },
+    "id|en|identity_challenge": {
+      "size": 13,
+      "example_ids": [
+        "ic3-en-prop-a01",
+        "ic3-en-prop-a02",
+        "ic3-en-prop-a03",
+        "ic3-en-prop-a17",
+        "ic3-en-prop-a18",
+        "ic3-en-prop-a24",
+        "ic3-en-prop-a26",
+        "ic3-en-prop-a31",
+        "ic3-en-prop-a41",
+        "ic3-en-prop-a61",
+        "ic3-en-prop-a62",
+        "ic3-en-prop-a67",
+        "ic3-en-prop-a69"
+      ]
+    },
+    "own|es|general_ownership_affirmation": {
+      "size": 12,
+      "example_ids": [
+        "ic3-es-own-p08",
+        "ic3-es-own-p14",
+        "ic3-es-own-p17",
+        "ic3-es-own-p21",
+        "ic3-es-own-p23",
+        "ic3-es-own-p24",
+        "ic3-es-own-p30",
+        "ic3-es-own-p31",
+        "ic3-es-own-p36",
+        "ic3-es-own-p39",
+        "ic3-es-own-p47",
+        "ic3-es-own-p48"
+      ]
+    },
+    "neg|en|soft_negative": {
+      "size": 11,
+      "example_ids": [
+        "ic3-en-prop-a06",
+        "ic3-en-prop-a23",
+        "ic3-en-prop-a27",
+        "ic3-en-prop-a45",
+        "ic3-en-prop-a58",
+        "ic3-en-prop-a59",
+        "ic3-en-prop-a64",
+        "ic3-en-prop-a73",
+        "ic3-en-prop-a75",
+        "ic3-en-prop-a76",
+        "ic3-en-prop-a77"
+      ]
+    },
+    "own|en|explicit_owner_claim": {
+      "size": 10,
+      "example_ids": [
+        "ic3-en-own-p04",
+        "ic3-en-own-p27",
+        "ic3-en-own-p32",
+        "ic3-en-own-p37",
+        "ic3-en-own-p45",
+        "ic3-en-own-p48",
+        "ic3-en-own-p65",
+        "ic3-en-own-p72",
+        "ic3-en-own-p77",
+        "ic3-en-own-p79"
+      ]
+    },
+    "own|es|still_own_retain": {
+      "size": 10,
+      "example_ids": [
+        "ic3-es-own-p01",
+        "ic3-es-own-p06",
+        "ic3-es-own-p09",
+        "ic3-es-own-p13",
+        "ic3-es-own-p28",
+        "ic3-es-own-p35",
+        "ic3-es-own-p40",
+        "ic3-es-own-p41",
+        "ic3-es-own-p45",
+        "ic3-es-hist-own-01"
+      ]
+    },
+    "prop|es|written_formal_proposal": {
+      "size": 10,
+      "example_ids": [
+        "ic3-es-prop-p01",
+        "ic3-es-prop-p05",
+        "ic3-es-prop-p08",
+        "ic3-es-prop-p09",
+        "ic3-es-prop-p20",
+        "ic3-es-prop-p22",
+        "ic3-es-prop-p25",
+        "ic3-es-prop-p30",
+        "ic3-es-prop-p44",
+        "ic3-es-hist-prop-01"
+      ]
+    },
+    "disc|es|disconnect_other": {
+      "size": 9,
+      "example_ids": [
+        "ic3-es-own-a09",
+        "ic3-es-own-a10",
+        "ic3-es-own-a21",
+        "ic3-es-own-a30",
+        "ic3-es-own-a33",
+        "ic3-es-own-a34",
+        "ic3-es-prop-a15",
+        "ic3-es-price-a15",
+        "ic3-es-price-a41"
+      ]
+    },
+    "term|es|opt_out": {
+      "size": 9,
+      "example_ids": [
+        "ic3-es-own-a15",
+        "ic3-es-own-a16",
+        "ic3-es-own-a35",
+        "ic3-es-prop-a09",
+        "ic3-es-prop-a26",
+        "ic3-es-prop-a35",
+        "ic3-es-price-a14",
+        "ic3-es-price-a33",
+        "ic3-es-price-a42"
+      ]
+    },
+    "prop|es|cash_offer_request": {
+      "size": 9,
+      "example_ids": [
+        "ic3-es-prop-p04",
+        "ic3-es-prop-p10",
+        "ic3-es-prop-p14",
+        "ic3-es-prop-p17",
+        "ic3-es-prop-p26",
+        "ic3-es-prop-p28",
+        "ic3-es-prop-p33",
+        "ic3-es-prop-p40",
+        "ic3-es-prop-p43"
+      ]
+    },
+    "info|es|info_request": {
+      "size": 9,
+      "example_ids": [
+        "ic3-es-prop-a11",
+        "ic3-es-prop-a12",
+        "ic3-es-prop-a17",
+        "ic3-es-prop-a24",
+        "ic3-es-prop-a29",
+        "ic3-es-prop-a32",
+        "ic3-es-prop-a36",
+        "ic3-es-prop-a37",
+        "ic3-es-prop-a39"
+      ]
+    },
+    "disc|en|disconnect_other": {
+      "size": 8,
+      "example_ids": [
+        "ic3-en-own-a29",
+        "ic3-en-own-a30",
+        "ic3-en-own-a38",
+        "ic3-en-own-a47",
+        "ic3-en-own-a55",
+        "ic3-en-own-a56",
+        "ic3-en-own-a61",
+        "ic3-en-own-a62"
+      ]
+    },
+    "prop|en|purchase_terms_structure": {
+      "size": 8,
+      "example_ids": [
+        "ic3-en-prop-p02",
+        "ic3-en-prop-p07",
+        "ic3-en-prop-p09",
+        "ic3-en-prop-p28",
+        "ic3-en-prop-p43",
+        "ic3-en-prop-p51",
+        "ic3-en-prop-p56",
+        "ic3-en-prop-p61"
+      ]
+    },
+    "prop|es|other_proposal_request": {
+      "size": 8,
+      "example_ids": [
+        "ic3-es-prop-p11",
+        "ic3-es-prop-p13",
+        "ic3-es-prop-p16",
+        "ic3-es-prop-p21",
+        "ic3-es-prop-p23",
+        "ic3-es-prop-p49",
+        "ic3-es-price-a11",
+        "ic3-es-price-a29"
+      ]
+    },
+    "own|en|property_is_mine": {
+      "size": 7,
+      "example_ids": [
+        "ic3-en-own-p10",
+        "ic3-en-own-p16",
+        "ic3-en-own-p33",
+        "ic3-en-own-p46",
+        "ic3-en-own-p49",
+        "ic3-en-own-p74",
+        "ic3-en-own-p80"
+      ]
+    },
+    "price|en|firm_or_bottom": {
+      "size": 7,
+      "example_ids": [
+        "ic3-en-price-p12",
+        "ic3-en-price-p19",
+        "ic3-en-price-p27",
+        "ic3-en-price-p30",
+        "ic3-en-price-p66",
+        "ic3-en-price-p77",
+        "ic3-en-price-p78"
+      ]
+    },
+    "own|es|property_is_mine": {
+      "size": 7,
+      "example_ids": [
+        "ic3-es-own-p04",
+        "ic3-es-own-p11",
+        "ic3-es-own-p16",
+        "ic3-es-own-p26",
+        "ic3-es-own-p33",
+        "ic3-es-own-p43",
+        "ic3-es-own-p50"
+      ]
+    },
+    "neg|es|soft_negative": {
+      "size": 7,
+      "example_ids": [
+        "ic3-es-own-a20",
+        "ic3-es-prop-a06",
+        "ic3-es-prop-a23",
+        "ic3-es-prop-a28",
+        "ic3-es-prop-a33",
+        "ic3-es-prop-a38",
+        "ic3-es-prop-a40"
+      ]
+    },
+    "own|en|still_own_retain": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-p06",
+        "ic3-en-own-p19",
+        "ic3-en-own-p20",
+        "ic3-en-own-p34",
+        "ic3-en-own-p52",
+        "ic3-en-hist-own-01"
+      ]
+    },
+    "role|en|family_not_sole_owner": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-a07",
+        "ic3-en-own-a08",
+        "ic3-en-own-a09",
+        "ic3-en-own-a53",
+        "ic3-en-own-a63",
+        "ic3-en-price-a52"
+      ]
+    },
+    "disc|en|sold_or_transferred": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-a11",
+        "ic3-en-own-a12",
+        "ic3-en-own-a41",
+        "ic3-en-own-a48",
+        "ic3-en-own-a60",
+        "ic3-en-own-a74"
+      ]
+    },
+    "disc|en|true_wrong_number": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-a15",
+        "ic3-en-own-a16",
+        "ic3-en-own-a46",
+        "ic3-en-own-a73",
+        "ic3-en-prop-a22",
+        "ic3-en-price-a37"
+      ]
+    },
+    "role|en|occupant_other": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-a36",
+        "ic3-en-own-a45",
+        "ic3-en-own-a52",
+        "ic3-en-own-a59",
+        "ic3-en-own-a71",
+        "ic3-en-own-a72"
+      ]
+    },
+    "term|en|hostile_legal": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-own-a57",
+        "ic3-en-own-a58",
+        "ic3-en-prop-a13",
+        "ic3-en-prop-a32",
+        "ic3-en-prop-a33",
+        "ic3-en-prop-a65"
+      ]
+    },
+    "prop|en|price_range_from_buyer": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-prop-p06",
+        "ic3-en-prop-p25",
+        "ic3-en-prop-p38",
+        "ic3-en-prop-p40",
+        "ic3-en-prop-p49",
+        "ic3-en-prop-p72"
+      ]
+    },
+    "price_n|en|repair_estimate_or_condition": {
+      "size": 6,
+      "example_ids": [
+        "ic3-en-prop-a35",
+        "ic3-en-price-a15",
+        "ic3-en-price-a16",
+        "ic3-en-price-a17",
+        "ic3-en-price-a42",
+        "ic3-en-price-a60"
+      ]
+    },
+    "role|es|agent_broker": {
+      "size": 6,
+      "example_ids": [
+        "ic3-es-own-a04",
+        "ic3-es-own-a05",
+        "ic3-es-own-a31",
+        "ic3-es-prop-a07",
+        "ic3-es-prop-a16",
+        "ic3-es-price-a21"
+      ]
+    },
+    "term|es|hostile_legal": {
+      "size": 6,
+      "example_ids": [
+        "ic3-es-own-a23",
+        "ic3-es-own-a24",
+        "ic3-es-prop-a10",
+        "ic3-es-prop-a14",
+        "ic3-es-prop-a25",
+        "ic3-es-prop-a34"
+      ]
+    },
+    "role|en|tenant_renter": {
+      "size": 5,
+      "example_ids": [
+        "ic3-en-own-a01",
+        "ic3-en-own-a02",
+        "ic3-en-own-a51",
+        "ic3-en-price-a10",
+        "ic3-en-price-a81"
+      ]
+    },
+    "price|en|floor_minimum": {
+      "size": 5,
+      "example_ids": [
+        "ic3-en-price-p09",
+        "ic3-en-price-p10",
+        "ic3-en-price-p25",
+        "ic3-en-price-p26",
+        "ic3-en-price-p76"
+      ]
+    },
+    "price_n|en|year": {
+      "size": 5,
+      "example_ids": [
+        "ic3-en-price-a03",
+        "ic3-en-price-a04",
+        "ic3-en-price-a30",
+        "ic3-en-price-a40",
+        "ic3-en-price-a48"
+      ]
+    },
+    "price_n|en|purchase_history": {
+      "size": 5,
+      "example_ids": [
+        "ic3-en-price-a18",
+        "ic3-en-price-a19",
+        "ic3-en-price-a26",
+        "ic3-en-price-a45",
+        "ic3-en-price-a64"
+      ]
+    },
+    "id|es|identity_challenge": {
+      "size": 5,
+      "example_ids": [
+        "ic3-es-prop-a02",
+        "ic3-es-prop-a03",
+        "ic3-es-prop-a18",
+        "ic3-es-prop-a30",
+        "ic3-es-prop-a31"
+      ]
+    },
+    "time|en|need_time": {
+      "size": 4,
+      "example_ids": [
+        "ic3-en-prop-a36",
+        "ic3-en-prop-a37",
+        "ic3-en-prop-a38",
+        "ic3-en-price-a51"
+      ]
+    },
+    "cond|en|condition": {
+      "size": 4,
+      "example_ids": [
+        "ic3-en-price-a29",
+        "ic3-en-price-a43",
+        "ic3-en-price-a61",
+        "ic3-en-price-a62"
+      ]
+    },
+    "own|es|title_holder_of_record": {
+      "size": 4,
+      "example_ids": [
+        "ic3-es-own-p02",
+        "ic3-es-own-p05",
+        "ic3-es-own-p19",
+        "ic3-es-own-p29"
+      ]
+    },
+    "role|es|family_not_sole_owner": {
+      "size": 4,
+      "example_ids": [
+        "ic3-es-own-a06",
+        "ic3-es-own-a07",
+        "ic3-es-own-a08",
+        "ic3-es-own-a26"
+      ]
+    },
+    "prop|es|send_numbers_economics": {
+      "size": 4,
+      "example_ids": [
+        "ic3-es-prop-p03",
+        "ic3-es-prop-p12",
+        "ic3-es-prop-p27",
+        "ic3-es-prop-p48"
+      ]
+    },
+    "time|es|need_time": {
+      "size": 4,
+      "example_ids": [
+        "ic3-es-prop-a19",
+        "ic3-es-prop-a20",
+        "ic3-es-prop-a21",
+        "ic3-es-price-a22"
+      ]
+    },
+    "own_n|en|address_confirm_only": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-own-a21",
+        "ic3-en-own-a50",
+        "ic3-en-price-a68"
+      ]
+    },
+    "price_n|en|zip_or_code": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-own-a22",
+        "ic3-en-price-a01",
+        "ic3-en-price-a02"
+      ]
+    },
+    "cb|en|callback_or_phone": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-prop-a56",
+        "ic3-en-price-a07",
+        "ic3-en-price-a08"
+      ]
+    },
+    "price|en|net_to_seller": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-price-p04",
+        "ic3-en-price-p33",
+        "ic3-en-price-p65"
+      ]
+    },
+    "price_n|en|sqft": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-price-a05",
+        "ic3-en-price-a06",
+        "ic3-en-price-a88"
+      ]
+    },
+    "price_n|en|mortgage_balance": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-price-a13",
+        "ic3-en-price-a14",
+        "ic3-en-price-a41"
+      ]
+    },
+    "price_n|en|explicit_price_negation": {
+      "size": 3,
+      "example_ids": [
+        "ic3-en-price-a24",
+        "ic3-en-price-a25",
+        "ic3-en-price-a63"
+      ]
+    },
+    "own|es|sole_owner": {
+      "size": 3,
+      "example_ids": [
+        "ic3-es-own-p12",
+        "ic3-es-own-p15",
+        "ic3-es-own-p44"
+      ]
+    },
+    "prop|es|purchase_terms_structure": {
+      "size": 3,
+      "example_ids": [
+        "ic3-es-prop-p02",
+        "ic3-es-prop-p24",
+        "ic3-es-prop-p42"
+      ]
+    },
+    "prop|es|price_range_from_buyer": {
+      "size": 3,
+      "example_ids": [
+        "ic3-es-prop-p07",
+        "ic3-es-prop-p19",
+        "ic3-es-prop-p36"
+      ]
+    },
+    "price|es|net_to_seller": {
+      "size": 3,
+      "example_ids": [
+        "ic3-es-price-p05",
+        "ic3-es-price-p29",
+        "ic3-es-price-p43"
+      ]
+    },
+    "price|es|floor_minimum": {
+      "size": 3,
+      "example_ids": [
+        "ic3-es-price-p09",
+        "ic3-es-price-p10",
+        "ic3-es-price-p27"
+      ]
+    },
+    "own|en|sole_owner": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-own-p08",
+        "ic3-en-own-p73"
+      ]
+    },
+    "own|en|legal_current_owner": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-own-p21",
+        "ic3-en-own-p59"
+      ]
+    },
+    "role|en|property_manager": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-own-a03",
+        "ic3-en-own-a04"
+      ]
+    },
+    "disc|en|never_owned": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-own-a13",
+        "ic3-en-own-a14"
+      ]
+    },
+    "disc|en|former_owner": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-own-a17",
+        "ic3-en-own-a18"
+      ]
+    },
+    "neg|en|proposal_rejected": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-prop-a05",
+        "ic3-en-prop-a46"
+      ]
+    },
+    "neg|en|not_interested_selling": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-prop-a19",
+        "ic3-en-prop-a20"
+      ]
+    },
+    "lat|en|latent_interest": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-prop-a39",
+        "ic3-en-prop-a40"
+      ]
+    },
+    "price_n|en|taxes": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-price-a12",
+        "ic3-en-price-a32"
+      ]
+    },
+    "price_n|en|arv": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-price-a20",
+        "ic3-en-price-a21"
+      ]
+    },
+    "price_n|en|price_refusal": {
+      "size": 2,
+      "example_ids": [
+        "ic3-en-price-a34",
+        "ic3-en-price-a35"
+      ]
+    },
+    "role|es|occupant_other": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-own-a02",
+        "ic3-es-own-a38"
+      ]
+    },
+    "neg|es|under_contract": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-own-a22",
+        "ic3-es-prop-a08"
+      ]
+    },
+    "role|es|tenant_renter": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-own-a25",
+        "ic3-es-price-a34"
+      ]
+    },
+    "price_n|es|zip_or_code": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-own-a32",
+        "ic3-es-price-a01"
+      ]
+    },
+    "neg|es|not_interested_selling": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-prop-a05",
+        "ic3-es-prop-a13"
+      ]
+    },
+    "price|es|firm_or_bottom": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-p12",
+        "ic3-es-price-p36"
+      ]
+    },
+    "price_n|es|year": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-a02",
+        "ic3-es-price-a39"
+      ]
+    },
+    "price_n|es|sqft": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-a03",
+        "ic3-es-price-a40"
+      ]
+    },
+    "price_n|es|mortgage_balance": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-a07",
+        "ic3-es-price-a44"
+      ]
+    },
+    "price_n|es|repair_estimate_or_condition": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-a08",
+        "ic3-es-price-a27"
+      ]
+    },
+    "price_n|es|price_refusal": {
+      "size": 2,
+      "example_ids": [
+        "ic3-es-price-a13",
+        "ic3-es-price-a32"
+      ]
+    },
+    "neg|en|under_contract": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-prop-a09"
+      ]
+    },
+    "price|en|range_ask": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-price-p14"
+      ]
+    },
+    "price_n|en|rent": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-price-a09"
+      ]
+    },
+    "ctx|en|ownership_check|no": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-no-01"
+      ]
+    },
+    "ctx|en|proposal_interest|sure": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-prop-sure-01"
+      ]
+    },
+    "ctx|en|asking_price|maybe": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-price-maybe-01"
+      ]
+    },
+    "ctx|en|ownership_check|thats right": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-true-01"
+      ]
+    },
+    "ctx|en|proposal_interest|go ahead": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-prop-go-01"
+      ]
+    },
+    "ctx|en|asking_price|later": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-price-later-01"
+      ]
+    },
+    "ctx|en|ownership_check|true": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-true2"
+      ]
+    },
+    "ctx|en|proposal_interest|nope": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-prop-nope"
+      ]
+    },
+    "ctx|en|asking_price|idk": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-price-idk"
+      ]
+    },
+    "ctx|en|ownership_check|absolutely": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-absolutely"
+      ]
+    },
+    "ctx|en|ownership_check|for sure": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-for-sure"
+      ]
+    },
+    "ctx|en|ownership_check|negative": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-negative-word"
+      ]
+    },
+    "ctx|en|ownership_check|roger": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-roger"
+      ]
+    },
+    "ctx|en|ownership_check|copy that": {
+      "size": 1,
+      "example_ids": [
+        "ic3-en-ctx-own-copy"
+      ]
+    },
+    "role|es|property_manager": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-own-a03"
+      ]
+    },
+    "disc|es|never_owned": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-own-a11"
+      ]
+    },
+    "disc|es|true_wrong_number": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-own-a13"
+      ]
+    },
+    "disc|es|former_owner": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-own-a14"
+      ]
+    },
+    "disc|es|sold_or_transferred": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-own-a40"
+      ]
+    },
+    "lat|es|latent_interest": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-prop-a22"
+      ]
+    },
+    "price|es|range_ask": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-p11"
+      ]
+    },
+    "cb|es|callback_or_phone": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a04"
+      ]
+    },
+    "price_n|es|rent": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a05"
+      ]
+    },
+    "price_n|es|purchase_history": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a09"
+      ]
+    },
+    "price_n|es|arv": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a10"
+      ]
+    },
+    "price_n|es|explicit_price_negation": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a12"
+      ]
+    },
+    "cond|es|condition": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-price-a18"
+      ]
+    },
+    "ctx|es|ownership_check|correcto": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-own-si-02"
+      ]
+    },
+    "ctx|es|ownership_check|claro": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-own-claro"
+      ]
+    },
+    "ctx|es|ownership_check|afirmativo": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-own-afirmativo"
+      ]
+    },
+    "ctx|es|proposal_interest|dale": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-prop-dale"
+      ]
+    },
+    "ctx|es|asking_price|luego": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-price-luego"
+      ]
+    },
+    "ctx|es|ownership_check|exacto": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-own-exacto"
+      ]
+    },
+    "ctx|es|ownership_check|sip": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-own-sip"
+      ]
+    },
+    "ctx|es|proposal_interest|nel": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-prop-nel"
+      ]
+    },
+    "ctx|es|asking_price|no se": {
+      "size": 1,
+      "example_ids": [
+        "ic3-es-ctx-price-nose"
+      ]
+    }
+  }
+}

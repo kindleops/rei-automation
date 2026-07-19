@@ -1,10 +1,12 @@
 # Independent calibration v3 — collection specification
 
-**Status:** Gold corpus frozen pre-prediction. See `collection-report.json` and `immutable-content-hashes.json`.
+**Status (methodology correction):** The frozen 791-example artifact set is preserved as **`acquisition_brain_adversarial_development_pack_v3`**. It is **not** independent blind authority evidence.
 
-**Do not author v3 examples while reading `classify.js` implementation details.**
+See `METHODOLOGY_AUDIT.md`, `PRESERVATION_RECORD.json`, and `FREEZE_STATUS.md`.
 
-Generate or curate the corpus **after PR #41 is merged**, independently of remediation development fixtures and of independent-calibration-v1/v2 gold.
+**True blind work** lives in `../independent-calibration-v3.1/` (empty workspace + dual-curator protocol).
+
+**Do not author blind gold while reading `classify.js` implementation details.**
 
 ## Purpose
 

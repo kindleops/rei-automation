@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 /**
- * Independent blind-calibration v3 corpus builder + freeze.
+ * Development-pack builder for acquisition_brain_adversarial_development_pack_v3.
  *
- * Hard constraints for this script:
+ * METHODOLOGY NOTE (PR #42 correction):
+ * Output of this script is a development/adversarial pack only.
+ * It is NOT independent blind authority evidence.
+ *
+ * After freeze of gold-labels.jsonl / immutable hashes:
+ * - Do NOT re-run this script to overwrite frozen gold.
+ * - Use verify-frozen-corpus.mjs (read-only) to verify hashes.
+ * - Any content change requires a NEW corpus version.
+ *
+ * Hard constraints:
  * - Does NOT import or read classify.js
- * - Does NOT read v2-remediation fixture files for authoring
  * - Does NOT run classifier predictions
- * - Uses only hand-authored / template-expanded language + exclusion lists
- *
- * Exclusion lists (_exclusion_sets.json) are used solely for leakage audit.
  */
+if (process.argv.includes("--overwrite-frozen")) {
+  console.error("Refusing --overwrite-frozen. Frozen gold is immutable; bump corpus version instead.");
+  process.exit(2);
+}
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

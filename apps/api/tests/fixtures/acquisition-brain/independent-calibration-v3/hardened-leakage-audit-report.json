@@ -1,0 +1,59 @@
+{
+  "audit_version": "hardened_leakage_audit_v1",
+  "gold_count": 791,
+  "prior_count": 250,
+  "exact_or_normalized_hits_in_pack": 0,
+  "high_similarity_suspicious_pairs": 2,
+  "translation_equivalent_suspects": 3,
+  "sample_suspicious": [
+    {
+      "id": "ic3-en-own-a19",
+      "method": "token_set",
+      "token_jaccard": 1,
+      "ngram_jaccard": 0.818,
+      "prior": {
+        "text": "Stop texting",
+        "source": "ic2_gold",
+        "id": "ic2-adv-own-11"
+      },
+      "reason": "high_similarity_review"
+    },
+    {
+      "id": "ic3-es-ctx-own-si-02",
+      "method": "char_3gram",
+      "token_jaccard": 0,
+      "ngram_jaccard": 0.833,
+      "prior": {
+        "text": "Correct",
+        "source": "ic2_gold",
+        "id": "ic2-own-en-04"
+      },
+      "reason": "high_similarity_review"
+    }
+  ],
+  "sample_translation_suspects": [
+    {
+      "en": "ic3-en-price-p01",
+      "es": "ic3-es-price-p02",
+      "shared_numbers": "265000",
+      "reason": "shared_numeric_span_cross_lang_review"
+    },
+    {
+      "en": "ic3-en-price-p14",
+      "es": "ic3-es-price-p11",
+      "shared_numbers": "235|255",
+      "reason": "shared_numeric_span_cross_lang_review"
+    },
+    {
+      "en": "ic3-en-price-p30",
+      "es": "ic3-es-price-p34",
+      "shared_numbers": "218000",
+      "reason": "shared_numeric_span_cross_lang_review"
+    }
+  ],
+  "notes": [
+    "Pack was filtered at original freeze for exact/normalized; hardened audit surfaces residual similarity for review.",
+    "Shared family IDs across languages are not used as proof of non-translation.",
+    "True blind v3.1 must re-run this audit against this development pack as a prior corpus."
+  ]
+}
