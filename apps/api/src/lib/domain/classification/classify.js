@@ -5,12 +5,18 @@ import {
   normalizeLanguage,
   normalizeStage,
 } from "@/lib/providers/podio.js";
+import {
+  validateConversationContext,
+  applyContextualShortReply,
+  CONTEXT_VERSION,
+} from "@/lib/domain/classification/conversation-context.js";
 
 /**
  * Provenance identifier recorded on every state mutation this classifier's
  * output produces. Bump when classification semantics change materially.
  */
-export const CLASSIFY_VERSION = "classify_js_v1";
+export const CLASSIFY_VERSION = "classify_js_context_v2";
+export { CONTEXT_VERSION, validateConversationContext };
 
 // ══════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -644,7 +650,8 @@ const OBJECTION_MAP = [
       "sold yrs ago", "sold years ago", "sold 10 yrs",
       "this is not shirley", "not shirley",
       "la mía es", "la mia es", "no la mía", "no la mia",
-      "esa casa", "llanoesmia",
+      "llanoesmia",
+      "esa casa no es", "esa casa no es mía", "esa casa no es mia",
       // Spanish
       "número equivocado", "equivocado de número",
       "no soy el dueño", "no soy la dueña",
@@ -847,7 +854,7 @@ const OBJECTION_MAP = [
       // Italian
       "non sono interessato", "non sono interessata",
       "non voglio vendere", "non è in vendita",
-      "non la venderò", "la tengo",
+      "non la venderò", "me la tengo", "me lo tengo",
       "non ci penso a vendere", "nessun interesse",
       "no grazie",
       // French
@@ -3268,10 +3275,255 @@ const ASKING_PRICE_PATTERNS = [
   /\b\d{1,3}\s+million\b/i,
   /\b\d{1,3}\s+mil\b/i,
   /\b(?:half|quarter|three\s+quarter)s?\s+(?:mil|million)\b/i,
+  /\bno\s+less\s+than\s+\$?\s*\d[\d,.]*/i,
+  /\bbetween\s+\$?\s*\d[\d,.]*\s+and\s+\$?\s*\d[\d,.]*/i,
+  /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
+  /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
+  /\bmi\s+precio\s+es\b/i,
+  /\balrededor\s+de\s+\$?\s*\d/i,
 ];
 
 function matchesAnyPattern(text, patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Structured seller asking-price parse. Only semantic_role = seller_asking_price
+ * may qualify for future authority (never assigned here without blind v3).
+ */
+export function parseSellerAskingPrice(message) {
+  const raw = cleanMessage(message);
+  const text = lower(raw);
+  const empty = {
+    value: null,
+    range: null,
+    qualifier: null,
+    currency: null,
+    evidence_span: null,
+    semantic_role: null,
+    confidence: 0,
+    price_rule_id: null,
+    qualifies_as_seller_asking_price: false,
+  };
+
+  if (!text) return empty;
+
+  // Explicit non-asking / non-seller-price roles
+  if (/\bnot\s+asking\b/i.test(text) || /\bno\s+estoy\s+pidiendo\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "explicit_negation",
+      confidence: 0.9,
+      price_rule_id: "price_reject_not_asking",
+    };
+  }
+  if (/^\s*\d{5}(-\d{4})?\s*$/.test(text.trim())) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "zip_code",
+      confidence: 0.95,
+      price_rule_id: "price_reject_zip",
+    };
+  }
+  if (/^\s*(19|20)\d{2}\s*$/.test(text.trim())) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "year",
+      confidence: 0.95,
+      price_rule_id: "price_reject_year",
+    };
+  }
+  if (/\b(sq\.?\s*ft|sqft|square\s+feet|pies\s+cuadrados)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "square_footage",
+      confidence: 0.9,
+      price_rule_id: "price_reject_sqft",
+    };
+  }
+  if (/\b(call|text|reach)\s+me\s+at\b|\bmy\s+(?:cell|phone|number)\s+is\b|\b\d{10,11}\b/.test(text)
+    && !/\b(k|thousand|million|\$)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "phone",
+      confidence: 0.9,
+      price_rule_id: "price_reject_phone",
+    };
+  }
+  if (/\brent\s+is\b|\brents?\s+for\b|\balquiler\b|\brenta\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "rent",
+      confidence: 0.9,
+      price_rule_id: "price_reject_rent",
+    };
+  }
+  if (/\b(taxes?|property\s+tax|impuestos)\b/i.test(text) && /\d/.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "taxes",
+      confidence: 0.85,
+      price_rule_id: "price_reject_taxes",
+    };
+  }
+  if (/\b(owe|owed|mortgage|balance|loan)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "mortgage_balance",
+      confidence: 0.9,
+      price_rule_id: "price_reject_mortgage",
+    };
+  }
+  if (/\b(roof|hvac|foundation|repair|repairs)\b/i.test(text)
+    && /\b(cost|costs|quote|estimate|to\s+fix|to\s+replace)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "repair_estimate",
+      confidence: 0.9,
+      price_rule_id: "price_reject_repair",
+    };
+  }
+  if (/\b(bought|paid|purchase[d]?)\s+(it\s+)?for\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "purchase_history",
+      confidence: 0.9,
+      price_rule_id: "price_reject_purchase_history",
+    };
+  }
+  if (/\b(arv|after\s+repair\s+value)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "arv",
+      confidence: 0.85,
+      price_rule_id: "price_reject_arv",
+    };
+  }
+  if (/\b(would\s+you\s+pay|what\s+would\s+you\s+pay|can\s+you\s+pay)\b/i.test(text)) {
+    return {
+      ...empty,
+      evidence_span: raw,
+      semantic_role: "buyer_proposal_or_hypothetical",
+      confidence: 0.85,
+      price_rule_id: "price_reject_hypothetical",
+    };
+  }
+
+  // Seller asking-price positives
+  let ruleId = null;
+  let qualifier = null;
+  let range = null;
+  let value = null;
+  let evidence = null;
+
+  const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
+  if (between) {
+    const lo = scalePriceToken(between[1], between[2]);
+    const hi = scalePriceToken(between[3], between[4]);
+    if (lo != null && hi != null) {
+      range = { low: lo, high: hi };
+      value = lo;
+      qualifier = "range";
+      ruleId = "price_between_range";
+      evidence = between[0];
+    }
+  }
+
+  const noLess = text.match(/\bno\s+less\s+than\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
+  if (!ruleId && noLess) {
+    value = scalePriceToken(noLess[1], noLess[2]);
+    qualifier = "floor";
+    ruleId = "price_no_less_than";
+    evidence = noLess[0];
+  }
+
+  const bottom = text.match(/\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
+  if (!ruleId && bottom) {
+    value = scalePriceToken(bottom[1], bottom[2]);
+    qualifier = "bottom_line";
+    ruleId = "price_bottom_line";
+    evidence = bottom[0];
+  }
+
+  // Fractional millions (half mil / quarter million)
+  const half = text.match(/\b(half|quarter|three\s+quarters?)\s+(mil|million)\b/i);
+  if (!ruleId && half) {
+    const frac = /half/i.test(half[1]) ? 0.5 : /three/i.test(half[1]) ? 0.75 : 0.25;
+    value = frac * 1000000;
+    qualifier = "stated";
+    ruleId = "price_fractional_million";
+    evidence = half[0];
+  }
+
+  if (!ruleId && matchesAnyPattern(text, ASKING_PRICE_PATTERNS)) {
+    // Require at least one digit in the amount token (avoid matching bare ".")
+    const m =
+      text.match(/\$?\s*(\d[\d,.]*)\s*(k|thousand|m|mil|million)?\b/i) ||
+      text.match(/\b(\d{2,3})\s*k\b/i);
+    if (m) {
+      value = scalePriceToken(m[1], m[2] || (/\d{2,3}k/i.test(m[0]) ? "k" : null));
+      evidence = m[0];
+      if (/\bfirm\b/i.test(text)) qualifier = "firm";
+      else if (/\bminimum|min\b/i.test(text)) qualifier = "floor";
+      else if (/\baround|about|alrededor\b/i.test(text)) qualifier = "approx";
+      else if (/\basking\b/i.test(text)) qualifier = "asking";
+      else qualifier = "stated";
+      ruleId = "price_pattern_match";
+    }
+  }
+
+  // Bare multi-digit without seller cues and without $ / k — not eligible
+  if (!ruleId && /^\s*\$?\s*\d[\d,.]+\s*$/.test(text.trim()) && !/\$/.test(text) && text.replace(/\D/g, "").length >= 5) {
+    const digits = text.replace(/\D/g, "");
+    if (digits.length === 5) {
+      return {
+        ...empty,
+        evidence_span: raw,
+        semantic_role: "zip_or_ambiguous_number",
+        confidence: 0.7,
+        price_rule_id: "price_reject_ambiguous_number",
+      };
+    }
+  }
+
+  if (ruleId && value != null && !Number.isNaN(value)) {
+    const hasCurrency = /\$|usd|k|thousand|million|mil\b/i.test(text) || value >= 1000;
+    return {
+      value,
+      range,
+      qualifier,
+      currency: hasCurrency ? "USD" : null,
+      evidence_span: evidence || raw,
+      semantic_role: "seller_asking_price",
+      confidence: qualifier === "asking" || qualifier === "bottom_line" ? 0.9 : 0.82,
+      price_rule_id: ruleId,
+      qualifies_as_seller_asking_price: true,
+    };
+  }
+
+  return empty;
+}
+
+function scalePriceToken(numStr, suffix) {
+  if (numStr == null) return null;
+  let val = parseFloat(String(numStr).replace(/,/g, ""));
+  if (Number.isNaN(val)) return null;
+  const s = (suffix || "").toLowerCase();
+  if (s.startsWith("k") || s.startsWith("thou")) val *= 1000;
+  if (s.startsWith("m")) val *= 1000000;
+  // bare "250" in "no less than 250" often means 250k in REI SMS — leave as-is if < 1000 without suffix
+  return val;
 }
 
 const INTENT_PRIORITY = Object.freeze([
@@ -3349,19 +3601,32 @@ function matchesOwnershipDisconnect(text = "") {
       "la mia es",
       "no la mía",
       "no la mia",
-      "esa casa",
       "llanoesmia",
       "ya lo vendí",
       "ya lo vendi",
       "no es mía",
       "no es mia",
+      "no es de mi",
       "no tengo esa propiedad",
       "nunca fui el dueño",
       "nunca fui el dueno",
+      "nunca he sido el dueño",
+      "nunca he sido el dueno",
       "not me",
       "owns it not me",
       "brother owns it not me",
+      "es de mi hermano no mía",
+      "es de mi hermano no mia",
     ])
+  ) {
+    return true;
+  }
+
+  // Spanish "esa casa" only with explicit disown / garble (not "propietario de esa casa")
+  if (
+    /\besa\s+casa\b/i.test(normalized) &&
+    /\b(no|llano|equivoc|vend|mía|mia)\b/i.test(normalized) &&
+    !/\b(soy|propietario|dueño|dueno|owner)\b/i.test(normalized)
   ) {
     return true;
   }
@@ -3398,6 +3663,53 @@ function pickPrimaryIntent(unique_intents = []) {
   return unique_intents[0] ?? "unclear";
 }
 
+function finalizeIntentResult({
+  primary_intent,
+  secondary_intent = null,
+  secondary_intents = null,
+  matched_intents = null,
+  matched_rule_ids = [],
+  suppressed_rule_ids = [],
+  context_status = "unavailable",
+  context_source_id = null,
+  context_use_case = null,
+  context_age_ms = null,
+  calibrated_rule_family_id = null,
+  evidence_spans = [],
+  precedence_result = "intent_priority",
+  ambiguity_flags = [],
+  confidence_rationale = null,
+  price_parse = null,
+  contextual_override = null,
+  contextual_confidence = null,
+} = {}) {
+  const matched = matched_intents || (primary_intent ? [primary_intent] : ["unclear"]);
+  const secondaryList =
+    secondary_intents ||
+    (secondary_intent ? [secondary_intent] : matched.filter((i) => i !== primary_intent));
+  return {
+    primary_intent: primary_intent || "unclear",
+    secondary_intent: secondary_intent ?? secondaryList[0] ?? null,
+    secondary_intents: secondaryList,
+    matched_intents: matched,
+    matched_rule_ids,
+    suppressed_rule_ids,
+    precedence_result,
+    evidence_spans,
+    context_status,
+    context_source_id,
+    context_use_case,
+    context_age_ms,
+    ambiguity_flags,
+    calibrated_rule_family_id,
+    confidence_rationale,
+    price_parse,
+    contextual_override,
+    contextual_confidence,
+    classifier_version: CLASSIFY_VERSION,
+  };
+}
+
 /**
  * resolveIntents(message, signals)
  *
@@ -3410,12 +3722,74 @@ function resolveIntents(
     compliance_flag = null,
     objection = null,
     positive_signals = [],
+    conversation_context = null,
   } = {}
 ) {
   const text = lower(message);
+  const rawMessage = cleanMessage(message);
   const normalized_objection = cleanMessage(objection);
+  const matched_rule_ids = [];
+  const suppressed_rule_ids = [];
+  let price_parse = null;
+  let calibrated_rule_family_id = null;
 
   const intents = [];
+  const ctxValidation = validateConversationContext(conversation_context);
+  const shortCtx = applyContextualShortReply(rawMessage, ctxValidation);
+  if (shortCtx.applied) {
+    matched_rule_ids.push(shortCtx.rule_id);
+    calibrated_rule_family_id = shortCtx.rule_id;
+    if (shortCtx.force_unclear) {
+      return {
+        primary_intent: "unclear",
+        secondary_intent: null,
+        secondary_intents: shortCtx.labels || [],
+        matched_intents: ["unclear"],
+        matched_rule_ids,
+        suppressed_rule_ids: ["bare_yes_ownership_fallback"],
+        precedence_result: "contextual_short_reply_override",
+        evidence_spans: shortCtx.evidence_span ? [shortCtx.evidence_span] : [rawMessage],
+        context_status: ctxValidation.context_status,
+        context_source_id: shortCtx.context_message_id || null,
+        context_use_case: shortCtx.context_use_case || null,
+        context_age_ms: shortCtx.context_age_ms ?? null,
+        ambiguity_flags: shortCtx.human_review ? ["needs_clarification"] : [],
+        calibrated_rule_family_id,
+        confidence_rationale: shortCtx.rationale,
+        contextual_override: shortCtx,
+        price_parse: null,
+      };
+    }
+    // Map contextual primary to production intents
+    const ctxPrimary =
+      shortCtx.primary_intent === "ownership_confirmed"
+        ? "ownership_confirmed"
+        : shortCtx.primary_intent === "not_interested"
+          ? "not_interested"
+          : shortCtx.primary_intent === "interested"
+            ? "seller_interested"
+            : shortCtx.primary_intent;
+    return {
+      primary_intent: ctxPrimary,
+      secondary_intent: null,
+      secondary_intents: shortCtx.labels || [],
+      matched_intents: [ctxPrimary],
+      matched_rule_ids,
+      suppressed_rule_ids: ["message_text_only_ownership"],
+      precedence_result: "contextual_short_reply_override",
+      evidence_spans: shortCtx.evidence_span ? [shortCtx.evidence_span] : [rawMessage],
+      context_status: ctxValidation.context_status,
+      context_source_id: shortCtx.context_message_id || null,
+      context_use_case: shortCtx.context_use_case || null,
+      context_age_ms: shortCtx.context_age_ms ?? null,
+      ambiguity_flags: [],
+      calibrated_rule_family_id,
+      confidence_rationale: shortCtx.rationale,
+      contextual_override: shortCtx,
+      price_parse: null,
+      contextual_confidence: shortCtx.confidence,
+    };
+  }
 
   // 1. OPT-OUT / COMPLIANCE (Highest Priority)
   // Prefer wrong_number when message is primarily a wrong-number disconnect
@@ -3463,23 +3837,57 @@ function resolveIntents(
       "no mas mensajes",
       "dejen de enviarme",
       "alto",
+      "no me escriba más",
+      "no me escriba mas",
+      "no me escribas más",
+      "no me escribas mas",
+      "no me escriba",
+      "no me escribas",
+      "deje de escribirme",
+      "dejen de escribirme",
     ]) ||
     /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim()) ||
     (/\bstop\b/i.test(text) &&
       includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]));
 
   if (is_opt_out && !is_true_wrong && !is_ownership_disconnect) {
-    return { primary_intent: "opt_out", secondary_intent: null };
+    matched_rule_ids.push("opt_out_terminal");
+    return finalizeIntentResult({
+      primary_intent: "opt_out",
+      secondary_intent: null,
+      matched_rule_ids,
+      suppressed_rule_ids,
+      context_status: ctxValidation.context_status,
+      context_source_id: null,
+      calibrated_rule_family_id: "opt_out_terminal",
+      evidence_spans: [rawMessage],
+      precedence_result: "terminal_opt_out",
+    });
   }
   // Opt-out + ownership in same message: opt_out terminal wins
   if (is_opt_out && !is_true_wrong && includesAny(text, ["never contact", "stop harassing"])) {
-    return { primary_intent: "opt_out", secondary_intent: null };
+    return finalizeIntentResult({
+      primary_intent: "opt_out",
+      matched_rule_ids: [...matched_rule_ids, "opt_out_terminal"],
+      context_status: ctxValidation.context_status,
+      calibrated_rule_family_id: "opt_out_terminal",
+      evidence_spans: [rawMessage],
+      precedence_result: "terminal_opt_out",
+    });
   }
   if (is_opt_out && is_true_wrong) {
     // wrong number stop calling → wrong_number (recipient invalid)
     intents.push("wrong_number");
+    matched_rule_ids.push("wrong_number_with_stop");
   } else if (is_opt_out) {
-    return { primary_intent: "opt_out", secondary_intent: null };
+    return finalizeIntentResult({
+      primary_intent: "opt_out",
+      matched_rule_ids: [...matched_rule_ids, "opt_out_terminal"],
+      context_status: ctxValidation.context_status,
+      calibrated_rule_family_id: "opt_out_terminal",
+      evidence_spans: [rawMessage],
+      precedence_result: "terminal_opt_out",
+    });
   }
 
   // 2. WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
@@ -3498,7 +3906,14 @@ function resolveIntents(
 
   // 2.6 AMBIGUOUS SHORT UTTERANCES — insufficient evidence for routing
   if (/^(maybe|huh|hmm|idk|dunno|eh)[\s?!.]*$/i.test(text.trim())) {
-    return { primary_intent: "unclear", secondary_intent: null };
+    return finalizeIntentResult({
+      primary_intent: "unclear",
+      matched_rule_ids: ["ambiguous_short"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      ambiguity_flags: ["short_ambiguous"],
+      precedence_result: "ambiguous_short",
+    });
   }
 
   // 3. HOSTILE OR LEGAL
@@ -3597,28 +4012,38 @@ function resolveIntents(
     }
   }
 
-  // 7. PRICE PROVIDED (guard ZIP/year/phone false positives lightly)
-  const looks_like_zip_or_year =
-    /^\s*\d{5}(-\d{4})?\s*$/.test(text.trim()) ||
-    /^\s*(19|20)\d{2}\s*$/.test(text.trim());
-  if (
-    !looks_like_zip_or_year &&
-    (matchesAnyPattern(text, ASKING_PRICE_PATTERNS) ||
-      includesAny(text, [
-        "quiero 250 mil",
-        "250 mil",
-        "alrededor de",
-        "no menos de",
-        "entre 240",
-      ]) ||
-      /\b\d{5,7}\b/.test(text) && includesAny(text, ["around", "about", "around", "alrededor", "quiero"]))
-  ) {
+  // 7. PRICE PROVIDED — structured semantic role required
+  price_parse = parseSellerAskingPrice(rawMessage);
+  if (price_parse.qualifies_as_seller_asking_price) {
     intents.push("asking_price_provided");
+    matched_rule_ids.push(price_parse.price_rule_id || "seller_asking_price");
+  } else if (price_parse.price_rule_id) {
+    suppressed_rule_ids.push(price_parse.price_rule_id);
   }
 
-  // 8. ASKS FOR OFFER
+  // 8. ASKS FOR OFFER / PROPOSAL REQUEST
+  const agent_handles_proposal =
+    includesAny(text, [
+      "my agent handles",
+      "agent handles proposals",
+      "realtor handles",
+      "talk to my agent",
+      "contact my agent",
+      "through my agent",
+    ]);
+  const proposal_rejected =
+    includesAny(text, [
+      "don't want a proposal",
+      "dont want a proposal",
+      "no proposal",
+      "not interested in a proposal",
+      "under contract",
+      "already under contract",
+    ]);
   if (
-    normalized_objection === "send_offer_first" ||
+    !agent_handles_proposal &&
+    !proposal_rejected &&
+    (normalized_objection === "send_offer_first" ||
     includesAny(text, [
       "how much",
       "what are you offering",
@@ -3628,6 +4053,33 @@ function resolveIntents(
       "what is the proposal",
       "what's your proposal",
       "what is your proposal",
+      "what proposal can you",
+      "what offer can you",
+      "what would you propose",
+      "what would you pay",
+      "what you would pay",
+      "what you have in mind",
+      "what do you have in mind",
+      "purchase terms",
+      "what kind of terms",
+      "written proposal",
+      "written offer",
+      "send me the numbers",
+      "send the numbers",
+      "send numbers",
+      "send over an offer",
+      "send over a proposal",
+      "go ahead and send numbers",
+      "sure go ahead and send",
+      "i'll look at a proposal",
+      "ill look at a proposal",
+      "look at a proposal",
+      "give me your best number",
+      "your best number",
+      "offer range",
+      "price range",
+      "ballpark",
+      "would you pay",
       "send me a proposal",
       "send me the proposal",
       "send a proposal",
@@ -3651,9 +4103,14 @@ function resolveIntents(
       // Spanish proposal / offer
       "cuál es la propuesta",
       "cual es la propuesta",
+      "que propuesta",
+      "qué propuesta",
       "la propuesta",
+      "propuesta tienen",
       "envíenme una oferta",
       "envienme una oferta",
+      "mándeme una oferta",
+      "mandeme una oferta",
       "envíe una oferta",
       "envie una oferta",
       "quiero oferta",
@@ -3664,9 +4121,17 @@ function resolveIntents(
       "mandeme los numeros",
       "envíen el contrato",
       "envien el contrato",
-    ])
+    ]) ||
+      /\b(proposal|offer|numbers|terms)\b/i.test(text) &&
+        /\b(send|put together|look at|want|need|see|give|mánd|mand|envi)/i.test(text))
   ) {
     intents.push("asks_offer");
+    matched_rule_ids.push("proposal_request");
+  }
+  if (agent_handles_proposal) {
+    intents.push("not_interested");
+    matched_rule_ids.push("agent_handles_proposal");
+    suppressed_rule_ids.push("proposal_request");
   }
 
   // 9. CALLBACK / TEXT REQUESTS
@@ -3683,6 +4148,7 @@ function resolveIntents(
   if (includesAny(text, [
     "interested", "depends", "depending", "maybe", "possibly",
     "if the price is right", "enough money", "make it worth it",
+    "me interesa", "si el precio", "if the price",
   ])) {
     if (!intents.includes("seller_interested") && !intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("latent_interest");
@@ -3699,6 +4165,7 @@ function resolveIntents(
     "realtor",
     "i'm the agent",
     "im the agent",
+    "i am the agent",
     "just a tenant",
     "i am a tenant",
     "i'm a tenant",
@@ -3714,6 +4181,7 @@ function resolveIntents(
     "soy inquilino",
     "soy el administrador",
     "soy el agente",
+    "soy la agente",
   ]);
   const ownership_negated =
     includesAny(text, [
@@ -3725,20 +4193,75 @@ function resolveIntents(
       "dont want",
       "not mine",
       "never owned",
+      "no i don't",
+      "no i dont",
+      "years ago",
+      "was mine",
     ]) ||
     /\bi do not\b/.test(text) ||
-    /\bi don't\b/.test(text);
+    /\bi don't\b/.test(text) ||
+    /\bi dont\b/.test(text);
+
+  // Former owner / "was mine years ago" → ownership disconnect
+  if (
+    /\b(was\s+mine|used\s+to\s+own|years\s+ago)\b/i.test(text) &&
+    !/\bstill\b/i.test(text)
+  ) {
+    if (!intents.includes("wrong_number")) intents.push("wrong_number");
+    matched_rule_ids.push("former_owner_disconnect");
+  }
+
+  if (is_non_owner_role) {
+    // Agent / manager / tenant / family — never ownership_confirmed
+    suppressed_rule_ids.push("ownership_confirmed");
+    matched_rule_ids.push("non_owner_role");
+    if (
+      includesAny(text, [
+        "tenant",
+        "inquilino",
+        "property manager",
+        "administrador",
+        "i manage it",
+        "i manage the",
+      ])
+    ) {
+      if (!intents.includes("tenant_occupied")) intents.push("tenant_occupied");
+    } else if (
+      includesAny(text, [
+        "i'm the agent",
+        "im the agent",
+        "i am the agent",
+        "listing agent",
+        "real estate agent",
+        "realtor",
+        "soy el agente",
+        "soy la agente",
+      ])
+    ) {
+      if (!intents.includes("not_interested")) intents.push("not_interested");
+    }
+    // Family / spouse-only language: leave unclear (do not false-owner, do not force not_interested)
+  }
 
   if (
     !is_property_correction &&
     !is_non_owner_role &&
     !is_ownership_disconnect &&
     !ownership_negated &&
+    !intents.includes("wrong_number") &&
     (includesAny(text, [
       "yes i own it",
       "yes i do",
       "i own it",
       "still own it",
+      "still own the place",
+      "still own the",
+      "still the owner",
+      "still hold title",
+      "hold title",
+      "owner of record",
+      "that's me",
+      "thats me",
       "that's mine",
       "thats mine",
       "it's mine",
@@ -3759,34 +4282,60 @@ function resolveIntents(
       "i own this",
       "we own it",
       "we own this",
+      "we own that",
       "owned this house",
       "have owned",
+      "yes still own",
+      "yeah that'?s my house",
       "soy el dueño",
       "soy el dueno",
       "sí, soy el dueño",
       "si soy el dueno",
       "si, soy el dueño",
+      "sí soy el propietario",
+      "si soy el propietario",
+      "soy el propietario",
       "es mía",
       "es mia",
       "es mi casa",
       "todavía soy el dueño",
       "todavia soy el dueno",
+      "todavía la tengo",
+      "todavia la tengo",
+      "a mi nombre",
+      "está a mi nombre",
+      "esta a mi nombre",
       "sii soy el dueno",
       "sip mía",
       "sip mia",
       "so y siempre lo seré",
       "a si es",
       "si cual",
+      "soy el owner",
+      "yes soy el owner",
     ]) ||
-      // short affirmative only when not a price/interest-only context
-      (/^(yes|si|sí|yea|yeah|yep|yup|i do|it is)[\s?!.]*$/i.test(text.trim()) &&
-        !includesAny(text, ["price", "offer", "proposal"])) ||
-      // Spanish short "si ..." affirmatives (not "si no" negation)
+      // Bare ownership affirmatives (context may refine separately)
+      /^(yes|si|sí|yea|yeah|yep|yup|i do|it is|we do|correct|affirmative|that's me|thats me)[\s?!.]*$/i.test(
+        text.trim()
+      ) ||
+      // Spanish short "si ..." affirmatives (not "si no" negation / opt-out)
       (/^\s*s[ií]\b/i.test(text.trim()) &&
         !/\bs[ií]\s+no\b/i.test(text) &&
-        !includesAny(text, ["no me interesa", "no quiero"])))
+        !includesAny(text, ["no me interesa", "no quiero", "no me escriba", "no me escribas"])))
   ) {
     intents.push("ownership_confirmed");
+    matched_rule_ids.push("ownership_affirmation");
+  }
+
+  // "No I don't" short denial without relation evidence → not_interested (safe)
+  if (
+    /^(no\s+i\s+don'?t|no\s+i\s+do\s+not)[\s!.]*$/i.test(text.trim()) ||
+    /^no\s+i\s+don'?t\b/i.test(text.trim())
+  ) {
+    if (!intents.includes("ownership_confirmed")) {
+      intents.push("not_interested");
+      matched_rule_ids.push("short_ownership_denial");
+    }
   }
 
   // LLC / entity ownership claim still ownership-related
@@ -3855,6 +4404,8 @@ function resolveIntents(
       "needs a roof",
       "new roof",
       "roof is",
+      "roof costs",
+      "roof cost",
       "hvac",
       "foundation",
       "plumbing",
@@ -3866,20 +4417,30 @@ function resolveIntents(
       "aire acondicionado",
       "techo malo",
       "techo nuevo",
-    ])
+    ]) ||
+    (/\broof\b/i.test(text) && /\b(cost|costs|quote|estimate)\b/i.test(text))
   ) {
     intents.push("condition_disclosed");
   }
 
   // 13. REACTION / EMOJI ONLY / SYSTEM REACTION
-  const is_emoji_only = /^[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Extended_Pictographic}\s?]+$/u.test(text);
+  // Pure digit tokens (ZIP/year/phone) are NOT reactions — Unicode digit emoji props can false-match.
+  const is_pure_digit_token = /^\s*[\d\s\-()]+\s*$/.test(text);
+  const is_emoji_only =
+    !is_pure_digit_token &&
+    /^[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\p{Emoji_Presentation}\p{Extended_Pictographic}\s?]+$/u.test(
+      text
+    );
   const is_system_reaction = text.includes("to \u201c");
   if (is_emoji_only || is_system_reaction) {
      intents.push("reaction_only");
   }
 
-  // 14. ACKNOWLEDGEMENT
-  if (includesAny(text, ["ok", "okay", "understood", "got it", "gotcha", "cool", "fine", "bueno", "bien", "vale", "good"])) {
+  // 14. ACKNOWLEDGEMENT (avoid "bien"/"bueno" substring traps inside longer Spanish interest)
+  if (
+    /^(ok|okay|understood|got it|gotcha|cool|fine|bueno|bien|vale|good)[\s!.]*$/i.test(text.trim()) ||
+    includesAny(text, ["ok", "okay", "understood", "got it", "gotcha"])
+  ) {
      intents.push("acknowledgement");
   }
 
@@ -3920,6 +4481,10 @@ function resolveIntents(
       "don't have a number",
       "dont have a number",
       "no tengo precio",
+      "no voy a dar precio",
+      "not giving a price",
+      "won't give a price",
+      "wont give a price",
     ])
   ) {
     intents.push("info_request");
@@ -3927,17 +4492,70 @@ function resolveIntents(
 
   // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
   const unique_intents = [...new Set(intents)];
-  const primary = pickPrimaryIntent(unique_intents);
+  let primary = pickPrimaryIntent(unique_intents);
+  // Explicit ownership + proposal request (no price): identity stage wins; offer is secondary.
+  // When seller also states asking price, price remains primary via INTENT_PRIORITY.
+  if (
+    unique_intents.includes("ownership_confirmed") &&
+    unique_intents.includes("asks_offer") &&
+    !unique_intents.includes("asking_price_provided") &&
+    !unique_intents.includes("opt_out") &&
+    !unique_intents.includes("wrong_number")
+  ) {
+    primary = "ownership_confirmed";
+  }
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
   const secondary_intents = unique_intents.filter((intent) => intent !== primary);
 
-  return {
+  const ambiguous = [];
+  if (primary === "unclear") ambiguous.push("no_confident_intent");
+  if (
+    ctxValidation.context_status !== "valid" &&
+    /^(yes|yep|yeah|yup|si|sí|no|nope)[\s.!?]*$/i.test(text.trim())
+  ) {
+    ambiguous.push("short_reply_without_validated_context");
+  }
+
+  return finalizeIntentResult({
     primary_intent: primary,
     secondary_intent: secondary,
     secondary_intents,
-    matched_intents: unique_intents,
-  };
+    matched_intents: unique_intents.length ? unique_intents : ["unclear"],
+    matched_rule_ids,
+    suppressed_rule_ids,
+    context_status: ctxValidation.context_status,
+    context_source_id:
+      ctxValidation.context_status === "valid"
+        ? ctxValidation.context?.last_outbound_message_id ?? null
+        : null,
+    context_use_case:
+      ctxValidation.context_status === "valid"
+        ? ctxValidation.context?.last_outbound_use_case ?? null
+        : null,
+    context_age_ms:
+      ctxValidation.context_status === "valid"
+        ? ctxValidation.context?.context_age_ms ?? null
+        : null,
+    calibrated_rule_family_id:
+      calibrated_rule_family_id ||
+      matched_rule_ids[0] ||
+      (primary === "unclear" ? "unclear_fallback" : primary),
+    evidence_spans: price_parse?.evidence_span
+      ? [price_parse.evidence_span]
+      : rawMessage
+        ? [rawMessage]
+        : [],
+    precedence_result: "intent_priority",
+    ambiguity_flags: ambiguous,
+    confidence_rationale:
+      primary === "unclear"
+        ? "no_deterministic_rule_with_sufficient_evidence"
+        : matched_rule_ids.length
+          ? `matched_rules:${matched_rule_ids.join(",")}`
+          : "intent_priority_without_named_rule",
+    price_parse,
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -4190,7 +4808,7 @@ function estimateMotivationScore({ objection, emotion, positive_signals = [] }) 
 // HEURISTIC CLASSIFICATION
 // ══════════════════════════════════════════════════════════════════════════
 
-function classifyHeuristic(message, brain_item = null) {
+function classifyHeuristic(message, brain_item = null, options = {}) {
   const compliance_flag  = detectComplianceFlag(message);
   const language         = detectLanguageHeuristic(message, brain_item);
   const objection        = compliance_flag ? null : detectObjection(message);
@@ -4201,9 +4819,10 @@ function classifyHeuristic(message, brain_item = null) {
     compliance_flag,
     objection,
     positive_signals,
+    conversation_context: options.conversation_context ?? options.context ?? null,
   });
 
-  const confidence = computeHeuristicConfidence({
+  let confidence = computeHeuristicConfidence({
     objection,
     primary_intent: intents.primary_intent,
     emotion,
@@ -4211,6 +4830,17 @@ function classifyHeuristic(message, brain_item = null) {
     language,
     positive_signals,
   });
+
+  // Context-bound short replies may carry explicit confidence; never high merely for regex
+  if (typeof intents.contextual_confidence === "number") {
+    confidence = intents.contextual_confidence;
+  } else if (
+    intents.ambiguity_flags?.includes("short_reply_without_validated_context")
+  ) {
+    confidence = Math.min(confidence, 0.72);
+  }
+  // Confidence remains uncalibrated for authority until blind v3
+  const confidence_calibrated = false;
 
   const motivation_score = estimateMotivationScore({
     objection,
@@ -4226,10 +4856,25 @@ function classifyHeuristic(message, brain_item = null) {
     compliance_flag,
     primary_intent: intents.primary_intent,
     secondary_intent: intents.secondary_intent,
+    secondary_intents: intents.secondary_intents || [],
     detected_intent: intents.primary_intent, // Backward compatibility
     positive_signals,
     confidence,
+    confidence_calibrated,
     motivation_score,
+    matched_rule_ids: intents.matched_rule_ids || [],
+    suppressed_rule_ids: intents.suppressed_rule_ids || [],
+    precedence_result: intents.precedence_result || "intent_priority",
+    evidence_spans: intents.evidence_spans || [],
+    context_status: intents.context_status || "unavailable",
+    context_source_id: intents.context_source_id || null,
+    context_use_case: intents.context_use_case || null,
+    context_age_ms: intents.context_age_ms ?? null,
+    ambiguity_flags: intents.ambiguity_flags || [],
+    calibrated_rule_family_id: intents.calibrated_rule_family_id || null,
+    confidence_rationale: intents.confidence_rationale || null,
+    price_parse: intents.price_parse || null,
+    classifier_version: CLASSIFY_VERSION,
   };
 }
 
@@ -4534,6 +5179,8 @@ const AI_CONFIDENCE_THRESHOLD = 0.82;
 export async function classify(message, brain_item = null, options = {}) {
   const text = cleanMessage(message);
   const heuristicOnly = options?.heuristicOnly === true;
+  const conversation_context =
+    options?.conversation_context ?? options?.context ?? null;
 
   if (!text) {
     const automation_decision = deriveAutomationDecision({
@@ -4550,16 +5197,25 @@ export async function classify(message, brain_item = null, options = {}) {
       compliance_flag: null,
       positive_signals: [],
       confidence:      0.50,
+      confidence_calibrated: false,
       motivation_score: 50,
       seller_state:    null,
       source:          "heuristic",
       notes:           "",
       detected_intent: "unclear",
       automation_decision,
+      context_status: conversation_context
+        ? validateConversationContext(conversation_context).context_status
+        : "unavailable",
+      matched_rule_ids: [],
+      suppressed_rule_ids: [],
+      classifier_version: CLASSIFY_VERSION,
     };
   }
 
-  const heuristic = classifyHeuristic(text, brain_item);
+  const heuristic = classifyHeuristic(text, brain_item, {
+    conversation_context,
+  });
 
   if (heuristicOnly) {
     const final_motivation = estimateMotivationScore(heuristic);
