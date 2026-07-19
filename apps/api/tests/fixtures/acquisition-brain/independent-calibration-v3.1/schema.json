@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "independent_calibration_v3_1_example",
+  "title": "IndependentCalibrationV31Example",
+  "description": "Empty schema for true blind-v3.1. Dual semantic/routing labels required.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "calibration_example_id",
+    "true_semantic_family_id",
+    "language_code",
+    "deidentified_raw_text",
+    "canonical_semantic_outcome",
+    "classifier_primary_intent",
+    "production_routing_outcome",
+    "suppression_action",
+    "terminal_state",
+    "authority_candidate_eligibility",
+    "independent_example_flag",
+    "annotator_a_id",
+    "annotator_b_id",
+    "agreement_status",
+    "text_sha256",
+    "normalized_text_sha256"
+  ],
+  "properties": {
+    "calibration_example_id": { "type": "string", "pattern": "^ic31-" },
+    "true_semantic_family_id": { "type": "string", "minLength": 3 },
+    "language": { "type": "string" },
+    "language_code": { "type": "string", "enum": ["en", "es"] },
+    "deidentified_raw_text": { "type": "string", "minLength": 1 },
+    "preceding_outbound_use_case": { "type": ["string", "null"] },
+    "context_status_expected": {
+      "type": ["string", "null"],
+      "enum": [null, "valid", "stale", "conflicting", "missing", "superseded", "unavailable"]
+    },
+    "canonical_semantic_outcome": { "type": "string" },
+    "classifier_primary_intent": { "type": "string" },
+    "expected_secondary_intents": { "type": "array", "items": { "type": "string" } },
+    "expected_facts": { "type": "array" },
+    "production_routing_outcome": { "type": "string" },
+    "suppression_action": { "type": "string" },
+    "terminal_state": { "type": "string" },
+    "authority_candidate_eligibility": { "type": "boolean" },
+    "expected_authority_candidate": { "type": ["string", "null"] },
+    "source_category": {
+      "type": "string",
+      "enum": ["historical_deid", "independent_collected", "authored_boundary", "adversarial", "context"]
+    },
+    "natural_conversational_language": { "type": "boolean" },
+    "legalistic_or_unnatural": { "type": "boolean" },
+    "labeling_rationale": { "type": "string" },
+    "independent_example_flag": { "type": "boolean", "const": true },
+    "annotator_a_id": { "type": "string" },
+    "annotator_b_id": { "type": "string" },
+    "adjudicator_id": { "type": ["string", "null"] },
+    "agreement_status": {
+      "type": "string",
+      "enum": ["agree", "disagreed_adjudicated", "unresolved_ambiguous"]
+    },
+    "text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "normalized_text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

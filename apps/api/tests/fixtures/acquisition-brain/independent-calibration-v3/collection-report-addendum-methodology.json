@@ -1,0 +1,30 @@
+{
+  "addendum_to": "collection-report.json",
+  "original_collection_report_preserved": true,
+  "methodology_correction": true,
+  "development_pack_version": "acquisition_brain_adversarial_development_pack_v3",
+  "may_count_for_authority_confidence": false,
+  "original_gold_hash": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+  "original_manifest_hash": "571a81af0d83d0f527b761076e68d55428670b556e30c41e2bd1f44cbdd13c8a",
+  "true_semantic_family_count": 129,
+  "original_claimed_family_count": 791,
+  "natural_language_percentage": 0.76,
+  "constructed_language_percentage": 99.24,
+  "context_fixture_count": 23,
+  "context_coverage_sufficient_for_authority": false,
+  "independent_labeling": {
+    "curator_a_available": false,
+    "curator_b_available": false,
+    "agreement_percent": null,
+    "cohens_kappa": null,
+    "disagreement_count": null,
+    "adjudication_count": 0,
+    "unresolved_ambiguity_count": null,
+    "independent_curation_still_required": true
+  },
+  "authority_status_all_candidates": "insufficient_independent_support",
+  "predictions_executed": false,
+  "ready_for_true_v3_1_collection": true,
+  "ready_for_internal_authoritative_canary": false,
+  "ready_for_public_activation": false
+}

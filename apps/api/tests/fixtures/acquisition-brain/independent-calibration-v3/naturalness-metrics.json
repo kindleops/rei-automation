@@ -1,0 +1,8 @@
+{
+  "natural_conversational_count": 6,
+  "constructed_language_count": 785,
+  "legalistic_or_unnatural_count": 14,
+  "natural_language_percentage": 0.76,
+  "constructed_language_percentage": 99.24,
+  "note": "historical_style_deid is a thin stylized slice; not independently collected seller SMS. True v3.1 requires ≥50% deidentified natural conversational language."
+}

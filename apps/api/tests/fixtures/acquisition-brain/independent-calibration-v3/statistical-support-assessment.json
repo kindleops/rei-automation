@@ -1,0 +1,82 @@
+{
+  "development_pack_version": "acquisition_brain_adversarial_development_pack_v3",
+  "authority_use": "forbidden",
+  "requirements": {
+    "precision_point": 0.99,
+    "precision_lb_95_one_sided": 0.99,
+    "recall_point": 0.95,
+    "recall_lb_95_one_sided": 0.95,
+    "min_independent_predicted_positives_for_precision_lb": 300,
+    "min_gold_positive_families_for_recall_lb_zero_fn_case": 60,
+    "unsafe_terminal_confusions_allowed": 0
+  },
+  "candidates": [
+    {
+      "candidate": "clear_ownership_confirmation",
+      "language": "en",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    },
+    {
+      "candidate": "clear_ownership_confirmation",
+      "language": "es",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    },
+    {
+      "candidate": "clear_seller_requests_proposal",
+      "language": "en",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    },
+    {
+      "candidate": "clear_seller_requests_proposal",
+      "language": "es",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    },
+    {
+      "candidate": "clear_asking_price_disclosure",
+      "language": "en",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    },
+    {
+      "candidate": "clear_asking_price_disclosure",
+      "language": "es",
+      "status": "insufficient_independent_support",
+      "reasons": [
+        "development_pack_not_blind",
+        "paraphrase_not_independent",
+        "natural_language_share_below_50pct",
+        "labels_not_dual_curated"
+      ]
+    }
+  ],
+  "note": "Do not claim readiness from 50 permutations, repeated paraphrases, or one surface form per synthetic family."
+}

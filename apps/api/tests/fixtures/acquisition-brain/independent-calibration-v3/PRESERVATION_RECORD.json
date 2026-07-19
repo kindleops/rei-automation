@@ -1,0 +1,34 @@
+{
+  "record_type": "methodology_correction_preservation",
+  "recorded_at": "2026-07-19T12:00:00.000Z",
+  "original_corpus_version": "independent_calibration_v3",
+  "original_head": "cb9f05bf5e496fbceae5ebe921ad5922bda1df53",
+  "original_gold_labels_jsonl_sha256": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+  "original_manifest_json_sha256": "571a81af0d83d0f527b761076e68d55428670b556e30c41e2bd1f44cbdd13c8a",
+  "original_example_count": 791,
+  "original_english_count": 507,
+  "original_spanish_count": 284,
+  "original_claimed_semantic_family_count": 791,
+  "original_artifacts_immutable": true,
+  "gold_labels_jsonl_must_not_be_rewritten": true,
+  "conceptual_reclassification": "acquisition_brain_adversarial_development_pack_v3",
+  "calibration_status_for_all_examples": "development_after_methodology_review",
+  "may_count_for_authority_confidence": false,
+  "why_not_independent_authority_evidence": [
+    "Semantic-family IDs were assigned 1:1 with surface forms; paraphrases were treated as independent observations.",
+    "Corpus was agent-authored/template-expanded, not dual-curated blind labels with inter-annotator adjudication.",
+    "The coding agent that participated in classifier remediation cannot be sole gold-label authority.",
+    "Natural deidentified conversational seller language is a small minority of source mix.",
+    "Context-fixture coverage (23) is insufficient for context-contract validation at authority grade.",
+    "Statistical lower bounds for precision ≥ 0.99 and recall ≥ 0.95 cannot be supported by paraphrase-inflated independence.",
+    "Production routing intents (e.g. sold → wrong_number) were used as if they were pure semantic gold.",
+    "Leakage audit did not include character n-gram / lineage / translation-equivalent depth sufficient for blind claims."
+  ],
+  "still_useful_for": [
+    "deterministic regression",
+    "adversarial safety discovery",
+    "context short-reply unit tests",
+    "semantic-role neighbor discovery",
+    "terminal and role-safety smoke coverage"
+  ]
+}
