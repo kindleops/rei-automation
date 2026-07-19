@@ -1,6 +1,6 @@
 # Independent calibration v3 — collection specification
 
-**Status:** Schema frozen empty. No examples. No predictions.
+**Status:** Gold corpus frozen pre-prediction. See `collection-report.json` and `immutable-content-hashes.json`.
 
 **Do not author v3 examples while reading `classify.js` implementation details.**
 
@@ -77,4 +77,4 @@ Price positives require evidence of **seller asking / desired amount**. Neighbor
 | `manifest.template.json` | Empty manifest template |
 | `.gitkeep` | Placeholder |
 
-**No gold rows. No predictions. No report results.**
+**Gold frozen. No predictions in this corpus freeze. Collection report present.**

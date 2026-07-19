@@ -1,0 +1,53 @@
+{
+  "corpus_version": "independent_calibration_v3",
+  "status": "frozen_pre_prediction",
+  "frozen_at": "2026-07-19T07:01:25.307Z",
+  "example_count": 791,
+  "english_count": 507,
+  "spanish_count": 284,
+  "semantic_family_count": 791,
+  "source_category_distribution": {
+    "authored": 390,
+    "adversarial": 372,
+    "context": 23,
+    "historical_style_deid": 6
+  },
+  "candidate_language_counts": {
+    "clear_ownership_confirmation|en": 87,
+    "adversarial_ownership|en": 80,
+    "clear_seller_requests_proposal|en": 82,
+    "adversarial_proposal|en": 80,
+    "clear_asking_price_disclosure|en": 81,
+    "adversarial_price|en": 90,
+    "context_ownership_check|en": 2,
+    "context_proposal_interest|en": 2,
+    "context_asking_price|en": 3,
+    "clear_ownership_confirmation|es": 56,
+    "adversarial_ownership|es": 38,
+    "clear_seller_requests_proposal|es": 51,
+    "adversarial_proposal|es": 39,
+    "clear_asking_price_disclosure|es": 51,
+    "adversarial_price|es": 45,
+    "context_proposal_interest|es": 2,
+    "context_asking_price|es": 2
+  },
+  "context_fixture_count": 23,
+  "positive_eligible_count": 408,
+  "adversarial_neighbor_count": 372,
+  "gold_labels_jsonl_sha256": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+  "predictions": null,
+  "predictions_executed": false,
+  "prediction_results_forbidden_until_separate_run": true,
+  "classifier_inspected_during_curation": false,
+  "remediation_fixtures_inspected_during_curation": false,
+  "independence": {
+    "independent_example_flag_all": true,
+    "no_v1_v2_dev_reuse": true
+  },
+  "notes": [
+    "Frozen before any classifier predictions.",
+    "Do not run predictions until this hash is recorded in the collection report.",
+    "Authority allowlist must remain empty until separate blind-v3 evaluation passes."
+  ],
+  "manifest_sha256": "84c0f57dc8872f255702f7b253483e380f9e64d527e160b8c1b49bf508b9dce7"
+}

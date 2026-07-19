@@ -1,0 +1,120 @@
+{
+  "title": "Independent calibration v3 — collection & freeze report",
+  "corpus_version": "independent_calibration_v3",
+  "frozen_at": "2026-07-19T07:01:25.307Z",
+  "base_main": "50b6c0aabe00d54497e24cc1de63a9f02eb3c760",
+  "process": {
+    "classifier_rule_bodies_inspected": false,
+    "pr41_remediation_fixtures_inspected_for_authoring": false,
+    "predictions_executed": false,
+    "allowlist_modified": false,
+    "production_mutations": 0,
+    "sms_sent": 0
+  },
+  "counts": {
+    "byLang": {
+      "en": 507,
+      "es": 284
+    },
+    "bySource": {
+      "authored": 390,
+      "adversarial": 372,
+      "context": 23,
+      "historical_style_deid": 6
+    },
+    "byCandidateLang": {
+      "clear_ownership_confirmation|en": 87,
+      "adversarial_ownership|en": 80,
+      "clear_seller_requests_proposal|en": 82,
+      "adversarial_proposal|en": 80,
+      "clear_asking_price_disclosure|en": 81,
+      "adversarial_price|en": 90,
+      "context_ownership_check|en": 2,
+      "context_proposal_interest|en": 2,
+      "context_asking_price|en": 3,
+      "clear_ownership_confirmation|es": 56,
+      "adversarial_ownership|es": 38,
+      "clear_seller_requests_proposal|es": 51,
+      "adversarial_proposal|es": 39,
+      "clear_asking_price_disclosure|es": 51,
+      "adversarial_price|es": 45,
+      "context_proposal_interest|es": 2,
+      "context_asking_price|es": 2
+    },
+    "contextCount": 23,
+    "positive": 408,
+    "adversarial": 372,
+    "n": 791
+  },
+  "leakage_audit": {
+    "exact_overlap_with_prior": {
+      "count": 0,
+      "ids": [],
+      "pass": true
+    },
+    "normalized_overlap_with_prior": {
+      "count": 0,
+      "ids": [],
+      "pass": true
+    },
+    "token_similarity_internal": {
+      "high_similarity_pairs_ge_0_92": 0,
+      "sample": [],
+      "pass": true
+    },
+    "semantic_family_integrity": {
+      "unique_families": 791,
+      "multi_member_families": 0,
+      "pass": true
+    },
+    "translation_equivalent_review": {
+      "method": "manual_policy_no_shared_ids_across_languages; no MT cloning used",
+      "shared_family_ids_across_lang": 0,
+      "pass": true
+    },
+    "context_validity": {
+      "issues": 0,
+      "sample": [],
+      "pass": true
+    },
+    "label_consistency": {
+      "issues": 0,
+      "sample": [],
+      "pass": true
+    },
+    "duplicate_exclusions": [
+      "ic3-en-ctx-own-yes-01",
+      "ic3-en-ctx-own-yes-02",
+      "ic3-en-ctx-own-yes-03",
+      "ic3-en-ctx-own-yes-04",
+      "ic3-en-ctx-own-si-05",
+      "ic3-en-ctx-own-we-06",
+      "ic3-en-ctx-prop-ok-01",
+      "ic3-en-ctx-own-affirm-01",
+      "ic3-es-own-a01",
+      "ic3-es-own-a12",
+      "ic3-es-prop-a01",
+      "ic3-es-ctx-own-si-01"
+    ]
+  },
+  "labeling_audit": {
+    "independent_audit": true,
+    "method": "Dual-pass label consistency checks in freeze script + human-authored rationales per family; no model auto-labeling.",
+    "pass": true,
+    "issues": 0
+  },
+  "size_note": "Corpus sized for independent blind evaluation of three narrow candidates in EN and ES with adversarial and context coverage. Predicted-positive opportunity targets (≥300 per candidate×language) require the separate prediction run to measure classifier volume; gold positives and neighbors are frozen here.",
+  "frozen_hashes": {
+    "corpus_version": "independent_calibration_v3",
+    "frozen_at": "2026-07-19T07:01:25.307Z",
+    "gold_labels_jsonl_sha256": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+    "manifest_json_sha256": "571a81af0d83d0f527b761076e68d55428670b556e30c41e2bd1f44cbdd13c8a",
+    "example_count": 791,
+    "english_count": 507,
+    "spanish_count": 284,
+    "semantic_family_count": 791,
+    "predictions_sha256": null,
+    "predictions_must_be_null": true
+  },
+  "next_step": "Separate blind-v3 prediction run against this frozen hash only. Do not mutate gold after predictions start."
+}

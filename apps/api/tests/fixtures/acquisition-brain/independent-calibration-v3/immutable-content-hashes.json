@@ -1,0 +1,12 @@
+{
+  "corpus_version": "independent_calibration_v3",
+  "frozen_at": "2026-07-19T07:01:25.307Z",
+  "gold_labels_jsonl_sha256": "dcbfdea9b54e60dceeaca750be7db4ba67de9f5169ba0e77e90437c3816d7b3d",
+  "manifest_json_sha256": "571a81af0d83d0f527b761076e68d55428670b556e30c41e2bd1f44cbdd13c8a",
+  "example_count": 791,
+  "english_count": 507,
+  "spanish_count": 284,
+  "semantic_family_count": 791,
+  "predictions_sha256": null,
+  "predictions_must_be_null": true
+}
