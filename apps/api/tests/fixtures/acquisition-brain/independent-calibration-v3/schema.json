@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "independent_calibration_v3_example",
+  "title": "IndependentCalibrationV3Example",
+  "description": "Frozen empty schema for future blind calibration v3. No examples in PR #41.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "calibration_example_id",
+    "semantic_family_id",
+    "language_code",
+    "deidentified_raw_text",
+    "expected_primary_intent",
+    "independent_example_flag",
+    "text_sha256",
+    "normalized_text_sha256"
+  ],
+  "properties": {
+    "calibration_example_id": { "type": "string", "pattern": "^ic3-" },
+    "semantic_family_id": { "type": "string", "minLength": 3 },
+    "language": { "type": "string" },
+    "language_code": { "type": "string", "enum": ["en", "es", "mixed"] },
+    "deidentified_raw_text": { "type": "string", "minLength": 1 },
+    "preceding_outbound_use_case": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "ownership_check",
+        "proposal_interest",
+        "proposal_request",
+        "asking_price",
+        "condition_check",
+        "motivation_check",
+        "timeline_check",
+        "general_followup"
+      ]
+    },
+    "canonical_lifecycle_stage": { "type": ["string", "null"] },
+    "expected_primary_intent": { "type": "string" },
+    "expected_secondary_intents": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "expected_facts": { "type": "array" },
+    "expected_terminal_state": { "type": "string" },
+    "expected_authority_candidate": { "type": ["string", "null"] },
+    "expected_rule_family_eligibility": { "type": "boolean" },
+    "labeling_rationale": { "type": "string" },
+    "source_category": {
+      "type": "string",
+      "enum": ["authored", "adversarial", "context", "historical_style_deid"]
+    },
+    "independent_example_flag": { "type": "boolean", "const": true },
+    "adversarial_neighbor": { "type": "boolean" },
+    "text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "normalized_text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

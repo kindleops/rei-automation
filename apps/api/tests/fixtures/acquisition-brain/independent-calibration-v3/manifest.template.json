@@ -1,0 +1,16 @@
+{
+  "corpus_version": "independent_calibration_v3",
+  "status": "empty_schema_only",
+  "examples": [],
+  "example_count": 0,
+  "predictions": null,
+  "prediction_results_forbidden_in_pr41": true,
+  "gold_hash": null,
+  "manifest_hash": null,
+  "immutable_until_curation_complete": true,
+  "notes": [
+    "Populate only after independent curation post PR #41 merge.",
+    "Hash gold before any classifier predictions.",
+    "No overlap with development, v1, or v2 semantic families."
+  ]
+}

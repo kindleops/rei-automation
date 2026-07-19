@@ -1,0 +1,135 @@
+[
+  {
+    "family": "es_v2_own_si_propietario",
+    "text": "Sí soy el propietario de esa casa",
+    "expected_primary_intent": "ownership_confirmed",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_own_todavia",
+    "text": "Todavía la tengo a mi nombre",
+    "expected_primary_intent": "ownership_confirmed",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_own_deny",
+    "text": "No soy el dueño de esa propiedad",
+    "expected_primary_intent": "wrong_number",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_sold",
+    "text": "Ya lo vendí el año pasado",
+    "expected_primary_intent": "wrong_number",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_never",
+    "text": "Nunca he sido el dueño",
+    "expected_primary_intent": "wrong_number",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_tenant",
+    "text": "Solo soy inquilino aquí",
+    "expected_primary_intent": "tenant_occupied",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_agent",
+    "text": "Soy el agente de la propiedad",
+    "expected_primary_intent": "not_interested",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_manager",
+    "text": "Soy el administrador del edificio",
+    "expected_primary_intent": "tenant_occupied",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_family",
+    "text": "Es de mi hermano no mía",
+    "expected_primary_intent": "wrong_number",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_prop_request",
+    "text": "Qué propuesta me pueden hacer",
+    "expected_primary_intent": "asks_offer",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_prop_numbers",
+    "text": "Mándeme los números por escrito",
+    "expected_primary_intent": "asks_offer",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_interest_cond",
+    "text": "Me interesa si el precio es bueno",
+    "expected_primary_intent": "latent_interest",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_price_ask",
+    "text": "Estoy pidiendo 280 mil",
+    "expected_primary_intent": "asking_price_provided",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_price_range",
+    "text": "Entre 240 y 260 mil",
+    "expected_primary_intent": "asking_price_provided",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_price_refuse",
+    "text": "No voy a dar precio por mensaje",
+    "expected_primary_intent": "info_request",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_optout",
+    "text": "No me escriba más por favor",
+    "expected_primary_intent": "opt_out",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_wrong",
+    "text": "Número equivocado no conozco esa casa",
+    "expected_primary_intent": "wrong_number",
+    "language": "es",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_mixed",
+    "text": "Yes soy el owner de la casa",
+    "expected_primary_intent": "ownership_confirmed",
+    "language": "mixed",
+    "development_after_blind_evaluation": true
+  },
+  {
+    "family": "es_v2_mixed_stop",
+    "text": "Stop no me contactes más",
+    "expected_primary_intent": "opt_out",
+    "language": "mixed",
+    "development_after_blind_evaluation": true
+  }
+]
