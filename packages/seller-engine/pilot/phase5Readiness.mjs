@@ -196,7 +196,7 @@ function buildAudit(elig) {
     tierB_name_mailing: elig.filter((e) => e.rule === 'B_name_plus_mailing'),
     multi_eligible: elig.filter((e) => multiPids.has(e.pid)),
     absentee_owner: elig.filter((e) => /absentee/i.test(e.p.occupancy_raw ?? '')),
-    corp_name_as_individual: elig.filter((e) => /\b(LLC|INC|CORP|TRUST|ESTATE|COMPANY|PROPERTIES|HOLDINGS)\b/i.test(e.p.owner_name_raw ?? '') && (e.p.company_links ?? 0) === 0 && e.p.cls_entity !== true),
+    corp_name_as_individual: elig.filter((e) => /\b(LLC|INC|CORP|TRUST|ESTATE|COMPANY|PROPERTIES|HOLDINGS)\b/i.test(e.p.owner_name_raw ?? '') && (e.p.company_links ?? 0) === 0 && e.p.cls_entity !== true && e.p.cls_estate !== true),
     high_priority: [...elig].sort((a, b) => b.priority - a.priority).slice(0, 100),
     low_confidence_boundary: elig.filter((e) => e.c.evidence_tier === 'B'),
   };
