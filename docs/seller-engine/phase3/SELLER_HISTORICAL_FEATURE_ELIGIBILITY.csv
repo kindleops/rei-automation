@@ -1,0 +1,106 @@
+feature_id,dependency,eligibility_class,rationale
+F-001,transactions.current.sale_date,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-002,lien probate/death documents (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-003,expired_listing flag,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-003,listing snapshots,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-004,vendor likely_to_move flag,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-005,transactions.current.sale_date,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-006,loan estimated_balance,current_state_only,vendor-modeled balance at scrape time
+F-006,estimated_value,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-007,equity_percent,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-008,rent context (comp snapshot v2),unknown,not yet produced
+F-009,loan_type/financing_type on recorded loans,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-010,loan modification records (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-011,reverse-mortgage loan type (recorded),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-012,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-013,lien documents + lifecycle (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-014,lien documents + lifecycle (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-015,lien documents + lifecycle (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-016,lien documents + lifecycle (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-017,lien documents + lifecycle (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-018,foreclosure_data payload presence,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-018,foreclosure document dates,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-019,foreclosure_data payload presence,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-019,foreclosure document dates,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-020,foreclosure_data payload presence,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-020,foreclosure document dates,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-021,foreclosure_data payload presence,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-021,foreclosure document dates,historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-022,is_vacant / vacancy flags,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-023,TaxDelinquent + TaxDelinquentYear,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed; delinquent YEAR is dated but current status is not
+F-024,municipal/utility lien docs (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-025,building_condition (assessor),current_state_only,assessor vintage unknown in export
+F-026,year_built/effective_year_built,historically_reconstructable,construction facts stable over time
+F-027,systems fields,current_state_only,assessor vintage unknown
+F-028,cohort layout norms,unknown,comp snapshot v2
+F-029,vendor repair baseline,prohibited_from_historical_backtest,rule-9 baseline; contemporaneous model output — never backdate
+F-030,tired_landlord flag,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-030,absentee/occupancy,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-030,renter links,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-031,owner mailing state,current_state_only,mailing address is current-state (owner may have moved)
+F-032,ASR documents (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-033,portfolio totals (vendor),current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-034,portfolio totals (vendor),current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-035,sibling dispositions (dated transfers),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-035,holding links,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-036,probate/estate documents (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-036,vesting/classifications,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-037,ownership classifications,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-037,company registry status,reconstructable_only_with_event_history,registry history exists but not in batch
+F-038,owner_2 / vesting strings,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-039,vesting strings,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-040,person_flags primary_decision_maker,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-041,company status,reconstructable_only_with_event_history,registry history
+F-041,officers,unknown,dormant source
+F-042,vesting + POA docs,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed (docs dated but vesting current)
+F-043,matching evidence,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-044,individual_key presence,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-045,cross-source repeats,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-046,contact channels / profile,current_state_only,"phones, emails, DNC, language are scrape-time state"
+F-047,contact channels / profile,current_state_only,"phones, emails, DNC, language are scrape-time state"
+F-048,contact channels / profile,current_state_only,"phones, emails, DNC, language are scrape-time state"
+F-049,contact channels / profile,current_state_only,"phones, emails, DNC, language are scrape-time state"
+F-050,lien amounts (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-050,estimated_equity,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-051,deed type groups (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-052,renovated-comp spread,unknown,comp snapshot v2
+F-053,blocker evidence mix,current_state_only,renter/entity/estate gates are current-state
+F-054,occupancy evidence,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-055,free_and_clear flag + seller-finance history,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed (history part dated)
+F-056,immutable comp/market snapshot at historical as-of,reconstructable_only_with_event_history,eligible ONLY when a snapshot dated at-or-before the historical as-of exists; never recompute retroactively
+F-057,immutable comp/market snapshot at historical as-of,reconstructable_only_with_event_history,eligible ONLY when a snapshot dated at-or-before the historical as-of exists; never recompute retroactively
+F-058,immutable comp/market snapshot at historical as-of,reconstructable_only_with_event_history,eligible ONLY when a snapshot dated at-or-before the historical as-of exists; never recompute retroactively
+F-130,immutable comp/market snapshot at historical as-of,reconstructable_only_with_event_history,eligible ONLY when a snapshot dated at-or-before the historical as-of exists; never recompute retroactively
+F-059,buyer exit labels,unknown,not produced
+F-060,comp snapshot + payoff,reconstructable_only_with_event_history,snapshot-dated only
+F-060,loan balances,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-061,comp snapshot + payoff,reconstructable_only_with_event_history,snapshot-dated only
+F-061,loan balances,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-062,comp snapshot + payoff,reconstructable_only_with_event_history,snapshot-dated only
+F-062,loan balances,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-101,vendor checksums vs slots,current_state_only,"quality features describe the batch, not history"
+F-102,vendor checksums vs slots,current_state_only,"quality features describe the batch, not history"
+F-103,vendor checksums vs slots,current_state_only,"quality features describe the batch, not history"
+F-104,classification sources,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-105,portfolio magnitudes,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-110,matching_flags tokens,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-111,scalar liveness,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-112,renter flag,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-113,batch population metrics,current_state_only,batch-descriptive
+F-120,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-121,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-122,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-123,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-124,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-125,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-126,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-127,vendor profile tiers,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-131,TaxAmt,current_state_only,tax year known but amount is current assessment
+F-131,estimated_value,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-132,renovated-comp spread,unknown,comp snapshot v2
+F-133,"acquisition price (dated, qualifier-gated)",historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-133,estimated_value,current_state_only,vendor current-state enrichment; reflects scrape-time state and CANNOT be backdated merely because the property existed
+F-134,acquisition-adjacent loan records (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-135,release documents (dated),historically_reconstructable,recorded document with event date; later snapshots preserve it — date-filter at as-of
+F-136,foreclosure event history,reconstructable_only_with_event_history,reconstructable only from multi-vintage batch history (appearance/disappearance across captures)
+F-137,condition + municipal liens + vacancy,current_state_only,condition/vacancy current-state (lien part dated)

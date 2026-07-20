@@ -1,0 +1,21 @@
+{
+  "subject": {
+    "property_id": "prop_fixture_1", "asset_class": "single_family", "fips": "17031",
+    "situs_state": "IL", "building_square_feet": 1400, "year_built": 1950, "condition_raw": "Fair"
+  },
+  "loaderResult": {
+    "candidates": [
+      { "comp_id": "c1", "sale_price": 210000, "recording_date": "2026-03-10", "distance_miles": 0.4, "building_sqft": 1350, "effective_year_built": 1955, "building_condition": "Average", "sales_price_code": "Full amount stated on Document." },
+      { "comp_id": "c2", "sale_price": 195000, "recording_date": "2026-01-22", "distance_miles": 0.9, "building_sqft": 1500, "effective_year_built": 1948, "building_condition": "Fair", "sales_price_code": "Sales price from Transfer Tax." },
+      { "comp_id": "c3", "sale_price": 232000, "recording_date": "2025-11-05", "distance_miles": 1.8, "building_sqft": 1420, "effective_year_built": 1961, "building_condition": "Good", "sales_price_code": "Full amount computed from Transfer Tax or Excise Tax." },
+      { "comp_id": "c4", "sale_price": 60000, "recording_date": "2026-02-14", "distance_miles": 0.6, "building_sqft": 1380, "effective_year_built": 1950, "sales_price_code": "Non-arms length transaction." },
+      { "comp_id": "c5", "sale_price": 205000, "recording_date": "2026-08-01", "distance_miles": 0.5, "building_sqft": 1400, "effective_year_built": 1952, "sales_price_code": "Full amount stated on Document." },
+      { "comp_id": "c6", "sale_price": 188000, "recording_date": "2022-01-04", "distance_miles": 0.7, "building_sqft": 1300, "effective_year_built": 1950, "sales_price_code": "Full amount stated on Document." },
+      { "comp_id": "c7", "sale_price": 219000, "recording_date": "2026-04-02", "distance_miles": 6.5, "building_sqft": 1450, "effective_year_built": 1957, "sales_price_code": "Full amount stated on Document." },
+      { "comp_id": "c8", "sale_price": 201000, "recording_date": "2026-05-20", "distance_miles": 1.1, "building_sqft": 1360, "effective_year_built": 1949, "building_condition": "Average", "sales_price_code": "Sales Price or Transfer Tax rounded by county prior to computation." },
+      { "comp_id": "c9", "sale_price": 214500, "recording_date": "2026-06-01", "distance_miles": 2.2, "building_sqft": 1600, "effective_year_built": 1953, "building_condition": "Average", "sales_price_code": "From recorded Affidavit of Value or Verified." }
+    ],
+    "diagnostics": { "scanned": 9 }
+  },
+  "buyerStats": { "buyer_velocity": 3.2, "confidence": 0.55 }
+}

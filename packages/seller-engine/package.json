@@ -1,0 +1,13 @@
+{
+  "name": "@rei/seller-engine",
+  "version": "0.1.0-phase3",
+  "private": true,
+  "type": "module",
+  "description": "Seller intelligence engine (Phase 3 foundation). Local tooling only: NOT imported by apps/api or apps/dashboard, not part of any build or deploy path, and never touches production Supabase.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "corpus": "node corpus/manifest.mjs",
+    "import": "node importers/run.mjs",
+    "score": "node scores/run.mjs"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "engine": "seller_engine_v12_baseline",
+  "semver": "12.1.0-exact-port",
+  "weight_class": "exact_legacy_port",
+  "provenance": "EXACT port of the supplied legacy Google Apps Script 'MASTER OWNER PIPELINE — V12 DIRECT SUPABASE SYNC'. Sanitized immutable reference: docs/seller-engine/legacy/V12_DIRECT_SUPABASE_SYNC_SANITIZED.js (sha256 89adfaeb8d3ded32f84476d2a87e5df58568d9a26f9089dcebe15a9eb69ae8c8). All scoring constants live in the port itself (scores/v12Baseline.mjs) verbatim from source — this config intentionally carries NO tunable points, so the port cannot drift from the reference by config edit. Legacy behavior is preserved including double-counted tax delinquency, substring-order branch shadowing ('potential but high risk' -> +20 branch; 'preforeclosure' also matching the 'foreclosure' tag; 2-month 'very heavy' usage matching 'heavy'), hardcoded year 2026, fixed equity bonus (>=50% +20 / >=30% +10), flat tag points without release netting, per-row distress-marker inflation, and the 0..100 clamp on every sub-score and the final priority. V12 remains a comparison baseline ONLY — never canonical truth (Phase 1 rule 9).",
+  "priority_formula": "clamp01_100(round(FP*0.30 + URG*0.30 + CONTACT*0.20 + equity_bonus))",
+  "tiers": { "TIER_1": ">=70", "TIER_2": ">=45", "TIER_3": "else" },
+  "cadence": { "TIER_1": "AGGRESSIVE", "TIER_2": "STANDARD", "TIER_3": "PASSIVE" }
+}

@@ -1,0 +1,574 @@
+{
+  "engine": "seller_engine_deterministic_v1",
+  "semver": "1.6.0-provisional",
+  "version_delta_1_5_to_1_6": "COMPANY OWNERSHIP EVIDENCE SEMANTICS ONLY. No seller-pressure feature, weight, formula, interaction, score-family composition, priority composition, renter-handling, contact-planning, Tier-B policy or entity/trust/estate routing-precedence change. Seller-pressure family drift 0. V1.5 stays frozen and hash-locked as the immutable comparison baseline (config/deterministic_v1.config.json). V1.6 changes only WHAT COUNTS AS ENTITY-OWNERSHIP EVIDENCE: a property_company_links row is a company ASSOCIATION, not proof the current owner of record is an entity. Traced source semantics: matching_type '21' is perfectly collinear with company_source 'property.transaction_linked_companies' (a transaction-party join) and carries no independent meaning; blank matching_type is company_source 'property.linked_company'. Historical buyer/seller/agent association can no longer independently trigger entity_authority_resolution; a historical buyer requires corroboration via the latest qualifying transfer, name match to the owner of record, transfer preceding the scoring timestamp, no later transfer, and a consistent canonical classification. Lexical evidence remains fail-closed but is labelled lexical_authority_review, not confirmed entity ownership. Implemented in scores/companyRelationship.mjs + scores/entityOwnershipEvidence.mjs; the frozen V1.5 resolver, contact planner and eligibility policy are called UNCHANGED.",
+  "version_delta_1_4_to_1_5": "IDENTITY/AUTHORITY ROUTING PRECEDENCE ONLY (no seller-pressure/feature/weight/formula/interaction/composition change; motivation & execution-priority drift 0). Entity/trust/estate/probate authority now PRECEDES individual owner resolution in both ownerResolution.mjs (engine F-114) and ownerResolutionCanonical.mjs \u2014 a person name-matching a trust/estate/company name is at most an authority_unverified associated person, never an owner_confirmed individual (fixes the 2,944 owner_outreach leak). Lexical owner-name fallback (trust/estate/company terms) fail-closes to authority review even without a canonical classification. Eligibility policy: Tier B => manual_approval_required pending the provenance/independence audit; only Tier A (exact-key) stays shadow-eligible; entity/trust/estate/probate/conflict/authority_unverified never auto-outreach. Joint-party semantics split into verified_required_signers / probable_co_owners / alternate_owner_candidates / authority_unknown_parties; simultaneous_contact_allowed=false unless verified joint authority.",
+  "version_delta_1_3_to_1_4": "Phase 5 IDENTITY/ROUTING ONLY: DEPRECATE blocked_not_owner as a property execution route (a property always has an owner of record). The renter+no-owner case now routes owner_resolution_required with owner_resolution_status=no_reachable_owner_contact. blocked_not_owner remains a deprecated compatibility enum value, never emitted. Canonical candidate-ranking resolution layer added (scores/ownerResolutionCanonical.mjs, outreachEligibility.mjs, resolutionPriority.mjs) \u2014 pure resolution/eligibility, no seller-pressure change. Motivation/distress/financial scores unchanged (drift 0).",
+  "version_delta": "1.2.0->1.3.0: IDENTITY GATING + EXECUTION ROUTING ONLY (no seller-pressure/financial/lien/foreclosure/distress/market/economic weight or curve changes). Adds F-114 owner_resolution (scores/ownerResolution.mjs): separates person_contact_suppressed (person-scoped renter flag) from owner_resolution_status (property) from property_execution_route. A renter flag no longer directly sets blocked_not_owner; the route follows owner resolution \u2014 new routes owner_resolution_required, manual_review_renter_owner_conflict, entity_authority_resolution; blocked_not_owner reserved for a confirmed renter with NO owner of record. Priority gate zeroes ONLY on confirmed block (or REO); unresolved/conflict/entity routes keep identity-damped priority. Motivation family scores unchanged. See 1.1->1.2 below for prior delta.",
+  "prior_version_delta_1_1_to_1_2": "snapshot interface v2 unblocks F-052/F-130/F-132 from MEASURED comp data; repair_burden family scores when measured inputs exist (NOT in the motivation sum); discount_potential gains a bounded rehab_headroom term. No weight/curve/composition change.",
+  "weight_class": "provisional_domain_weight",
+  "disclaimer": "Every weight below is a provisional_domain_weight: a documented domain judgment, NOT statistically calibrated. Backtesting (Phase 3 harness) must precede any calibration claim. family_params is the single numeric authority consumed by scores/families.mjs; the weights[] entries document shape, direction and exclusions for each term. No priority cap is applied: execution priority is a ranking scale, not a percentage, and saturating it (a V12 behavior) destroys ordering among the strongest candidates.",
+  "gates": {
+    "renter_block": {
+      "feature": "F-112",
+      "effect": "zero owner-outreach priority when NO clean owner-tier link remains (person-level gate, property-blocked only when the renter is the only linked person)",
+      "rationale": "OD-13 QA: 1,029 token/renter collisions in one batch; renters are not the seller \u2014 but a clean co-linked owner still is"
+    },
+    "link_tier_multiplier": {
+      "feature": "F-110",
+      "map": {
+        "exact": 1.0,
+        "high": 0.95,
+        "medium": 0.8,
+        "low": 0.5,
+        "none": 0.15
+      },
+      "rationale": "identity confidence is multiplicative, never additive (IX-16)"
+    },
+    "scalar_corroboration_bump": {
+      "feature": "F-111",
+      "effect": "+one tier step when true",
+      "rationale": "OD-13 refinement: scalar-True is a vendor precision subset in live batches"
+    }
+  },
+  "family_params": {
+    "foreclosure_urgency": {
+      "stage_map": {
+        "none": 0,
+        "lis_pendens": 25,
+        "nod": 45,
+        "nos_nts": 70,
+        "auction_scheduled": 85,
+        "reo": 0
+      },
+      "stage_stale_days": 540,
+      "stage_stale_mult": 0.6,
+      "past_auction_unresolved_mult": 0.35,
+      "clock_cap": 15,
+      "clock_curve": 900,
+      "clock_floor_days": 7
+    },
+    "legal_title_pressure": {
+      "class_weights": {
+        "senior_gov": 16,
+        "judgment_litigation": 12,
+        "generic": 10,
+        "municipal_hoa": 5
+      },
+      "class_episode_cap": 2,
+      "amount_ratio_weight": 25,
+      "cap": 60
+    },
+    "property_distress": {
+      "tax_base": 18,
+      "tax_per_year": 6,
+      "tax_years_cap": 5,
+      "condition_map": {
+        "5": 8,
+        "6": 16,
+        "7": 24
+      },
+      "vacancy_points": 10,
+      "cap": 60
+    },
+    "financial_pressure": {
+      "equity_negative_points": 14,
+      "equity_thin_points": 8,
+      "equity_thin_pct": 15,
+      "ltv_high": 0.85,
+      "ltv_high_points": 14,
+      "ltv_mid": 0.65,
+      "ltv_mid_points": 6,
+      "rate_reset_points": 8,
+      "reverse_mortgage_points": 6,
+      "modification_points": 5,
+      "strain_min_indicators": 2,
+      "strain_mult": 1.15,
+      "cap": 40
+    },
+    "seller_propensity": {
+      "tenure_long_years": 12,
+      "tenure_long_points": 12,
+      "tenure_short_years": 2,
+      "tenure_short_distress_points": 6,
+      "tenure_base_points": 2,
+      "life_event_points": 10,
+      "life_recent_days": 730,
+      "life_mid_days": 1825,
+      "life_mid_mult": 0.6,
+      "life_old_mult": 0.3,
+      "failed_listing_points": 8,
+      "failed_after_cuts_bonus": 2,
+      "failed_cuts_pct": 0.08,
+      "title_cleanup_points": 5,
+      "suppressor_mult": 0.3,
+      "suppressor_distress_override": 40,
+      "cap": 35
+    },
+    "physical_obsolescence": {
+      "age_old": 60,
+      "age_old_points": 6,
+      "age_mid": 40,
+      "age_mid_points": 3
+    },
+    "landlord_fatigue": {
+      "per_composite_point": 4,
+      "cap": 20
+    },
+    "portfolio_liquidation": {
+      "scale_large": 5,
+      "scale_large_points": 4,
+      "scale_multi_points": 2,
+      "per_disposition": 6,
+      "disposition_cap": 12,
+      "leverage_high": 0.75,
+      "leverage_points": 4,
+      "cap": 16
+    },
+    "ownership_complexity": {
+      "estate_points": 8,
+      "entity_points": 5,
+      "fractional_points": 4,
+      "life_estate_points": 4,
+      "horizon_days": {
+        "high": 365,
+        "mid": 180,
+        "base": 90
+      },
+      "horizon_high_at": 8,
+      "horizon_mid_at": 4
+    },
+    "authority_confidence": {
+      "base": 0.8,
+      "decision_maker_bonus": 0.2,
+      "entity_defunct_mult": 0.5,
+      "officers_unknown_mult": 0.85,
+      "estate_unsettled_mult": 0.75,
+      "estate_with_fiduciary_mult": 0.95,
+      "life_estate_mult": 0.9,
+      "floor": 0.3
+    },
+    "contactability": {
+      "wireless_points": 6,
+      "any_channel_points": 3
+    },
+    "discount_potential": {
+      "equity_deep_pct": 60,
+      "equity_deep_points": 8,
+      "equity_mid_pct": 40,
+      "equity_mid_points": 4,
+      "basis_bands": [
+        [
+          3,
+          12
+        ],
+        [
+          2,
+          8
+        ],
+        [
+          1.5,
+          4
+        ]
+      ],
+      "low_basis_classes": [
+        "distress_acquisition",
+        "estate_acquisition",
+        "family_acquisition",
+        "distress_price_class"
+      ],
+      "low_basis_points": 6,
+      "cash_tenure_min_years": 3,
+      "cash_points": 3,
+      "payable_pressure_ratio": 0.15,
+      "payable_pressure_points": 4,
+      "rehab_cover_strong": 0.67,
+      "rehab_cover_strong_points": 6,
+      "rehab_cover_ok": 1.0,
+      "rehab_cover_ok_points": 3,
+      "retail_expectation_mult": 0.5,
+      "retail_condition_max_rank": 2,
+      "retail_basis_below": 1.3,
+      "cap": 25
+    },
+    "repair_burden": {
+      "to_value_light": 0.05,
+      "to_value_light_points": 4,
+      "to_value_mid": 0.12,
+      "to_value_mid_points": 8,
+      "to_value_heavy": 0.25,
+      "to_value_heavy_points": 12,
+      "spread_exceeded_ratio": 1.0,
+      "spread_exceeded_points": 4,
+      "cap": 16
+    },
+    "dealability": {
+      "equity_critical_pct": 5,
+      "equity_critical_mult": 0.5,
+      "equity_thin_pct": 15,
+      "equity_thin_mult": 0.75,
+      "equity_strong_pct": 40,
+      "equity_strong_mult": 1.05,
+      "equity_deep_pct": 60,
+      "equity_deep_mult": 1.1,
+      "tenant_occupied_mult": 0.95,
+      "short_sale_route_mult": 0.35,
+      "short_sale_stage": [
+        "nos_nts",
+        "auction_scheduled"
+      ],
+      "active_listing_mult": 0.2
+    },
+    "market_scaler": {
+      "spread_strong": 40000,
+      "spread_strong_mult": 1.1,
+      "spread_ok": 10000,
+      "spread_ok_mult": 1.0,
+      "spread_thin_mult": 0.85,
+      "spread_negative_mult": 0.5,
+      "velocity_strong": 4,
+      "velocity_strong_mult": 1.05,
+      "velocity_thin": 1,
+      "velocity_thin_mult": 0.85,
+      "clamp": [
+        0.4,
+        1.2
+      ]
+    },
+    "quality_haircut": {
+      "confidence_mult_on_disagree": 0.9
+    }
+  },
+  "weights": [
+    {
+      "key": "foreclosure_stage",
+      "feature": "F-018",
+      "family": "foreclosure_urgency",
+      "direction": "positive",
+      "monotonic": "stage ladder lis_pendens<nod<nos_nts<auction_scheduled; reo scores 0 (not a seller lead)",
+      "shape": "stage_map x recency decay (stale evidence x0.6 after 540d; past-auction-unresolved x0.35 pending review)",
+      "max_contribution": 85,
+      "exclusions": [
+        "lis-pendens lien docs routed to stage, never litigation pressure (IX-02)"
+      ],
+      "rationale": "a running foreclosure clock is the strongest single distress evidence family, but stage evidence is an event, not a permanent state \u2014 it must decay"
+    },
+    {
+      "key": "days_to_auction",
+      "feature": "F-019",
+      "family": "foreclosure_urgency",
+      "direction": "positive-inverse-days",
+      "monotonic": "closer auction => higher, floor at 0 days",
+      "shape": "min(15, 900/max(days,7))",
+      "max_contribution": 15,
+      "exclusions": [
+        "only when F-018 in nod|nos_nts|auction_scheduled"
+      ],
+      "rationale": "urgency sharpens nonlinearly near auction"
+    },
+    {
+      "key": "open_lien_pressure",
+      "feature": "F-013",
+      "family": "legal_title_pressure",
+      "direction": "positive",
+      "monotonic": "more open severity-weighted episodes & higher amount relative to equity (fallback value) => higher",
+      "shape": "sum(class_weight x min(age-decayed episodes, 2)) + 25 x min(amount_to_equity|amount_to_value, 1)",
+      "max_contribution": 60,
+      "exclusions": [
+        "release-closed episodes contribute 0 (IX-03)",
+        "lis-pendens routed to stage when foreclosure active (IX-02)",
+        "amount preferentially relative to EQUITY (IX-01), never both ratios"
+      ],
+      "rationale": "severity-ordered netted lien stack: government/support creditors outrank judgments outrank generic liens outrank HOA/municipal noise; a 12-year-old dormant judgment is not today's pressure"
+    },
+    {
+      "key": "tax_delinquency",
+      "feature": "F-023",
+      "family": "property_distress",
+      "direction": "positive",
+      "monotonic": "more years deep => higher",
+      "shape": "18 + 6*min(years_deep,5)",
+      "max_contribution": 48,
+      "exclusions": [
+        "recorded municipal/county tax lien docs sit in the municipal_hoa lien class at weight 5 \u2014 bounded residual overlap, documented"
+      ],
+      "rationale": "sustained non-payment on owned real estate is high-signal disengagement"
+    },
+    {
+      "key": "vacancy",
+      "feature": "F-022",
+      "family": "property_distress",
+      "direction": "positive",
+      "monotonic": "boolean",
+      "shape": "10",
+      "max_contribution": 10,
+      "exclusions": [
+        "vacancy counts here once; it corroborates landlord-fatigue composite only via occupancy routing, and F-137 is descriptive-only"
+      ],
+      "rationale": "a vacant house is pure carrying cost with no use value \u2014 direct disengagement evidence"
+    },
+    {
+      "key": "leverage_pressure",
+      "feature": "F-007/F-006",
+      "family": "financial_pressure",
+      "direction": "positive",
+      "monotonic": "less equity => more pressure; equity preferred, LTV only as fallback",
+      "shape": "equity known ? (eq<0 ? 14 : eq<15 ? 8 : 0) : (ltv>0.85 ? 14 : ltv>0.65 ? 6 : 0)",
+      "max_contribution": 14,
+      "exclusions": [
+        "equity and LTV are arithmetic complements \u2014 NEVER combined in one term (IX-01)"
+      ],
+      "rationale": "an underwater or pinned owner is financially stressed; the DEAL consequences of thin equity live in dealability/discount, not here \u2014 pressure and executability are different axes"
+    },
+    {
+      "key": "tenure_curve",
+      "feature": "F-001",
+      "family": "seller_propensity",
+      "direction": "u-shaped",
+      "monotonic": "NOT monotone: <=2y elevates ONLY with distress context (failed-buy pattern needs the failure); >=12y elevates; 4-8y trough",
+      "shape": "years>=12 ? 12 : years<=2 ? (distress_context ? 6 : 2) : 2",
+      "max_contribution": 12,
+      "exclusions": [
+        "suppressed by F-005 unless distress families >= 40 points"
+      ],
+      "rationale": "long-hold aging-out (A3) + failed-recent-buy (A5); a happy recent buyer is the least likely seller"
+    },
+    {
+      "key": "life_event_evidence",
+      "feature": "F-002",
+      "family": "seller_propensity",
+      "direction": "positive with recency decay",
+      "monotonic": "newer events matter more",
+      "shape": "10 x (<=2y: 1.0, <=5y: 0.6, older/undated: 0.3/0.6)",
+      "max_contribution": 10,
+      "exclusions": [
+        "life-event docs feed propensity POINTS here; estate STAGE (complexity/authority axes) consumes the same docs for non-motivation purposes \u2014 different axes, not a double count (IX-14 router)"
+      ],
+      "rationale": "death/probate/divorce is the strongest documented life-disruption evidence in the corpus"
+    },
+    {
+      "key": "failed_listing",
+      "feature": "F-003",
+      "family": "seller_propensity",
+      "direction": "positive",
+      "monotonic": "boolean",
+      "shape": "8",
+      "max_contribution": 8,
+      "exclusions": [
+        "expired/withdrawn only; an ACTIVE listing is an agent-flow routing gate, never a propensity input (IX-10, T-10)"
+      ],
+      "rationale": "a failed retail attempt is proven intent to sell plus a demonstrated retail-path failure"
+    },
+    {
+      "key": "recent_title_cleanup",
+      "feature": "F-135",
+      "family": "seller_propensity",
+      "direction": "positive-context",
+      "monotonic": "boolean",
+      "shape": "5",
+      "max_contribution": 5,
+      "exclusions": [
+        "episode must be closed \u2014 open episodes score in F-013 only"
+      ],
+      "rationale": "satisfying old liens is classic pre-sale behavior (archetype A6)"
+    },
+    {
+      "key": "rate_reset_exposure",
+      "feature": "F-009",
+      "family": "financial_pressure",
+      "direction": "positive",
+      "monotonic": "boolean",
+      "shape": "8",
+      "max_contribution": 8,
+      "exclusions": [],
+      "rationale": "adjustable/balloon structures add payment-shock risk"
+    },
+    {
+      "key": "reverse_mortgage_context",
+      "feature": "F-011",
+      "family": "financial_pressure",
+      "direction": "positive-context",
+      "monotonic": "boolean",
+      "shape": "6",
+      "max_contribution": 6,
+      "exclusions": [],
+      "rationale": "senior equity release; estate-sale trajectory"
+    },
+    {
+      "key": "modification_churn",
+      "feature": "F-010",
+      "family": "financial_pressure",
+      "direction": "positive",
+      "monotonic": "any recorded modification",
+      "shape": "5",
+      "max_contribution": 5,
+      "exclusions": [],
+      "rationale": "a recorded mortgage modification is documented prior distress"
+    },
+    {
+      "key": "person_strain_corroboration",
+      "feature": "F-012",
+      "family": "financial_pressure",
+      "direction": "multiplicative-corroboration",
+      "monotonic": ">=2 vendor strain indicators with link tier >= medium",
+      "shape": "x1.15 on existing property-side pressure, never standalone",
+      "max_contribution": 0,
+      "exclusions": [
+        "IX-18: vendor tiers corroborate only until holdout-validated; zero effect when property-side pressure is 0"
+      ],
+      "rationale": "personal strain converts property pressure into urgency (IX-06) but cannot manufacture pressure"
+    },
+    {
+      "key": "condition_distress",
+      "feature": "F-025",
+      "family": "property_distress",
+      "direction": "positive for rank>=5 (Fair/Poor/Unsound)",
+      "monotonic": "worse condition => higher",
+      "map": {
+        "5": 8,
+        "6": 16,
+        "7": 24
+      },
+      "max_contribution": 24,
+      "exclusions": [
+        "condition feeds distress once; excluded from tired-landlord composite; repair-cost economics live in blocked F-053/F-132 (IX-04)"
+      ],
+      "rationale": "visible neglect proxies owner disengagement"
+    },
+    {
+      "key": "effective_age",
+      "feature": "F-026",
+      "family": "physical_obsolescence",
+      "direction": "positive-context",
+      "monotonic": "older => modestly higher",
+      "shape": "age>=60 ? 6 : age>=40 ? 3 : 0",
+      "max_contribution": 6,
+      "exclusions": [
+        "cohort-degraded: national bands until snapshots"
+      ],
+      "rationale": "cap-ex burden proxy, deliberately small absent local norms"
+    },
+    {
+      "key": "landlord_fatigue_composite",
+      "feature": "F-030/F-032",
+      "family": "landlord_fatigue",
+      "direction": "positive",
+      "monotonic": "more rental-context corroborations => higher",
+      "shape": "min(20, composite x 4); ASR lives INSIDE the composite",
+      "max_contribution": 20,
+      "exclusions": [
+        "flag never alone; condition excluded (scores in distress); ASR not double-added"
+      ],
+      "rationale": "fatigue requires rental context: absentee + tenant/multi-unit + rent-assignment leverage"
+    },
+    {
+      "key": "portfolio_terms",
+      "feature": "F-033/F-035/F-034",
+      "family": "portfolio_liquidation",
+      "direction": "positive",
+      "monotonic": "scale small flat; dispositions dominate; leverage amplifies for multi-owners",
+      "shape": "(scale>=5 ? 4 : scale>=2 ? 2 : 0) + min(12, dispositions x 6) + (leverage>=0.75 && scale>=2 ? 4 : 0)",
+      "max_contribution": 16,
+      "exclusions": [
+        "F-105 magnitude guard voids all portfolio terms",
+        "portfolio leverage separate from per-property LTV (IX-12)"
+      ],
+      "rationale": "liquidation MOTION is evidence; scale alone is weak; concentrated portfolio debt makes each property a candidate cash source"
+    },
+    {
+      "key": "basis_appreciation_capacity",
+      "feature": "F-133",
+      "family": "discount_potential",
+      "direction": "positive",
+      "monotonic": "higher value/basis => higher discount tolerance",
+      "shape": "ratio>=3 ? 12 : ratio>=2 ? 8 : ratio>=1.5 ? 4 : 0",
+      "max_contribution": 12,
+      "exclusions": [
+        "non-valuation-class basis excluded (T-06/IX-15)"
+      ],
+      "rationale": "embedded gain enables below-retail acceptance (archetype A4)"
+    },
+    {
+      "key": "discount_terms",
+      "feature": "F-007/F-051/F-134/F-050/F-025",
+      "family": "discount_potential",
+      "direction": "positive with retail-expectation damper",
+      "monotonic": "equity headroom + low-basis acquisition + seasoned cash basis + payable pressure; halved when condition is Excellent/VG and appreciation < 1.3x",
+      "shape": "see family_params.discount_potential",
+      "max_contribution": 25,
+      "exclusions": [
+        "equity headroom counts here for PAYABILITY; its pressure aspect lives in financial_pressure; F-050 reuse is the IX-01 interaction (payoff-negotiation lever), capped at 4"
+      ],
+      "rationale": "discount capacity = can the owner afford to say yes (equity/basis) x will they psychologically accept below-retail (anchors, pressure)"
+    },
+    {
+      "key": "channel_readiness",
+      "feature": "F-046",
+      "family": "contactability",
+      "direction": "gate-context",
+      "monotonic": "more compliant wireless => higher execution readiness",
+      "shape": "wireless>=1 ? 6 : compliant_channels>=1 ? 3 : 0",
+      "max_contribution": 6,
+      "exclusions": [
+        "hard compliance blocks already removed channels before counting",
+        "IX-19: zero channels + extreme distress + equity routes to alternate-channel escalation instead of sinking priority"
+      ],
+      "rationale": "execution priority needs a reachable channel; motivation score unaffected"
+    },
+    {
+      "key": "agg_conflict_haircut",
+      "feature": "F-101/F-102",
+      "family": "data_quality_confidence",
+      "direction": "negative-confidence",
+      "monotonic": "disagreement => execution-priority confidence x0.9",
+      "shape": "confidence multiplier, applied in composition",
+      "max_contribution": 0,
+      "exclusions": [],
+      "rationale": "OD-12: conflicts surface as quality signals, never silently averaged"
+    },
+    {
+      "key": "repair_burden_measured",
+      "feature": "F-132",
+      "family": "repair_burden",
+      "direction": "positive",
+      "monotonic": "higher repair-to-value => higher capex load; repairs exceeding the measured spread add a value-trap marker",
+      "shape": "to_value bands 4/8/12 + spread-exceeded +4, cap 16",
+      "max_contribution": 16,
+      "exclusions": [
+        "NOT in the motivation sum \u2014 condition scores disengagement once in property_distress (IX-04)",
+        "vendor baseline is rule-9 comparison data, never canonical"
+      ],
+      "rationale": "quantifies capex load from measured comp data; descriptor + discount/dealability input"
+    },
+    {
+      "key": "rehab_headroom_measured",
+      "feature": "F-052",
+      "family": "discount_potential",
+      "direction": "positive",
+      "monotonic": "measured renovated spread covering repairs => as-is discount rationale",
+      "shape": "cover<=0.67 => +6; <=1.0 (or repairs unmeasured) => +3; repairs exceed spread => 0",
+      "max_contribution": 6,
+      "exclusions": [
+        "only when snapshot v2 measured the spread from >=2 good + >=2 poor condition comps (IX-04)"
+      ],
+      "rationale": "poor condition creates discount headroom only where renovated comps prove the spread exists"
+    }
+  ],
+  "ix19_escalation": {
+    "enabled": false,
+    "mode": "dry_run_only",
+    "version": "ix19-2026.07.17",
+    "trigger": {
+      "distress": "F-018 in nod|nos_nts|auction_scheduled OR F-023.years_deep>=2",
+      "equity": "F-007 >= 30",
+      "contactability": "F-046.compliant_phones == 0 AND F-047 == 0"
+    },
+    "simulated_budgets_pct": [
+      0.25,
+      0.5,
+      1.0,
+      2.0
+    ],
+    "note": "P2-7: disabled from production outreach; produces recommended caps from backtest simulation only"
+  }
+}
