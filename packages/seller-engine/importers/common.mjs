@@ -1,5 +1,5 @@
 // Shared staging-importer engine: streaming, idempotent (deterministic ids +
-// atomic partition replace), resumable (checkpoint by row offset), dry-run and
+// atomic partition replace), crash-safe restart semantics, dry-run and
 // pilot modes, raw preservation + lineage on every row, conflict reporting.
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';

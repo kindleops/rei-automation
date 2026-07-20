@@ -25,7 +25,9 @@ function loadProps() {
       p.raw->'raw_keep'->>'Owner1OwnershipRights' vesting_raw,
       (select count(*) from seller_engine.property_company_links cl where cl.property_id=p.id) company_links,
       exists(select 1 from seller_engine.ownership_classifications c join seller_engine.property_ownerships oo on oo.id=c.ownership_id
-             where oo.property_id=p.id and c.classification in ('corporate','trust','estate')) cls_entity,
+             where oo.property_id=p.id and c.classification in ('corporate','trust')) cls_entity,
+      exists(select 1 from seller_engine.ownership_classifications c join seller_engine.property_ownerships oo on oo.id=c.ownership_id
+             where oo.property_id=p.id and c.classification='estate') cls_estate,
       exists(select 1 from seller_engine.ownership_classifications c join seller_engine.property_ownerships oo on oo.id=c.ownership_id
              where oo.property_id=p.id and c.classification='trust') cls_trust,
       exists(select 1 from seller_engine.property_liens l where l.property_id=p.id and l.lifecycle_class='probate_life_event') probate,
@@ -111,7 +113,7 @@ function main() {
     const cands = candFor(links.get(pid), p);
     const property = { property_id: pid, owner_name: p.owner_name_raw, owner_mailing_state: p.mailing_state,
       situs_state: p.situs_state, is_entity: (p.company_links ?? 0) > 0 || p.cls_entity === true,
-      probate_evidence: p.probate === true, reo: p.reo === true,
+      probate_evidence: p.probate === true || p.cls_estate === true, reo: p.reo === true,
       owner_two_name: p.owner_two_name, vesting_raw: p.vesting_raw, is_trust: p.cls_trust === true };
     const res = resolveCanonical(property, cands);
     if (res.execution_route !== 'owner_outreach') continue; // contact plans only for owner_resolved
