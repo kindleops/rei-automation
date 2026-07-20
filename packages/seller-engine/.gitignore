@@ -1,0 +1,4 @@
+# Ephemeral pilot Postgres cluster, dumps, checkpoints and run state.
+# Large binaries (5GB+); regenerate via pilot/load.mjs or restore from
+# var/pilot/archive/seller_engine_pilot.dump (kept on disk, not in git).
+var/
