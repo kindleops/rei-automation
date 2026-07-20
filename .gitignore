@@ -32,3 +32,11 @@ apps/dashboard/proof/**/structure-evidence.txt
 
 # Root-level local screenshots
 /*.png
+
+# Seller-engine local runtime / pilot artifacts (generated staging, shadow,
+# docker-pgdata, checkpoints, reports). Source under packages/seller-engine/
+# remains tracked; only var/ is disposable local state.
+packages/seller-engine/var/
+
+# One-off ops script rollback payloads (may contain local DB snapshots)
+apps/api/scripts/.rollback-snapshots/
