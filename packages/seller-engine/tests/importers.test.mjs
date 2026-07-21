@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,8 +8,9 @@ import { fileURLToPath } from 'node:url';
 process.env.SELLER_ENGINE_VAR = mkdtempSync(join(tmpdir(), 'se-var-'));
 const { importFile } = await import('../importers/common.mjs');
 const { mapProperty } = await import('../importers/mappers.mjs');
-const { readPartition, readAll } = await import('../lib/store.mjs');
+const { readPartition, readAll, VAR_DIR } = await import('../lib/store.mjs');
 const { sha256 } = await import('../lib/hash.mjs');
+const { rejectSQL } = await import('../pilot/tables.mjs');
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'properties_fixture.csv');
 
@@ -32,6 +33,33 @@ test('idempotency: re-import of same file produces identical batch id and identi
   const rows2 = sha256(JSON.stringify(readPartition('properties', b.batch.id)));
   assert.equal(a.batch.id, b.batch.id);
   assert.equal(rows1, rows2);
+});
+
+test('resume restarts safely instead of trusting an unpersisted row offset', async () => {
+  const first = await importFile({ filePath: FIXTURE, fileSet: 'properties', mapper: mapProperty });
+  const ckptPath = join(VAR_DIR, 'checkpoints', `${first.batch.id}.json`);
+
+  mkdirSync(dirname(ckptPath), { recursive: true });
+  writeFileSync(ckptPath, JSON.stringify({ nextRow: 2 }));
+
+  const resumed = await importFile({
+    filePath: FIXTURE,
+    fileSet: 'properties',
+    mapper: mapProperty,
+    resume: true,
+  });
+
+  assert.equal(resumed.batch.row_count, 3);
+  assert.equal(readPartition('source_records', resumed.batch.id).length, 3);
+  assert.equal(readPartition('properties', resumed.batch.id).length, 3);
+});
+
+test('pilot reject logging uses canonical import-batch lineage', () => {
+  const sql = rejectSQL('properties', 'batch_test');
+
+  assert.match(sql, /sample_values, import_batch_id\)/);
+  assert.doesNotMatch(sql, /sample_values, batch_id\)/);
+  assert.match(sql, /'batch_test'/);
 });
 
 test('dry-run writes nothing; pilot limits rows', async () => {

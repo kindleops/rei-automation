@@ -1,7 +1,7 @@
 // Shared staging-importer engine: streaming, idempotent (deterministic ids +
-// atomic partition replace), resumable (checkpoint by row offset), dry-run and
+// atomic partition replace), crash-safe restart semantics, dry-run and
 // pilot modes, raw preservation + lineage on every row, conflict reporting.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { csvRows } from '../lib/csv.mjs';
 import { sha256, sha256File, deterministicId } from '../lib/hash.mjs';
@@ -12,8 +12,9 @@ export async function importFile({ filePath, fileSet, mapper, batchId = null,
   const fileSha = await sha256File(filePath);
   batchId ??= deterministicId('batch', fileSet, fileSha); // same file => same batch => idempotent
   const ckptPath = join(VAR_DIR, 'checkpoints', `${batchId}.json`);
-  let startRow = 0;
-  if (resume && existsSync(ckptPath)) startRow = JSON.parse(readFileSync(ckptPath, 'utf8')).nextRow ?? 0;
+  if (resume && existsSync(ckptPath)) {
+    console.warn(`resume requested for ${batchId}; restarting from row 0 because partitions commit atomically`);
+  }
 
   const tables = {};            // table -> rows
   const rawRows = [];
@@ -21,6 +22,7 @@ export async function importFile({ filePath, fileSet, mapper, batchId = null,
   const unmapped = new Map();   // domain_key|raw_value -> count
   let header = null;
   let processed = 0;
+  let lastRow = 0;
   let scrapedMin = null; let scrapedMax = null;
   const runIds = new Set();
 
@@ -37,9 +39,9 @@ export async function importFile({ filePath, fileSet, mapper, batchId = null,
 
   for await (const { rowNumber, record } of csvRows(filePath)) {
     header ??= Object.keys(record);
-    if (rowNumber <= startRow) continue;
     if (pilot !== null && processed >= pilot) break;
     processed += 1;
+    lastRow = rowNumber;
     if (record.run_id) runIds.add(record.run_id);
     if (record.scraped_at) {
       scrapedMin = scrapedMin === null || record.scraped_at < scrapedMin ? record.scraped_at : scrapedMin;
@@ -55,10 +57,6 @@ export async function importFile({ filePath, fileSet, mapper, batchId = null,
       payload: record,
     });
     mapper(record, ctx, rowNumber);
-    if (!dryRun && processed % 5000 === 0) {
-      mkdirSync(dirname(ckptPath), { recursive: true });
-      writeFileSync(ckptPath, JSON.stringify({ nextRow: rowNumber }));
-    }
   }
 
   const batch = {
@@ -85,7 +83,8 @@ export async function importFile({ filePath, fileSet, mapper, batchId = null,
         return { id: deterministicId('unm', domain_key, raw_value), domain_key, raw_value, occurrence_count: n, first_seen_batch: batchId, status: 'pending' };
       }));
     writeReport(`import_${fileSet}_${batchId}`, { summary, conflicts: conflicts.slice(0, 200) });
-    if (existsSync(ckptPath)) writeFileSync(ckptPath, JSON.stringify({ done: true }));
+    mkdirSync(dirname(ckptPath), { recursive: true });
+    writeFileSync(ckptPath, JSON.stringify({ done: true, nextRow: lastRow }));
   }
   return { ...summary, conflicts_detail: conflicts };
 }
