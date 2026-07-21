@@ -302,3 +302,69 @@ test('owner graph rejects missing or invalid asOf timestamps', () => {
     /requires a valid asOf timestamp/,
   );
 });
+
+
+test('owner graph reads identity evidence from the prospects batch', () => {
+  const propertyBatch = `test_og_props_${Date.now()}`;
+  const identityBatch = `test_og_identity_${Date.now()}`;
+
+  writePartition('properties', propertyBatch, [
+    {
+      id: 'split_p1',
+      situs_state: 'TN',
+      raw_keep: {
+        owner_hash: 'SPLIT_OH',
+        owner_name: 'OWNER, TAYLOR',
+      },
+    },
+  ]);
+  writePartition('property_ownerships', propertyBatch, [
+    {
+      id: 'split_o1',
+      property_id: 'split_p1',
+      owner_hash: 'SPLIT_OH',
+      owner_name_raw: 'OWNER, TAYLOR',
+    },
+  ]);
+
+  for (const table of [
+    'property_valuation_tax_snapshots',
+    'property_loans',
+    'property_transactions',
+    'property_foreclosure_events',
+    'property_liens',
+    'property_company_links',
+  ]) {
+    writePartition(table, propertyBatch, []);
+  }
+
+  writePartition('people', identityBatch, [
+    {
+      id: 'split_person',
+      individual_key: 'IK_TAYLOR',
+      identity_tier: 'key',
+      full_name: 'TAYLOR OWNER',
+    },
+  ]);
+  writePartition('property_person_links', identityBatch, [
+    {
+      property_id: 'split_p1',
+      person_id: 'split_person',
+      renter_flag: false,
+      link_tier: 'exact',
+      is_matching_property_as_owner: true,
+    },
+  ]);
+
+  const { nodes } = buildOwnerGraph({
+    batches: [propertyBatch],
+    identityBatches: [identityBatch],
+    asOf: AS_OF,
+  });
+
+  const owner = nodes.find((node) =>
+    node.property_ids.includes('split_p1'));
+
+  assert.equal(owner.owner_key, 'ik:IK_TAYLOR');
+  assert.equal(owner.owner_kind, 'individual_key');
+});

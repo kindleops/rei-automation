@@ -79,7 +79,11 @@ const qualifiedIndividualKeys = ({
 //   2. owner_hash (vendor owner fingerprint) — property-side owner identity
 //   3. company id (entity owner) — for company-owned properties
 // A property with only a name and no key/hash yields an UNRESOLVED owner node.
-export function buildOwnerGraph({ batches, asOf }) {
+export function buildOwnerGraph({
+  batches,
+  identityBatches = batches,
+  asOf,
+}) {
   const asOfMs = toMs(asOf);
   if (asOfMs === null) {
     throw new Error(
@@ -95,10 +99,10 @@ export function buildOwnerGraph({ batches, asOf }) {
   const fcs = idxBy(batches.flatMap((b) => readPartition('property_foreclosure_events', b)), 'property_id');
   const liens = idxBy(batches.flatMap((b) => readPartition('property_liens', b)), 'property_id');
   const coLinks = idxBy(batches.flatMap((b) => readPartition('property_company_links', b)), 'property_id');
-  const people = batches.flatMap((b) =>
+  const people = identityBatches.flatMap((b) =>
     readPartition('people', b));
   const personLinks = idxBy(
-    batches.flatMap((b) =>
+    identityBatches.flatMap((b) =>
       readPartition('property_person_links', b)),
     'property_id',
   );
@@ -282,8 +286,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const fs = await import('node:fs');
   const state = JSON.parse(fs.readFileSync(new URL('../var/pilot/state.json', import.meta.url), 'utf8'));
   const asOf = state.stages.score?.as_of;
+  const prospectsBatch = state.batches.prospects?.id;
   const { report } = buildOwnerGraph({
     batches: [state.batches.properties.id],
+    identityBatches: prospectsBatch
+      ? [prospectsBatch]
+      : [],
     asOf,
   });
   console.log(JSON.stringify(report, null, 2));
