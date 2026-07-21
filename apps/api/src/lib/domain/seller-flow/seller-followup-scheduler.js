@@ -18,10 +18,22 @@ import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { enqueueSendQueueItem } from "@/lib/supabase/sms-engine.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 
+// Canonical intent names — must match CANONICAL_INTENTS in
+// coverage-net/canonical-intent-aliases.js, the single reconciled vocabulary
+// for Stages 1-6 (that module's own comment documents a past incident where
+// divergent per-file vocabularies silently missed live classifier intents).
+// normalizeClassificationContract() always folds wrong_person -> wrong_number
+// before this scheduler ever sees an intent, so "wrong_person" alone would
+// never match a real inbound reply; property_specific_non_owner covers both
+// "not the owner" and "never owned" claims (see PROPERTY_SCOPED_CLAIMS in
+// resolve-inbound-relationship.js), and former_owner_respondent covers "sold
+// the property" claims.
 const SUPPRESSED_INTENTS = new Set([
   "opt_out",
+  "wrong_number",
   "wrong_person",
-  "wrong_person",
+  "property_specific_non_owner",
+  "former_owner_respondent",
   "hostile_or_legal",
   "timing_complaint",
 ]);

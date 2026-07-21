@@ -13,6 +13,18 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+/** Normalizes an injected `now` (epoch ms, ISO string, or Date) to epoch ms; defaults to the real clock. */
+function toEpochMs(now) {
+  if (typeof now === "number" && Number.isFinite(now)) return now;
+  const ms = new Date(now ?? Date.now()).getTime();
+  return Number.isFinite(ms) ? ms : Date.now();
+}
+
+/** Normalizes an injected `now` to an ISO string; defaults to the real clock. */
+function toIsoNow(now) {
+  return new Date(toEpochMs(now)).toISOString();
+}
+
 const OWNERSHIP_PROBE_STAGES = new Set([
   "ownership_check",
   "ownership_confirmation",
@@ -307,9 +319,9 @@ function shouldRouteToNeedsReview(classification = {}) {
   return false;
 }
 
-export function deriveInboxBucketFromThreadState(row = {}) {
+export function deriveInboxBucketFromThreadState(row = {}, now = Date.now()) {
   const explicit = normalizeLegacyBucket(row.inbox_bucket || row.inbox_category || "");
-  if (explicit && !isStaleExplicitInboxBucket(row, explicit)) return explicit;
+  if (explicit && !isStaleExplicitInboxBucket(row, explicit, toEpochMs(now))) return explicit;
 
   if (row.is_suppressed === true || lower(row.disposition) === "suppressed") return "suppressed";
   if (lower(row.disposition) === "wrong_number") return "dead";
@@ -332,7 +344,7 @@ export function deriveInboxBucketFromThreadState(row = {}) {
     provider_delivery_status: row.latest_provider_delivery_status || null,
   };
 
-  const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row);
+  const bucket = resolveInboxBucketFromClassification(classification, messageEvent, row, now);
   if (bucket) return bucket;
 
   if (isOutboundLastWithoutReply({
@@ -344,6 +356,7 @@ export function deriveInboxBucketFromThreadState(row = {}) {
       lastInboundAt: row.last_inbound_at,
       latestDeliveryStatus: row.latest_delivery_status,
       workflowRow: row,
+      now: toEpochMs(now),
     });
     if (outboundState.inbox_bucket) return outboundState.inbox_bucket;
   }
@@ -364,7 +377,7 @@ function hasExplicitColdEvidence(row = {}) {
   );
 }
 
-export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}) {
+export function resolveInboxBucketFromClassification(classification = {}, messageEvent = {}, existingState = {}, now = Date.now()) {
   const direction = clean(messageEvent.direction).toLowerCase();
   const is_outbound = direction === "outbound";
   const inboundFlags = resolveThreadFlagsFromClassification(classification);
@@ -440,6 +453,7 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
         messageEvent.provider_delivery_status ||
         existingState.latest_delivery_status,
       workflowRow: existingState,
+      now: toEpochMs(now),
     });
     return outboundState.inbox_bucket;
   }
@@ -479,6 +493,7 @@ export function resolveAutomationLaneFromClassification(
   messageEvent = {},
   existingState = {},
   inbox_bucket = null,
+  now = Date.now(),
 ) {
   const direction = clean(messageEvent.direction).toLowerCase();
   const inboundFlags = resolveThreadFlagsFromClassification(classification);
@@ -520,6 +535,7 @@ export function resolveAutomationLaneFromClassification(
         existingState.latest_message_at,
       lastInboundAt: existingState.last_inbound_at,
       latestDeliveryStatus: deliveryStatus,
+      now: toEpochMs(now),
     });
     return outboundState.automation_lane;
   }
@@ -565,18 +581,20 @@ export function resolveDispositionFromClassification(
   return existingState.disposition || null;
 }
 
-export function buildThreadStatePatchFromClassification({ messageEvent = {}, classification = {}, existingState = {} }) {
+export function buildThreadStatePatchFromClassification({ messageEvent = {}, classification = {}, existingState = {}, now = Date.now() }) {
   const direction = clean(messageEvent.direction).toLowerCase();
   const is_inbound = direction === "inbound";
-  
+  const nowMs = toEpochMs(now);
+  const nowIso = toIsoNow(now);
+
   // Use the new single-source-of-truth resolvers
   const flags = is_inbound ? resolveThreadFlagsFromClassification(classification) : resolveThreadFlagsFromClassification(existingState);
   const statuses = resolveUniversalStatusFromClassification(is_inbound ? classification : {}, messageEvent, existingState);
-  const bucket = resolveInboxBucketFromClassification(is_inbound ? classification : {}, messageEvent, existingState);
+  const bucket = resolveInboxBucketFromClassification(is_inbound ? classification : {}, messageEvent, existingState, nowMs);
 
   const patch = {
     latest_message_id: messageEvent.id || messageEvent.provider_message_sid,
-    latest_message_at: messageEvent.received_at || messageEvent.sent_at || messageEvent.event_timestamp || new Date().toISOString(),
+    latest_message_at: messageEvent.received_at || messageEvent.sent_at || messageEvent.event_timestamp || nowIso,
     latest_message_body: messageEvent.message_body || messageEvent.message,
     latest_message_direction: direction,
     latest_direction: direction,
@@ -589,7 +607,7 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
     latest_provider_delivery_status: clean(messageEvent.provider_delivery_status) || null,
     latest_failed_at: messageEvent.failed_at || null,
     latest_failure_reason: clean(messageEvent.failure_reason) || null,
-    updated_at: new Date().toISOString(),
+    updated_at: nowIso,
   };
 
   // Only overlay classification results if it was an inbound message and we have classification
@@ -621,6 +639,7 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
     messageEvent,
     existingState,
     bucket,
+    nowMs,
   );
   patch.disposition = resolveDispositionFromClassification(
     is_inbound ? classification : existingState,

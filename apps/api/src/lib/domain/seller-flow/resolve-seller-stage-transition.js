@@ -257,6 +257,36 @@ const BLOCKING_INTENTS = Object.freeze({
     reasoning_code: "HOLD_HOSTILE_LEGAL_REVIEW",
     workflow_event: "AUTOMATION_NEEDS_REVIEW",
   },
+  // Canonical intents from canonical-intent-aliases.js's deriveCanonicalIntent
+  // (via resolve-inbound-relationship.js's PROPERTY_SCOPED_CLAIMS "not_owner" /
+  // "never_been_owner" claims). Distinct from wrong_number: the phone/person
+  // may still be valid for a different property, so this halts and routes to
+  // review rather than fully blocking the contact.
+  property_specific_non_owner: {
+    contactability: CONTACTABILITY_CODES.DO_NOT_TEXT,
+    disposition: DISPOSITION_CODES.UNQUALIFIED,
+    operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
+    next_action: NEXT_ACTIONS.HUMAN_REVIEW,
+    cancel_followups: true,
+    review_required: true,
+    review_reason: "property_specific_non_owner",
+    reasoning_code: "HOLD_NOT_OWNER_PROPERTY_SCOPED_REVIEW",
+    workflow_event: "AUTOMATION_NEEDS_REVIEW",
+  },
+  // Canonical intent for a "former_owner" relationship claim (sold the
+  // property, no longer owns it). Distinct disposition from a bare not-owner
+  // claim for accurate telemetry/dashboard reporting.
+  former_owner_respondent: {
+    contactability: CONTACTABILITY_CODES.DO_NOT_TEXT,
+    disposition: DISPOSITION_CODES.SOLD,
+    operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
+    next_action: NEXT_ACTIONS.HUMAN_REVIEW,
+    cancel_followups: true,
+    review_required: true,
+    review_reason: "former_owner_property_sold",
+    reasoning_code: "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW",
+    workflow_event: "AUTOMATION_NEEDS_REVIEW",
+  },
 });
 
 /** Nurture windows (days) by disengaging intent. */
@@ -405,9 +435,13 @@ export function resolveSellerStageTransition({
       lead_temperature: normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED),
       disposition: blocking.disposition || current_disposition || null,
       contactability_patch: { contactability_status: blocking.contactability },
-      ownership_patch: intentKey === "wrong_number" || intentKey === "wrong_person"
-        ? { ownership_status: "not_owner" }
-        : null,
+      ownership_patch:
+        intentKey === "wrong_number" ||
+        intentKey === "wrong_person" ||
+        intentKey === "property_specific_non_owner" ||
+        intentKey === "former_owner_respondent"
+          ? { ownership_status: "not_owner" }
+          : null,
       next_action: blocking.next_action,
       next_action_due_at: null,
       required_template_use_case: null,
