@@ -22,6 +22,15 @@ export function isWithinWindow(eventTs, asOf, horizonDays) {
   return ev > start && ev <= start + horizonDays * 86_400_000;
 }
 
+export function isObservedOutcome(eventTs, asOf, observedThrough) {
+  const ev = toMs(eventTs);
+  const start = toMs(asOf);
+  const end = toMs(observedThrough);
+
+  if (ev === null || start === null || end === null) return false;
+  return ev > start && ev <= end;
+}
+
 // Censoring (P2-1): a row is only a valid negative when the observation window
 // is fully covered by data through observed_through.
 export function labelState(eventTs, asOf, horizonDays, observedThrough) {

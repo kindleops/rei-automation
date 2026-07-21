@@ -76,13 +76,35 @@ test('shadow cohort: frozen, hash-verified, reproducible; evaluation grades post
     'deterministic_v1_score', 'v12_score', 'explanations', 'versions', 'scoring_timestamp']) {
     assert.ok(k in r, k);
   }
-  // evaluation: outcome before as-of never grades; after does
+  // Historical and post-observation events cannot suppress eligible sales.
   const outcomes = [
-    { family: 'verified_sale', property_id: 'pa1', event_ts: '2026-06-01T00:00:00Z' },  // before as-of -> ignored
-    { family: 'verified_sale', property_id: 'pb2', event_ts: '2026-08-15T00:00:00Z' },  // within 90d
+    {
+      family: 'verified_sale',
+      property_id: 'pa1',
+      event_ts: '2026-06-01T00:00:00Z',
+    },
+    {
+      family: 'verified_sale',
+      property_id: 'pa1',
+      event_ts: '2026-08-01T00:00:00Z',
+    },
+    {
+      family: 'verified_sale',
+      property_id: 'pb2',
+      event_ts: '2026-08-15T00:00:00Z',
+    },
+    {
+      family: 'verified_sale',
+      property_id: 'pc3',
+      event_ts: '2026-12-01T00:00:00Z',
+    },
   ];
-  const ev = evaluateShadowCohort(loaded, outcomes, { observedThrough: '2026-11-01T00:00:00Z' });
+  const ev = evaluateShadowCohort(
+    loaded,
+    outcomes,
+    { observedThrough: '2026-11-01T00:00:00Z' },
+  );
   assert.equal(ev.state, 'ok');
-  assert.equal(ev.report.horizons['90d'].positives, 1);
+  assert.equal(ev.report.horizons['90d'].positives, 2);
   assert.ok(ev.report.horizons['365d'].censored >= 1); // window not fully observed
 });
