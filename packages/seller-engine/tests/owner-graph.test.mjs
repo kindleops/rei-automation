@@ -15,6 +15,11 @@ function seed() {
     { id: 'p4', situs_state: 'TX', asset_class: 'single_family', raw_keep: { owner_name: 'DOE, JANE' } }, // name only, no hash
     { id: 'p5', situs_state: 'FL', asset_class: 'single_family', raw_keep: { owner_name: 'MIXED, FORECLOSURE' } },
     { id: 'p6', situs_state: 'OH', asset_class: 'single_family', raw_keep: { owner_name: 'MIXED, LIEN' } },
+    { id: 'p7', situs_state: 'TN', asset_class: 'single_family', raw_keep: { owner_hash: 'OH7', owner_name: 'OWNER, ALEX' } },
+    { id: 'p8', situs_state: 'GA', asset_class: 'single_family', raw_keep: { owner_hash: 'OH8', owner_name: 'OWNER, ALEX' } },
+    { id: 'p9', situs_state: 'TX', asset_class: 'single_family', raw_keep: { owner_hash: 'OH9', owner_name: 'RENTER, RITA' } },
+    { id: 'p10', situs_state: 'FL', asset_class: 'single_family', raw_keep: { owner_hash: 'OH10', owner_name: 'WEAK, WENDY' } },
+    { id: 'p11', situs_state: 'AZ', asset_class: 'single_family', raw_keep: { owner_hash: 'OH11', owner_name: 'OWNER, CASEY' } },
   ]);
   writePartition('property_ownerships', B, [
     { id: 'o1', property_id: 'p1', owner_hash: 'OH1', owner_name_raw: 'SMITH, JOHN' },
@@ -23,6 +28,11 @@ function seed() {
     { id: 'o4', property_id: 'p4', owner_hash: null, owner_name_raw: 'DOE, JANE' },
     { id: 'o5', property_id: 'p5', owner_hash: null, owner_name_raw: 'MIXED, FORECLOSURE' },
     { id: 'o6', property_id: 'p6', owner_hash: null, owner_name_raw: 'MIXED, LIEN' },
+    { id: 'o7', property_id: 'p7', owner_hash: 'OH7', owner_name_raw: 'OWNER, ALEX' },
+    { id: 'o8', property_id: 'p8', owner_hash: 'OH8', owner_name_raw: 'OWNER, ALEX' },
+    { id: 'o9', property_id: 'p9', owner_hash: 'OH9', owner_name_raw: 'RENTER, RITA' },
+    { id: 'o10', property_id: 'p10', owner_hash: 'OH10', owner_name_raw: 'WEAK, WENDY' },
+    { id: 'o11', property_id: 'p11', owner_hash: 'OH11', owner_name_raw: 'OWNER, CASEY' },
   ]);
   writePartition('property_valuation_tax_snapshots', B, [
     { property_id: 'p1', as_of: '2026-06-01', estimated_value: 200000, estimated_equity: 120000, tax_delinquent: true, tax_delinquent_year: 2023 },
@@ -60,6 +70,82 @@ function seed() {
       lifecycle_class: 'creation',
       filing_date: '2026-08-01',
       recording_date: '2026-06-10',
+    },
+  ]);
+  writePartition('people', B, [
+    {
+      id: 'per_alex',
+      individual_key: 'IK_ALEX',
+      identity_tier: 'key',
+      full_name: 'ALEX OWNER',
+    },
+    {
+      id: 'per_rita',
+      individual_key: 'IK_RITA',
+      identity_tier: 'key',
+      full_name: 'RITA RENTER',
+    },
+    {
+      id: 'per_wendy',
+      individual_key: 'IK_WENDY',
+      identity_tier: 'key',
+      full_name: 'WENDY WEAK',
+    },
+    {
+      id: 'per_casey_1',
+      individual_key: 'IK_CASEY_1',
+      identity_tier: 'key',
+      full_name: 'CASEY OWNER',
+    },
+    {
+      id: 'per_casey_2',
+      individual_key: 'IK_CASEY_2',
+      identity_tier: 'key',
+      full_name: 'CASEY OWNER',
+    },
+  ]);
+  writePartition('property_person_links', B, [
+    {
+      property_id: 'p7',
+      person_id: 'per_alex',
+      renter_flag: false,
+      link_tier: 'exact',
+      is_matching_property_as_owner: true,
+    },
+    {
+      property_id: 'p8',
+      person_id: 'per_alex',
+      renter_flag: false,
+      link_tier: 'high',
+      is_matching_property_as_owner: true,
+    },
+    {
+      property_id: 'p9',
+      person_id: 'per_rita',
+      renter_flag: true,
+      link_tier: 'exact',
+      is_matching_property_as_owner: true,
+    },
+    {
+      property_id: 'p10',
+      person_id: 'per_wendy',
+      renter_flag: false,
+      link_tier: 'low',
+      is_matching_property_as_owner: true,
+    },
+    {
+      property_id: 'p11',
+      person_id: 'per_casey_1',
+      renter_flag: false,
+      link_tier: 'exact',
+      is_matching_property_as_owner: true,
+    },
+    {
+      property_id: 'p11',
+      person_id: 'per_casey_2',
+      renter_flag: false,
+      link_tier: 'exact',
+      is_matching_property_as_owner: true,
     },
   ]);
   writePartition('property_company_links', B, []);
@@ -126,4 +212,93 @@ test('mixed-date distress evidence accepts any valid pre-cutoff date', () => {
 test('name-shared-across-keys surfaces as a candidate conflict, not an edge', () => {
   const { conflicts } = buildOwnerGraph({ batches: [B], asOf: AS_OF });
   assert.ok(conflicts.some((c) => c.kind === 'name_shared_across_owner_keys' && c.resolution === 'candidate_only_not_merged'));
+});
+
+
+test('qualified individual_key outranks owner_hash and groups holdings', () => {
+  const { nodes } = buildOwnerGraph({
+    batches: [B],
+    asOf: AS_OF,
+  });
+
+  const alex = nodes.find((n) =>
+    n.owner_key === 'ik:IK_ALEX');
+
+  assert.equal(alex.owner_kind, 'individual_key');
+  assert.equal(alex.confidence, 'high');
+  assert.equal(alex.portfolio_holdings, 2);
+  assert.deepEqual(
+    [...alex.property_ids].sort(),
+    ['p7', 'p8'],
+  );
+  assert.equal(
+    nodes.some((n) => n.owner_key === 'oh:OH7'),
+    false,
+  );
+  assert.equal(
+    nodes.some((n) => n.owner_key === 'oh:OH8'),
+    false,
+  );
+});
+
+test('renter and weak keyed links never establish ownership', () => {
+  const { nodes } = buildOwnerGraph({
+    batches: [B],
+    asOf: AS_OF,
+  });
+
+  assert.ok(nodes.some((n) => n.owner_key === 'oh:OH9'));
+  assert.ok(nodes.some((n) => n.owner_key === 'oh:OH10'));
+  assert.equal(
+    nodes.some((n) => n.owner_key === 'ik:IK_RITA'),
+    false,
+  );
+  assert.equal(
+    nodes.some((n) => n.owner_key === 'ik:IK_WENDY'),
+    false,
+  );
+});
+
+test('multiple qualified individual keys fail closed', () => {
+  const { nodes, conflicts } = buildOwnerGraph({
+    batches: [B],
+    asOf: AS_OF,
+  });
+
+  const ambiguous = nodes.find((n) =>
+    n.property_ids.includes('p11'));
+
+  assert.equal(
+    ambiguous.owner_kind,
+    'unresolved_individual_key_conflict',
+  );
+  assert.equal(ambiguous.confidence, 'low');
+  assert.equal(
+    nodes.some((n) =>
+      n.owner_key === 'ik:IK_CASEY_1'
+      || n.owner_key === 'ik:IK_CASEY_2'),
+    false,
+  );
+  assert.ok(conflicts.some((conflict) =>
+    conflict.kind === 'multiple_qualified_individual_keys'
+    && conflict.property_id === 'p11'
+    && conflict.resolution === 'unresolved_not_merged'));
+});
+
+test('owner graph rejects missing or invalid asOf timestamps', () => {
+  assert.throws(
+    () => buildOwnerGraph({
+      batches: [B],
+      asOf: '',
+    }),
+    /requires a valid asOf timestamp/,
+  );
+
+  assert.throws(
+    () => buildOwnerGraph({
+      batches: [B],
+      asOf: 'not-a-date',
+    }),
+    /requires a valid asOf timestamp/,
+  );
 });
