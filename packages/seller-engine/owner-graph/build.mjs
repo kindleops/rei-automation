@@ -10,8 +10,14 @@
 import { readPartition, writeReport, writePartition } from '../lib/store.mjs';
 import { deterministicId } from '../lib/hash.mjs';
 import { toMs } from '../lib/timeSafety.mjs';
+import { nameSignals } from '../scores/ownerResolution.mjs';
 
 const DAY = 86_400_000;
+const QUALIFIED_OWNER_LINK_TIERS = new Set([
+  'exact',
+  'high',
+  'medium',
+]);
 
 const idxBy = (rows, key) => {
   const m = new Map();
@@ -33,12 +39,58 @@ const evidenceAtOrBefore = (row, asOfMs, fields) =>
     return ms !== null && ms <= asOfMs;
   });
 
+const qualifiedIndividualKeys = ({
+  propertyId,
+  ownerName,
+  linksByProperty,
+  peopleById,
+}) => {
+  const keys = [];
+
+  for (const link of linksByProperty.get(propertyId) ?? []) {
+    const person = peopleById.get(link.person_id);
+    const individualKey = (
+      typeof person?.individual_key === 'string'
+        ? person.individual_key.trim()
+        : ''
+    );
+    const signals = nameSignals(
+      ownerName,
+      person?.full_name,
+    );
+
+    const qualified = (
+      individualKey.length > 0
+      && person?.identity_tier === 'key'
+      && link.renter_flag !== true
+      && link.is_matching_property_as_owner === true
+      && QUALIFIED_OWNER_LINK_TIERS.has(link.link_tier)
+      && signals.name_match === true
+    );
+
+    if (qualified) keys.push(individualKey);
+  }
+
+  return [...new Set(keys)].sort();
+};
+
 // Owner-node key precedence (never name-only):
 //   1. individual_key (vendor person identity) — highest confidence
 //   2. owner_hash (vendor owner fingerprint) — property-side owner identity
 //   3. company id (entity owner) — for company-owned properties
 // A property with only a name and no key/hash yields an UNRESOLVED owner node.
-export function buildOwnerGraph({ batches, asOf }) {
+export function buildOwnerGraph({
+  batches,
+  identityBatches = batches,
+  asOf,
+}) {
+  const asOfMs = toMs(asOf);
+  if (asOfMs === null) {
+    throw new Error(
+      'owner graph requires a valid asOf timestamp',
+    );
+  }
+
   const props = batches.flatMap((b) => readPartition('properties', b));
   const owns = batches.flatMap((b) => readPartition('property_ownerships', b));
   const vals = idxBy(batches.flatMap((b) => readPartition('property_valuation_tax_snapshots', b)), 'property_id');
@@ -47,7 +99,18 @@ export function buildOwnerGraph({ batches, asOf }) {
   const fcs = idxBy(batches.flatMap((b) => readPartition('property_foreclosure_events', b)), 'property_id');
   const liens = idxBy(batches.flatMap((b) => readPartition('property_liens', b)), 'property_id');
   const coLinks = idxBy(batches.flatMap((b) => readPartition('property_company_links', b)), 'property_id');
-  const asOfMs = toMs(asOf) ?? Date.now();
+  const people = identityBatches.flatMap((b) =>
+    readPartition('people', b));
+  const personLinks = idxBy(
+    identityBatches.flatMap((b) =>
+      readPartition('property_person_links', b)),
+    'property_id',
+  );
+  const peopleById = new Map(
+    people
+      .filter((person) => person.id != null)
+      .map((person) => [person.id, person]),
+  );
 
   const ownByProp = idxBy(owns, 'property_id');
   const ownerNodes = new Map();  // owner_key -> node
@@ -70,12 +133,50 @@ export function buildOwnerGraph({ batches, asOf }) {
     const oh = own.owner_hash ?? p.raw_keep?.owner_hash ?? null;
     const name = own.owner_name_raw ?? p.raw_keep?.owner_name ?? null;
     const companyLinked = (coLinks.get(p.id) ?? []);
-    // choose the owner-identity key by precedence
+    const individualKeys = qualifiedIndividualKeys({
+      propertyId: p.id,
+      ownerName: name,
+      linksByProperty: personLinks,
+      peopleById,
+    });
+
+    // Choose the owner-identity key by documented precedence. Multiple
+    // independently qualified person keys are a conflict, never an arbitrary
+    // winner and never silently downgraded to another resolved identity.
     let key; let kind;
-    if (oh) { key = `oh:${oh}`; kind = 'owner_hash'; }
-    else if (companyLinked.length) { key = `co:${companyLinked[0].company_id}`; kind = 'company'; }
-    else if (name) { key = `unresolved:${deterministicId('own_unres', name, p.situs_state ?? '')}`; kind = 'unresolved_name_only'; }
-    else { key = `unresolved:${p.id}`; kind = 'unresolved_none'; }
+    if (individualKeys.length === 1) {
+      key = `ik:${individualKeys[0]}`;
+      kind = 'individual_key';
+    } else if (individualKeys.length > 1) {
+      key = `unresolved:${deterministicId(
+        'own_key_conflict',
+        p.id,
+        ...individualKeys,
+      )}`;
+      kind = 'unresolved_individual_key_conflict';
+      conflicts.push({
+        kind: 'multiple_qualified_individual_keys',
+        property_id: p.id,
+        individual_keys: individualKeys,
+        resolution: 'unresolved_not_merged',
+      });
+    } else if (oh) {
+      key = `oh:${oh}`;
+      kind = 'owner_hash';
+    } else if (companyLinked.length) {
+      key = `co:${companyLinked[0].company_id}`;
+      kind = 'company';
+    } else if (name) {
+      key = `unresolved:${deterministicId(
+        'own_unres',
+        name,
+        p.situs_state ?? '',
+      )}`;
+      kind = 'unresolved_name_only';
+    } else {
+      key = `unresolved:${p.id}`;
+      kind = 'unresolved_none';
+    }
 
     const node = getNode(key, kind, name);
     const cur = latestAtOrBefore(
@@ -184,7 +285,14 @@ const countBy = (arr, k) => arr.reduce((m, r) => { m[r[k]] = (m[r[k]] ?? 0) + 1;
 if (import.meta.url === `file://${process.argv[1]}`) {
   const fs = await import('node:fs');
   const state = JSON.parse(fs.readFileSync(new URL('../var/pilot/state.json', import.meta.url), 'utf8'));
-  const asOf = state.stages.score?.as_of ?? new Date().toISOString();
-  const { report } = buildOwnerGraph({ batches: [state.batches.properties.id], asOf });
+  const asOf = state.stages.score?.as_of;
+  const prospectsBatch = state.batches.prospects?.id;
+  const { report } = buildOwnerGraph({
+    batches: [state.batches.properties.id],
+    identityBatches: prospectsBatch
+      ? [prospectsBatch]
+      : [],
+    asOf,
+  });
   console.log(JSON.stringify(report, null, 2));
 }

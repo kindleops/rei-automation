@@ -28,8 +28,16 @@ export async function buildReport() {
   const propsBatch = STATE.batches.properties;
   const recon = reconcile();
 
-  // owner graph over the pilot (in-corpus scope)
-  const og = buildOwnerGraph({ batches: [propsBatch.id], asOf });
+  // Owner graph over the pilot. Property evidence and identity evidence
+  // are imported under separate deterministic batch IDs.
+  const prospectsBatch = STATE.batches.prospects?.id;
+  const og = buildOwnerGraph({
+    batches: [propsBatch.id],
+    identityBatches: prospectsBatch
+      ? [prospectsBatch]
+      : [],
+    asOf,
+  });
 
   // outcome coverage — verified_sale + listing from local canonical data
   const props = readPartition('properties', propsBatch.id);
