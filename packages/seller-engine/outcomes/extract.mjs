@@ -14,7 +14,11 @@
 // Time safety: an event counts for a scoring as_of only if event_ts > as_of
 // (it is a future outcome) AND <= observed_through. Missing outcomes are
 // CENSORED when observation/identity coverage is incomplete — never negative.
-import { toMs, labelState } from '../lib/timeSafety.mjs';
+import {
+  isObservedOutcome,
+  toMs,
+  labelState,
+} from '../lib/timeSafety.mjs';
 import { classifyTransfer, buildVerifiedSaleLabels, HORIZONS } from '../labels/builders.mjs';
 
 // (B) production export contract — documentation, not execution
@@ -52,7 +56,12 @@ export function extractListingOutcomes(listingSnapshots, { asOf, observedThrough
     else if ((s.price_cut_abs ?? 0) > 0) events.push(evt(s, 'listing', 'price_cut', s.min_list_price_date ?? ts, s.price_cut_abs));
     else if (s.is_active) events.push(evt(s, 'listing', 'listed', s.initial_list_date ?? ts, s.current_list_price));
   }
-  return events.filter((e) => toMs(e.event_ts) !== null);
+  return events.filter((e) =>
+    isObservedOutcome(
+      e.event_ts,
+      asOf,
+      observedThrough,
+    ));
 }
 
 const evt = (s, family, key, ts, value) => ({
@@ -71,7 +80,12 @@ export function buildOutcomeCoverage({ properties, propMeta, transfersByProperty
   // combine all outcome events (local + any provided operational export)
   const allEvents = [
     ...listingEvents,
-    ...operationalEvents.filter((e) => toMs(e.event_ts) !== null && toMs(e.event_ts) > toMs(asOf)),
+    ...operationalEvents.filter((e) =>
+      isObservedOutcome(
+        e.event_ts,
+        asOf,
+        observedThrough,
+      )),
   ];
 
   // dimension breakdown: market (state) x asset_class x batch x identity x family x horizon

@@ -6,7 +6,11 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { sha256 } from '../lib/hash.mjs';
 import { VAR_DIR } from '../lib/store.mjs';
-import { labelState } from '../lib/timeSafety.mjs';
+import {
+  isObservedOutcome,
+  labelState,
+  toMs,
+} from '../lib/timeSafety.mjs';
 import { liftAtK, TOP_FRACTIONS } from '../backtest/harness.mjs';
 
 export function loadCohort(cohortName) {
@@ -35,8 +39,19 @@ export function evaluateShadowCohort({ manifest, records }, outcomes, { observed
   const byProp = new Map();
   for (const o of outcomes) {
     if (o.family !== 'verified_sale') continue;
+    if (!isObservedOutcome(
+      o.event_ts,
+      manifest.as_of,
+      observedThrough,
+    )) continue;
+
     const cur = byProp.get(o.property_id);
-    if (!cur || o.event_ts < cur.event_ts) byProp.set(o.property_id, o);
+    if (
+      !cur
+      || toMs(o.event_ts) < toMs(cur.event_ts)
+    ) {
+      byProp.set(o.property_id, o);
+    }
   }
   const report = { cohort: manifest.cohort, as_of: manifest.as_of, evaluated_at: new Date().toISOString(), horizons: {} };
   for (const h of manifest.horizons_days) {

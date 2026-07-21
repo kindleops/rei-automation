@@ -7,11 +7,31 @@ const OBS = '2026-07-01T00:00:00Z';
 
 test('listing outcomes extract sold/expired/price_cut events', () => {
   const ev = extractListingOutcomes([
+    {
+      property_id: 'p0',
+      observed_at: '2025-12-01',
+      sold_date: '2025-12-15',
+      sold_price: 200000,
+    },
     { property_id: 'p1', observed_at: '2026-03-01', sold_date: '2026-03-15', sold_price: 250000 },
     { property_id: 'p2', observed_at: '2026-02-01', status: 'Expired', date_updated: '2026-02-10' },
     { property_id: 'p3', observed_at: '2026-02-01', price_cut_abs: 15000, min_list_price_date: '2026-02-05' },
+    {
+      property_id: 'p4',
+      observed_at: '2026-08-01',
+      sold_date: '2026-08-15',
+      sold_price: 300000,
+    },
   ], { asOf: AS_OF, observedThrough: OBS });
-  assert.deepEqual(ev.map((e) => e.event_key).sort(), ['expired', 'price_cut', 'sold']);
+
+  assert.deepEqual(
+    ev.map((e) => e.event_key).sort(),
+    ['expired', 'price_cut', 'sold'],
+  );
+  assert.deepEqual(
+    ev.map((e) => e.property_id).sort(),
+    ['p1', 'p2', 'p3'],
+  );
 });
 
 test('verified_sale: horizons beyond the observation window are censored, not negative; incomplete identity surfaced', () => {
@@ -31,14 +51,42 @@ test('verified_sale: horizons beyond the observation window are censored, not ne
   assert.equal(cov.incomplete_identity_properties, 1, 'low/none identity flagged so operational absence stays censored');
 });
 
-test('timestamp-safe: an operational event before as-of never counts as a future outcome', () => {
+test('timestamp-safe: only operational events inside the observation window count', () => {
   const cov = buildOutcomeCoverage({
-    properties: [{ id: 'p1' }], propMeta: new Map([['p1', { identity: 'high' }]]),
-    transfersByProperty: new Map(), listingSnapshots: [],
-    operationalEvents: [{ property_id: 'p1', family: 'investor_conversion', event_key: 'offer_accepted', event_ts: '2025-06-01' }],
-    asOf: AS_OF, observedThrough: OBS,
+    properties: [{ id: 'p1' }],
+    propMeta: new Map([['p1', { identity: 'high' }]]),
+    transfersByProperty: new Map(),
+    listingSnapshots: [],
+    operationalEvents: [
+      {
+        property_id: 'p1',
+        family: 'investor_conversion',
+        event_key: 'offer_accepted',
+        event_ts: '2025-06-01',
+      },
+      {
+        property_id: 'p1',
+        family: 'investor_conversion',
+        event_key: 'offer_accepted',
+        event_ts: '2026-03-01',
+      },
+      {
+        property_id: 'p1',
+        family: 'investor_conversion',
+        event_key: 'offer_accepted',
+        event_ts: '2026-08-01',
+      },
+    ],
+    asOf: AS_OF,
+    observedThrough: OBS,
   });
-  assert.equal(cov.dimensions.outcome_family?.investor_conversion?.positive ?? 0, 0);
+
+  assert.equal(
+    cov.dimensions.outcome_family
+      ?.investor_conversion
+      ?.positive ?? 0,
+    1,
+  );
 });
 
 test('production sources are documented specs, not executed queries', () => {
