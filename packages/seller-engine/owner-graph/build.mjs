@@ -19,6 +19,22 @@ const idxBy = (rows, key) => {
   return m;
 };
 
+const latestAtOrBefore = (rows, asOfMs, field) => {
+  const eligible = rows
+    .map((row, index) => ({ row, index, ms: toMs(row[field]) }))
+    .filter(({ ms }) => ms === null || ms <= asOfMs)
+    .sort((a, b) => ((b.ms ?? -Infinity) - (a.ms ?? -Infinity)) || a.index - b.index);
+  return eligible[0]?.row ?? null;
+};
+
+const evidenceAtOrBefore = (row, asOfMs, fields) => {
+  for (const field of fields) {
+    const ms = toMs(row[field]);
+    if (ms !== null) return ms <= asOfMs;
+  }
+  return false;
+};
+
 // Owner-node key precedence (never name-only):
 //   1. individual_key (vendor person identity) — highest confidence
 //   2. owner_hash (vendor owner fingerprint) — property-side owner identity
@@ -64,8 +80,12 @@ export function buildOwnerGraph({ batches, asOf }) {
     else { key = `unresolved:${p.id}`; kind = 'unresolved_none'; }
 
     const node = getNode(key, kind, name);
-    const cur = (txns.get(p.id) ?? []).find((t) => t.event_role === 'current' && t.sale_date);
-    const val = (vals.get(p.id) ?? [])[0] ?? {};
+    const cur = latestAtOrBefore(
+      (txns.get(p.id) ?? []).filter((t) => t.event_role === 'current' && t.sale_date),
+      asOfMs,
+      'sale_date',
+    );
+    const val = latestAtOrBefore(vals.get(p.id) ?? [], asOfMs, 'as_of') ?? {};
     const distress = distressState(p, val, fcs.get(p.id) ?? [], liens.get(p.id) ?? [], asOfMs);
     node.properties.push({
       property_id: p.id, situs_state: p.situs_state ?? null,
@@ -102,7 +122,9 @@ export function buildOwnerGraph({ batches, asOf }) {
     const debt = n.properties.reduce((s, p) => s + (p.loan_balance ?? 0), 0);
     const value = n.properties.reduce((s, p) => s + (p.estimated_value ?? 0), 0);
     const distressed = n.properties.filter((p) => p.distressed);
-    const recentDisps = n.properties.filter((p) => p.current_sale_ms && asOfMs - p.current_sale_ms < 730 * DAY);
+    const recentDisps = n.properties.filter((p) => p.current_sale_ms !== null
+      && p.current_sale_ms <= asOfMs
+      && p.current_sale_ms >= asOfMs - 730 * DAY);
     graphNodes.push({
       owner_key: n.owner_key, owner_kind: n.owner_kind, confidence: n.confidence,
       distinct_names: n.names.size, name_sample: [...n.names].slice(0, 3),
@@ -141,9 +163,19 @@ export function buildOwnerGraph({ batches, asOf }) {
 function distressState(p, val, fcs, liens, asOfMs) {
   const reasons = [];
   if (val.tax_delinquent === true) reasons.push('tax_delinquent');
-  if (fcs.some((f) => f.stage && f.stage !== 'none' && f.stage !== 'reo')) reasons.push('foreclosure');
-  const openLiens = liens.filter((l) => ['creation', 'judgment', 'litigation'].includes(l.lifecycle_class)
-    && toMs(l.filing_date ?? l.recording_date) !== null).length;
+
+  const activeForeclosure = fcs.some((f) =>
+    f.stage
+    && f.stage !== 'none'
+    && f.stage !== 'reo'
+    && evidenceAtOrBefore(f, asOfMs, ['recording_date', 'default_date', 'auction_date']));
+
+  if (activeForeclosure) reasons.push('foreclosure');
+
+  const openLiens = liens.filter((l) =>
+    ['creation', 'judgment', 'litigation'].includes(l.lifecycle_class)
+    && evidenceAtOrBefore(l, asOfMs, ['filing_date', 'recording_date'])).length;
+
   if (openLiens > 0) reasons.push('open_liens');
   return { distressed: reasons.length > 0, reasons };
 }

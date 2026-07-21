@@ -21,10 +21,11 @@ function seed() {
     { id: 'o4', property_id: 'p4', owner_hash: null, owner_name_raw: 'DOE, JANE' },
   ]);
   writePartition('property_valuation_tax_snapshots', B, [
-    { property_id: 'p1', estimated_value: 200000, estimated_equity: 120000, tax_delinquent: true, tax_delinquent_year: 2023 },
-    { property_id: 'p2', estimated_value: 180000, estimated_equity: 100000, tax_delinquent: true, tax_delinquent_year: 2024 },
-    { property_id: 'p3', estimated_value: 150000, estimated_equity: 90000 },
-    { property_id: 'p4', estimated_value: 250000, estimated_equity: 250000 },
+    { property_id: 'p1', as_of: '2026-06-01', estimated_value: 200000, estimated_equity: 120000, tax_delinquent: true, tax_delinquent_year: 2023 },
+    { property_id: 'p2', as_of: '2026-06-01', estimated_value: 180000, estimated_equity: 100000, tax_delinquent: true, tax_delinquent_year: 2024 },
+    { property_id: 'p3', as_of: '2026-06-01', estimated_value: 150000, estimated_equity: 90000 },
+    { property_id: 'p4', as_of: '2026-08-01', estimated_value: 999000, estimated_equity: 999000, tax_delinquent: true },
+    { property_id: 'p4', as_of: '2026-06-01', estimated_value: 250000, estimated_equity: 250000 },
   ]);
   writePartition('property_loans', B, [
     { property_id: 'p1', slot_class: 'current_recorded', estimated_balance: 80000 },
@@ -34,10 +35,15 @@ function seed() {
     { property_id: 'p1', event_role: 'current', sale_date: '2026-03-01' }, // recent disposition-window
     { property_id: 'p2', event_role: 'current', sale_date: '2012-01-01' },
     { property_id: 'p3', event_role: 'current', sale_date: '2010-01-01' },
+    { property_id: 'p4', event_role: 'current', sale_date: '2026-08-01' },
     { property_id: 'p4', event_role: 'current', sale_date: '2009-01-01' },
   ]);
-  writePartition('property_foreclosure_events', B, []);
-  writePartition('property_liens', B, []);
+  writePartition('property_foreclosure_events', B, [
+    { property_id: 'p4', stage: 'nod', recording_date: '2026-08-01' },
+  ]);
+  writePartition('property_liens', B, [
+    { property_id: 'p4', lifecycle_class: 'creation', filing_date: '2026-08-01' },
+  ]);
   writePartition('property_company_links', B, []);
 }
 
@@ -66,6 +72,17 @@ test('systemic distress + liquidation signals computed at owner level (IX-13)', 
   assert.equal(oh1.disposition_velocity_2y, 1, 'p1 sold within 2y window');
   assert.equal(oh1.liquidation_indicator, true);
   assert.equal(oh1.portfolio_leverage, Math.round((160000 / 380000) * 1000) / 1000);
+});
+
+test('future-dated evidence is excluded from owner portfolio and distress signals', () => {
+  const { nodes } = buildOwnerGraph({ batches: [B], asOf: AS_OF });
+  const jane = nodes.find((n) => n.name_sample.includes('DOE, JANE'));
+
+  assert.equal(jane.portfolio_value, 250000, 'post-cutoff valuation excluded');
+  assert.equal(jane.portfolio_equity, 250000, 'post-cutoff equity excluded');
+  assert.equal(jane.simultaneous_distressed_holdings, 0, 'future lien/foreclosure/tax evidence excluded');
+  assert.equal(jane.disposition_velocity_2y, 0, 'future sale never counts as a recent disposition');
+  assert.equal(jane.liquidation_indicator, false);
 });
 
 test('name-shared-across-keys surfaces as a candidate conflict, not an edge', () => {
