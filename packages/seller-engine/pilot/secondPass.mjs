@@ -23,6 +23,11 @@ import { copyIn, csvCell, pgArray } from './pg.mjs';
 import { computeFeatures } from '../features/engine.mjs';
 import { scoreDeterministicV1 } from '../scores/deterministicV1.mjs';
 import { assembleBundles } from './bundles.mjs';
+import {
+  inClause,
+  requireNonEmptyPartition,
+  scoreVintageScope,
+} from './secondPassScope.mjs';
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE = JSON.parse(readFileSync(join(PILOT_DIR, 'state.json'), 'utf8'));
@@ -53,8 +58,6 @@ function partition() {
 }
 
 // ---- DB-side hashes restricted to R (before/after) --------------------------
-function inClause(ids) { return ids.map((i) => `'${i.replace(/'/g, "''")}'`).join(','); }
-
 const PROP_FK = {
   properties: 'id', property_valuation_tax_snapshots: 'property_id', property_ownerships: 'property_id',
   property_loans: 'property_id', loan_checksums: 'property_id', property_transactions: 'property_id',
@@ -180,7 +183,7 @@ async function reMergePartition(ids) {
 }
 
 // ---- Phase B: re-score R and compare re-computed vs stored snapshot hashes
-function reScoreCompare(ids) {
+function reScoreCompare(ids, { asOf, engineVersion }) {
   const idset = new Set(ids);
   const { bundles } = assembleBundles({ batches: STATE.batches, sidecarPath: STATE.batches.prospects?.sidecar ?? null });
   const subset = bundles.filter((b) => idset.has(b.property.id));
@@ -191,23 +194,69 @@ function reScoreCompare(ids) {
   // stored feature JSON per property (parse -> canonical hash)
   for (const b of subset) {
     if (seen.has(b.property.id)) continue; seen.add(b.property.id);
-    const feats = computeFeatures(b, STATE.stages.score.as_of, { compSnapshot: b.compSnapshot ?? null });
+    const feats = computeFeatures(
+      b,
+      asOf,
+      { compSnapshot: b.compSnapshot ?? null },
+    );
     const v1 = scoreDeterministicV1(feats.features);
-    const stored = jrows(`select json_build_object('features', features) from seller_engine.seller_feature_snapshots where property_id='${b.property.id.replace(/'/g, "''")}'`)[0];
+    const { fsWhere, scoreWhere } = scoreVintageScope({
+      propertyId: b.property.id,
+      asOf,
+      engineVersion,
+    });
+    const stored = jrows(`
+      select json_build_object('features', fs.features)
+      from seller_engine.seller_feature_snapshots fs
+      where ${fsWhere}
+    `)[0];
     if (!stored) { featMismatch += 1; mismatches.push({ property_id: b.property.id, kind: 'missing_stored' }); continue; }
     if (chash(feats.features) === chash(stored.features)) featMatch += 1;
     else { featMismatch += 1; mismatches.push({ property_id: b.property.id, kind: 'feature_hash' }); }
     // priority (raw) from DB
-    const storedPri = psql(`select coalesce(ss.score::text,'n') from seller_engine.seller_score_snapshots ss join seller_engine.seller_feature_snapshots fs on fs.id=ss.feature_snapshot_id where ss.family='execution_priority' and fs.property_id='${b.property.id.replace(/'/g, "''")}'`);
+    const storedPri = psql(`
+      select coalesce(ss.score::text, 'n')
+      from seller_engine.seller_score_snapshots ss
+      join seller_engine.seller_feature_snapshots fs
+        on fs.id = ss.feature_snapshot_id
+      where ${fsWhere}
+        and ${scoreWhere}
+        and ss.family = 'execution_priority'
+    `);
     if (String(v1.execution_priority) === storedPri) priMatch += 1; else { priMismatch += 1; mismatches.push({ property_id: b.property.id, kind: 'priority', recomputed: v1.execution_priority, stored: storedPri }); }
     // family scores set
     const recFam = chash(Object.fromEntries(Object.entries(v1.families).map(([k, f]) => [k, [f.score ?? null, f.score_state]])));
-    const storedFamRows = jrows(`select json_build_object('family',ss.family,'score',ss.score,'state',ss.score_state) from seller_engine.seller_score_snapshots ss join seller_engine.seller_feature_snapshots fs on fs.id=ss.feature_snapshot_id where fs.property_id='${b.property.id.replace(/'/g, "''")}' and ss.family <> 'v12_baseline_priority'`);
+    const storedFamRows = jrows(`
+      select json_build_object(
+        'family', ss.family,
+        'score', ss.score,
+        'state', ss.score_state
+      )
+      from seller_engine.seller_score_snapshots ss
+      join seller_engine.seller_feature_snapshots fs
+        on fs.id = ss.feature_snapshot_id
+      where ${fsWhere}
+        and ${scoreWhere}
+        and ss.family <> 'v12_baseline_priority'
+    `);
     const storedFam = chash(Object.fromEntries(storedFamRows.map((r) => [r.family, [r.score ?? null, r.state]])));
     if (recFam === storedFam) famMatch += 1; else { famMismatch += 1; mismatches.push({ property_id: b.property.id, kind: 'family' }); }
     // explanation set (component+contribution+direction, order-insensitive)
     const recExpl = chash([...v1.explanations.map((e) => [e.component, e.contribution ?? null, e.direction])].sort());
-    const storedExplRows = jrows(`select json_build_object('c',se.component,'v',se.contribution,'d',se.direction) from seller_engine.seller_score_explanations se join seller_engine.seller_score_snapshots ss on ss.id=se.score_snapshot_id join seller_engine.seller_feature_snapshots fs on fs.id=ss.feature_snapshot_id where fs.property_id='${b.property.id.replace(/'/g, "''")}'`);
+    const storedExplRows = jrows(`
+      select json_build_object(
+        'c', se.component,
+        'v', se.contribution,
+        'd', se.direction
+      )
+      from seller_engine.seller_score_explanations se
+      join seller_engine.seller_score_snapshots ss
+        on ss.id = se.score_snapshot_id
+      join seller_engine.seller_feature_snapshots fs
+        on fs.id = ss.feature_snapshot_id
+      where ${fsWhere}
+        and ${scoreWhere}
+    `);
     const storedExpl = chash([...storedExplRows.map((r) => [r.c, r.v ?? null, r.d])].sort());
     if (recExpl === storedExpl) explMatch += 1; else { explMismatch += 1; mismatches.push({ property_id: b.property.id, kind: 'explanation' }); }
   }
@@ -215,12 +264,24 @@ function reScoreCompare(ids) {
 }
 
 async function main() {
-  const ids = partition();
+  const scoreAsOf = STATE.stages.score?.as_of;
+  const scoreEngineVersion = STATE.stages.score?.engine_version;
+
+  if (!scoreAsOf || !scoreEngineVersion) {
+    throw new Error(
+      'second-pass unavailable: scoring as_of or engine version is missing',
+    );
+  }
+
+  const ids = requireNonEmptyPartition(partition());
   console.log(`partition R: ${ids.length} properties`);
   const before = { tables: tableHashes(ids), relationships: relationshipHashes(ids), snapshots: snapshotHashes(ids), counts: domainAndConflictCounts(ids) };
 
   const stagedA = await reMergePartition(ids);
-  const scoreCmp = reScoreCompare(ids);
+  const scoreCmp = reScoreCompare(ids, {
+    asOf: scoreAsOf,
+    engineVersion: scoreEngineVersion,
+  });
 
   const after = { tables: tableHashes(ids), relationships: relationshipHashes(ids), snapshots: snapshotHashes(ids), counts: domainAndConflictCounts(ids) };
 
