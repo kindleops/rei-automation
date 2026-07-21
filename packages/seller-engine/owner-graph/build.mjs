@@ -27,13 +27,11 @@ const latestAtOrBefore = (rows, asOfMs, field) => {
   return eligible[0]?.row ?? null;
 };
 
-const evidenceAtOrBefore = (row, asOfMs, fields) => {
-  for (const field of fields) {
+const evidenceAtOrBefore = (row, asOfMs, fields) =>
+  fields.some((field) => {
     const ms = toMs(row[field]);
-    if (ms !== null) return ms <= asOfMs;
-  }
-  return false;
-};
+    return ms !== null && ms <= asOfMs;
+  });
 
 // Owner-node key precedence (never name-only):
 //   1. individual_key (vendor person identity) — highest confidence
