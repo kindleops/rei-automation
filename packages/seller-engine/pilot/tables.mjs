@@ -292,6 +292,6 @@ export function rejectSQL(table, batchId) {
     .map(([c, t]) => `select '${table}' tt, '${c}' cc, count(*) n, (array_agg(distinct s.${c}))[1:5] sample
        from stage_${table} s where s.${c} <> '' and (${CAST[t](c)}) is null having count(*) > 0`);
   if (!checks.length) return null;
-  return `insert into pilot_load_rejects (target_table, column_name, reject_count, sample_values, batch_id)
+  return `insert into pilot_load_rejects (target_table, column_name, reject_count, sample_values, import_batch_id)
     select tt, cc, n, sample, '${batchId}' from (${checks.join(' union all ')}) q;`;
 }

@@ -30,6 +30,6 @@ create table if not exists pilot_load_rejects (
   column_name text not null,
   reject_count integer not null,
   sample_values text[] not null default '{}',
-  batch_id text,
+  import_batch_id text not null references import_batches(id),
   recorded_at timestamptz not null default now()
 );

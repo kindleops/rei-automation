@@ -10,6 +10,7 @@ const { importFile } = await import('../importers/common.mjs');
 const { mapProperty } = await import('../importers/mappers.mjs');
 const { readPartition, readAll, VAR_DIR } = await import('../lib/store.mjs');
 const { sha256 } = await import('../lib/hash.mjs');
+const { rejectSQL } = await import('../pilot/tables.mjs');
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'properties_fixture.csv');
 
@@ -51,6 +52,14 @@ test('resume restarts safely instead of trusting an unpersisted row offset', asy
   assert.equal(resumed.batch.row_count, 3);
   assert.equal(readPartition('source_records', resumed.batch.id).length, 3);
   assert.equal(readPartition('properties', resumed.batch.id).length, 3);
+});
+
+test('pilot reject logging uses canonical import-batch lineage', () => {
+  const sql = rejectSQL('properties', 'batch_test');
+
+  assert.match(sql, /sample_values, import_batch_id\)/);
+  assert.doesNotMatch(sql, /sample_values, batch_id\)/);
+  assert.match(sql, /'batch_test'/);
 });
 
 test('dry-run writes nothing; pilot limits rows', async () => {
