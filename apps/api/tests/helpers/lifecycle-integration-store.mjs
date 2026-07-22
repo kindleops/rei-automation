@@ -47,6 +47,34 @@ export function makeLifecycleStore() {
   let nextQueueId = 1;
   let nextEventId = 1;
 
+  function appendMessageEvent(payload) {
+    const evt = { id: `evt_${nextEventId++}`, ...payload };
+    messageEvents.push(evt);
+    return evt;
+  }
+
+  // Mirrors the real Postgres upsert this lifecycle relies on for replay
+  // safety (e.g. writeOutboundSuccessMessageEvent in sms-engine.js:
+  // `.from(MESSAGE_EVENTS_TABLE).upsert(payload, { onConflict: "message_event_key",
+  // ignoreDuplicates: false })`). A conflicting message_event_key updates the
+  // existing row in place (preserving its id) instead of appending a
+  // duplicate. Payloads with no message_event_key, or upserts not declaring
+  // onConflict: "message_event_key", fall back to plain append — no
+  // production caller proves a different conflict rule for those.
+  function upsertMessageEvent(payload, options = {}) {
+    const conflictColumn = cleanStr(options?.onConflict);
+    const eventKey = cleanStr(payload?.message_event_key);
+    if (conflictColumn === "message_event_key" && eventKey) {
+      const existing = messageEvents.find((e) => cleanStr(e.message_event_key) === eventKey);
+      if (existing) {
+        const { id: _incomingId, ...rest } = payload;
+        Object.assign(existing, rest);
+        return { ...existing };
+      }
+    }
+    return appendMessageEvent(payload);
+  }
+
   function activeDedupeConflict(dedupe_key) {
     const key = cleanStr(dedupe_key);
     if (!key) return null;
@@ -88,11 +116,8 @@ export function makeLifecycleStore() {
       return { data: { ...stored }, error: null };
     },
 
-    recordMessageEvent(payload) {
-      const evt = { id: `evt_${nextEventId++}`, ...payload };
-      messageEvents.push(evt);
-      return evt;
-    },
+    recordMessageEvent: appendMessageEvent,
+    upsertMessageEvent,
 
     setCampaign(id, status) {
       campaigns.set(id, { id, status });
@@ -269,9 +294,9 @@ export function makeLifecycleFakeSupabase(store) {
               single: async () => ({ data: store.recordMessageEvent(payload), error: null }),
             }),
           }),
-          upsert: (payload) => ({
+          upsert: (payload, options = {}) => ({
             select: () => ({
-              maybeSingle: async () => ({ data: store.recordMessageEvent(payload), error: null }),
+              maybeSingle: async () => ({ data: store.upsertMessageEvent(payload, options), error: null }),
             }),
           }),
           select: () => makeSelectChain(() => store.messageEvents),
