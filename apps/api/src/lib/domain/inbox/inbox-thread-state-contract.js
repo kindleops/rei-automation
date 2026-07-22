@@ -94,14 +94,14 @@ export function normalizeInboxThreadStateRow(row = {}) {
   };
 }
 
-export function resolveCanonicalInboxBucket(row = {}) {
-  return deriveInboxBucketFromThreadState(normalizeInboxThreadStateRow(row));
+export function resolveCanonicalInboxBucket(row = {}, nowMs = Date.now()) {
+  return deriveInboxBucketFromThreadState(normalizeInboxThreadStateRow(row), nowMs);
 }
 
 export function resolveEffectiveInboxBucket(row = {}, nowMs = Date.now()) {
   const normalized = normalizeInboxThreadStateRow(row);
   const explicit = lower(normalized.inbox_bucket);
-  const canonical = lower(resolveCanonicalInboxBucket(normalized) || "");
+  const canonical = lower(resolveCanonicalInboxBucket(normalized, nowMs) || "");
 
   if (explicit && !isStaleExplicitInboxBucket(normalized, explicit, nowMs)) {
     return explicit;
