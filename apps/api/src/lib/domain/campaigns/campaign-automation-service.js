@@ -15,6 +15,8 @@ import {
   getSupabaseFeederCandidates,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
+import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
 import {
   ageBucketFromMob,
@@ -6168,7 +6170,19 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
   const phoneId = firstNonEmpty(target.phone_id, snapshot.phone_id, snapshot.best_phone_id)
   const market = firstNonEmpty(target.market, snapshot.market, campaign.market)
   const state = normalizeState(firstNonEmpty(target.state, snapshot.state, campaign.state))
-  const sourceTimezone = firstNonEmpty(target.timezone, snapshot.timezone, 'America/Chicago')
+  // Campaign queue eligibility (createCampaignQueuePlan) fails closed on a
+  // missing/invalid timezone rather than silently defaulting — see
+  // timezone_eligibility_reason below. `timezone`/`source_timezone`
+  // themselves keep their existing fallback-to-America/Chicago behavior so
+  // non-queue callers of this function (e.g. evaluateCampaignLaunchReadiness's
+  // template-preview sampling) are unaffected.
+  const rawTimezone = firstNonEmpty(target.timezone, snapshot.timezone)
+  const timezoneEligibilityReason = !rawTimezone
+    ? 'missing_timezone'
+    : !isValidIanaTimezone(rawTimezone)
+      ? 'invalid_timezone'
+      : null
+  const sourceTimezone = rawTimezone || 'America/Chicago'
   const timezone = resolveTimezone(sourceTimezone)
   const sellerName = firstNonEmpty(
     snapshot.seller_full_name,
@@ -6194,6 +6208,7 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     state,
     timezone,
     source_timezone: sourceTimezone,
+    timezone_eligibility_reason: timezoneEligibilityReason,
     contact_window: firstNonEmpty(snapshot.contact_window, target.contact_window),
     language: canonicalLanguage,
     best_language: canonicalLanguage,
@@ -6215,6 +6230,16 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     final_acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
     acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
     identity_alignment: { status: target.identity_status || metadata.identity_alignment || 'unknown' },
+    // Raw ownership signals, when the upstream graph/candidate snapshot
+    // carries them — same fields evaluatePreSendEligibility's renter-not-
+    // owner rule already consumes for every other outbound path
+    // (supabase-candidate-feeder.js's normalizeCandidateRow). Absent here
+    // today for graph-sourced targets (campaign_target_graph pre-computes
+    // identity_alignment.status instead), so this is null/null for those
+    // rows and the identity_alignment status check below is the operative
+    // gate; kept so a future raw-signal source is honored automatically.
+    likely_owner: snapshot.likely_owner ?? metadata.likely_owner ?? target.likely_owner ?? null,
+    likely_renting: snapshot.likely_renting ?? metadata.likely_renting ?? target.likely_renting ?? null,
     never_contacted: outreach.never_contacted ?? true,
     latest_contact_at: outreach.latest_contact_at || null,
     last_outbound_at: outreach.last_outbound_at || null,
@@ -6728,6 +6753,32 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     }
     if (!candidate.phone_id) {
       recordSkip('missing_phone_id', target)
+      continue
+    }
+    // Canonical owner/identity verification — the same deterministic,
+    // fail-closed pre-send gate every other outbound path (feeder,
+    // manual-send, next-best-contact selection) runs before a cold message
+    // can be sent. Strict mode always: this is a queue-build-time ownership
+    // check, independent of the template-routing "allow identity unknown"
+    // policy used later in this same function for template selection.
+    // Blocks renter (RENTER_NOT_OWNER), explicit non-owner / former-owner /
+    // wrong-party (IDENTITY_MISMATCH), and unverified/ambiguous identity
+    // (OWNERSHIP_NOT_CONFIRMED) — never inferred merely from the presence of
+    // master_owner_id/prospect_id/phone_id.
+    const ownerEligibility = evaluatePreSendEligibility(candidate, {})
+    if (!ownerEligibility.eligible) {
+      recordSkip(ownerEligibility.block_reason || ownerEligibility.reason || 'owner_identity_not_verified', target, {
+        identity_alignment_status: candidate.identity_alignment?.status || null,
+        ownership_confidence: ownerEligibility.ownership_confidence,
+        likely_owner: candidate.likely_owner,
+        likely_renting: candidate.likely_renting,
+      })
+      continue
+    }
+    if (candidate.timezone_eligibility_reason) {
+      recordSkip(candidate.timezone_eligibility_reason, target, {
+        supplied_timezone: candidate.source_timezone || null,
+      })
       continue
     }
     if (seenPhones.has(phone)) {
