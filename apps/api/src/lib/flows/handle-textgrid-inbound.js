@@ -1242,7 +1242,14 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     let classification, inbound_is_negative, queue_cancellation, route, signals,
       deterministic_state, offer_routing;
     try {
-      classification = await runtimeDeps.classify(message_body, brain_item);
+      // Deterministic Auto Reply Intelligence V2 prerequisite: seller inbound
+      // classification must never depend on live model inference. classify()
+      // already exposes a heuristicOnly bypass (regex/keyword rules only,
+      // zero I/O) — force it here so aiAssistClassification() is unreachable
+      // from real seller traffic. Low-confidence heuristic output still flows
+      // through unchanged; the deterministic downstream resolver already
+      // routes low-confidence/unclear intents to human review.
+      classification = await runtimeDeps.classify(message_body, brain_item, { heuristicOnly: true });
 
       try {
         await syncClassifiedInboxThreadState({

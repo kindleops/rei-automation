@@ -529,7 +529,11 @@ export async function processSellerInboundMessage({
 
   let classification = providedClassification;
   if (!classification) {
-    classification = await runtimeDeps.classify(message, conversationBrain);
+    // Defense in depth: the live webhook path always pre-supplies
+    // `classification`, but any other/future caller landing here must stay
+    // off the AI-assist branch too — see the matching heuristicOnly call in
+    // handle-textgrid-inbound.js.
+    classification = await runtimeDeps.classify(message, conversationBrain, { heuristicOnly: true });
   }
 
   const contractResult = normalizeClassificationContract({
