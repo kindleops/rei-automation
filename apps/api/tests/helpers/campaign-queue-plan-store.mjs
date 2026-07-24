@@ -70,6 +70,7 @@ function applyFilterOp(op, col, value) {
     if (op === "gte") return asComparable(raw) !== null && asComparable(raw) >= asComparable(value);
     if (op === "lt") return asComparable(raw) !== null && asComparable(raw) < asComparable(value);
     if (op === "lte") return asComparable(raw) !== null && asComparable(raw) <= asComparable(value);
+    if (op === "is") return value === null ? raw === null || raw === undefined : raw === value;
     return true;
   };
 }
@@ -147,6 +148,10 @@ function makeSelectChain(rowsGetter) {
     },
     ilike(col, val) {
       matchers.push(applyFilterOp("ilike", col, val));
+      return api;
+    },
+    is(col, val) {
+      matchers.push(applyFilterOp("is", col, val));
       return api;
     },
     filter(col, op, val) {

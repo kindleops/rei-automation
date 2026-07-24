@@ -4157,9 +4157,47 @@ function graphDistributionCounts(rows = []) {
   return counts
 }
 
+// campaign_target_graph.queue_eligible is a purely mechanical messaging-
+// mechanics flag (sms_eligible/suppression/wrong_number/pending_touch/
+// active_queue/sender_covered) — it carries no owner-identity, timezone, or
+// phone-ownership-ambiguity signal. buildCampaignTargets only ever receives
+// queue_eligible=true rows, so status/target_status must not be derived from
+// queue_eligible alone or every graph-sourced target is marked 'ready'
+// regardless of identity/timezone/ambiguity. Reuses the same canonical,
+// fail-closed identity policy createCampaignQueuePlan already gates on
+// (evaluatePreSendEligibility -> isIdentityEligibleForLiveOutbound) so the
+// two layers cannot silently drift apart.
+function resolveCampaignTargetReadiness(row = {}) {
+  const hasLinkage = Boolean(
+    clean(row.master_owner_id) && clean(row.prospect_id || row.canonical_prospect_id) &&
+    clean(row.phone_id) && clean(row.canonical_e164)
+  )
+  const hasTimezone = Boolean(clean(row.timezone))
+  const ambiguousPhone = Boolean(row.ambiguous_phone_ownership)
+  const eligibility = evaluatePreSendEligibility(
+    { identity_alignment: { status: clean(row.identity_alignment) || 'unknown' } },
+    {}
+  )
+
+  const blockReason = !row.queue_eligible
+    ? clean(row.queue_block_reason || 'graph_not_queue_eligible')
+    : !hasLinkage
+      ? 'missing_identity_linkage'
+      : !eligibility.eligible
+        ? clean(eligibility.reason) || 'identity_not_verified'
+        : !hasTimezone
+          ? 'missing_timezone'
+          : ambiguousPhone
+            ? 'ambiguous_phone_ownership'
+            : null
+
+  return { ready: blockReason === null, blockReason }
+}
+
 function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
   const prospectId = clean(row.prospect_id || row.canonical_prospect_id) || null
+  const readiness = resolveCampaignTargetReadiness(row)
   return {
     campaign_id: campaignId,
     campaign_key: `ct:${campaignId || 'preview'}:${clean(row.graph_id) || crypto
@@ -4174,7 +4212,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     language: clean(row.language || campaign?.language_policy || 'auto') || 'auto',
     source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
     daily_cap: campaign?.daily_cap || null,
-    status: row.queue_eligible ? 'ready' : 'blocked',
+    status: readiness.ready ? 'ready' : 'blocked',
     master_owner_id: clean(row.master_owner_id) || null,
     prospect_id: prospectId,
     property_id: clean(row.property_id) || null,
@@ -4188,9 +4226,9 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     identity_status: clean(row.identity_alignment) || 'unknown',
     routing_status: row.sender_covered ? 'ready' : 'blocked',
     suppression_status: row.true_post_contact_suppression ? 'blocked' : 'clear',
-    template_status: row.queue_eligible ? 'pending' : 'blocked',
-    target_status: row.queue_eligible ? 'ready' : 'blocked',
-    block_reason: row.queue_eligible ? null : clean(row.queue_block_reason || 'graph_not_queue_eligible'),
+    template_status: readiness.ready ? 'pending' : 'blocked',
+    target_status: readiness.ready ? 'ready' : 'blocked',
+    block_reason: readiness.blockReason,
     metadata: {
       source: CAMPAIGN_TARGET_GRAPH_TABLE,
       graph_id: row.graph_id || null,
