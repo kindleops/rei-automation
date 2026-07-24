@@ -59,7 +59,7 @@ function msgTsIso(m) {
   return n ? new Date(n).toISOString() : null;
 }
 
-function isValidIanaTimezone(tz) {
+export function isValidIanaTimezone(tz) {
   const t = clean(tz);
   if (!t || t.length < 3) return false;
   try {
