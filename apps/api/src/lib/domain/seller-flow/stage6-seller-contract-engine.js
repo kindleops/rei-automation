@@ -123,7 +123,7 @@ const EMAIL_RE_G = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 // AUTHORITY / OWNERSHIP STRUCTURE DETECTION
 // ══════════════════════════════════════════════════════════════════════════
 
-function detectAuthority({ message, entity_type, vesting_information, owner_count }) {
+export function detectAuthority({ message, entity_type, vesting_information, owner_count }) {
   const combined = `${lower(message)} ${lower(entity_type)} ${lower(vesting_information)}`;
 
   let structure = OWNERSHIP_STRUCTURE.INDIVIDUAL;
@@ -137,7 +137,15 @@ function detectAuthority({ message, entity_type, vesting_information, owner_coun
   } else if (includesAny(combined, ["estate", "executor", "executrix", "administrator", "probate", "albacea", "sucesión", "sucesion"])) {
     structure = OWNERSHIP_STRUCTURE.ESTATE;
     authority_type = AUTHORITY_TYPE.EXECUTOR;
-  } else if (includesAny(combined, ["heir", "heirs", "heirship", "inherited it", "passed away", "heredero", "herederos"])) {
+  } else if (includesAny(combined, [
+    "heir", "heirs", "heirship", "inherited it", "passed away", "heredero", "herederos",
+    // Deceased-owner phrasing that carries the same signer/authority risk as an
+    // explicit "heir" claim. Death alone is NOT probate — detectProbate stays
+    // gated on estate structure or the word probate itself.
+    "died", "deceased", "late mother", "late father", "late mom", "late dad",
+    "my mom's house", "my mother's house", "my dad's house", "my father's house",
+    "my parents' house", "falleció", "fallecio", "murió", "murio",
+  ])) {
     structure = OWNERSHIP_STRUCTURE.HEIRS;
     authority_type = AUTHORITY_TYPE.HEIR;
   } else if (includesAny(combined, ["llc", "limited liability"])) {
@@ -152,7 +160,7 @@ function detectAuthority({ message, entity_type, vesting_information, owner_coun
   } else if (includesAny(combined, ["my wife", "my husband", "spouse", "married", "wife also owns", "husband also owns", "mi esposa", "mi esposo", "esposa también", "esposa tambien"])) {
     structure = OWNERSHIP_STRUCTURE.MARRIED_COUPLE;
     authority_type = AUTHORITY_TYPE.SPOUSE;
-  } else if (includesAny(combined, ["co-owner", "co owner", "two owners", "both own", "also owns", "on title", "on the title", "my brother is on", "my sister is on", "partner owns", "joint owners", "tenants in common", "co-dueño", "ambos dueños"])) {
+  } else if (includesAny(combined, ["co-owner", "co owner", "two owners", "both own", "also owns", "on title", "on the title", "my brother is on", "my sister is on", "partner owns", "joint owners", "tenants in common", "co-dueño", "ambos dueños", "owns half", "own half", "owns part", "his half", "her half", "their half"])) {
     structure = OWNERSHIP_STRUCTURE.MULTIPLE_OWNERS;
     authority_type = AUTHORITY_TYPE.CO_OWNER;
   }
@@ -244,12 +252,12 @@ function detectTitleRisk({ message, title_information }) {
   };
 }
 
-function detectProbate({ message, ownership_structure }) {
+export function detectProbate({ message, ownership_structure }) {
   return includesAny(lower(message), ["probate", "in probate", "probate court", "en sucesión", "en sucesion"]) ||
     (ownership_structure === OWNERSHIP_STRUCTURE.ESTATE && includesAny(lower(message), ["passed", "died", "deceased"]));
 }
 
-function detectHeirship({ message, ownership_structure }) {
+export function detectHeirship({ message, ownership_structure }) {
   return ownership_structure === OWNERSHIP_STRUCTURE.HEIRS ||
     includesAny(lower(message), ["heir", "heirs", "heirship", "multiple heirs", "heredero", "herederos"]);
 }

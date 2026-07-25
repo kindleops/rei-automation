@@ -38,10 +38,35 @@ function num(value) {
 }
 
 /** Deals become trackable once real engagement exists past bare S1 contact. */
+/** Canonical facts whose loss between turns would break known-vs-missing. */
+const DURABLE_FACT_KEYS = [
+  "ownership_status",
+  "ownership_claim",
+  "authority_claims",
+  "probate_detected",
+  "heirship_detected",
+  "deceased_owner",
+  "condition_disclosed",
+  "condition_summary",
+  "repairs_summary",
+  "occupancy_status",
+  "timeline",
+  "reason_for_selling",
+  "listing_status",
+  "asking_price_needs_clarification",
+];
+
 export function transitionQualifiesForOpportunity(transition = {}) {
   if (!transition) return false;
   if (transition.facts_patch?.asking_price?.value > 0) return true;
   if (transition.facts_patch?.wants_offer === true) return true;
+  // A turn that carries ANY durable canonical fact must be trackable, even if
+  // it did not advance the lifecycle — otherwise the fact silently disappears
+  // before the next inbound and known-vs-missing resolution becomes fiction.
+  const facts = transition.facts_patch || {};
+  if (DURABLE_FACT_KEYS.some((key) => facts[key] !== undefined && facts[key] !== null)) {
+    return true;
+  }
   return Number(transition.stage_after_number || 1) >= 2 && transition.advanced === true;
 }
 

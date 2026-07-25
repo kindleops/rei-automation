@@ -22,6 +22,15 @@
 import {
   resolveAskingPriceSignal,
 } from "@/lib/domain/seller-flow/monetary-understanding.js";
+// Estate/probate/heirship patterns come from the canonical production contract
+// engine so there is exactly ONE probate taxonomy in the codebase.
+import {
+  AUTHORITY_TYPE,
+  OWNERSHIP_STRUCTURE,
+  detectAuthority,
+  detectHeirship,
+  detectProbate,
+} from "@/lib/domain/seller-flow/stage6-seller-contract-engine.js";
 
 export const SELLER_FACT_EXTRACTOR_VERSION = "seller_fact_extractor_v1";
 
@@ -151,7 +160,7 @@ const TIMELINE_RULES = [
   { urgency: "immediate", re: /\basap\b|right away|immediately|as soon as possible|this week|yesterday if|lo antes posible|inmediatamente|cuanto antes|esta semana/i },
   { urgency: "soon", re: /\bthis month|within (a|one|two|\d+) (month|months|weeks?)|next month|(30|60|90) days|in a (few|couple) (of )?(weeks?|months?)|este mes|pr[oó]ximo mes|en unos meses/i },
   { urgency: "flexible", re: /\bno (rush|hurry)|whenever|not in a hurry|flexible on timing|sin prisa|no hay prisa/i },
-  { urgency: "long_term", re: /\bnext year|in a year|not (until|for) (a year|next)|maybe (next|in the) (year|spring|summer|fall|winter)|el pr[oó]ximo a[nñ]o/i },
+  { urgency: "long_term", re: /\bnext year|in a year|not (until|for) (a year|next)|maybe (next|in the) (year|spring|summer|fall|winter)|after the holidays|after the first of the year|later (this|in the) year|next (spring|summer|fall|winter)|el pr[oó]ximo a[nñ]o|despu[eé]s de las fiestas/i },
 ];
 
 function extractTimeline(message, base) {
@@ -185,7 +194,10 @@ function extractOccupancy(message, base) {
 // ── Listing / agent involvement ──────────────────────────────────────────────
 
 const LISTING_RULES = [
-  { status: "listed_with_agent", re: /\blisted with (an? )?(agent|realtor|broker)|it'?s (already )?listed|on the (mls|market)|my (realtor|agent|broker) (has|is|listed)|est[aá] listada|con un agente/i },
+  {
+    status: "listed_with_agent",
+    re: /\blisted with (an? |my |our )?(agent|realtor|broker)|(?:it'?s|it is|i have it|we have it|already)\s+listed\b|on the (mls|market)|my (realtor|agent|broker) (has|is|listed)|est[aá] listada|con un agente/i,
+  },
   { status: "agent_involved", re: /\btalk to my (agent|realtor|broker)|my (agent|realtor|broker) (handles|will)|through my (agent|realtor)|habla con mi agente/i },
   { status: "fsbo", re: /\bfor sale by owner|selling it (myself|ourselves)|no agent|sin agente|la vendo yo/i },
 ];
@@ -209,6 +221,32 @@ function extractOfferInterest(message, base) {
   const evidence = findEvidence(message, new RegExp(OFFER_INTEREST_RE.source, "i"));
   if (!evidence) return null;
   return fact({ wants_offer: true }, { ...base, confidence: 0.9, evidence });
+}
+
+// ── Seller interest (explicit / conditional sale language) ───────────────────
+// Evidence layer only. Bare hedges ("maybe", "possibly") without a sell/offer
+// frame are intentionally not interest — they stay unknown.
+
+const SELLER_INTEREST_RULES = [
+  {
+    interest: "interested",
+    re: /\b(?<!not\s+|no\s+)(?:want to sell|looking to sell|ready to sell|willing to sell|interested in selling|considering selling|would consider selling|i would sell|i'?d sell|i'?m interested|im interested)\b/i,
+  },
+  {
+    // Conditional / latent interest — requires sell, offer, or price frame.
+    interest: "conditional",
+    re: /\b(?:(?:i|we)\s+)?(?:might|may|could)\s+(?:sell|be\s+interested)|(?:i'?d|i\s+would|we\s+would|i'?ll|i\s+will)\s+consider\s+(?:selling|it)|(?:maybe|possibly)\s+(?:i|we|i'?d)\s+(?:would\s+)?(?:sell|consider)|for\s+the\s+right\s+price|if\s+the\s+(?:price|offer)\s+is\s+right|depends\s+on\s+(?:the\s+)?(?:price|offer|how\s+much)|open\s+to\s+(?:selling|an\s+offer|offers)|could\s+be\s+interested\b/i,
+  },
+];
+
+function extractSellerInterest(message, base) {
+  for (const rule of SELLER_INTEREST_RULES) {
+    const evidence = findEvidence(message, new RegExp(rule.re.source, "i"));
+    if (evidence) {
+      return fact({ interest: rule.interest }, { ...base, confidence: 0.85, evidence });
+    }
+  }
+  return null;
 }
 
 // ── Objections (explicit only) ──────────────────────────────────────────────
@@ -238,14 +276,25 @@ function extractObjections(message, base) {
 //    resolve-inbound-relationship.js) ─────────────────────────────────────────
 
 const OWNERSHIP_POSITIVE_RE =
-  /\b(yes,? )?(i|we) own (it|that|this|the (house|property|place|home))|it'?s (my|our) (house|property|place|home)|i'?m the owner|that'?s (my|our) (house|property)|(soy|somos) (el|la|los) due[nñ][oa]s?|es (mi|nuestra) (casa|propiedad)/i;
+  /\b(yes,? )?(i|we) own (it|that|this|the (house|property|place|home))|it'?s (my|our) (house|property|place|home)|i'?m the owner|that'?s (my|our) (house|property)|(?<!\bnot )\b(that|this|it)'?s mine\b|(soy|somos) (el|la|los) due[nñ][oa]s?|es (mi|nuestra) (casa|propiedad)/i;
 
 const OWNERSHIP_NEGATIVE_RE =
-  /\b(i|we) (don'?t|do not|never) own(ed)?|not (my|the owner'?s?|mine)|it'?s not mine|wrong (number|person)|(i|we) sold (it|that|the)|no longer (own|mine)|i('?m| am) (just )?(the |a )?(tenant|renter)|i('?m| am) renting|no soy (el|la) due[nñ][oa]|ya (la|lo) vend[ií]/i;
+  /\b(i|we) (don'?t|do not|never) own(ed)?|not (my|the owner'?s?|mine)|it'?s not mine|wrong (number|person)|(i|we) sold (it|that|the)|no longer (own|mine)|i('?m| am) (just )?(the |a )?(tenant|renter)|i('?m| am) renting|\b(i|we) (just )?rent (here|it|this place|the (house|place))\b|no soy (el|la) due[nñ][oa]|ya (la|lo) vend[ií]/i;
 
-function extractOwnership(message, base) {
+// Attribution of the property to a living third party ("it's my brother's").
+// Spouse relations are deliberately excluded: those are authority/co-decision
+// cases, never non-owner suppression. Suppressed entirely when estate context
+// exists — a relative speaking about a deceased owner's house is an
+// authority question, not a wrong-party question.
+const THIRD_PARTY_OWNER_RE =
+  /\b(it'?s|that'?s|this is|belongs to|it belongs to)\s+(my|our)\s+(brother|sister|mother|father|mom|dad|son|daughter|aunt|uncle|cousin|friend|neighbou?r|ex|in-?laws?|grandmother|grandfather|grandma|grandpa)('?s)?\b/i;
+
+function extractOwnership(message, base, { estateContext = false } = {}) {
   const positive = findEvidence(message, new RegExp(OWNERSHIP_POSITIVE_RE.source, "i"));
-  const negative = findEvidence(message, new RegExp(OWNERSHIP_NEGATIVE_RE.source, "i"));
+  let negative = findEvidence(message, new RegExp(OWNERSHIP_NEGATIVE_RE.source, "i"));
+  if (!negative && !estateContext) {
+    negative = findEvidence(message, new RegExp(THIRD_PARTY_OWNER_RE.source, "i"));
+  }
   if (positive && negative) {
     return fact(
       { ownership_claim: "contradictory" },
@@ -293,7 +342,33 @@ const SPOUSE_ON_TITLE_RE =
   /\b(my )?(wife|husband|spouse|esposa?|esposo)('s name)? (is )?(also )?on (the )?(title|deed|escritura)|both (of us|our names) (are )?on (the )?(title|deed)|(wife|husband|spouse).{0,40}(has to|must|needs to|will have to) sign|(los dos|ambos) (estamos|firmamos)/i;
 
 const CO_OWNER_RE =
-  /\b(my|our) (brother|sister|siblings?|partner|son|daughter|mother|father|family) (and i )?(own|co-?own)|we own it together|co-?owner|due[nñ]os? junto/i;
+  /\b(my|our) (brother|sister|siblings?|partner|son|daughter|mother|father|family) (and i )?(own|co-?own)|\b(my|our) (brother|sister|siblings?|partner|son|daughter) owns? (half|part)|we own it together|co-?owner|due[nñ]os? junto/i;
+
+// Decision-maker / signoff language: "my wife would have to agree".
+// This is a SIGNOFF claim, never a title claim — it records that another
+// person must approve, and asserts nothing about who is on the deed.
+const SPOUSE_RELATIONS = "wife|husband|spouse|esposa?|esposo";
+const CO_OWNER_RELATIONS = "partner|brother|sister|son|daughter|siblings?";
+const FAMILY_RELATIONS = "mother|father|mom|dad|kids|children|family|parents?";
+const SIGNOFF_VERB_RE =
+  "(has|have|would have|will have|needs?|need|must|got|gotta)\\s*(to\\s+)?(agree|approve|sign off|sign|say yes|be on board|okay it|ok it|decide|weigh in)";
+const SIGNOFF_ASK_RE =
+  "(ask|talk to|check with|run (it|this) by|discuss (it|this) with|clear (it|this) with|consultar(lo)? con)";
+
+function signoffPattern(relations) {
+  return new RegExp(
+    `\\b(my|our)\\s+(${relations})\\b[^.!?;]{0,40}?\\b${SIGNOFF_VERB_RE}` +
+      `|\\b${SIGNOFF_ASK_RE}\\s+(my|our)\\s+(${relations})\\b` +
+      `|\\b(${relations})\\b[^.!?;]{0,20}?\\bhas to (agree|approve|sign)`,
+    "i"
+  );
+}
+
+const SIGNOFF_RULES = [
+  { relationship: "spouse", re: signoffPattern(SPOUSE_RELATIONS) },
+  { relationship: "co_owner", re: signoffPattern(CO_OWNER_RELATIONS) },
+  { relationship: "family", re: signoffPattern(FAMILY_RELATIONS) },
+];
 
 function extractAuthority(message, ownershipFact, base) {
   const claims = [];
@@ -321,9 +396,33 @@ function extractAuthority(message, ownershipFact, base) {
     if (!firstEvidence) firstEvidence = coOwnerEvidence;
   }
 
+  // Decision-maker approval requirements. Recorded only when no stronger
+  // title/co-ownership evidence for the same relationship already exists, so
+  // "my wife is on the deed" is never downgraded to a bare signoff claim.
+  for (const rule of SIGNOFF_RULES) {
+    if (additional_signers.some((s) => s.relationship === rule.relationship)) continue;
+    const evidence = findEvidence(message, new RegExp(rule.re.source, "i"));
+    if (!evidence) continue;
+    additional_signers.push({
+      relationship: rule.relationship,
+      // Explicitly NOT a title assertion.
+      basis: "claimed_decision_maker_approval",
+    });
+    if (!firstEvidence) firstEvidence = evidence;
+  }
+
   if (!claims.length && !additional_signers.length) return null;
 
-  const authority_type = claims[0] || (additional_signers.length ? "co_owner" : "unknown");
+  // Canonical AUTHORITY_TYPE vocabulary (stage6-seller-contract-engine.js).
+  const SIGNER_AUTHORITY_TYPE = {
+    spouse: AUTHORITY_TYPE.SPOUSE,
+    co_owner: AUTHORITY_TYPE.CO_OWNER,
+    family: AUTHORITY_TYPE.CO_OWNER,
+  };
+  const authority_type =
+    claims[0] ||
+    SIGNER_AUTHORITY_TYPE[additional_signers[0]?.relationship] ||
+    (additional_signers.length ? AUTHORITY_TYPE.CO_OWNER : "unknown");
   return fact(
     {
       authority_type,
@@ -334,6 +433,41 @@ function extractAuthority(message, ownershipFact, base) {
       requires_authority_review: true,
     },
     { ...base, confidence: 0.85, evidence: firstEvidence, needsReview: true }
+  );
+}
+
+// ── Estate / probate / deceased-owner context ────────────────────────────────
+// Delegated entirely to the canonical Stage 6 contract engine detectors so
+// there is one probate/heirship taxonomy. Captured as a DURABLE fact because
+// the next inbound message will not repeat the words "probate" or "passed
+// away", and authority must stay unresolved across the whole conversation.
+
+const DECEASED_OWNER_RE =
+  /\b(passed away|passed on|died|deceased|late (mother|father|mom|dad|husband|wife|parents?))\b|\bfalleci[oó]\b|\bmuri[oó]\b/i;
+
+function extractEstateContext(message, base) {
+  const structure = detectAuthority({ message }).ownership_structure;
+  const probate_detected = detectProbate({ message, ownership_structure: structure });
+  const heirship_detected = detectHeirship({ message, ownership_structure: structure });
+  const deceasedEvidence = findEvidence(message, new RegExp(DECEASED_OWNER_RE.source, "i"));
+  const estate_structure =
+    structure === OWNERSHIP_STRUCTURE.ESTATE || structure === OWNERSHIP_STRUCTURE.HEIRS;
+
+  if (!probate_detected && !heirship_detected && !deceasedEvidence && !estate_structure) {
+    return null;
+  }
+
+  return fact(
+    {
+      probate_detected,
+      heirship_detected,
+      deceased_owner: Boolean(deceasedEvidence) || probate_detected || heirship_detected,
+      ownership_structure: structure,
+      // A living heir/executor speaking for an estate is a legitimate
+      // counterparty — this is an authority signal, never a suppression one.
+      suppression_implied: false,
+    },
+    { ...base, confidence: 0.85, evidence: deceasedEvidence, needsReview: true }
   );
 }
 
@@ -461,6 +595,23 @@ export function extractSellerFacts({
       field: "asking_price",
       reason: price.clarification_reason || "ambiguous_monetary_statement",
     });
+    // Keep the seller's raw words as EVIDENCE only. This must never be
+    // promoted into a canonical asking price — the monetary resolver already
+    // refused it, and no "assume thousands" rule exists anywhere.
+    const mention = clean((price.all_mentions || [])[0]?.raw || "");
+    result.facts.asking_price_mention = fact(
+      {
+        raw_text: mention || null,
+        canonical_asking_price: false,
+        clarification_reason: price.clarification_reason || "ambiguous_monetary_statement",
+      },
+      {
+        ...base,
+        confidence: 0.3,
+        evidence: mention ? { text: mention, index: text.indexOf(mention) } : null,
+        needsReview: true,
+      }
+    );
   }
 
   const repairs = extractRepairs(text, base);
@@ -490,10 +641,22 @@ export function extractSellerFacts({
   const offerInterest = extractOfferInterest(text, base);
   if (offerInterest) result.facts.offer_interest = offerInterest;
 
+  const sellerInterest = extractSellerInterest(text, base);
+  if (sellerInterest) result.facts.seller_interest = sellerInterest;
+
   const objections = extractObjections(text, base);
   if (objections) result.facts.objections = objections;
 
-  const ownership = extractOwnership(text, base);
+  // Estate context is resolved BEFORE ownership so that third-party
+  // attribution to a deceased owner is read as an authority question rather
+  // than a non-owner denial.
+  const estate = extractEstateContext(text, base);
+  if (estate) {
+    result.facts.estate_context = estate;
+    result.needs_review = true; // estate/probate authority always needs review
+  }
+
+  const ownership = extractOwnership(text, base, { estateContext: Boolean(estate) });
   if (ownership) {
     result.facts.ownership = ownership;
     if (ownership.conflict) {
@@ -550,6 +713,11 @@ export function extractionToResolverFacts(extraction = null) {
   if (facts.offer_interest?.value?.wants_offer) {
     out.wants_offer = true;
   }
+  // Durable seller interest — projected even when primary intent is elsewhere
+  // (e.g. ownership + "might sell" in one turn, or latent conditional phrasing).
+  if (facts.seller_interest?.value?.interest) {
+    out.interest = facts.seller_interest.value.interest;
+  }
   if (facts.listing_status?.value?.listing_status) {
     out.listing_status = facts.listing_status.value.listing_status;
   }
@@ -560,6 +728,16 @@ export function extractionToResolverFacts(extraction = null) {
     // A claim, not verified sole authority — the resolver's ownership predicate
     // treats "confirmed" as the S1 milestone exactly as classify.js does today.
     out.ownership_claim_evidence = facts.ownership.evidence_text || null;
+    // Durable structured form so ownership evidence survives even when another
+    // signal (e.g. not_interested) becomes the primary intent.
+    out.ownership_claim = "confirmed";
+  }
+  if (facts.ownership?.value?.ownership_claim === "denied") {
+    // Renter / former owner / "not mine". Uses the canonical NEGATIVE_OWNERSHIP
+    // value already written by the blocking-intent paths in the resolver.
+    out.ownership_claim = "denied";
+    out.ownership_status = "not_owner";
+    out.ownership_denied_evidence = facts.ownership.evidence_text || null;
   }
   if (
     facts.ownership?.value?.ownership_claim === "contradictory" ||
@@ -573,6 +751,33 @@ export function extractionToResolverFacts(extraction = null) {
   if (facts.reason_for_selling?.value?.reason) {
     out.reason_for_selling = facts.reason_for_selling.value.reason;
   }
+
+  // ── Durable estate/probate authority context ─────────────────────────────
+  // Must persist: the next message will not repeat "probate", but authority
+  // stays unresolved for the whole conversation.
+  if (facts.estate_context?.value) {
+    const estate = facts.estate_context.value;
+    if (estate.probate_detected) out.probate_detected = true;
+    if (estate.heirship_detected) out.heirship_detected = true;
+    if (estate.deceased_owner) out.deceased_owner = true;
+  }
+
+  // ── Ambiguous money: evidence only, never a canonical price ──────────────
+  if (facts.asking_price_mention?.value) {
+    out.asking_price_needs_clarification = true;
+    out.asking_price_mention_raw = facts.asking_price_mention.value.raw_text || null;
+  }
+  if (extraction.asking_price_needs_clarification === true) {
+    out.asking_price_needs_clarification = true;
+  }
+
+  // ── Objections: ONLY those that change future deterministic behaviour and
+  // have no existing canonical home. `family_signoff` is already represented
+  // by authority_claims, `already_listed` by listing_status, and `not_ready`
+  // by timeline/nurture — none of those are duplicated here.
+  const objections = facts.objections?.value?.objections || [];
+  if (objections.includes("price_too_low")) out.price_objection = true;
+  if (objections.includes("trust_concern")) out.trust_concern = true;
 
   return out;
 }
