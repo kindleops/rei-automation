@@ -201,60 +201,102 @@ export function dealContextFromActiveInbox(active: ActiveInboxContext): DealCont
   })
 }
 
+/** True when dealContext identity matches the selected thread — never blend mismatched properties. */
+export function dealContextMatchesThread(
+  thread: InboxWorkflowThread | null | undefined,
+  dc: DealContext | null | undefined,
+): boolean {
+  if (!thread || !dc) return false
+  const t = thread as unknown as Record<string, unknown>
+  const threadKey = String(thread.threadKey || thread.id || '').trim()
+  const conversationId = String(getConversationThreadIdForThread(thread) || threadKey).trim()
+  const dcThreadKey = String(dc.threadKey || dc.thread_key || '').trim()
+  if (dcThreadKey && (dcThreadKey === threadKey || dcThreadKey === conversationId)) return true
+
+  const threadPropertyId = String(t.propertyId || t.property_id || '').trim()
+  const dcPropertyId = String(dc.propertyId || dc.property_id || '').trim()
+  if (threadPropertyId && dcPropertyId && threadPropertyId === dcPropertyId) return true
+
+  // Same phone identity (canonical e164) is also a valid match when property is unknown.
+  const threadPhone = String(
+    t.canonicalE164 || t.canonical_e164 || t.bestPhone || t.sellerPhone || '',
+  ).trim()
+  const dcPhone = String(
+    (dc as Record<string, unknown>).canonicalE164
+    || (dc as Record<string, unknown>).canonical_e164
+    || '',
+  ).trim()
+  if (threadPhone && dcPhone && threadPhone === dcPhone) return true
+
+  // No conflicting identity → allow enrichment only when dealContext has no property and thread has none.
+  if (!threadPropertyId && !dcPropertyId && !dcThreadKey) return true
+  return false
+}
+
 export function mergeSelectedThreadAndDealContext(
   thread: InboxWorkflowThread,
   dc: DealContext | null,
 ): DealContext {
   const t = thread as unknown as Record<string, unknown>
-  const base = dc ?? normalizeDealContext(t)
+  // Reject stale deal context from a previous thread/property (cross-thread contamination).
+  const safeDc = dealContextMatchesThread(thread, dc) ? dc : null
+  const base = safeDc ?? normalizeDealContext(t)
 
   const dcLat = isValidCoord(base.latitude) ? base.latitude : (isValidCoord(base.lat) ? base.lat : null)
   const dcLng = isValidCoord(base.longitude) ? base.longitude : (isValidCoord(base.lng) ? base.lng : null)
   const tLat = isValidCoord(t.lat) ? t.lat as number : (isValidCoord(t.latitude) ? t.latitude as number : null)
   const tLng = isValidCoord(t.lng) ? t.lng as number : (isValidCoord(t.longitude) ? t.longitude as number : null)
-  const lat = dcLat ?? tLat ?? 0
-  const lng = dcLng ?? tLng ?? 0
+  // Prefer thread coords only when deal context is absent or matched; never keep foreign coords.
+  const lat = (safeDc ? (dcLat ?? tLat) : tLat) ?? 0
+  const lng = (safeDc ? (dcLng ?? tLng) : tLng) ?? 0
+
+  // Selected thread identity always wins over deal-context enrichment for identity fields.
+  const threadPropertyId = pickStr(t.property_id || t.propertyId, null)
+  const threadOwnerId = pickStr(t.master_owner_id || t.ownerId || t.masterOwnerId, null)
+  const threadProspectId = pickStr(t.prospect_id || t.prospectId, null)
+  const threadKey = pickStr(t.threadKey || t.thread_key || thread.threadKey || thread.id, null)
 
   return {
     ...base,
-    propertyId: pickStr(base.propertyId, t.property_id || t.propertyId) || base.propertyId,
-    property_id: pickStr(base.property_id, t.property_id) || base.property_id,
-    masterOwnerId: pickStr(base.masterOwnerId, t.master_owner_id || t.ownerId) || base.masterOwnerId,
-    master_owner_id: pickStr(base.master_owner_id, t.master_owner_id) || base.master_owner_id,
-    prospectId: pickStr(base.prospectId, t.prospect_id || t.prospectId) || base.prospectId,
-    prospect_id: pickStr(base.prospect_id, t.prospect_id) || base.prospect_id,
-    ownerName: pickStr(base.ownerName, t.owner_name || t.ownerName),
-    owner_name: pickStr(base.owner_name, t.owner_name || t.ownerName),
-    firstName: pickStr(base.firstName, t.seller_first_name || t.first_name),
-    first_name: pickStr(base.first_name, t.first_name),
-    propertyAddress: pickStr(base.propertyAddress, t.property_address_full || t.propertyAddress || t.subject),
-    property_address_full: pickStr(base.property_address_full, t.property_address_full || t.propertyAddress),
-    market: pickStr(base.market, t.market),
-    market_name: pickStr(base.market_name, t.market || t.market_name),
-    propertyState: pickStr(base.propertyState, t.property_address_state || t.propertyState),
-    propertyZip: pickStr(base.propertyZip, t.property_address_zip || t.propertyZip),
+    propertyId: threadPropertyId || pickStr(base.propertyId, null) || base.propertyId,
+    property_id: threadPropertyId || pickStr(base.property_id, null) || base.property_id,
+    masterOwnerId: threadOwnerId || pickStr(base.masterOwnerId, null) || base.masterOwnerId,
+    master_owner_id: threadOwnerId || pickStr(base.master_owner_id, null) || base.master_owner_id,
+    prospectId: threadProspectId || pickStr(base.prospectId, null) || base.prospectId,
+    prospect_id: threadProspectId || pickStr(base.prospect_id, null) || base.prospect_id,
+    // Display fields: prefer thread when present so UI never shows previous-record names/addresses.
+    ownerName: pickStr(t.owner_name || t.ownerName, base.ownerName),
+    owner_name: pickStr(t.owner_name || t.ownerName, base.owner_name),
+    firstName: pickStr(t.seller_first_name || t.first_name, base.firstName),
+    first_name: pickStr(t.first_name, base.first_name),
+    propertyAddress: pickStr(t.property_address_full || t.propertyAddress || t.subject, base.propertyAddress),
+    property_address_full: pickStr(t.property_address_full || t.propertyAddress, base.property_address_full),
+    market: pickStr(t.market, base.market),
+    market_name: pickStr(t.market || t.market_name, base.market_name),
+    propertyState: pickStr(t.property_address_state || t.propertyState, base.propertyState),
+    propertyZip: pickStr(t.property_address_zip || t.propertyZip, base.propertyZip),
     latitude: lat,
     longitude: lng,
     lat,
     lng,
-    estimatedValue: pickNum(base.estimatedValue, t.estimated_value),
-    estimated_value: pickNum(base.estimated_value, t.estimated_value),
-    cashOffer: pickNum(base.cashOffer, t.cash_offer),
-    cash_offer: pickNum(base.cash_offer, t.cash_offer),
-    equityPercent: pickNum(base.equityPercent, t.equity_percent),
-    equity_percent: pickNum(base.equity_percent, t.equity_percent),
-    status: pickStr(base.status, t.universal_status),
-    universal_status: pickStr(base.universal_status, t.universal_status),
-    stage: pickStr(base.stage, t.universal_stage),
-    universal_stage: pickStr(base.universal_stage, t.universal_stage),
-    bucket: pickStr(base.bucket, t.inbox_bucket),
-    inbox_bucket: pickStr(base.inbox_bucket, t.inbox_bucket),
-    latestMessageBody: pickStr(base.latestMessageBody, t.latest_message_body || t.latestMessageBody),
-    latest_message_body: pickStr(base.latest_message_body, t.latest_message_body),
-    latestMessageDirection: pickStr(base.latestMessageDirection, t.latest_message_direction),
-    latest_message_direction: pickStr(base.latest_message_direction, t.latest_message_direction),
-    threadKey: pickStr(base.threadKey, t.threadKey || t.thread_key || thread.threadKey || thread.id),
-    thread_key: pickStr(base.thread_key, t.thread_key || thread.threadKey || thread.id),
+    estimatedValue: pickNum(safeDc ? base.estimatedValue : null, t.estimated_value),
+    estimated_value: pickNum(safeDc ? base.estimated_value : null, t.estimated_value),
+    cashOffer: pickNum(safeDc ? base.cashOffer : null, t.cash_offer),
+    cash_offer: pickNum(safeDc ? base.cash_offer : null, t.cash_offer),
+    equityPercent: pickNum(safeDc ? base.equityPercent : null, t.equity_percent),
+    equity_percent: pickNum(safeDc ? base.equity_percent : null, t.equity_percent),
+    status: pickStr(t.universal_status || t.operational_status || t.inboxStatus, base.status),
+    universal_status: pickStr(t.universal_status || t.operational_status, base.universal_status),
+    stage: pickStr(t.universal_stage || t.lifecycle_stage || t.conversationStage, base.stage),
+    universal_stage: pickStr(t.universal_stage || t.lifecycle_stage, base.universal_stage),
+    bucket: pickStr(t.inbox_bucket || t.inboxBucket, base.bucket),
+    inbox_bucket: pickStr(t.inbox_bucket || t.inboxBucket, base.inbox_bucket),
+    latestMessageBody: pickStr(t.latest_message_body || t.latestMessageBody, base.latestMessageBody),
+    latest_message_body: pickStr(t.latest_message_body || t.latestMessageBody, base.latest_message_body),
+    latestMessageDirection: pickStr(t.latest_message_direction || t.latestDirection, base.latestMessageDirection),
+    latest_message_direction: pickStr(t.latest_message_direction || t.latestDirection, base.latest_message_direction),
+    threadKey: threadKey || base.threadKey,
+    thread_key: threadKey || base.thread_key,
   }
 }
 
@@ -267,30 +309,42 @@ export function resolveCanonicalWorkspaceContext(args: {
   const activeFallback = dealContextFromActiveInbox(activeContext)
 
   if (selected) {
-    const merged = mergeSelectedThreadAndDealContext(selected, dealContext)
+    // Never feed mismatched dealContext into the merge — selected thread is authority.
+    const matchedDc = dealContextMatchesThread(selected, dealContext) ? dealContext : null
+    const merged = mergeSelectedThreadAndDealContext(selected, matchedDc)
     if (!activeFallback || activeContextMatchesThread(activeContext, selected)) {
       return merged
     }
+    // Active context only fills gaps; selected thread identity stays authoritative.
     return {
       ...merged,
-      ...activeFallback,
-      propertyId: pickStr(activeFallback.propertyId, merged.propertyId) || merged.propertyId,
-      property_id: pickStr(activeFallback.property_id, merged.property_id) || merged.property_id,
-      masterOwnerId: pickStr(activeFallback.masterOwnerId, merged.masterOwnerId) || merged.masterOwnerId,
-      master_owner_id: pickStr(activeFallback.master_owner_id, merged.master_owner_id) || merged.master_owner_id,
-      ownerName: pickStr(activeFallback.ownerName, merged.ownerName),
-      owner_name: pickStr(activeFallback.owner_name, merged.owner_name),
-      propertyAddress: pickStr(activeFallback.propertyAddress, merged.propertyAddress),
-      property_address_full: pickStr(activeFallback.property_address_full, merged.property_address_full),
-      market: pickStr(activeFallback.market, merged.market),
-      market_name: pickStr(activeFallback.market_name, merged.market_name),
-      threadKey: pickStr(activeFallback.threadKey, merged.threadKey),
-      thread_key: pickStr(activeFallback.thread_key, merged.thread_key),
+      propertyId: pickStr(merged.propertyId, activeFallback.propertyId) || merged.propertyId,
+      property_id: pickStr(merged.property_id, activeFallback.property_id) || merged.property_id,
+      masterOwnerId: pickStr(merged.masterOwnerId, activeFallback.masterOwnerId) || merged.masterOwnerId,
+      master_owner_id: pickStr(merged.master_owner_id, activeFallback.master_owner_id) || merged.master_owner_id,
+      ownerName: pickStr(merged.ownerName, activeFallback.ownerName),
+      owner_name: pickStr(merged.owner_name, activeFallback.owner_name),
+      propertyAddress: pickStr(merged.propertyAddress, activeFallback.propertyAddress),
+      property_address_full: pickStr(merged.property_address_full, activeFallback.property_address_full),
+      market: pickStr(merged.market, activeFallback.market),
+      market_name: pickStr(merged.market_name, activeFallback.market_name),
+      threadKey: pickStr(merged.threadKey, activeFallback.threadKey),
+      thread_key: pickStr(merged.thread_key, activeFallback.thread_key),
     }
   }
 
   if (activeFallback) {
     if (dealContext) {
+      const activeThreadKey = String(activeContext.threadKey || '').trim()
+      const activePropertyId = String(activeContext.propertyId || '').trim()
+      const dcThreadKey = String(dealContext.threadKey || dealContext.thread_key || '').trim()
+      const dcPropertyId = String(dealContext.propertyId || dealContext.property_id || '').trim()
+      const identityMatches = Boolean(
+        (activeThreadKey && dcThreadKey && activeThreadKey === dcThreadKey)
+        || (activePropertyId && dcPropertyId && activePropertyId === dcPropertyId)
+        || (!dcThreadKey && !dcPropertyId),
+      )
+      if (!identityMatches) return activeFallback
       return {
         ...dealContext,
         ...activeFallback,

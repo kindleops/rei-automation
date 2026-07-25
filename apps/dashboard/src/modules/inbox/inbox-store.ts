@@ -193,7 +193,12 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
     return outboundMs > 0 && (Date.now() - outboundMs) > WAITING_REPLY_WINDOW_MS
   }
   if (key === 'new_replies') {
-    if (['dead', 'suppressed'].includes(rowBucket)) return false
+    // New Replies is a disposition work queue, NOT an unread counter.
+    // Opening/reading alone must not remove a thread; only outbound response,
+    // terminal disposition, suppression, or archive does.
+    if (getRowValue(row, 'is_archived', 'isArchived') === true) return false
+    if (['dead', 'suppressed', 'priority', 'needs_review', 'waiting', 'cold'].includes(rowBucket)) return false
+    if (rowBucket === 'new_replies') return true
     const direction = String(getRowValue(row, 'latest_message_direction', 'latestDirection', 'direction') ?? '').trim().toLowerCase()
     const normalizedDirection = direction === 'in' || direction === 'incoming' ? 'inbound'
       : direction === 'out' || direction === 'outgoing' ? 'outbound'
@@ -206,14 +211,14 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
     const outMs = rowTimestampMs(lastOut)
     if (!inMs) return false
     if (outMs > 0 && inMs < outMs) return false
-    const isRead = getRowValue(row, 'is_read', 'isRead') === true
-    const isActioned = getRowValue(row, 'is_actioned', 'isActioned') === true
     const isTerminal = getRowValue(row, 'opt_out', 'optOut') === true
       || getRowValue(row, 'wrong_number', 'wrongNumber') === true
       || getRowValue(row, 'not_interested', 'notInterested') === true
       || getRowValue(row, 'is_suppressed', 'isSuppressed') === true
-    if (isRead || isActioned || isTerminal) return false
-    return rowBucket === 'new_replies' || normalizedDirection === 'inbound'
+      || getRowValue(row, 'needs_review', 'needsReview') === true
+    if (isTerminal) return false
+    // Do NOT filter on is_read — read ≠ dispositioned.
+    return true
   }
   return rowBucket === key
 }
@@ -224,11 +229,22 @@ const rowTimestamp = (row: Record<string, unknown>): number => {
   return Number.isFinite(ts) ? ts : 0
 }
 
+const rowIsPinned = (row: Record<string, unknown>): boolean =>
+  getRowValue(row, 'is_pinned', 'isPinned') === true
+
 const sortRowsNewestFirst = (rows: unknown[]): unknown[] =>
   [...rows].sort((left, right) => {
     const leftRow = left as Record<string, unknown>
     const rightRow = right as Record<string, unknown>
-    return rowTimestamp(rightRow) - rowTimestamp(leftRow)
+    // Explicit pin action reorders immediately — pinned rows float to top.
+    const pinDelta = Number(rowIsPinned(rightRow)) - Number(rowIsPinned(leftRow))
+    if (pinDelta !== 0) return pinDelta
+    const tsDelta = rowTimestamp(rightRow) - rowTimestamp(leftRow)
+    if (tsDelta !== 0) return tsDelta
+    // Deterministic tie-breaker for stable pagination/cursor behavior.
+    const leftKey = String(getRowValue(leftRow, 'threadKey', 'thread_key', 'id') ?? '')
+    const rightKey = String(getRowValue(rightRow, 'threadKey', 'thread_key', 'id') ?? '')
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
   })
 
 const withThreadIdentity = (threadKey: string, row: Record<string, unknown>): Record<string, unknown> => ({

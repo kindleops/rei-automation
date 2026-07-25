@@ -17,6 +17,8 @@ type Props = {
   participants: PropertyParticipant[]
   selectedParticipant: PropertyParticipant | null
   prospectName?: string | null
+  /** Household / owner label — distinct from active prospect person. */
+  householdLabel?: string | null
   loading?: boolean
   onSelectParticipant: (participant: PropertyParticipant) => void
   onTryNextEligible?: (participant: PropertyParticipant) => void
@@ -61,6 +63,7 @@ const ActiveProspectCardComponent = ({
   participants,
   selectedParticipant,
   prospectName = null,
+  householdLabel = null,
   loading = false,
   onSelectParticipant,
   onTryNextEligible,
@@ -79,6 +82,43 @@ const ActiveProspectCardComponent = ({
 
   const switcherList = useMemo(() => participants, [participants])
   const headlineName = selected?.display_name || prospectName || 'Select prospect'
+
+  // Prospect index among unique people (by prospect_id or display name), not phones.
+  const prospectProgress = useMemo(() => {
+    if (!selected || participants.length === 0) return null
+    const uniqueProspectKeys: string[] = []
+    for (const p of participants) {
+      const key = String(p.prospect_id || p.display_name || p.participant_id || '').trim().toLowerCase()
+      if (key && !uniqueProspectKeys.includes(key)) uniqueProspectKeys.push(key)
+    }
+    const selectedKey = String(
+      selected.prospect_id || selected.display_name || selected.participant_id || '',
+    ).trim().toLowerCase()
+    const index = Math.max(0, uniqueProspectKeys.indexOf(selectedKey))
+    return { index: index + 1, total: uniqueProspectKeys.length || participants.length }
+  }, [participants, selected])
+
+  // Phone index among phones for the same prospect.
+  const phoneProgress = useMemo(() => {
+    if (!selected) return null
+    const selectedProspectKey = String(
+      selected.prospect_id || selected.display_name || selected.participant_id || '',
+    ).trim().toLowerCase()
+    const sameProspectPhones = participants.filter((p) => {
+      const key = String(p.prospect_id || p.display_name || p.participant_id || '').trim().toLowerCase()
+      return key === selectedProspectKey && String(p.canonical_e164 || '').trim()
+    })
+    const phones = sameProspectPhones.length > 0 ? sameProspectPhones : (selected.canonical_e164 ? [selected] : [])
+    const selectedPhone = String(selected.canonical_e164 || '').trim()
+    const index = Math.max(0, phones.findIndex((p) => String(p.canonical_e164 || '').trim() === selectedPhone))
+    return { index: index + 1, total: phones.length }
+  }, [participants, selected])
+
+  const relationshipLabel = useMemo(() => {
+    if (!selected) return null
+    if (selected.likely_owner || selected.ownership_status === 'confirmed') return 'Likely owner'
+    return formatParticipantRelationship(selected.relationship_to_property || selected.identity_class) || null
+  }, [selected])
 
   useEffect(() => {
     if (!open) return
@@ -109,6 +149,11 @@ const ActiveProspectCardComponent = ({
             <h3 className="nx-active-prospect__name">
               {loading && !selected ? 'Loading…' : headlineName}
             </h3>
+            {householdLabel ? (
+              <p className="nx-active-prospect__household" title="Owner / household (not necessarily the active contact)">
+                Household: {householdLabel}
+              </p>
+            ) : null}
           </div>
           <div className="nx-active-prospect__actions">
             <button
@@ -126,6 +171,24 @@ const ActiveProspectCardComponent = ({
 
         <div className="nx-active-prospect__meta-row">
           <OwnershipIndicator status={selected?.ownership_status} />
+          {relationshipLabel ? (
+            <span className="nx-active-prospect__match-flag is-relationship">{relationshipLabel}</span>
+          ) : null}
+          {prospectProgress && prospectProgress.total > 0 ? (
+            <span className="nx-active-prospect__match-flag is-progress">
+              Prospect {prospectProgress.index} of {prospectProgress.total}
+            </span>
+          ) : null}
+          {phoneProgress && phoneProgress.total > 0 ? (
+            <span className="nx-active-prospect__match-flag is-progress">
+              Wireless {phoneProgress.index} of {phoneProgress.total}
+            </span>
+          ) : null}
+          {phone ? (
+            <span className="nx-active-prospect__match-flag is-phone" title="Active phone">
+              {formatPhone(phone)}
+            </span>
+          ) : null}
           {matchFlags.map((flag) => (
             <span
               key={flag.key}
@@ -222,3 +285,23 @@ const ActiveProspectCardComponent = ({
 
 export const ActiveProspectCard = memo(ActiveProspectCardComponent)
 ActiveProspectCard.displayName = 'ActiveProspectCard'
+
+// Minimal progressive styles for household / progression chips (no visual redesign).
+if (typeof document !== 'undefined' && !document.getElementById('nx-active-prospect-stabilization-css')) {
+  const style = document.createElement('style')
+  style.id = 'nx-active-prospect-stabilization-css'
+  style.textContent = `
+    .nx-active-prospect__household {
+      margin: 2px 0 0;
+      font-size: 11px;
+      color: var(--nexus-muted, #9ba8c0);
+      line-height: 1.3;
+    }
+    .nx-active-prospect__match-flag.is-progress,
+    .nx-active-prospect__match-flag.is-phone,
+    .nx-active-prospect__match-flag.is-relationship {
+      opacity: 0.95;
+    }
+  `
+  document.head.appendChild(style)
+}

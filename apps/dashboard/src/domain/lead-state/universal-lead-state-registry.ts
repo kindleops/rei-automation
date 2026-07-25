@@ -143,12 +143,34 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = [
   'archive_scope',
   'archive_reason',
   'paused_reason',
+  // Canonical automation control plane — shared by Deal Desk UI and seller auto-reply.
+  'automation_state',
+  'automation_status',
   'is_archived',
   'is_read',
   'is_pinned',
   'is_starred',
   'updated_by',
 ] as const
+
+/** Values accepted by auto-reply plan (resolve-seller-auto-reply-plan). */
+export const AUTOMATION_STATE_ORDER = ['running', 'paused', 'manual'] as const
+export type AutomationStateCode = typeof AUTOMATION_STATE_ORDER[number]
+
+export const AUTOMATION_STATE_META: Record<AutomationStateCode, { label: string; color: string }> = {
+  running: { label: 'Autopilot On', color: '#a78bfa' },
+  paused: { label: 'Autopilot Paused', color: '#ffd60a' },
+  manual: { label: 'Manual Control', color: '#ff9f43' },
+}
+
+export function normalizeAutomationState(value: unknown): AutomationStateCode {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  if (!raw) return 'running'
+  if (raw === 'running' || raw === 'active' || raw === 'on' || raw === 'auto' || raw === 'autopilot_on') return 'running'
+  if (raw === 'paused' || raw === 'pause' || raw === 'autopilot_paused') return 'paused'
+  if (raw === 'manual' || raw === 'manual_control' || raw === 'manual_only' || raw === 'off') return 'manual'
+  return 'running'
+}
 
 export const LEGACY_FIELD_ALIASES: Record<string, string> = {
   seller_stage: 'lifecycle_stage',

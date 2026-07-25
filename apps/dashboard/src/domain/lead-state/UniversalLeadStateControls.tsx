@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import {
+  AUTOMATION_STATE_META,
+  AUTOMATION_STATE_ORDER,
   CONTACTABILITY_META,
   CONTACTABILITY_ORDER,
   DISPOSITION_META,
@@ -13,11 +15,13 @@ import {
   OPERATIONAL_STATUS_META,
   OPERATIONAL_STATUS_ORDER,
   contactabilityBlocksSend,
+  normalizeAutomationState,
   normalizeContactability,
   normalizeDisposition,
   normalizeLeadTemperature,
   normalizeLifecycleStage,
   normalizeOperationalStatus,
+  type AutomationStateCode,
   type ContactabilityCode,
   type DispositionCode,
   type LeadTemperatureCode,
@@ -59,6 +63,12 @@ const CONTACTABILITY_OPTIONS: SelectOption[] = CONTACTABILITY_ORDER.map((code) =
   value: code,
   label: CONTACTABILITY_META[code].label,
   color: CONTACTABILITY_META[code].color,
+}))
+
+const AUTOMATION_OPTIONS: SelectOption[] = AUTOMATION_STATE_ORDER.map((code) => ({
+  value: code,
+  label: AUTOMATION_STATE_META[code].label,
+  color: AUTOMATION_STATE_META[code].color,
 }))
 
 const readThreadKey = (thread: InboxWorkflowThread | Record<string, unknown>): string =>
@@ -148,6 +158,8 @@ export function UniversalLeadStateControls({
     normalizeDisposition(readText(row, 'disposition')))
   const [contactability, setContactability] = useState<ContactabilityCode>(() =>
     normalizeContactability(readText(row, 'contactability_status', 'contactabilityStatus')))
+  const [automation, setAutomation] = useState<AutomationStateCode>(() =>
+    normalizeAutomationState(readText(row, 'automation_state', 'automationState', 'automation_status', 'automationStatus')))
   const [starred, setStarred] = useState(() => readBool(row, 'is_starred', 'isStarred'))
   const [pinned, setPinned] = useState(() => readBool(row, 'is_pinned', 'isPinned'))
   const [archived, setArchived] = useState(() => readBool(row, 'is_archived', 'isArchived', 'archived'))
@@ -164,6 +176,7 @@ export function UniversalLeadStateControls({
     setTemperature(normalizeLeadTemperature(readText(row, 'lead_temperature', 'leadTemperature', 'temperature')))
     setDisposition(normalizeDisposition(readText(row, 'disposition')))
     setContactability(normalizeContactability(readText(row, 'contactability_status', 'contactabilityStatus')))
+    setAutomation(normalizeAutomationState(readText(row, 'automation_state', 'automationState', 'automation_status', 'automationStatus')))
     setStarred(readBool(row, 'is_starred', 'isStarred'))
     setPinned(readBool(row, 'is_pinned', 'isPinned'))
     setArchived(readBool(row, 'is_archived', 'isArchived', 'archived'))
@@ -249,6 +262,22 @@ export function UniversalLeadStateControls({
             const normalized = normalizeContactability(next)
             setContactability(normalized)
             void commit({ contactability_status: normalized })
+          }}
+        />
+        <CanonicalSelect
+          label="Automation"
+          value={automation}
+          options={AUTOMATION_OPTIONS}
+          pending={pending}
+          disabled={disabled}
+          onChange={(next) => {
+            const normalized = normalizeAutomationState(next)
+            setAutomation(normalized)
+            void commit({
+              automation_state: normalized,
+              automation_status: normalized === 'running' ? 'active' : normalized,
+              paused_reason: normalized === 'running' ? null : (normalized === 'paused' ? 'manual_pause' : 'manual_control'),
+            })
           }}
         />
       </div>

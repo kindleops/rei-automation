@@ -6034,6 +6034,10 @@ export const IntelligencePanel = ({
                   ?? thread.inboxStatus,
                 lead_temperature: thread.lead_temperature
                   ?? extras.leadTemperature as string | null | undefined,
+                automation_state: extras.automation_state as string | null | undefined
+                  ?? extras.automationState as string | null | undefined
+                  ?? extras.automation_status as string | null | undefined
+                  ?? thread.automationState,
                 is_starred: extras.is_starred as boolean | null | undefined ?? thread.isStarred,
                 is_pinned: extras.is_pinned as boolean | null | undefined ?? thread.isPinned,
                 is_archived: extras.is_archived as boolean | null | undefined ?? thread.isArchived,

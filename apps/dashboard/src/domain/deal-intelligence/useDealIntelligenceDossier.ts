@@ -136,10 +136,27 @@ export function useDealIntelligenceDossier(
       return
     }
 
+    // Seed is only accepted when it already matches the current identity key.
+    // Never keep a previous-thread full dossier visible while switching.
     if (isFullDossier(options.seedDossier)) {
-      return
+      const seedProperty = resolvePropertyId(thread, options.seedDossier)
+      const seedIdentity = (options.seedDossier?.identity || {}) as Record<string, unknown>
+      const seedThread = String(seedIdentity.thread_key || seedIdentity.threadKey || '').trim()
+      const expectedThread = String(thread?.threadKey || '').trim()
+      const expectedProperty = String(thread?.propertyId || '').trim()
+      const seedMatches = Boolean(
+        (seedThread && expectedThread && seedThread === expectedThread)
+        || (seedProperty && expectedProperty && seedProperty === expectedProperty)
+        || (!expectedProperty && !seedProperty),
+      )
+      if (seedMatches) {
+        setDossier(options.seedDossier)
+        setLoading(false)
+        return
+      }
     }
 
+    // Immediate clear — wrong data for even one frame is not acceptable.
     dossierRef.current = null
     setDossier(null)
     setError(null)

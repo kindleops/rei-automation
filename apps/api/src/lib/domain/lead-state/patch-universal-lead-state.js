@@ -35,6 +35,8 @@ const TRACKED_FIELDS = new Set([
   'snoozed_until',
   'manual_stage_lock',
   'manual_temperature_lock',
+  'automation_state',
+  'automation_status',
 ]);
 
 export async function fetchCurrentLeadState(supabase, threadKey) {
@@ -228,11 +230,24 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   if ('follow_up_at' in canonicalPatch) rowPatch.follow_up_at = canonicalPatch.follow_up_at || null;
 
   if ('paused_reason' in canonicalPatch) rowPatch.paused_reason = clean(canonicalPatch.paused_reason) || null;
+  if ('automation_state' in canonicalPatch) {
+    const automationState = clean(canonicalPatch.automation_state).toLowerCase() || 'running';
+    rowPatch.automation_state = automationState;
+    // Mirror into automation_status for live-inbox / queue surfaces that still read that column.
+    if (!('automation_status' in canonicalPatch)) {
+      rowPatch.automation_status = automationState === 'running' ? 'active' : automationState;
+    }
+  }
+  if ('automation_status' in canonicalPatch) {
+    rowPatch.automation_status = clean(canonicalPatch.automation_status) || null;
+  }
   if ('is_read' in canonicalPatch) {
     rowPatch.is_read = asBoolean(canonicalPatch.is_read, false);
     rowPatch.last_read_at = rowPatch.is_read ? now : null;
     // Legacy mirror: the dashboard inbox route historically wrote read_at.
     rowPatch.read_at = rowPatch.last_read_at;
+    // CRITICAL: is_read must never rewrite inbox_bucket. New Replies is a disposition
+    // work queue — opening a message alone does not clear it.
   }
   if ('is_pinned' in canonicalPatch) rowPatch.is_pinned = asBoolean(canonicalPatch.is_pinned, false);
   if ('is_starred' in canonicalPatch) rowPatch.is_starred = asBoolean(canonicalPatch.is_starred, false);

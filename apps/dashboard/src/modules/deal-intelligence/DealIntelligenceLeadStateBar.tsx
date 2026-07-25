@@ -5,9 +5,13 @@ import type { IconName } from '../../shared/icons'
 import { patchLeadStateFromView } from '../../domain/lead-state/persistUniversalLeadState'
 import type { LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
 import {
+  AUTOMATION_STATE_META,
+  AUTOMATION_STATE_ORDER,
   LEAD_TEMPERATURE_META,
   LEAD_TEMPERATURE_ORDER,
+  normalizeAutomationState,
   normalizeLeadTemperature,
+  type AutomationStateCode,
   type LeadTemperatureCode,
 } from '../../domain/lead-state/universal-lead-state-registry'
 import { StageChangeConfirmModal } from '../inbox/components/StageChangeConfirmModal'
@@ -31,6 +35,7 @@ export interface DealIntelligenceLeadStateData {
   lifecycle_stage?: string | null
   operational_status?: string | null
   lead_temperature?: string | null
+  automation_state?: string | null
   is_starred?: boolean | null
   is_pinned?: boolean | null
   is_archived?: boolean | null
@@ -245,11 +250,22 @@ const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = LEAD_TEMPERATURE_ORDER.map
   (v) => ({ value: v, visual: threadTemperatureVisuals[v] }),
 )
 
+const AUTOMATION_OPTIONS: PillOption<AutomationStateCode>[] = AUTOMATION_STATE_ORDER.map((v) => ({
+  value: v,
+  visual: {
+    label: AUTOMATION_STATE_META[v].label,
+    color: AUTOMATION_STATE_META[v].color,
+    bg: `${AUTOMATION_STATE_META[v].color}22`,
+    border: `${AUTOMATION_STATE_META[v].color}55`,
+  },
+}))
+
 function toThreadShape(data: DealIntelligenceLeadStateData) {
   return {
     lifecycle_stage: data.lifecycle_stage ?? undefined,
     operational_status: data.operational_status ?? undefined,
     lead_temperature: data.lead_temperature ?? undefined,
+    automation_state: data.automation_state ?? undefined,
     is_starred: data.is_starred ?? undefined,
     is_pinned: data.is_pinned ?? undefined,
     is_archived: data.is_archived ?? undefined,
@@ -266,6 +282,7 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
   const status = useOptimisticField<ThreadStatus>(resolveThreadStatus(shape))
   const stage = useOptimisticField<ThreadStage>(resolveThreadStage(shape))
   const temperature = useOptimisticField<ThreadTemperature>(resolveThreadTemperature(shape))
+  const automation = useOptimisticField<AutomationStateCode>(normalizeAutomationState(data.automation_state))
 
   const [starred, setStarred] = useState(Boolean(data.is_starred))
   const [pinned, setPinned] = useState(Boolean(data.is_pinned))
@@ -282,10 +299,12 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
       status.reset(resolveThreadStatus(shape))
       stage.reset(resolveThreadStage(shape))
       temperature.reset(resolveThreadTemperature(shape))
-    } else if (!status.pending && !stage.pending && !temperature.pending && !actionPending) {
+      automation.reset(normalizeAutomationState(data.automation_state))
+    } else if (!status.pending && !stage.pending && !temperature.pending && !automation.pending && !actionPending) {
       status.reset(resolveThreadStatus(shape))
       stage.reset(resolveThreadStage(shape))
       temperature.reset(resolveThreadTemperature(shape))
+      automation.reset(normalizeAutomationState(data.automation_state))
     }
     if (!actionPending) {
       setStarred(Boolean(data.is_starred))
@@ -300,6 +319,7 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
     data.lifecycle_stage,
     data.operational_status,
     data.lead_temperature,
+    data.automation_state,
     data.is_starred,
     data.is_pinned,
     data.is_archived,
@@ -313,6 +333,7 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
     status,
     stage,
     temperature,
+    automation,
     starred,
     setStarred,
     pinned,
@@ -341,6 +362,8 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
   const {
     status,
     stage,
+    temperature,
+    automation,
     manualStageLock,
   } = useLeadStateSync(data)
 
@@ -349,7 +372,7 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
     next: ThreadStage | null
   }>({ open: false, next: null })
 
-  const persist = async (patch: Record<string, string>, executeNextAction = false) => {
+  const persist = async (patch: Record<string, unknown>, executeNextAction = false) => {
     const result = await patchLeadStateFromView('deal_intelligence', threadKey, patch, {
       execute_next_action: executeNextAction,
     })
@@ -369,7 +392,7 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
     await stage.commit(next, () => persist({ lifecycle_stage: next }, executeNextAction))
   }
 
-  const anyPending = status.pending || stage.pending
+  const anyPending = status.pending || stage.pending || temperature.pending || automation.pending
 
   return (
     <>
@@ -409,6 +432,32 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
             className="nx-di25-ctrl--status"
             layout="card"
             onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
+          />
+          <GlassControl
+            label="Temperature"
+            value={temperature.value}
+            options={TEMP_OPTIONS}
+            pending={temperature.pending}
+            error={temperature.error}
+            disabled={disabled}
+            className="nx-di25-ctrl--temp"
+            layout="card"
+            onChange={(next) => temperature.commit(next, () => persist({ lead_temperature: next }))}
+          />
+          <GlassControl
+            label="Automation"
+            value={automation.value}
+            options={AUTOMATION_OPTIONS}
+            pending={automation.pending}
+            error={automation.error}
+            disabled={disabled}
+            className="nx-di25-ctrl--automation"
+            layout="card"
+            onChange={(next) => automation.commit(next, () => persist({
+              automation_state: next,
+              automation_status: next === 'running' ? 'active' : next,
+              paused_reason: next === 'running' ? null : (next === 'paused' ? 'manual_pause' : 'manual_control'),
+            }))}
           />
         </div>
       </div>

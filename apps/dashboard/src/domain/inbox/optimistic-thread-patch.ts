@@ -53,9 +53,10 @@ export function buildOptimisticThreadPatch(
     case 'unpin':
       return { isPinned: false }
     case 'read':
-      return { isRead: true, unread: false, unreadCount: 0, status: 'read', inboxStatus: 'closed' }
+      // Read is not disposition — never move the thread out of New Replies via is_read alone.
+      return { isRead: true, unread: false, unreadCount: 0 }
     case 'unread':
-      return { isRead: false, unread: true, unreadCount: 1, status: 'unread', inboxStatus: 'new_reply' }
+      return { isRead: false, unread: true, unreadCount: 1 }
     case 'snooze':
       return { inboxStatus: 'waiting' }
     default:

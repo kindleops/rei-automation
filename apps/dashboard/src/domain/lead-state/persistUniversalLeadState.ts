@@ -177,6 +177,42 @@ export function unpinThread(
   return persistUniversalLeadState(threadKey, { is_pinned: false }, meta)
 }
 
+/** Pause automated outbound for this thread (canonical automation_state). */
+export function pauseThreadAutomation(
+  threadKey: string,
+  meta: UniversalLeadStateMeta = {},
+): Promise<UniversalLeadStateMutationResult> {
+  return persistUniversalLeadState(threadKey, {
+    automation_state: 'paused',
+    automation_status: 'paused',
+    paused_reason: meta.reason || 'manual_pause',
+  }, meta)
+}
+
+/** Resume automated outbound for this thread. */
+export function resumeThreadAutomation(
+  threadKey: string,
+  meta: UniversalLeadStateMeta = {},
+): Promise<UniversalLeadStateMutationResult> {
+  return persistUniversalLeadState(threadKey, {
+    automation_state: 'running',
+    automation_status: 'active',
+    paused_reason: null,
+  }, meta)
+}
+
+/** Force manual-only control (no auto-reply) without changing operational status. */
+export function setThreadManualControl(
+  threadKey: string,
+  meta: UniversalLeadStateMeta = {},
+): Promise<UniversalLeadStateMutationResult> {
+  return persistUniversalLeadState(threadKey, {
+    automation_state: 'manual',
+    automation_status: 'manual',
+    paused_reason: meta.reason || 'manual_control',
+  }, meta)
+}
+
 export function snoozeThread(
   threadKey: string,
   until?: string | Date,

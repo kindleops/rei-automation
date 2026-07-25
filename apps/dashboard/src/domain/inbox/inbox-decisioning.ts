@@ -478,9 +478,15 @@ export const sortThreadsByDecision = (
   _decisions: Map<string, ConversationDecision>,
 ): InboxWorkflowThread[] => {
   return [...threads].sort((a, b) => {
-    // Strict chronological sorting as per requirements
+    // Explicit pin action reorders immediately to the top of the active list.
+    const pinDelta = Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned))
+    if (pinDelta !== 0) return pinDelta
+    // Canonical activity order with deterministic thread-key tie-breaker.
     const timeA = new Date(a.lastMessageAt || (a as any).lastMessageIso || a.updatedAt || 0).getTime()
     const timeB = new Date(b.lastMessageAt || (b as any).lastMessageIso || b.updatedAt || 0).getTime()
-    return timeB - timeA
+    if (timeB !== timeA) return timeB - timeA
+    const keyA = String(a.threadKey || a.id || '')
+    const keyB = String(b.threadKey || b.id || '')
+    return keyA < keyB ? -1 : keyA > keyB ? 1 : 0
   })
 }

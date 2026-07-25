@@ -1659,6 +1659,11 @@ export const DealIntelligence25Panel = ({
     lifecycle_stage: convoState?.lifecycle_stage as string | null | undefined,
     operational_status: convoState?.operational_status as string | null | undefined,
     lead_temperature: convoState?.lead_temperature as string | null | undefined,
+    automation_state: (
+      convoState?.automation_state
+      ?? convoState?.automation_status
+      ?? convoState?.automationState
+    ) as string | null | undefined,
     is_starred: convoState?.is_starred as boolean | null | undefined,
     is_pinned: convoState?.is_pinned as boolean | null | undefined,
     is_archived: convoState?.is_archived as boolean | null | undefined,

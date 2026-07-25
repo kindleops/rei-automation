@@ -443,6 +443,10 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = Object.freeze([
   'archive_scope',
   'archive_reason',
   'paused_reason',
+  // Canonical automation control plane — shared by Deal Desk UI and seller auto-reply.
+  // Values: running | paused | manual (auto-reply plan treats paused/manual as suppress).
+  'automation_state',
+  'automation_status',
   'is_archived',
   'is_read',
   'is_pinned',

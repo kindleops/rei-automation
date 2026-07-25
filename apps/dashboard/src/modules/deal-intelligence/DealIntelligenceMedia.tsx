@@ -116,6 +116,24 @@ export const DealIntelligenceMedia = ({
   const [streetStaticFailed, setStreetStaticFailed] = useState(false)
   const [aerialStaticFailed, setAerialStaticFailed] = useState(false)
 
+  // Cache key by property identity so unrelated inbox count/message updates never remount media.
+  const mediaIdentityKey = useMemo(
+    () => [
+      Number.isFinite(lat) ? Number(lat).toFixed(5) : '',
+      Number.isFinite(lng) ? Number(lng).toFixed(5) : '',
+      String(address || '').trim().toLowerCase(),
+    ].join('|'),
+    [address, lat, lng],
+  )
+
+  // Reset failure state only when the underlying property changes — not on parent re-renders.
+  useEffect(() => {
+    setStreetStaticFailed(false)
+    setAerialStaticFailed(false)
+    setStreetMode('loading')
+    setAerialMode('loading')
+  }, [mediaIdentityKey])
+
   const streetEmbedUrl = useMemo(
     () => buildInteractiveStreetViewUrl({ address, lat, lng }),
     [address, lat, lng],

@@ -672,12 +672,22 @@ export const applyInboxFilters = (
   const skipView = options.skipViewFilter === true
   const skipStage = options.skipStageFilter === true
   const skipAdvanced = options.skipAdvancedFilter === true
-  return threads.filter((thread) => (
-    matchesSearchInternal(thread, state.search) &&
-    (skipStage || matchesStageSelection(thread, state.stage)) &&
-    (skipView || matchesViewSelection(thread, state.view)) &&
-    (skipAdvanced || matchesAdvancedFilters(thread, state.advanced))
-  ))
+  const view = state.view
+  const allowArchived = view === 'archived'
+    || view === 'all_conversations'
+    || view === 'all_messages'
+    || (view as string) === 'all'
+  return threads.filter((thread) => {
+    // Archive is always enforced client-side so optimistic archive immediately
+    // removes the thread from operational buckets without a full refresh.
+    // Archived threads remain reachable via All Threads / search / archived.
+    const isArchived = Boolean(thread.isArchived || (thread as any).is_archived)
+    if (isArchived && !allowArchived) return false
+    return matchesSearchInternal(thread, state.search)
+      && (skipStage || matchesStageSelection(thread, state.stage))
+      && (skipView || matchesViewSelection(thread, state.view))
+      && (skipAdvanced || matchesAdvancedFilters(thread, state.advanced))
+  })
 }
 
 export const getPriorityInboxThreads = (threads: InboxWorkflowThread[]): InboxWorkflowThread[] =>

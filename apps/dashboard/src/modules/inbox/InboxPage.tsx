@@ -170,6 +170,7 @@ import {
 import {
   activeContextMatchesThread,
   dealContextFromActiveInbox,
+  dealContextMatchesThread,
   findThreadByRef,
   findThreadForActiveContext,
   hasEntityAnchor,
@@ -752,6 +753,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // Stable ref to selected thread — lets message effect depend on key (string) not object reference
   const selectedRef = useRef<InboxWorkflowThread | null>(null)
   const selectedThreadFallbackRef = useRef<InboxWorkflowThread | null>(null)
+  const effectiveActiveContextRef = useRef(effectiveActiveContext)
+  effectiveActiveContextRef.current = effectiveActiveContext
   const publishingUniversalRef = useRef(false)
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
@@ -2032,20 +2035,38 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (plan.clearMessageCache) delete messageCacheRef.current[plan.cacheKey]
     const cachedMessages = [...plan.immediate.cachedMessages]
     const cacheKey = plan.cacheKey
+    const selectionChanged = prevSelectedIdRef.current !== thread.id
     prevSelectedIdRef.current = thread.id
     const selectStarted = performance.now()
 
     setThreadTranslations({})
     setThreadViewMode('original')
     setDetectedThreadLanguage(null)
-    setDealContext(plan.immediate.dealContextFallback)
+    // Immediately invalidate record-specific UI. Prefer cache only when it matches this thread.
+    // Never keep a previous thread's deal context for even one frame (cross-thread contamination).
+    const cachedDealContext = dealContextCacheRef.current[cacheKey] ?? null
+    const seedDealContext = cachedDealContext && dealContextMatchesThread(thread, cachedDealContext)
+      ? cachedDealContext
+      : normalizeDealContext(thread as unknown as Record<string, unknown>)
+    if (selectionChanged) {
+      setDealContext(seedDealContext)
+      setThreadIntelligence(null)
+      setThreadContext(plan.immediate.threadContextSeed)
+      setPropertyParticipants([])
+      setSelectedParticipant(null)
+      setMasterOwnerHouseholdLabel(null)
+      setNextEligibleContact(null)
+      setContextLoading(true)
+    } else {
+      setDealContext(seedDealContext)
+      setThreadContext(plan.immediate.threadContextSeed)
+      setThreadIntelligence(plan.immediate.intelligenceSeed)
+      setContextLoading(plan.immediate.contextLoading)
+    }
     setSelectedMessages(plan.immediate.selectedMessages)
     setMessagesLoading(plan.immediate.messagesLoading)
     setHasOlderMessages(false)
     setOlderMessagesLoading(false)
-    setContextLoading(plan.immediate.contextLoading)
-    setThreadContext(plan.immediate.threadContextSeed)
-    setThreadIntelligence(plan.immediate.intelligenceSeed)
 
     if (DEV) console.log('[SMOOTH_THREAD_SELECT]', { key: selectedKeyForEffect, refetch: messageRefetchKey > 0, cacheHit: plan.telemetry.cacheHit })
 
@@ -2134,13 +2155,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         },
         onDossier: (result) => {
           if (result.dealContext) {
-            setDealContext(result.dealContext)
-            dealContextCacheRef.current[cacheKey] = result.dealContext
-            const dossierContext = buildThreadContextFromDealContext(result.dealContext)
-            if (dossierContext) setThreadContext(dossierContext)
+            // Only commit deal context that still matches the selected thread identity.
+            if (dealContextMatchesThread(thread, result.dealContext) || !thread.propertyId) {
+              setDealContext(result.dealContext)
+              dealContextCacheRef.current[cacheKey] = result.dealContext
+              const dossierContext = buildThreadContextFromDealContext(result.dealContext)
+              if (dossierContext) setThreadContext(dossierContext)
+            }
           }
           if (result.intelligence) {
-            setThreadIntelligence((current) => ({ ...(current ?? {}), ...result.intelligence }))
+            // Replace — never merge prior-thread intelligence into the new selection.
+            setThreadIntelligence({
+              ...((thread ?? {}) as unknown as ThreadIntelligenceRecord),
+              ...result.intelligence,
+            })
           }
           setContextLoading(false)
         },
@@ -3523,6 +3551,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     let cancelled = false
     const controller = new AbortController()
+    // Clear previous-property participants immediately so UI never shows the wrong household.
+    setPropertyParticipants([])
+    setSelectedParticipant(null)
+    setMasterOwnerHouseholdLabel(null)
+    setNextEligibleContact(null)
     setPropertyParticipantsLoading(true)
     const fallbackSeed = selected ? (() => {
       const selectedRecord = selected as unknown as Record<string, unknown>
@@ -3643,7 +3676,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const active = effectiveActiveContext
     const hasAnchor = Boolean(active.threadKey || active.propertyId || active.masterOwnerId || active.sellerId || active.opportunityId)
     if (!hasAnchor) return
-    if (selected && activeContextMatchesThread(active, selected) && dealContext) return
+    // Selected-thread hydration is owned by the thread-select effect. This path only
+    // hydrates entity anchors when there is no selected thread yet (pipeline/map/queue).
+    if (selected && activeContextMatchesThread(active, selected)) return
 
     let cancelled = false
     const controller = new AbortController()
@@ -3652,7 +3687,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const cachedDealContext = cacheKey ? dealContextCacheRef.current[cacheKey] : null
     if (cachedDealContext) {
       setDealContext(cachedDealContext)
-    } else if (fallback && !dealContext) {
+    } else if (fallback) {
       setDealContext(fallback)
     }
 
@@ -3666,18 +3701,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           hydrated = await getDealContextByProperty(active.propertyId, controller.signal)
         }
         if (cancelled || !hydrated) return
+        // Stale guard: only commit if anchor is still current and no thread has been selected
+        // that would own deal context via the select effect.
+        const stillActive = (
+          (active.threadKey && effectiveActiveContextRef.current?.threadKey === active.threadKey)
+          || (active.propertyId && effectiveActiveContextRef.current?.propertyId === active.propertyId)
+          || (active.masterOwnerId && effectiveActiveContextRef.current?.masterOwnerId === active.masterOwnerId)
+          || (active.sellerId && effectiveActiveContextRef.current?.sellerId === active.sellerId)
+        )
+        if (!stillActive) return
+        if (selectedRef.current && activeContextMatchesThread(active, selectedRef.current) === false) return
         if (cacheKey) dealContextCacheRef.current[cacheKey] = hydrated
-        if (selected && !activeContextMatchesThread(active, selected)) return
-        setDealContext((current) => {
-          if (!current) return hydrated
-          return {
-            ...hydrated,
-            ...current,
-            ownerName: current.ownerName || hydrated.ownerName,
-            propertyAddress: current.propertyAddress || hydrated.propertyAddress,
-            market: current.market || hydrated.market,
-          }
-        })
+        // Replace — never merge previous-thread fields over newly hydrated identity.
+        setDealContext(hydrated)
       } catch {
         /* hydration is best-effort */
       }
@@ -3688,13 +3724,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       controller.abort()
     }
   }, [
-    dealContext,
     effectiveActiveContext.masterOwnerId,
     effectiveActiveContext.opportunityId,
     effectiveActiveContext.propertyId,
     effectiveActiveContext.sellerId,
     effectiveActiveContext.threadKey,
-    selected,
+    selectedKeyForEffect,
   ])
 
   const syncOpportunityContext = useCallback((opportunity: PipelineOpportunity, mode: 'select' | 'preview') => {
@@ -4611,6 +4646,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         participants={propertyParticipants}
         selectedParticipant={selectedParticipant}
         prospectName={selected ? resolveThreadPrimaryName(selected) : null}
+        householdLabel={masterOwnerHouseholdLabel}
         loading={propertyParticipantsLoading}
         onSelectParticipant={handleParticipantSelect}
         onTryNextEligible={handleTryNextEligible}

@@ -208,11 +208,12 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
     return null
   })()
 
+  // New Replies is a disposition work queue — is_read alone must never mark it stale.
   const backendBucketIsStale = bucketFromBackend === 'new_replies' && (
     direction !== 'inbound'
     || isSuppressed
     || isDead
-    || isRead
+    || isArchived
     || hasAny(intent, ['not_interested', 'wrong_number', 'opt_out', 'stop', 'dnc'])
   )
 
@@ -243,9 +244,11 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   } else if (followUpIntent || followUpStage || Boolean(followUpAt)) {
     bucket = 'follow_up'
     reasons.push(followUpAt ? 'follow_up_at scheduled' : 'soft rejection follow-up')
-  } else if (direction === 'inbound' && isUnread && !isArchived) {
+  } else if (direction === 'inbound' && !isArchived) {
+    // Disposition work queue: stay in New Replies until outbound response or terminal disposition.
+    // Opening/reading alone must NOT remove the thread (is_read ignored).
     bucket = 'new_replies'
-    reasons.push('latest inbound unread')
+    reasons.push(isUnread ? 'latest inbound awaiting disposition' : 'inbound read but not yet dispositioned')
   } else if (needsReviewIntent || isLowConfidence || missingClassificationInbound) {
     bucket = 'needs_review'
     reasons.push('unclear/low-confidence/ambiguous inbound')

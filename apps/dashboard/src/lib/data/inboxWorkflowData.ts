@@ -202,7 +202,18 @@ const mapWorkflowPatchToCanonical = (
       canonical.operational_status = 'needs_review'
     }
   }
-  if (patch.automationState === 'paused') canonical.operational_status = 'paused'
+  // Automation pause is independent of operational_status (lead pipeline status).
+  // Auto-reply engine reads automation_state (running|paused|manual).
+  if (patch.automationState === 'paused') {
+    canonical.automation_state = 'paused'
+    canonical.automation_status = 'paused'
+  } else if (patch.automationState === 'active') {
+    canonical.automation_state = 'running'
+    canonical.automation_status = 'active'
+  } else if (patch.automationState === 'manual_control') {
+    canonical.automation_state = 'manual'
+    canonical.automation_status = 'manual'
+  }
   if (patch.isHotLead) canonical.lead_temperature = 'hot'
 
   return canonical
@@ -953,11 +964,19 @@ export const snoozeThread = async (thread: InboxThread): Promise<WorkflowMutatio
 }
 
 export const pauseAutomation = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { automationState: 'paused' } as any)
+  return toWorkflowResult(await persistUniversalLeadState(toThreadKey(thread), {
+    automation_state: 'paused',
+    automation_status: 'paused',
+    paused_reason: 'manual_pause',
+  }, { source_view: 'inbox' }))
 }
 
 export const resumeAutomation = async (thread: InboxThread): Promise<WorkflowMutationResult> => {
-  return persistWorkflowPatch(thread, { automationState: 'active' } as any)
+  return toWorkflowResult(await persistUniversalLeadState(toThreadKey(thread), {
+    automation_state: 'running',
+    automation_status: 'active',
+    paused_reason: null,
+  }, { source_view: 'inbox' }))
 }
 
 export const retryFailedSend = async (thread: InboxThread): Promise<WorkflowMutationResult> => {

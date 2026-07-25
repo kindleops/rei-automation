@@ -99,13 +99,34 @@ const BUCKETS: BucketConfig[] = [
   { bucket: 'all_messages', view: 'all_conversations', label: 'All Threads', shortLabel: 'All', icon: '📦', description: 'Canonical thread universe', accentClass: 'is-neutral', countKey: 'all_messages' },
 ]
 
-const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
-  BUCKETS[0],
-  BUCKETS[1],
-  BUCKETS[2],
-  BUCKETS[3],
-  BUCKETS[8],
-]
+const DEFAULT_VISIBLE_INBOX_KEYS = ['priority', 'new_replies', 'needs_review', 'waiting', 'all_messages'] as const
+const INBOX_VISIBILITY_PREF_KEY = 'nx.inbox.visible-buckets.v1'
+
+const readVisibleInboxKeys = (): string[] => {
+  if (typeof window === 'undefined') return [...DEFAULT_VISIBLE_INBOX_KEYS]
+  try {
+    const raw = window.localStorage.getItem(INBOX_VISIBILITY_PREF_KEY)
+    if (!raw) return [...DEFAULT_VISIBLE_INBOX_KEYS]
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return [...DEFAULT_VISIBLE_INBOX_KEYS]
+    const valid = parsed
+      .map((value) => String(value ?? '').trim())
+      .filter((key) => BUCKETS.some((bucket) => bucket.bucket === key || bucket.countKey === key))
+    // Always keep at least one visible bucket so the nav never collapses empty.
+    return valid.length > 0 ? valid : [...DEFAULT_VISIBLE_INBOX_KEYS]
+  } catch {
+    return [...DEFAULT_VISIBLE_INBOX_KEYS]
+  }
+}
+
+const writeVisibleInboxKeys = (keys: string[]) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(INBOX_VISIBILITY_PREF_KEY, JSON.stringify(keys))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 type LocalSavedFilter = {
   id: string
@@ -1225,6 +1246,31 @@ const _DealSnapshotPlaceholder = ({ thread, decision }: any) => {
   )
 }
 
+// Inject once — Manage Inboxes popover (preference UI only).
+if (typeof document !== 'undefined' && !document.getElementById('nx-manage-inboxes-css')) {
+  const style = document.createElement('style')
+  style.id = 'nx-manage-inboxes-css'
+  style.textContent = `
+    .nx-cat-nav__manage { position: relative; display: inline-flex; align-items: center; }
+    .nx-manage-inboxes {
+      position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+      min-width: 220px; max-width: 280px; padding: 10px;
+      border-radius: 12px; border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(10, 14, 22, 0.96); box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+    }
+    .nx-manage-inboxes__head { display: grid; gap: 2px; margin-bottom: 8px; }
+    .nx-manage-inboxes__head strong { font-size: 12px; color: var(--nexus-text, #e8edf7); }
+    .nx-manage-inboxes__head span { font-size: 10px; color: var(--nexus-muted, #9ba8c0); }
+    .nx-manage-inboxes__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .nx-manage-inboxes__row {
+      display: flex; align-items: center; gap: 8px; font-size: 12px;
+      color: var(--nexus-text, #e8edf7); cursor: pointer; padding: 4px 2px;
+    }
+    .nx-manage-inboxes__row input { accent-color: #5bb6ff; }
+  `
+  document.head.appendChild(style)
+}
+
 export const InboxSidebar = ({
   threads, selectedId, activeViewFilter, onSelect, onThreadAction, savedPreset, onApplySavedPreset,
   viewCounts, onOpenAdvancedFilters, activeFilterChips = [], activeFilterCount = 0,
@@ -1246,6 +1292,9 @@ export const InboxSidebar = ({
   const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loadMoreLoading, setLoadMoreLoading] = useState(false)
+  const [visibleInboxKeys, setVisibleInboxKeys] = useState<string[]>(() => readVisibleInboxKeys())
+  const [manageInboxesOpen, setManageInboxesOpen] = useState(false)
+  const manageInboxesRef = useRef<HTMLDivElement | null>(null)
   const prevThreadsLengthRef = useRef(threads.length)
   const inboxLoadFailed = Boolean(formatLoadingError(loadingError)) && threads.length === 0
   const canonicalActiveView = useMemo<InboxViewSelectValue>(() => {
@@ -1261,9 +1310,43 @@ export const InboxSidebar = ({
   const activeBucketConfig = useMemo(
     () => BUCKETS.find((bucket) => bucket.view === canonicalActiveView)
       ?? BUCKETS.find((bucket) => bucket.bucket === 'all_messages')
-      ?? VISIBLE_INBOX_CHIPS[VISIBLE_INBOX_CHIPS.length - 1],
+      ?? BUCKETS[BUCKETS.length - 1],
     [canonicalActiveView],
   )
+
+  const visibleInboxChips = useMemo(() => {
+    const keySet = new Set(visibleInboxKeys)
+    const ordered = BUCKETS.filter((bucket) => keySet.has(bucket.bucket) || keySet.has(bucket.countKey))
+    // Always surface the active bucket even if the user hid it, so selection remains reachable.
+    if (!ordered.some((bucket) => bucket.view === canonicalActiveView || bucket.bucket === activeBucketConfig.bucket)) {
+      ordered.unshift(activeBucketConfig)
+    }
+    return ordered.length > 0
+      ? ordered
+      : BUCKETS.filter((b) => (DEFAULT_VISIBLE_INBOX_KEYS as readonly string[]).includes(b.bucket))
+  }, [visibleInboxKeys, canonicalActiveView, activeBucketConfig])
+
+  const toggleInboxVisibility = useCallback((bucketKey: string) => {
+    setVisibleInboxKeys((current) => {
+      const next = current.includes(bucketKey)
+        ? current.filter((key) => key !== bucketKey)
+        : [...current, bucketKey]
+      const safe = next.length > 0 ? next : [bucketKey]
+      writeVisibleInboxKeys(safe)
+      return safe
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!manageInboxesOpen) return
+    const onDown = (event: MouseEvent) => {
+      if (manageInboxesRef.current?.contains(event.target as Node)) return
+      setManageInboxesOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [manageInboxesOpen])
+
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
   const [savedFilters, setSavedFilters] = useState<LocalSavedFilter[]>([])
   const [showManageLists, setShowManageLists] = useState(false)
@@ -1360,10 +1443,13 @@ export const InboxSidebar = ({
     onLoadMore()
   }, [onLoadMore, activeViewFilter])
 
-  // Only scroll to the selected thread when it is outside the visible area.
-  // Unconditional scrollIntoView was the primary cause of the list jumping on every click.
+  // Only scroll to the selected thread when selection itself changes and the row
+  // is outside the visible area. Do NOT depend on visibleThreadCount — Load More
+  // must not re-scroll the list underneath the operator.
   useEffect(() => {
     if (!selectedId) return
+    // Skip while restoring scroll after Load More.
+    if (scrollPreserveRef.current !== null) return
     const root = groupsRef.current
     if (!root) return
     const selectedNode = root.querySelector<HTMLElement>(`[data-thread-id="${selectedId}"]`)
@@ -1374,7 +1460,7 @@ export const InboxSidebar = ({
     if (!isAlreadyVisible) {
       selectedNode.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
-  }, [selectedId, activeBucketConfig, visibleThreadCount])
+  }, [selectedId, activeBucketConfig.bucket])
 
   // After new rows are appended by Load More, restore the scroll position that was
   // captured in scrollPreserveRef so the viewport doesn't jump to the top.
@@ -1451,7 +1537,7 @@ export const InboxSidebar = ({
         </div>
       )}
       <div className="nx-cat-nav" ref={catNavRef} role="tablist" aria-label="Inbox categories">
-        {VISIBLE_INBOX_CHIPS.map((item) => {
+        {visibleInboxChips.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
           const showUnread = item.bucket === 'new_replies' && Number(countValue ?? 0) > 0
@@ -1478,6 +1564,48 @@ export const InboxSidebar = ({
             </button>
           )
         })}
+        <div className="nx-cat-nav__manage" ref={manageInboxesRef}>
+          <button
+            type="button"
+            className={cls('nx-cat-nav__item', 'is-manage', manageInboxesOpen && 'is-active')}
+            title="Manage which inbox categories are visible"
+            aria-haspopup="dialog"
+            aria-expanded={manageInboxesOpen}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setManageInboxesOpen((open) => !open)
+            }}
+          >
+            <span className="nx-cat-nav__icon" aria-hidden="true">⚙</span>
+            <span className="nx-cat-nav__label">Manage</span>
+          </button>
+          {manageInboxesOpen ? (
+            <div className="nx-manage-inboxes" role="dialog" aria-label="Manage inboxes">
+              <header className="nx-manage-inboxes__head">
+                <strong>Manage Inboxes</strong>
+                <span>Visibility preference only — does not change records</span>
+              </header>
+              <ul className="nx-manage-inboxes__list">
+                {BUCKETS.map((item) => {
+                  const checked = visibleInboxKeys.includes(item.bucket) || visibleInboxKeys.includes(item.countKey)
+                  return (
+                    <li key={item.bucket}>
+                      <label className="nx-manage-inboxes__row">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleInboxVisibility(item.bucket)}
+                        />
+                        <span>{item.icon} {item.label}</span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       </div>
       {activeBucketConfig.bucket === 'cold' && (
         <div className="nx-cold-stale-chips" role="group" aria-label="Cold follow-up age filter">
