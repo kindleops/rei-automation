@@ -3904,8 +3904,9 @@ function resolveIntents(
     intents.push("property_correction");
   }
 
-  // 2.6 AMBIGUOUS SHORT UTTERANCES — insufficient evidence for routing
-  if (/^(maybe|huh|hmm|idk|dunno|eh)[\s?!.]*$/i.test(text.trim())) {
+  // 2.6 AMBIGUOUS SHORT UTTERANCES — insufficient evidence for routing.
+  // Bare hedges without sell/offer context must NOT become seller interest.
+  if (/^(maybe|possibly|perhaps|huh|hmm|idk|dunno|eh)[\s?!.]*$/i.test(text.trim())) {
     return finalizeIntentResult({
       primary_intent: "unclear",
       matched_rule_ids: ["ambiguous_short"],
@@ -4005,7 +4006,7 @@ function resolveIntents(
     intents.push("info_request");
   }
 
-  const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling)\b/i;
+  const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling|would consider selling)\b/i;
   if (positive_interest_regex.test(text)) {
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("seller_interested");
@@ -4145,11 +4146,20 @@ function resolveIntents(
   }
 
   // 10. LATENT INTEREST / VAGUE NEGOTIATION
-  if (includesAny(text, [
-    "interested", "depends", "depending", "maybe", "possibly",
-    "if the price is right", "enough money", "make it worth it",
-    "me interesa", "si el precio", "if the price",
-  ])) {
+  // Conditional-sale language requires a sell/offer/price frame so bare hedges
+  // ("maybe", "possibly") stay unclear via the short-utterance guard above.
+  const conditional_sale_interest_re =
+    /\b(?:(?:i|we)\s+)?(?:might|may|could)\s+(?:sell|be\s+interested)|(?:i'?d|i\s+would|we\s+would|i'?ll|i\s+will)\s+consider\s+(?:selling|it)|(?:maybe|possibly)\s+(?:i|we|i'?d)\s+(?:would\s+)?(?:sell|consider)|for\s+the\s+right\s+price|if\s+the\s+(?:price|offer)\s+is\s+right|depends\s+on\s+(?:the\s+)?(?:price|offer)|open\s+to\s+(?:selling|an\s+offer|offers)|could\s+be\s+interested\b/i;
+  if (
+    includesAny(text, [
+      "interested", "depends", "depending", "maybe", "possibly",
+      "if the price is right", "enough money", "make it worth it",
+      "me interesa", "si el precio", "if the price",
+      "might sell", "may sell", "could sell", "consider selling",
+      "for the right price", "depends on the offer", "depends on price",
+    ]) ||
+    conditional_sale_interest_re.test(text)
+  ) {
     if (!intents.includes("seller_interested") && !intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("latent_interest");
     }

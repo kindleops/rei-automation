@@ -25,8 +25,44 @@ import {
   normalizeLeadTemperature,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { ACQUISITION_LIFECYCLE_EVENTS } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
+import { resolveSellerAuthorityState } from "@/lib/domain/seller-flow/seller-authority-state.js";
 
-export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v1";
+export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v2_authority_gated";
+
+/**
+ * Stage index of the first offer-bearing lifecycle stage (S5 `offer`). The
+ * authority gate and listing/agent gate cap advancement below this index
+ * whenever canonical policy withholds automated offer progression.
+ */
+const OFFER_STAGE_IDX = 4;
+
+/** Template use cases that reveal or finalize an offer. */
+const OFFER_TEMPLATE_USE_CASES = new Set([
+  "offer_reveal_cash",
+  "initial_offer",
+  "conditional_offer",
+  "counter_offer",
+  "final_offer",
+]);
+
+/**
+ * Canonical listing/agent statuses that divert off direct-owner automated
+ * offer progression (mirrors Stage 2 LISTED_WITH_AGENT / AGENT_OR_REALTOR
+ * policy: listed_backup + review, not GENERATE_OFFER).
+ */
+const LISTING_BLOCKS_AUTOMATED_OFFER = new Set([
+  "listed_with_agent",
+  "agent_involved",
+]);
+
+/**
+ * Whether durable listing/agent facts require the listed-backup / review path
+ * instead of automated direct-owner offer progression.
+ * Reuses Stage 2 outcomes: listed_with_agent, agent_or_realtor_involved.
+ */
+export function listingBlocksAutomatedOffer(facts = {}) {
+  return LISTING_BLOCKS_AUTOMATED_OFFER.has(lower(facts?.listing_status));
+}
 
 /** Canonical next-action vocabulary (spec §9 — exactly one per state change). */
 export const NEXT_ACTIONS = Object.freeze({
@@ -164,6 +200,12 @@ function interestResolved(facts = {}) {
 }
 
 function priceResolved(facts = {}, ade = null) {
+  // The canonical monetary resolver refused this amount as ambiguous. A
+  // refused amount is evidence, never a canonical asking price — S3/S4/S5
+  // readiness must not be satisfiable by it.
+  if (facts.asking_price_needs_clarification === true && !(facts.asking_price?.value > 0)) {
+    return false;
+  }
   if (facts.asking_price?.value > 0) return true;
   // "Make me an offer": S3 resolves without a number only when ADE has
   // sufficient facts to price the deal.
@@ -398,6 +440,10 @@ export function resolveSellerStageTransition({
   engine_decision = null,
   source_message_id = null,
   temperature_signal = null,
+  // Canonical authority predicate (seller-authority-state.js). Supplied by the
+  // orchestrator so the SAME instance gates stage progression and next-best
+  // action; recomputed from facts alone when a caller omits it.
+  authority_state = null,
   now = new Date().toISOString(),
 } = {}) {
   const beforeCode = normalizeLifecycleStage(stage_before);
@@ -506,12 +552,30 @@ export function resolveSellerStageTransition({
 
   // ── 3. Positive / neutral path: fact implications + milestone scan ───────
 
-  // Ownership-conflict guard: one message carrying BOTH an ownership claim
-  // and a denial ("I own it… well, I sold it last year") is evidence in
-  // conflict, never settled truth. Blocking/opt-out paths above still win;
-  // everything else holds the current stage for a human, persists NO
-  // ownership value, and queues nothing.
-  if (new_facts?.ownership_conflict === true) {
+  // Ownership confirmation never silently overwrites a durable denial — that
+  // is a conflict/review state, not automatic re-qualification. Current-turn
+  // negative ownership facts must also never be stamped "confirmed" merely
+  // because the classifier labeled the intent ownership_confirmed.
+  if (intentKey === "ownership_confirmed") {
+    const priorDenied =
+      NEGATIVE_OWNERSHIP.has(lower(known_facts?.ownership_status)) ||
+      lower(known_facts?.ownership_claim) === "denied";
+    const newDenied =
+      NEGATIVE_OWNERSHIP.has(lower(new_facts?.ownership_status)) ||
+      lower(new_facts?.ownership_claim) === "denied";
+    if (newDenied) {
+      // Seller's current words win for this turn; do not stamp confirmed.
+    } else if (priorDenied) {
+      facts.ownership_conflict = true;
+    } else {
+      facts.ownership_status = "confirmed";
+    }
+  }
+
+  // Ownership-conflict guard: same-message contradictions OR cross-turn
+  // durable denial + current positive claim. Blocking/opt-out paths above
+  // still win; everything else holds the stage for a human and queues nothing.
+  if (new_facts?.ownership_conflict === true || facts.ownership_conflict === true) {
     return {
       ...base,
       facts_patch: { ...facts, ownership_conflict: true },
@@ -536,8 +600,6 @@ export function resolveSellerStageTransition({
       evaluate_alternate_contact: false,
     };
   }
-
-  if (intentKey === "ownership_confirmed") facts.ownership_status = "confirmed";
   if (intentKey === "seller_interested" || intentKey === "latent_interest") {
     facts.interest = facts.interest || "interested";
   }
@@ -563,7 +625,59 @@ export function resolveSellerStageTransition({
     disposition: disposition_state,
     closing,
   });
-  const afterIdx = Math.max(beforeIdx, unresolvedIdx);
+  // ── Authority gate (shared canonical predicate) ──────────────────────────
+  // Ownership + interest + price + condition are NOT sufficient to enter an
+  // offer-bearing stage. When the canonical authority predicate withholds
+  // offer progression (unresolved spouse/co-owner signoff, trust/LLC/estate
+  // authority, probate/heirship), the lifecycle is capped BELOW the offer
+  // stage before anything is persisted — so the stored stage, the next
+  // action, the template and the outbound decision all agree.
+  const authority = authority_state || resolveSellerAuthorityState({
+    message: "",
+    known_facts: facts,
+    new_facts,
+    contract_state,
+  });
+
+  let afterIdx = Math.max(beforeIdx, unresolvedIdx);
+  let authority_gate = null;
+  if (!authority.offer_progression_allowed && afterIdx >= OFFER_STAGE_IDX) {
+    // Monotonicity still holds: a deal already at S5+ never regresses, but its
+    // action/template are overridden below.
+    const gatedIdx = Math.max(beforeIdx, Math.min(afterIdx, OFFER_STAGE_IDX - 1));
+    authority_gate = {
+      applied: true,
+      block_reason: authority.block_reason,
+      ownership_structure: authority.ownership_structure,
+      signer_gap: authority.signer_gap,
+      probate_detected: authority.probate_detected,
+      heirship_detected: authority.heirship_detected,
+      capped_from_stage: stageAt(afterIdx),
+      capped_to_stage: stageAt(gatedIdx),
+      stage_capped: gatedIdx < afterIdx,
+    };
+    afterIdx = gatedIdx;
+  }
+
+  // ── Listing / agent gate (canonical Stage 2 listed-backup policy) ────────
+  // When listing_status is listed_with_agent or agent_involved, Stage 2 routes
+  // to listed_backup + review — never automated GENERATE_OFFER. Cap below the
+  // offer stage and force review so persisted lifecycle cannot disagree with
+  // V2 response_strategy.offer_allowed=false / handle_agent_involvement.
+  let listing_gate = null;
+  const listingBlocksOffer = listingBlocksAutomatedOffer(facts);
+  if (listingBlocksOffer && afterIdx >= OFFER_STAGE_IDX) {
+    const gatedIdx = Math.max(beforeIdx, Math.min(afterIdx, OFFER_STAGE_IDX - 1));
+    listing_gate = {
+      applied: true,
+      listing_status: lower(facts.listing_status),
+      policy: "listed_backup_review",
+      capped_from_stage: stageAt(afterIdx),
+      capped_to_stage: stageAt(gatedIdx),
+      stage_capped: gatedIdx < afterIdx,
+    };
+    afterIdx = gatedIdx;
+  }
   const afterCode = stageAt(afterIdx);
 
   // Temperature floor by engagement depth, then by the explainable signal
@@ -616,6 +730,62 @@ export function resolveSellerStageTransition({
     templateUseCase = "signature_reminder";
   }
 
+  // Authority gate, part 2: strip any offer/contract-bearing action or
+  // template. This also covers a deal already sitting at S5+ (where the stage
+  // cannot regress) — the ACTION is still withheld. Fails closed to review
+  // with no template, so nothing can be queued while authority is unresolved.
+  const OFFER_BEARING_ACTIONS = new Set([
+    NEXT_ACTIONS.GENERATE_OFFER,
+    NEXT_ACTIONS.GENERATE_CONTRACT,
+    NEXT_ACTIONS.NEGOTIATE,
+    NEXT_ACTIONS.AWAIT_SIGNATURE,
+  ]);
+  if (
+    !authority.offer_progression_allowed &&
+    (OFFER_BEARING_ACTIONS.has(nextAction) || OFFER_TEMPLATE_USE_CASES.has(templateUseCase))
+  ) {
+    nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
+    templateUseCase = null;
+    authority_gate = {
+      ...(authority_gate || { applied: true, block_reason: authority.block_reason }),
+      action_withheld: true,
+    };
+  }
+
+  // Listing/agent gate, part 2: same fail-closed action strip as authority.
+  // Stage 2 listed_backup uses template "already_listed" under review — never
+  // an offer-bearing template or GENERATE_OFFER next action.
+  if (
+    listingBlocksOffer &&
+    (OFFER_BEARING_ACTIONS.has(nextAction) || OFFER_TEMPLATE_USE_CASES.has(templateUseCase))
+  ) {
+    nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
+    templateUseCase = "already_listed";
+    listing_gate = {
+      ...(listing_gate || {
+        applied: true,
+        listing_status: lower(facts.listing_status),
+        policy: "listed_backup_review",
+      }),
+      action_withheld: true,
+    };
+  } else if (listingBlocksOffer && !OFFER_BEARING_ACTIONS.has(nextAction)) {
+    // Even when not at offer stage, listed/agent requires review/reroute so
+    // persisted next_action cannot keep a direct-owner acquisition path.
+    nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
+    if (!templateUseCase || OFFER_TEMPLATE_USE_CASES.has(templateUseCase)) {
+      templateUseCase = "already_listed";
+    }
+    listing_gate = {
+      ...(listing_gate || {
+        applied: true,
+        listing_status: lower(facts.listing_status),
+        policy: "listed_backup_review",
+      }),
+      action_withheld: true,
+    };
+  }
+
   // Low-confidence or unclear input never advances silently — review instead.
   const confidence = typeof classification_confidence === "number" ? classification_confidence : null;
   const ambiguous = intentKey === "unclear" || intentKey === "reaction_only" || intentKey === "acknowledgement";
@@ -649,31 +819,59 @@ export function resolveSellerStageTransition({
       workflow_event_types: [],
       follow_up: { create: false, cancel: false, replace: false, days: null, due_at: null },
       evaluate_alternate_contact: false,
+      listing_gate,
     };
   }
 
-  const reviewRequired = lowConfidence;
-  const reasoning = afterIdx > beforeIdx
-    ? `${stageShort(beforeCode)}_TO_${stageShort(afterCode)}_${intentKey.toUpperCase()}`
-    : `${stageShort(beforeCode)}_HOLD_${intentKey.toUpperCase()}`;
+  const authorityReview = Boolean(authority_gate?.applied);
+  const listingReview = Boolean(listing_gate?.applied);
+  const reviewRequired = lowConfidence || authorityReview || listingReview;
+  const reasoning = authority_gate?.applied
+    ? `${stageShort(beforeCode)}_HOLD_AUTHORITY_${String(authority.block_reason || "unresolved").toUpperCase()}`
+    : listing_gate?.applied
+      ? `${stageShort(beforeCode)}_HOLD_LISTING_${String(facts.listing_status || "agent").toUpperCase()}`
+    : afterIdx > beforeIdx
+      ? `${stageShort(beforeCode)}_TO_${stageShort(afterCode)}_${intentKey.toUpperCase()}`
+      : `${stageShort(beforeCode)}_HOLD_${intentKey.toUpperCase()}`;
+
+  // Listed/agent policy uses Stage 2 already_listed under review. Authority /
+  // low-confidence review strips templates. Offer templates never survive.
+  let finalTemplate = templateUseCase;
+  if (reviewRequired) {
+    finalTemplate = listingReview ? "already_listed" : null;
+  }
 
   return {
     ...base,
+    authority_state: authority,
+    authority_gate,
+    listing_gate,
     stage_after: afterCode,
     stage_after_number: afterIdx + 1,
     advanced: afterIdx > beforeIdx,
     stages_advanced: afterIdx - beforeIdx,
-    operational_status: OPERATIONAL_STATUS_CODES.ACTIVE_COMMUNICATION,
+    // Any final human-review transition must surface as NEEDS_REVIEW so inbox
+    // consumers keying off operational_status agree with next_action.
+    // Blocking/suppression paths return earlier with stronger statuses.
+    operational_status: reviewRequired
+      ? OPERATIONAL_STATUS_CODES.NEEDS_REVIEW
+      : OPERATIONAL_STATUS_CODES.ACTIVE_COMMUNICATION,
     lead_temperature: temperature,
     disposition: interestResolved(facts) ? DISPOSITION_CODES.INTERESTED : current_disposition || null,
     contactability_patch: null,
     ownership_patch: facts.ownership_status ? { ownership_status: facts.ownership_status } : null,
     next_action: reviewRequired ? NEXT_ACTIONS.HUMAN_REVIEW : nextAction,
     next_action_due_at: now,
-    required_template_use_case: templateUseCase,
+    required_template_use_case: finalTemplate,
     ade_action: adeAction,
     review_required: reviewRequired,
-    review_reason: reviewRequired ? "low_confidence_advancement" : null,
+    review_reason: authorityReview
+      ? authority.block_reason || "authority_unresolved"
+      : listingReview
+        ? `listing_${lower(facts.listing_status) || "agent_involved"}`
+      : reviewRequired
+        ? "low_confidence_advancement"
+        : null,
     reasoning_code: reasoning,
     workflow_event_types: advancementEvents(beforeIdx, afterIdx, facts, intentKey),
     follow_up: {

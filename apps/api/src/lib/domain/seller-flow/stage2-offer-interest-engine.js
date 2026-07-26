@@ -253,17 +253,22 @@ const CONDITIONAL_PHRASES = [
   "depends", "it depends", "depends on price", "depends on the price",
   "depends on your offer", "depends on the offer", "depends on how much",
   "if the price is right", "if the offer is right", "if it's worth it",
-  "possibly", "perhaps", "might be", "maybe",
+  "for the right price", "possibly", "perhaps", "might be", "maybe",
+  // Conditional-sale language (sell/offer frame required — not bare hedges alone)
+  "might sell", "may sell", "i might sell", "i may sell", "we might sell",
+  "would consider selling", "i'd consider selling", "i would consider selling",
+  "i would consider it", "i'd consider it", "could be interested",
+  "i could be interested", "maybe i would sell", "maybe i'd sell",
   // Spanish
   "depende", "depende del precio", "depende de la oferta", "tal vez", "quizás",
-  "quizas", "puede ser", "posiblemente",
+  "quizas", "puede ser", "posiblemente", "podría vender", "podria vender",
 ];
 
 const AFFIRMATIVE_INTEREST_PHRASES = [
   "yes", "yeah", "yep", "yup", "sure", "absolutely", "of course", "definitely",
   "i'm interested", "im interested", "interested", "i would sell", "i'd sell",
   "willing to sell", "open to selling", "open to an offer", "i'm open", "im open",
-  "let's talk", "lets talk", "i could sell", "ready to sell",
+  "let's talk", "lets talk", "i could sell", "ready to sell", "considering selling",
   // Spanish
   "sí", "si", "claro", "por supuesto", "me interesa", "interesado", "interesada",
   "estoy interesado", "estoy interesada", "dispuesto a vender", "abierto a",

@@ -27,6 +27,10 @@ import {
   extractSellerFacts,
   extractionToResolverFacts,
 } from "@/lib/domain/seller-flow/extract-seller-facts.js";
+import { resolveSellerAuthorityState } from "@/lib/domain/seller-flow/seller-authority-state.js";
+import { resolveSellerConversationState } from "@/lib/domain/seller-flow/resolve-seller-conversation-state.js";
+import { resolveSellerNextBestAction } from "@/lib/domain/seller-flow/resolve-seller-next-best-action.js";
+import { resolveSellerResponseStrategy } from "@/lib/domain/seller-flow/resolve-seller-response-strategy.js";
 import { computeTemperatureSignal } from "@/lib/domain/seller-flow/temperature-signal-model.js";
 import {
   NEGOTIATION_ZONES,
@@ -83,6 +87,29 @@ export function __setSellerInboundOrchestratorDeps(overrides = {}) {
 
 export function __resetSellerInboundOrchestratorDeps() {
   runtimeDeps = { ...defaultDeps };
+}
+
+/**
+ * V2 may only NARROW outbound execution. Fail closed: already-computed
+ * conversation-state safety withholds even when response_strategy is null
+ * (resolver threw / next_best_action missing).
+ */
+export function resolveV2ReplyWithhold({
+  conversation_state = null,
+  response_strategy = null,
+} = {}) {
+  const conversation_safety_withholds = Boolean(
+    conversation_state?.safety?.suppression_required === true ||
+      conversation_state?.safety?.human_review_required === true ||
+      conversation_state?.safety?.no_reply_required === true
+  );
+  const strategy_withholds = Boolean(
+    response_strategy &&
+      (response_strategy.no_reply ||
+        response_strategy.human_review_required ||
+        response_strategy.suppression_required)
+  );
+  return strategy_withholds || conversation_safety_withholds;
 }
 
 function clean(value) {
@@ -748,45 +775,109 @@ export async function processSellerInboundMessage({
     },
   });
 
+  // ── Auto Reply Intelligence V2 (deterministic, no AI) ───────────────────
+  // Canonical fact merge → conversation state → authority/readiness → known
+  // vs missing → next-best action. Resolved BEFORE the lifecycle transition so
+  // the SAME authority predicate gates the persisted stage, the next action,
+  // the template and the outbound send. There is exactly one effective
+  // business decision per seller turn.
+  const summary = context?.summary || {};
+  const extracted = contract.extracted_facts || {};
+
+  const canonical_known_facts = {
+    ...(deal_state?.known_facts || {}),
+    ownership_status:
+      summary.ownership_status || deal_state?.known_facts?.ownership_status || null,
+    asking_price: deal_state?.known_facts?.asking_price || summary.asking_price || null,
+    occupancy_status:
+      summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
+  };
+
+  // Monetary authority is absolute: when resolveAskingPriceSignal refuses an
+  // amount as ambiguous, the raw classifier mention (seller_state.price_mentioned)
+  // must NOT be promoted into a canonical asking price. It survives only as
+  // evidence on the extraction record. No "assume thousands" rule exists.
+  const price_clarification_required =
+    price_signal.needs_clarification === true && price_signal.asking_price == null;
+  const resolved_asking_price = price_clarification_required
+    ? null
+    : price_signal.asking_price ??
+      stage_engine_decision?.seller_asking_price ??
+      extracted.asking_price ??
+      null;
+
+  const canonical_new_facts = {
+    ...extraction_facts,
+    asking_price: resolved_asking_price,
+    ...(price_clarification_required
+      ? {
+          asking_price_needs_clarification: true,
+          asking_price_mention_raw:
+            extraction_facts.asking_price_mention_raw ?? extracted.asking_price ?? null,
+        }
+      : {}),
+    condition_summary:
+      typeof extracted.condition === "string"
+        ? extracted.condition
+        : extraction_facts.repairs_summary || null,
+    condition_disclosed:
+      contract.normalized_intent === "condition_disclosed" ||
+      Boolean(extracted.condition) ||
+      extraction_facts.condition_disclosed ||
+      undefined,
+    occupancy_status: extracted.tenant_occupied
+      ? "tenant_occupied"
+      : stage_engine_decision?.occupancy_status || extraction_facts.occupancy_status || null,
+    timeline: extracted.timeline || extraction_facts.timeline || null,
+  };
+
+  const canonical_contract_state =
+    underwritingSignals?.contract_state || deal_state?.contract_state || null;
+
+  // ONE authority predicate instance, shared by the stage resolver and the NBA.
+  const authority_state = resolveSellerAuthorityState({
+    message,
+    known_facts: canonical_known_facts,
+    new_facts: canonical_new_facts,
+    contract_state: canonical_contract_state,
+    entity_type: summary.entity_type || null,
+    vesting_information: summary.vesting_information || null,
+    owner_count: summary.owner_count ?? null,
+  });
+
+  let conversation_state = null;
+  let next_best_action = null;
+  try {
+    conversation_state = resolveSellerConversationState({
+      contract,
+      known_facts: canonical_known_facts,
+      new_facts: canonical_new_facts,
+      negotiation_state: underwritingSignals?.negotiation_state || prior_negotiation_state || null,
+      contract_state: canonical_contract_state,
+      ade_snapshot: persisted_ade,
+      underwriting,
+      message,
+      stage_before: stageBefore || summary.conversation_stage || null,
+      now: new Date().toISOString(),
+    });
+    next_best_action = resolveSellerNextBestAction(conversation_state);
+  } catch (state_error) {
+    runtimeDeps.warn("[SELLER_CONVERSATION_STATE_FAILED]", {
+      thread_key: threadKey || inboundFrom,
+      error: state_error?.message || "conversation_state_failed",
+    });
+  }
+
   // ── Deterministic lifecycle transition (resolved BEFORE the reply is
   // queued so ADE + strategy shape the outbound instead of trailing it).
   let transition = null;
   try {
-    const extracted = contract.extracted_facts || {};
-    const summary = context?.summary || {};
     transition = resolveSellerStageTransition({
       stage_before: stageBefore || summary.conversation_stage || null,
-      known_facts: {
-        ...(deal_state?.known_facts || {}),
-        ownership_status:
-          summary.ownership_status || deal_state?.known_facts?.ownership_status || null,
-        asking_price: deal_state?.known_facts?.asking_price || summary.asking_price || null,
-        occupancy_status:
-          summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
-      },
+      known_facts: canonical_known_facts,
       // Classifier/engine values keep precedence; the evidence-backed
       // extraction fills gaps and stamps extractor_version into facts_patch.
-      new_facts: {
-        ...extraction_facts,
-        asking_price:
-          price_signal.asking_price ??
-          stage_engine_decision?.seller_asking_price ??
-          extracted.asking_price ??
-          null,
-        condition_summary:
-          typeof extracted.condition === "string"
-            ? extracted.condition
-            : extraction_facts.repairs_summary || null,
-        condition_disclosed:
-          contract.normalized_intent === "condition_disclosed" ||
-          Boolean(extracted.condition) ||
-          extraction_facts.condition_disclosed ||
-          undefined,
-        occupancy_status: extracted.tenant_occupied
-          ? "tenant_occupied"
-          : stage_engine_decision?.occupancy_status || extraction_facts.occupancy_status || null,
-        timeline: extracted.timeline || extraction_facts.timeline || null,
-      },
+      new_facts: canonical_new_facts,
       intent:
         intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
       classification_confidence: classification?.confidence ?? null,
@@ -795,10 +886,11 @@ export async function processSellerInboundMessage({
       automation_mode: effective_auto_reply_mode,
       negotiation_state: underwritingSignals?.negotiation_state || prior_negotiation_state || null,
       ade_result: underwritingSignals?.ade_result || deal_state?.ade_result || null,
-      contract_state: underwritingSignals?.contract_state || deal_state?.contract_state || null,
+      contract_state: canonical_contract_state,
       engine_decision: stage_engine_decision,
       source_message_id: providerMessageId || inboundEventId,
       temperature_signal,
+      authority_state,
     });
   } catch (transition_error) {
     runtimeDeps.warn("[SELLER_INBOUND_TRANSITION_RESOLVER_FAILED]", {
@@ -938,6 +1030,40 @@ export async function processSellerInboundMessage({
     comp_anchor_statement: negotiation?.comp_anchor?.authorized_statement || null,
   };
 
+  // ── V2 deterministic response strategy (business decision → wording
+  // contract). Selects no copy: it names an EXISTING template use case and the
+  // constraints on it. Every terminal gate below (suppression, ceiling clamp,
+  // auto_reply_mode, fail-closed template selection) still runs unchanged.
+  let response_strategy = null;
+  if (conversation_state && next_best_action) {
+    try {
+      response_strategy = resolveSellerResponseStrategy({
+        conversation_state,
+        next_best_action,
+        underwriting,
+        ade_snapshot: effective_ade_snapshot,
+      });
+    } catch (strategy_error) {
+      runtimeDeps.warn("[SELLER_RESPONSE_STRATEGY_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: strategy_error?.message || "response_strategy_failed",
+      });
+    }
+  }
+
+  // The V2 layer may only NARROW execution, never widen it. See
+  // resolveV2ReplyWithhold — strategy exceptions must fail closed on safety.
+  const v2_withholds_reply = resolveV2ReplyWithhold({
+    conversation_state,
+    response_strategy,
+  });
+  const v2_should_queue_live = should_queue_live && !v2_withholds_reply;
+
+  // When the authority gate fired, the negotiation strategy directive cannot
+  // steer the outbound either — offer/counter templates are withheld together
+  // with the lifecycle advancement.
+  const authority_gate_applied = Boolean(transition?.authority_gate?.applied);
+
   const execution = await runtimeDeps.executeInboundAutomationDecision({
     message,
     threadKey: threadKey || inboundFrom,
@@ -952,35 +1078,55 @@ export async function processSellerInboundMessage({
     inboundFrom,
     inboundTo,
     inboundEventId,
-    enableQueueInsert: should_queue_live,
+    enableQueueInsert: v2_should_queue_live,
     applySuppression,
-    dryRun: dryRun || !should_queue_live,
+    dryRun: dryRun || !v2_should_queue_live,
     autoReplyMode: effective_auto_reply_mode,
     proofRun,
     scheduleDelaySeconds: inboundAutopilotDelaySeconds,
     timezoneOverride,
     contactWindowOverride,
     dealAuthority: deal_authority,
-    strategyDirective: negotiation?.strategy_decision
-      ? {
-          strategy: negotiation.strategy_decision.strategy,
-          reason_code: negotiation.strategy_decision.reason_code,
-          template_use_case: negotiation.strategy_decision.template_use_case,
-          allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
-          review_required: negotiation.strategy_decision.review_required,
-          review_reason: negotiation.strategy_decision.review_reason,
-          monetary_amount: authorized_amount,
-        }
-      : null,
-    // Lifecycle advancement makes the resolver's outstanding question the
-    // template authority (strategy directive above still wins at S5+).
-    // Holds and blocked intents keep intent-profile conversational routing.
-    transitionDirective:
-      transition && transition.advanced && !transition.review_required && !transition.contactability_patch
+    strategyDirective:
+      negotiation?.strategy_decision && !authority_gate_applied
         ? {
-            required_template_use_case: transition.required_template_use_case,
+            strategy: negotiation.strategy_decision.strategy,
+            reason_code: negotiation.strategy_decision.reason_code,
+            template_use_case: negotiation.strategy_decision.template_use_case,
+            allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
+            review_required: negotiation.strategy_decision.review_required,
+            review_reason: negotiation.strategy_decision.review_reason,
+            monetary_amount: authorized_amount,
+          }
+        : null,
+    // Template authority for next-action selection. The directive applies under
+    // EXACTLY the pre-existing condition (the lifecycle advanced, is not in
+    // review, and is not a contactability change) — lateral intents such as
+    // who_is_this and callback_requested never advance, so they keep
+    // intent-profile conversational routing exactly as before. Within that
+    // window the V2 response strategy chooses the use case, because it is the
+    // only layer that reads known-vs-missing canonical facts; it falls back to
+    // the lifecycle resolver's outstanding question. The S5+ negotiation
+    // directive still wins above; suppression always wins below.
+    //
+    // When V2 withholds the reply the directive is dropped entirely rather
+    // than falling back to the lifecycle template. The lifecycle resolver does
+    // not read listing status, agent involvement or identity conflicts, so its
+    // template can still be an offer reveal on a turn V2 has already ruled
+    // unsafe to answer. Falling back would let the withheld turn name an
+    // offer-bearing template downstream — the exact widening this layer is
+    // forbidden to do.
+    transitionDirective:
+      transition &&
+      transition.advanced &&
+      !transition.review_required &&
+      !transition.contactability_patch &&
+      !v2_withholds_reply
+        ? {
+            required_template_use_case:
+              response_strategy?.template_use_case || transition.required_template_use_case,
             stage_after: transition.stage_after,
-            reasoning_code: transition.reasoning_code,
+            reasoning_code: response_strategy?.reason_code || transition.reasoning_code,
           }
         : null,
     supabaseClient: supabase,
@@ -1659,6 +1805,11 @@ export async function processSellerInboundMessage({
     },
     seller_automation_execution,
     transition,
+    // Auto Reply Intelligence V2 canonical decision chain (deterministic).
+    conversation_state,
+    next_best_action,
+    response_strategy,
+    authority_state,
     deal_persistence,
     acquisition_brain_shadow,
     acquisition_brain_shadow_fact_state,

@@ -21,6 +21,7 @@ function deriveOwnershipSignal({
   classification = {},
   relationship = null,
   ownership_probe = null,
+  secondary_signals = {},
 } = {}) {
   if (relationship?.ownership_confirmed) return OWNERSHIP_SIGNALS.CONFIRMED;
   if (ownership_probe?.ownership_status === "inferred") return OWNERSHIP_SIGNALS.INFERRED;
@@ -37,7 +38,45 @@ function deriveOwnershipSignal({
     return OWNERSHIP_SIGNALS.DENIED;
   }
   if (primary === "not_interested" && ownership_probe) return OWNERSHIP_SIGNALS.INFERRED;
+  // A secondary ownership confirmation is still ownership evidence — it must
+  // not be erased because another signal became primary. Only ever upgrades
+  // UNKNOWN; it can never override a denial resolved above.
+  if (secondary_signals?.ownership_confirmed === true) return OWNERSHIP_SIGNALS.INFERRED;
   return OWNERSHIP_SIGNALS.UNKNOWN;
+}
+
+/**
+ * Project the classifier's secondary intents into a SMALL set of canonical
+ * structured signals.
+ *
+ * Deliberately not a blanket copy of the secondary-intent array: only signals
+ * that (a) a downstream deterministic consumer actually reads and (b) are
+ * safety- or acquisition-relevant are projected. This exists so that a
+ * secondary signal is never erased just because a different signal became
+ * primary — e.g. "Yeah that's mine but I'm not interested" must keep the
+ * ownership evidence alongside the not-interested disposition.
+ */
+const PROJECTED_SECONDARY_SIGNALS = Object.freeze([
+  "ownership_confirmed",
+  "tenant_occupied",
+  "not_interested",
+  "asks_offer",
+  "opt_out",
+  "condition_disclosed",
+]);
+
+function deriveSecondarySignals(classification = {}) {
+  const raw = Array.isArray(classification.secondary_intents)
+    ? classification.secondary_intents
+    : classification.secondary_intent
+      ? [classification.secondary_intent]
+      : [];
+  const normalized = new Set(raw.map((intent) => normalizeCanonicalIntent(intent)));
+  const out = {};
+  for (const signal of PROJECTED_SECONDARY_SIGNALS) {
+    if (normalized.has(signal)) out[signal] = true;
+  }
+  return out;
 }
 
 function deriveInterestSignal(classification = {}) {
@@ -116,6 +155,7 @@ export function normalizeClassificationContract({
   );
   const review = deriveReviewRequirement(classification);
   const seller_state = classification.seller_state || {};
+  const secondary_signals = deriveSecondarySignals(classification);
 
   const contract = {
     message_id: clean(messageId) || clean(inboundEventId) || null,
@@ -141,14 +181,25 @@ export function normalizeClassificationContract({
             relationship: relationship.relationship_claim || null,
           }
         : null,
-      tenant_occupied: seller_state.tenant_occupied === true,
+      tenant_occupied: seller_state.tenant_occupied === true || secondary_signals.tenant_occupied === true,
       creative_finance_open: seller_state.creative_finance_open === true,
     },
-    ownership_signal: deriveOwnershipSignal({ classification, relationship, ownership_probe }),
+    // Canonical structured secondary evidence — see deriveSecondarySignals.
+    secondary_signals,
+    ownership_signal: deriveOwnershipSignal({
+      classification,
+      relationship,
+      ownership_probe,
+      secondary_signals,
+    }),
     interest_signal: deriveInterestSignal(classification),
     wrong_number_signal: normalized_intent === "wrong_number" || relationship?.invalidate_phone_globally === true,
+    // Safety-critical: secondary opt_out (e.g. "yeah it's mine but STOP") must
+    // suppress even when ownership/other signals became primary.
     opt_out_signal:
-      normalized_intent === "opt_out" || clean(classification.compliance_flag) === "stop_texting",
+      normalized_intent === "opt_out" ||
+      clean(classification.compliance_flag) === "stop_texting" ||
+      secondary_signals.opt_out === true,
     ambiguity_review_required: review.required,
     review_reason: review.reason,
     relationship,
