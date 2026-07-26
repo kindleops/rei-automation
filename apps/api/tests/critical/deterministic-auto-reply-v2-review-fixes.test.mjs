@@ -137,6 +137,19 @@ test("F2: durable not_owner + later positive ownership claim is CONFLICTING, not
   assert.notEqual(transition2.next_action, NEXT_ACTIONS.GENERATE_OFFER);
 });
 
+test("F2: ownership_confirmed intent with current-turn denial does not stamp confirmed", () => {
+  const transition = resolveSellerStageTransition({
+    stage_before: "ownership_confirmation",
+    known_facts: {},
+    new_facts: { ownership_status: "not_owner", ownership_claim: "denied" },
+    intent: "ownership_confirmed",
+    classification_confidence: 0.9,
+    now: NOW,
+  });
+  assert.notEqual(transition.facts_patch?.ownership_status, "confirmed");
+  assert.notEqual(transition.next_action, NEXT_ACTIONS.GENERATE_OFFER);
+});
+
 test("F2: wrong-number suppression is not auto-cleared by a later positive ownership claim", () => {
   // Prior wrong-number identity + durable denial remains suppressed path.
   // A later positive claim creates conflict/review — never auto-unsuppresses.
@@ -224,6 +237,32 @@ test("F4: wrong-number / not-owner durable facts do not qualify a new opportunit
       stage_after_number: 2,
     }),
     false
+  );
+  // Suppression must beat price/offer short-circuits.
+  assert.equal(
+    transitionQualifiesForOpportunity({
+      facts_patch: {
+        ownership_status: "not_owner",
+        ownership_claim: "denied",
+        asking_price: { value: 250000 },
+      },
+      advanced: false,
+      stage_after_number: 1,
+    }),
+    false,
+    "not_owner + asking_price must not create opportunity"
+  );
+  assert.equal(
+    transitionQualifiesForOpportunity({
+      facts_patch: {
+        ownership_status: "wrong_number",
+        wants_offer: true,
+      },
+      advanced: false,
+      stage_after_number: 1,
+    }),
+    false,
+    "wrong_number + wants_offer must not create opportunity"
   );
 });
 
@@ -380,10 +419,9 @@ test("F7: authority / low-confidence / listing review transitions use NEEDS_REVI
     }),
     now: NOW,
   });
-  if (spouse.review_required) {
-    assert.equal(spouse.operational_status, OPS.NEEDS_REVIEW);
-    assert.equal(spouse.next_action, NEXT_ACTIONS.HUMAN_REVIEW);
-  }
+  assert.equal(spouse.review_required, true);
+  assert.equal(spouse.operational_status, OPS.NEEDS_REVIEW);
+  assert.equal(spouse.next_action, NEXT_ACTIONS.HUMAN_REVIEW);
 
   // Listing review
   const listed = resolveSellerStageTransition({
@@ -530,7 +568,10 @@ test("F9: non-numeric ADE recommended_cash_offer falls through; never NaN", () =
     next_best_action: nba,
     ade_snapshot: { recommended_cash_offer: "not-a-number" },
   });
-  assert.notEqual(strategy.acquisition_context.recommended_cash_offer, Number.NaN);
+  assert.ok(
+    !Number.isNaN(strategy.acquisition_context.recommended_cash_offer),
+    "recommended_cash_offer must never be NaN"
+  );
   assert.ok(
     strategy.acquisition_context.recommended_cash_offer === null ||
       Number.isFinite(strategy.acquisition_context.recommended_cash_offer)

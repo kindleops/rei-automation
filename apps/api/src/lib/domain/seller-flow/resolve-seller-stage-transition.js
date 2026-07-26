@@ -553,12 +553,19 @@ export function resolveSellerStageTransition({
   // ── 3. Positive / neutral path: fact implications + milestone scan ───────
 
   // Ownership confirmation never silently overwrites a durable denial — that
-  // is a conflict/review state, not automatic re-qualification.
+  // is a conflict/review state, not automatic re-qualification. Current-turn
+  // negative ownership facts must also never be stamped "confirmed" merely
+  // because the classifier labeled the intent ownership_confirmed.
   if (intentKey === "ownership_confirmed") {
     const priorDenied =
       NEGATIVE_OWNERSHIP.has(lower(known_facts?.ownership_status)) ||
       lower(known_facts?.ownership_claim) === "denied";
-    if (priorDenied && !NEGATIVE_OWNERSHIP.has(lower(new_facts?.ownership_status))) {
+    const newDenied =
+      NEGATIVE_OWNERSHIP.has(lower(new_facts?.ownership_status)) ||
+      lower(new_facts?.ownership_claim) === "denied";
+    if (newDenied) {
+      // Seller's current words win for this turn; do not stamp confirmed.
+    } else if (priorDenied) {
       facts.ownership_conflict = true;
     } else {
       facts.ownership_status = "confirmed";
