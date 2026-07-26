@@ -205,10 +205,19 @@ export function resolveSellerAuthorityState({
   // ── External authority evidence is the ONLY way to clear a risk ──────────
   // Seller text can raise authority risk but can never verify authority —
   // exactly the posture the Stage 6 engine already takes.
+  //
+  // Critical: conversational claims (requires_authority_review, probate
+  // language) must RAISE risk, but once canonical contract_state says
+  // authority is verified, those historical risk flags must not permanently
+  // deadlock progression. probate_detected / heirship_detected remain TRUE
+  // as historical context; they stop forcing `unresolved` when externally
+  // verified (separate "this is a probate deal" from "authority open").
   const externally_verified =
     contract_state?.authority_verified === true ||
     contract_state?.authority_doc === true ||
-    claims?.authority_verified === true;
+    // Never trust a claim's self-asserted authority_verified from SMS text.
+    // Only external contract_state clears entity/estate risk.
+    false;
 
   let authority_verified;
   if (externally_verified) authority_verified = true;
@@ -222,19 +231,30 @@ export function resolveSellerAuthorityState({
     authority_verified = false;
   }
 
+  // Conversational signoff/review flags only bind while authority is still
+  // unresolved. Once Stage 6-equivalent verification is true (external doc OR
+  // multi-signer gap closed), a stale requires_authority_review claim cannot
+  // permanently deadlock progression.
   const explicit_signoff_required =
-    claims?.can_execute_alone === false || claims?.requires_authority_review === true;
+    !authority_verified &&
+    (claims?.can_execute_alone === false || claims?.requires_authority_review === true);
+
+  // Historical probate/heirship context does not permanently deadlock once
+  // external contract/title authority verification is present. Multi-signer
+  // gap closure alone does not clear estate risk — only external verification.
+  const probate_blocks_progression = probate_detected && !externally_verified;
+  const heirship_blocks_progression = heirship_detected && !externally_verified;
 
   const unresolved =
     !authority_verified ||
     explicit_signoff_required ||
-    probate_detected ||
-    heirship_detected;
+    probate_blocks_progression ||
+    heirship_blocks_progression;
 
   let block_reason = null;
   if (unresolved) {
-    if (probate_detected) block_reason = AUTHORITY_BLOCK_REASONS.PROBATE_UNRESOLVED;
-    else if (heirship_detected) block_reason = AUTHORITY_BLOCK_REASONS.HEIRSHIP_UNRESOLVED;
+    if (probate_blocks_progression) block_reason = AUTHORITY_BLOCK_REASONS.PROBATE_UNRESOLVED;
+    else if (heirship_blocks_progression) block_reason = AUTHORITY_BLOCK_REASONS.HEIRSHIP_UNRESOLVED;
     else block_reason =
       STRUCTURE_BLOCK_REASON[structure] || AUTHORITY_BLOCK_REASONS.AUTHORITY_VERIFICATION_REQUIRED;
   }
@@ -254,6 +274,7 @@ export function resolveSellerAuthorityState({
     signer_count_confirmed,
     signer_gap,
     additional_signers_claimed: claims?.additional_signers_claimed || [],
+    // Historical context — never erased by verification.
     probate_detected,
     heirship_detected,
     estate_context: probate_detected || heirship_detected || structure === OWNERSHIP_STRUCTURE.ESTATE,
@@ -262,6 +283,10 @@ export function resolveSellerAuthorityState({
     offer_progression_allowed: !unresolved,
     contract_progression_allowed: !unresolved,
     block_reason,
+    // Operator attention for estate/entity structures — not for ordinary
+    // multi-signer discovery (spouse co-decision). Offer progression is gated
+    // separately via offer_progression_allowed; do not widen human_review so
+    // far that S1 ownership replies are withheld for "my wife and I own it".
     human_review_required: Boolean(
       probate_detected || heirship_detected || ENTITY_STRUCTURES.has(structure)
     ),

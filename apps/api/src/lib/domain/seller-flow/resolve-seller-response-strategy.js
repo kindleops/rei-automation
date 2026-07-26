@@ -154,14 +154,18 @@ export function resolveSellerResponseStrategy({
   if (state.authority.estate_context) prohibited_actions.push("assume_individual_estate_authority");
 
   // Acquisition context is exposed ONLY from already-available canonical
-  // authority. No offer number is invented here.
+  // authority. No offer number is invented here. Non-numeric ADE values must
+  // never leak NaN (which would stop the ?? fallback chain).
+  const finiteOrNull = (value) => {
+    const n = Number(value);
+    // Cash offers must be finite and positive — never NaN / 0 / negative.
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
   const acquisition_context = {
     recommended_cash_offer:
-      underwriting?.recommended_cash_offer ??
-      (ade_snapshot?.recommended_cash_offer != null
-        ? Number(ade_snapshot.recommended_cash_offer)
-        : null) ??
-      state.negotiation.recommended_offer ??
+      finiteOrNull(underwriting?.recommended_cash_offer) ??
+      finiteOrNull(ade_snapshot?.recommended_cash_offer) ??
+      finiteOrNull(state.negotiation.recommended_offer) ??
       null,
     max_allowable_offer:
       underwriting?.max_allowable_offer ?? state.negotiation.authorized_offer_ceiling ?? null,

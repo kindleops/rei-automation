@@ -89,6 +89,29 @@ export function __resetSellerInboundOrchestratorDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 
+/**
+ * V2 may only NARROW outbound execution. Fail closed: already-computed
+ * conversation-state safety withholds even when response_strategy is null
+ * (resolver threw / next_best_action missing).
+ */
+export function resolveV2ReplyWithhold({
+  conversation_state = null,
+  response_strategy = null,
+} = {}) {
+  const conversation_safety_withholds = Boolean(
+    conversation_state?.safety?.suppression_required === true ||
+      conversation_state?.safety?.human_review_required === true ||
+      conversation_state?.safety?.no_reply_required === true
+  );
+  const strategy_withholds = Boolean(
+    response_strategy &&
+      (response_strategy.no_reply ||
+        response_strategy.human_review_required ||
+        response_strategy.suppression_required)
+  );
+  return strategy_withholds || conversation_safety_withholds;
+}
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -1028,15 +1051,12 @@ export async function processSellerInboundMessage({
     }
   }
 
-  // The V2 layer may only NARROW execution, never widen it: it can withhold a
-  // reply the legacy path would have queued, but can never queue one the
-  // legacy path blocked.
-  const v2_withholds_reply = Boolean(
-    response_strategy &&
-      (response_strategy.no_reply ||
-        response_strategy.human_review_required ||
-        response_strategy.suppression_required)
-  );
+  // The V2 layer may only NARROW execution, never widen it. See
+  // resolveV2ReplyWithhold — strategy exceptions must fail closed on safety.
+  const v2_withholds_reply = resolveV2ReplyWithhold({
+    conversation_state,
+    response_strategy,
+  });
   const v2_should_queue_live = should_queue_live && !v2_withholds_reply;
 
   // When the authority gate fired, the negotiation strategy directive cannot

@@ -226,6 +226,11 @@ function extractOfferInterest(message, base) {
 // ── Seller interest (explicit / conditional sale language) ───────────────────
 // Evidence layer only. Bare hedges ("maybe", "possibly") without a sell/offer
 // frame are intentionally not interest — they stay unknown.
+// Explicit negation always wins: never project durable positive interest from
+// "I don't want to sell" / "never want to sell" / "wouldn't consider selling".
+
+const NEGATED_SELL_INTEREST_RE =
+  /\b(?:(?:do\s*n'?t|don'?t|do not|never|not)\s+(?:want|looking|willing)\s+to\s+sell|(?:do\s*n'?t|don'?t|do not|never|not)\s+(?:want\s+to\s+)?(?:consider|considering)\s+selling|wouldn'?t\s+(?:want\s+to\s+sell|consider\s+selling)|(?:i'?m|i\s+am|we\s+are|we'?re)\s+not\s+(?:looking\s+to\s+sell|considering\s+selling|interested\s+in\s+selling)|not\s+interested\s+in\s+selling|never\s+(?:want\s+to\s+sell|consider\s+selling)|am\s+not\s+considering\s+selling)\b/i;
 
 const SELLER_INTEREST_RULES = [
   {
@@ -240,6 +245,9 @@ const SELLER_INTEREST_RULES = [
 ];
 
 function extractSellerInterest(message, base) {
+  // Deterministic negation guard — rule order beats lookbehind edge cases
+  // ("don't" / "never" / "wouldn't" before sell-frame phrases).
+  if (NEGATED_SELL_INTEREST_RE.test(String(message || ""))) return null;
   for (const rule of SELLER_INTEREST_RULES) {
     const evidence = findEvidence(message, new RegExp(rule.re.source, "i"));
     if (evidence) {

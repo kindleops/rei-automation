@@ -194,8 +194,12 @@ export function normalizeClassificationContract({
     }),
     interest_signal: deriveInterestSignal(classification),
     wrong_number_signal: normalized_intent === "wrong_number" || relationship?.invalidate_phone_globally === true,
+    // Safety-critical: secondary opt_out (e.g. "yeah it's mine but STOP") must
+    // suppress even when ownership/other signals became primary.
     opt_out_signal:
-      normalized_intent === "opt_out" || clean(classification.compliance_flag) === "stop_texting",
+      normalized_intent === "opt_out" ||
+      clean(classification.compliance_flag) === "stop_texting" ||
+      secondary_signals.opt_out === true,
     ambiguity_review_required: review.required,
     review_reason: review.reason,
     relationship,

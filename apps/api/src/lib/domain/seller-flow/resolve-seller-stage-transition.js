@@ -552,12 +552,23 @@ export function resolveSellerStageTransition({
 
   // ── 3. Positive / neutral path: fact implications + milestone scan ───────
 
-  // Ownership-conflict guard: one message carrying BOTH an ownership claim
-  // and a denial ("I own it… well, I sold it last year") is evidence in
-  // conflict, never settled truth. Blocking/opt-out paths above still win;
-  // everything else holds the current stage for a human, persists NO
-  // ownership value, and queues nothing.
-  if (new_facts?.ownership_conflict === true) {
+  // Ownership confirmation never silently overwrites a durable denial — that
+  // is a conflict/review state, not automatic re-qualification.
+  if (intentKey === "ownership_confirmed") {
+    const priorDenied =
+      NEGATIVE_OWNERSHIP.has(lower(known_facts?.ownership_status)) ||
+      lower(known_facts?.ownership_claim) === "denied";
+    if (priorDenied && !NEGATIVE_OWNERSHIP.has(lower(new_facts?.ownership_status))) {
+      facts.ownership_conflict = true;
+    } else {
+      facts.ownership_status = "confirmed";
+    }
+  }
+
+  // Ownership-conflict guard: same-message contradictions OR cross-turn
+  // durable denial + current positive claim. Blocking/opt-out paths above
+  // still win; everything else holds the stage for a human and queues nothing.
+  if (new_facts?.ownership_conflict === true || facts.ownership_conflict === true) {
     return {
       ...base,
       facts_patch: { ...facts, ownership_conflict: true },
@@ -582,8 +593,6 @@ export function resolveSellerStageTransition({
       evaluate_alternate_contact: false,
     };
   }
-
-  if (intentKey === "ownership_confirmed") facts.ownership_status = "confirmed";
   if (intentKey === "seller_interested" || intentKey === "latent_interest") {
     facts.interest = facts.interest || "interested";
   }
@@ -834,7 +843,10 @@ export function resolveSellerStageTransition({
     stage_after_number: afterIdx + 1,
     advanced: afterIdx > beforeIdx,
     stages_advanced: afterIdx - beforeIdx,
-    operational_status: listingReview
+    // Any final human-review transition must surface as NEEDS_REVIEW so inbox
+    // consumers keying off operational_status agree with next_action.
+    // Blocking/suppression paths return earlier with stronger statuses.
+    operational_status: reviewRequired
       ? OPERATIONAL_STATUS_CODES.NEEDS_REVIEW
       : OPERATIONAL_STATUS_CODES.ACTIVE_COMMUNICATION,
     lead_temperature: temperature,

@@ -97,6 +97,19 @@ function resolveIdentity({ contract, facts, intent, engaged = false }) {
   if (factClaim === "denied" && (factStatus === "confirmed" || ownershipSignal === "confirmed")) {
     return { state: IDENTITY_STATES.CONFLICTING, owner_confirmed: false, review_required: true };
   }
+  // Cross-turn: durable not_owner/denial + current positive ownership claim.
+  // Do NOT silently keep NON_OWNER (erasing the new evidence) and do NOT
+  // auto-trust the positive claim — fail closed to conflict/review.
+  // Wrong-number contact suppression is separate and is never auto-cleared.
+  const durableNegativeOwnership =
+    factStatus === "not_owner" || factClaim === "denied";
+  const currentPositiveOwnership =
+    ownershipSignal === "confirmed" ||
+    ownershipSignal === "inferred" ||
+    factClaim === "confirmed";
+  if (durableNegativeOwnership && currentPositiveOwnership) {
+    return { state: IDENTITY_STATES.CONFLICTING, owner_confirmed: false, review_required: true };
+  }
 
   if (intent === "wrong_number" || claim === "actual_wrong_number" || contract?.wrong_number_signal) {
     return { state: IDENTITY_STATES.WRONG_NUMBER, owner_confirmed: false, review_required: false };
@@ -113,12 +126,20 @@ function resolveIdentity({ contract, facts, intent, engaged = false }) {
   if (REPRESENTATIVE_CLAIMS.has(claim)) {
     return { state: IDENTITY_STATES.REPRESENTATIVE, owner_confirmed: false, review_required: true };
   }
-  if (ownershipSignal === "confirmed" || factClaim === "confirmed" || factStatus === "confirmed") {
+  // "inferred" is the secondary-signal ownership projection (e.g. "yeah that's
+  // mine but I'm not interested") — still ownership evidence, never erased
+  // merely because another disposition became primary.
+  if (
+    ownershipSignal === "confirmed" ||
+    ownershipSignal === "inferred" ||
+    factClaim === "confirmed" ||
+    factStatus === "confirmed"
+  ) {
     return {
       state: IDENTITY_STATES.OWNER_CONFIRMED,
       owner_confirmed: true,
       review_required: false,
-      basis: "explicit_claim",
+      basis: ownershipSignal === "inferred" ? "secondary_signal" : "explicit_claim",
     };
   }
   // Canonical existing policy, mirrored from resolveSellerStageTransition:
