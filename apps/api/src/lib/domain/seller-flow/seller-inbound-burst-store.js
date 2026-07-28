@@ -28,8 +28,9 @@ const TABLE = "seller_inbound_bursts";
 // insert race, version-CAS lose). Shared by the memory and Supabase stores;
 // exhaustion is an explicit deterministic failure (burst_append_retry_exhausted)
 // that fails the webhook closed — provider/idempotency redelivery retries,
-// never a per-message fallback.
-const BURST_APPEND_MAX_ROUNDS = 5;
+// never a per-message fallback. Exported so tests derive retry-cap
+// expectations from this authority instead of duplicating the literal.
+export const BURST_APPEND_MAX_ROUNDS = 5;
 
 function clean(value) {
   return String(value ?? "").trim();

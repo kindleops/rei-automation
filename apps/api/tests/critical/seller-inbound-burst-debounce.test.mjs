@@ -22,6 +22,7 @@ import {
   resolveBurstAskingPriceSignal,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import {
+  BURST_APPEND_MAX_ROUNDS,
   createMemorySellerInboundBurstStore,
   createSupabaseSellerInboundBurstStore,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
@@ -1527,12 +1528,19 @@ function burstToDbRow(burst, id) {
 }
 
 test("append race: repeated unique open-generation race succeeds within the bounded cap — one constituent only", async () => {
+  // Scenario: this many unique-insert races before the append succeeds.
+  const TRANSIENT_UNIQUE_RACES = 2;
+  const expected_attempts = TRANSIENT_UNIQUE_RACES + 1;
+  assert.ok(
+    expected_attempts <= BURST_APPEND_MAX_ROUNDS,
+    "scenario success round must sit within the authoritative retry cap"
+  );
   let inserts = 0;
   const supabase = makeScriptedBurstSupabase((calls) => {
     const insert = calls.find((c) => c.op === "insert");
     if (insert) {
       inserts += 1;
-      if (inserts <= 2) {
+      if (inserts <= TRANSIENT_UNIQUE_RACES) {
         return {
           data: null,
           error: {
@@ -1555,7 +1563,11 @@ test("append race: repeated unique open-generation race succeeds within the boun
   });
   assert.equal(r.ok, true);
   assert.equal(r.created, true);
-  assert.equal(inserts, 3, "two unique races then success, inside the bounded cap");
+  assert.equal(
+    inserts,
+    expected_attempts,
+    "every transient unique race retries once, then the append succeeds"
+  );
   assert.deepEqual(r.burst.constituents.map((c) => c.body), ["hello"], "message lands exactly once");
 });
 
@@ -1567,12 +1579,19 @@ test("append race: repeated version-CAS race succeeds within the bounded cap —
     now: T0,
   });
   const dbRow = burstToDbRow(base, "sb-cas-1");
+  // Scenario: this many version-CAS losses before the append succeeds.
+  const TRANSIENT_CAS_LOSSES = 2;
+  const expected_attempts = TRANSIENT_CAS_LOSSES + 1;
+  assert.ok(
+    expected_attempts <= BURST_APPEND_MAX_ROUNDS,
+    "scenario success round must sit within the authoritative retry cap"
+  );
   let updates = 0;
   const supabase = makeScriptedBurstSupabase((calls) => {
     const update = calls.find((c) => c.op === "update");
     if (update) {
       updates += 1;
-      if (updates <= 2) {
+      if (updates <= TRANSIENT_CAS_LOSSES) {
         dbRow.version += 1; // concurrent writer won the CAS
         return { data: null, error: null };
       }
@@ -1589,7 +1608,11 @@ test("append race: repeated version-CAS race succeeds within the bounded cap —
   });
   assert.equal(r.ok, true);
   assert.equal(r.appended, true);
-  assert.equal(updates, 3, "two CAS losses then success, inside the bounded cap");
+  assert.equal(
+    updates,
+    expected_attempts,
+    "every transient CAS loss retries once, then the append succeeds"
+  );
   assert.deepEqual(
     r.burst.constituents.map((c) => c.body),
     ["first", "second"],
@@ -1625,7 +1648,11 @@ test("append race: persistent CAS conflict fails explicitly at the bounded cap �
     /burst_append_retry_exhausted/,
     "exhaustion is an explicit deterministic error (webhook fails closed, provider redelivers)"
   );
-  assert.equal(updates, 5, "exactly the centralized bounded rounds, never unbounded");
+  assert.equal(
+    updates,
+    BURST_APPEND_MAX_ROUNDS,
+    "exactly the authoritative bounded rounds, never unbounded"
+  );
 });
 
 test("complete race: two concurrent same-token completions — one atomic terminal write, summary never overwritten", async () => {
