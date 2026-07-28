@@ -1682,7 +1682,14 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       let seller_orchestration = null;
       let burst_deferral = null;
 
-      if (seller_burst_enabled && typeof runtimeDeps.createSellerInboundBurstCoordinator === "function") {
+      if (seller_burst_enabled) {
+        // Fail closed: burst enabled + burst infrastructure unavailable must
+        // error the webhook so the provider redelivers. The coordinator
+        // dependency missing can never fall through to the per-message V2
+        // path below.
+        if (typeof runtimeDeps.createSellerInboundBurstCoordinator !== "function") {
+          throw new Error("seller_inbound_burst_coordinator_unavailable");
+        }
         const supabase_for_burst = runtimeDeps.getSupabaseClient?.() || null;
         const burst_coordinator = runtimeDeps.createSellerInboundBurstCoordinator({
           supabase: supabase_for_burst,
@@ -1822,6 +1829,13 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
             eligible_at: burst_deferral?.append?.burst?.eligible_at || null,
           });
         }
+      }
+
+      // Burst invariant: while burst mode is enabled the deferral above must
+      // have produced an orchestration result — the legacy per-message V2
+      // fallback below is only reachable when burst mode is disabled.
+      if (seller_burst_enabled && !seller_orchestration) {
+        throw new Error("seller_inbound_burst_orchestration_missing");
       }
 
       if (!seller_orchestration) {

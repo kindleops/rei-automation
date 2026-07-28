@@ -133,9 +133,19 @@ export function detectImmediateSafetySignal({
     return { latch: true, kind: SAFETY_KINDS.WRONG_NUMBER, reason: "wrong_number" };
   }
 
+  // Immediate terminal latch requires EXPLICIT adversarial/legal-action
+  // language (or the canonical litigator compliance flag). Bare
+  // attorney/lawyer references are legitimate in this domain (probate,
+  // estate, closing counsel) and the keyword-level hostile_or_legal
+  // classification fires on them too — neither may cancel follow-ups and
+  // terminally suppress a seller by itself. Non-latched hostile signals
+  // still flow into the aggregate V2 turn at flush, where the existing
+  // hostile_or_legal seller policy (SUPPRESS tier, no reply) applies.
   if (
-    primary === "hostile_or_legal" ||
-    /\b(i will sue|i'll sue|lawyer|attorney|legal action|cease and desist)\b/i.test(body)
+    compliance === "litigator" ||
+    /\b(i will sue|i'll sue|i am suing|i'm suing|we will sue|we'll sue|sue you|suing you|lawsuit|legal action|cease and desist|harassment|harassing)\b/i.test(
+      body
+    )
   ) {
     return {
       latch: true,

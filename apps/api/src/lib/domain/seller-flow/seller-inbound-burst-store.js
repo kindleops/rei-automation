@@ -24,6 +24,13 @@ import {
 
 const TABLE = "seller_inbound_bursts";
 
+// Single bounded-retry authority for append races (open-generation unique
+// insert race, version-CAS lose). Shared by the memory and Supabase stores;
+// exhaustion is an explicit deterministic failure (burst_append_retry_exhausted)
+// that fails the webhook closed — provider/idempotency redelivery retries,
+// never a per-message fallback.
+const BURST_APPEND_MAX_ROUNDS = 5;
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -90,8 +97,8 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
     const group = resolveBurstGroupKey({ thread_key });
     return withThreadLock(group, async () => {
       const nowIso = nowArg || now();
-      // Loop (never recurse through the thread lock) for rollover/CAS retries.
-      for (let round = 0; round < 5; round += 1) {
+      // Loop (never recurse through the thread lock) for CAS retries.
+      for (let round = 0; round < BURST_APPEND_MAX_ROUNDS; round += 1) {
         const open = getOpen(group);
 
         if (!open) {
@@ -138,8 +145,12 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
         });
 
         if (projected.rollover) {
-          // Force old open burst eligible for exclusive claim, then loop —
-          // next round sees no open burst and creates generation N+1.
+          // Mirror the production (Supabase) rollover contract exactly: the
+          // old generation stays the thread's ONLY open row (partial unique
+          // index allows one OPEN per thread), force-marked eligible, and the
+          // message is handed back to the caller. The coordinator flushes
+          // (claims + completes) the old generation, then retries the append —
+          // generation N+1 opens only after the old row left OPEN.
           const stale = byId.get(open.id);
           if (stale && stale.status === BURST_STATUSES.OPEN) {
             byId.set(open.id, {
@@ -149,8 +160,13 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
               updated_at: nowIso,
             });
           }
-          openByThread.delete(group);
-          continue;
+          return {
+            ok: false,
+            reason: "open_burst_past_hard_close_flush_required",
+            rollover: true,
+            burst: clone(byId.get(open.id)),
+            pending_message: message,
+          };
         }
 
         if (projected.duplicate || !projected.appended) {
@@ -450,6 +466,25 @@ export function createSupabaseSellerInboundBurstStore({
   } = {}) {
     const group = resolveBurstGroupKey({ thread_key });
     const nowIso = nowArg || now();
+    // Bounded iterative retry (no recursion) for the two append races:
+    // unique open-generation insert race and version-CAS lose. Exhaustion is
+    // an explicit deterministic failure — webhook fails closed, provider
+    // redelivers, never a per-message fallback.
+    for (let round = 0; round < BURST_APPEND_MAX_ROUNDS; round += 1) {
+      const result = await appendMessageOnce({
+        group,
+        message,
+        debounce_ms,
+        max_duration_ms,
+        nowIso,
+      });
+      if (result.retry) continue;
+      return result.value;
+    }
+    throw new Error("burst_append_retry_exhausted");
+  }
+
+  async function appendMessageOnce({ group, message, debounce_ms, max_duration_ms, nowIso }) {
     const open = await fetchOpen(group);
 
     if (!open) {
@@ -483,19 +518,15 @@ export function createSupabaseSellerInboundBurstStore({
       };
       const { data, error } = await supabase.from(TABLE).insert(insertRow).select("*").single();
       if (error) {
-        // Unique open-burst race → retry append
+        // Unique open-burst race → re-read the winner and retry the append.
         if (String(error.message || "").includes("one_open") || error.code === "23505") {
-          return appendMessage({
-            thread_key: group,
-            message,
-            debounce_ms,
-            max_duration_ms,
-            now: nowIso,
-          });
+          return { retry: true };
         }
         throw error;
       }
-      return { ok: true, created: true, appended: true, duplicate: false, burst: rowToBurst(data) };
+      return {
+        value: { ok: true, created: true, appended: true, duplicate: false, burst: rowToBurst(data) },
+      };
     }
 
     const projected = projectAppendToOpenBurst({
@@ -542,16 +573,20 @@ export function createSupabaseSellerInboundBurstStore({
       // is complex mid-append. Simpler: refuse rollover insert until old claimed;
       // caller flushEligible first. Here we still try claim of old.
       return {
-        ok: false,
-        reason: "open_burst_past_hard_close_flush_required",
-        rollover: true,
-        burst: open,
-        pending_message: message,
+        value: {
+          ok: false,
+          reason: "open_burst_past_hard_close_flush_required",
+          rollover: true,
+          burst: open,
+          pending_message: message,
+        },
       };
     }
 
     if (projected.duplicate || !projected.appended) {
-      return { ok: true, created: false, appended: false, duplicate: true, burst: open };
+      return {
+        value: { ok: true, created: false, appended: false, duplicate: true, burst: open },
+      };
     }
 
     const next = projected.burst;
@@ -580,16 +615,12 @@ export function createSupabaseSellerInboundBurstStore({
 
     if (error) throw error;
     if (!data) {
-      // CAS lost — retry
-      return appendMessage({
-        thread_key: group,
-        message,
-        debounce_ms,
-        max_duration_ms,
-        now: nowIso,
-      });
+      // CAS lost — re-read the latest row and retry.
+      return { retry: true };
     }
-    return { ok: true, created: false, appended: true, duplicate: false, burst: rowToBurst(data) };
+    return {
+      value: { ok: true, created: false, appended: true, duplicate: false, burst: rowToBurst(data) },
+    };
   }
 
   async function claimEligible({
@@ -700,6 +731,10 @@ export function createSupabaseSellerInboundBurstStore({
       return { ok: true, already_completed: true, burst: rowToBurst(current) };
     }
     const finalStatus = current.safety_latched ? BURST_STATUSES.SUPPRESSED : status;
+    // Atomic terminal CAS: completed_at IS NULL in the update predicate makes
+    // exactly one of two concurrent same-token completions win — the loser
+    // observes complete_cas_failed and the first terminal result_summary
+    // stays authoritative (never overwritten).
     const { data, error: upErr } = await supabase
       .from(TABLE)
       .update({
@@ -711,6 +746,7 @@ export function createSupabaseSellerInboundBurstStore({
       })
       .eq("id", current.id)
       .eq("claim_token", clean(claim_token))
+      .is("completed_at", null)
       .select("*")
       .maybeSingle();
     if (upErr) throw upErr;

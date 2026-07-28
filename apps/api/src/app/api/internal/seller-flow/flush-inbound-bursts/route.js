@@ -13,7 +13,8 @@
 
 import { NextResponse } from "next/server";
 import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
-import { getSupabaseClient } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { createSellerInboundBurstCoordinator } from "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js";
 import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 import { cancelSupabasePendingOutbound } from "@/lib/domain/queue/cancel-supabase-pending-outbound.js";
@@ -28,7 +29,12 @@ export const dynamic = "force-dynamic";
 export async function POST(request) {
   const auth = requireInternalSecret(request);
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, reason: auth.reason || "unauthorized" }, { status: 401 });
+    // requireInternalSecret contract: { error, status } — unauthorized → 401,
+    // internal secret not configured → 500 internal_secret_not_configured.
+    return NextResponse.json(
+      { ok: false, reason: auth.error || "unauthorized" },
+      { status: auth.status || 401 }
+    );
   }
 
   let body = {};
@@ -38,7 +44,13 @@ export async function POST(request) {
     body = {};
   }
 
-  const supabase = getSupabaseClient?.() || null;
+  // client.js exports no getSupabaseClient — the canonical accessor is
+  // getDefaultSupabaseClient (always returns a client, placeholder included),
+  // so the availability guard must be hasSupabaseConfig().
+  if (!hasSupabaseConfig()) {
+    return NextResponse.json({ ok: false, reason: "missing_supabase" }, { status: 503 });
+  }
+  const supabase = getDefaultSupabaseClient() || null;
   if (!supabase) {
     return NextResponse.json({ ok: false, reason: "missing_supabase" }, { status: 503 });
   }

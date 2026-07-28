@@ -21,7 +21,11 @@ import {
   isClaimableBurst,
   resolveBurstAskingPriceSignal,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
-import { createMemorySellerInboundBurstStore } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
+import {
+  createMemorySellerInboundBurstStore,
+  createSupabaseSellerInboundBurstStore,
+} from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
+import { POST as flushInboundBurstsPost } from "@/app/api/internal/seller-flow/flush-inbound-bursts/route.js";
 import {
   createSellerInboundBurstCoordinator,
   isSellerInboundBurstEnabled,
@@ -95,6 +99,54 @@ test("policy: STOP / wrong number / hostile latch immediately", () => {
     "hostile_or_legal"
   );
   assert.equal(detectImmediateSafetySignal({ message: "yeah maybe" }).latch, false);
+});
+
+test("policy: bare attorney/lawyer (probate/estate/closing counsel) never latches hostile_or_legal", async () => {
+  const benign = [
+    "My attorney is handling the estate.",
+    "My lawyer is helping with probate.",
+    "Let me check with my attorney.",
+    "The closing attorney has the paperwork.",
+  ];
+  for (const message of benign) {
+    assert.equal(
+      detectImmediateSafetySignal({ message }).latch,
+      false,
+      `body-only must not latch: ${message}`
+    );
+    // The keyword-level heuristic classifier labels these hostile_or_legal
+    // (bare attorney/lawyer keyword). That classification alone must not
+    // cancel follow-ups and terminally suppress — the aggregate V2 turn
+    // still applies the full hostile_or_legal seller policy at flush.
+    const classification = await classify(message, null, { heuristicOnly: true });
+    assert.equal(
+      detectImmediateSafetySignal({ message, classification }).latch,
+      false,
+      `keyword-level classification alone must not latch: ${message}`
+    );
+  }
+
+  const adversarial = [
+    "I'll sue you.",
+    "I will sue",
+    "Cease and desist.",
+    "I'm taking legal action against you.",
+    "You are harassing me.",
+  ];
+  for (const message of adversarial) {
+    const signal = detectImmediateSafetySignal({ message });
+    assert.equal(signal.latch, true, `must latch: ${message}`);
+    assert.equal(signal.kind, "hostile_or_legal", `must latch hostile_or_legal: ${message}`);
+  }
+
+  // Canonical litigator compliance flag remains authoritative immediate safety.
+  assert.equal(
+    detectImmediateSafetySignal({
+      message: "Our office will be in touch.",
+      classification: { compliance_flag: "litigator" },
+    }).kind,
+    "hostile_or_legal"
+  );
 });
 
 test("policy: duplicate provider id does not append", () => {
@@ -1149,6 +1201,12 @@ test("rollover: memory path — message past hard close lands exactly once in ge
     },
   });
 
+  // Production invariant (partial unique index): never two OPEN rows per thread.
+  const openCount = () =>
+    store._debug
+      .listAll()
+      .filter((b) => b.thread_key === "+1555111ROLL" && b.status === BURST_STATUSES.OPEN).length;
+
   const sends = [
     { body: "part one", at: 0 },
     { body: "part two", at: 30_000 },
@@ -1165,6 +1223,7 @@ test("rollover: memory path — message past hard close lands exactly once in ge
       received_at: now(),
     });
     assert.equal(r.ok !== false, true);
+    assert.ok(openCount() <= 1, `one-open-per-thread invariant after send ${i + 1}`);
   }
 
   const rows = store._debug.listAll();
@@ -1173,6 +1232,9 @@ test("rollover: memory path — message past hard close lands exactly once in ge
   const gen2 = rows.find((b) => b.generation === 2);
   assert.deepEqual(gen1.constituents.map((c) => c.body), ["part one", "part two", "part three"]);
   assert.deepEqual(gen2.constituents.map((c) => c.body), ["late part four"]);
+  // Rollover finalized gen1 (claimed + completed) before gen2 opened.
+  assert.notEqual(gen1.status, BURST_STATUSES.OPEN);
+  assert.equal(openCount(), 1, "only generation 2 remains open");
 
   // Flush everything: every message processed exactly once, no duplicates.
   clock = ms(T0) + 95_000 + 25_000;
@@ -1180,6 +1242,63 @@ test("rollover: memory path — message past hard close lands exactly once in ge
   assert.equal(processCalls.length, 2);
   const all_bodies = processCalls.flatMap((c) => c.message.split("\n"));
   assert.deepEqual(all_bodies.sort(), ["late part four", "part one", "part three", "part two"]);
+  assert.equal(openCount(), 0, "no OPEN rows after full flush");
+});
+
+test("rollover: memory store mirrors production flush_required contract — never two OPEN rows per thread", async () => {
+  let clock = ms(T0);
+  const now = () => new Date(clock).toISOString();
+  const store = createMemorySellerInboundBurstStore({ now });
+  const K = "+1555111MEMRO";
+  const openCount = () =>
+    store._debug
+      .listAll()
+      .filter((b) => b.thread_key === K && b.status === BURST_STATUSES.OPEN).length;
+
+  await store.appendMessage({
+    thread_key: K,
+    message: { body: "first", event_id: "m1", provider_message_id: "pm1", received_at: T0 },
+    now: T0,
+  });
+  assert.equal(openCount(), 1);
+
+  const late = plus(T0, 95_000);
+  clock = ms(late);
+  const r = await store.appendMessage({
+    thread_key: K,
+    message: { body: "after cap", event_id: "m2", provider_message_id: "pm2", received_at: late },
+    now: late,
+  });
+  // Production (Supabase) contract: append refuses past hard close, the old
+  // generation is force-marked eligible and stays the ONLY open row, and the
+  // message is handed back for the coordinator's flush-then-retry loop.
+  assert.equal(r.ok, false);
+  assert.equal(r.rollover, true);
+  assert.equal(r.reason, "open_burst_past_hard_close_flush_required");
+  assert.equal(r.pending_message.body, "after cap");
+  assert.equal(r.burst.eligible_at, late, "old generation force-marked eligible");
+  assert.equal(openCount(), 1, "old generation remains the only OPEN row");
+
+  // Old generation must leave OPEN (claim → complete) before N+1 can open.
+  const claim = await store.claimEligible({ thread_key: K, now: late });
+  assert.equal(claim.ok, true);
+  assert.equal(openCount(), 0);
+  const done = await store.completeClaimed({
+    burst_id: claim.burst.burst_id,
+    claim_token: claim.claim_token,
+    result_summary: { queued: false },
+    now: late,
+  });
+  assert.equal(done.ok, true);
+
+  const r2 = await store.appendMessage({
+    thread_key: K,
+    message: { body: "after cap", event_id: "m2", provider_message_id: "pm2", received_at: late },
+    now: late,
+  });
+  assert.equal(r2.created, true);
+  assert.equal(r2.burst.generation, 2);
+  assert.equal(openCount(), 1, "exactly one OPEN row once generation 2 opens");
 });
 
 test("rollover: supabase flush_required contract — old gen finalized, new message exactly once, bounded retry", async () => {
@@ -1344,6 +1463,252 @@ test("crash recovery: complete is idempotent on claim_token", async () => {
   assert.equal(c2.already_completed || c2.burst.status === BURST_STATUSES.COMPLETED, true);
 });
 
+// ── Supabase store race bounds (scripted PostgREST chain) ──────────────────
+
+/**
+ * Minimal thenable supabase chain: records every builder call, resolves via
+ * handler(calls) at await time. Lets tests script insert/update race outcomes
+ * for the production store without a network.
+ */
+function makeScriptedBurstSupabase(handler) {
+  return {
+    from(table) {
+      const calls = [{ op: "from", args: [table] }];
+      const chain = new Proxy(
+        {},
+        {
+          get(_target, prop) {
+            if (prop === "then") {
+              const p = Promise.resolve().then(() => handler(calls));
+              return p.then.bind(p);
+            }
+            if (typeof prop === "symbol") return undefined;
+            return (...args) => {
+              calls.push({ op: prop, args });
+              return chain;
+            };
+          },
+        }
+      );
+      return chain;
+    },
+  };
+}
+
+function burstToDbRow(burst, id) {
+  return {
+    id,
+    thread_key: burst.thread_key,
+    generation: burst.generation,
+    burst_id: burst.burst_id,
+    status: burst.status,
+    first_event_id: burst.first_event_id,
+    latest_event_id: burst.latest_event_id,
+    constituent_messages: burst.constituents,
+    first_received_at: burst.first_received_at,
+    last_received_at: burst.last_received_at,
+    eligible_at: burst.eligible_at,
+    hard_close_at: burst.hard_close_at,
+    safety_latched: Boolean(burst.safety_latched),
+    safety_reason: burst.safety_reason || null,
+    safety_kind: burst.safety_kind || null,
+    version: burst.version,
+    policy_version: burst.policy_version,
+    decision_idempotency_key: burst.decision_idempotency_key,
+    claim_token: burst.claim_token || null,
+    claimed_at: burst.claimed_at || null,
+    claimed_by: burst.claimed_by || null,
+    attempt_count: Number(burst.attempt_count || 0),
+    completed_at: burst.completed_at || null,
+    result_summary: burst.result_summary || null,
+    created_at: burst.first_received_at,
+    updated_at: burst.last_received_at,
+  };
+}
+
+test("append race: repeated unique open-generation race succeeds within the bounded cap — one constituent only", async () => {
+  let inserts = 0;
+  const supabase = makeScriptedBurstSupabase((calls) => {
+    const insert = calls.find((c) => c.op === "insert");
+    if (insert) {
+      inserts += 1;
+      if (inserts <= 2) {
+        return {
+          data: null,
+          error: {
+            code: "23505",
+            message: 'duplicate key violates "idx_seller_inbound_bursts_one_open_per_thread"',
+          },
+        };
+      }
+      return { data: { ...insert.args[0], id: "sb-uniq-1" }, error: null };
+    }
+    const select = calls.find((c) => c.op === "select");
+    if (select?.args?.[0] === "generation") return { data: [], error: null };
+    return { data: null, error: null }; // no open row visible to this worker
+  });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => T0 });
+  const r = await store.appendMessage({
+    thread_key: "+1555111UNIQ",
+    message: { body: "hello", event_id: "u1", provider_message_id: "pu1", received_at: T0 },
+    now: T0,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.created, true);
+  assert.equal(inserts, 3, "two unique races then success, inside the bounded cap");
+  assert.deepEqual(r.burst.constituents.map((c) => c.body), ["hello"], "message lands exactly once");
+});
+
+test("append race: repeated version-CAS race succeeds within the bounded cap — no duplicate constituent", async () => {
+  const base = createOpenBurstState({
+    thread_key: "+1555111CAS",
+    generation: 1,
+    message: { body: "first", event_id: "c1", provider_message_id: "pc1", received_at: T0 },
+    now: T0,
+  });
+  const dbRow = burstToDbRow(base, "sb-cas-1");
+  let updates = 0;
+  const supabase = makeScriptedBurstSupabase((calls) => {
+    const update = calls.find((c) => c.op === "update");
+    if (update) {
+      updates += 1;
+      if (updates <= 2) {
+        dbRow.version += 1; // concurrent writer won the CAS
+        return { data: null, error: null };
+      }
+      Object.assign(dbRow, update.args[0]);
+      return { data: { ...dbRow }, error: null };
+    }
+    return { data: { ...dbRow }, error: null }; // fetchOpen re-reads latest
+  });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => plus(T0, 1000) });
+  const r = await store.appendMessage({
+    thread_key: "+1555111CAS",
+    message: { body: "second", event_id: "c2", provider_message_id: "pc2", received_at: plus(T0, 1000) },
+    now: plus(T0, 1000),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.appended, true);
+  assert.equal(updates, 3, "two CAS losses then success, inside the bounded cap");
+  assert.deepEqual(
+    r.burst.constituents.map((c) => c.body),
+    ["first", "second"],
+    "no duplicate constituent after retries"
+  );
+});
+
+test("append race: persistent CAS conflict fails explicitly at the bounded cap — no runaway, no silent success", async () => {
+  const base = createOpenBurstState({
+    thread_key: "+1555111EXH",
+    generation: 1,
+    message: { body: "first", event_id: "x1", provider_message_id: "px1", received_at: T0 },
+    now: T0,
+  });
+  const dbRow = burstToDbRow(base, "sb-exh-1");
+  let updates = 0;
+  const supabase = makeScriptedBurstSupabase((calls) => {
+    if (calls.some((c) => c.op === "update")) {
+      updates += 1;
+      dbRow.version += 1; // every round loses the CAS
+      return { data: null, error: null };
+    }
+    return { data: { ...dbRow }, error: null };
+  });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => plus(T0, 1000) });
+  await assert.rejects(
+    () =>
+      store.appendMessage({
+        thread_key: "+1555111EXH",
+        message: { body: "second", event_id: "x2", provider_message_id: "px2", received_at: plus(T0, 1000) },
+        now: plus(T0, 1000),
+      }),
+    /burst_append_retry_exhausted/,
+    "exhaustion is an explicit deterministic error (webhook fails closed, provider redelivers)"
+  );
+  assert.equal(updates, 5, "exactly the centralized bounded rounds, never unbounded");
+});
+
+test("complete race: two concurrent same-token completions — one atomic terminal write, summary never overwritten", async () => {
+  const base = createOpenBurstState({
+    thread_key: "+1555111DONE",
+    generation: 1,
+    message: { body: "x", event_id: "d1", provider_message_id: "pd1", received_at: T0 },
+    now: T0,
+  });
+  const dbRow = {
+    ...burstToDbRow(base, "sb-done-1"),
+    status: BURST_STATUSES.CLAIMED,
+    claim_token: "tok-race",
+    claimed_at: T0,
+    version: 2,
+  };
+  const barrier = [];
+  let barrierDone = false;
+  let sawTerminalFilter = false;
+  const supabase = makeScriptedBurstSupabase((calls) => {
+    const update = calls.find((c) => c.op === "update");
+    if (update) {
+      const eqs = calls.filter((c) => c.op === "eq");
+      const isNull = calls.find((c) => c.op === "is" && c.args[0] === "completed_at");
+      if (isNull) sawTerminalFilter = true;
+      const matches =
+        eqs.some((c) => c.args[0] === "id" && c.args[1] === dbRow.id) &&
+        eqs.some((c) => c.args[0] === "claim_token" && c.args[1] === dbRow.claim_token) &&
+        (!isNull || dbRow.completed_at == null);
+      if (matches && isNull) {
+        Object.assign(dbRow, update.args[0]);
+        return { data: { ...dbRow }, error: null };
+      }
+      return { data: null, error: null };
+    }
+    // Barrier: both completions observe the pre-terminal row before either
+    // writes — the exact interleaving the atomic CAS must survive.
+    return new Promise((resolve) => {
+      const release = () => resolve({ data: { ...dbRow }, error: null });
+      if (barrierDone) return release();
+      barrier.push(release);
+      if (barrier.length === 2) {
+        barrierDone = true;
+        for (const r of barrier) r();
+      }
+    });
+  });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => plus(T0, 30_000) });
+  const [c1, c2] = await Promise.all([
+    store.completeClaimed({
+      burst_id: base.burst_id,
+      claim_token: "tok-race",
+      result_summary: { winner: "A" },
+      now: plus(T0, 30_000),
+    }),
+    store.completeClaimed({
+      burst_id: base.burst_id,
+      claim_token: "tok-race",
+      result_summary: { winner: "B" },
+      now: plus(T0, 30_001),
+    }),
+  ]);
+  const wins = [c1, c2].filter((c) => c.ok);
+  const losses = [c1, c2].filter((c) => !c.ok);
+  assert.equal(wins.length, 1, "exactly one completion mutates");
+  assert.equal(losses.length, 1);
+  assert.equal(losses[0].reason, "complete_cas_failed");
+  assert.ok(sawTerminalFilter, "terminal CAS must require completed_at IS NULL");
+  assert.deepEqual(dbRow.result_summary, wins[0].burst.result_summary, "first terminal result is authoritative");
+
+  // A later retry with the same token is idempotent — never an overwrite.
+  const frozen_summary = dbRow.result_summary;
+  const c3 = await store.completeClaimed({
+    burst_id: base.burst_id,
+    claim_token: "tok-race",
+    result_summary: { winner: "C" },
+    now: plus(T0, 60_000),
+  });
+  assert.equal(c3.ok, true);
+  assert.equal(c3.already_completed, true);
+  assert.deepEqual(dbRow.result_summary, frozen_summary, "retry never overwrites the terminal summary");
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // BLOCKER 3 — per-fragment classification must not mutate business state
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1447,7 +1812,7 @@ function makeRecordingSupabase({ selects = {} } = {}) {
   };
 }
 
-function installBurstFragmentHarness({ appendThrows = false } = {}) {
+function installBurstFragmentHarness({ appendThrows = false, coordinatorMissing = false } = {}) {
   const ledger = createInMemoryIdempotencyLedger();
   const supabase = makeRecordingSupabase({
     selects: {
@@ -1568,15 +1933,17 @@ function installBurstFragmentHarness({ appendThrows = false } = {}) {
     updateInboundAutopilotQueue: async () => ({ ok: true }),
     emitAutomationEvent: async () => ({ ok: true }),
     isSellerInboundBurstEnabled: () => true,
-    createSellerInboundBurstCoordinator: (opts) => {
-      coordinator_ref = createSellerInboundBurstCoordinator({
-        ...opts,
-        supabase: null,
-        store: burst_store,
-        now: harness_now,
-      });
-      return coordinator_ref;
-    },
+    createSellerInboundBurstCoordinator: coordinatorMissing
+      ? null
+      : (opts) => {
+          coordinator_ref = createSellerInboundBurstCoordinator({
+            ...opts,
+            supabase: null,
+            store: burst_store,
+            now: harness_now,
+          });
+          return coordinator_ref;
+        },
     processSellerInboundMessage: async (args) => {
       calls.v2.push(args);
       return { ok: true, queued: false, execution: { queued: false } };
@@ -1746,6 +2113,18 @@ test("fragments: burst store unavailable → webhook fails closed, no silent swa
   assert.match(r.error_message, /seller_inbound_bursts_schema_missing/);
   assert.equal(harness.calls.v2.length, 0, "no per-message auto-reply fallback");
   assert.deepEqual(harness.calls.podio.map((c) => c.name), []);
+});
+
+test("fragments: burst enabled + coordinator dependency missing → webhook fails closed, zero V2, zero reply/follow-up writes", async () => {
+  const harness = installBurstFragmentHarness({ coordinatorMissing: true });
+  const r = await harness.sendFragment("hello there", { at: 0, id: "nodep-1" });
+  assert.equal(r.ok, false, "webhook must error so the provider redelivers");
+  assert.equal(r.error, "textgrid_inbound_failed_podio_write");
+  assert.match(r.error_message, /seller_inbound_burst_coordinator_unavailable/);
+  assert.equal(harness.calls.v2.length, 0, "no per-message V2 fallback");
+  assert.deepEqual(harness.calls.podio.map((c) => c.name), []);
+  const business_writes = harness.supabase.writes.filter((w) => w.table !== "inbox_thread_state");
+  assert.deepEqual(business_writes, [], "no reply queue inserts, no follow-up inserts");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2521,5 +2900,50 @@ test("GATE B: brand-new thread row before flush is presentation-only and non-exe
     assert.equal(calls.v2[0].message, "yeah maybe");
   } finally {
     __resetTextgridInboundTestDeps();
+  }
+});
+
+// ── Flush route auth: requireInternalSecret contract preserved ─────────────
+
+test("flush route auth: invalid credential → 401 unauthorized; unconfigured secret → 500 internal_secret_not_configured", async () => {
+  const makeReq = (headers = {}) =>
+    new Request("http://localhost/api/internal/seller-flow/flush-inbound-bursts", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
+
+  // test:critical env configures INTERNAL_API_SECRET=test → wrong credential is 401.
+  const unauthorized = await flushInboundBurstsPost(makeReq({ "x-internal-api-secret": "wrong" }));
+  assert.equal(unauthorized.status, 401);
+  assert.deepEqual(await unauthorized.json(), { ok: false, reason: "unauthorized" });
+
+  // Valid credential passes auth — the next guard (no supabase config in the
+  // test env) answers 503, proving auth no longer hardcodes 401 on this path.
+  const authed = await flushInboundBurstsPost(makeReq({ "x-internal-api-secret": "test" }));
+  assert.equal(authed.status, 503);
+  assert.deepEqual(await authed.json(), { ok: false, reason: "missing_supabase" });
+
+  // No secrets configured at all → the helper's 500 must surface untouched.
+  const saved = {
+    INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET,
+    CRON_SECRET: process.env.CRON_SECRET,
+    QUEUE_ENGINE_SHARED_SECRET: process.env.QUEUE_ENGINE_SHARED_SECRET,
+  };
+  try {
+    delete process.env.INTERNAL_API_SECRET;
+    delete process.env.CRON_SECRET;
+    delete process.env.QUEUE_ENGINE_SHARED_SECRET;
+    const unconfigured = await flushInboundBurstsPost(makeReq({ "x-internal-api-secret": "test" }));
+    assert.equal(unconfigured.status, 500);
+    assert.deepEqual(await unconfigured.json(), {
+      ok: false,
+      reason: "internal_secret_not_configured",
+    });
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
