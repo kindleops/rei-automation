@@ -3589,6 +3589,16 @@ export async function syncClassifiedInboxThreadState({
   messageEvent,
   is_read,
   increment_direction,
+  // Burst-fragment mode: an individual constituent of an open seller burst
+  // may only project presentation/triage + immediate-safety state. Fields the
+  // semantic audit classified business-authoritative (status → contactability
+  // gate incl. paused_review; next_action + disposition → canonical universal
+  // lead state; automation_state → automation kill-switch semantics) are
+  // withheld from the upsert so the finalized aggregate turn remains the only
+  // writer (via the guarded patchUniversalLeadState service). Safety-latched
+  // fragments (STOP / wrong number / hostile) do NOT set this — immediate
+  // suppression keeps the full projection.
+  fragment_safe = false,
 } = {}, deps = {}) {
   const supabase = getSupabase(deps);
   const normalizedThreadKey = clean(thread_key);
@@ -3660,6 +3670,7 @@ export async function syncClassifiedInboxThreadState({
     status: "active",
     automation_state: "running",
   });
+  if (fragment_safe) inboxPayload.__fragment_safe = true;
 
   return upsertInboxThreadState(inboxPayload, deps);
 }
@@ -4700,9 +4711,11 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   }
 
   let prior = null;
+  // Include is_suppressed so fragment-safe monotonic suppression can see prior
+  // terminal contact state (counts alone are insufficient for true→false guard).
   const { data: existing_state } = await supabase
     .from('inbox_thread_state')
-    .select('inbound_count,outbound_count')
+    .select('inbound_count,outbound_count,is_suppressed,status,next_action,automation_state,disposition')
     .eq('thread_key', thread_key)
     .limit(1)
     .maybeSingle();
@@ -4764,6 +4777,30 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   if (typeof payload.is_suppressed === "boolean") insert_payload.is_suppressed = payload.is_suppressed;
   if (payload.last_inbound_at !== undefined) insert_payload.last_inbound_at = payload.last_inbound_at;
   if (payload.last_outbound_at !== undefined) insert_payload.last_outbound_at = payload.last_outbound_at;
+
+  // Burst-fragment guard (see syncClassifiedInboxThreadState.fragment_safe):
+  // when a prior row exists, a burst fragment must not mutate the
+  // business-authoritative columns — status (contactability gate, e.g.
+  // paused_review), next_action + disposition (canonical universal lead
+  // state), automation_state (automation-control semantics). Omitting them
+  // from the upsert leaves the stored values untouched; the finalized
+  // aggregate turn changes them through patchUniversalLeadState only. A brand
+  // new row keeps the normal defaults — there is no prior state to protect.
+  if (payload.__fragment_safe && prior) {
+    delete insert_payload.status;
+    delete insert_payload.next_action;
+    delete insert_payload.automation_state;
+    delete insert_payload.disposition;
+    // Suppression is monotonic across non-safety fragments:
+    // false → true is allowed only via safety-latched (fragment_safe=false) paths;
+    // true → false is NEVER allowed. A benign fragment must not clear STOP.
+    if (prior.is_suppressed === true) {
+      insert_payload.is_suppressed = true;
+    } else if (insert_payload.is_suppressed === false) {
+      // Omit explicit false so a missing prior-true race cannot invent a clear.
+      delete insert_payload.is_suppressed;
+    }
+  }
 
   const { data, error } = await supabase
     .from('inbox_thread_state')

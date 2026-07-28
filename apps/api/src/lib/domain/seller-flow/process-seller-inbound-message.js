@@ -23,6 +23,7 @@ import {
   loadSellerDealState,
 } from "@/lib/domain/seller-flow/persist-seller-transition.js";
 import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import { resolveBurstAskingPriceSignal } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import {
   extractSellerFacts,
   extractionToResolverFacts,
@@ -500,6 +501,7 @@ export async function processSellerInboundMessage({
   recentOutbound = null,
   supabaseClient = null,
   getSystemValue = null,
+  burstContext = null,
 } = {}) {
   const supabase = supabaseClient || runtimeDeps.getSupabaseClient?.();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -628,7 +630,7 @@ export async function processSellerInboundMessage({
       : Number(prior_negotiation_state?.offers_made) > 0) ||
       prior_negotiation_state?.latest_offer != null
   );
-  const price_signal = resolveAskingPriceSignal(message, {
+  const price_signal_options = {
     reference:
       prior_negotiation_state?.current_asking_price ??
       prior_negotiation_state?.current_ask ??
@@ -637,7 +639,19 @@ export async function processSellerInboundMessage({
       null,
     negotiationActive: negotiation_active,
     sourceMessageId: providerMessageId || inboundEventId,
-  });
+  };
+  // Finalized-burst turns carry their raw constituents: the burst-aware
+  // reduction evaluates each fragment with the SAME single-message monetary
+  // authority and options, then lets the latest explicit unambiguous seller
+  // correction win ("$350k" → "Actually $325k" ⇒ 325000). Single messages
+  // keep the generic monetary policy untouched.
+  const burst_constituents = Array.isArray(burstContext?.constituent_messages)
+    ? burstContext.constituent_messages.filter((m) => clean(m?.body))
+    : [];
+  const price_signal =
+    burst_constituents.length > 1
+      ? resolveBurstAskingPriceSignal(burst_constituents, price_signal_options)
+      : resolveAskingPriceSignal(message, price_signal_options);
 
   // ── Deterministic evidence-backed fact extraction (not a classifier —
   // classify.js remains the only intent classifier). Every fact carries
@@ -699,6 +713,18 @@ export async function processSellerInboundMessage({
   // replayable alongside the decision that consumed it.
   if (intelligence_snapshot && fact_extraction) {
     intelligence_snapshot.fact_extraction = fact_extraction;
+  }
+  // Burst provenance: which finalized generation produced this single V2 turn
+  // (audit + idempotency proof — the decision key is stable across reclaims).
+  if (intelligence_snapshot && burstContext) {
+    intelligence_snapshot.burst_context = {
+      burst_id: burstContext.burst_id || null,
+      generation: burstContext.generation ?? null,
+      decision_idempotency_key: burstContext.decision_idempotency_key || null,
+      message_count: burstContext.message_count ?? burst_constituents.length,
+      policy_version: burstContext.policy_version || null,
+      attempt_count: burstContext.attempt_count ?? null,
+    };
   }
 
   try {
