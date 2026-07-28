@@ -22,6 +22,12 @@ import { isOfferStageTrigger, runOfferStageAI, buildOfferStageMetadata, shouldSk
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
 import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
+import {
+  createSellerInboundBurstCoordinator,
+  isSellerInboundBurstEnabled,
+} from "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js";
+import { detectImmediateSafetySignal } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
+import { cancelPendingFollowUpsForThread } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { buildIntelligenceMessageEventPatch } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
 import {
   autoReplyModeAllowsDiagnostics,
@@ -89,6 +95,9 @@ const defaultDeps = {
   syncPipelineState,
   processAutonomousSellerReply,
   processSellerInboundMessage,
+  createSellerInboundBurstCoordinator,
+  isSellerInboundBurstEnabled,
+  cancelPendingFollowUpsForThread,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
   cancelPendingQueueItemsForOwner,
@@ -811,6 +820,17 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     await runtimeDeps.getSystemValue("podio_sync_enabled"),
     false
   );
+  // Durable burst mode (BLOCKER-3 gate): while enabled, an individual inbound
+  // fragment may only (a) persist the raw message, (b) apply immediate
+  // safety/contact projections (suppression, pending-outbound cancellation,
+  // inbox thread presentation/triage), and (c) enter durable burst storage.
+  // Acquisition/business advancement — brains, offers, underwriting,
+  // contracts, pipeline, follow-up queueing, reply queueing — happens exactly
+  // once per finalized burst via the aggregate V2 turn, never per fragment.
+  const seller_burst_enabled = runtimeDeps.isSellerInboundBurstEnabled
+    ? runtimeDeps.isSellerInboundBurstEnabled()
+    : isSellerInboundBurstEnabled();
+  const podio_business_writes_enabled = podio_sync_enabled && !seller_burst_enabled;
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
     ? { mode: "disabled", source: "queue_emergency_stop" }
@@ -1020,7 +1040,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       context = await runtimeDeps.loadContextWithFallback({
         inbound_from,
         inbound_to,
-        create_brain_if_missing: podio_sync_enabled,
+        create_brain_if_missing: podio_business_writes_enabled,
         loadContextImpl: runtimeDeps.loadContext,
       });
     } catch (err) {
@@ -1252,6 +1272,15 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       classification = await runtimeDeps.classify(message_body, brain_item, { heuristicOnly: true });
 
       try {
+        // Burst-fragment write restriction: while burst mode defers the
+        // business decision, a non-safety fragment may only project
+        // presentation/triage thread state — business-authoritative columns
+        // (status/next_action/disposition/automation_state) wait for the
+        // finalized aggregate. Safety-latched fragments keep the full
+        // projection so immediate suppression state lands instantly.
+        const fragment_safety = seller_burst_enabled
+          ? detectImmediateSafetySignal({ message: message_body, classification })
+          : { latch: false };
         await syncClassifiedInboxThreadState({
           thread_key: inbound_from,
           seller_phone: inbound_from,
@@ -1262,6 +1291,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           market: market_id,
           conversationStage: stage_before,
           classification,
+          fragment_safe: seller_burst_enabled && !fragment_safety.latch,
           messageEvent: {
             id: inbound_message_event_id,
             provider_message_sid: extracted.message_id,
@@ -1451,7 +1481,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     // Write brain activity, master-owner timestamps, and stage/language/profile
     // updates in parallel.
     try {
-      if (podio_sync_enabled) {
+      if (podio_business_writes_enabled) {
         await runtimeDeps.updateMasterOwnerAfterInbound({
           master_owner_id,
           received_at: new Date().toISOString(),
@@ -1485,7 +1515,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     // Fetch the latest open offer to determine offer-progression vs. creation.
     let existing_offer = null;
     try {
-      if (podio_sync_enabled) {
+      if (podio_business_writes_enabled) {
         existing_offer = await runtimeDeps.findLatestOpenOffer({
           prospect_id,
           master_owner_id,
@@ -1517,7 +1547,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         "manual_review",
       ].includes(offer_route);
 
-      if (podio_sync_enabled) {
+      if (podio_business_writes_enabled) {
         maybe_offer_progress = existing_offer
           ? await runtimeDeps.maybeProgressOfferStatus({
               offer_item_id: existing_offer.item_id,
@@ -1568,7 +1598,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         underwriting_transfer = null;
       }
 
-      underwriting = podio_sync_enabled
+      underwriting = podio_business_writes_enabled
         ? await runtimeDeps.maybeUpsertUnderwritingFromInbound({
             context,
             classification,
@@ -1638,37 +1668,194 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       const seller_flow_execution_allowed =
         execution_allowed && !cap_reached && offer_route !== "manual_review";
 
-      const seller_orchestration = await runtimeDeps.processSellerInboundMessage({
-        message: message_body,
-        threadKey: inbound_from,
-        propertyId: property_id,
-        prospectId: prospect_id,
-        ownerId: master_owner_id,
-        phoneId: phone_item_id,
-        classification,
-        conversationBrain: brain_item,
-        context,
-        route,
-        inboundFrom: inbound_from,
-        inboundTo: extracted.to || context?.summary?.inbound_to || context?.summary?.textgrid_number || inbound_to,
-        inboundEventId: inbound_message_event_id || extracted.message_id,
-        inboundReceivedAt:
-          extracted.received_at || payload?.http_received_at || new Date().toISOString(),
-        providerMessageId: extracted.message_id,
-        stageBefore: stage_before,
-        autoReplyMode: auto_reply_mode_final,
-        executionAllowed: seller_flow_execution_allowed,
-        systemFollowupEnabled: system_followup_enabled,
-        inboundAutopilotDelaySeconds: inbound_autopilot_delay_seconds,
-        timezoneOverride: autopilot_queue_overrides.timezone_label,
-        contactWindowOverride: autopilot_queue_overrides.contact_window,
-        dryRun: Boolean(dry_run),
-        applySuppression: true,
-        underwritingSignals: signals,
-        recentOutbound: latest_outbound_event,
-        supabaseClient: runtimeDeps.getSupabaseClient?.(),
-        getSystemValue: runtimeDeps.getSystemValue,
-      });
+      const inbound_received_at =
+        extracted.received_at || payload?.http_received_at || new Date().toISOString();
+      const inbound_to_resolved =
+        extracted.to ||
+        context?.summary?.inbound_to ||
+        context?.summary?.textgrid_number ||
+        inbound_to;
+
+      // Durable burst/debounce: every raw message is already persisted above.
+      // When enabled, defer processSellerInboundMessage until the quiet window
+      // closes (or immediate safety forces a suppressed finalize).
+      let seller_orchestration = null;
+      let burst_deferral = null;
+
+      if (seller_burst_enabled && typeof runtimeDeps.createSellerInboundBurstCoordinator === "function") {
+        const supabase_for_burst = runtimeDeps.getSupabaseClient?.() || null;
+        const burst_coordinator = runtimeDeps.createSellerInboundBurstCoordinator({
+          supabase: supabase_for_burst,
+          processSellerInboundMessage: runtimeDeps.processSellerInboundMessage,
+          cancelPendingOutbound: async (args) => {
+            if (!supabase_for_burst) return { ok: false, cancelled: 0, reason: "no_supabase" };
+            return runtimeDeps.cancelSupabasePendingOutbound(
+              {
+                thread_key: args.thread_key,
+                to_phone_number: args.thread_key,
+                phone_id: phone_item_id,
+                master_owner_id,
+                property_id,
+                prospect_id,
+                reason: args.reason,
+                inbound_event_id: args.inbound_event_id,
+                cancelled_by: "seller_inbound_burst",
+                policy:
+                  args.policy === "compliance_terminal"
+                    ? CANCELLATION_POLICIES.COMPLIANCE_TERMINAL
+                    : undefined,
+              },
+              { supabase: supabase_for_burst }
+            );
+          },
+          cancelPendingFollowUps: async (args) =>
+            runtimeDeps.cancelPendingFollowUpsForThread({
+              thread_key: args.thread_key,
+              reason: args.reason,
+              inbound_event_id: args.inbound_event_id,
+              supabase: supabase_for_burst,
+            }),
+          worker_id: "textgrid_inbound",
+          enabled: true,
+        });
+
+        const orchestration_context = {
+          propertyId: property_id,
+          prospectId: prospect_id,
+          ownerId: master_owner_id,
+          phoneId: phone_item_id,
+          conversationBrain: brain_item,
+          context,
+          route,
+          inboundTo: inbound_to_resolved,
+          stageBefore: stage_before,
+          autoReplyMode: auto_reply_mode_final,
+          executionAllowed: seller_flow_execution_allowed,
+          systemFollowupEnabled: system_followup_enabled,
+          inboundAutopilotDelaySeconds: inbound_autopilot_delay_seconds,
+          timezoneOverride: autopilot_queue_overrides.timezone_label,
+          contactWindowOverride: autopilot_queue_overrides.contact_window,
+          dryRun: Boolean(dry_run),
+          underwritingSignals: signals,
+          recentOutbound: latest_outbound_event,
+          supabaseClient: supabase_for_burst,
+          getSystemValue: runtimeDeps.getSystemValue,
+        };
+
+        // Durable thread suppression (e.g. prior STOP) must latch every later
+        // fragment so a benign message cannot open a reply-capable generation.
+        let prior_thread_suppressed = false;
+        try {
+          if (supabase_for_burst) {
+            const { data: suppress_row } = await supabase_for_burst
+              .from("inbox_thread_state")
+              .select("is_suppressed")
+              .eq("thread_key", inbound_from)
+              .limit(1)
+              .maybeSingle();
+            prior_thread_suppressed = suppress_row?.is_suppressed === true;
+          }
+        } catch {
+          prior_thread_suppressed = false;
+        }
+
+        burst_deferral = await burst_coordinator.onPersistedInbound({
+          thread_key: inbound_from,
+          event_id: inbound_message_event_id || extracted.message_id,
+          provider_message_id: extracted.message_id,
+          body: message_body,
+          received_at: inbound_received_at,
+          classification,
+          orchestration_context,
+          prior_thread_suppressed,
+        });
+
+        // Fail closed: if durable burst ingestion could not accept the message
+        // (store unavailable, rollover append exhausted), error the webhook so
+        // the provider redelivers. Never silently swallow the message and
+        // never fall back to a per-message auto-reply while burst mode is on.
+        if (burst_deferral && burst_deferral.ok === false) {
+          throw new Error(
+            burst_deferral.reason || "seller_inbound_burst_ingestion_failed"
+          );
+        }
+
+        if (burst_deferral?.flush?.orchestration) {
+          seller_orchestration = burst_deferral.flush.orchestration;
+        } else if (burst_deferral?.deferred) {
+          // Decision deferred to burst flush — no per-message auto-reply.
+          seller_orchestration = {
+            ok: true,
+            deferred_burst: true,
+            burst_id: burst_deferral?.append?.burst?.burst_id || null,
+            generation: burst_deferral?.append?.burst?.generation || null,
+            queued: false,
+            followup_scheduled: false,
+            follow_up: { ok: true, skipped: true, reason: "deferred_to_burst_flush" },
+            seller_stage_reply: {
+              queued: false,
+              reason: "deferred_to_burst_flush",
+              plan: { should_queue_reply: false, selected_use_case: null },
+            },
+            intelligence_snapshot: {
+              canonical_intent: classification?.primary_intent || null,
+              canonical_decision: {
+                should_queue_reply: false,
+                audit_reason: burst_deferral?.safety?.latch
+                  ? `burst_safety_${burst_deferral.safety.kind || "terminal"}`
+                  : "deferred_to_burst_flush",
+              },
+              execution_blocked_reason: burst_deferral?.safety?.latch
+                ? `burst_safety_${burst_deferral.safety.kind || "terminal"}`
+                : "deferred_to_burst_flush",
+            },
+            effective_action: burst_deferral?.safety?.latch
+              ? "suppressed"
+              : "burst_deferred",
+          };
+          safeInfo("seller_inbound_burst.deferred", {
+            message_id: extracted.message_id,
+            inbound_from,
+            burst_id: burst_deferral?.append?.burst?.burst_id || null,
+            generation: burst_deferral?.append?.burst?.generation || null,
+            safety_latched: Boolean(burst_deferral?.safety?.latch),
+            eligible_at: burst_deferral?.append?.burst?.eligible_at || null,
+          });
+        }
+      }
+
+      if (!seller_orchestration) {
+        seller_orchestration = await runtimeDeps.processSellerInboundMessage({
+          message: message_body,
+          threadKey: inbound_from,
+          propertyId: property_id,
+          prospectId: prospect_id,
+          ownerId: master_owner_id,
+          phoneId: phone_item_id,
+          classification,
+          conversationBrain: brain_item,
+          context,
+          route,
+          inboundFrom: inbound_from,
+          inboundTo: inbound_to_resolved,
+          inboundEventId: inbound_message_event_id || extracted.message_id,
+          inboundReceivedAt: inbound_received_at,
+          providerMessageId: extracted.message_id,
+          stageBefore: stage_before,
+          autoReplyMode: auto_reply_mode_final,
+          executionAllowed: seller_flow_execution_allowed,
+          systemFollowupEnabled: system_followup_enabled,
+          inboundAutopilotDelaySeconds: inbound_autopilot_delay_seconds,
+          timezoneOverride: autopilot_queue_overrides.timezone_label,
+          contactWindowOverride: autopilot_queue_overrides.contact_window,
+          dryRun: Boolean(dry_run),
+          applySuppression: true,
+          underwritingSignals: signals,
+          recentOutbound: latest_outbound_event,
+          supabaseClient: runtimeDeps.getSupabaseClient?.(),
+          getSystemValue: runtimeDeps.getSystemValue,
+        });
+      }
 
       const auto_reply_plan = seller_orchestration?.seller_stage_reply?.plan || {};
       seller_stage_reply = seller_orchestration?.seller_stage_reply || null;
@@ -1787,7 +1974,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         };
       }
 
-      if (podio_sync_enabled && shouldCreateBrainForInbound({ brain_id, seller_stage_reply, context, route })) {
+      if (podio_business_writes_enabled && shouldCreateBrainForInbound({ brain_id, seller_stage_reply, context, route })) {
         brain_item = await runtimeDeps.createBrain({
           master_owner_id,
           prospect_id,
@@ -1826,7 +2013,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         }
       }
 
-      if (podio_sync_enabled && seller_stage_reply?.brain_stage && brain_id) {
+      if (podio_business_writes_enabled && seller_stage_reply?.brain_stage && brain_id) {
         await runtimeDeps.updateBrainStage({ brain_id, stage: seller_stage_reply.brain_stage });
       }
 
@@ -1836,7 +2023,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         ? { ok: true, queued: false, reason: "system_control_disabled" }
         : auto_reply_plan?.should_queue_reply
         ? { ok: true, queued: false, reason: "suppressed_by_auto_reply_plan" }
-        : podio_sync_enabled
+        : podio_business_writes_enabled
           ? await runtimeDeps.maybeQueueUnderwritingFollowUp({
               inbound_from,
               underwriting,
@@ -1853,7 +2040,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         underwriting_follow_up?.offer_ready === true;
 
       maybe_offer =
-        !podio_sync_enabled ||
+        !podio_business_writes_enabled ||
         defer_immediate_offer_create ||
         initial_offer?.created ||
         initial_offer?.existing_offer_item_id ||
@@ -1880,7 +2067,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         existing_offer?.item_id ||
         null;
 
-      contract = podio_sync_enabled
+      contract = podio_business_writes_enabled
         ? await runtimeDeps.maybeCreateContractFromAcceptedOffer({
             offer_item: existing_offer || null,
             offer_item_id: active_offer_item_id,
@@ -1895,7 +2082,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           })
         : null;
 
-      pipeline = podio_sync_enabled
+      pipeline = podio_business_writes_enabled
         ? await runtimeDeps.syncPipelineState({
             create_if_missing: shouldCreatePipelineForInbound({
               seller_stage_reply,
@@ -1988,7 +2175,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           classification?.detected_intent ||
           "unclear";
 
-        if (podio_sync_enabled) {
+        if (podio_business_writes_enabled) {
           await runtimeDeps.logInboundMessageEvent({
             record_item_id: inbound_message_event_id,
             brain_item,
