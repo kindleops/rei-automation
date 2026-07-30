@@ -15,6 +15,8 @@ import {
   verifyTextgridWebhookRequest,
 } from "@/lib/webhooks/textgrid-verify-webhook.js";
 import { normalizeTextgridDeliveryPayload } from "@/lib/webhooks/textgrid-delivery-normalize.js";
+import { getPodioAvailability, isPodioUnavailableError } from "@/lib/providers/podio.js";
+import { recordLaunchCriticalAlert } from "@/lib/domain/alerts/launch-critical-alerts.js";
 
 const defaultLogger = child({
   module: "webhooks.textgrid.delivery_request",
@@ -76,6 +78,9 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
     verifyTextgridWebhookSignatureImpl = verifyTextgridWebhookRequest,
     writeWebhookLogImpl = writeWebhookLog,
     processDeliveryWebhookLiveImpl = processDeliveryWebhookLive,
+    getPodioAvailabilityImpl = getPodioAvailability,
+    isPodioUnavailableErrorImpl = isPodioUnavailableError,
+    recordLaunchCriticalAlertImpl = recordLaunchCriticalAlert,
   } = deps;
 
   let log_payload = null;
@@ -305,22 +310,83 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
       }
     }
 
-    downstream_handler_invoked = true;
-    podio_persistence_attempted = true;
-    logger.info(
-      "textgrid_delivery.handler_started",
-      buildTextgridWebhookLogMeta({
-        payload,
-        webhook_verification,
-        downstream_handler_invoked: true,
-        podio_persistence_attempted: true,
-        extra: {
-          handler_name: "handleTextgridDelivery",
-        },
-      })
-    );
+    // ── Legacy Podio correlation lane (containment) ──────────────────────────
+    // Canonical Supabase delivery persistence has already completed above. This
+    // lane is legacy Podio correlation only, so it must never decide the webhook
+    // status: previously any Podio error propagated to the outer catch and
+    // returned 500 to TextGrid, which makes the provider retry a receipt we
+    // already stored.
+    const podio_availability = getPodioAvailabilityImpl();
+    let result = null;
 
-    const result = await handleTextgridDeliveryImpl(payload);
+    if (!podio_availability.ok) {
+      podio_persistence_attempted = false;
+      logger.info(
+        "textgrid_delivery.podio_lane_skipped",
+        buildTextgridWebhookLogMeta({
+          payload,
+          webhook_verification,
+          downstream_handler_invoked: false,
+          podio_persistence_attempted: false,
+          extra: {
+            handler_name: "handleTextgridDelivery",
+            skip_reason: podio_availability.reason,
+          },
+        })
+      );
+      result = { ok: true, skipped: true, reason: podio_availability.reason };
+    } else {
+      downstream_handler_invoked = true;
+      podio_persistence_attempted = true;
+      logger.info(
+        "textgrid_delivery.handler_started",
+        buildTextgridWebhookLogMeta({
+          payload,
+          webhook_verification,
+          downstream_handler_invoked: true,
+          podio_persistence_attempted: true,
+          extra: {
+            handler_name: "handleTextgridDelivery",
+          },
+        })
+      );
+
+      try {
+        result = await handleTextgridDeliveryImpl(payload);
+      } catch (podio_error) {
+        // Contained: log, alert, and still return 2xx. The delivery receipt is
+        // already durable in Supabase.
+        logger.error(
+          "textgrid_delivery.podio_lane_failed",
+          buildTextgridWebhookLogMeta({
+            payload,
+            webhook_verification,
+            downstream_handler_invoked: true,
+            podio_persistence_attempted: true,
+            extra: {
+              handler_name: "handleTextgridDelivery",
+              error_message: podio_error?.message || "unknown_podio_error",
+              error_name: podio_error?.name || null,
+              podio_unavailable: isPodioUnavailableErrorImpl(podio_error),
+            },
+          })
+        );
+        await recordLaunchCriticalAlertImpl({
+          code: "delivery_webhook_podio_lane_failed",
+          severity: "warning",
+          summary: "Legacy Podio correlation failed on a delivery receipt; Supabase persistence unaffected.",
+          metadata: {
+            error_name: podio_error?.name || null,
+            podio_unavailable: isPodioUnavailableErrorImpl(podio_error),
+          },
+        }).catch(() => {});
+        result = {
+          ok: false,
+          contained: true,
+          reason: "podio_correlation_failed",
+        };
+      }
+    }
 
     logger.info(
       "textgrid_delivery.handler_completed",

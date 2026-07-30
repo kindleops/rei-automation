@@ -15,6 +15,10 @@
 
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { warn, info } from "@/lib/logging/logger.js";
+import {
+  stripOperatorOwnedSystemKeys,
+  SYSTEM_CONTROL_AUTHORITIES,
+} from "@/lib/domain/queue/operator-brake-authority.js";
 
 const TABLE = "system_control";
 
@@ -144,12 +148,38 @@ export async function getSystemValue(key, opts = {}) {
   }
 }
 
+/**
+ * Write system_control values.
+ *
+ * @param {object} pairs key -> value
+ * @param {{ supabase?: object, authority?: string, context?: string }} [opts]
+ *   - authority: SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION makes the write
+ *     operator-brake-safe — operator-owned keys are dropped, not persisted.
+ *     Defaults to operator authority (explicit control-plane action).
+ */
 export async function setSystemValues(pairs = {}, opts = {}) {
   const { supabase = defaultSupabase } = opts;
-  const entries = Object.entries(pairs)
+  const authority = clean(opts.authority) || SYSTEM_CONTROL_AUTHORITIES.OPERATOR;
+
+  let incoming = pairs;
+  let blocked_keys = [];
+  if (authority === SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION) {
+    const filtered = stripOperatorOwnedSystemKeys(pairs);
+    incoming = filtered.patch;
+    blocked_keys = filtered.removed;
+    if (blocked_keys.length > 0) {
+      warn("system_control.operator_owned_write_blocked", {
+        authority,
+        context: clean(opts.context) || "unknown",
+        keys: blocked_keys,
+      });
+    }
+  }
+
+  const entries = Object.entries(incoming)
     .map(([key, value]) => ({ key: clean(key), value: clean(value) }))
     .filter((row) => row.key);
-  if (entries.length === 0) return { ok: true, updated: 0 };
+  if (entries.length === 0) return { ok: true, updated: 0, blocked_keys };
 
   const { data, error } = await supabase
     .from(TABLE)
@@ -157,10 +187,16 @@ export async function setSystemValues(pairs = {}, opts = {}) {
     .select("key,value,updated_at");
   if (error) {
     warn("system_control.set_values_error", { message: error.message, count: entries.length });
-    return { ok: false, error };
+    return { ok: false, error, blocked_keys };
   }
-  entries.forEach((row) => _cache.delete(row.key));
-  return { ok: true, updated: data?.length || 0, rows: data || [] };
+  // Invalidate BOTH caches. _value_cache was previously left stale for up to
+  // CACHE_TTL_MS, so an operator writing queue_execution_mode='stopped' was not
+  // observed by the dispatch gate in a warm lambda for up to 30s.
+  entries.forEach((row) => {
+    _cache.delete(row.key);
+    _value_cache.delete(row.key);
+  });
+  return { ok: true, updated: data?.length || 0, rows: data || [], blocked_keys };
 }
 
 /**

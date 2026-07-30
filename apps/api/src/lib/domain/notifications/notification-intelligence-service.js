@@ -345,6 +345,40 @@ export async function resolveNotificationByGroupingKey(groupingKey, reason = 'au
   }
 }
 
+/**
+ * Resolve the single notification identified by its deduplication key.
+ *
+ * Distinct from resolveNotificationByGroupingKey, which resolves an entire
+ * group. Launch-critical alerting needs per-alert resolution so clearing one
+ * subsystem failure does not mark unrelated failures in the same group resolved.
+ */
+export async function resolveNotificationByDeduplicationKey(deduplicationKey, options = {}) {
+  const db = getDb()
+  if (!deduplicationKey) return { ok: false, error: 'deduplication_key_required' }
+
+  const reason = options.resolution_message || options.reason || 'auto_resolved'
+  const nowIso = now().toISOString()
+  try {
+    const { data, error } = await db
+      .from('notification_events')
+      .update({
+        status: 'resolved',
+        resolved_at: nowIso,
+        updated_at: nowIso,
+        action_state: { resolve_reason: reason },
+      })
+      .eq('deduplication_key', deduplicationKey)
+      .eq('status', 'active')
+      .select('id')
+
+    if (error) return { ok: false, error: error.message }
+    const resolved_count = data?.length ?? 0
+    return { ok: true, resolved: resolved_count > 0, resolved_count }
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err) }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Operator state mutations
 // ---------------------------------------------------------------------------
