@@ -10,7 +10,13 @@
  *      is refused — another product's project is not rei-automation staging.
  *   3. An explicit opt-in env var (ALLOW_OFFERR_STAGING_FIXTURES=true) is
  *      required, so an inherited shell env can never silently authorize a run.
- *   4. A target that cannot be positively identified is refused. Unknown is
+ *   4. An environment that DESIGNATES ITSELF production (NODE_ENV,
+ *      VERCEL_ENV, APP_ENV, ...) is refused regardless of which database the
+ *      target string points at. A correct ref on a production runtime is
+ *      still a production execution.
+ *   5. Declared-required staging secrets must be present. A half-configured
+ *      run is refused before it can half-apply anything.
+ *   6. A target that cannot be positively identified is refused. Unknown is
  *      never treated as safe.
  *
  * The guard throws OfferrStagingGuardError. Callers must not catch and continue.
@@ -34,6 +40,29 @@ export const FOREIGN_PRODUCT_PROJECT_REFS = Object.freeze({
 });
 
 export const STAGING_OPT_IN_ENV = 'ALLOW_OFFERR_STAGING_FIXTURES';
+
+/**
+ * Environment variables that designate the *runtime* environment. If any of
+ * them says production, the run is refused even when the database target
+ * itself looks like staging — Offerr fixtures must never execute from a
+ * production runtime.
+ */
+export const ENVIRONMENT_DESIGNATION_ENVS = Object.freeze([
+  'NODE_ENV',
+  'VERCEL_ENV',
+  'APP_ENV',
+  'APP_ENVIRONMENT',
+  'ENVIRONMENT',
+  'DEPLOY_ENV',
+  'OFFERR_ENVIRONMENT',
+]);
+
+/** Values that mean "this is production". Compared case-insensitively. */
+export const PRODUCTION_ENVIRONMENT_VALUES = Object.freeze([
+  'production',
+  'prod',
+  'live',
+]);
 
 export class OfferrStagingGuardError extends Error {
   constructor(message, details = {}) {
@@ -81,6 +110,8 @@ export function isLocalTarget(target) {
  * @param {object}  [options.env]        Environment (defaults to process.env).
  * @param {string}  [options.label]      Human label for logs.
  * @param {boolean} [options.allowLocal] Permit a local container target (default true).
+ * @param {string[]} [options.requiredSecrets] Env var names that must be present
+ *   and non-empty before the run is allowed to proceed.
  * @returns {{ ok: true, classification: string, project_ref: string|null, target_host: string }}
  */
 export function assertOfferrStagingTarget({
@@ -88,6 +119,7 @@ export function assertOfferrStagingTarget({
   env = process.env,
   label = 'offerr-staging',
   allowLocal = true,
+  requiredSecrets = [],
 } = {}) {
   const raw = String(target ?? '').trim();
 
@@ -106,6 +138,35 @@ export function assertOfferrStagingTarget({
       `Refusing to run: ${STAGING_OPT_IN_ENV} is not set to "true". ` +
         'Offerr staging fixtures require an explicit, deliberate opt-in.',
       { label, opt_in_present: Boolean(optIn) },
+    );
+  }
+
+  // ── 1b. Runtime environment designation — absolute refusal ───────────────
+  // A staging ref reached from a production runtime is still a production
+  // execution. Refuse before any target classification work.
+  for (const name of ENVIRONMENT_DESIGNATION_ENVS) {
+    const value = String(env?.[name] ?? '').trim().toLowerCase();
+    if (value && PRODUCTION_ENVIRONMENT_VALUES.includes(value)) {
+      throw new OfferrStagingGuardError(
+        `REFUSING TO RUN FROM A PRODUCTION ENVIRONMENT. ${name}="${value}" ` +
+          'designates this runtime as production. Offerr staging fixtures and ' +
+          'verification must never execute from a production environment, ' +
+          'regardless of which database the target points at.',
+        { label, environment_var: name, environment_value: value, classification: 'production_environment' },
+      );
+    }
+  }
+
+  // ── 1c. Required staging secrets must all be present ─────────────────────
+  // A half-configured run is refused before it can half-apply anything.
+  const missingSecrets = (Array.isArray(requiredSecrets) ? requiredSecrets : [])
+    .filter((name) => !String(env?.[name] ?? '').trim());
+  if (missingSecrets.length > 0) {
+    throw new OfferrStagingGuardError(
+      `Refusing to run: required staging secret(s) missing or empty: ` +
+        `${missingSecrets.join(', ')}. Offerr staging runs fail closed rather ` +
+        'than proceeding with partial configuration.',
+      { label, missing_secrets: missingSecrets, classification: 'missing_secrets' },
     );
   }
 
@@ -223,6 +284,8 @@ export default {
   PRODUCTION_PROJECT_REFS,
   FOREIGN_PRODUCT_PROJECT_REFS,
   STAGING_OPT_IN_ENV,
+  ENVIRONMENT_DESIGNATION_ENVS,
+  PRODUCTION_ENVIRONMENT_VALUES,
   OfferrStagingGuardError,
   extractProjectRef,
   isLocalTarget,

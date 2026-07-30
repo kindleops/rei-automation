@@ -267,6 +267,43 @@ was **not** performed. **Nothing was applied to any hosted project, and no
 hosted project was read from or written to** beyond `projects list` /
 `orgs list` metadata.
 
+### 10.1b The repository cannot rebuild the base schema either
+
+Creating the Supabase project is **necessary but not sufficient**. Offerr's
+runtime touches five database objects, and four have no DDL anywhere in this
+repository:
+
+| Object | Defined in repo? |
+|---|---|
+| `public.system_control` | yes — `20260428_create_system_control.sql` |
+| `public.properties` | **no — production-only** |
+| `public.buyer_comp_raw_v2` | **no — production-only** |
+| `public.buyer_entities_v2` | **no — production-only** |
+| `get_comp_candidates_for_subject(...)` | **no — production-only** |
+
+Replaying the 120-migration tree against an empty project would not create
+them. `apps/api/scripts/offerr/offerr-staging-bootstrap.sql` closes this gap
+with a small deterministic bootstrap (preferred over cloning production): the
+four missing objects, no production data, no secrets, and every outbound flag
+pinned `false` — note the canonical `system_control` migration seeds
+`outbound_sms_enabled`/`feeder_enabled`/`queue_runner_enabled` to `true`, which
+staging must never inherit. It aborts if `public.properties` holds any
+non-`OFFERR-STAGING-TEST-` row, and it is idempotent.
+
+Validated end-to-end against disposable PostgreSQL 17.10: bootstrap applies and
+re-applies cleanly, refuses a populated database, the Offerr migration applies
+on top, schema verification is **47/47**, the comp RPC honours its radius and
+recency windows deterministically, and the full E2E harness scores **207/207**.
+
+> The bootstrap's `get_comp_candidates_for_subject` is a **behavioural
+> stand-in** — same signature and return contract, deterministic body, *not*
+> production's SQL. Staging on it proves how Offerr handles comp data, not
+> production's comp retrieval. Production comp-SQL parity stays open.
+
+Related: V3 feature flags are read from **env vars** by `readFeatureFlag`, not
+from `system_control`, so V3 enablement in staging is a deployment env change
+rather than a database flag change.
+
 ### 10.2 What was verified instead — ephemeral PostgreSQL 17
 
 Because a hosted staging project was unavailable, the migration and the full
@@ -413,12 +450,23 @@ Known limitations:
 - The PostgREST adapter used by the E2E harness
   (`offerr-pg-rest-adapter.mjs`) implements only the query surface the Offerr
   store uses. It is verification tooling, not a general Supabase client.
+- **The E2E harness stubs comp retrieval.** `offerr-e2e-verify.mjs` injects
+  `loadV3CompCandidates: async () => ({ candidates: c.comps })`, so its 207
+  assertions cover the real route, auth, flag gate, resolver, safety gates,
+  store, and a real PostgreSQL — but **not** the real comp path
+  (`get_comp_candidates_for_subject` → `buyer_comp_raw_v2` →
+  `buyer_entities_v2`). `offerr-staging-bootstrap.sql` now makes a real-RPC run
+  possible; rewiring the harness to seed `buyer_comp_raw_v2` and drop the stub
+  is the top prerequisite before any V3-enabled matrix result is trusted.
+- The bootstrap's `get_comp_candidates_for_subject` is a behavioural stand-in,
+  not production's SQL (which this repo does not contain), so **production
+  comp-retrieval parity is unverified** by any run to date.
 
 ## Commands
 
 ```bash
 cd apps/api
-# Offerr spine suites (62 tests)
+# Offerr spine suites (78 tests: 62 spine + 16 staging-guard refusal matrix)
 NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test \
 PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test \
 OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 \
@@ -437,9 +485,18 @@ Stand up a disposable PostgreSQL 17 and apply the migration:
 docker run -d --name offerr-verify-pg -e POSTGRES_PASSWORD=offerrverify \
   -e POSTGRES_DB=offerr_verify -p 55432:5432 postgres:17
 
-# Supabase role + default-ACL environment, then the migration
+# Supabase role + default-ACL environment (LOCAL ONLY — hosted Supabase
+# already has these roles; never run prereqs against a hosted project)
 psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
   -v ON_ERROR_STOP=1 -f apps/api/scripts/offerr/offerr-supabase-prereqs.sql
+
+# Base schema the spine depends on (properties, buyer_comp_raw_v2,
+# buyer_entities_v2, get_comp_candidates_for_subject, safe system_control).
+# This one DOES apply to hosted staging — it is the bootstrap step.
+psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
+  -v ON_ERROR_STOP=1 -f apps/api/scripts/offerr/offerr-staging-bootstrap.sql
+
+# Then the Offerr migration
 psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
   -v ON_ERROR_STOP=1 \
   -f apps/api/supabase/migrations/PROPOSED_20260729120000_offerr_evaluation_spine.sql
@@ -463,7 +520,20 @@ node --import ./tests/register-aliases.mjs scripts/offerr/offerr-e2e-verify.mjs
 ```
 
 `OFFERR_KEEP_FIXTURES=true` retains the synthetic rows for inspection.
-The guard **refuses to run** without `ALLOW_OFFERR_STAGING_FIXTURES=true`,
-refuses the production ref `lcppdrmrdfblstpcbgpf` outright, refuses the
-ReivestiExchange/SignPro projects, and refuses any unidentified target.
+
+The guard **refuses to run** on all six conditions, each covered by
+`tests/critical/offerr-staging-guard.test.mjs` (16 tests):
+
+1. `ALLOW_OFFERR_STAGING_FIXTURES` is not exactly `"true"`.
+2. The runtime designates itself production — `NODE_ENV`, `VERCEL_ENV`,
+   `APP_ENV`, `APP_ENVIRONMENT`, `ENVIRONMENT`, `DEPLOY_ENV`, or
+   `OFFERR_ENVIRONMENT` set to `production`/`prod`/`live`. This applies
+   **regardless of target**: a correct staging ref reached from a production
+   runtime is still a production execution.
+3. A declared `requiredSecrets` env var is missing or blank.
+4. The production ref `lcppdrmrdfblstpcbgpf` appears anywhere in the target,
+   including embedded pooler hostnames.
+5. The target is ReivestiExchange or SignPro.
+6. The target cannot be positively identified as local or as a Supabase project
+   matching `OFFERR_STAGING_PROJECT_REF`.
 Teardown: `docker rm -f offerr-verify-pg`.

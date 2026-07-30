@@ -23,7 +23,11 @@ import pg from 'pg';
 import { handleOfferrEvaluationsRequest } from '@/app/api/internal/offerr/evaluations/route.js';
 import { OFFERR_FLAG_KEY } from '@/lib/domain/offerr/offerr-contracts.js';
 
-import { assertOfferrStagingTarget, printTargetIdentity } from './offerr-staging-guard.mjs';
+import {
+  assertOfferrStagingTarget,
+  isLocalTarget,
+  printTargetIdentity,
+} from './offerr-staging-guard.mjs';
 import { createPgRestAdapter } from './offerr-pg-rest-adapter.mjs';
 import { CASES, FIXTURE_PREFIX, cleanupFixtures, seedSyntheticProperties } from './offerr-staging-fixtures.mjs';
 
@@ -112,7 +116,15 @@ async function main() {
   const target = process.env.OFFERR_VERIFY_DATABASE_URL || '';
 
   section('0. TARGET IDENTITY + PRODUCTION GUARD');
-  const verdict = assertOfferrStagingTarget({ target, label: 'offerr-e2e-verify' });
+  // A hosted staging run must carry its own explicit secret; a disposable local
+  // container may fall back to the documented verification default.
+  const requiredSecrets = ['OFFERR_VERIFY_DATABASE_URL'];
+  if (!isLocalTarget(target)) requiredSecrets.push('INTERNAL_API_SECRET');
+  const verdict = assertOfferrStagingTarget({
+    target,
+    label: 'offerr-e2e-verify',
+    requiredSecrets,
+  });
   printTargetIdentity(verdict, { purpose: 'Offerr E2E verification' });
 
   process.env.INTERNAL_API_SECRET = INTERNAL_SECRET;

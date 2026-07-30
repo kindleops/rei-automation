@@ -1,8 +1,25 @@
 # Offerr Evaluation Spine — Staging Verification Report
 
-**Date:** 2026-07-30
+**Date:** 2026-07-30 (pass 1) · 2026-07-30 (pass 2 — see §11)
 **Branch:** `feat/offerr-ai-evaluation-spine`
 **PR:** [#57](https://github.com/kindleops/rei-automation/pull/57) — **draft, not merged**
+
+> ### Pass-2 headline
+>
+> The hosted rollout was attempted again and is **still blocked**, now by *two*
+> independent gaps rather than one:
+>
+> 1. **`real-estate-automation-staging` still does not exist.** Re-audited via
+>    `supabase projects list` / `orgs list`; the same three projects are
+>    returned. No substitute was used.
+> 2. **NEW — the repository cannot rebuild a representative base schema.**
+>    `properties`, `buyer_comp_raw_v2`, `buyer_entities_v2`, and the
+>    `get_comp_candidates_for_subject` RPC have **no DDL anywhere in the repo**.
+>    Creating the staging project alone would therefore *not* have unblocked
+>    hosted verification. See §11.2.
+>
+> Pass 2 delivered the fix for (2) — a validated deterministic bootstrap — plus
+> guard hardening and 16 new regression tests. Full detail in §11.
 **Scope:** staging infrastructure + integration verification. No UI wiring, no
 LeadCommand lifecycle, no messaging, contracts, title, e-signature, marketplace
 publication, paid providers, contact enrichment, or seller auth.
@@ -678,3 +695,150 @@ apps/api/tests/critical/offerr-evaluation-spine.test.mjs
 docs/offerr/offerr-evaluation-spine.md
     staging state, migration verification, limitations, commands
 ```
+
+---
+
+## 11. Pass 2 — hosted rollout re-attempt (2026-07-30)
+
+Starting HEAD `8a6bae4b`, PR #57 `OPEN` / `isDraft: true` / base `main` /
+`mergedAt: null` / `MERGEABLE`. Working tree carried only the two expected
+unrelated modifications (`.claude/scheduled_tasks.lock`,
+`supabase/.temp/cli-latest`). PR checks green (CodeRabbit `SUCCESS`, Vercel
+`SUCCESS`); still no human reviews and no unresolved threads.
+
+### 11.1 Staging project — re-audited, still absent
+
+`supabase projects list` and `supabase orgs list` returned exactly the same two
+organizations and three projects as pass 1. **No project named
+`real-estate-automation-staging` exists.** Per the fail-closed rule, no
+substitute was adopted and nothing hosted was written. Phases 4, 6, 8–16 remain
+blocked.
+
+### 11.2 NEW BLOCKER — the repo cannot rebuild the base schema
+
+The Offerr runtime touches exactly five database objects. Their provenance was
+established by searching every `*.sql` in the repository:
+
+| Object | Used by | Defined in repo? |
+|---|---|---|
+| `public.system_control` | flag gate (`getSystemFlag`) | **yes** — `20260428_create_system_control.sql` |
+| `public.properties` | `offerr-property-resolution.js` | **no** |
+| `public.buyer_comp_raw_v2` | `compCandidateLoader.js` identity join | **no** |
+| `public.buyer_entities_v2` | `compCandidateLoader.js` buy-box | **no** |
+| `get_comp_candidates_for_subject(...)` | `compCandidateLoader.js` RPC | **no** |
+
+Four of five are **production-only objects created out of band**. Replaying the
+120-migration tree against an empty project would not create them.
+
+This matters because it invalidates the pass-1 assumption that creating the
+Supabase project was the *only* blocker. It was not. Discovering this after
+provisioning would have produced a staging project that could not run an
+evaluation.
+
+Also confirmed: V3 feature flags are read by `readFeatureFlag` from **env vars**,
+not from `system_control`. Phase-12-style enablement is a deployment env change,
+not a database flag change.
+
+### 11.3 Deliverable — `offerr-staging-bootstrap.sql`
+
+A deterministic bootstrap for the four missing objects, preferred over cloning
+production. Contents: `system_control` (canonical shape, **outbound seed values
+inverted to `false`** — the production migration seeds
+`outbound_sms_enabled`/`feeder_enabled`/`queue_runner_enabled` to `true`, which
+staging must never inherit); `properties`; `buyer_comp_raw_v2`;
+`buyer_entities_v2`; and a `get_comp_candidates_for_subject` stand-in.
+
+Safety: section 0 aborts if `public.properties` holds any row not prefixed
+`OFFERR-STAGING-TEST-`, so pointing it at a populated database fails before any
+DDL runs. Idempotent throughout.
+
+**Validated against disposable PostgreSQL 17.10, not merely authored:**
+
+| Check | Result |
+|---|---|
+| Bootstrap applies to an empty database | pass |
+| Re-run is idempotent | pass (all objects skipped, no error) |
+| Aborts on a single non-synthetic `properties` row | pass — refused before DDL |
+| Offerr migration applies on top | pass |
+| `offerr-schema-verify.sql` | **47/47 PASS, 0 FAIL** |
+| Comp RPC honours the radius window | pass — 4.0 mi comp excluded |
+| Comp RPC honours the recency window | pass — 1200-day-old comp excluded |
+| Comp RPC determinism across repeated calls | pass — byte-identical |
+| Full `offerr-e2e-verify.mjs` against the bootstrapped DB | **207/207 pass** |
+
+> **Fidelity limit that must survive into the rollout decision.** The RPC here
+> is a *behavioural stand-in*: same signature, same return contract,
+> deterministic implementation — **not** production's SQL, which this repository
+> does not contain. Hosted staging on this bootstrap proves how *Offerr handles*
+> comp data; it does not validate production's comp retrieval. Treat
+> production comp-SQL parity as a separate, still-open item.
+
+### 11.4 Guard hardening — two refusal classes were missing
+
+The Phase-3 requirement lists six refusal conditions. `offerr-staging-guard.mjs`
+implemented four. The two gaps are now closed:
+
+- **Production runtime designation.** `NODE_ENV`, `VERCEL_ENV`, `APP_ENV`,
+  `APP_ENVIRONMENT`, `ENVIRONMENT`, `DEPLOY_ENV`, `OFFERR_ENVIRONMENT` set to
+  `production`/`prod`/`live` now refuse the run **regardless of target**. A
+  correct staging ref reached from a production runtime is still a production
+  execution.
+- **Missing required secrets.** New `requiredSecrets` option; a run with
+  partial configuration is refused before it can half-apply anything.
+  `offerr-e2e-verify.mjs` now requires `OFFERR_VERIFY_DATABASE_URL` always, plus
+  `INTERNAL_API_SECRET` whenever the target is not local.
+
+New `apps/api/tests/critical/offerr-staging-guard.test.mjs` — **16 tests**
+covering every refusal branch and both accept paths, including the
+credentials-never-logged assertion. Offerr suites: **62 → 78, all passing.**
+
+### 11.5 Known fidelity gap — the E2E harness stubs the comp loader
+
+`offerr-e2e-verify.mjs` injects `loadV3CompCandidates: async () => ({ candidates: c.comps })`.
+The 207 assertions therefore exercise the real route, auth, flag gate, resolver,
+safety gates, store, and a real PostgreSQL — but **not** the real comp retrieval
+path. The bootstrap now makes a real-RPC run possible; rewiring the harness to
+seed `buyer_comp_raw_v2` and drop the stub was deliberately not attempted here,
+because it is a redesign of a passing 207-assertion suite and belongs with the
+hosted run it enables. This is the **top prerequisite** for the next pass.
+
+### 11.6 Vercel — identified, nothing deployed
+
+Team `real-estate-automation`. The canonical project for `apps/api` is **`api`**
+(latest production URL `https://api-steel-three-96.vercel.app`). The repo root
+`.vercel/project.json` links to `rei-automation-dashboard`, a *different*
+project — a preview deploy from the repo root would target the dashboard, not
+the API. **No deployment was created**, because a preview must use staging
+Supabase env vars and there is no staging database to point at; pointing a
+preview at production would violate the safety rules.
+
+Environment variables a staging preview will need (names only, no values):
+`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `INTERNAL_API_SECRET`,
+`APP_BASE_URL`, `OFFERR_STAGING_PROJECT_REF`, and — because V3 flags are
+env-read — `ACQUISITION_ENGINE_V3_ENABLED` plus the `ACQUISITION_ENGINE_V3_ALLOW_*`
+family left at their safe `false` defaults.
+
+### 11.7 Pass-2 state
+
+- Nothing hosted was written, migrated, deployed, flagged, or read beyond the
+  read-only `supabase projects list` / `orgs list`.
+- Verification container destroyed; no artifacts persist.
+- `offerr_evaluation_enabled` remains `false`; migration remains `PROPOSED_`-prefixed
+  and applied to no hosted project.
+- Offerr tests **78/78**, schema checks **47/47**, E2E **207/207**, lint pass.
+- PR #57 remains **draft and unmerged**.
+
+### 11.8 Operator action required (updated, ordered)
+
+1. **Approve billing** for an additional Supabase project in org
+   `gosflvntwnxegkrulmoz`.
+2. **Create** `real-estate-automation-staging`, West US (Oregon), fresh password
+   (never committed).
+3. **Bootstrap** it: `offerr-supabase-prereqs.sql` is *not* needed (hosted
+   Supabase already has the roles) — run `offerr-staging-bootstrap.sql`, then
+   `PROPOSED_20260729120000_offerr_evaluation_spine.sql`, then
+   `offerr-schema-verify.sql`.
+4. **Rewire** the E2E harness onto the real comp RPC (§11.5) before trusting any
+   V3-enabled matrix result.
+5. **Deploy** the `api` Vercel project to preview with staging env vars.
+6. Only then are Phases 10–16 executable.
