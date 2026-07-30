@@ -254,7 +254,9 @@ test('production queue rails patch uses campaign caps not stale canary limits', 
   assert.equal(patch.queue_market_cap, '400')
   assert.equal(patch.queue_per_number_cap, '150')
   assert.equal(patch.queue_run_limit, '50')
-  assert.equal(patch.queue_emergency_stop_at, '')
+  // Operator brakes outrank campaign state: the rails patch must NEVER clear the
+  // operator emergency stop (this key used to be written as '').
+  assert.equal('queue_emergency_stop_at' in patch, false)
   // Global inbound auto-reply containment is decoupled from outbound rails:
   // the rails patch must NEVER carry auto_reply_mode (see decoupling tests below).
   assert.equal(patch.auto_reply_mode, undefined)
@@ -264,13 +266,13 @@ test('production queue rails patch uses campaign caps not stale canary limits', 
 // ── auto_reply_mode decoupling (global inbound containment must not be ────────
 //    overwritten by outbound campaign queue-rail synchronization) ─────────────
 
+// Tuning rails the campaign legitimately owns. The execution-posture keys
+// (queue_execution_mode, queue_emergency_stop_at, queue_processor_mode,
+// queue_runner_enabled, queue_auto_send_enabled, outbound_sms_enabled,
+// campaign_mode, queue_auto_enqueue_enabled) are operator-owned and were
+// deliberately removed from this patch — see operator-brake-authority.js and
+// tests/critical/operator-brake-authority.test.mjs.
 const OUTBOUND_RAILS_KEYS = [
-  'queue_processor_mode',
-  'queue_auto_enqueue_enabled',
-  'queue_auto_send_enabled',
-  'outbound_sms_enabled',
-  'campaign_mode',
-  'queue_execution_mode',
   'queue_run_limit',
   'queue_hard_cap',
   'queue_max_batch_size',
@@ -303,10 +305,13 @@ test('buildProductionQueueRailsPatch omits auto_reply_mode but keeps outbound ra
   for (const key of OUTBOUND_RAILS_KEYS) {
     assert.ok(key in patch, `expected rails patch to still set ${key}`)
   }
-  assert.equal(patch.campaign_mode, 'live_limited')
-  assert.equal(patch.queue_processor_mode, 'on')
-  assert.equal(patch.queue_auto_send_enabled, 'true')
   assert.equal(patch.queue_market_filter, 'Miami, FL')
+  // Operator-owned posture keys are absent by construction.
+  assert.equal('campaign_mode' in patch, false)
+  assert.equal('queue_processor_mode' in patch, false)
+  assert.equal('queue_auto_send_enabled' in patch, false)
+  assert.equal('outbound_sms_enabled' in patch, false)
+  assert.equal('queue_execution_mode' in patch, false)
 })
 
 test('syncProductionQueueRailsFromCampaign never writes auto_reply_mode to system_control', async () => {
@@ -320,9 +325,11 @@ test('syncProductionQueueRailsFromCampaign never writes auto_reply_mode to syste
   assert.equal(res.ok, true)
   assert.equal(writes.length, 1)
   assert.equal('auto_reply_mode' in writes[0], false)
-  // Outbound rails still synchronized.
-  assert.equal(writes[0].queue_auto_send_enabled, 'true')
-  assert.equal(writes[0].campaign_mode, 'live_limited')
+  // Tuning rails still synchronized; operator posture keys are not.
+  assert.equal(writes[0].queue_max_batch_size, '50')
+  assert.equal(writes[0].queue_daily_send_cap, '750')
+  assert.equal('queue_auto_send_enabled' in writes[0], false)
+  assert.equal('campaign_mode' in writes[0], false)
 })
 
 test('campaign rails sync leaves an existing internal_only mode unchanged', async () => {

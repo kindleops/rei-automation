@@ -4,6 +4,7 @@ import { getQueueRouteDeploymentMeta } from "@/lib/domain/queue/queue-route-depl
 import { buildDisabledResponse, getSystemFlag, setSystemValues } from "@/lib/system-control.js";
 import { reconcileCampaignExecutionHealth } from "@/lib/domain/queue/campaign-universal-reconciliation.js";
 import { reconcileCanonicalQueueLifecycle } from "@/lib/supabase/sms-engine.js";
+import { getPodioAvailability } from "@/lib/providers/podio.js";
 
 function asNumber(value, fallback = null) {
   const n = Number(value);
@@ -53,6 +54,7 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
   const reconcileSupabaseDeliveryStatusesFn =
     deps.reconcileSupabaseDeliveryStatuses || reconcileSupabaseDeliveryStatuses;
   const setSystemValuesFn = deps.setSystemValues || setSystemValues;
+  const getPodioAvailabilityFn = deps.getPodioAvailability || getPodioAvailability;
   const getSystemFlagFn = deps.getSystemFlag || getSystemFlag;
   const jsonResponse =
     deps.jsonResponse ||
@@ -153,16 +155,37 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
     return { ok: false, error: serializeIntegrationError(error) };
   });
 
-  const podio_wrap = await runOptionalIntegration(
-    "podio_queue_reconcile",
-    () =>
-      runQueueReconcileRunner({
-        limit,
-        stale_after_minutes,
-        master_owner_id: master_owner_scope.effective_id,
-      }),
-    logger
-  );
+  // Containment: don't even enter the Podio reconcile lane when Podio is
+  // unavailable. runQueueReconcileRunner opens with unfiltered Podio app scans,
+  // so skipping here avoids pointless work and keeps the heartbeat honest about
+  // WHY the lane was skipped.
+  const podio_availability = getPodioAvailabilityFn();
+  const podio_wrap = podio_availability.ok
+    ? await runOptionalIntegration(
+        "podio_queue_reconcile",
+        () =>
+          runQueueReconcileRunner({
+            limit,
+            stale_after_minutes,
+            master_owner_id: master_owner_scope.effective_id,
+          }),
+        logger
+      )
+    : {
+        ok: false,
+        integration: "podio_queue_reconcile",
+        skipped: true,
+        error: null,
+        result: { ok: false, skipped: true, reason: podio_availability.reason },
+      };
+
+  if (!podio_availability.ok) {
+    logger?.info?.("queue_reconcile.podio_lane_skipped", {
+      reason: podio_availability.reason,
+      missing: podio_availability.missing,
+    });
+  }
+
   const podio_result = podio_wrap.result || {
     ok: false,
     skipped: true,
@@ -180,6 +203,14 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
     queue_reconcile_last_lifecycle_version: deployment_meta.reconcile_lifecycle_version || "",
     queue_reconcile_last_canonical_ok: String(canonical_lifecycle_result?.ok !== false),
     queue_reconcile_last_podio_ok: String(podio_wrap.ok === true),
+    // Distinguish deliberate containment from a real Podio failure: both leave
+    // _podio_ok false, and anything alerting on that key alone would read the
+    // launch-time containment skip as an outage.
+    queue_reconcile_last_podio_state: podio_availability.ok
+      ? podio_wrap.ok === true
+        ? "ok"
+        : "failed"
+      : `skipped_${podio_availability.reason}`,
   }).catch((error) => {
     logger?.warn?.("queue_reconcile.heartbeat_write_failed", {
       error: serializeIntegrationError(error),

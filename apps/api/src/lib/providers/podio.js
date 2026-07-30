@@ -265,23 +265,96 @@ async function getToken() {
   return _refresh_promise;
 }
 
+/**
+ * Read credentials at CALL time, not module-load time, so the containment guard
+ * reflects the live environment (and is testable without re-importing).
+ */
+function readPodioCredentialEnv() {
+  // process.env is the ONLY source. Do not fall back to the module-load consts:
+  // that would make the guard report credentials present after they are removed
+  // from the environment, which is exactly the containment we need to enforce.
+  return {
+    PODIO_CLIENT_ID: process.env.PODIO_CLIENT_ID,
+    PODIO_CLIENT_SECRET: process.env.PODIO_CLIENT_SECRET,
+    PODIO_USERNAME: process.env.PODIO_USERNAME,
+    PODIO_PASSWORD: process.env.PODIO_PASSWORD,
+  };
+}
+
 export function getPodioCredentialStatus() {
-  const missing = Object.entries(REQUIRED_ENV)
-    .filter(([, value]) => !value)
+  const env = readPodioCredentialEnv();
+  const missing = Object.entries(env)
+    .filter(([, value]) => !clean(value))
     .map(([key]) => key);
 
   return {
     configured: missing.length === 0,
     missing,
-    client_id_present: Boolean(PODIO_CLIENT_ID),
-    client_secret_present: Boolean(PODIO_CLIENT_SECRET),
-    username_present: Boolean(PODIO_USERNAME),
-    password_present: Boolean(PODIO_PASSWORD),
+    client_id_present: Boolean(clean(env.PODIO_CLIENT_ID)),
+    client_secret_present: Boolean(clean(env.PODIO_CLIENT_SECRET)),
+    username_present: Boolean(clean(env.PODIO_USERNAME)),
+    password_present: Boolean(clean(env.PODIO_PASSWORD)),
   };
 }
 
 export function hasPodioCredentials() {
   return getPodioCredentialStatus().configured;
+}
+
+/**
+ * Explicit operator kill switch, independent of credentials.
+ * PODIO_INTEGRATION_DISABLED=1|true|yes|on disables all Podio network I/O.
+ */
+export function isPodioExplicitlyDisabled() {
+  const raw = clean(process.env.PODIO_INTEGRATION_DISABLED).toLowerCase();
+  return ["1", "true", "yes", "on"].includes(raw);
+}
+
+/**
+ * Single source of truth for "may we talk to Podio at all?".
+ *
+ * @returns {{ ok: boolean, reason: string|null, missing: string[] }}
+ */
+export function getPodioAvailability() {
+  if (isPodioExplicitlyDisabled()) {
+    return { ok: false, reason: "podio_integration_disabled", missing: [] };
+  }
+  const status = getPodioCredentialStatus();
+  if (!status.configured) {
+    return { ok: false, reason: "podio_credentials_unavailable", missing: status.missing };
+  }
+  return { ok: true, reason: null, missing: [] };
+}
+
+export function isPodioAvailable() {
+  return getPodioAvailability().ok;
+}
+
+/**
+ * Typed, network-free refusal. Callers already treat PodioError as the Podio
+ * failure contract, so containment reuses it rather than inventing a new type.
+ */
+export function buildPodioUnavailableError(availability, method = null, path = null) {
+  return new PodioError(
+    availability.reason === "podio_integration_disabled"
+      ? "Podio integration is disabled; refusing network request."
+      : `Podio credentials unavailable (${availability.missing.join(", ") || "unset"}); refusing network request.`,
+    {
+      method,
+      path,
+      status: null,
+      data: { error: availability.reason, missing: availability.missing },
+      code: availability.reason,
+      operation: "podio_availability_guard",
+    },
+  );
+}
+
+export function isPodioUnavailableError(error) {
+  return (
+    error instanceof PodioError &&
+    (error.code === "podio_credentials_unavailable" || error.code === "podio_integration_disabled")
+  );
 }
 
 export async function verifyPodioAuth() {
@@ -1261,6 +1334,25 @@ async function _executeWithRetry(buildConfig, attempt = 0) {
 // ══════════════════════════════════════════════════════════════════════════
 
 export async function podioRequest(method, path, data = null, params = null) {
+  // ── Containment chokepoint ───────────────────────────────────────────────
+  // Every Podio network call in the codebase funnels through here. When Podio
+  // is unavailable (no credentials, or explicitly disabled) we refuse BEFORE any
+  // I/O — no OAuth request with undefined credentials, no DNS, no socket.
+  //
+  // Production carries zero Podio env vars, so this guard makes Podio network
+  // attempts structurally impossible in production while leaving every caller's
+  // existing PodioError handling intact.
+  const availability = getPodioAvailability();
+  if (!availability.ok) {
+    logger.warn("podio.request_blocked_unavailable", {
+      method: clean(method).toUpperCase() || null,
+      path: clean(path) || null,
+      reason: availability.reason,
+      missing: availability.missing,
+    });
+    throw buildPodioUnavailableError(availability, method, path);
+  }
+
   const active_cooldown = await getPodioRateLimitCooldown();
   if (active_cooldown.active) {
     logger.warn("podio.request_skipped_cooldown", {

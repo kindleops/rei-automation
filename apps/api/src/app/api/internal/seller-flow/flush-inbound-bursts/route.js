@@ -23,6 +23,7 @@ import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-
 import { loadContext } from "@/lib/domain/context/load-context.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { launchAlerts } from "@/lib/domain/alerts/launch-critical-alerts.js";
 
 export const dynamic = "force-dynamic";
 
@@ -107,10 +108,30 @@ export async function POST(request) {
     enabled: true,
   });
 
-  const result = await coordinator.flushEligible({
-    thread_key: body.thread_key || null,
-    limit: Number(body.limit) > 0 ? Number(body.limit) : 20,
-  });
+  let result;
+  try {
+    result = await coordinator.flushEligible({
+      thread_key: body.thread_key || null,
+      limit: Number(body.limit) > 0 ? Number(body.limit) : 20,
+    });
+  } catch (flush_error) {
+    // A crashing flush must be observable, not silent. The scheduler retries on
+    // the next minute; expired claim leases are reclaimable, so returning 500
+    // here is safe and makes the failure visible to Vercel cron monitoring.
+    warn("seller_inbound_burst.flush_threw", {
+      error_message: flush_error?.message || "unknown_error",
+    });
+    await launchAlerts
+      .burstFlushFailure({
+        error_message: flush_error?.message || "unknown_error",
+        thread_scoped: Boolean(body.thread_key),
+      })
+      .catch(() => {});
+    return NextResponse.json(
+      { ok: false, reason: "seller_inbound_burst_flush_failed" },
+      { status: 500 }
+    );
+  }
 
   try {
     const results = result.results || [];
@@ -127,6 +148,12 @@ export async function POST(request) {
         failed: failed.length,
         reasons: failed.map((r) => r.reason).slice(0, 10),
       });
+      await launchAlerts
+        .burstFlushFailure({
+          failed_count: failed.length,
+          reasons: failed.map((r) => r.reason).slice(0, 10),
+        })
+        .catch(() => {});
     }
   } catch {
     /* logging must never fail the flush */

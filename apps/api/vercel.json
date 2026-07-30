@@ -38,6 +38,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/internal/seller-flow/flush-inbound-bursts",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/internal/webhooks/recover-delivery",
       "schedule": "*/2 * * * *"
     },

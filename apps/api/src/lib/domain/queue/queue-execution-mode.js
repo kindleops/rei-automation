@@ -8,13 +8,62 @@ export const QUEUE_EXECUTION_MODES = Object.freeze({
 
 const ALLOWED = new Set(Object.values(QUEUE_EXECUTION_MODES));
 
+/**
+ * Canonical fail-closed storage value. Operators and code should write this.
+ */
+export const CANONICAL_FAIL_CLOSED_EXECUTION_MODE = QUEUE_EXECUTION_MODES.STOPPED;
+
+/**
+ * Legacy values that may exist in production system_control rows and have a
+ * known, safe meaning. Production was frozen on 2026-07-29 with the literal
+ * 'paused', which is NOT canonical but IS unambiguously a stop. Mapping it
+ * explicitly (rather than letting it fall through the unknown-value branch)
+ * keeps the audit trail honest: a legacy stop is recognised as a stop, not
+ * silently reinterpreted.
+ *
+ * The SQL mirror queue_execution_mode_normalized() reaches the same verdict via
+ * its ELSE branch (see 20260625200000_queue_atomic_claim_containment.sql).
+ */
+export const QUEUE_EXECUTION_MODE_LEGACY_ALIASES = Object.freeze({
+  paused: QUEUE_EXECUTION_MODES.STOPPED,
+  pause: QUEUE_EXECUTION_MODES.STOPPED,
+});
+
 function clean(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
 export function normalizeQueueExecutionMode(value, fallback = QUEUE_EXECUTION_MODES.STOPPED) {
   const normalized = clean(value);
-  return ALLOWED.has(normalized) ? normalized : fallback;
+  if (ALLOWED.has(normalized)) return normalized;
+  if (Object.hasOwn(QUEUE_EXECUTION_MODE_LEGACY_ALIASES, normalized)) {
+    return QUEUE_EXECUTION_MODE_LEGACY_ALIASES[normalized];
+  }
+  return fallback;
+}
+
+/**
+ * Classify a raw stored value for observability. Unknown values are reported as
+ * such (and still fail closed) so an operator can see that the stored posture
+ * was not understood, instead of it looking like a deliberate stop.
+ *
+ * @returns {{ mode: string, raw: string, source: 'canonical'|'legacy_alias'|'unknown_fail_closed', fail_closed: boolean }}
+ */
+export function describeQueueExecutionMode(value) {
+  const raw = clean(value);
+  if (ALLOWED.has(raw)) {
+    return { mode: raw, raw, source: "canonical", fail_closed: raw !== QUEUE_EXECUTION_MODES.NORMAL };
+  }
+  if (Object.hasOwn(QUEUE_EXECUTION_MODE_LEGACY_ALIASES, raw)) {
+    const mode = QUEUE_EXECUTION_MODE_LEGACY_ALIASES[raw];
+    return { mode, raw, source: "legacy_alias", fail_closed: true };
+  }
+  return {
+    mode: CANONICAL_FAIL_CLOSED_EXECUTION_MODE,
+    raw,
+    source: "unknown_fail_closed",
+    fail_closed: true,
+  };
 }
 
 export async function getQueueExecutionMode(deps = {}) {

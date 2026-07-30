@@ -62,6 +62,12 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
     (await import("@/lib/system-control.js")).getSystemValue;
   const build_podio_cooldown_skip_result =
     deps.buildPodioCooldownSkipResult || null;
+  const recordQueueRunFailureAlert =
+    deps.recordQueueRunFailureAlert ||
+    (async (metadata) => {
+      const { launchAlerts } = await import("@/lib/domain/alerts/launch-critical-alerts.js");
+      return launchAlerts.queueRunFailure(metadata);
+    });
   const route_logger = deps.logger;
   const json_response =
     deps.jsonResponse ||
@@ -553,6 +559,14 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       metadata: diagnostics,
       should_alert_critical: true,
     });
+
+    // Durable Supabase record: Discord delivery is best-effort and leaves no
+    // queryable history, so a launch-critical queue failure must also persist.
+    await recordQueueRunFailureAlert({
+      error_name: diagnostics?.name || null,
+      error_status: diagnostics?.status || null,
+      error_message: diagnostics?.message || null,
+    }).catch(() => {});
 
     return json_response(
       {

@@ -5,6 +5,7 @@
 import loadContext from "@/lib/domain/context/load-context.js";
 import { findRecentOutboundContextPair } from "@/lib/domain/context/find-recent-outbound-pair.js";
 import { info } from "@/lib/logging/logger.js";
+import { getPodioAvailability } from "@/lib/providers/podio.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -154,10 +155,12 @@ export async function loadContextWithFallback({
   primary_context = null,
   loadContextImpl = loadContext,
   findRecentOutboundContextPairImpl = findRecentOutboundContextPair,
+  getPodioAvailabilityImpl = getPodioAvailability,
 } = {}) {
   const lookup_sources_tried = [];
 
   // Campaign replies should bind to the outbound send_queue/message_event pair first.
+  // This path is Supabase-only and never touches Podio.
   const pair_context = await tryOutboundPairContext({
     inbound_from,
     inbound_to,
@@ -165,6 +168,26 @@ export async function loadContextWithFallback({
     findRecentOutboundContextPairImpl,
   });
   if (pair_context) return pair_context;
+
+  // Containment: the phone-lookup fallback is a Podio fan-out (phone record,
+  // brain resolve, 6x getItem, recent events) and loadContext RETHROWS, so a
+  // Podio outage here previously failed the inbound step. When Podio is
+  // unavailable, report a clean not-found instead of attempting network I/O.
+  const podio_availability = getPodioAvailabilityImpl();
+  if (!podio_availability.ok) {
+    lookup_sources_tried.push("phone_skipped_podio_unavailable");
+    return {
+      ...(primary_context || {}),
+      found: Boolean(primary_context?.found),
+      lookup_sources_tried,
+      fallback_pair_match: false,
+      fallback_match_source: null,
+      fallback_match_id: null,
+      fallback_match_data: null,
+      podio_skipped: true,
+      podio_skip_reason: podio_availability.reason,
+    };
+  }
 
   lookup_sources_tried.push("phone");
 

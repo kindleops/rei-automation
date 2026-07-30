@@ -308,11 +308,14 @@ export function buildProductionQueueRailsPatch(campaign = {}) {
   const state = market.toLowerCase().includes(', fl') ? 'FL' : clean(campaign.metadata?.state)
 
   return {
-    queue_emergency_stop_at: '',
-    queue_processor_mode: 'on',
-    queue_auto_enqueue_enabled: 'true',
-    queue_auto_send_enabled: 'true',
-    outbound_sms_enabled: 'true',
+    // NOTE: the global outbound execution posture is NOT set here. The keys in
+    // CAMPAIGN_FORBIDDEN_SYSTEM_KEYS (queue_execution_mode,
+    // queue_emergency_stop_at, queue_processor_mode, queue_runner_enabled,
+    // queue_auto_send_enabled, outbound_sms_enabled, campaign_mode,
+    // queue_auto_enqueue_enabled) are operator-owned. This patch is applied by
+    // two 5-minute crons, so writing them let a live campaign silently clear an
+    // operator stop or emergency brake within one tick. Campaigns may only
+    // request a posture — see describeCampaignRequestedPosture().
     // NOTE: auto_reply_mode is intentionally NOT set here. Global inbound
     // auto-reply containment (system_control.auto_reply_mode) is decoupled from
     // outbound campaign queue-rail synchronization. Campaign feed/activation/
@@ -322,8 +325,6 @@ export function buildProductionQueueRailsPatch(campaign = {}) {
     // let a live campaign's every-5-min rails sync silently override inbound
     // containment. See buildProductionLiveCampaignPersistencePatch() for the
     // campaign row's own auto_reply_mode, which is a separate, legitimate field.
-    campaign_mode: 'live_limited',
-    queue_execution_mode: 'normal',
     queue_run_limit: String(Math.min(batchMax, 50)),
     queue_hard_cap: String(batchMax),
     queue_max_batch_size: String(batchMax),
@@ -341,11 +342,26 @@ export async function syncProductionQueueRailsFromCampaign(campaign = {}, deps =
     return { ok: false, skipped: true, reason: 'not_production_launch' }
   }
   const { setSystemValues } = await import('@/lib/system-control.js')
+  const {
+    assertNoOperatorOwnedSystemKeys,
+    describeCampaignRequestedPosture,
+    SYSTEM_CONTROL_AUTHORITIES,
+  } = await import('@/lib/domain/queue/operator-brake-authority.js')
   const setValues = deps.setSystemValues || setSystemValues
   const supabase = deps.supabase
   const patch = buildProductionQueueRailsPatch(campaign)
-  await setValues(patch, supabase ? { supabase } : {})
-  return { ok: true, patch }
+
+  // Fail loudly rather than silently dropping: if a future edit reintroduces an
+  // operator-owned key into the patch, this throws in tests instead of shipping
+  // a cron that can clear an operator stop.
+  assertNoOperatorOwnedSystemKeys(patch, 'campaign_rails_sync')
+
+  await setValues(patch, {
+    ...(supabase ? { supabase } : {}),
+    authority: SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION,
+    context: 'campaign_rails_sync',
+  })
+  return { ok: true, patch, requested_posture: describeCampaignRequestedPosture(campaign) }
 }
 
 /**

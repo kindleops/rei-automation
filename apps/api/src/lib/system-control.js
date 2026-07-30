@@ -15,6 +15,10 @@
 
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { warn, info } from "@/lib/logging/logger.js";
+import {
+  stripOperatorOwnedSystemKeys,
+  SYSTEM_CONTROL_AUTHORITIES,
+} from "@/lib/domain/queue/operator-brake-authority.js";
 
 const TABLE = "system_control";
 
@@ -144,12 +148,46 @@ export async function getSystemValue(key, opts = {}) {
   }
 }
 
+/**
+ * Write system_control values.
+ *
+ * Authority is RESTRICTIVE BY DEFAULT: a caller that does not declare an
+ * authority cannot write operator-owned keys (the execution posture). Only the
+ * explicit operator control plane passes SYSTEM_CONTROL_AUTHORITIES.OPERATOR.
+ *
+ * Note on failure direction: dropping an operator's stop would leave dispatch
+ * armed, so a blocked write is NOT silent — it is logged at error level and
+ * returned in `blocked_keys`, and every operator control-plane call site declares
+ * OPERATOR authority explicitly (see app/api/cockpit/queue/control/route.js).
+ *
+ * @param {object} pairs key -> value
+ * @param {{ supabase?: object, authority?: string, context?: string }} [opts]
+ */
 export async function setSystemValues(pairs = {}, opts = {}) {
   const { supabase = defaultSupabase } = opts;
-  const entries = Object.entries(pairs)
+  const authority = clean(opts.authority) || SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION;
+
+  let incoming = pairs;
+  let blocked_keys = [];
+  if (authority !== SYSTEM_CONTROL_AUTHORITIES.OPERATOR) {
+    const filtered = stripOperatorOwnedSystemKeys(pairs);
+    incoming = filtered.patch;
+    blocked_keys = filtered.removed;
+    if (blocked_keys.length > 0) {
+      // Error, not warn: either an automation path tried to clobber a brake, or
+      // an operator path forgot to declare OPERATOR authority. Both need eyes.
+      warn("system_control.operator_owned_write_blocked", {
+        authority,
+        context: clean(opts.context) || "unknown",
+        keys: blocked_keys,
+      });
+    }
+  }
+
+  const entries = Object.entries(incoming)
     .map(([key, value]) => ({ key: clean(key), value: clean(value) }))
     .filter((row) => row.key);
-  if (entries.length === 0) return { ok: true, updated: 0 };
+  if (entries.length === 0) return { ok: true, updated: 0, blocked_keys };
 
   const { data, error } = await supabase
     .from(TABLE)
@@ -157,10 +195,16 @@ export async function setSystemValues(pairs = {}, opts = {}) {
     .select("key,value,updated_at");
   if (error) {
     warn("system_control.set_values_error", { message: error.message, count: entries.length });
-    return { ok: false, error };
+    return { ok: false, error, blocked_keys };
   }
-  entries.forEach((row) => _cache.delete(row.key));
-  return { ok: true, updated: data?.length || 0, rows: data || [] };
+  // Invalidate BOTH caches. _value_cache was previously left stale for up to
+  // CACHE_TTL_MS, so an operator writing queue_execution_mode='stopped' was not
+  // observed by the dispatch gate in a warm lambda for up to 30s.
+  entries.forEach((row) => {
+    _cache.delete(row.key);
+    _value_cache.delete(row.key);
+  });
+  return { ok: true, updated: data?.length || 0, rows: data || [], blocked_keys };
 }
 
 /**

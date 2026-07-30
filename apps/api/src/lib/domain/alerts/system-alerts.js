@@ -9,11 +9,24 @@ import {
   updateMessageEvent,
   findMessageEvents,
 } from "@/lib/podio/apps/message-events.js";
-import { getFirstMatchingItem, getTextValue, isRevisionLimitExceeded } from "@/lib/providers/podio.js";
+import {
+  getFirstMatchingItem,
+  getTextValue,
+  isRevisionLimitExceeded,
+  isPodioAvailable,
+} from "@/lib/providers/podio.js";
+import {
+  recordLaunchCriticalAlert,
+  resolveLaunchCriticalAlert,
+} from "@/lib/domain/alerts/launch-critical-alerts.js";
 
 const logger = child({
   module: "domain.alerts.system_alerts",
 });
+
+function warn(event, meta) {
+  logger.warn(event, meta);
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -307,10 +320,64 @@ export async function recordSystemAlert({
     code: normalized_code,
     dedupe_key,
   });
-  const existing = await findSystemAlertRecord({
+  // ── Canonical Supabase persistence (authoritative) ────────────────────────
+  // Runs first and independently of Podio: production carries no Podio
+  // credentials, so the Podio lane below is a legacy best-effort mirror. This
+  // call never throws.
+  const canonical = await recordLaunchCriticalAlert({
+    code: normalized_code,
     subsystem: normalized_subsystem,
-    signature,
+    severity: clean(severity) || "warning",
+    summary: clean(summary) || `${normalized_subsystem} ${normalized_code}`,
+    dedupe_key: `${normalized_subsystem}:${signature}`,
+    metadata: {
+      ...(metadata && typeof metadata === "object" ? metadata : {}),
+      retryable: Boolean(retryable),
+      affected_id_count: Array.isArray(affected_ids) ? affected_ids.length : 0,
+    },
   });
+
+  // When Podio is unavailable, stop here and report the canonical result rather
+  // than throwing. This lookup previously sat OUTSIDE the try block below, so a
+  // Podio failure propagated out of recordSystemAlert and 500'd its callers
+  // (autopilot route, retry runner, closing/title/docusign/buyer webhooks).
+  if (!isPodioAvailable()) {
+    return {
+      ok: canonical.ok,
+      created: canonical.ok && !canonical.evolved,
+      updated: canonical.ok && Boolean(canonical.evolved),
+      alert_item_id: null,
+      canonical_alert_id: canonical.id || null,
+      podio_skipped: true,
+      podio_skip_reason: "podio_unavailable",
+    };
+  }
+
+  let existing = null;
+  try {
+    existing = await findSystemAlertRecord({
+      subsystem: normalized_subsystem,
+      signature,
+    });
+  } catch (lookup_error) {
+    warn("system_alert.podio_lookup_failed", {
+      subsystem: normalized_subsystem,
+      code: normalized_code,
+      message: lookup_error?.message,
+    });
+    return {
+      ok: canonical.ok,
+      // Same shape as the podio_unavailable return above, so callers branching
+      // on created/updated do not see undefined on only one skip path.
+      created: false,
+      updated: false,
+      alert_item_id: null,
+      canonical_alert_id: canonical.id || null,
+      podio_skipped: true,
+      podio_skip_reason: "podio_lookup_failed",
+    };
+  }
+
   const existing_meta = parseAlertMeta(existing);
   const last_seen_at = nowIso();
   const next_meta = {
@@ -458,14 +525,50 @@ export async function resolveSystemAlert({
     code: normalized_code,
     dedupe_key,
   });
-  const existing = await findSystemAlertRecord({
+  // Resolve the canonical Supabase alert first; never throw on the Podio lane.
+  const canonicalResolved = await resolveLaunchCriticalAlert({
+    code: normalized_code,
     subsystem: normalized_subsystem,
-    signature,
+    dedupe_key: `${normalized_subsystem}:${signature}`,
+    resolution_message: clean(resolution_message),
   });
+
+  if (!isPodioAvailable()) {
+    return {
+      ok: true,
+      resolved: Boolean(canonicalResolved?.resolved),
+      canonical_resolved: Boolean(canonicalResolved?.resolved),
+      podio_skipped: true,
+      podio_skip_reason: "podio_unavailable",
+    };
+  }
+
+  let existing = null;
+  try {
+    existing = await findSystemAlertRecord({
+      subsystem: normalized_subsystem,
+      signature,
+    });
+  } catch (lookup_error) {
+    warn("system_alert.podio_resolve_lookup_failed", {
+      subsystem: normalized_subsystem,
+      code: normalized_code,
+      message: lookup_error?.message,
+    });
+    return {
+      ok: true,
+      resolved: Boolean(canonicalResolved?.resolved),
+      canonical_resolved: Boolean(canonicalResolved?.resolved),
+      podio_skipped: true,
+      podio_skip_reason: "podio_lookup_failed",
+    };
+  }
+
   if (!existing?.item_id) {
     return {
       ok: true,
-      resolved: false,
+      resolved: Boolean(canonicalResolved?.resolved),
+      canonical_resolved: Boolean(canonicalResolved?.resolved),
       reason: "alert_not_found",
     };
   }
