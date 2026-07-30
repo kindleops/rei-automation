@@ -50,7 +50,16 @@ test("security addendum enables RLS and revokes public access on seller_inbound_
 test("security addendum pins search_path and minimises EXECUTE on the claim RPC", () => {
   const sql = fs.readFileSync(securityAddendumPath, "utf8");
   assert.match(sql, /claim_seller_inbound_burst/);
-  assert.match(sql, /SET search_path = public, pg_temp/);
+  // `extensions` is mandatory, not cosmetic: the claim body calls
+  // gen_random_bytes() (pgcrypto), which is installed in the `extensions`
+  // schema. A `public, pg_temp` pin makes every claim raise
+  // "function gen_random_bytes(integer) does not exist".
+  assert.match(sql, /SET search_path = public, extensions, pg_temp/);
+  assert.doesNotMatch(
+    sql,
+    /SET search_path = public, pg_temp/,
+    "no search_path pin in this migration may omit the extensions schema",
+  );
   assert.match(sql, /REVOKE ALL ON FUNCTION %s FROM PUBLIC/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION %s TO service_role/);
   // Must NOT redefine the function: claim/reclaim/finalize semantics from PR #54
@@ -98,6 +107,10 @@ test("base burst migration still lacks RLS, proving the addendum is required", (
   assert.doesNotMatch(sql, /GRANT\s+EXECUTE/i);
   assert.match(sql, /idx_seller_inbound_bursts_one_open_per_thread/);
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.claim_seller_inbound_burst/);
+  // Documents the coupling that forces `extensions` onto the addendum's pinned
+  // search_path. If this call is ever removed, re-derive the required schema
+  // list rather than assuming `extensions` is still needed.
+  assert.match(sql, /gen_random_bytes\(/);
 });
 
 // ── G. content-aware updated_at ──────────────────────────────────────────────

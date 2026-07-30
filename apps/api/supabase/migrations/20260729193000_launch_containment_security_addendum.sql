@@ -57,7 +57,11 @@ BEGIN
   END IF;
 
   -- Deterministic name resolution regardless of caller search_path.
-  EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', fn_signature);
+  -- `extensions` must be on the path: the PR #54 body calls gen_random_bytes()
+  -- (pgcrypto), and pgcrypto is installed in the `extensions` schema in this
+  -- project. Pinning to `public, pg_temp` alone makes every claim raise
+  -- "function gen_random_bytes(integer) does not exist".
+  EXECUTE format('ALTER FUNCTION %s SET search_path = public, extensions, pg_temp', fn_signature);
 
   -- Postgres grants EXECUTE to PUBLIC on every new function; anon/authenticated
   -- inherit it. Revoke, then grant only the role the API actually uses.
@@ -129,9 +133,12 @@ BEGIN
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM authenticated', fn.sig);
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn.sig);
 
-    -- SECURITY DEFINER functions must have a pinned search_path.
+    -- SECURITY DEFINER functions must have a pinned search_path. Same
+    -- `extensions` requirement as section 2: pinning without it silently breaks
+    -- any body that reaches for pgcrypto/uuid-ossp. Adding `extensions` after
+    -- `public` cannot shadow a public object, so this is strictly additive.
     IF fn.prosecdef AND (fn.proconfig IS NULL OR NOT (fn.proconfig::text LIKE '%search_path%')) THEN
-      EXECUTE format('ALTER FUNCTION %s SET search_path = public, pg_temp', fn.sig);
+      EXECUTE format('ALTER FUNCTION %s SET search_path = public, extensions, pg_temp', fn.sig);
     END IF;
   END LOOP;
 END $$;
