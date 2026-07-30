@@ -14,6 +14,7 @@ import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-con
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
+  resolveAutoReplyScopeConfig,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
@@ -1386,6 +1387,7 @@ export async function executeInboundAutomationDecision({
   inboundFrom = "",
   inboundTo = "",
   inboundEventId = null,
+  inboundReceivedAt = null,
   enableQueueInsert = false,
   applySuppression = true,
   dryRun = true,
@@ -1406,10 +1408,21 @@ export async function executeInboundAutomationDecision({
     autoReplyMode,
     dryRun ? "dry_run" : enableQueueInsert ? "live_limited" : "disabled"
   );
+  const auto_reply_scope_config =
+    effective_auto_reply_mode === "live_limited"
+      ? await resolveAutoReplyScopeConfig({ getSystemValue: getSystemValueImpl })
+      : { cutoffAt: null, threadAllowlist: null };
+
   const queue_permission = autoReplyModeAllowsQueue({
     mode: effective_auto_reply_mode,
     inboundFrom,
     threadKey,
+    // Deliberately no `|| now` fallback: an unknown arrival time must fail
+    // closed under live_limited rather than inherit the current timestamp and
+    // sail past the cutoff.
+    inboundReceivedAt,
+    cutoffAt: auto_reply_scope_config.cutoffAt,
+    threadAllowlist: auto_reply_scope_config.threadAllowlist,
   });
   let base_decision = applyInboundAutomationDecision({
     message,

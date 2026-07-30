@@ -32,6 +32,7 @@ import { buildIntelligenceMessageEventPatch } from "@/lib/domain/seller-flow/per
 import {
   autoReplyModeAllowsDiagnostics,
   autoReplyModeAllowsQueue,
+  resolveAutoReplyScopeConfig,
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import {
@@ -1614,10 +1615,19 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           })
         : { ok: true, skipped: true, reason: "podio_sync_disabled" };
 
+      const auto_reply_scope_config =
+        auto_reply_mode_final === "live_limited"
+          ? await resolveAutoReplyScopeConfig({})
+          : { cutoffAt: null, threadAllowlist: null };
+
       const queue_permission = autoReplyModeAllowsQueue({
         mode: auto_reply_mode_final,
         inboundFrom: inbound_from,
         threadKey: inbound_from,
+        inboundReceivedAt:
+          extracted.received_at || payload?.http_received_at || new Date().toISOString(),
+        cutoffAt: auto_reply_scope_config.cutoffAt,
+        threadAllowlist: auto_reply_scope_config.threadAllowlist,
       });
       const execution_allowed = Boolean(
         inbound_auto_reply_queue_enabled && queue_permission.allowed

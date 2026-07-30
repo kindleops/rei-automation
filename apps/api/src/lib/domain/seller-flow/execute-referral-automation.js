@@ -197,7 +197,14 @@ export async function executeReferralAutomation({
     };
   }
 
-  if (!execution_allowed || !autoReplyModeAllowsQueue({ mode: auto_reply_mode }).allowed) {
+  // Capability probe only: execution_allowed already carries the caller's
+  // scope-enforced decision for this inbound, and a referral targets a newly
+  // referred contact rather than the inbound thread, so the thread allowlist
+  // does not apply here.
+  if (
+    !execution_allowed ||
+    !autoReplyModeAllowsQueue({ mode: auto_reply_mode, enforceScope: false }).allowed
+  ) {
     return {
       ok: true,
       action: "shadow_only",
