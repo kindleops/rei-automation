@@ -1,0 +1,456 @@
+{
+  "schema_contract_version": "1.0.0",
+  "name": "offerr-comp-intelligence",
+  "recovered_at": "2026-07-30",
+  "recovered_from": {
+    "supabase_project_ref": "lcppdrmrdfblstpcbgpf",
+    "method": "read-only pg_catalog / information_schema inspection",
+    "server_version": "PostgreSQL 17.6",
+    "write_capability": "none \u2014 session forced default_transaction_read_only=on; write probe refused with SQLSTATE 25006"
+  },
+  "parity": {
+    "public.get_comp_candidates_for_subject": "EXACT_PRODUCTION_DEFINITION",
+    "public.v_recent_sold_comps": "EXACT_PRODUCTION_DEFINITION",
+    "public.buyer_comp_raw_v2": "EXACT_PRODUCTION_COLUMN_CONTRACT",
+    "public.buyer_entities_v2": "EXACT_PRODUCTION_COLUMN_CONTRACT",
+    "public.properties": "COMPATIBLE_RECONSTRUCTION_READ_SURFACE_SUBSET"
+  },
+  "rpc": {
+    "schema": "public",
+    "name": "get_comp_candidates_for_subject",
+    "language": "sql",
+    "volatility": "STABLE",
+    "security_definer": false,
+    "search_path": null,
+    "identity_arguments": "p_subject_property_id text, p_radius_miles numeric, p_months_back integer, p_limit integer",
+    "arguments": [
+      {
+        "name": "p_subject_property_id",
+        "type": "text",
+        "default": null
+      },
+      {
+        "name": "p_radius_miles",
+        "type": "numeric",
+        "default": "1.0"
+      },
+      {
+        "name": "p_months_back",
+        "type": "integer",
+        "default": "6"
+      },
+      {
+        "name": "p_limit",
+        "type": "integer",
+        "default": "25"
+      }
+    ],
+    "result_columns": [
+      {
+        "name": "comp_id",
+        "type": "uuid"
+      },
+      {
+        "name": "property_id",
+        "type": "text"
+      },
+      {
+        "name": "address",
+        "type": "text"
+      },
+      {
+        "name": "city",
+        "type": "text"
+      },
+      {
+        "name": "state",
+        "type": "text"
+      },
+      {
+        "name": "zip",
+        "type": "text"
+      },
+      {
+        "name": "latitude",
+        "type": "numeric"
+      },
+      {
+        "name": "longitude",
+        "type": "numeric"
+      },
+      {
+        "name": "sale_price",
+        "type": "numeric"
+      },
+      {
+        "name": "sale_date",
+        "type": "date"
+      },
+      {
+        "name": "mls_sold_price",
+        "type": "numeric"
+      },
+      {
+        "name": "mls_sold_date",
+        "type": "date"
+      },
+      {
+        "name": "estimated_value",
+        "type": "numeric"
+      },
+      {
+        "name": "price_off_value",
+        "type": "numeric"
+      },
+      {
+        "name": "percent_off",
+        "type": "numeric"
+      },
+      {
+        "name": "ppsf",
+        "type": "numeric"
+      },
+      {
+        "name": "ppu",
+        "type": "numeric"
+      },
+      {
+        "name": "ppbd",
+        "type": "numeric"
+      },
+      {
+        "name": "asset_class",
+        "type": "text"
+      },
+      {
+        "name": "property_type",
+        "type": "text"
+      },
+      {
+        "name": "building_condition",
+        "type": "text"
+      },
+      {
+        "name": "construction_type",
+        "type": "text"
+      },
+      {
+        "name": "beds",
+        "type": "numeric"
+      },
+      {
+        "name": "baths",
+        "type": "numeric"
+      },
+      {
+        "name": "sqft",
+        "type": "numeric"
+      },
+      {
+        "name": "units_count",
+        "type": "numeric"
+      },
+      {
+        "name": "year_built",
+        "type": "numeric"
+      },
+      {
+        "name": "distance_miles",
+        "type": "numeric"
+      },
+      {
+        "name": "similarity_score",
+        "type": "numeric"
+      },
+      {
+        "name": "comp_confidence_score",
+        "type": "numeric"
+      },
+      {
+        "name": "deal_grade",
+        "type": "text"
+      },
+      {
+        "name": "streetview_image",
+        "type": "text"
+      }
+    ],
+    "reads": [
+      "public.v_recent_sold_comps",
+      "public.properties"
+    ],
+    "writes": [],
+    "row_cap": 100
+  },
+  "tables": {
+    "public.properties": {
+      "required_columns": {
+        "active_lien": "bool",
+        "air_conditioning": "text",
+        "assd_total_value": "numeric",
+        "asset_class": "text",
+        "asset_subtype": "text",
+        "asset_type": "text",
+        "avg_sqft_per_unit": "numeric",
+        "basement": "text",
+        "beds_per_unit": "numeric",
+        "building_class": "text",
+        "building_condition": "text",
+        "building_quality": "text",
+        "building_square_feet": "numeric",
+        "calculated_total_value": "numeric",
+        "commercial_property_type": "text",
+        "commercial_subtype": "text",
+        "commercial_units": "numeric",
+        "construction_type": "text",
+        "deal_strength_score": "numeric",
+        "deck": "text",
+        "default_date": "date",
+        "driveway": "text",
+        "effective_year_built": "int4",
+        "equity_amount": "numeric",
+        "equity_percent": "numeric",
+        "estimated_repair_cost": "numeric",
+        "estimated_repair_cost_per_sqft": "numeric",
+        "estimated_value": "numeric",
+        "exterior_walls": "text",
+        "final_acquisition_score": "numeric",
+        "flood_zone": "text",
+        "floor_cover": "text",
+        "foreclosure_stage": "text",
+        "foreclosure_status": "text",
+        "garage": "text",
+        "geographic_features": "text",
+        "heating_fuel_type": "text",
+        "heating_type": "text",
+        "hoa1_name": "text",
+        "interior_walls": "text",
+        "is_corporate_owner": "bool",
+        "is_foreclosure": "bool",
+        "is_hot_pre_foreclosure": "bool",
+        "is_hot_preforeclosure": "bool",
+        "is_pre_foreclosure": "bool",
+        "is_preforeclosure": "bool",
+        "latitude": "numeric",
+        "lien_type": "text",
+        "longitude": "numeric",
+        "lot_square_feet": "numeric",
+        "market": "text",
+        "market_status_label": "text",
+        "master_owner_id": "text",
+        "mls_current_listing_price": "numeric",
+        "mls_market_status": "text",
+        "mls_sold_date": "date",
+        "mls_sold_price": "numeric",
+        "monthly_rent": "numeric",
+        "normalized_asset_class": "text",
+        "normalized_asset_subclass": "text",
+        "out_of_state_owner": "bool",
+        "owner_location": "text",
+        "owner_type": "text",
+        "owner_type_guess": "text",
+        "ownership_years": "numeric",
+        "past_due_amount": "numeric",
+        "patio": "text",
+        "podio_tags": "text",
+        "pool": "text",
+        "porch": "text",
+        "preforeclosure_stage": "text",
+        "preforeclosure_status": "text",
+        "property_address": "text",
+        "property_address_city": "text",
+        "property_address_county_name": "text",
+        "property_address_full": "text",
+        "property_address_state": "text",
+        "property_address_zip": "text",
+        "property_class": "text",
+        "property_export_id": "text",
+        "property_flags_json": "jsonb",
+        "property_flags_text": "text",
+        "property_id": "text",
+        "property_subtype": "text",
+        "property_type": "text",
+        "rehab_level": "text",
+        "renovation_level_classification": "text",
+        "rent_estimate": "numeric",
+        "roof_cover": "text",
+        "roof_type": "text",
+        "sale_date": "text",
+        "sale_price": "numeric",
+        "school_district_name": "text",
+        "seller_tags_json": "jsonb",
+        "seller_tags_text": "text",
+        "sewer": "text",
+        "sqft_per_unit": "numeric",
+        "stories": "numeric",
+        "structured_motivation_score": "numeric",
+        "style": "text",
+        "subdivision_name": "text",
+        "sum_buildings_nbr": "numeric",
+        "sum_commercial_units": "numeric",
+        "sum_garage_sqft": "numeric",
+        "tag_distress_score": "numeric",
+        "tax_amt": "numeric",
+        "tax_delinquent": "bool",
+        "tax_delinquent_year": "int4",
+        "total_baths": "numeric",
+        "total_bedrooms": "numeric",
+        "total_loan_amt": "numeric",
+        "total_loan_balance": "numeric",
+        "total_loan_payment": "numeric",
+        "units_count": "int4",
+        "water": "text",
+        "year_built": "int4",
+        "zoning": "text"
+      },
+      "primary_key": [
+        "property_export_id"
+      ],
+      "required_indexes": [
+        "uq_properties_property_id"
+      ],
+      "note": "production has 343 columns; 117 are read by the Offerr path"
+    },
+    "public.buyer_comp_raw_v2": {
+      "required_columns": {
+        "apn_parcel_id": "text",
+        "building_condition": "text",
+        "building_square_feet": "numeric",
+        "comp_confidence_score": "numeric",
+        "construction_type": "text",
+        "deal_grade": "text",
+        "document_type": "text",
+        "effective_year_built": "numeric",
+        "estimated_value": "numeric",
+        "id": "uuid",
+        "import_status": "text",
+        "is_corporate_owner": "bool",
+        "last_sale_doc_type": "text",
+        "latitude": "numeric",
+        "lienholder_name": "text",
+        "longitude": "numeric",
+        "mls_sold_date": "date",
+        "mls_sold_price": "numeric",
+        "normalized_asset_class": "text",
+        "out_of_state_owner": "bool",
+        "owner_1_name": "text",
+        "owner_address_full": "text",
+        "owner_name": "text",
+        "percent_off": "numeric",
+        "ppbd": "numeric",
+        "ppsf": "numeric",
+        "ppu": "numeric",
+        "price_off_value": "numeric",
+        "property_address_city": "text",
+        "property_address_full": "text",
+        "property_address_state": "text",
+        "property_address_zip": "text",
+        "property_id": "text",
+        "property_type": "text",
+        "recording_date": "date",
+        "sale_date": "date",
+        "sale_price": "numeric",
+        "saleprice": "numeric",
+        "school_district_name": "text",
+        "streetview_image": "text",
+        "subdivision_name": "text",
+        "total_baths": "numeric",
+        "total_bedrooms": "numeric",
+        "total_loan_amt": "numeric",
+        "total_loan_balance": "numeric",
+        "total_loan_payment": "numeric",
+        "units_count": "numeric",
+        "year_built": "numeric"
+      },
+      "primary_key": [
+        "id"
+      ],
+      "required_indexes": [
+        "idx_buyer_comp_raw_v2_property_id",
+        "idx_buyer_comp_raw_v2_lat_lng",
+        "idx_buyer_comp_raw_v2_sale_date"
+      ],
+      "note": "all 167 production columns are materialised; these 48 are load-bearing"
+    },
+    "public.buyer_entities_v2": {
+      "required_columns": {
+        "avg_purchase_price": "numeric",
+        "buyer_key": "text",
+        "markets_active": "_text",
+        "normalized_buyer_name": "text",
+        "preferred_asset_classes": "_text",
+        "purchase_count": "int4"
+      },
+      "primary_key": [
+        "id"
+      ],
+      "required_indexes": [
+        "idx_bev2_normalized_name"
+      ],
+      "note": "optional enrichment source; loader swallows failures here"
+    }
+  },
+  "views": {
+    "public.v_recent_sold_comps": {
+      "required_columns": {
+        "id": "uuid",
+        "property_id": "text",
+        "property_address_full": "text",
+        "property_address_city": "text",
+        "property_address_state": "text",
+        "property_address_zip": "text",
+        "latitude": "numeric",
+        "longitude": "numeric",
+        "sale_price": "numeric",
+        "sale_date": "date",
+        "mls_sold_price": "numeric",
+        "mls_sold_date": "date",
+        "estimated_value": "numeric",
+        "price_off_value": "numeric",
+        "percent_off": "numeric",
+        "computed_ppsf": "numeric",
+        "ppu": "numeric",
+        "ppbd": "numeric",
+        "normalized_asset_class": "text",
+        "property_type": "text",
+        "building_condition": "text",
+        "construction_type": "text",
+        "total_bedrooms": "numeric",
+        "total_baths": "numeric",
+        "building_square_feet": "numeric",
+        "units_count": "numeric",
+        "year_built": "numeric",
+        "comp_confidence_score": "numeric",
+        "deal_grade": "text",
+        "streetview_image": "text",
+        "is_usable_comp": "bool"
+      },
+      "base_table": "public.buyer_comp_raw_v2",
+      "filter": "import_status IS DISTINCT FROM 'rejected'"
+    }
+  },
+  "offerr_spine": {
+    "tables": [
+      "offerr_evaluation_requests",
+      "offerr_evaluations",
+      "offerr_evaluation_events"
+    ],
+    "feature_flag": "offerr_evaluation_enabled",
+    "flag_table": "public.system_control"
+  },
+  "failure_codes": [
+    "missing_properties_table",
+    "missing_comp_table",
+    "missing_comp_view",
+    "missing_buyer_entity_table",
+    "missing_comp_rpc",
+    "comp_rpc_signature_mismatch",
+    "comp_rpc_result_contract_mismatch",
+    "schema_contract_version_mismatch",
+    "missing_required_column",
+    "missing_required_index",
+    "missing_offerr_table",
+    "missing_offerr_feature_flag",
+    "grant_posture_mismatch"
+  ]
+}

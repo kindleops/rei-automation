@@ -267,42 +267,99 @@ was **not** performed. **Nothing was applied to any hosted project, and no
 hosted project was read from or written to** beyond `projects list` /
 `orgs list` metadata.
 
-### 10.1b The repository cannot rebuild the base schema either
+### 10.1b The base schema — recovered and source-controlled (2026-07-30)
 
 Creating the Supabase project is **necessary but not sufficient**. Offerr's
-runtime touches five database objects, and four have no DDL anywhere in this
-repository:
+runtime touches six database objects. Until 2026-07-30 five of them had no DDL
+anywhere in this repository, so replaying the 120-migration tree against an
+empty project would not have produced a schema the spine could run against.
 
-| Object | Defined in repo? |
-|---|---|
-| `public.system_control` | yes — `20260428_create_system_control.sql` |
-| `public.properties` | **no — production-only** |
-| `public.buyer_comp_raw_v2` | **no — production-only** |
-| `public.buyer_entities_v2` | **no — production-only** |
-| `get_comp_candidates_for_subject(...)` | **no — production-only** |
+All of them are now source-controlled under
+`apps/api/supabase/contracts/offerr-comp-intelligence/`, recovered **read-only**
+from production (`lcppdrmrdfblstpcbgpf`) via `pg_get_functiondef`,
+`pg_get_viewdef` and `information_schema`:
 
-Replaying the 120-migration tree against an empty project would not create
-them. `apps/api/scripts/offerr/offerr-staging-bootstrap.sql` closes this gap
-with a small deterministic bootstrap (preferred over cloning production): the
-four missing objects, no production data, no secrets, and every outbound flag
-pinned `false` — note the canonical `system_control` migration seeds
+| Object | Defined in repo? | Parity class |
+|---|---|---|
+| `public.system_control` | yes — `20260428_create_system_control.sql` | canonical shape |
+| `public.properties` | **yes** — `canonical/010_properties.sql` | compatible reconstruction (117-of-343 columns = the full Offerr read surface) |
+| `public.buyer_comp_raw_v2` | **yes** — `canonical/020_…sql` | exact column contract (167/167) |
+| `public.buyer_entities_v2` | **yes** — `canonical/030_…sql` | exact column contract (49/49) |
+| `public.v_recent_sold_comps` | **yes** — `canonical/040_…sql` | **exact production definition (verbatim)** |
+| `get_comp_candidates_for_subject(...)` | **yes** — `canonical/050_…sql` | **exact production definition (verbatim)** |
+
+`v_recent_sold_comps` was the missing link. The comp RPC does **not** read
+`buyer_comp_raw_v2` directly — it reads this view, which is a projection over
+that table filtered to `import_status IS DISTINCT FROM 'rejected'`. Because the
+view passes `id` straight through, the RPC's `comp_id` *is*
+`buyer_comp_raw_v2.id`, which is what makes `compCandidateLoader`'s
+`.in('id', compIds)` identity join correct.
+
+Parity is proven, not asserted: re-creating the function and the view in a fresh
+PostgreSQL 17 database and reading the catalog back yields output
+**byte-identical** to production, and all 333 reproduced columns match
+production's type, nullability and default with zero mismatches.
+
+`apps/api/scripts/offerr/offerr-staging-bootstrap.sql` is now a thin staging
+wrapper that `\ir`-includes those canonical files — it contributes no comp DDL of
+its own, so there is exactly one copy of each definition and staging cannot drift
+from the recovered contract. On top of the canonical objects it adds only staging
+concerns: a refuse-to-run guard (aborts if `properties`, `buyer_comp_raw_v2` or
+`buyer_entities_v2` holds any non-`OFFERR-STAGING-TEST-` row), `system_control`
+with every automation flag pinned `false` (the canonical migration seeds
 `outbound_sms_enabled`/`feeder_enabled`/`queue_runner_enabled` to `true`, which
-staging must never inherit. It aborts if `public.properties` holds any
-non-`OFFERR-STAGING-TEST-` row, and it is idempotent.
+staging must never inherit), the service-role grant posture, a recorded
+schema-contract version, and a post-bootstrap assertion that fails loudly on
+signature or result-contract drift.
 
-Validated end-to-end against disposable PostgreSQL 17.10: bootstrap applies and
-re-applies cleanly, refuses a populated database, the Offerr migration applies
-on top, schema verification is **47/47**, the comp RPC honours its radius and
-recency windows deterministically, and the full E2E harness scores **207/207**.
+Validated end-to-end against disposable PostgreSQL 17.10: the database was
+dropped and rebuilt **from source-controlled files alone**, bootstrap applies and
+re-applies cleanly, refuses a populated database, the Offerr migration applies on
+top, schema verification is **47/47**, the drift check reports **COMPATIBLE**,
+20 RPC contract cases pass against real PostgreSQL, and the full E2E harness
+scores **291/291 with no injected comps**.
 
-> The bootstrap's `get_comp_candidates_for_subject` is a **behavioural
-> stand-in** — same signature and return contract, deterministic body, *not*
-> production's SQL. Staging on it proves how Offerr handles comp data, not
-> production's comp retrieval. Production comp-SQL parity stays open.
+> **The behavioural stand-in is gone.** Staging now executes the same comp SQL
+> production executes. What remains unverified is not the SQL but the *data*:
+> production comp density, duplicate rates and package frequency are not
+> characterised by synthetic fixtures. See the contract README "Open
+> production-parity risks".
 
 Related: V3 feature flags are read from **env vars** by `readFeatureFlag`, not
 from `system_control`, so V3 enablement in staging is a deployment env change
 rather than a database flag change.
+
+### 10.1c The real comp-retrieval path
+
+Nothing about comps is injected anywhere in the verification harness. This is
+what executes by default:
+
+```
+loadV3CompCandidates(subject, deps)                    compCandidateLoader.js
+  ├─ (1) rpc get_comp_candidates_for_subject(          ← exact production SQL
+  │        p_subject_property_id, p_radius_miles,
+  │        p_months_back, p_limit: 100)
+  │        └─ public.v_recent_sold_comps → public.buyer_comp_raw_v2
+  ├─ (2) buyer_comp_raw_v2 .select(RAW_IDENTITY_SELECT).in('id', compIds)
+  ├─ (3) buyer_entities_v2 .select(ENTITY_SELECT).in('normalized_buyer_name', …)
+  └─ (4) normalizeCandidate → qualifyComps → clusterTransactions
+           → buildV3Decision → applyOfferrSafetyGates
+```
+
+Exactly three queries, no N+1, and **no write on any of it** — the RPC is
+declared `STABLE` and the whole path runs unchanged inside a `READ ONLY`
+transaction.
+
+Eligibility windows come from `compCandidateLoader.eligibilityWindow`: land
+20mi/48mo, commercial 15mi/48mo, multifamily 7mi/36mo, residential 4mi/30mo.
+
+**The comp RPC is a retrieval primitive, not a safety boundary.** Several
+protections one might assume live in it do not: it does **not** reject zero or
+negative prices (only `NULL` ones, via `is_usable_comp`) and does **not** reject
+future-dated sales. Those are handled one layer down by
+`transactionQualification` (`nominal_consideration`, lane ceiling, PPSF bounds,
+anchor ratio) and `transactionClustering` (package/duplicate detection). The
+full guarantee-to-layer map is in the contract README §3.
 
 ### 10.2 What was verified instead — ephemeral PostgreSQL 17
 
@@ -392,7 +449,7 @@ service_role | offerr_evaluation_events   | INSERT, SELECT
 | Side-effect and privacy proofs | **Verified** (executable, real-loader path) |
 | Idempotency incl. races, payload reuse, partial snapshots | **Verified against real PostgreSQL 17** |
 | Migration DDL / constraints / indexes / RLS / grants / rollback | **Verified on PostgreSQL 17** (47/47 checks) |
-| 12-case evaluation matrix, flag gating, reconciliation | **Verified** (207/207 assertions, real DB) |
+| 12-case evaluation matrix, flag gating, reconciliation | **Verified** (291/291 assertions, real DB, real comp loader) |
 | Hosted staging project | **Blocked** — none exists; creation is a billing/ownership decision |
 | Hosted staging migration application | **Blocked** — depends on the project above |
 | Staging API preview deployment | **Blocked** — depends on the project above |
@@ -449,24 +506,38 @@ Known limitations:
   actually served, and a deployed preview URL are therefore **unverified**.
 - The PostgREST adapter used by the E2E harness
   (`offerr-pg-rest-adapter.mjs`) implements only the query surface the Offerr
-  store uses. It is verification tooling, not a general Supabase client.
-- **The E2E harness stubs comp retrieval.** `offerr-e2e-verify.mjs` injects
-  `loadV3CompCandidates: async () => ({ candidates: c.comps })`, so its 207
-  assertions cover the real route, auth, flag gate, resolver, safety gates,
-  store, and a real PostgreSQL — but **not** the real comp path
-  (`get_comp_candidates_for_subject` → `buyer_comp_raw_v2` →
-  `buyer_entities_v2`). `offerr-staging-bootstrap.sql` now makes a real-RPC run
-  possible; rewiring the harness to seed `buyer_comp_raw_v2` and drop the stub
-  is the top prerequisite before any V3-enabled matrix result is trusted.
-- The bootstrap's `get_comp_candidates_for_subject` is a behavioural stand-in,
-  not production's SQL (which this repo does not contain), so **production
-  comp-retrieval parity is unverified** by any run to date.
+  store and the acquisition comp path use — `.rpc`, `.select` (with real column
+  projection), `.eq/.in/.gte/.lte/.gt/.lt/.ilike`, `.order/.limit`,
+  `.single/.maybeSingle`, insert and delete. It is verification tooling, not a
+  general Supabase client.
+- **Comp-retrieval SQL parity is closed; comp-*data* parity is not.** The
+  canonical RPC and view are now exact production definitions (§10.1b) and the
+  E2E harness runs them for real, but every run to date uses 40 synthetic comp
+  rows. Production holds ~48k. Real comp density, duplicate rates and package
+  frequency are uncharacterised, so a hosted V3-enabled result may exercise
+  paths these fixtures never reach.
+- **The canonical `ORDER BY` has no unique tiebreaker.** Candidates equal on
+  (similarity, sale_date, distance) have implementation-defined order, so with
+  `p_limit` truncating, *which* comps survive can vary run to run on identical
+  data. Reproduced faithfully rather than silently patched. Recommended
+  production fix: append `, comp_id ASC`.
+- **The comp RPC does not reject zero/negative prices or future-dated sales.**
+  `is_usable_comp` only tests `NOT NULL`. Nominal prices are quarantined at
+  qualification, but they still consume rows against the 100-row cap, and
+  future-dated sales are not rejected on recency by any layer.
+- Production grants `anon`/`authenticated` full DML on the comp tables and
+  `EXECUTE ... TO PUBLIC` on the comp RPC, with RLS as the only guard. Observed
+  read-only, unchanged, and reported for separate triage.
+- `persistence_ms` and `total_ms` never appear in the lifecycle event's payload,
+  because the service assigns them after handing the payload to the store. An
+  observability gap, not a correctness one.
 
 ## Commands
 
 ```bash
 cd apps/api
-# Offerr spine suites (78 tests: 62 spine + 16 staging-guard refusal matrix)
+# Offerr spine suites (139 with a verification database; 115 pass + 2 skip
+# without one — the DB-backed RPC contract suites skip rather than fail)
 NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test \
 PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test \
 OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 \
@@ -537,3 +608,48 @@ The guard **refuses to run** on all six conditions, each covered by
 6. The target cannot be positively identified as local or as a Supabase project
    matching `OFFERR_STAGING_PROJECT_REF`.
 Teardown: `docker rm -f offerr-verify-pg`.
+
+### Comp-contract verification (added 2026-07-30)
+
+Rebuild a disposable database from source control alone, then prove the real
+comp path against it. Nothing below ever touches a hosted project.
+
+```bash
+cd apps/api
+export URL='postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify'
+
+# 1. Supabase roles + default ACLs (LOCAL ONLY — hosted Supabase has these)
+psql "$URL" -v ON_ERROR_STOP=1 -f scripts/offerr/offerr-supabase-prereqs.sql
+
+# 2. Canonical comp contract + staging guards. \ir-includes
+#    supabase/contracts/offerr-comp-intelligence/canonical/*.sql
+psql "$URL" -v ON_ERROR_STOP=1 -f scripts/offerr/offerr-staging-bootstrap.sql
+
+# 3. The Offerr spine migration
+psql "$URL" -v ON_ERROR_STOP=1 \
+  -f supabase/migrations/PROPOSED_20260729120000_offerr_evaluation_spine.sql
+
+# 4. Read-only contract/drift check — must print COMPATIBLE
+OFFERR_SCHEMA_CHECK_DATABASE_URL="$URL" \
+  node scripts/offerr/offerr-schema-drift-check.mjs
+
+# 5. RPC contract suite against real PostgreSQL 17 (20 cases + 2 loader cases)
+OFFERR_VERIFY_DATABASE_URL="$URL" NODE_ENV=test PODIO_CLIENT_ID=test \
+PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test \
+INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test \
+APP_BASE_URL=http://localhost:3000 \
+node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+  tests/critical/offerr-comp-rpc-contract.test.mjs
+
+# 6. Full real-path E2E — no injected comps (291 assertions)
+ALLOW_OFFERR_STAGING_FIXTURES=true OFFERR_VERIFY_DATABASE_URL="$URL" \
+OFFERR_LATENCY_SAMPLES=30 NODE_ENV=test PODIO_CLIENT_ID=test \
+PODIO_CLIENT_SECRET=test PODIO_USERNAME=test PODIO_PASSWORD=test \
+BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test \
+APP_BASE_URL=http://localhost:3000 \
+node --import ./tests/register-aliases.mjs scripts/offerr/offerr-e2e-verify.mjs
+```
+
+`OFFERR_MATRIX_JSON=/path/matrix.json` writes the per-case comp diagnostics
+(RPC rows, clusters, effective sample size, package/duplicate counts, execution
+state, confidence) for comparison across runs.

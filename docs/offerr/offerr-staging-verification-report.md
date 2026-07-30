@@ -1,10 +1,31 @@
 # Offerr Evaluation Spine — Staging Verification Report
 
-**Date:** 2026-07-30 (pass 1) · 2026-07-30 (pass 2 — see §11)
+**Date:** 2026-07-30 (pass 1) · 2026-07-30 (pass 2 — see §11) · 2026-07-30 (pass 3 — see §12)
 **Branch:** `feat/offerr-ai-evaluation-spine`
 **PR:** [#57](https://github.com/kindleops/rei-automation/pull/57) — **draft, not merged**
 
-> ### Pass-2 headline
+> ### Pass-3 headline (current state — read this first)
+>
+> The last remaining local fidelity gap is **closed**.
+>
+> 1. **The canonical comp-retrieval contract was recovered** read-only from
+>    production `lcppdrmrdfblstpcbgpf` (write probe refused, SQLSTATE 25006) and
+>    is now source-controlled. The comp RPC and `v_recent_sold_comps` are
+>    **exact production definitions**, verified **byte-identical** on catalog
+>    round-trip. The Pass-2 behavioural stand-in is deleted.
+> 2. **The E2E harness no longer injects comps.** `loadV3CompCandidates`,
+>    `loadComparableProperties`, `loadBuyerPurchases` and `loadSubjectProperty`
+>    injections are gone; the real RPC → identity join → buy-box join →
+>    qualification → clustering path executes against real PostgreSQL.
+>    **291/291 assertions pass.**
+> 3. **A newly created project can now be bootstrapped from repository files
+>    alone** — demonstrated by dropping and rebuilding the verification database
+>    from source control with no manual DDL. This was the Pass-2 blocker.
+>
+> Still blocked on the operator: `real-estate-automation-staging` does not
+> exist, so nothing is *hosted*-staging-verified. Full detail in §12.
+
+> ### Pass-2 headline (historical — superseded by §12)
 >
 > The hosted rollout was attempted again and is **still blocked**, now by *two*
 > independent gaps rather than one:
@@ -772,6 +793,12 @@ DDL runs. Idempotent throughout.
 > does not contain. Hosted staging on this bootstrap proves how *Offerr handles*
 > comp data; it does not validate production's comp retrieval. Treat
 > production comp-SQL parity as a separate, still-open item.
+>
+> **⚠️ SUPERSEDED BY PASS 3 (§12).** This limit no longer applies. The exact
+> production RPC and view were recovered read-only on 2026-07-30, are now
+> source-controlled, and the E2E harness executes them for real with no injected
+> comps. Everything in §11 is retained as the historical record of Pass 2, not
+> as a description of current state.
 
 ### 11.4 Guard hardening — two refusal classes were missing
 
@@ -842,3 +869,518 @@ family left at their safe `false` defaults.
    V3-enabled matrix result.
 5. **Deploy** the `api` Vercel project to preview with staging env vars.
 6. Only then are Phases 10–16 executable.
+
+---
+
+## 12. Pass 3 — canonical comp contract recovered, real comp path verified (2026-07-30)
+
+Pass 2 closed with one blocker above all others (§11.5): **the E2E harness stubbed
+the comp loader**, so 207/207 assertions proved routing, gating, persistence and
+projection — but proved nothing about comp retrieval. Pass 3 removes that gap.
+
+### 12.1 Production schema inspection — read-only, verified read-only
+
+Production Supabase project `lcppdrmrdfblstpcbgpf` was inspected **read-only** to
+recover the canonical definitions the repository was missing.
+
+The connection was opened with `options='-c default_transaction_read_only=on'`
+and every statement ran inside an explicit `BEGIN TRANSACTION READ ONLY`. Before
+any inspection query, a deliberate write probe was issued to prove the session
+could not write:
+
+```
+READONLY PROOF: {"transaction_read_only":{"transaction_read_only":"on"},
+                 "write_probe":"write refused: 25006"}
+server: PostgreSQL 17.6 on aarch64-unknown-linux-gnu
+```
+
+SQLSTATE `25006` is `read_only_sql_transaction`. The script aborts if the probe
+ever succeeds.
+
+**Objects inspected** (catalog metadata only — no row data was selected or
+exported):
+
+| Object | What was read |
+|---|---|
+| `public.get_comp_candidates_for_subject` | `pg_get_functiondef`, arguments, result, language, volatility, security, config, grants |
+| `public.v_recent_sold_comps` | `pg_get_viewdef(oid, true)`, columns, relkind |
+| `public.buyer_comp_raw_v2` | columns, constraints, indexes, grants, RLS policies |
+| `public.buyer_entities_v2` | columns, constraints, indexes, grants, RLS policies |
+| `public.properties` | columns, constraints, indexes, grants, RLS policies |
+| `recently_sold_properties`, `buyer_comp_properties_v2`, `buyer_purchase_events_v2` | existence + columns |
+| `pg_extension`, `pg_policies`, `pg_stat_user_tables` | extensions, policies, approximate row counts |
+
+**No production data was written, altered, deleted, or exported. No seller,
+owner, phone, email, campaign, message, contract, comp or property row was
+selected.**
+
+### 12.2 What the recovery found — the previous stand-in was wrong in six ways
+
+The Pass-2 bootstrap contained a *behavioural stand-in* for the comp RPC. The
+recovered production definition differs from it materially:
+
+| | Pass-2 stand-in | Recovered production |
+|---|---|---|
+| Candidate source | `buyer_comp_raw_v2` directly | **`v_recent_sold_comps`** (a view over it) |
+| `comp_id` type | `text` | **`uuid`** |
+| Output columns | 24, including a separate `id` | **32, no `id`** |
+| Subject exclusion | `c.id IS DISTINCT FROM p_subject_property_id` | `c.property_id IS DISTINCT FROM s.property_id` |
+| Recency column | `recording_date` | **`sale_date`** |
+| Validity gating | inline lat/lon/date predicates | delegated to `v_recent_sold_comps.is_usable_comp` |
+| Distance | haversine, R=3958.7566, 4dp | **spherical law of cosines, R=3958.8, clamped, 2dp** |
+| Similarity | distance decay × size parity | **100 − capped sqft/beds/baths/year penalties − 20 asset-class mismatch** |
+| Ordering | `dist ASC, recording_date DESC, id ASC` | `similarity DESC, sale_date DESC, distance ASC` (**no unique tiebreaker**) |
+| Row cap | `greatest(1, coalesce(p_limit,100))` | `least(greatest(p_limit,1),100)` |
+| Defaults | `4, 30, 100` | `1.0, 6, 25` |
+
+The missing link was `v_recent_sold_comps`: it is a view over `buyer_comp_raw_v2`
+that passes `id` straight through. That is **why** `compCandidateLoader`'s
+identity join `.in('id', compIds)` is correct — `comp_id` *is*
+`buyer_comp_raw_v2.id`. No stand-in could have been trusted without that fact.
+
+### 12.3 Parity achieved — proven byte-identical, not asserted
+
+The canonical definitions are now source-controlled at
+`apps/api/supabase/contracts/offerr-comp-intelligence/`.
+
+Re-creating them in a fresh PostgreSQL 17 database and reading the catalog back
+produces output **byte-identical** to the production catalog:
+
+```
+FUNCTION byte-identical to production: True
+VIEW     byte-identical to production: True
+```
+
+Column contracts compared row-by-row against the recovered catalog:
+
+```
+local columns: 333
+columns not present in production: []
+type/nullability/default mismatches: 0
+  properties           local=117  prod=343
+  buyer_comp_raw_v2    local=167  prod=167
+  buyer_entities_v2    local=49   prod=49
+```
+
+| Object | Parity class |
+|---|---|
+| `get_comp_candidates_for_subject` | **EXACT_PRODUCTION_DEFINITION** (verbatim) |
+| `v_recent_sold_comps` | **EXACT_PRODUCTION_DEFINITION** (verbatim) |
+| `buyer_comp_raw_v2` | **EXACT_PRODUCTION_COLUMN_CONTRACT** (167/167) |
+| `buyer_entities_v2` | **EXACT_PRODUCTION_COLUMN_CONTRACT** (49/49) |
+| `properties` | **COMPATIBLE_RECONSTRUCTION** — 117-of-343 columns, exactly the Offerr read surface |
+| `system_control` | canonical shape, staging-safe flag state |
+
+**No definition required by the Offerr comp path remains unavailable.**
+
+### 12.4 Licensing and data-rights boundary
+
+Reviewed before committing (full analysis in the contract README §4):
+
+- No credentials in any recovered DDL.
+- **No provider name appears anywhere** in any object, column or function body —
+  there is no vendor string to redact.
+- Provider-shaped *ingest* columns exist (`raw_payload`, `batch_id`,
+  `source_record_id`, `import_status`, `row_hash`) — plumbing, not licensed
+  content. `import_status` is load-bearing (the view filters on it) and is kept.
+- PII-bearing columns exist on `buyer_comp_raw_v2`; the Offerr path reads owner
+  name and mailing address only for buyer-identity resolution, and the seller
+  projection strips all of it (asserted per-case in the E2E).
+- The similarity formula is internal arithmetic, not a licensed provider formula.
+
+**Conclusion: no adapter indirection is needed.** There is no provider-specific
+implementation to isolate, so the "sanitized interface + provider adapter"
+fallback was not required. Exact production SQL is committed as-is. **No
+unresolved licensing decision blocks this work.**
+
+### 12.5 Production posture findings (observed, NOT changed)
+
+Recorded for separate triage. Nothing in production was altered.
+
+1. `get_comp_candidates_for_subject` is `GRANT EXECUTE ... TO PUBLIC` (so `anon`
+   and `authenticated` can execute it).
+2. `properties`, `buyer_comp_raw_v2`, `buyer_entities_v2` and
+   `v_recent_sold_comps` grant full `SELECT, INSERT, UPDATE, DELETE, TRUNCATE`
+   to `anon` and `authenticated`. RLS is enabled with SELECT-only policies, so
+   **RLS is currently the only thing preventing anonymous writes to the comp
+   corpus.**
+3. The RPC has no pinned `SET search_path` (mitigated by `SECURITY INVOKER`).
+
+The staging bootstrap deliberately does **not** reproduce finding 2 — a staging
+database where `anon` can write comps would make the side-effect proof
+meaningless. That deviation is commented in the bootstrap.
+
+### 12.6 The comp injection is gone
+
+`apps/api/scripts/offerr/offerr-e2e-verify.mjs` previously injected:
+
+```js
+loadV3CompCandidates: async () => ({ candidates: c.comps })
+loadComparableProperties: async () => c.comps ?? []
+loadBuyerPurchases: async () => []
+loadSubjectProperty: async (id) => (direct pool query)
+```
+
+**All four are removed.** The harness now injects exactly two dependencies:
+
+```js
+const baseDeps = { db: adapter, supabase: adapter, getSystemFlag: dbFlagReader };
+```
+
+`db` serves the Offerr store, the property resolver and `compCandidateLoader`;
+`supabase` serves `acquisitionDecisionEngine`'s `db(deps)`. Everything else
+resolves to its production default. The only way to change what the engine sees
+is to change database rows.
+
+Three independent guards keep it that way:
+
+- a runtime assertion in the harness (`harness injects no comp candidates…`);
+- a runtime assertion that the RPC was actually invoked through the adapter;
+- a source-level test (`offerr-comp-schema-contract.test.mjs`) that fails if any
+  of the six banned injection keys reappears.
+
+### 12.7 The adapter now covers the real query surface
+
+`offerr-pg-rest-adapter.mjs` gained `.rpc()` (named arguments), `.in()`,
+`.gte/.lte/.gt/.lt`, and — most importantly — **real column projection**:
+`.select('a,b,c')` emits `SELECT "a","b","c"`, not `SELECT *`.
+
+That last one is not cosmetic. `acquisitionDecisionEngine.optionalEnrichmentQuery`
+narrows its column list in response to SQLSTATE `42703`. Under `SELECT *` that
+retry loop could never execute and a missing column would silently be
+`undefined` instead of detected. 17 focused tests pin every operation.
+
+### 12.8 Fixtures are database rows now
+
+The 12-case matrix is expressed purely as rows in the canonical tables:
+**15 properties, 40 comps in `buyer_comp_raw_v2`, 8 buyers in
+`buyer_entities_v2`**. No case carries a `comps` array any more.
+
+One design change was forced by the real RPC. The residential comp radius is
+4 miles, and the original fixtures placed every Houston subject within ~1 mile
+of every other — harmless while comps were injected per-case, fatal once
+retrieval is real, because C09's $332.5M contaminated comp would have
+contaminated C01, C11 and C12. Each case now owns a **coordinate island 0.25°
+(~17 mi) apart**, with its comps within ~1.5 mi of their own subject. Comp sets
+are provably disjoint; a test asserts every comp-bearing subject pair is ≥ 8 mi
+apart. Street/city/ZIP strings are unchanged, because cases 5–8 depend on them
+and coordinates never reach a seller.
+
+### 12.9 The real-path 12-case matrix
+
+Database rebuilt **from source-controlled files only** (prereqs → bootstrap →
+Offerr migration), then the full harness run with no injected comps:
+
+| Case | HTTP | Resolution | RPC rows | Candidates | Clusters | ESS | Pkg | Dup | Quar | Excl | Execution state | Conf | Outcome | Range |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C01 Clean SFR | 200 | RESOLVED | 7 | 7 | 6 | 6 | 0 | 1 | 0 | 1 | SHADOW_MODE_READY | 84 | INSTANT_RANGE_ELIGIBLE | YES |
+| C02 Thin comps | 200 | RESOLVED | 2 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | DATA_REQUIRED | 58 | REVIEW_REQUIRED | null |
+| C03 Small multi | 200 | RESOLVED | 3 | 3 | 3 | 3 | 0 | 0 | 0 | 0 | SHADOW_MODE_READY | 72 | INSTANT_RANGE_ELIGIBLE | YES |
+| C04 Commercial | 200 | RESOLVED | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | DATA_REQUIRED | 22 | **UNSUPPORTED** | null |
+| C05 Ambiguous dup | 200 | AMBIGUOUS | — | 0 | — | — | — | — | — | — | — | — | REVIEW_REQUIRED | null |
+| C06 Missing unit | 200 | AMBIGUOUS | — | 0 | — | — | — | — | — | — | — | — | REVIEW_REQUIRED | null |
+| C07 ZIP conflict | 200 | NOT_FOUND | — | 0 | — | — | — | — | — | — | — | — | REVIEW_REQUIRED | null |
+| C08 No match | 200 | NOT_FOUND | — | 0 | — | — | — | — | — | — | — | — | REVIEW_REQUIRED | null |
+| C09 Contaminated | 200 | RESOLVED | 4 | 4 | 4 | 3 | 0 | 0 | **1** | 0 | REVIEW_REQUIRED | 72 | REVIEW_REQUIRED | null |
+| C10 Package | 200 | RESOLVED | 12 | 12 | **1** | **0** | **1** | 0 | 12 | 0 | ANOMALY_QUARANTINE | 24 | REVIEW_REQUIRED | null |
+| C11 Condition conflict | 200 | RESOLVED | 6 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | SHADOW_MODE_READY | 84 | CONDITIONAL_RANGE | YES |
+| C12 Asking > value | 200 | RESOLVED | 6 | 6 | 6 | 6 | 0 | 0 | 0 | 0 | SHADOW_MODE_READY | 84 | CONDITIONAL_RANGE | YES |
+
+Retrieval tier is `rpc_radius_4mi_30mo` for residential cases and
+`rpc_radius_7mi_36mo` for C03 (small multifamily) — the real
+`eligibilityWindow` ladder, executed, not simulated.
+
+The load-bearing results:
+
+- **Package collapse (C10):** 12 physical rows → **1 economic transaction** →
+  **effective sample size 0**. Correlated evidence added no depth, and the
+  engine landed in `ANOMALY_QUARANTINE`.
+- **Extreme quarantine (C09):** the $332.5M comp was quarantined by the real
+  qualification layer (lane ceiling + implausible PPSF + anchor ratio) while the
+  3 clean comps survived (ESS 3). No valuation figure came near the contaminated
+  price.
+- **Duplicate collapse (C01):** 7 rows → 6 clusters, 1 excluded as
+  `duplicate_parcel_row`, `DUPLICATE_PARCEL_ROWS` raised. Rows are not
+  transactions, proven end-to-end.
+- **Buyer/entity loading (all comp-bearing cases):** identity resolved for
+  **every** comp (`identity_enriched == rpc_rows`) and the `buyer_entities_v2`
+  buy-box matched every comp. The optional enrichment branch executed for real.
+- **Empty comps (C04):** `rpc_empty`, `NO_INDEPENDENT_COMPS`, fail-closed,
+  `UNSUPPORTED`, no range.
+
+### 12.10 Stubbed vs real — what changed
+
+| Case | Stubbed outcome | Real outcome | Changed? |
+|---|---|---|---|
+| C01 | INSTANT_RANGE_ELIGIBLE / range | INSTANT_RANGE_ELIGIBLE / range | no |
+| C02 | REVIEW_REQUIRED / null | REVIEW_REQUIRED / null | no |
+| C03 | INSTANT_RANGE_ELIGIBLE / range | INSTANT_RANGE_ELIGIBLE / range | no |
+| C04 | UNSUPPORTED / null | UNSUPPORTED / null | no |
+| C05–C08 | REVIEW_REQUIRED / null | REVIEW_REQUIRED / null | no |
+| C09 | REVIEW_REQUIRED / null | REVIEW_REQUIRED / null | no (seller outcome) |
+| C10 | REVIEW_REQUIRED / null | REVIEW_REQUIRED / null | no |
+| C11 | CONDITIONAL_RANGE / range | CONDITIONAL_RANGE / range | no |
+| C12 | CONDITIONAL_RANGE / range | CONDITIONAL_RANGE / range | no |
+
+**Every seller-facing outcome, range presence and reason-code set is unchanged.
+No assertion had to be rewritten to accommodate the real path, and the old
+fixtures were not masking an outcome bug.**
+
+One internal figure did move, and it is an improvement:
+
+- **C09 execution state: `ANOMALY_QUARANTINE` → `REVIEW_REQUIRED`.** Under the
+  stub, the raw fixture objects carried no buyer identity, so
+  `normalizeCandidate` never ran and `v3_pricing_eligible` was `undefined`.
+  Under the real path identity resolves, the 3 clean comps qualify as genuine
+  independent evidence (ESS 3), and the engine correctly distinguishes "one
+  contaminated comp among good ones" from "nothing usable". The seller-facing
+  result is identical; the internal state is now more accurate.
+
+What the stub *was* hiding was not a wrong answer but an **unverified claim**:
+whether the RPC, the identity join and the buy-box join worked at all. Those are
+now proven.
+
+### 12.11 Idempotency, concurrency and determinism (real comp loader)
+
+| Check | Result |
+|---|---|
+| Replay same key | 200, `idempotent_replay: true`, **no second snapshot** |
+| Replay evaluation_id | identical |
+| Same key, different address | **409** `idempotency_key_reused_with_different_payload` |
+| 6 simultaneous same-key requests | statuses `200 ×6`; **exactly 1 request row, exactly 1 evaluation** |
+| Concurrent evaluation_id agreement | all successful responses agree |
+| Orphaned/incomplete request rows | 0 |
+| Requests with >1 snapshot | 0 |
+| **Comp determinism** | same subject under a **new** key produced an **identical `comp_set_hash`** |
+
+That last row is new and only meaningful now: it proves the canonical RPC
+returns a stable evidence set across independent evaluations.
+
+**Persistence failure and compensating cleanup**, forced against the real
+database (a temporary always-false `CHECK` constraint on `offerr_evaluations`
+makes the snapshot insert fail while the request insert has already committed —
+the two are not transactional):
+
+| Check | Result |
+|---|---|
+| Response | **503**, never a success |
+| `failure_code` | `offerr_persistence_failed` |
+| Evaluation returned to caller | none |
+| Orphaned request row | **0** — the compensating delete ran |
+| Request table row count | returned to its pre-failure value |
+| Idempotency key after cleanup | **reusable** — a transient DB error does not permanently burn the key |
+
+The constraint is dropped in a `finally` block, so the probe cannot leave the
+verification database altered.
+
+### 12.12 Side-effect reconciliation — before → after
+
+All 18 execution/side-effect tables `0 → 0`:
+
+```
+property_acquisition_scores 0→0   property_cash_offer_snapshots 0→0
+send_queue 0→0                    message_events 0→0
+email_send_queue 0→0              follow_up_queue 0→0
+campaigns 0→0                     campaign_targets 0→0
+contracts 0→0                     offers 0→0
+title_orders 0→0                  acquisition_opportunities 0→0
+acquisition_events 0→0            deal_thread_state 0→0
+universal_lead_command_cache 0→0  lead_command_state 0→0
+exchange_listings 0→0             exchange_publications 0→0
+```
+
+**Comp corpus (new in Pass 3) — read, never written:**
+
+```
+properties          15 → 15
+buyer_comp_raw_v2   40 → 40
+buyer_entities_v2    8 →  8
+```
+
+Tables touched by the spine (reads included):
+`rpc:get_comp_candidates_for_subject`, `v_recent_sold_comps`,
+`buyer_comp_raw_v2`, `buyer_entities_v2`, `properties`, `acquisition_contacts`,
+`buyer_comp_properties_v2`, `buyer_purchase_events_v2`,
+`recently_sold_properties`, `offerr_evaluation_requests`, `offerr_evaluations`,
+`offerr_evaluation_events`.
+
+Tables **written**: `offerr_evaluation_requests`, `offerr_evaluations`,
+`offerr_evaluation_events` — and nothing else. 31 RPC invocations recorded.
+
+Offerr tables `0 → 15 / 0 → 15 / 0 → 15` (12 matrix + V3-disabled + determinism
+probe + concurrency winner).
+
+### 12.13 Latency — real comp path, 30 repeated evaluations
+
+Local disposable PostgreSQL 17.10 in Docker. **These are local numbers and do
+not predict hosted Supabase latency.**
+
+Wall clock over 30 evaluations: `min 164ms, p50 249ms, p95 600ms, max 629ms`.
+
+| Stage | p50 | p95 | max |
+|---|---|---|---|
+| validate | 0 | 0 | 1 |
+| idempotency | 3 | 29 | 85 |
+| resolution | 5 | 24 | 34 |
+| subject hydration | 9 | 22 | 233 |
+| overlay | 0 | 1 | 1 |
+| **comp load (RPC + 2 joins)** | **92** | **210** | **433** |
+| engine | 5 | 11 | 14 |
+| gates | 0 | 1 | 1 |
+| persistence + overhead (derived) | 135 | — | — |
+
+12-case matrix: `min 31ms, p50 234ms, p95 589ms, max 589ms`.
+
+`persistence_ms` and `total_ms` are absent from the lifecycle event's payload
+because the service assigns them *after* handing the payload to the store, so
+they cannot appear in the event that same call writes. Persistence is therefore
+reported as a derived residual. This is an observability gap, not a correctness
+one.
+
+A second 30-sample run taken while three PostgreSQL containers and the full
+critical suite were competing for the same CPU measured `p50 838ms, p95 1822ms,
+max 1851ms` — still an order of magnitude inside the deadline, but a useful
+reminder that these figures track host load and say nothing about hosted
+Supabase.
+
+**Is the 15-second deadline still realistic?** Yes, with margin. Comp load is now
+the dominant stage (p50 92ms, max 433ms locally) and it is the stage most
+exposed to hosted network latency and real comp density — the local corpus is 40
+rows against production's ~48k. A 10× hosted degradation would still leave
+roughly an order of magnitude of headroom. The deadline should be re-measured
+against hosted staging before launch, not assumed.
+
+### 12.14 Schema drift detection
+
+New: `apps/api/scripts/offerr/offerr-schema-drift-check.mjs`. Strictly read-only
+(`default_transaction_read_only=on` + explicit `BEGIN TRANSACTION READ ONLY`);
+a test asserts the file contains no mutating statement. The contract is read
+from `schema-contract.json`, not hard-coded.
+
+It verifies required tables/views, every required column **and its type**,
+required indexes, the RPC's existence + exact signature + 32-column result
+contract + `STABLE` volatility, the schema-contract version, the Offerr tables,
+the feature flag, and the comp-corpus grant posture.
+
+Stable machine-readable failure codes: `missing_properties_table`,
+`missing_comp_table`, `missing_comp_view`, `missing_buyer_entity_table`,
+`missing_comp_rpc`, `comp_rpc_signature_mismatch`,
+`comp_rpc_result_contract_mismatch`, `schema_contract_version_mismatch`,
+`missing_required_column`, `missing_required_index`, `missing_offerr_table`,
+`missing_offerr_feature_flag`, `grant_posture_mismatch`.
+
+Result against the rebuilt verification database: **22 checks, COMPATIBLE, exit 0.**
+
+Negative-tested, not just asserted: dropping the RPC yields `missing_comp_rpc`;
+replacing it with a 2-argument, 2-column stub yields both
+`comp_rpc_signature_mismatch` and `comp_rpc_result_contract_mismatch`.
+
+**A regression this work introduced, caught by the existing gate.** The
+contract-version marker was first created as `public.offerr_schema_contract`.
+`offerr-schema-verify.sql` immediately failed three of its 47 checks: the
+migration is supposed to create *exactly three* `offerr%` tables, and `anon` /
+`authenticated` are supposed to hold *zero* privileges on them — a
+bootstrap-owned fourth table in that namespace broke both, and it had silently
+inherited `anon`/`authenticated` DML from the prereqs' `ALTER DEFAULT
+PRIVILEGES`. Fixed by renaming it to
+`public.comp_intelligence_schema_contract` (it describes the comp contract, not
+the Offerr spine) and revoking those grants explicitly. Schema verification is
+back to **47/47**. Worth recording because it is evidence the gate does its job
+on new work, not only on old.
+
+### 12.15 Test results
+
+| Suite | Pass 2 | Pass 3 |
+|---|---|---|
+| Offerr critical tests (with database) | 78 | **139 pass, 0 fail, 0 skip** |
+| Offerr critical tests (no database) | 78 | **115 pass, 0 fail, 2 skip** |
+| Real-path E2E assertions | 207 (stubbed comps) | **291 pass, 0 fail** |
+| RPC contract cases vs real PostgreSQL 17 | — | **20 + 2 loader = 22** |
+| Schema drift check | — | **22 checks, COMPATIBLE** |
+| Schema verification (`offerr-schema-verify.sql`) | 47 | 47 |
+| Lint | pass | **pass (1475 files)** |
+
+The 2 skips are the database-backed RPC contract suites when
+`OFFERR_VERIFY_DATABASE_URL` is unset — they skip rather than fail so the default
+`npm test` stays green without a container.
+
+### 12.16 Hosted staging readiness — the five questions
+
+1. **Can a newly created Supabase project be bootstrapped from repository files
+   alone?** **Yes — demonstrated.** The verification database was dropped and
+   rebuilt from `offerr-supabase-prereqs.sql` (local only) →
+   `offerr-staging-bootstrap.sql` → the Offerr migration, with no manual DDL, and
+   the full 291-assertion suite passed against it. This was the Pass-2 blocker
+   (§11.2) and it is closed.
+2. **Does the E2E suite exercise the actual default comp-loader path?** **Yes.**
+   No comp candidate, comp, buyer entity, buyer purchase, subject row, engine
+   decision or seller outcome is injected. Proven at runtime (the RPC-invocation
+   assertion) and at source level (the banned-injection test).
+3. **Is the staging RPC exact production SQL or a compatible stand-in?**
+   **Exact production SQL**, verbatim, verified byte-identical on catalog
+   round-trip. Same for `v_recent_sold_comps`.
+4. **Are production comp-retrieval semantics verified?** **The SQL semantics are
+   verified; production data behaviour is not.** 20 contract cases pin filter,
+   distance, similarity, ordering, limit, identity and read-only semantics
+   against real PostgreSQL 17. What remains unverified is how that SQL behaves
+   over the *real corpus* — 40 synthetic rows here versus ~48k production rows,
+   with unknown real duplicate and package rates.
+5. **What remains before a hosted V3-enabled result can be trusted?** See §12.17.
+
+**Verdict: the repository-side comp-parity gap is closed. The system is not yet
+"hosted-staging-verified", because no hosted staging project exists.** Every
+remaining blocker is an operator/infrastructure action, not a code gap.
+
+### 12.17 Remaining production-parity risks
+
+1. **The canonical `ORDER BY` has no unique tiebreaker.** Rows equal on
+   (similarity, sale_date, distance) have implementation-defined order; with
+   `p_limit` truncating, *which* comps survive can vary. Reproduced faithfully
+   rather than silently patched. **Recommended production fix: append
+   `, comp_id ASC`.**
+2. **Future-dated sales are not excluded** by the RPC or the view (lower bound
+   only). Contract case 4 documents this.
+3. **Zero and negative prices reach the loader** — `is_usable_comp` only tests
+   `NOT NULL`. They are quarantined at qualification as `nominal_consideration`,
+   but they consume rows against the 100-row cap. Contract case 6 documents this.
+4. **`properties` in staging is a 117-of-343 column subset.** It covers the whole
+   current read surface; a future engine change reading a 344th column would pass
+   staging and fail production. The drift checker exists to catch that.
+5. **Real corpus behaviour is uncharacterised.** Comp density, duplicate rates
+   and package frequency in production are unknown from this work.
+6. **Production grant posture** (§12.5) — comp tables are `anon`-writable at the
+   grant level, with RLS as the only guard.
+7. **Hosted latency is unmeasured.** All figures here are local Docker.
+
+### 12.18 Operator action required (updated, ordered)
+
+1. **Approve billing** for an additional Supabase project in org
+   `gosflvntwnxegkrulmoz`.
+2. **Create** `real-estate-automation-staging`, West US (Oregon), fresh password
+   (never committed).
+3. **Bootstrap** it — `offerr-supabase-prereqs.sql` is *not* needed (hosted
+   Supabase already has the roles): run `offerr-staging-bootstrap.sql`, then
+   `PROPOSED_20260729120000_offerr_evaluation_spine.sql`, then
+   `offerr-schema-verify.sql`.
+4. **Run the drift check** against it (`offerr-schema-drift-check.mjs`) and
+   require `COMPATIBLE` before proceeding.
+5. **Run the real-path E2E** against it and compare the 12-case matrix to §12.9.
+6. **Deploy** the `api` Vercel project to preview with staging env vars.
+7. Consider the production follow-ups in §12.17 items 1–3 and §12.5.
+
+~~4. Rewire the E2E harness onto the real comp RPC (§11.5) before trusting any
+V3-enabled matrix result.~~ **Done in Pass 3.**
+
+### 12.19 Pass-3 state
+
+- **No production write occurred.** Production was inspected read-only with
+  server-enforced `default_transaction_read_only=on`; the write probe was
+  refused with SQLSTATE 25006.
+- No hosted project was created; nothing was deployed to Vercel.
+- All verification ran against a disposable PostgreSQL 17.10 Docker container,
+  destroyed afterwards.
+- `offerr_evaluation_enabled` remains `false`; the migration remains
+  `PROPOSED_`-prefixed and applied to no hosted project.
+- Offerr tests **139/139**, E2E **291/291**, RPC contract **22/22**, drift check
+  **COMPATIBLE**, lint **pass**.
+- PR #57 remains **draft and unmerged**.
