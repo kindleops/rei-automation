@@ -3,6 +3,7 @@ import { ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shar
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
+import { SYSTEM_CONTROL_AUTHORITIES } from '@/lib/domain/queue/operator-brake-authority.js'
 import {
   asBoolean,
   asPositiveInteger,
@@ -99,6 +100,13 @@ const DEFAULTS = {
   queue_emergency_stop_at: '',
   queue_execution_mode: 'stopped',
 }
+
+// This route IS the operator control plane: it is the only path allowed to write
+// the operator-owned execution posture (queue_execution_mode,
+// queue_emergency_stop_at, processor/runner/auto-send/outbound toggles).
+// setSystemValues is restrictive by default, so these writes declare authority
+// explicitly — without it an operator stop would be silently dropped.
+const OPERATOR_WRITE = Object.freeze({ authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR })
 
 const QUEUE_LIMITED_ACTIVE_STATUSES = ['queued', 'scheduled']
 const DIAGNOSTIC_COUNT_TIMEOUT_MS = 2500
@@ -337,7 +345,7 @@ async function rearmEmergencyStopAfterOneSend(action, reason, details = {}) {
       stopped_at: stoppedAt,
       ...details,
     }),
-  })
+  }, OPERATOR_WRITE)
   return stoppedAt
 }
 
@@ -532,7 +540,7 @@ async function recordLastRun(status, diagnostics = {}) {
     queue_last_run_at: new Date().toISOString(),
     queue_last_run_diagnostics: JSON.stringify(diagnostics).slice(0, 6000),
   }
-  await setSystemValues(payload)
+  await setSystemValues(payload, OPERATOR_WRITE)
 }
 
 async function loadQueuedScheduledRowsToday() {
@@ -669,7 +677,7 @@ export async function POST(request) {
       campaign_mode: 'paused',
       queue_auto_send_enabled: 'false',
       queue_auto_enqueue_enabled: 'false',
-    })
+    }, OPERATOR_WRITE)
     if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
     return responseWithDiagnostics(request, { ok: true, action }, updated, 200)
@@ -683,7 +691,7 @@ export async function POST(request) {
       campaign_mode,
       queue_auto_enqueue_enabled: 'true',
       queue_auto_send_enabled: 'false',
-    })
+    }, OPERATOR_WRITE)
     if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
     return responseWithDiagnostics(request, { ok: true, action, campaign_mode }, updated, 200)
@@ -701,7 +709,7 @@ export async function POST(request) {
       queue_last_run_status: 'emergency_stopped',
       queue_last_run_at: stoppedAt,
       queue_last_run_diagnostics: JSON.stringify({ action, reason, stopped_at: stoppedAt }),
-    })
+    }, OPERATOR_WRITE)
     if (!result.ok) return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
     const updated = await loadSettings()
     return responseWithDiagnostics(request, { ok: true, action, reason, stopped_at: stoppedAt }, updated, 200)
@@ -1233,7 +1241,7 @@ export async function POST(request) {
   }
 
   const patch = parseBody(body)
-  const result = await setSystemValues(patch)
+  const result = await setSystemValues(patch, OPERATOR_WRITE)
   if (!result.ok) {
     return corsJson(request,{ ok: false, error: 'queue_control_update_failed' }, 500)
   }

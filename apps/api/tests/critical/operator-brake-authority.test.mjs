@@ -99,6 +99,16 @@ test("operator-owned denylist covers every mandated execution-posture key", () =
   assert.equal(isOperatorOwnedSystemKey("queue_market_filter"), false);
 });
 
+test("the denylist is case-insensitive", () => {
+  // Defense in depth: a differently-cased key must not slip past the denylist.
+  for (const key of ["Queue_Execution_Mode", "QUEUE_EMERGENCY_STOP_AT", "  Outbound_SMS_Enabled  "]) {
+    assert.equal(isOperatorOwnedSystemKey(key), true, `${key} must be denied`);
+  }
+  const { patch, removed } = stripOperatorOwnedSystemKeys({ QUEUE_EXECUTION_MODE: "normal" });
+  assert.deepEqual(patch, {});
+  assert.deepEqual(removed, ["queue_execution_mode"]);
+});
+
 test("stripOperatorOwnedSystemKeys removes only operator keys and reports them", () => {
   const { patch, removed } = stripOperatorOwnedSystemKeys({
     queue_execution_mode: "normal",
@@ -270,6 +280,81 @@ test("operator authority may still write brakes (control plane is not blocked)",
     { authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR },
   );
   assert.equal(sc.get("queue_execution_mode"), "normal");
+});
+
+// ── the write seam is restrictive by default ─────────────────────────────────
+
+test("setSystemValues blocks operator keys when no authority is declared", async () => {
+  // Fail-closed default: an undeclared caller (any cron/automation path) cannot
+  // write the execution posture.
+  const { setSystemValues } = await import("@/lib/system-control.js");
+  const writes = [];
+  const fakeSupabase = {
+    from: () => ({
+      upsert: (entries) => {
+        writes.push(...entries);
+        return { select: async () => ({ data: entries, error: null }) };
+      },
+    }),
+  };
+
+  const res = await setSystemValues(
+    { queue_execution_mode: "normal", queue_daily_send_cap: "750" },
+    { supabase: fakeSupabase },
+  );
+
+  assert.deepEqual(res.blocked_keys, ["queue_execution_mode"]);
+  assert.deepEqual(
+    writes.map((row) => row.key),
+    ["queue_daily_send_cap"],
+    "only the tuning key may reach the database",
+  );
+});
+
+test("setSystemValues allows operator keys when OPERATOR authority is declared", async () => {
+  // An operator STOP must still land — dropping it would leave dispatch armed.
+  const { setSystemValues } = await import("@/lib/system-control.js");
+  const writes = [];
+  const fakeSupabase = {
+    from: () => ({
+      upsert: (entries) => {
+        writes.push(...entries);
+        return { select: async () => ({ data: entries, error: null }) };
+      },
+    }),
+  };
+
+  const res = await setSystemValues(
+    { queue_execution_mode: "stopped", queue_emergency_stop_at: "2026-07-29T06:14:21.151Z" },
+    { supabase: fakeSupabase, authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR },
+  );
+
+  assert.deepEqual(res.blocked_keys, []);
+  assert.deepEqual(
+    writes.map((row) => row.key).sort(),
+    ["queue_emergency_stop_at", "queue_execution_mode"],
+  );
+});
+
+test("the operator control plane declares OPERATOR authority on every brake write", async () => {
+  // Guards the flip to a restrictive default: if a control-plane call site loses
+  // its authority declaration, an operator stop would be silently dropped.
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const routePath = path.resolve(here, "../../src/app/api/cockpit/queue/control/route.js");
+  const source = fs.readFileSync(routePath, "utf8");
+
+  const calls = source.match(/setSystemValues\(/g) || [];
+  const authorized = source.match(/OPERATOR_WRITE\)/g) || [];
+  assert.ok(calls.length > 0, "control route must write system values");
+  assert.equal(
+    authorized.length,
+    calls.length,
+    `every setSystemValues call in the operator control plane must pass OPERATOR_WRITE (${authorized.length}/${calls.length})`,
+  );
+  assert.match(source, /authority: SYSTEM_CONTROL_AUTHORITIES\.OPERATOR/);
 });
 
 test("campaigns may request a posture but it is advisory only", async () => {

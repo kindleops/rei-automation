@@ -173,6 +173,7 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
       )
     : {
         ok: false,
+        integration: "podio_queue_reconcile",
         skipped: true,
         error: null,
         result: { ok: false, skipped: true, reason: podio_availability.reason },
@@ -202,6 +203,14 @@ export async function handleQueueReconcileRequest(request, method = "GET", deps 
     queue_reconcile_last_lifecycle_version: deployment_meta.reconcile_lifecycle_version || "",
     queue_reconcile_last_canonical_ok: String(canonical_lifecycle_result?.ok !== false),
     queue_reconcile_last_podio_ok: String(podio_wrap.ok === true),
+    // Distinguish deliberate containment from a real Podio failure: both leave
+    // _podio_ok false, and anything alerting on that key alone would read the
+    // launch-time containment skip as an outage.
+    queue_reconcile_last_podio_state: podio_availability.ok
+      ? podio_wrap.ok === true
+        ? "ok"
+        : "failed"
+      : `skipped_${podio_availability.reason}`,
   }).catch((error) => {
     logger?.warn?.("queue_reconcile.heartbeat_write_failed", {
       error: serializeIntegrationError(error),

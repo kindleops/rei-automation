@@ -63,7 +63,10 @@ export const SYSTEM_CONTROL_AUTHORITIES = Object.freeze({
 });
 
 function cleanKey(value) {
-  return String(value ?? "").trim();
+  // Case-insensitive, matching queue-execution-mode.js. This is the fail-closed
+  // defense-in-depth seam, so a differently-cased key must not slip past the
+  // denylist even though every current key is a lowercase constant.
+  return String(value ?? "").trim().toLowerCase();
 }
 
 export function isOperatorOwnedSystemKey(key) {

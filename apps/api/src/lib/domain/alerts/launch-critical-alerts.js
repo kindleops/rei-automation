@@ -100,7 +100,15 @@ export function sanitizeAlertMetadata(metadata = {}) {
     if (FORBIDDEN_METADATA_KEYS.some((fragment) => lowered.includes(fragment))) continue;
     if (value === null || value === undefined) continue;
     if (typeof value === "object") {
-      safe[key] = Array.isArray(value) ? value.slice(0, 25) : sanitizeAlertMetadata(value);
+      // Arrays must recurse too: [{ token: "..." }] would otherwise persist the
+      // secret verbatim, breaking this function's contract.
+      safe[key] = Array.isArray(value)
+        ? value
+            .slice(0, 25)
+            .map((item) =>
+              item && typeof item === "object" ? sanitizeAlertMetadata(item) : item,
+            )
+        : sanitizeAlertMetadata(value);
       continue;
     }
     safe[key] = typeof value === "string" ? value.slice(0, 500) : value;

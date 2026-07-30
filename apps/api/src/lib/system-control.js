@@ -151,23 +151,31 @@ export async function getSystemValue(key, opts = {}) {
 /**
  * Write system_control values.
  *
+ * Authority is RESTRICTIVE BY DEFAULT: a caller that does not declare an
+ * authority cannot write operator-owned keys (the execution posture). Only the
+ * explicit operator control plane passes SYSTEM_CONTROL_AUTHORITIES.OPERATOR.
+ *
+ * Note on failure direction: dropping an operator's stop would leave dispatch
+ * armed, so a blocked write is NOT silent — it is logged at error level and
+ * returned in `blocked_keys`, and every operator control-plane call site declares
+ * OPERATOR authority explicitly (see app/api/cockpit/queue/control/route.js).
+ *
  * @param {object} pairs key -> value
  * @param {{ supabase?: object, authority?: string, context?: string }} [opts]
- *   - authority: SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION makes the write
- *     operator-brake-safe — operator-owned keys are dropped, not persisted.
- *     Defaults to operator authority (explicit control-plane action).
  */
 export async function setSystemValues(pairs = {}, opts = {}) {
   const { supabase = defaultSupabase } = opts;
-  const authority = clean(opts.authority) || SYSTEM_CONTROL_AUTHORITIES.OPERATOR;
+  const authority = clean(opts.authority) || SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION;
 
   let incoming = pairs;
   let blocked_keys = [];
-  if (authority === SYSTEM_CONTROL_AUTHORITIES.CAMPAIGN_AUTOMATION) {
+  if (authority !== SYSTEM_CONTROL_AUTHORITIES.OPERATOR) {
     const filtered = stripOperatorOwnedSystemKeys(pairs);
     incoming = filtered.patch;
     blocked_keys = filtered.removed;
     if (blocked_keys.length > 0) {
+      // Error, not warn: either an automation path tried to clobber a brake, or
+      // an operator path forgot to declare OPERATOR authority. Both need eyes.
       warn("system_control.operator_owned_write_blocked", {
         authority,
         context: clean(opts.context) || "unknown",

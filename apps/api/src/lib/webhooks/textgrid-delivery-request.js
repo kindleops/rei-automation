@@ -388,16 +388,21 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
       }
     }
 
+    // Report what ACTUALLY happened: when the Podio lane is skipped or contained
+    // these flags must not claim a persistence attempt, or the logs would show
+    // containment as a successful Podio write.
     logger.info(
       "textgrid_delivery.handler_completed",
       buildTextgridWebhookLogMeta({
         payload,
         webhook_verification,
-        downstream_handler_invoked: true,
-        podio_persistence_attempted: true,
+        downstream_handler_invoked,
+        podio_persistence_attempted,
         extra: {
           handler_name: "handleTextgridDelivery",
           handler_ok: result?.ok !== false,
+          podio_lane_skipped: Boolean(result?.skipped),
+          podio_lane_contained: Boolean(result?.contained),
         },
       })
     );
@@ -407,8 +412,8 @@ export async function handleTextgridDeliveryRequest(request, deps = {}) {
       buildTextgridWebhookLogMeta({
         payload,
         webhook_verification,
-        downstream_handler_invoked: true,
-        podio_persistence_attempted: true,
+        downstream_handler_invoked,
+        podio_persistence_attempted,
         final_response_status: 200,
       })
     );

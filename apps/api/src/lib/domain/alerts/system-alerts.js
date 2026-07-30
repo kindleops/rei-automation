@@ -367,6 +367,10 @@ export async function recordSystemAlert({
     });
     return {
       ok: canonical.ok,
+      // Same shape as the podio_unavailable return above, so callers branching
+      // on created/updated do not see undefined on only one skip path.
+      created: false,
+      updated: false,
       alert_item_id: null,
       canonical_alert_id: canonical.id || null,
       podio_skipped: true,
@@ -554,6 +558,7 @@ export async function resolveSystemAlert({
     return {
       ok: true,
       resolved: Boolean(canonicalResolved?.resolved),
+      canonical_resolved: Boolean(canonicalResolved?.resolved),
       podio_skipped: true,
       podio_skip_reason: "podio_lookup_failed",
     };

@@ -239,8 +239,19 @@ test("queue reconcile skips its Podio lane when Podio is unavailable", async () 
     { url: "https://app.example.com/api/internal/queue/reconcile", json: async () => ({}) },
     "GET",
     {
-      requireCronAuth: () => ({ authorized: true, auth: { authenticated: true }, response: null }),
+      // The handler reads deps.requireCronOrEngineAuth — injecting the wrong key
+      // would fall through to the real cron-auth import and make this test pass
+      // or fail on ambient env rather than on the containment logic.
+      requireCronOrEngineAuth: async () => ({
+        authorized: true,
+        auth: { authenticated: true },
+        response: null,
+      }),
       getSystemFlag: async () => true,
+      // A Podio lane that must never be entered: if containment leaks, this throws.
+      runQueueReconcileRunner: async () => {
+        throw new Error("podio_reconcile_lane_should_not_run");
+      },
       getPodioAvailability: () => ({
         ok: false,
         reason: "podio_credentials_unavailable",
@@ -262,7 +273,13 @@ test("queue reconcile skips its Podio lane when Podio is unavailable", async () 
   );
 
   const heartbeat = heartbeats.at(-1) || {};
+  assert.ok(heartbeats.length > 0, "heartbeat must be written, proving the handler ran");
   assert.equal(heartbeat.queue_reconcile_last_podio_ok, "false");
+  // A deliberate containment skip must be distinguishable from a Podio outage.
+  assert.equal(
+    heartbeat.queue_reconcile_last_podio_state,
+    "skipped_podio_credentials_unavailable",
+  );
   assert.notEqual(responses[0]?.status, 500);
 });
 
