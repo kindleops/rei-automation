@@ -29,6 +29,21 @@
 -- Access: service-role only. The dashboard must never read these tables with
 -- the anon key; seller-facing surfaces receive only the seller_projection
 -- payload via the internal API.
+--
+-- ROLLBACK (repository has no down-migration convention; documented here and
+-- in docs/offerr/offerr-evaluation-spine.md). Safe while the feature flag is
+-- false and no other subsystem references these tables — order matters
+-- because of the FKs:
+--   1. UPDATE public.system_control SET value = 'false'
+--      WHERE key = 'offerr_evaluation_enabled';
+--   2. DROP TABLE IF EXISTS public.offerr_evaluation_events;
+--   3. DROP TABLE IF EXISTS public.offerr_evaluations;
+--   4. DROP TABLE IF EXISTS public.offerr_evaluation_requests;
+--   5. DROP FUNCTION IF EXISTS public.offerr_touch_updated_at();
+--   6. (optional) DELETE FROM public.system_control
+--      WHERE key = 'offerr_evaluation_enabled';
+-- No other object in this migration touches pre-existing schema, so rollback
+-- restores the exact prior state.
 
 CREATE OR REPLACE FUNCTION public.offerr_touch_updated_at()
 RETURNS trigger
@@ -62,7 +77,7 @@ CREATE TABLE IF NOT EXISTS public.offerr_evaluation_requests (
   CONSTRAINT offerr_eval_requests_idempotency_unique
     UNIQUE (idempotency_key),
   CONSTRAINT offerr_eval_requests_resolution_check
-    CHECK (resolution_status IN ('RESOLVED', 'AMBIGUOUS', 'NOT_FOUND', 'UNSUPPORTED'))
+    CHECK (resolution_status IN ('RESOLVED', 'AMBIGUOUS', 'NOT_FOUND', 'INVALID_INPUT', 'UNSUPPORTED'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_offerr_eval_requests_property

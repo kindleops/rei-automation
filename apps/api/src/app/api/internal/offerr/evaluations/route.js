@@ -20,13 +20,20 @@ const logger = child({ module: 'api.internal.offerr.evaluations' });
 
 const FAILURE_STATUS = {
   invalid_offerr_intake: 400,
+  idempotency_key_reused_with_different_payload: 409,
   evaluation_timeout: 504,
   offerr_persistence_unavailable: 503,
   offerr_persistence_failed: 503,
+  offerr_idempotency_conflict_retry: 503,
+  offerr_incomplete_snapshot: 500,
 };
 
 function clean(value) {
   return String(value ?? '').trim();
+}
+
+function generateCorrelationId(deps = {}) {
+  return (deps.generateCorrelationId ?? (() => globalThis.crypto.randomUUID()))();
 }
 
 /**
@@ -37,6 +44,10 @@ function clean(value) {
  */
 export async function handleOfferrEvaluationsRequest(request, deps = {}) {
   const routeLogger = deps.logger ?? logger;
+  // Correlation id exists before validation so every log line and error
+  // envelope for this HTTP request can be tied together, even when the
+  // evaluation never starts.
+  const correlationId = generateCorrelationId(deps);
 
   const auth = requireSharedSecretAuth(request, routeLogger, {
     env_name: 'INTERNAL_API_SECRET',
@@ -52,15 +63,37 @@ export async function handleOfferrEvaluationsRequest(request, deps = {}) {
 
   const contentLength = Number(request.headers?.get?.('content-length') ?? 0);
   if (Number.isFinite(contentLength) && contentLength > OFFERR_INTAKE_LIMITS.max_request_bytes) {
+    routeLogger.warn('offerr_evaluations.rejected', {
+      correlation_id: correlationId,
+      failure_code: 'payload_too_large',
+      content_length: contentLength,
+    });
     return NextResponse.json(
-      { ok: false, route: ROUTE, error: 'payload_too_large' },
+      { ok: false, route: ROUTE, error: 'payload_too_large', correlation_id: correlationId },
       { status: 413 },
     );
   }
 
   let requestId = null;
   try {
-    const body = await request.json().catch(() => ({}));
+    // Malformed JSON is a normal client error, not an exception path.
+    const body = await request.json().catch(() => null);
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      routeLogger.warn('offerr_evaluations.rejected', {
+        correlation_id: correlationId,
+        failure_code: 'malformed_json_body',
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          route: ROUTE,
+          error: 'invalid_offerr_intake',
+          validation_errors: ['malformed_json_body'],
+          correlation_id: correlationId,
+        },
+        { status: 400 },
+      );
+    }
 
     const evaluate = deps.evaluateOfferrProperty ?? evaluateOfferrProperty;
     const result = await evaluate(
@@ -95,17 +128,25 @@ export async function handleOfferrEvaluationsRequest(request, deps = {}) {
           route: ROUTE,
           error: 'invalid_offerr_intake',
           validation_errors: result.validation_errors ?? [],
+          correlation_id: correlationId,
         },
         { status: 400 },
       );
     }
 
+    routeLogger.warn('offerr_evaluations.failed', {
+      correlation_id: correlationId,
+      request_id: requestId,
+      failure_code: clean(result.failure_code) || 'unknown',
+      timeout_stage: result.timeout_stage ?? null,
+    });
     return NextResponse.json(
       {
         ok: false,
         route: ROUTE,
         error: 'offerr_evaluation_failed',
         failure_code: clean(result.failure_code) || 'unknown',
+        correlation_id: correlationId,
       },
       { status: FAILURE_STATUS[result.failure_code] ?? 500 },
     );
@@ -113,12 +154,18 @@ export async function handleOfferrEvaluationsRequest(request, deps = {}) {
     const errorMessage = clean(error?.message) || 'unknown';
     routeLogger.error('offerr_evaluations.failed', {
       failure_code: 'offerr_evaluations_route_failed',
+      correlation_id: correlationId,
       request_id: requestId,
       error_message: errorMessage,
     });
     captureRouteException(error, { route: ROUTE, subsystem: 'offerr' });
     return NextResponse.json(
-      { ok: false, route: ROUTE, error: 'offerr_evaluations_route_failed' },
+      {
+        ok: false,
+        route: ROUTE,
+        error: 'offerr_evaluations_route_failed',
+        correlation_id: correlationId,
+      },
       { status: 500 },
     );
   }

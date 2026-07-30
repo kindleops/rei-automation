@@ -76,10 +76,14 @@ export function createSupabaseOfferrEvaluationStore(deps = {}) {
       if (requestError) {
         if (requestError.code === UNIQUE_VIOLATION) {
           const existing = await this.findByIdempotencyKey(request.idempotency_key);
-          if (existing.ok && existing.found) {
+          if (existing.ok && existing.found && existing.evaluation) {
             return { ok: true, duplicate: true, ...existing };
           }
-          return { ok: false, error: 'offerr_idempotency_conflict_unreadable' };
+          // The concurrent winner has not finished writing its evaluation
+          // snapshot yet (or left an orphaned request). Never present a
+          // partial snapshot as a completed evaluation — fail closed and let
+          // the caller retry.
+          return { ok: false, error: 'offerr_idempotency_conflict_retry' };
         }
         return { ok: false, error: 'offerr_request_write_failed', detail: requestError.message };
       }
@@ -91,6 +95,15 @@ export function createSupabaseOfferrEvaluationStore(deps = {}) {
         .select('*')
         .single();
       if (evaluationError) {
+        // The two inserts are not transactional: without compensation the
+        // idempotency key would be consumed by a request row that has no
+        // evaluation snapshot. Delete our own just-inserted request so the
+        // caller can retry cleanly; if the delete fails the replay path still
+        // refuses to present the partial snapshot as a success.
+        await db()
+          .from(OFFERR_REQUESTS_TABLE)
+          .delete()
+          .eq('id', insertedRequest.id);
         return {
           ok: false,
           error: 'offerr_evaluation_write_failed',

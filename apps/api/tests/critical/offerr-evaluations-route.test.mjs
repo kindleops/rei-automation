@@ -89,13 +89,73 @@ const VALID_BODY = {
 };
 
 test('missing internal secret is rejected before any evaluation work', async () => {
+  let flagReads = 0;
+  let evaluateCalls = 0;
   const res = await handleOfferrEvaluationsRequest(
     makeRequest({ headers: { 'x-internal-api-secret': '' }, body: VALID_BODY }),
-    evaluationDeps(),
+    evaluationDeps({
+      getSystemFlag: async () => {
+        flagReads += 1;
+        return true;
+      },
+      evaluateOfferrProperty: async () => {
+        evaluateCalls += 1;
+        return { ok: false, failure_code: 'unreachable' };
+      },
+    }),
   );
   assert.equal(res.status, 401);
   const payload = await res.json();
   assert.equal(payload.ok, false);
+  assert.equal(flagReads, 0, 'auth happens before the flag read');
+  assert.equal(evaluateCalls, 0, 'auth happens before any evaluation work');
+});
+
+test('disabled flag short-circuits before any evaluation work', async () => {
+  let evaluateCalls = 0;
+  const res = await handleOfferrEvaluationsRequest(
+    makeRequest({ body: VALID_BODY }),
+    evaluationDeps({
+      getSystemFlag: async () => false,
+      evaluateOfferrProperty: async () => {
+        evaluateCalls += 1;
+        return { ok: false, failure_code: 'unreachable' };
+      },
+    }),
+  );
+  assert.equal(res.status, 423);
+  assert.equal(evaluateCalls, 0, 'flag gate precedes evaluation');
+});
+
+test('malformed JSON body is a stable 400 with a correlation id', async () => {
+  const request = {
+    headers: new Headers({ 'x-internal-api-secret': 'test' }),
+    json: async () => {
+      throw new SyntaxError('Unexpected token');
+    },
+  };
+  const res = await handleOfferrEvaluationsRequest(request, evaluationDeps());
+  assert.equal(res.status, 400);
+  const payload = await res.json();
+  assert.equal(payload.error, 'invalid_offerr_intake');
+  assert.deepEqual(payload.validation_errors, ['malformed_json_body']);
+  assert.ok(payload.correlation_id, 'correlation id present on pre-validation failure');
+});
+
+test('idempotency payload-reuse conflict maps to 409', async () => {
+  const res = await handleOfferrEvaluationsRequest(
+    makeRequest({ body: VALID_BODY }),
+    evaluationDeps({
+      evaluateOfferrProperty: async () => ({
+        ok: false,
+        failure_code: 'idempotency_key_reused_with_different_payload',
+      }),
+    }),
+  );
+  assert.equal(res.status, 409);
+  const payload = await res.json();
+  assert.equal(payload.failure_code, 'idempotency_key_reused_with_different_payload');
+  assert.ok(payload.correlation_id);
 });
 
 test('feature flag disabled returns the canonical 423 system_control_disabled envelope', async () => {

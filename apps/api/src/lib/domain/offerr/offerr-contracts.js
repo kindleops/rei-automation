@@ -23,11 +23,16 @@ export const OFFERR_SPINE_VERSION = 'offerr-evaluation-spine-v1';
 
 export const OFFERR_FLAG_KEY = 'offerr_evaluation_enabled';
 
-/** Deterministic property-resolution statuses (documented in docs/offerr). */
+/**
+ * Deterministic property-resolution statuses (documented in docs/offerr).
+ * The resolver emits RESOLVED / AMBIGUOUS / NOT_FOUND / INVALID_INPUT;
+ * UNSUPPORTED is a request-level status derived later from the asset lane.
+ */
 export const OFFERR_RESOLUTION_STATUSES = Object.freeze({
   RESOLVED: 'RESOLVED',
   AMBIGUOUS: 'AMBIGUOUS',
   NOT_FOUND: 'NOT_FOUND',
+  INVALID_INPUT: 'INVALID_INPUT',
   UNSUPPORTED: 'UNSUPPORTED',
 });
 

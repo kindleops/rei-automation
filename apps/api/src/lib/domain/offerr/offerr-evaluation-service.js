@@ -222,6 +222,25 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     return failure('offerr_persistence_unavailable', {}, timings, startedAt);
   }
   if (existing.found) {
+    // Fail closed on a request row without its evaluation snapshot — a
+    // partial snapshot must never be presented as a completed evaluation.
+    if (!existing.evaluation) {
+      logger.error('offerr_evaluation.failed', {
+        request_id: existing.request?.id ?? intake.request_id,
+        failure_code: 'offerr_incomplete_snapshot',
+      });
+      return failure('offerr_incomplete_snapshot', {}, timings, startedAt);
+    }
+    // An idempotency key is bound to one logical request: reusing it with a
+    // different address is a caller bug, not a replay.
+    const storedAddress = clean(existing.request?.normalized_submitted_address);
+    if (storedAddress && storedAddress !== intake.normalized_submitted_address) {
+      logger.warn('offerr_evaluation.failed', {
+        request_id: existing.request?.id ?? intake.request_id,
+        failure_code: 'idempotency_key_reused_with_different_payload',
+      });
+      return failure('idempotency_key_reused_with_different_payload', {}, timings, startedAt);
+    }
     logger.info('offerr_evaluation.completed', {
       request_id: existing.request?.id ?? intake.request_id,
       outcome: existing.evaluation?.outcome ?? null,
@@ -237,7 +256,10 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   let resolution;
   try {
     resolution = await resolveSubject(
-      { normalizedAddress: intake.normalized_submitted_address },
+      {
+        rawAddress: intake.raw_submitted_address,
+        normalizedAddress: intake.normalized_submitted_address,
+      },
       deps,
     );
   } catch (error) {
@@ -480,6 +502,13 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   if (persisted.duplicate) {
     // Concurrent request with the same idempotency key won the insert race:
     // return the stored evaluation so the response stays deterministic.
+    const winnerAddress = clean(persisted.request?.normalized_submitted_address);
+    if (winnerAddress && winnerAddress !== intake.normalized_submitted_address) {
+      return failure('idempotency_key_reused_with_different_payload', {}, timings, startedAt);
+    }
+    if (!persisted.evaluation) {
+      return failure('offerr_incomplete_snapshot', {}, timings, startedAt);
+    }
     logger.info('offerr_evaluation.completed', {
       request_id: persisted.request?.id ?? intake.request_id,
       outcome: persisted.evaluation?.outcome ?? null,
