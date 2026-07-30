@@ -294,6 +294,65 @@ test('unsupported asset lane returns UNSUPPORTED with no automatic range', async
   assert.ok(result.internal_result.reason_codes.some((r) => r.startsWith('unsupported_asset_family:')));
 });
 
+// classifyAssetLane falls back to `inferred_from_unit_count(n)` at confidence
+// 55 and returns SFR for unit counts of 0/1 when it recognises no type keyword.
+// A commercial record whose property_type string it does not know therefore
+// arrives as lane=SFR / family=RESIDENTIAL_SINGLE. Offerr must refuse it rather
+// than underwrite a commercial building as a house.
+test('commercial record misclassified as SFR is refused via the non-residential signal', async () => {
+  const COMMERCIAL = {
+    ...HOUSTON_SFR,
+    property_id: 'commercial-0001',
+    property_type: 'Commercial Retail',
+    property_class: 'Commercial',
+    building_square_feet: 12000,
+    units_count: 0,
+  };
+  // The REAL classifier is used here on purpose: this test's value is that it
+  // reproduces the real misclassification rather than stubbing it.
+  const result = await evaluateOfferrProperty(
+    intakeFor(COMMERCIAL, 'commercial-misclass-1'),
+    makeDeps({ subject: COMMERCIAL, comps: HOUSTON_COMPS }),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.outcome, OFFERR_OUTCOMES.UNSUPPORTED);
+  assert.equal(result.seller_projection.preliminary_range, null);
+  assert.ok(
+    result.internal_result.reason_codes.includes('non_residential_signal_on_canonical_record'),
+    `expected non-residential refusal, got ${JSON.stringify(result.internal_result.reason_codes)}`,
+  );
+});
+
+test('asset family resting only on a low-confidence guess never earns a range', () => {
+  const gates = applyOfferrSafetyGates({
+    resolution: { status: OFFERR_RESOLUTION_STATUSES.RESOLVED },
+    assetFamily: 'RESIDENTIAL_SINGLE',
+    assetLane: 'SFR',
+    assetConfidence: 55, // the inferred_from_unit_count fallback
+    decision: { v3: { final_confidence: 95 } },
+  });
+
+  assert.equal(gates.outcome, OFFERR_OUTCOMES.UNSUPPORTED);
+  assert.equal(gates.preliminary_range, null);
+  assert.equal(gates.gate_checks.asset_classification_trusted, false);
+  assert.ok(
+    gates.reason_codes.some((r) => r.startsWith('asset_classification_below_confidence_floor:')),
+  );
+});
+
+test('omitted asset confidence does not trip the floor (direct-caller compatibility)', () => {
+  const gates = applyOfferrSafetyGates({
+    resolution: { status: OFFERR_RESOLUTION_STATUSES.RESOLVED },
+    assetFamily: 'RESIDENTIAL_SINGLE',
+    assetLane: 'SFR',
+    decision: null, // falls through to the V3-absent review path, not UNSUPPORTED
+  });
+
+  assert.equal(gates.gate_checks.asset_classification_trusted, true);
+  assert.equal(gates.outcome, OFFERR_OUTCOMES.REVIEW_REQUIRED);
+});
+
 // ── 5. Idempotency: duplicate key does not create a second evaluation ───────
 
 test('same idempotency key replays the stored evaluation, no second snapshot', async () => {

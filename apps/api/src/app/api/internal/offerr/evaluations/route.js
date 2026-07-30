@@ -25,7 +25,14 @@ const FAILURE_STATUS = {
   offerr_persistence_unavailable: 503,
   offerr_persistence_failed: 503,
   offerr_idempotency_conflict_retry: 503,
-  offerr_incomplete_snapshot: 500,
+  // A request row without its evaluation snapshot is a transiently inconsistent
+  // server state, not an unhandled fault: under concurrent same-key traffic the
+  // pre-flight replay lookup routinely observes the winner's request row before
+  // its snapshot commits. Retry is the correct client action, so this is 503
+  // rather than 500 (503 also keeps a routine race out of exception alerting).
+  // Verified against a real Postgres race — see docs/offerr/
+  // offerr-staging-verification-report.md.
+  offerr_incomplete_snapshot: 503,
 };
 
 function clean(value) {

@@ -221,9 +221,27 @@ REVOKE ALL ON TABLE public.offerr_evaluation_requests FROM anon, authenticated;
 REVOKE ALL ON TABLE public.offerr_evaluations         FROM anon, authenticated;
 REVOKE ALL ON TABLE public.offerr_evaluation_events   FROM anon, authenticated;
 
+-- Supabase seeds `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON
+-- TABLES TO postgres, anon, authenticated, service_role`, so a new public
+-- table arrives with service_role already holding arwd. The narrower GRANTs
+-- below are additive and do NOT take that surplus away: without these REVOKEs
+-- the "immutable snapshot" and "append-only ledger" guarantees are
+-- convention-only, and the service-role key the Offerr API uses could UPDATE
+-- or DELETE a persisted evaluation. Revoke first, then grant the exact set.
+-- (Verified on PostgreSQL 17 with the Supabase default ACL reproduced — see
+-- apps/api/scripts/offerr/offerr-schema-verify.sql section 7.)
+REVOKE ALL ON TABLE public.offerr_evaluations         FROM service_role, PUBLIC;
+REVOKE ALL ON TABLE public.offerr_evaluation_events   FROM service_role, PUBLIC;
+REVOKE ALL ON TABLE public.offerr_evaluation_requests FROM PUBLIC;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.offerr_evaluation_requests TO service_role;
 GRANT SELECT, INSERT               ON TABLE public.offerr_evaluations         TO service_role;
 GRANT SELECT, INSERT               ON TABLE public.offerr_evaluation_events   TO service_role;
+
+-- offerr_touch_updated_at() is a trigger function; PostgreSQL grants EXECUTE
+-- to PUBLIC on every new function by default. Nothing seller-facing should be
+-- able to reach any offerr_* routine, so drop the implicit grant.
+REVOKE ALL ON FUNCTION public.offerr_touch_updated_at() FROM PUBLIC;
 
 -- ── Feature flag seed: explicitly disabled ─────────────────────────────────
 

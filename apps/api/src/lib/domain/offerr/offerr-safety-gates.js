@@ -36,6 +36,49 @@ export const OFFERR_GATE_THRESHOLDS = Object.freeze({
   medium_label_min_confidence: 55,
 });
 
+/**
+ * Minimum classifyAssetLane() confidence Offerr will accept as positive
+ * evidence that a subject really is in a supported residential family.
+ *
+ * classifyAssetLane falls back to `inferred_from_unit_count(n)` at confidence
+ * 55 when no type/land-use keyword matches, and that fallback returns SFR for
+ * unit counts of 0 or 1. A commercial record whose property_type string the
+ * classifier does not recognise (e.g. 'Commercial Retail', units_count 0)
+ * therefore arrives as lane=SFR / family=RESIDENTIAL_SINGLE and would sail
+ * through the supported-family gate. Genuine residential rows classify at
+ * 78-82 from a keyword or an explicit unit count, so requiring 70 keeps every
+ * real residential case while refusing the guess.
+ *
+ * Offerr fails closed on its own rather than changing the shared classifier,
+ * which the wider acquisition engine depends on.
+ */
+export const OFFERR_MIN_ASSET_CONFIDENCE = 70;
+
+/** Canonical signals that a record is not residential, whatever the lane says. */
+const NON_RESIDENTIAL_PATTERN =
+  /commercial|retail|office|industrial|warehouse|storage|hotel|motel|hospitality|\binn\b|resort|restaurant|medical|church|school|marina|mixed.?use|vacant land|raw land|land only|unimproved|acreage|mobile home park|agricultur|farm|ranch|timber/i;
+
+/**
+ * True when the canonical record itself declares a non-residential use.
+ * Read from the source columns rather than the derived lane so a misfiring
+ * classifier cannot mask it.
+ */
+export function detectNonResidentialSignal(row = {}) {
+  const blob = [
+    row?.property_type,
+    row?.property_class,
+    row?.normalized_asset_class,
+    row?.asset_class,
+    row?.asset_subtype,
+    row?.land_use,
+    row?.zoning,
+  ]
+    .map((v) => String(v ?? ''))
+    .join(' ');
+  if (row?.is_vacant_land === true) return true;
+  return NON_RESIDENTIAL_PATTERN.test(blob);
+}
+
 const RANGE_ELIGIBLE_STATES = new Set([
   EXECUTION_STATES.SHADOW_MODE_READY,
   EXECUTION_STATES.AUTO_RANGE_READY,
@@ -106,13 +149,29 @@ export function applyOfferrSafetyGates({
   decision,
   assetFamily,
   assetLane,
+  assetConfidence = null,
+  nonResidentialSignal = false,
   materialConflicts = [],
   thresholds = OFFERR_GATE_THRESHOLDS,
 } = {}) {
   const reasons = [];
+  // The confidence floor applies only when a confidence value is supplied.
+  // evaluateOfferrProperty always supplies one; callers that assert an asset
+  // family directly (unit tests, and any caller that has already established
+  // the family by other means) are unaffected. The non-residential signal
+  // below is the independent defence and needs no confidence value.
+  // Note: finiteNum(null) is 0, not null (Number(null) === 0), so "absent" has
+  // to be tested before coercion or an omitted confidence would read as 0.
+  const assetConfidenceNum =
+    assetConfidence === null || assetConfidence === undefined || assetConfidence === ''
+      ? null
+      : finiteNum(assetConfidence);
+  const confidentClassification =
+    assetConfidenceNum === null || assetConfidenceNum >= OFFERR_MIN_ASSET_CONFIDENCE;
   const checks = {
     property_resolved: resolution?.status === OFFERR_RESOLUTION_STATUSES.RESOLVED,
     asset_family_supported: OFFERR_SUPPORTED_ASSET_FAMILIES.includes(assetFamily),
+    asset_classification_trusted: confidentClassification && !nonResidentialSignal,
     engine_v3_active: Boolean(decision?.v3),
     execution_state_range_eligible: false,
     invariants_ok: false,
@@ -140,9 +199,19 @@ export function applyOfferrSafetyGates({
     return review(reasons, nextStep, checks);
   }
 
-  // 2. Unsupported asset lane -> no automatic range, ever.
-  if (!checks.asset_family_supported) {
-    reasons.push(`unsupported_asset_family:${assetFamily ?? 'UNKNOWN'}`);
+  // 2. Unsupported asset lane -> no automatic range, ever. A supported family
+  //    that rests only on a low-confidence guess, or that contradicts an
+  //    explicit non-residential signal on the canonical record, is treated the
+  //    same way: Offerr will not underwrite an asset it cannot positively
+  //    identify as residential.
+  if (!checks.asset_family_supported || !checks.asset_classification_trusted) {
+    if (!checks.asset_family_supported) {
+      reasons.push(`unsupported_asset_family:${assetFamily ?? 'UNKNOWN'}`);
+    } else if (nonResidentialSignal) {
+      reasons.push('non_residential_signal_on_canonical_record');
+    } else {
+      reasons.push(`asset_classification_below_confidence_floor:${assetConfidence ?? 'null'}`);
+    }
     if (assetLane) reasons.push(`asset_lane:${assetLane}`);
     return {
       outcome: OFFERR_OUTCOMES.UNSUPPORTED,

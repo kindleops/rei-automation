@@ -37,7 +37,7 @@ import {
   normalizeOfferrIntake,
 } from './offerr-contracts.js';
 import { resolveOfferrSubjectProperty } from './offerr-property-resolution.js';
-import { applyOfferrSafetyGates } from './offerr-safety-gates.js';
+import { applyOfferrSafetyGates, detectNonResidentialSignal } from './offerr-safety-gates.js';
 import { buildOfferrSellerProjection } from './offerr-seller-projection.js';
 import { createSupabaseOfferrEvaluationStore } from './offerr-evaluation-store.js';
 
@@ -301,6 +301,11 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   const classification = rawSubject ? classify(rawSubject) : null;
   const assetLane = classification?.lane ?? null;
   const assetFamily = assetLane ? (LANE_FAMILY[assetLane] ?? 'UNKNOWN') : null;
+  const assetConfidence = classification ? (num(classification.confidence) ?? null) : null;
+  // classifyAssetLane infers SFR from a unit count of 0/1 when it recognises no
+  // type keyword, so a commercial record can arrive as a supported family.
+  // Offerr reads the canonical use columns directly and fails closed.
+  const nonResidentialSignal = rawSubject ? detectNonResidentialSignal(rawSubject) : false;
   const materialConflicts = detectOverlayConflicts(intake.seller_facts, rawSubject);
   timings.overlay_ms = Date.now() - stageStart;
 
@@ -371,6 +376,8 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     decision,
     assetFamily,
     assetLane,
+    assetConfidence,
+    nonResidentialSignal,
     materialConflicts,
   });
   timings.gates_ms = Date.now() - stageStart;
@@ -403,6 +410,10 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     comp_set_hash: compEvidenceHash,
     comp_retrieval_tier: loaderDiagnostics?.retrieval_tier ?? null,
     effective_sample_size: v3?.sample?.effective_sample_size ?? null,
+    asset_lane: assetLane,
+    asset_family: assetFamily,
+    asset_confidence: assetConfidence,
+    non_residential_signal: nonResidentialSignal,
     seller_fact_overlay: intake.seller_facts,
     material_conflicts: materialConflicts,
     gate_checks: gates.gate_checks,

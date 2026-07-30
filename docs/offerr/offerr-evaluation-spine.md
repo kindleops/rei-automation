@@ -1,10 +1,11 @@
 # Offerr Evaluation Spine — Internal Vertical Slice
 
-**Date:** 2026-07-29 (hardening pass same day)
-**Status:** Implemented + independently reviewed on `feat/offerr-ai-evaluation-spine`; feature flag OFF; migration PROPOSED (not applied anywhere)
+**Date:** 2026-07-29 (hardening pass same day); staging-verification pass 2026-07-30
+**Status:** Implemented, independently reviewed, and verified against PostgreSQL 17 on `feat/offerr-ai-evaluation-spine`; feature flag OFF; migration PROPOSED (not applied to any hosted project)
 **Scope:** Internal-only evaluation spine — no seller communication, no contracts, no marketplace behavior
 **Repository:** `kindleops/rei-automation`
-**Safety posture:** No production data or schema was modified. No migrations were applied. The branch was not merged.
+**Safety posture:** No production data or schema was modified. No migration was applied to any hosted Supabase project. No hosted project was written to. The branch was not merged.
+**Verification report:** [`offerr-staging-verification-report.md`](./offerr-staging-verification-report.md)
 
 ---
 
@@ -36,10 +37,10 @@ non-binding by construction.
 | Stage | Module | Fail-closed behavior |
 |---|---|---|
 | 1. Validate + normalize intake | `offerr-contracts.js` | 400 `invalid_offerr_intake` |
-| 2. Idempotent replay lookup | `offerr-evaluation-store.js` | 503 store unreachable; 500 `offerr_incomplete_snapshot` for an orphaned request; 409 key reuse with different payload |
+| 2. Idempotent replay lookup | `offerr-evaluation-store.js` | 503 store unreachable; 503 `offerr_incomplete_snapshot` when a request row's snapshot is not yet committed (retryable); 409 key reuse with different payload |
 | 3. Deterministic address resolution | `offerr-property-resolution.js` | AMBIGUOUS / NOT_FOUND / INVALID_INPUT → review, no range |
 | 4. Canonical subject hydration | `loadSubjectProperty` (engine) | hydration miss → AMBIGUOUS |
-| 5. Asset classification + seller-fact overlay | `classifyAssetLane` + `detectOverlayConflicts` | unsupported family → UNSUPPORTED |
+| 5. Asset classification + seller-fact overlay | `classifyAssetLane` + `detectNonResidentialSignal` + `detectOverlayConflicts` | unsupported family, non-residential signal, or sub-floor classification confidence → UNSUPPORTED |
 | 6. Comp + buyer + decision paths | engine loaders + `calculateAcquisitionDecision` | loader error → structured failure |
 | 7. Offerr safety gates | `offerr-safety-gates.js` | any uncertainty → review, no range |
 | 8. Immutable snapshot persistence | `offerr-evaluation-store.js` | persistence failure → compensating delete + no range returned |
@@ -199,9 +200,15 @@ workflow exists), so no type regeneration applies.
   a stable `409 idempotency_key_reused_with_different_payload`; concurrent
   same-key races settle on exactly one snapshot. The request+snapshot writes
   are not transactional, so a failed snapshot insert triggers a compensating
-  delete of the request row, and a surviving orphaned request is answered
-  with `500 offerr_incomplete_snapshot` — a partial snapshot is never
-  presented as a completed evaluation.
+  delete of the request row, and a request row without its snapshot is
+  answered with `503 offerr_incomplete_snapshot` — a partial snapshot is never
+  presented as a completed evaluation. 503 rather than 500 because under
+  concurrent same-key traffic the pre-flight replay lookup routinely observes
+  the winner's request row before its snapshot commits, so retry is the correct
+  client action and a routine race should not read as an unhandled fault.
+  Proven against a real PostgreSQL 17 race: of six simultaneous same-key
+  requests one returned 200 and five returned retryable 503s, with exactly one
+  request row and exactly one snapshot persisted.
 
 ## 8. Observability and latency budget
 
@@ -242,31 +249,101 @@ claim is made — provider integration is deferred.
   `acquisition_opportunities`, LeadCommand tables are never touched, read or
   write; zero network requests.
 
-## 10. Current staging state
+## 10. Staging state and migration verification
 
-**There is no staging Supabase project for this repository.** The
-authenticated CLI lists three projects; the linked one
-(`lcppdrmrdfblstpcbgpf`, "real-estate-automation") is the **production**
-database named in the V3 audit, and the other two belong to different
-products (ReivestiExchange, SignPro). Per the safety rules, nothing was
-applied anywhere.
+### 10.1 No hosted staging project exists
 
-**Exact operator instructions to stage the migration** (when a staging
-project exists):
+**There is still no staging Supabase project for this repository** (re-audited
+2026-07-30). The authenticated CLI lists exactly three projects:
 
-1. Verify identity: `supabase projects list` — the target ref must NOT be
-   `lcppdrmrdfblstpcbgpf` and must be a project you can positively identify
-   as staging (name + org + creation intent).
-2. Copy `PROPOSED_20260729120000_offerr_evaluation_spine.sql` into the SQL
-   editor of that staging project (or rename without the `PROPOSED_` prefix
-   in a staging-only checkout and `supabase db push --linked` there). Do not
-   rename the file on this branch — the local link points at production.
-3. Verify: three `offerr_*` tables exist; RLS enabled with service-role-only
-   policies; `anon`/`authenticated` have no grants;
-   `system_control.offerr_evaluation_enabled = 'false'`.
-4. Smoke test with synthetic fixtures only (the critical suites); seed no
-   seller or property records.
-5. Leave the flag disabled. Rollback per §6 if needed.
+| Ref | Name | Org | Region | Created | Verdict |
+|---|---|---|---|---|---|
+| `lcppdrmrdfblstpcbgpf` | real-estate-automation | REI Automation (`gosflvntwnxegkrulmoz`) | West US (Oregon) | 2026-04-18 | **PRODUCTION** — CLI-linked; named as prod in the V3 audit and the SMS launch checklist |
+| `wwqqwllstapdolkndzzx` | ReivestiExchange | Luxer International (`ssxbuobppduwwahkxila`) | East US (Ohio) | 2025-09-16 | Different product — not valid staging |
+| `lvocccmhnyfoyqnbmmci` | SignPro | Luxer International (`ssxbuobppduwwahkxila`) | East US (Ohio) | 2025-05-16 | Different product — not valid staging |
+
+Creating `real-estate-automation-staging` is a billing/ownership decision and
+was **not** performed. **Nothing was applied to any hosted project, and no
+hosted project was read from or written to** beyond `projects list` /
+`orgs list` metadata.
+
+### 10.2 What was verified instead — ephemeral PostgreSQL 17
+
+Because a hosted staging project was unavailable, the migration and the full
+evaluation path were verified against a **disposable local PostgreSQL 17.10
+container** (production runs PostgreSQL 17), with the Supabase role and
+default-ACL environment reproduced so grants and RLS are meaningful:
+
+- roles `anon`, `authenticated`, `service_role` (BYPASSRLS), `authenticator`
+- `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,
+  authenticated, service_role` — Supabase's own default, and the reason the
+  migration's `REVOKE`s are load-bearing
+- the prerequisite `public.system_control` table
+
+This proves the DDL, constraints, indexes, RLS, grants, trigger, rollback, and
+real-database idempotency/concurrency. It does **not** substitute for a hosted
+staging project for PostgREST/API-gateway behaviour, Supabase Auth, or a
+deployed preview URL — those remain open (§11).
+
+### 10.3 Migration verification results
+
+`apps/api/scripts/offerr/offerr-schema-verify.sql` — **47 checks, 47 PASS, 0 FAIL**:
+
+- three `offerr_*` tables and exactly one `offerr_*` function; no extra views,
+  sequences, or publication membership
+- all timestamp columns `timestamptz`; all three PKs default `gen_random_uuid()`
+- `UNIQUE(idempotency_key)`; `UNIQUE(request_id, evaluation_version)`
+- `resolution_status` CHECK contains all five of RESOLVED / AMBIGUOUS /
+  NOT_FOUND / INVALID_INPUT / UNSUPPORTED
+- no FK cascades; **parent request delete is refused** while snapshots reference it
+- all seven documented indexes, including the partial
+  `uq_offerr_eval_events_dedupe_key ... WHERE dedupe_key IS NOT NULL`
+  (duplicates rejected, multiple NULLs allowed)
+- RLS enabled on all three tables, every policy scoped to `service_role` only
+- `anon`, `authenticated`, and `PUBLIC` hold **zero** privileges
+- the migration applies cleanly **twice** (fully additive / re-runnable)
+- the documented rollback leaves **0 tables, 0 functions, 0 flag rows**
+- `offerr_evaluation_enabled = 'false'` immediately after apply
+
+**Defect found and fixed during verification.** Supabase seeds
+`ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES TO ... service_role`, so a
+new public table arrives with `service_role` already holding `arwd`. The
+migration's narrower `GRANT SELECT, INSERT` on `offerr_evaluations` and
+`offerr_evaluation_events` is **additive and does not remove that surplus** —
+so the "immutable snapshot" and "append-only ledger" guarantees were
+convention-only, and the service-role key the Offerr API uses could have
+UPDATEd or DELETEd a persisted evaluation. The migration now REVOKEs before
+granting, and also drops PUBLIC's implicit EXECUTE on
+`offerr_touch_updated_at()`. Verified post-fix grants:
+
+```
+service_role | offerr_evaluation_requests | DELETE, INSERT, SELECT, UPDATE
+service_role | offerr_evaluations         | INSERT, SELECT
+service_role | offerr_evaluation_events   | INSERT, SELECT
+```
+
+### 10.4 Exact operator instructions to stage the migration
+
+1. **Create the staging project** (the outstanding operator action):
+   name `real-estate-automation-staging`, org `REI Automation`
+   (`gosflvntwnxegkrulmoz`), region West US (Oregon) to match production,
+   smallest sufficient instance size, freshly generated DB password.
+   `supabase projects create real-estate-automation-staging --org-id gosflvntwnxegkrulmoz --region us-west-1 --db-password <generated>`
+   — confirm the cost of an additional project first.
+2. **Verify identity before any write:** `supabase projects list`. The target
+   ref must NOT be `lcppdrmrdfblstpcbgpf` and must be positively identifiable
+   as staging.
+3. **Apply** `PROPOSED_20260729120000_offerr_evaluation_spine.sql` in that
+   project's SQL editor, or rename without the `PROPOSED_` prefix in a
+   staging-only checkout and `supabase db push --project-ref <staging-ref>`.
+   **Do not rename the file on this branch** — the local CLI link points at
+   production.
+4. **Verify** with `apps/api/scripts/offerr/offerr-schema-verify.sql`
+   (run as the schema owner, not `service_role`).
+5. **Exercise** with `apps/api/scripts/offerr/offerr-e2e-verify.mjs`, which
+   refuses to run without `ALLOW_OFFERR_STAGING_FIXTURES=true` and refuses the
+   production ref outright.
+6. **Leave `offerr_evaluation_enabled = 'false'`.** Rollback per §6 if needed.
 
 ## 11. Launch state
 
@@ -274,12 +351,15 @@ project exists):
 |---|---|
 | Domain contracts, orchestrator, gates, projection, store | **Implemented** |
 | Structured address resolution (suffix/directional/state/ZIP+4/unit) | **Implemented** |
-| Fail-closed ambiguity, geography-conflict, unit rules | **Verified** (59 tests green) |
+| Fail-closed ambiguity, geography-conflict, unit rules | **Verified** (62 tests green) |
 | Side-effect and privacy proofs | **Verified** (executable, real-loader path) |
-| Idempotency incl. races, payload reuse, partial snapshots | **Verified** |
-| Migration | **Staging-ready** (PROPOSED; operator instructions in §10) |
-| Staging application | **Blocked** — no staging project exists (business decision) |
-| Flag enablement, V3 enablement for Offerr traffic | **Blocked** — operator decisions |
+| Idempotency incl. races, payload reuse, partial snapshots | **Verified against real PostgreSQL 17** |
+| Migration DDL / constraints / indexes / RLS / grants / rollback | **Verified on PostgreSQL 17** (47/47 checks) |
+| 12-case evaluation matrix, flag gating, reconciliation | **Verified** (207/207 assertions, real DB) |
+| Hosted staging project | **Blocked** — none exists; creation is a billing/ownership decision |
+| Hosted staging migration application | **Blocked** — depends on the project above |
+| Staging API preview deployment | **Blocked** — depends on the project above |
+| Flag enablement, V3 enablement for Offerr production traffic | **Blocked** — operator decisions |
 | Public intake, providers, LeadCommand lifecycle, messaging, contracts, title, marketplace | **Deferred** |
 
 ## 12. Future seams (designed, not implemented)
@@ -306,18 +386,39 @@ intake wiring; UI; SMS/email; Offer Room; seller auth; SignPro AI;
 contracts; title routing; LeadCommand lifecycle creation; marketplace
 publication; applying the migration anywhere.
 
-Known limitations: canonical address components are parser-derived from
-strings (§3); comma-less inputs with unusual token order can fail closed to
-NOT_FOUND/AMBIGUOUS (never wrong-resolve); overlay-conflict rules are v1
-(asking-price and condition/repairs only); idempotency uniqueness is
-DB-enforced only after the migration is applied — until then the spine fails
-closed on persistence entirely.
+Known limitations:
+
+- Canonical address components are parser-derived from strings (§3);
+  comma-less inputs with unusual token order can fail closed to
+  NOT_FOUND/AMBIGUOUS (never wrong-resolve).
+- Overlay-conflict rules are v1 and compare only **seller claims against each
+  other or against `estimated_value`** — `asking_price > 1.5 ×
+  estimated_value`, and `condition ∈ {excellent, good}` with
+  `repairs.level = major`. There is **no comparison of a claimed condition
+  against a canonical condition field**, because the canonical `properties`
+  table carries no condition column. A seller claiming "excellent" on a
+  derelict property is therefore not detectable today.
+- `classifyAssetLane` infers `SFR` at confidence 55 from a unit count of 0 or 1
+  whenever it recognises no type keyword, so a commercial record can present as
+  a supported residential family. Offerr now refuses these itself
+  (`detectNonResidentialSignal` plus a confidence floor of
+  `OFFERR_MIN_ASSET_CONFIDENCE = 70`) rather than changing the shared
+  classifier the wider acquisition engine depends on. The underlying classifier
+  weakness remains and is worth fixing at source separately.
+- Idempotency uniqueness is DB-enforced only after the migration is applied —
+  until then the spine fails closed on persistence entirely.
+- Verification used an ephemeral local PostgreSQL 17 container, not a hosted
+  Supabase project. PostgREST behaviour, Supabase Auth, API-gateway grants as
+  actually served, and a deployed preview URL are therefore **unverified**.
+- The PostgREST adapter used by the E2E harness
+  (`offerr-pg-rest-adapter.mjs`) implements only the query surface the Offerr
+  store uses. It is verification tooling, not a general Supabase client.
 
 ## Commands
 
 ```bash
 cd apps/api
-# Offerr spine suites (59 tests)
+# Offerr spine suites (62 tests)
 NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test \
 PODIO_PASSWORD=test INTERNAL_API_SECRET=test BUYER_WEBHOOK_SECRET=test \
 OPS_DASHBOARD_SECRET=test APP_BASE_URL=http://localhost:3000 \
@@ -327,3 +428,42 @@ node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
 # Full critical gate
 npm run test:critical
 ```
+
+### Staging / migration verification (never against production)
+
+Stand up a disposable PostgreSQL 17 and apply the migration:
+
+```bash
+docker run -d --name offerr-verify-pg -e POSTGRES_PASSWORD=offerrverify \
+  -e POSTGRES_DB=offerr_verify -p 55432:5432 postgres:17
+
+# Supabase role + default-ACL environment, then the migration
+psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
+  -v ON_ERROR_STOP=1 -f apps/api/scripts/offerr/offerr-supabase-prereqs.sql
+psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
+  -v ON_ERROR_STOP=1 \
+  -f apps/api/supabase/migrations/PROPOSED_20260729120000_offerr_evaluation_spine.sql
+
+# 47-check schema verification (run as schema owner, not service_role)
+psql "postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify" \
+  -f apps/api/scripts/offerr/offerr-schema-verify.sql
+```
+
+End-to-end matrix, idempotency, concurrency, and reconciliation:
+
+```bash
+cd apps/api
+NODE_ENV=test PODIO_CLIENT_ID=test PODIO_CLIENT_SECRET=test PODIO_USERNAME=test \
+PODIO_PASSWORD=test INTERNAL_API_SECRET=offerr-staging-verify-secret \
+BUYER_WEBHOOK_SECRET=test OPS_DASHBOARD_SECRET=test \
+APP_BASE_URL=http://localhost:3000 \
+ALLOW_OFFERR_STAGING_FIXTURES=true \
+OFFERR_VERIFY_DATABASE_URL='postgresql://postgres:offerrverify@127.0.0.1:55432/offerr_verify' \
+node --import ./tests/register-aliases.mjs scripts/offerr/offerr-e2e-verify.mjs
+```
+
+`OFFERR_KEEP_FIXTURES=true` retains the synthetic rows for inspection.
+The guard **refuses to run** without `ALLOW_OFFERR_STAGING_FIXTURES=true`,
+refuses the production ref `lcppdrmrdfblstpcbgpf` outright, refuses the
+ReivestiExchange/SignPro projects, and refuses any unidentified target.
+Teardown: `docker rm -f offerr-verify-pg`.
