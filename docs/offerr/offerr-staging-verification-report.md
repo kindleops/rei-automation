@@ -1297,8 +1297,9 @@ on new work, not only on old.
 | Real-path E2E assertions | 207 (stubbed comps) | **291 pass, 0 fail** |
 | RPC contract cases vs real PostgreSQL 17 | — | **20 + 2 loader = 22** |
 | Schema drift check | — | **22 checks, COMPATIBLE** |
-| Schema verification (`offerr-schema-verify.sql`) | 47 | 47 |
-| Lint | pass | **pass (1475 files)** |
+| Acquisition + comp-intelligence regressions | — | **334 pass, 0 fail** |
+| Schema verification (`offerr-schema-verify.sql`) | 47 | **47 / 47** |
+| Lint | pass | **pass (1479 files)** |
 
 The 2 skips are the database-backed RPC contract suites when
 `OFFERR_VERIFY_DATABASE_URL` is unset — they skip rather than fail so the default
