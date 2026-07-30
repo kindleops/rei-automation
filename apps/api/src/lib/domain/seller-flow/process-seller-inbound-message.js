@@ -766,6 +766,10 @@ export async function processSellerInboundMessage({
           inboundEventId,
           referralId: referral_persist?.referral_id || null,
           execution_allowed,
+          // execution_allowed can come from the caller (webhook /
+          // recovery cron) independently of the scope gate, so the referral
+          // also needs this inbound's scope decision to send for real.
+          source_scope_allowed: Boolean(queue_permission.allowed),
           auto_reply_mode: effective_auto_reply_mode,
           dryRun: writes_suppressed,
         });

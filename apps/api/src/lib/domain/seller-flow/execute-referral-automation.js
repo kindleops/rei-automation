@@ -176,6 +176,10 @@ export async function executeReferralAutomation({
   inboundEventId = null,
   referralId = null,
   execution_allowed = false,
+  // The SOURCE inbound's scope decision (queue_permission.allowed). Defaults to
+  // false so any caller that forgets to propagate it gets shadow_only, never a
+  // real outbound to a referred number.
+  source_scope_allowed = false,
   auto_reply_mode = "disabled",
   dry_run = false,
 } = {}) {
@@ -197,22 +201,37 @@ export async function executeReferralAutomation({
     };
   }
 
-  // Capability probe only: execution_allowed already carries the caller's
-  // scope-enforced decision for this inbound, and a referral targets a newly
-  // referred contact rather than the inbound thread, so the thread allowlist
-  // does not apply here.
-  if (
-    !execution_allowed ||
-    !autoReplyModeAllowsQueue({ mode: auto_reply_mode, enforceScope: false }).allowed
-  ) {
+  // A referral sends a real outbound to a BRAND-NEW number, so it must inherit
+  // the source inbound's scope decision. execution_allowed alone is not enough:
+  // on the webhook path it is `seller_flow_execution_allowed` and on the
+  // recovery cron it is `recent && !dryRun`, both computed independently of the
+  // cutoff/allowlist gate — so a stale or non-allowlisted source inbound could
+  // otherwise drive a live referral outbound. Requiring
+  // `execution_allowed && source_scope_allowed` is what binds the referral to
+  // the same scope as the inbound that produced it.
+  //
+  // The mode check is a capability probe (enforceScope:false) on purpose: the
+  // thread allowlist scopes the SOURCE thread, and the referred contact is by
+  // definition a new number that will never appear on it, so matching the
+  // referred contact against the allowlist would deny every referral.
+  const mode_permits_sending = autoReplyModeAllowsQueue({
+    mode: auto_reply_mode,
+    enforceScope: false,
+  }).allowed;
+
+  if (!execution_allowed || !source_scope_allowed || !mode_permits_sending) {
     return {
       ok: true,
       action: "shadow_only",
-      reason: "execution_gated",
+      reason:
+        execution_allowed && mode_permits_sending && !source_scope_allowed
+          ? "source_inbound_out_of_scope"
+          : "execution_gated",
       review_required: false,
       queued: false,
       referral_id: referralId || null,
       referral: eligibility.referral || null,
+      source_scope_allowed: Boolean(source_scope_allowed),
     };
   }
 

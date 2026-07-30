@@ -218,18 +218,40 @@ export function autoReplyModeAllowsQueue({
 }
 
 /**
- * Loads the live_limited scope inputs from system_control. Returns nulls when
- * no reader is available — the gate treats that as "no cutoff" and denies.
+ * Loads the live_limited scope inputs from system_control. Never throws: a
+ * missing reader, a failed module import, and a read that throws synchronously
+ * or rejects all degrade to nulls, which the gate treats as "no cutoff" and
+ * denies. A scope read that blows up must not be able to reach the inbound
+ * handler as an exception, because an unhandled read failure is exactly the
+ * case where the send decision has to fail closed.
  */
 export async function resolveAutoReplyScopeConfig({ getSystemValue = null } = {}) {
-  const read =
-    typeof getSystemValue === "function"
-      ? getSystemValue
-      : (await import("@/lib/system-control.js")).getSystemValue;
+  const denied = () => ({ cutoffAt: null, threadAllowlist: null });
+
+  let read = typeof getSystemValue === "function" ? getSystemValue : null;
+  if (!read) {
+    try {
+      read = (await import("@/lib/system-control.js")).getSystemValue;
+    } catch {
+      return denied();
+    }
+  }
+  if (typeof read !== "function") return denied();
+
+  // Awaiting inside the try catches a synchronous throw from read() as well as
+  // a rejected promise — Promise.resolve(read(k)).catch() would only catch the
+  // latter, because the synchronous throw escapes before .catch() is attached.
+  const readOrNull = async (key) => {
+    try {
+      return await read(key);
+    } catch {
+      return null;
+    }
+  };
 
   const [cutoffAt, threadAllowlist] = await Promise.all([
-    Promise.resolve(read(AUTO_REPLY_CUTOFF_KEY)).catch(() => null),
-    Promise.resolve(read(AUTO_REPLY_ALLOWLIST_KEY)).catch(() => null),
+    readOrNull(AUTO_REPLY_CUTOFF_KEY),
+    readOrNull(AUTO_REPLY_ALLOWLIST_KEY),
   ]);
 
   return { cutoffAt: clean(cutoffAt) || null, threadAllowlist: clean(threadAllowlist) || null };

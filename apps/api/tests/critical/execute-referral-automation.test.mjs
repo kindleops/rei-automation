@@ -72,3 +72,74 @@ test("executeReferralAutomation stays shadow-only when execution is gated", asyn
   assert.equal(result.action, "shadow_only");
   assert.equal(result.queued, false);
 });
+
+// ── Source-inbound scope binding ────────────────────────────────────────────
+// A referral outbound goes to a brand-new number that no thread allowlist will
+// ever contain, so the guard is the SOURCE inbound's scope decision. On the
+// webhook path execution_allowed is `seller_flow_execution_allowed` and on the
+// recovery cron it is `recent && !dryRun` — neither carries the cutoff /
+// allowlist verdict, so an out-of-scope inbound must not escape via a referral.
+
+function referralFixture(sourceEventId) {
+  return resolveInboundRelationship({
+    message: "Never been the owner / His name is Sharon Schwartz / Tel (561)706-4622",
+    classification: { primary_intent: "wrong_number", objection: "wrong_number" },
+    source_event_id: sourceEventId,
+    source_thread_key: "+15550002000",
+    source_contact_phone: "+15550002000",
+    property_id: "234334277",
+  });
+}
+
+const REFERRAL_CONTEXT = {
+  summary: { property_address: "123 Main St", language_preference: "English" },
+};
+
+test("a referral from an out-of-scope source inbound never executes for real", async () => {
+  const result = await executeReferralAutomation({
+    relationship: referralFixture("evt-scope-denied"),
+    // The caller said "execute" and the mode permits sending, but the source
+    // inbound failed the cutoff/allowlist gate.
+    execution_allowed: true,
+    source_scope_allowed: false,
+    auto_reply_mode: "live_limited",
+    context: REFERRAL_CONTEXT,
+    inboundTo: "+15551234567",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, "shadow_only");
+  assert.equal(result.queued, false);
+  assert.equal(result.reason, "source_inbound_out_of_scope");
+  assert.equal(result.source_scope_allowed, false);
+});
+
+test("source scope defaults to denied when a caller forgets to propagate it", async () => {
+  const result = await executeReferralAutomation({
+    relationship: referralFixture("evt-scope-default"),
+    execution_allowed: true,
+    auto_reply_mode: "live_limited",
+    context: REFERRAL_CONTEXT,
+    inboundTo: "+15551234567",
+  });
+
+  assert.equal(result.action, "shadow_only");
+  assert.equal(result.queued, false);
+  assert.equal(result.source_scope_allowed, false);
+});
+
+test("an in-scope source inbound clears the scope gate and reaches execution", async () => {
+  // No Supabase client is injected, so the call stops at the persistence
+  // boundary — which is exactly the proof that the scope gate let it through
+  // rather than short-circuiting to shadow_only.
+  const result = await executeReferralAutomation({
+    relationship: referralFixture("evt-scope-allowed"),
+    execution_allowed: true,
+    source_scope_allowed: true,
+    auto_reply_mode: "live_limited",
+    context: REFERRAL_CONTEXT,
+    inboundTo: "+15551234567",
+  });
+
+  assert.notEqual(result.action, "shadow_only");
+});

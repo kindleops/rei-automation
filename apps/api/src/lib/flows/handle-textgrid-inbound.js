@@ -1617,7 +1617,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
 
       const auto_reply_scope_config =
         auto_reply_mode_final === "live_limited"
-          ? await resolveAutoReplyScopeConfig({})
+          ? await resolveAutoReplyScopeConfig({ getSystemValue: runtimeDeps.getSystemValue })
           : { cutoffAt: null, threadAllowlist: null };
 
       const queue_permission = autoReplyModeAllowsQueue({
