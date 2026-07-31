@@ -45,6 +45,7 @@ import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-p
 import {
   autoReplyModeAllowsQueue,
   normalizeAutoReplyMode,
+  resolveAutoReplyScopeConfig,
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
@@ -514,10 +515,20 @@ export async function processSellerInboundMessage({
     "disabled"
   );
 
+  // live_limited scope inputs are read only when that mode is actually in
+  // play; every other mode is decided without touching system_control.
+  const auto_reply_scope_config =
+    effective_auto_reply_mode === "live_limited"
+      ? await resolveAutoReplyScopeConfig({ getSystemValue })
+      : { cutoffAt: null, threadAllowlist: null };
+
   const queue_permission = autoReplyModeAllowsQueue({
     mode: effective_auto_reply_mode,
     inboundFrom: inboundFrom || threadKey,
     threadKey,
+    inboundReceivedAt,
+    cutoffAt: auto_reply_scope_config.cutoffAt,
+    threadAllowlist: auto_reply_scope_config.threadAllowlist,
   });
 
   const execution_allowed =
@@ -755,6 +766,10 @@ export async function processSellerInboundMessage({
           inboundEventId,
           referralId: referral_persist?.referral_id || null,
           execution_allowed,
+          // execution_allowed can come from the caller (webhook /
+          // recovery cron) independently of the scope gate, so the referral
+          // also needs this inbound's scope decision to send for real.
+          source_scope_allowed: Boolean(queue_permission.allowed),
           auto_reply_mode: effective_auto_reply_mode,
           dryRun: writes_suppressed,
         });
@@ -1104,6 +1119,7 @@ export async function processSellerInboundMessage({
     inboundFrom,
     inboundTo,
     inboundEventId,
+    inboundReceivedAt,
     enableQueueInsert: v2_should_queue_live,
     applySuppression,
     dryRun: dryRun || !v2_should_queue_live,

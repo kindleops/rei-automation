@@ -42,6 +42,8 @@ export async function OPTIONS(request) {
 const CONTROL_KEYS = [
   'queue_processor_mode',
   'auto_reply_mode',
+  'auto_reply_eligibility_cutoff_at',
+  'auto_reply_thread_allowlist',
   'campaign_mode',
   'candidate_source',
   'queue_daily_send_cap',
@@ -73,6 +75,10 @@ const CONTROL_KEYS = [
 const DEFAULTS = {
   queue_processor_mode: 'paused',
   auto_reply_mode: 'disabled',
+  // Empty cutoff keeps live_limited inert: the auto-reply gate fails closed
+  // until an operator sets an explicit eligibility cutoff.
+  auto_reply_eligibility_cutoff_at: '',
+  auto_reply_thread_allowlist: '',
   campaign_mode: 'paused',
   candidate_source: 'v_sms_ready_contacts_expanded',
   queue_daily_send_cap: '500',

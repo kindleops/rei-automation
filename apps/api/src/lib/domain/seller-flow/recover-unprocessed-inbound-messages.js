@@ -218,6 +218,10 @@ export async function recoverUnprocessedInboundMessages({
         inboundFrom: inbound_from,
         inboundTo: inbound_to,
         inboundEventId: row.id,
+        // The message's real arrival time, not the recovery run time — the
+        // live_limited eligibility cutoff is evaluated against this, and it is
+        // what keeps the unanswered backlog out of scope on this cron path.
+        inboundReceivedAt: row.received_at || null,
         providerMessageId: row.provider_message_sid,
         stageBefore:
           row.stage_before ||
