@@ -238,10 +238,28 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.offerr_evaluation_requests 
 GRANT SELECT, INSERT               ON TABLE public.offerr_evaluations         TO service_role;
 GRANT SELECT, INSERT               ON TABLE public.offerr_evaluation_events   TO service_role;
 
--- offerr_touch_updated_at() is a trigger function; PostgreSQL grants EXECUTE
--- to PUBLIC on every new function by default. Nothing seller-facing should be
--- able to reach any offerr_* routine, so drop the implicit grant.
+-- offerr_touch_updated_at() is a trigger function. Nothing seller-facing should
+-- be able to reach any offerr_* routine, and TWO independent mechanisms hand
+-- out EXECUTE here — both must be revoked:
+--
+--   1. PostgreSQL itself grants EXECUTE to PUBLIC on every new function.
+--   2. Hosted Supabase additionally seeds
+--        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+--          GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+--      which materialises as EXPLICIT per-role grants in the function's ACL.
+--
+-- REVOKE ... FROM PUBLIC removes (1) but is powerless against (2): an explicit
+-- role grant is not the PUBLIC grant. Verified on the hosted preview branch —
+-- with only the PUBLIC revoke the resulting ACL was
+--   {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+-- i.e. anon and authenticated still held EXECUTE. This was invisible on a local
+-- PostgreSQL container until offerr-supabase-prereqs.sql was taught to
+-- reproduce Supabase's ON FUNCTIONS default privilege as well.
+--
+-- Revoking from service_role is safe: PostgreSQL checks EXECUTE on a trigger
+-- function at CREATE TRIGGER time (already done above), not on each firing.
 REVOKE ALL ON FUNCTION public.offerr_touch_updated_at() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.offerr_touch_updated_at() FROM anon, authenticated, service_role;
 
 -- ── Feature flag seed: explicitly disabled ─────────────────────────────────
 

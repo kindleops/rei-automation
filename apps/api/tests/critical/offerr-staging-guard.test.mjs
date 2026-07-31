@@ -202,3 +202,106 @@ test('extractProjectRef and isLocalTarget behave as the guard assumes', () => {
   assert.equal(isLocalTarget('postgresql://u@localhost/db'), true);
   assert.equal(isLocalTarget(STAGING_TARGET), false);
 });
+
+// ── Preview-branch guard ───────────────────────────────────────────────────
+// Under the one-project architecture the parent project's DEFAULT branch IS
+// production, so "the target is a Supabase branch" is not a safety property.
+// These cases inject the branch list, so they assert the guard's logic without
+// touching the network.
+
+import {
+  assertOfferrPreviewBranch,
+  OfferrPreviewBranchGuardError,
+  CANONICAL_PARENT_PROJECT_REF,
+} from '../../scripts/offerr/offerr-preview-branch-guard.mjs';
+
+const PREVIEW_REF = 'ktvjkokwcqcgapzztkwu';
+const PREVIEW_TARGET = `postgresql://postgres:pw@db.${PREVIEW_REF}.supabase.co:5432/postgres`;
+
+const branchList = () => ([
+  { id: 'b-default', name: 'main', project_ref: CANONICAL_PARENT_PROJECT_REF, is_default: true, persistent: true, status: 'MIGRATIONS_FAILED' },
+  { id: 'b-preview', name: 'offerr-evaluation-spine-pr-57', project_ref: PREVIEW_REF, is_default: false, persistent: false, status: 'MIGRATIONS_FAILED' },
+]);
+
+const previewEnv = {
+  [STAGING_OPT_IN_ENV]: 'true',
+  OFFERR_STAGING_PROJECT_REF: PREVIEW_REF,
+};
+
+test('a genuine preview branch of the canonical parent is accepted', async () => {
+  const identity = await assertOfferrPreviewBranch({
+    target: PREVIEW_TARGET, env: previewEnv, listBranches: async () => branchList(),
+  });
+  assert.equal(identity.ok, true);
+  assert.equal(identity.project_ref, PREVIEW_REF);
+  assert.equal(identity.branch_name, 'offerr-evaluation-spine-pr-57');
+  assert.equal(identity.parent_ref, CANONICAL_PARENT_PROJECT_REF);
+  assert.equal(identity.persistent, false);
+});
+
+test('the parent project itself is refused as production', async () => {
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: `postgresql://postgres:pw@db.${CANONICAL_PARENT_PROJECT_REF}.supabase.co:5432/postgres`,
+      env: { ...previewEnv, OFFERR_STAGING_PROJECT_REF: CANONICAL_PARENT_PROJECT_REF },
+      listBranches: async () => branchList(),
+    }),
+    (error) => /PRODUCTION/i.test(error.message),
+  );
+});
+
+test('the parent DEFAULT branch is refused even when reached by its own ref', async () => {
+  // Distinct from the production-ref check: this asserts the is_default branch
+  // of the control-plane listing is rejected on its own merits.
+  const defaultBranchRef = 'aaaaaaaaaaaaaaaaaaaa';
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: `postgresql://postgres:pw@db.${defaultBranchRef}.supabase.co:5432/postgres`,
+      env: { ...previewEnv, OFFERR_STAGING_PROJECT_REF: defaultBranchRef },
+      listBranches: async () => ([
+        { id: 'b1', name: 'main', project_ref: defaultBranchRef, is_default: true, persistent: true, status: 'OK' },
+      ]),
+    }),
+    (error) => error instanceof OfferrPreviewBranchGuardError
+      && error.details.classification === 'default_branch',
+  );
+});
+
+test('a real project that is not a branch of the parent is refused', async () => {
+  const strangerRef = 'bbbbbbbbbbbbbbbbbbbb';
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: `postgresql://postgres:pw@db.${strangerRef}.supabase.co:5432/postgres`,
+      env: { ...previewEnv, OFFERR_STAGING_PROJECT_REF: strangerRef },
+      listBranches: async () => branchList(),
+    }),
+    (error) => error.details.classification === 'not_a_branch_of_parent',
+  );
+});
+
+test('an unresolvable control plane fails closed rather than open', async () => {
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: PREVIEW_TARGET, env: previewEnv,
+      listBranches: async () => { throw new OfferrPreviewBranchGuardError('boom', { classification: 'identity_unresolvable' }); },
+    }),
+    (error) => error.details.classification === 'identity_unresolvable',
+  );
+});
+
+test('preview-branch guard still requires the staging opt-in and refuses local targets', async () => {
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: PREVIEW_TARGET, env: { OFFERR_STAGING_PROJECT_REF: PREVIEW_REF },
+      listBranches: async () => branchList(),
+    }),
+    (error) => new RegExp(STAGING_OPT_IN_ENV).test(error.message),
+  );
+  await assert.rejects(
+    assertOfferrPreviewBranch({
+      target: 'postgresql://postgres@127.0.0.1:5432/db', env: previewEnv,
+      listBranches: async () => branchList(),
+    }),
+    (error) => /allowLocal is false/.test(error.message),
+  );
+});

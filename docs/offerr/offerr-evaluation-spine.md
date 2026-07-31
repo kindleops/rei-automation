@@ -653,3 +653,128 @@ node --import ./tests/register-aliases.mjs scripts/offerr/offerr-e2e-verify.mjs
 `OFFERR_MATRIX_JSON=/path/matrix.json` writes the per-case comp diagnostics
 (RPC rows, clusters, effective sample size, package/duplicate counts, execution
 state, confidence) for comparison across runs.
+
+---
+
+## 14. Hosted verification environment — Supabase preview branches
+
+### 14.1 One canonical project, temporary branches
+
+There is exactly **one** permanent Supabase project, `real-estate-automation`
+(`lcppdrmrdfblstpcbgpf`), shared by LeadCommand, OfferrAI, Reivesti Intelligence
+and Reivesti Exchange. Product boundaries are enforced through schemas, tables,
+grants, RLS, APIs, feature flags and domain contracts — **never** by standing up
+a second permanent database.
+
+Hosted verification therefore runs on a **temporary Supabase preview branch**
+inside that project. A preview branch has its own project ref, its own
+credentials, and its own empty database. It is a verification environment, not a
+product database, and it is deleted when the PR that motivated it closes.
+
+Do not duplicate canonical property, comp, buyer, acquisition or intelligence
+architecture across permanent projects.
+
+### 14.2 Proving you are on a preview branch
+
+`offerr-staging-guard.mjs` proves a target is **not** production. It cannot prove
+a target **is** a preview branch — with a per-branch ref it can only be *told*
+so via `OFFERR_STAGING_PROJECT_REF`. Since the parent project's **default branch
+is production**, "it's a branch" is not a safety property on its own.
+
+`offerr-preview-branch-guard.mjs` closes that gap by asking the Supabase control
+plane: the target ref must appear in the parent project's branch list **and**
+must not be the default branch. It fails closed when identity cannot be
+resolved. Call it before **every** hosted write:
+
+```js
+import {
+  assertOfferrPreviewBranch, printPreviewIdentity,
+} from './offerr-preview-branch-guard.mjs';
+
+const identity = await assertOfferrPreviewBranch({ target: process.env.OFFERR_STAGING_DB_URL });
+printPreviewIdentity(identity);
+```
+
+### 14.3 What hosted Supabase already provides
+
+`offerr-supabase-prereqs.sql` exists to make a **bare PostgreSQL container**
+resemble hosted Supabase. Do **not** apply it to a hosted project: the roles
+(`anon`, `authenticated`, `service_role`, `authenticator`), schema `USAGE`, and
+the `public` default privileges are already there, and
+`offerr-staging-bootstrap.sql` creates `public.system_control` itself.
+
+On a hosted project the sequence is just:
+
+```
+offerr-staging-bootstrap.sql   →   PROPOSED_..._offerr_evaluation_spine.sql
+```
+
+### 14.4 The privilege trap this uncovered
+
+Hosted Supabase seeds default privileges for **tables, functions and sequences**:
+
+```sql
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ... ON TABLES    TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ... ON SEQUENCES TO anon, authenticated, service_role;
+```
+
+These become **explicit per-role grants**. `REVOKE ... FROM PUBLIC` removes
+PostgreSQL's implicit `PUBLIC` grant but is powerless against them. Any new
+`public` function in an Offerr migration must therefore revoke from the roles by
+name, not only from `PUBLIC`:
+
+```sql
+REVOKE ALL ON FUNCTION public.my_fn() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.my_fn() FROM anon, authenticated, service_role;
+```
+
+This is a real defect that shipped and was only caught on hosted Supabase —
+see the verification report §13.7. `offerr-supabase-prereqs.sql` now reproduces
+the `ON FUNCTIONS` / `ON SEQUENCES` defaults so it is reproducible off-host, and
+`tests/critical/offerr-hosted-privilege-contract.test.mjs` guards it.
+
+Revoking a trigger function from `service_role` is safe: PostgreSQL checks
+`EXECUTE` on a trigger function at `CREATE TRIGGER` time, not per firing.
+
+### 14.5 Verifying the deployed system, not just the logic
+
+`offerr-e2e-verify.mjs` calls `handleOfferrEvaluationsRequest` **in process**. It
+proves the domain logic against a real database, but it skips the Vercel edge,
+Next.js request parsing, the serverless cold start, the shipped runtime env, and
+the real network hop to Supabase.
+
+`offerr-preview-https-verify.mjs` drives the **deployed preview URL over HTTPS**
+instead. Use it for anything whose answer depends on the deployment rather than
+the code. It is split by `--phase` because two of its phases need a redeploy
+with different runtime env:
+
+| phase | preconditions | proves |
+|---|---|---|
+| `disabled` | flag OFF | auth-before-flag, uniform 423, zero rows written |
+| `v3-disabled` | flag ON, V3 OFF | fail-closed, no range, no V2 fallback |
+| `matrix` | flag ON, V3 ON | 12 cases, validation contract, idempotency, concurrency, privacy, side effects, latency |
+| `persistence-failure` | flag ON | induced snapshot failure → 503, compensating deletion, key reusable |
+
+Note the route's gate ordering: `auth (401) → flag (423) → size (413) → parse
+(400) → intake (400)`. With the flag OFF **every** authenticated request returns
+423, including malformed and oversized bodies — a disabled feature must not
+parse attacker-controlled input. The 400/413 contract is only observable with
+the flag ON.
+
+### 14.6 Deployment-scoped env beats project-scoped Preview env
+
+The Vercel `api` project has **no connected Git repository**, so Vercel refuses
+branch-scoped Preview environment variables (`git_branch_required`). Writing
+project-wide Preview variables instead would leak the preview database into any
+future preview deployment of that project.
+
+Pass configuration per deployment instead — nothing persists in project
+settings, and there is nothing to clean up:
+
+```bash
+vercel deploy -e SUPABASE_URL="$URL" -e SUPABASE_SERVICE_ROLE_KEY="$KEY" ... --yes
+```
+
+Never pass `--prod`. Verify `target: null` in the deploy result — that is what
+distinguishes a preview from a production deployment.

@@ -40,6 +40,20 @@ GRANT anon, authenticated, service_role TO authenticator;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated, service_role;
 
+-- Hosted Supabase seeds the SAME default for FUNCTIONS and SEQUENCES, not just
+-- tables. Omitting them here is not a harmless simplification — it hid a real
+-- defect: `REVOKE ALL ON FUNCTION ... FROM PUBLIC` in the Offerr migration
+-- removed PostgreSQL's implicit PUBLIC grant and passed locally, while on the
+-- hosted preview branch anon and authenticated still held EXECUTE through these
+-- EXPLICIT per-role default grants (a PUBLIC revoke cannot remove a role grant).
+-- Verified against branch ktvjkokwcqcgapzztkwu of real-estate-automation on
+-- 2026-07-31; pg_default_acl there carries r/f/S entries for public granted by
+-- both `postgres` and `supabase_admin`.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO anon, authenticated, service_role;
+
 -- Prerequisite canonical table the Offerr migration seeds its flag into
 -- (apps/api/supabase/migrations/20260428_create_system_control.sql).
 CREATE TABLE IF NOT EXISTS public.system_control (

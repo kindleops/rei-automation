@@ -1385,3 +1385,459 @@ V3-enabled matrix result.~~ **Done in Pass 3.**
 - Offerr tests **139/139**, E2E **291/291**, RPC contract **22/22**, drift check
   **COMPATIBLE**, lint **pass**.
 - PR #57 remains **draft and unmerged**.
+
+---
+
+## 13. Pass 4 — hosted verification on a Supabase preview branch (2026-07-31)
+
+Pass 3 ended blocked on "there is no staging Supabase project". Pass 4 removed
+that blocker **without creating a second permanent project**, by using a
+temporary **preview branch inside the canonical project**. Every result in this
+section was produced against hosted Supabase and a real Vercel deployment over
+HTTPS — none of it is Docker or in-process.
+
+### 13.1 Canonical one-project architecture
+
+There is exactly **one** permanent Supabase project:
+
+| | |
+|---|---|
+| Project | `real-estate-automation` |
+| Project ref | `lcppdrmrdfblstpcbgpf` |
+| Organization | REI Automation (`gosflvntwnxegkrulmoz`) |
+| Region | West US (Oregon) / `us-west-2` |
+
+It is the canonical data platform for LeadCommand, OfferrAI, Reivesti
+Intelligence, Reivesti Exchange and shared property/buyer intelligence. Product
+boundaries are enforced by schemas, grants, RLS, APIs, feature flags and domain
+contracts — **not** by separate permanent databases. A Supabase preview branch
+is a temporary verification environment *inside* that project, not a second
+product database.
+
+### 13.2 Branching audit (Phase 2–3)
+
+Branching was already **enabled** on the parent project — it did not need to be
+turned on, and no plan change was required:
+
+| Branch | Ref | Default | Git branch | Status |
+|---|---|---|---|---|
+| `main` | `lcppdrmrdfblstpcbgpf` | **yes (production)** | `main` | MIGRATIONS_FAILED |
+| `acquisition-engine-validation` | `skpmxvjwhpwkwutlowls` | no | — | MIGRATIONS_FAILED |
+
+- **GitHub integration:** the parent's `main` branch is git-linked, but the
+  Vercel `api` project has **no connected Git repository**, and no preview
+  branch had been auto-created for PR #57. Automatic PR branching was therefore
+  not in play; the branch was created explicitly via the CLI.
+- **Cost:** Supabase bills branching at **$0.01344 per branch per hour**
+  (≈ $0.32/day, ≈ $9.81/month). No new project or subscription was required.
+- Both pre-existing branches sit in `MIGRATIONS_FAILED`, which is the parent
+  repo's chronic migration state, not a branch fault. The branch database is
+  still fully usable — that status describes the integration's migration run.
+
+### 13.3 Preview branch identity (Phase 4)
+
+| | |
+|---|---|
+| Branch name | `offerr-evaluation-spine-pr-57` |
+| Branch id | `8e2b7bd7-bc5a-42f5-8fcb-7098eabf9612` |
+| **Preview project ref** | **`ktvjkokwcqcgapzztkwu`** |
+| Parent project ref | `lcppdrmrdfblstpcbgpf` |
+| Persistent | **no — ephemeral** |
+| Cloned production data | **no** (`--with-data` omitted) |
+| Region | `us-west-2` (same as parent) |
+| Created | 2026-07-31 01:41:53 UTC |
+| Creation method | `supabase branches create offerr-evaluation-spine-pr-57 --project-ref lcppdrmrdfblstpcbgpf --region us-west-2` |
+
+### 13.4 Branch-safe targeting — a new guard (Phase 5)
+
+`offerr-staging-guard.mjs` proves a target is *not* production. It cannot prove
+a target *is* a preview branch — it can only be *told* so via
+`OFFERR_STAGING_PROJECT_REF`. Under a one-project architecture that gap matters,
+because the parent's **default branch is production** and "is a branch" is not
+by itself a safety property.
+
+**New:** `apps/api/scripts/offerr/offerr-preview-branch-guard.mjs` closes it by
+asking the Supabase control plane. The target ref must appear in the parent's
+branch list **and** must not be the default branch. Proven refusal classes:
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | production ref `lcppdrmrdfblstpcbgpf` | refused — `production` |
+| 2 | ReivestiExchange `wwqqwllstapdolkndzzx` | refused — `foreign_product` |
+| 3 | SignPro `lvocccmhnyfoyqnbmmci` | refused — `foreign_product` |
+| 4 | `ALLOW_OFFERR_STAGING_FIXTURES` absent | refused — no opt-in |
+| 5 | `VERCEL_ENV=production` runtime | refused — `production_environment` |
+| 6 | real-looking ref that is not a branch of the parent | refused — `not_a_branch_of_parent` |
+| 7 | the parent's **default** branch | refused — `default_branch` |
+| 8 | control plane unreachable | refused — `identity_unresolvable` (fail closed) |
+
+The identity block it prints precedes **every** hosted write in this section.
+
+### 13.5 Pre-bootstrap branch audit (Phase 6)
+
+The branch was **not** initialised from the parent's schema. It was created
+empty and the GitHub integration replayed the repo's root `supabase/migrations`,
+which failed after two files:
+
+| Property | Observed |
+|---|---|
+| PostgreSQL | 17.6 |
+| `public` tables | 2 — `inbox_thread_state`, `message_events` |
+| `public` views / Offerr objects | none |
+| Migration history | 2 rows (`20260428_create_inbox_thread_state`, `20260429_create_message_events_table`) |
+| Extensions | `pgcrypto`, `uuid-ossp`, `plpgsql`, `supabase_vault`, `pg_stat_statements` |
+| Roles | `anon`, `authenticated`, `authenticator`, `service_role`, `postgres` |
+
+Critically, `pg_default_acl` for schema `public` already carried, from **both**
+`postgres` and `supabase_admin`:
+
+```
+r (tables)    -> postgres, anon, authenticated, service_role = arwdDxtm
+f (functions) -> postgres, anon, authenticated, service_role = X
+S (sequences) -> postgres, anon, authenticated, service_role = rwU
+```
+
+This is what `offerr-supabase-prereqs.sql` reproduces locally. **It was therefore
+skipped entirely on the branch** — hosted Supabase already supplies the roles,
+schema `USAGE`, and default privileges, and the bootstrap creates
+`public.system_control` itself. Applying the local-only file would have added
+duplicate default-ACL entries for no benefit.
+
+### 13.6 Bootstrap and migration (Phase 7)
+
+Applied with `psql -v ON_ERROR_STOP=1 --single-transaction`, in order:
+
+1. `apps/api/scripts/offerr/offerr-staging-bootstrap.sql` — which `\ir`-includes
+   the canonical contract verbatim from
+   `apps/api/supabase/contracts/offerr-comp-intelligence/canonical/`.
+2. `apps/api/supabase/migrations/PROPOSED_20260729120000_offerr_evaluation_spine.sql`.
+
+Objects created: `system_control` (+ trigger, RLS, 3 policies), `properties`,
+`buyer_comp_raw_v2`, `buyer_entities_v2`, `v_recent_sold_comps`,
+`get_comp_candidates_for_subject`, `comp_intelligence_schema_contract`, the three
+`offerr_*` tables, `offerr_touch_updated_at()`, all documented indexes,
+constraints, RLS policies, grants and revokes.
+
+The bootstrap's own completeness assertion passed:
+`contract offerr-comp-intelligence 1.0.0 applied · 4 tables + 1 view + 1 RPC
+(32-column contract) · offerr_evaluation_enabled pinned false`.
+
+Re-applying the migration a second time succeeded unchanged — **idempotent on
+hosted Supabase**.
+
+### 13.7 HOSTED-ONLY DEFECT FOUND AND FIXED — function EXECUTE leaked to `anon`
+
+The first `offerr-schema-verify.sql` run on the branch returned **46 PASS / 1
+FAIL**:
+
+```
+FAIL  no public function exposes offerr internals to anon/authenticated
+```
+
+**Cause.** The migration contained only:
+
+```sql
+REVOKE ALL ON FUNCTION public.offerr_touch_updated_at() FROM PUBLIC;
+```
+
+That is sufficient on stock PostgreSQL, where the only EXECUTE grant on a new
+function is the implicit one to `PUBLIC`. Hosted Supabase *additionally* seeds
+`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon,
+authenticated, service_role`, which materialises as **explicit per-role grants**.
+`REVOKE ... FROM PUBLIC` cannot remove an explicit role grant. Observed ACL:
+
+```
+{postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+```
+
+**Why every prior pass missed it.** `offerr-supabase-prereqs.sql` reproduced
+Supabase's `ALTER DEFAULT PRIVILEGES ... ON TABLES` but **not** `ON FUNCTIONS`.
+The local Docker verification could not express the defect, so it passed.
+
+**Fix (three parts).**
+
+1. `PROPOSED_20260729120000_offerr_evaluation_spine.sql` now also runs
+   `REVOKE ALL ON FUNCTION public.offerr_touch_updated_at() FROM anon,
+   authenticated, service_role;`. Revoking from `service_role` is safe:
+   PostgreSQL checks EXECUTE on a trigger function at `CREATE TRIGGER` time, not
+   per firing.
+2. `offerr-supabase-prereqs.sql` now reproduces the hosted `ON FUNCTIONS` and
+   `ON SEQUENCES` defaults, so this class of defect is reproducible off-host.
+3. New regression suite
+   `apps/api/tests/critical/offerr-hosted-privilege-contract.test.mjs`.
+
+**Post-fix ACL:** `{postgres=X/postgres}` — owner only.
+
+The regression test was verified to actually fail: re-granting EXECUTE to
+`anon, authenticated` turned it red (3 failing assertions), and restoring the
+revoke turned it green (5/5).
+
+### 13.8 Schema verification and drift (Phase 8)
+
+| Gate | Result |
+|---|---|
+| `offerr-schema-verify.sql` | **47 PASS / 0 FAIL** |
+| `offerr-schema-drift-check.mjs` | **COMPATIBLE** (22 checks) |
+| RPC signature | matches canonical contract |
+| RPC result contract | 32 columns |
+| Contract marker | `offerr-comp-intelligence` `1.0.0` |
+| `offerr_*` tables | exactly 3 |
+| `offerr_evaluation_enabled` | present, `false` |
+
+### 13.9 Hosted RLS and privilege proof over real PostgREST (Phase 9)
+
+New: `apps/api/scripts/offerr/offerr-preview-rls-proof.mjs`. This is behavioural,
+not catalog-based — it drives the branch's real PostgREST endpoint.
+**40 checks / 40 pass.**
+
+| Role | Surface | Result |
+|---|---|---|
+| `anon` | SELECT/INSERT/UPDATE/DELETE × 3 `offerr_*` tables | **401**, SQLSTATE `42501` (12/12) |
+| `anon` | `rpc/offerr_touch_updated_at` | **404** `PGRST202` (not exposed) |
+| `authenticated` (minted HS256 JWT) | same 12 operations | **403**, `42501` (12/12) |
+| `authenticated` | `rpc/offerr_touch_updated_at` | **404** `PGRST202` |
+| `service_role` | request SELECT/INSERT/UPDATE/DELETE | allowed |
+| `service_role` | evaluation INSERT/SELECT | allowed |
+| `service_role` | evaluation **UPDATE / DELETE** | **403 `42501`** — immutable |
+| `service_role` | event INSERT/SELECT | allowed |
+| `service_role` | event **UPDATE / DELETE** | **403 `42501`** — append-only |
+| `service_role` | delete childless request (compensation) | allowed (204) |
+| `service_role` | delete request **with** children | **409 `23503`** — FK-protected |
+
+Neither FK from `offerr_evaluations` / `offerr_evaluation_events` is
+`ON DELETE CASCADE`. Compensating deletion therefore only succeeds on a request
+with no snapshot — which is exactly the failure path it exists for (proven in
+§13.14).
+
+### 13.10 Vercel preview (Phases 10–11)
+
+| | |
+|---|---|
+| Project | `api` (`prj_A9B8eQB3NKN9lm4KQFN4KAreitgN`) |
+| Team | Real-Estate-Automation (`team_Qa2ICFdTuZpqNjsAThz90rHV`) |
+| Root directory | `.` (deployed from `apps/api`) |
+| Git integration | **none** — every deployment is CLI-driven |
+| Supabase→Vercel var sync | **not configured** (requires the Git integration) |
+| Pre-existing PR-57 preview | **none** |
+
+Because the project has no connected Git repository, Vercel **rejects
+branch-scoped Preview environment variables** (`git_branch_required`). Rather
+than write project-wide Preview variables that would leak the preview database
+into any future preview deployment, configuration was passed as
+**deployment-scoped** `vercel deploy -e KEY=VALUE`. Nothing was persisted in
+project settings, so there is nothing to clean up and zero blast radius.
+
+Variable **names** configured (values never recorded):
+`SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `INTERNAL_API_SECRET`,
+`OFFERR_ENVIRONMENT`, `OFFERR_STAGING_PROJECT_REF`,
+`ALLOW_OFFERR_STAGING_FIXTURES`, `ACQUISITION_ENGINE_V3_ENABLED`,
+`ACQUISITION_ENGINE_V3_ALLOW_PERSIST`, `ACQUISITION_ENGINE_V3_ALLOW_AUTO_OFFER`,
+`ACQUISITION_ENGINE_V3_ALLOW_AUTO_CREATIVE`,
+`ACQUISITION_ENGINE_V3_SHADOW_MODE`, `OUTBOUND_SMS_ENABLED`, `EMAIL_ENABLED`.
+
+`INTERNAL_API_SECRET` is a **freshly generated preview-only secret**, not the
+production value. No SMS, email, campaign, provider, title, contract or
+Exchange credential was configured.
+
+| Deployment | Id | URL | V3 |
+|---|---|---|---|
+| 1 | `dpl_7bbhdWUjK44NnD2yaDJro5JVNi8T` | `https://api-awaw59yew-real-estate-automation.vercel.app` | disabled |
+| 2 | `dpl_4hg1Ese6Jat8Psg4XqUCwprxbGSP` | `https://api-2dwi9ed5e-real-estate-automation.vercel.app` | enabled |
+
+Both report `target: null` — **preview, not production**. No alias, no domain,
+no promotion, no production environment variable was touched.
+
+**Proof the preview is bound to the preview branch, not production.** The route
+returned `423 system_control_disabled` until `offerr_evaluation_enabled` was set
+to `true` **in `ktvjkokwcqcgapzztkwu`**, after which the same URL returned `200`
+— and the resulting request/evaluation/event rows were then read back out of
+that branch by ref-verified `psql`. Production has never had the `offerr_*`
+tables at all.
+
+Deployment Protection (`ssoProtection: all_except_custom_domains`) is enabled.
+Requests used the project's **pre-existing** automation bypass secret via
+`x-vercel-protection-bypass`; it was not created, rotated, or modified here, and
+its value is not recorded in this repository.
+
+### 13.11 Fixtures (Phase 12)
+
+Seeded through the guarded loader after the preview-branch identity block:
+
+| Table | Rows |
+|---|---|
+| `properties` | 15 |
+| `buyer_comp_raw_v2` | 40 |
+| `buyer_entities_v2` | 8 |
+
+Every identifier is `OFFERR-STAGING-TEST-` prefixed. Non-fixture rows in
+`properties`, `buyer_comp_raw_v2` and `buyer_entities_v2`: **0**. No production
+seller, owner, phone, email, campaign, conversation, offer, contract or title
+record was copied.
+
+### 13.12 Real HTTPS — feature flag disabled (Phase 13) — 13/13
+
+| Check | Result |
+|---|---|
+| missing secret | **401** `missing_internal_api_secret_token` |
+| wrong secret | **401** |
+| auth precedes flag lookup | confirmed (unauthenticated sees 401, never 423) |
+| valid request while disabled | **423** `system_control_disabled` |
+| request / evaluation / event rows written | **0 / 0 / 0** |
+
+**Ordering finding.** The deployed route evaluates
+`auth (401) → flag (423) → size (413) → parse (400) → intake (400)`. While the
+flag is OFF, malformed JSON, invalid intake and oversized bodies all return
+**423**, not 400/413, because the flag gate precedes body handling. This is
+fail-closed and correct — a disabled feature should not parse attacker-controlled
+input or disclose its validation behaviour. The 400/400/413 contract is
+therefore asserted with the flag ON (§13.13), where those codes are reachable.
+
+### 13.13 Real HTTPS — V3 disabled (Phase 14) — 9/9
+
+`ACQUISITION_ENGINE_V3_ENABLED=false`, flag ON, C01 clean SFR:
+
+- HTTP **200** in 3028 ms (cold start)
+- outcome **`REVIEW_REQUIRED`**, `preliminary_range` **null**
+- request row persisted, immutable evaluation persisted, persisted range null
+- no V2 fallback offer exposed; seller-safe scan clean
+- no side effect outside `offerr_*`
+
+Request-validation contract with the flag ON: malformed JSON → **400**
+`invalid_offerr_intake`; invalid intake → **400**; oversized → **413**; rejected
+requests persisted **0** rows.
+
+### 13.14 Real HTTPS — the 12-case matrix, V3 enabled (Phases 15–17, 19–21) — 139/139
+
+Every row below is a real HTTPS call to the deployed preview.
+
+| case | http | ms | resolution | outcome | confidence | range | events |
+|---|---|---|---|---|---|---|---|
+| C01_CLEAN_SFR | 200 | 1672 | RESOLVED | INSTANT_RANGE_ELIGIBLE | HIGH | 84 579–93 229 | 1 |
+| C02_CONDITIONAL_SFR | 200 | 1524 | RESOLVED | REVIEW_REQUIRED | MEDIUM | null | 1 |
+| C03_SMALL_MULTI | 200 | 1645 | RESOLVED | INSTANT_RANGE_ELIGIBLE | MEDIUM | 197 000–217 148 | 1 |
+| C04_UNSUPPORTED_ASSET | 200 | 1523 | RESOLVED | **UNSUPPORTED** | LOW | null | 1 |
+| C05_AMBIGUOUS_DUPLICATE | 200 | 783 | **AMBIGUOUS** | REVIEW_REQUIRED | LOW | null | 1 |
+| C06_MISSING_UNIT | 200 | 623 | **AMBIGUOUS** | REVIEW_REQUIRED | LOW | null | 1 |
+| C07_CONFLICTING_ZIP | 200 | 625 | **NOT_FOUND** | REVIEW_REQUIRED | LOW | null | 1 |
+| C08_NO_MATCH | 200 | 579 | **NOT_FOUND** | REVIEW_REQUIRED | LOW | null | 1 |
+| C09_CONTAMINATED_COMP | 200 | 1493 | RESOLVED | REVIEW_REQUIRED | MEDIUM | null | 1 |
+| C10_PACKAGE_COMPS | 200 | 1536 | RESOLVED | REVIEW_REQUIRED | LOW | null | 1 |
+| C11_SELLER_CONDITION_CONFLICT | 200 | 1452 | RESOLVED | **CONDITIONAL_RANGE** | MEDIUM | 84 579–93 229 | 1 |
+| C12_ASKING_ABOVE_VALUE | 200 | 1550 | RESOLVED | **CONDITIONAL_RANGE** | MEDIUM | 84 579–93 229 | 1 |
+
+Required matrix outcomes, all met: C04 commercial is `UNSUPPORTED` with no range
+— canonical non-residential evidence is not overridden by weak SFR inference;
+C05–C08 all fail closed with no range and no candidate/private identifier leak;
+C09's $332.5 M contaminated comp is quarantined and anchors nothing; C10's
+12 broadcast rows collapse to one economic transaction and cannot produce a
+range; C11 and C12 are both downgraded away from `INSTANT_RANGE_ELIGIBLE`.
+C01/C11/C12 share a range because the fixture generator gives them identical
+six-comp sets — the difference under test is the conflict downgrade, not price.
+
+**Idempotency (Phase 17).** Replay → **200** with `idempotent_replay: true` and
+**1** snapshot (no second row). Same key + different property → **409** with
+stable `failure_code: idempotency_key_reused_with_different_payload`, no extra
+snapshot, and no disclosure of the stored payload.
+
+**Concurrency (Phase 17).** Six simultaneous requests on one key →
+**exactly 1 request row, exactly 1 evaluation snapshot, zero HTTP 500**. Two runs
+were observed: `200×6` (all deterministic replays) and `200×5 + 503×1` (one
+retryable loser). Both satisfy the contract.
+
+**New key, same property** → separate evaluation, and the comp-set hash was
+byte-identical across evaluations
+(`ebcfb06b…d924f794`), confirming determinism over unchanged data.
+
+**Persistence-failure recovery (Phase 18) — 11/11.** A temporary
+`BEFORE INSERT` trigger on `offerr_evaluations` was installed inside a
+`try/finally`, so it could not survive a crash:
+
+- response **503** `offerr_persistence_failed` — never a success, never a 500
+- the induced-failure string never reached the caller
+- **0** evaluation snapshots persisted
+- request count returned to its pre-failure baseline (**45 → 45**) — the
+  compensating deletion removed the orphan
+- the same idempotency key was then reusable: retry → **200**,
+  `idempotent_replay: false`, exactly 1 request + 1 evaluation
+- trigger and function dropped; **0** temporary hooks left behind
+
+**Seller-safe privacy (Phase 19).** Every response was recursively scanned for
+forbidden keys (`internal_result`, `provenance`, MAO/assignment-fee, buy-box,
+buyer/owner identifiers, campaign/contract/title state, suppression, candidate
+lists) and forbidden value patterns (bare UUIDs outside allow-listed id fields,
+SQL text, stack frames, `pg_*`/`information_schema`/SQLSTATE strings). **Zero
+findings across every case, every error envelope and the 409/423/503 bodies.**
+Each range carries `binding: false`, `preliminary: true`, an approved disclaimer
+naming it non-binding and *not an offer*, an `expires_at`, and a seller-
+appropriate `next_step`.
+
+**Side-effect reconciliation (Phase 20).** Only `offerr_*` tables changed.
+`properties` 15→15, `buyer_comp_raw_v2` 40→40, `buyer_entities_v2` 8→8 — the
+property/comp/buyer surface is strictly read-only during evaluation. These
+execution and marketplace tables **do not exist on the preview branch at all**,
+so they cannot be written by construction: `property_acquisition_scores`,
+`send_queue`, `email_queue`, `followup_queue`, `campaigns`, `campaign_targets`,
+`offers`, `contracts`, `title_orders`, `acquisition_opportunities`,
+`contact_outreach_state`, `ops_notifications`. Requests without an evaluation
+snapshot: **0**. No external provider request was made.
+
+**Hosted latency (Phase 21).** 30 repeated clean-property evaluations over real
+HTTPS:
+
+| metric | value |
+|---|---|
+| HTTP wall-clock p50 | **1 709.9 ms** |
+| HTTP wall-clock p95 | **2 303.6 ms** |
+| HTTP wall-clock max | **2 336.4 ms** |
+| first sample (cold) | 1 909 ms |
+| non-200 responses | 0 |
+
+Comfortably inside the 15 s deadline. Function region and database region are
+both `us-west-2`. This supersedes the Pass-3 Docker latency, which measured a
+different system.
+
+### 13.15 Final flag state and cleanup (Phase 24)
+
+Verified directly against the preview branch after every phase completed:
+
+| Item | Final value |
+|---|---|
+| `offerr_evaluation_enabled` (preview branch) | **`false`** |
+| any `system_control` key not equal to `false` | **none** |
+| `offerr_evaluation_requests` / `offerr_evaluations` / `offerr_evaluation_events` | **0 / 0 / 0** |
+| incomplete Offerr requests (request without snapshot) | **0** |
+| synthetic fixtures (properties / comps / buyers) | **0 / 0 / 0** — removed by the E2E harness's own cleanup; both harnesses re-seed automatically on the next run |
+| temporary failure constraints or hooks | **0** |
+| `offerr_touch_updated_at()` ACL | `{postgres=X/postgres}` — owner only |
+| `ACQUISITION_ENGINE_V3_ENABLED` (preview deployment) | deployment-scoped only; **nothing persisted in Vercel project settings** |
+| Production `system_control` | **untouched — the migration has never been applied to production** |
+
+Nothing needs undoing in Vercel: because configuration was passed with
+`vercel deploy -e`, no Preview environment variable was ever written to the
+`api` project — `vercel env ls preview` remains empty.
+
+### 13.16 Preview branch retention (Phase 25)
+
+- **Status:** retained.
+- **Reason:** PR #57 is under review; the preview URL and branch are the
+  evidence behind this section and let a reviewer re-run any check.
+- **Deletion trigger:** when PR #57 is merged or closed, or when review
+  concludes — whichever comes first.
+- **Owner:** Ryan (operator). One command:
+  `supabase branches delete 8e2b7bd7-bc5a-42f5-8fcb-7098eabf9612 --project-ref lcppdrmrdfblstpcbgpf`
+- **Cost while retained:** ≈ $0.32/day. The branch is ephemeral, so it will not
+  outlive the PR.
+
+### 13.17 Pass-4 state
+
+- **The production database was not modified.** No schema write, fixture load,
+  feature-flag change or synthetic evaluation targeted `lcppdrmrdfblstpcbgpf`.
+  Every hosted write was preceded by a printed identity block proving the target
+  was preview branch `ktvjkokwcqcgapzztkwu`.
+- **No second permanent Supabase project was created** — one ephemeral preview
+  branch inside the canonical project.
+- Nothing was promoted to production on Vercel; no alias or domain was attached.
+- The migration remains `PROPOSED_`-prefixed and applied to **no** production
+  database.
+- PR #57 remains **draft and unmerged**.
