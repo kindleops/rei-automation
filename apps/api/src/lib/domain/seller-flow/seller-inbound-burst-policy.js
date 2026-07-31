@@ -296,6 +296,11 @@ export function aggregateBurstMessage(constituents = []) {
     ordered_provider_ids: ordered.map((m) => m.provider_message_id).filter(Boolean),
     first_received_at: ordered[0]?.received_at || null,
     last_received_at: ordered[ordered.length - 1]?.received_at || null,
+    // Scope-authorization time: the latest constituent that carried a REAL
+    // receipt timestamp. Null when no constituent had one, so the live_limited
+    // cutoff denies rather than being cleared by a synthesized instant.
+    last_authorized_received_at:
+      [...ordered].reverse().find((m) => m.authorized_received_at)?.authorized_received_at || null,
   };
 }
 

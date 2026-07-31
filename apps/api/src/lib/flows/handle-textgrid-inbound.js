@@ -1615,6 +1615,13 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           })
         : { ok: true, skipped: true, reason: "podio_sync_disabled" };
 
+      // Authorization timestamp: the message's ACTUAL receipt time, never a
+      // synthesized one. Stamping new Date() here would let a message with no
+      // provider/ingress timestamp — a diagnostics replay of an old inbound,
+      // for instance — clear a cutoff configured in the past. Null is the
+      // honest answer and the scope gate denies it.
+      const scope_received_at = extracted.received_at || payload?.http_received_at || null;
+
       const auto_reply_scope_config =
         auto_reply_mode_final === "live_limited"
           ? await resolveAutoReplyScopeConfig({ getSystemValue: runtimeDeps.getSystemValue })
@@ -1624,8 +1631,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         mode: auto_reply_mode_final,
         inboundFrom: inbound_from,
         threadKey: inbound_from,
-        inboundReceivedAt:
-          extracted.received_at || payload?.http_received_at || new Date().toISOString(),
+        inboundReceivedAt: scope_received_at,
         cutoffAt: auto_reply_scope_config.cutoffAt,
         threadAllowlist: auto_reply_scope_config.threadAllowlist,
       });
@@ -1678,8 +1684,10 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       const seller_flow_execution_allowed =
         execution_allowed && !cap_reached && offer_route !== "manual_review";
 
-      const inbound_received_at =
-        extracted.received_at || payload?.http_received_at || new Date().toISOString();
+      // Presentation/timing value — safe to synthesize, because burst debounce
+      // windows and persisted rows need a concrete instant. It must never be
+      // used as a scope-authorization input; scope_received_at is that value.
+      const inbound_received_at = scope_received_at || new Date().toISOString();
       const inbound_to_resolved =
         extracted.to ||
         context?.summary?.inbound_to ||
@@ -1781,7 +1789,9 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           event_id: inbound_message_event_id || extracted.message_id,
           provider_message_id: extracted.message_id,
           body: message_body,
-          received_at: inbound_received_at,
+          // Nullable on purpose: the coordinator synthesizes its own instant for
+          // debounce timing, but must not inherit a synthesized authorization time.
+          received_at: scope_received_at,
           classification,
           orchestration_context,
           prior_thread_suppressed,
@@ -1863,7 +1873,8 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           inboundFrom: inbound_from,
           inboundTo: inbound_to_resolved,
           inboundEventId: inbound_message_event_id || extracted.message_id,
-          inboundReceivedAt: inbound_received_at,
+          // Scope authorization input — the un-synthesized receipt time.
+          inboundReceivedAt: scope_received_at,
           providerMessageId: extracted.message_id,
           stageBefore: stage_before,
           autoReplyMode: auto_reply_mode_final,

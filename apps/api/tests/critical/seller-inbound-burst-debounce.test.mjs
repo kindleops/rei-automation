@@ -424,6 +424,49 @@ test("S6: price correction prefers latest explicit price in aggregated turn", ()
   assert.match(agg.message.split("\n").at(-1), /325k/i);
 });
 
+// ── Scope-authorization time is never synthesized ──────────────────────────
+// The live_limited cutoff is only meaningful if the timestamp it compares
+// against is a real receipt time. A burst whose constituents carry no provider
+// timestamp must aggregate to null, not to the debounce-timing instant.
+
+test("aggregate exposes an authorization time distinct from the timing time", () => {
+  const agg = aggregateBurstMessage([
+    { body: "one", received_at: T0, authorized_received_at: T0, event_id: "a" },
+    {
+      body: "two",
+      received_at: plus(T0, 1000),
+      authorized_received_at: plus(T0, 1000),
+      event_id: "b",
+    },
+  ]);
+  assert.equal(agg.last_authorized_received_at, plus(T0, 1000));
+  assert.equal(agg.last_received_at, plus(T0, 1000));
+});
+
+test("constituents with no real receipt time aggregate to a null authorization time", () => {
+  const agg = aggregateBurstMessage([
+    // received_at present (synthesized at ingress), authorization absent.
+    { body: "one", received_at: T0, authorized_received_at: null, event_id: "a" },
+    { body: "two", received_at: plus(T0, 1000), authorized_received_at: null, event_id: "b" },
+  ]);
+
+  assert.equal(agg.last_received_at, plus(T0, 1000));
+  assert.equal(
+    agg.last_authorized_received_at,
+    null,
+    "a synthesized timing value must not become an authorization value"
+  );
+});
+
+test("the latest constituent carrying a real receipt time wins the authorization time", () => {
+  const agg = aggregateBurstMessage([
+    { body: "one", received_at: T0, authorized_received_at: T0, event_id: "a" },
+    { body: "two", received_at: plus(T0, 1000), authorized_received_at: null, event_id: "b" },
+  ]);
+
+  assert.equal(agg.last_authorized_received_at, T0);
+});
+
 // ── Scenario 7: outside window → two generations ───────────────────────────
 
 test("S7: message after completed burst opens generation 2", async () => {

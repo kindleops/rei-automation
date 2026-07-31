@@ -116,7 +116,13 @@ export function createSellerInboundBurstCoordinator({
       event_id,
       provider_message_id,
       body,
+      // Timing value for debounce/ordering — synthesized when the provider gave
+      // us nothing, because the windows need a concrete instant.
       received_at: received_at || now(),
+      // Authorization value — deliberately NOT synthesized. The live_limited
+      // cutoff must never be cleared by a timestamp we invented; null flows
+      // through to the scope gate, which denies it.
+      authorized_received_at: received_at || null,
       classification,
     };
 
@@ -372,7 +378,9 @@ export function createSellerInboundBurstCoordinator({
         inboundFrom: burst.thread_key,
         inboundTo: ctx.inboundTo ?? null,
         inboundEventId: burst.latest_event_id || burst.first_event_id,
-        inboundReceivedAt: aggregated.last_received_at || burst.last_received_at,
+        // Authorization input: never falls back to the timing value, which may
+        // have been synthesized at ingress.
+        inboundReceivedAt: aggregated.last_authorized_received_at,
         providerMessageId: burst.latest_event_id || null,
         stageBefore: ctx.stageBefore ?? null,
         autoReplyMode: ctx.autoReplyMode ?? null,
