@@ -1,12 +1,19 @@
 -- Offerr Evaluation Spine — intake requests, versioned immutable evaluations,
 -- and an append-only lifecycle ledger for the private direct-to-seller channel.
 --
--- STATUS: PROPOSED. The PROPOSED_ prefix keeps this file outside the
+-- STATUS: APPLIED TO PRODUCTION 2026-07-31 under explicit operator
+-- authorization (project real-estate-automation / lcppdrmrdfblstpcbgpf,
+-- PostgreSQL 17.6), in a single transaction, with the feature flag left
+-- 'false'. Verified 36/36 production schema checks; all three Offerr tables
+-- contain zero rows. See docs/offerr/offerr-staging-verification-report.md §14.
+--
+-- The PROPOSED_ prefix is RETAINED deliberately: it keeps this file outside the
 -- `supabase db push` path (same convention as PROPOSED_20260626000000_
--- closing_desk_foundation.sql). It must NOT be applied to production as part
--- of the feat/offerr-ai-evaluation-spine task; application requires explicit
--- operator approval. ADDITIVE ONLY: no existing table, view, RPC, or policy
--- is altered or dropped.
+-- closing_desk_foundation.sql), and production's migration history has no row
+-- for it — operator-applied files are not tracked there. Do NOT rename it;
+-- renaming would make `db push` attempt to re-apply an already-applied
+-- migration. ADDITIVE ONLY: no existing table, view, RPC, or policy is altered
+-- or dropped. Re-running is safe (IF NOT EXISTS / ON CONFLICT throughout).
 --
 -- Grain and ownership:
 --   * offerr_evaluation_requests  — one row per Offerr intake submission.

@@ -1,10 +1,33 @@
 # Offerr Evaluation Spine — Staging Verification Report
 
 **Date:** 2026-07-30 (pass 1) · 2026-07-30 (pass 2 — see §11) · 2026-07-30 (pass 3 — see §12)
+· 2026-07-31 (pass 4 — see §13) · **2026-07-31 (production landing — see §14)**
 **Branch:** `feat/offerr-ai-evaluation-spine`
-**PR:** [#57](https://github.com/kindleops/rei-automation/pull/57) — **draft, not merged**
+**PR:** [#57](https://github.com/kindleops/rei-automation/pull/57) — **MERGED**
+2026-07-31T22:48:39Z, merge commit `6a0fd934`
 
-> ### Pass-3 headline (current state — read this first)
+> ### Production-landing headline (current state — read this first)
+>
+> The Offerr schema is **installed in production** (`lcppdrmrdfblstpcbgpf`) and
+> the merged API is **deployed**, with the feature **OFF**.
+>
+> 1. **Schema applied additively** in a single transaction: 3 tables, 1 trigger
+>    function, 3 RLS policies, grants/revokes, and
+>    `system_control['offerr_evaluation_enabled'] = 'false'`. Nothing else.
+> 2. **Zero rows exist** in any Offerr table, and every execution table
+>    (properties, comps, scores, campaigns, messages, LeadCommand) is
+>    byte-for-byte unchanged against a pre-migration snapshot.
+> 3. **Access is denied by construction**: `anon` and `authenticated` hold zero
+>    privileges on all three tables (proven by catalog inspection, not
+>    `information_schema`), evaluations/events are append-only for
+>    `service_role`, and `offerr_touch_updated_at()` is owner-only.
+> 4. **The production route fails closed**: 401 without auth, canonical 423
+>    `system_control_disabled` with auth.
+>
+> **Production installation is not launch.** Offerr remains unavailable to
+> sellers. See §14.5 for the activation prerequisites that remain.
+
+> ### Pass-3 headline (historical — superseded by §14)
 >
 > The last remaining local fidelity gap is **closed**.
 >
@@ -1841,3 +1864,273 @@ Nothing needs undoing in Vercel: because configuration was passed with
 - The migration remains `PROPOSED_`-prefixed and applied to **no** production
   database.
 - PR #57 remains **draft and unmerged**.
+
+---
+
+## 14. Production landing (2026-07-31)
+
+Controlled installation of the Offerr Evaluation Spine into production with the
+feature flag **OFF**. No seller traffic, no public UI, no activation.
+
+### 14.1 Identity and target
+
+| Field | Value |
+|---|---|
+| Project name | `real-estate-automation` |
+| Project reference | `lcppdrmrdfblstpcbgpf` |
+| Organization | REI Automation (`gosflvntwnxegkrulmoz`) |
+| Region | West US (Oregon) |
+| PostgreSQL version | **17.6** |
+| Environment | production |
+| Migration applied | `apps/api/supabase/migrations/PROPOSED_20260729120000_offerr_evaluation_spine.sql` |
+| Migration timestamp | 2026-07-31 22:43:43 UTC (flag row `updated_at`) |
+| Merge commit | `6a0fd9340bf9259c8e198b32643c063ed4f903d1` |
+| Pre-merge branch HEAD | `e12ac1b1f3030e8b0bd091990567c0edc62eeac8` |
+
+Every production write was preceded by a printed identity block. The psql
+wrapper used for this rollout **refuses to connect** unless the connection
+string contains `lcppdrmrdfblstpcbgpf`, so a preview reference could not be
+targeted by accident.
+
+### 14.2 Read-only audit proof
+
+Before inspection, `default_transaction_read_only=on` was forced and two
+deliberate write probes were issued inside an explicit `BEGIN READ ONLY`:
+
+| Probe | Result |
+|---|---|
+| `UPDATE public.system_control ... WHERE key='__readonly_probe_never_matches__'` | `ERROR: cannot execute UPDATE in a read-only transaction` |
+| `CREATE TEMP TABLE __readonly_probe(x int)` | `ERROR: cannot execute CREATE TABLE in a read-only transaction` |
+
+The server — not the client — refused both. Pre-migration state was clean: zero
+`offerr%` relations, zero `offerr%` functions, no `offerr_evaluation_enabled`
+row, and no migration-history collision on `20260729120000`.
+
+Production reproduces the same Supabase default-ACL posture that produced the
+hosted-only `EXECUTE` leak fixed on this branch:
+
+```
+default ACL, TABLES:    {postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,
+                         authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}
+default ACL, FUNCTIONS: {postgres=X/postgres,anon=X/postgres,
+                         authenticated=X/postgres,service_role=X/postgres}
+```
+
+The migration's explicit per-role `REVOKE`s are therefore load-bearing in
+production. **They must not be weakened or removed.**
+
+### 14.3 Exact production write set
+
+Applied in a **single transaction**, exit code 0:
+
+- `public.offerr_evaluation_requests`, `public.offerr_evaluations`,
+  `public.offerr_evaluation_events`
+- `public.offerr_touch_updated_at()` + trigger
+  `trg_offerr_eval_requests_touch` on requests only
+- constraints, indexes, RLS enable, 3 `service_role`-scoped policies
+- grants/revokes as documented in §14.4
+- `system_control['offerr_evaluation_enabled'] = 'false'` (`INSERT 0 1`)
+- `NOTIFY pgrst, 'reload schema'`
+
+The payload contains **no** seller data, property data, record copies, score or
+comp mutations, offers, campaigns, messages, contracts, LeadCommand lifecycle
+records, marketplace publications, or enablement of any flag. Its only DML is
+the disabled flag seed.
+
+**Migration history was intentionally not written.** `PROPOSED_`-prefixed files
+sit outside the `supabase db push` path by repository convention and are
+operator-applied; production confirms no `PROPOSED_` migration has ever been
+recorded (`20260626000000` closing-desk is likewise absent). `migration_history_rows`
+is unchanged at 195.
+
+### 14.4 Verification results
+
+| Gate | Result |
+|---|---|
+| Schema verification | **36/36 PASS, 0 FAIL** |
+| Post-migration drift | 20 PASS / 2 FAIL — see below |
+| `anon` privileges on all 3 tables | **zero** (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES all false) |
+| `authenticated` privileges on all 3 tables | **zero** |
+| `PUBLIC` in table ACLs | **absent** |
+| `service_role` on requests | SELECT, INSERT, UPDATE, DELETE |
+| `service_role` on evaluations | SELECT, INSERT only — **no UPDATE, no DELETE** |
+| `service_role` on events | SELECT, INSERT only — **no UPDATE, no DELETE** |
+| `offerr_touch_updated_at()` ACL | `{postgres=X/postgres}` — **owner-only** |
+| RLS | enabled on all 3, `service_role`-scoped `ALL` policies |
+| `offerr_evaluation_enabled` | **`false`** |
+| Offerr row counts | **0 / 0 / 0** |
+
+The verifier was run as **sections 1–8 and 10 only**. Section 9
+("behavioural probes") is deliberately skipped in production: it `COMMIT`s real
+rows into the Offerr tables before deleting them, which would violate the
+zero-synthetic-record requirement. Those 11 probes remain verified on the
+preview branch (47/47 there). 36 + 11 = 47.
+
+Privilege checks deliberately use `has_table_privilege()` /
+`has_function_privilege()` / `aclexplode()` rather than
+`information_schema.role_table_grants`. That view only reports grants involving
+*currently enabled* roles, so an "is empty" assertion can pass vacuously for a
+session that is not a member of `anon`/`authenticated`. The catalog functions
+are membership-independent.
+
+#### Residual drift — pre-existing, out of scope
+
+The drift checker returns **2 failures both before and after** this rollout —
+byte-identical, confirming the rollout neither caused nor changed them:
+
+1. `schema_contract_version_mismatch` — `public.comp_intelligence_schema_contract`
+   is absent. That marker table is created only by
+   `offerr-staging-bootstrap.sql`, which **must not** be applied to production
+   (production already holds the canonical comp infrastructure).
+2. `grant_posture_mismatch` — `anon` holds INSERT/UPDATE/DELETE/TRUNCATE on
+   `buyer_comp_raw_v2` and `buyer_entities_v2` (and `properties`).
+
+**Assessment of (2):** RLS is enabled on all three tables with **SELECT-only**
+permissive policies, so `anon` INSERT/UPDATE/DELETE are denied at the row-security
+layer today. `TRUNCATE` is *not* subject to RLS, but `anon` is `NOLOGIN` and
+PostgREST exposes no TRUNCATE verb, so there is no known reachable path. This is
+a **defense-in-depth gap, not an active exposure** — and it is pre-existing and
+unrelated to Offerr.
+
+Because repairing (2) and bootstrapping (1) are both explicitly out of scope for
+this task, a literal `COMPATIBLE` verdict was **not achievable**. The gate that
+*was* met: **all four Offerr-owned drift failures resolved to zero** and no new
+failure was introduced. Item (2) should be scheduled as a separate authorized
+task.
+
+### 14.5 Deployment and disabled-route smoke test
+
+| Field | Value |
+|---|---|
+| Vercel project | `real-estate-automation/api` (`prj_A9B8eQB3NKN9lm4KQFN4KAreitgN`) |
+| Deployment ID | `dpl_Fo1GnQTQRxKXFHbwt8VW8itZY15t` |
+| Production URL | `https://api-nnje8l3hz-real-estate-automation.vercel.app` |
+| Canonical aliases | `api-real-estate-automation.vercel.app`, `api-steel-three-96.vercel.app` |
+| Target / status | production / **Ready** |
+| Deployed source | working tree byte-identical to `6a0fd934` (CLI deploy carries no git metadata) |
+
+No new Vercel project was created, no preview Supabase credentials were used, no
+production secret was modified, and no new public route or seller-facing domain
+was attached.
+
+| Request | Expected | Actual |
+|---|---|---|
+| No auth header | 401 | **401** `missing_internal_api_secret_token` |
+| Wrong secret | 401 | **401** `invalid_internal_api_secret_token` |
+| Valid auth + valid intake | 423 | **423** `system_control_disabled`, `flag_key: offerr_evaluation_enabled` |
+| Valid auth + malformed body | 423 | **423** (see note) |
+| Valid auth + `{}` | 423 | **423** |
+
+**Note — intentional fail-closed ordering.** The flag gate precedes both the
+`content-length` check and body parsing, so an authenticated malformed or
+oversized body returns 423 rather than 400/413 while the feature is disabled.
+This ordering is deliberate and was **not** changed. The flag was **not** enabled
+to observe 400/413 in production.
+
+This smoke test also proves database wiring without exposing any credential: the
+`offerr_evaluation_enabled` row exists **only** in production and was created
+minutes earlier by this migration, so a canonical 423 naming that flag key can
+only be produced by an API reading production Supabase `lcppdrmrdfblstpcbgpf`.
+
+### 14.6 Side-effect reconciliation (measured)
+
+Identical aggregate snapshot script run before and after.
+
+| Metric | Before | After |
+|---|---|---|
+| `offerr_evaluation_requests` | ABSENT | **0** |
+| `offerr_evaluations` | ABSENT | **0** |
+| `offerr_evaluation_events` | ABSENT | **0** |
+| `offerr_touch_updated_at` ACL | ABSENT | `{postgres=X/postgres}` |
+| `public_tables` | 157 | 160 (+3 Offerr) |
+| `public_functions` | 875 | 876 (+1 trigger fn) |
+| `public_policies` | 112 | 115 (+3 Offerr) |
+| `system_control_rows` | 73 | 74 (+1 flag) |
+| `offerr_evaluation_enabled` | NO_ROW | **`false`** |
+| `properties` | 124048 | **124048** |
+| `property_acquisition_scores` | 140 | **140** |
+| `property_cash_offer_snapshots` | 0 | **0** |
+| `buyer_comp_raw_v2` | 47985 | **47985** |
+| `buyer_entities_v2` | 26390 | **26390** |
+| `acquisition_opportunities` | 746 | **746** |
+| `acquisition_opportunity_history` | 239 | **239** |
+| `campaigns` / `campaign_targets` / `campaign_runs` | 31 / 2119 / 23709 | **31 / 2119 / 23709** |
+| `message_events` | 12676 | **12676** |
+| `sms_campaigns` | 0 | **0** |
+| `universal_lead_command_cache` | 0 | **0** |
+| `universal_lead_state_events` | 4570 | **4570** |
+| `seller_heat_scores` | 0 | **0** |
+| `public_views` | 80 | **80** |
+| `migration_history_rows` | 195 | **195** |
+
+No seller evaluation, range, message, campaign, offer, contract, title record,
+LeadCommand lifecycle record, or Exchange publication was created. No synthetic
+fixture row was inserted.
+
+### 14.7 Preview infrastructure cleanup
+
+- Preview branch `offerr-evaluation-spine-pr-57` (`ktvjkokwcqcgapzztkwu`)
+  **deleted** 2026-07-31, immediately after the merge and production
+  verification. Confirmed absent from `supabase branches list`. Hourly cost
+  ended.
+- The production project `lcppdrmrdfblstpcbgpf` was not touched by the deletion.
+- Supersedes §13.16, which cited a stale branch identifier.
+- **Observation (unrelated, not actioned):** an older preview branch
+  `acquisition-engine-validation` (`skpmxvjwhpwkwutlowls`, created 2026-06-13)
+  still exists and is still accruing cost. Out of scope here.
+
+### 14.8 Remaining activation prerequisites
+
+**Production installation is not launch.** Offerr must remain unavailable to
+sellers until a separate activation phase completes:
+
+- public intake UI wiring
+- seller abuse protection
+- seller authentication / session model
+- rate limiting
+- production address and evaluation observability
+- approved disclaimers
+- production acquisition V3 rollout decision for Offerr traffic
+- internal-review workflow
+- LeadCommand handoff
+- operational monitoring
+- controlled canary
+- rollback plan
+
+### 14.9 Known correctness risks that block activation
+
+Five review findings land in code that is **unreachable while the flag is
+false**, so none blocks this installation — but each must be resolved before
+`offerr_evaluation_enabled` is flipped:
+
+1. **`offerr-property-resolution.js`** — the candidate query applies
+   `LIMIT 25` with **no `ORDER BY`**. Truncation is nondeterministic, so the
+   `AMBIGUOUS` guard can miss a second match and the resolver can return
+   `RESOLVED` for the **wrong subject property**. Highest-severity item.
+2. **`offerr-address-normalization.js`** — for comma-less input, a five-digit
+   **house number** is consumed as a ZIP, so `"12345 Main St"` fails with
+   `missing_street_number`.
+3. **`offerr-evaluation-service.js`** — the deadline is advisory; no
+   `AbortSignal`/per-call timeout reaches the loaders, so a hung dependency runs
+   to the 60 s route limit instead of returning `evaluation_timeout`.
+4. **`offerr-evaluation-service.js`** — subject hydration and the engine call
+   lack the failure-code boundary the other stages have, so transient errors
+   surface as HTTP 500 rather than a structured retryable code.
+5. **`offerr-evaluation-store.js`** — the compensating `delete()` result is
+   unchecked; a failed delete permanently poisons the idempotency key and makes
+   the documented retry advice wrong.
+
+Additionally, `offerr-hosted-privilege-contract.test.mjs` asserts grant absence
+via `information_schema.role_table_grants`, which can pass vacuously. The
+production proof in §14.4 does not rely on it, but the test should be moved to
+`has_table_privilege()`/`aclexplode()`.
+
+### 14.10 Final production state
+
+| Item | Value |
+|---|---|
+| `offerr_evaluation_enabled` | **`false`** (unchanged since seed) |
+| Other autonomous/execution flags | **not modified** |
+| Offerr tables | present, **empty** |
+| Production route | reachable, **fails closed** (401 / 423) |
+| Offerr availability to sellers | **none** |
