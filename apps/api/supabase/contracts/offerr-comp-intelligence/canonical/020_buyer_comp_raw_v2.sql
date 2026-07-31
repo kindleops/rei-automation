@@ -1,0 +1,211 @@
+-- =====================================================================
+-- OFFERR COMP-INTELLIGENCE CANONICAL CONTRACT — public.buyer_comp_raw_v2 (comp source of record)
+-- =====================================================================
+-- PARITY CLASS : EXACT PRODUCTION COLUMN CONTRACT (all 167 columns)
+-- PROVENANCE   : pg_catalog / information_schema column, constraint and index contract
+-- RECOVERED    : 2026-07-30 (read-only pg_catalog inspection, project lcppdrmrdfblstpcbgpf)
+-- SCHEMA VERSION: offerr-comp-intelligence/1.0.0
+--
+-- Every one of production's 167 columns is reproduced with its exact type,
+-- default and nullability, so the comp path cannot silently depend on a column
+-- that staging does not have.
+--
+-- This is the physical table behind public.v_recent_sold_comps and the identity
+-- source compCandidateLoader.js joins by `id = comp_id`.
+--
+-- DOCUMENTED DEVIATION FROM PRODUCTION:
+--   1. buyer_comp_raw_v2_batch_id_fkey -> buyer_comp_import_batches_v2 is omitted
+--      (the import-batch subsystem is outside the Offerr evaluation surface).
+--      batch_id itself is preserved and remains nullable.
+--
+-- This file is applied by apps/api/scripts/offerr/offerr-staging-bootstrap.sql
+-- via \ir. It is NOT part of the ordinary supabase/migrations chain: these
+-- objects already exist in production and must never be re-created there.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS public.buyer_comp_raw_v2 (
+  id                                   uuid DEFAULT gen_random_uuid() NOT NULL,
+  batch_id                             uuid,
+  source_row_number                    integer,
+  source_record_id                     text,
+  source_deal_id                       text,
+  property_id                          text,
+  apn_parcel_id                        text,
+  raw_payload                          jsonb DEFAULT '{}'::jsonb NOT NULL,
+  normalized_asset_class               text,
+  import_status                        text DEFAULT 'pending'::text NOT NULL,
+  rejection_reason                     text,
+  row_hash                             text,
+  created_at                           timestamptz DEFAULT now() NOT NULL,
+  updated_at                           timestamptz DEFAULT now() NOT NULL,
+  comp_search_profile_hash             text,
+  renovation_level_classification      text,
+  sqft_range                           text,
+  sqft_per_unit                        numeric,
+  beds_per_unit                        numeric,
+  year_built_bucket                    text,
+  purchase_info                        text,
+  comp_formula_payload                 jsonb DEFAULT '{}'::jsonb NOT NULL,
+  ppbd                                 numeric,
+  ppu                                  numeric,
+  ppsf                                 numeric,
+  price_off_value                      numeric,
+  percent_off                          numeric,
+  potential_spread                     numeric,
+  arv_estimate                         numeric,
+  arv_ppsf                             numeric,
+  comp_confidence_score                numeric,
+  deal_grade                           text,
+  target_margin_percent                numeric,
+  air_conditioning                     text,
+  assd_improvement_value               numeric,
+  assd_land_value                      numeric,
+  assd_total_value                     numeric,
+  assd_year                            numeric,
+  auction_date                         date,
+  basement                             text,
+  building_quality                     text,
+  construction_type                    text,
+  corner_lot                           text,
+  county_land_use_code                 text,
+  deck                                 text,
+  default_date                         date,
+  document_type                        text,
+  driveway                             text,
+  effective_year_built                 numeric,
+  estimated_value                      numeric,
+  exterior_walls                       text,
+  floor_cover                          text,
+  garage                               text,
+  hoa1_name                            text,
+  hoa1_type                            text,
+  heating_fuel_type                    text,
+  heating_type                         text,
+  interior_walls                       text,
+  legal_description                    text,
+  lot_nbr                              text,
+  lot_size_depth_feet                  numeric,
+  num_of_fireplaces                    numeric,
+  past_due_amount                      numeric,
+  patio                                text,
+  pool                                 text,
+  porch                                text,
+  property_class                       text,
+  recording_date                       date,
+  roof_cover                           text,
+  roof_type                            text,
+  sewer                                text,
+  situs_census_tract                   text,
+  stories                              numeric,
+  style                                text,
+  subdivision_name                     text,
+  sum_buildings_nbr                    numeric,
+  sum_commercial_units                 numeric,
+  sum_garage_sqft                      numeric,
+  tax_amt                              numeric,
+  tax_delinquent                       boolean,
+  tax_delinquent_year                  numeric,
+  tax_year                             numeric,
+  topography                           text,
+  total_loan_amt                       numeric,
+  total_loan_balance                   numeric,
+  total_loan_payment                   numeric,
+  water                                text,
+  active_lien                          boolean,
+  building_condition                   text,
+  building_square_feet                 numeric,
+  calculated_improvement_value         numeric,
+  calculated_land_value                numeric,
+  calculated_total_value               numeric,
+  contactability_dialable_phone_count  numeric,
+  contactability_email_count           numeric,
+  contactability_phone_count           numeric,
+  contactability_total                 numeric,
+  coordinates                          text,
+  equity_amount                        numeric,
+  equity_percent                       numeric,
+  estimated_repair_cost                numeric,
+  estimated_repair_cost_per_sqft       numeric,
+  flood_zone                           text,
+  geographic_features                  text,
+  highlighted                          boolean,
+  hoa_fee_amount                       numeric,
+  source_property_id                   text,
+  is_corporate_owner                   boolean,
+  last_sale_doc_type                   text,
+  lienholder_name                      text,
+  latitude                             numeric,
+  longitude                            numeric,
+  lot_acreage                          numeric,
+  lot_square_feet                      numeric,
+  map_image                            text,
+  market_status_label                  text,
+  market_status_value                  text,
+  market_sub_status                    text,
+  market_sub_status_label              text,
+  market_sub_status_value              text,
+  mls_current_listing_price            numeric,
+  mls_market_status                    text,
+  mls_sold_date                        date,
+  mls_sold_price                       numeric,
+  other_rooms                          text,
+  out_of_state_owner                   boolean,
+  owner_1_firstname                    text,
+  owner_1_lastname                     text,
+  owner_1_name                         text,
+  owner_2_firstname                    text,
+  owner_2_lastname                     text,
+  owner_2_name                         text,
+  owner_address                        text,
+  owner_address2                       text,
+  owner_address_city                   text,
+  owner_address_full                   text,
+  owner_address_line_1                 text,
+  owner_address_line_2                 text,
+  owner_address_state                  text,
+  owner_address_zip                    text,
+  owner_lastname                       text,
+  owner_location                       text,
+  owner_name                           text,
+  phone_numbers_count                  numeric,
+  property_address                     text,
+  property_address2                    text,
+  property_address_city                text,
+  property_address_county_name         text,
+  property_address_full                text,
+  property_address_range               text,
+  property_address_state               text,
+  property_address_zip                 text,
+  property_flags_json                  jsonb,
+  property_flags_text                  text,
+  property_type                        text,
+  removed_owner                        boolean,
+  sale_date                            date,
+  sale_price                           numeric,
+  saleprice                            numeric,
+  satellite_image                      text,
+  school_district_name                 text,
+  streetview_image                     text,
+  total_baths                          numeric,
+  total_bedrooms                       numeric,
+  units_count                          numeric,
+  year_built                           numeric,
+  zoning                               text,
+  CONSTRAINT buyer_comp_raw_v2_pkey PRIMARY KEY (id),
+  CONSTRAINT buyer_comp_raw_v2_row_hash_key UNIQUE (row_hash),
+  CONSTRAINT buyer_comp_raw_v2_import_status_check CHECK (import_status = ANY (ARRAY['pending'::text, 'accepted'::text, 'rejected'::text, 'duplicate'::text, 'error'::text]))
+);
+
+-- Production index set, restricted to what the Offerr comp path exercises.
+CREATE INDEX IF NOT EXISTS idx_buyer_comp_raw_v2_property_id
+  ON public.buyer_comp_raw_v2 USING btree (property_id);
+CREATE INDEX IF NOT EXISTS idx_buyer_comp_raw_v2_lat_lng
+  ON public.buyer_comp_raw_v2 USING btree (latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_buyer_comp_raw_v2_sale_date
+  ON public.buyer_comp_raw_v2 USING btree (sale_date);
+CREATE INDEX IF NOT EXISTS idx_buyer_comp_raw_v2_property_address_zip
+  ON public.buyer_comp_raw_v2 USING btree (property_address_zip);
+CREATE INDEX IF NOT EXISTS idx_buyer_comp_raw_v2_owner_name
+  ON public.buyer_comp_raw_v2 USING btree (owner_name);
+CREATE INDEX IF NOT EXISTS buyer_comp_raw_v2_asset_idx
+  ON public.buyer_comp_raw_v2 USING btree (normalized_asset_class, import_status);
