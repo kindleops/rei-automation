@@ -1,10 +1,15 @@
 # Offerr Evaluation Spine — Internal Vertical Slice
 
-**Date:** 2026-07-29 (hardening pass same day); staging-verification pass 2026-07-30
-**Status:** Implemented, independently reviewed, and verified against PostgreSQL 17 on `feat/offerr-ai-evaluation-spine`; feature flag OFF; migration PROPOSED (not applied to any hosted project)
+**Date:** 2026-07-29 (hardening pass same day); staging-verification pass 2026-07-30; **production landing 2026-07-31**
+**Status:** Merged (`6a0fd934`) and **installed in production** (`lcppdrmrdfblstpcbgpf`) with the feature flag **OFF**. Schema applied additively; all three Offerr tables empty; merged API deployed and failing closed. **Installed ≠ launched** — Offerr is not reachable by sellers.
 **Scope:** Internal-only evaluation spine — no seller communication, no contracts, no marketplace behavior
 **Repository:** `kindleops/rei-automation`
-**Safety posture:** No production data or schema was modified. No migration was applied to any hosted Supabase project. No hosted project was written to. The branch was not merged.
+**Safety posture:** The only production mutation is additive schema plus a
+default-disabled `system_control` flag row. **No production seller or property
+data was read into, written from, or created by this rollout**; every execution
+table (properties, comps, acquisition scores, campaigns, messages, LeadCommand,
+Exchange) is unchanged, verified by before/after aggregate snapshot. No seller
+evaluation or range has ever been generated in production.
 **Verification report:** [`offerr-staging-verification-report.md`](./offerr-staging-verification-report.md)
 
 ---
@@ -418,6 +423,16 @@ service_role | offerr_evaluation_events   | INSERT, SELECT
 
 ### 10.4 Exact operator instructions to stage the migration
 
+> **Historical — superseded 2026-07-31.** The separate-staging-project route was
+> never taken. Hosted verification used an **ephemeral Supabase preview branch**
+> of the canonical project (`offerr-evaluation-spine-pr-57` /
+> `ktvjkokwcqcgapzztkwu`, since deleted), and the migration has since been
+> applied to **production** under operator authorization — see
+> [report §14](./offerr-staging-verification-report.md#14-production-landing-2026-07-31).
+> Step 4 below is also superseded in production: the verifier's section 9
+> commits probe rows, so production runs sections 1–8 and 10 only.
+> Retained for provenance.
+
 1. **Create the staging project** (the outstanding operator action):
    name `real-estate-automation-staging`, org `REI Automation`
    (`gosflvntwnxegkrulmoz`), region West US (Oregon) to match production,
@@ -441,6 +456,13 @@ service_role | offerr_evaluation_events   | INSERT, SELECT
 
 ## 11. Launch state
 
+> **Installed in production 2026-07-31 with the feature OFF.** PR #57 is merged
+> (`6a0fd934`), the schema is applied to `lcppdrmrdfblstpcbgpf`, and the merged
+> API is deployed. `offerr_evaluation_enabled = 'false'` and all three Offerr
+> tables are empty. **Installation is not launch** — Offerr is not reachable by
+> sellers. Full evidence:
+> [`offerr-staging-verification-report.md` §14](./offerr-staging-verification-report.md#14-production-landing-2026-07-31).
+
 | Area | State |
 |---|---|
 | Domain contracts, orchestrator, gates, projection, store | **Implemented** |
@@ -450,9 +472,14 @@ service_role | offerr_evaluation_events   | INSERT, SELECT
 | Idempotency incl. races, payload reuse, partial snapshots | **Verified against real PostgreSQL 17** |
 | Migration DDL / constraints / indexes / RLS / grants / rollback | **Verified on PostgreSQL 17** (47/47 checks) |
 | 12-case evaluation matrix, flag gating, reconciliation | **Verified** (291/291 assertions, real DB, real comp loader) |
-| Hosted staging project | **Blocked** — none exists; creation is a billing/ownership decision |
-| Hosted staging migration application | **Blocked** — depends on the project above |
-| Staging API preview deployment | **Blocked** — depends on the project above |
+| Hosted verification | **Done** — ephemeral Supabase preview branch, real HTTPS (172/172); branch since deleted |
+| PR #57 | **Merged** 2026-07-31 → `6a0fd934` |
+| Production schema application | **Done** — single transaction, 36/36 production checks (11 write-probe checks intentionally skipped) |
+| Production privilege contract | **Verified** — anon/authenticated zero, evaluations/events append-only, helper fn owner-only |
+| Production API deployment | **Done** — `dpl_Fo1GnQTQRxKXFHbwt8VW8itZY15t`, Offerr disabled |
+| Production disabled-route behaviour | **Verified** — 401 unauthenticated, canonical 423 authenticated |
+| Correctness fixes required before flag flip | **Open** — 5 findings, report §14.9 |
+| Public intake UI, seller auth, abuse protection, rate limiting, observability, canary | **Not started** — activation phase |
 | Flag enablement, V3 enablement for Offerr production traffic | **Blocked** — operator decisions |
 | Public intake, providers, LeadCommand lifecycle, messaging, contracts, title, marketplace | **Deferred** |
 
