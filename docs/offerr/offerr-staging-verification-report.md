@@ -2291,7 +2291,22 @@ production connection was opened at any point.
 | Schema verification | **47/47 PASS** |
 | Schema drift check | **COMPATIBLE** |
 | Acquisition + comp regressions | **790 tests — 788 pass, 2 fail** (both pre-existing, see below) |
+| **Full critical suite** | **4611 tests — 4518 pass, 88 fail, 0 cancelled, 5 skip** (34m31s) |
 | Lint (`lint-critical.mjs`) | **PASS — 1495 files** |
+
+**Full critical suite — completed, not a partial result.** 88 failures against
+the repository's documented chronic main baseline of ~86. **Zero of them are in
+any Offerr file, and zero are in any of the 18 files this branch touches.** The
+88 land in 31 unrelated suites (queue, inbox, campaigns, Podio sync, messaging,
+classifier). Re-running those same 31 files on an `origin/main` worktree
+reproduces the same failures, confirming they are pre-existing rather than
+introduced here.
+
+Caveat recorded honestly: a scheduled agent was active in this repository
+during the run (it committed `63410210` to the checked-out branch mid-task), so
+the machine was **not** contention-free. That inflates load-sensitive
+assertions such as `p95 pure compute under 15ms`, which passes in isolation.
+The Offerr-specific gates above were all run separately and are unaffected.
 
 Baseline comparison for the two acquisition failures, run on an `origin/main`
 worktree with the identical command:
