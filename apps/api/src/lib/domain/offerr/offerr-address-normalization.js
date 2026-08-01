@@ -77,6 +77,13 @@ const UNIT_DESIGNATORS = Object.freeze(['apt', 'apartment', 'unit', 'ste', 'suit
  */
 const STREET_NUMBER_RE = /^\d+(?:-\d+)?[a-z]?$/;
 
+/**
+ * Suffixes that name a numbered route rather than a street type, in their
+ * normalized form. Only these may be followed by a bare number and still be
+ * read as part of the street NAME ("Highway 6").
+ */
+const ROUTE_STYLE_SUFFIXES = Object.freeze(new Set(['hwy']));
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -269,14 +276,26 @@ export function parseSellerAddress(raw) {
   // post-directional and (comma-less input) the city.
   let suffixIndex = -1;
   for (let i = tokens.length - 1; i >= 0; i -= 1) {
-    if (!SUFFIX_MAP[tokens[i]]) continue;
-    // "Highway 6", "State Highway 6": a suffix homograph followed by a bare
+    const normalizedSuffix = SUFFIX_MAP[tokens[i]];
+    if (!normalizedSuffix) continue;
+    // "Highway 6", "State Highway 6": a ROUTE-STYLE suffix followed by a bare
     // number is part of the ROAD'S NAME, not a street-type suffix. Treating it
     // as one consumed the name entirely ("1234 Highway 6" -> no street name ->
     // INVALID_INPUT) or pushed the route number out into the city slot
     // ("1234 State Highway 6" -> city "6"), which then fought the seller's
     // real city and failed closed as a geography conflict.
-    if (i + 1 < tokens.length && /^\d+$/.test(tokens[i + 1])) continue;
+    //
+    // Scoped to route-style suffixes deliberately. Applying it to EVERY suffix
+    // would swallow the suffix of a comma-less address that ends in a bare unit
+    // number — "100 Main St 204" would parse as the street "main st 204" — so
+    // the rule is narrow by construction.
+    if (
+      ROUTE_STYLE_SUFFIXES.has(normalizedSuffix) &&
+      i + 1 < tokens.length &&
+      /^\d+$/.test(tokens[i + 1])
+    ) {
+      continue;
+    }
     suffixIndex = i;
     break;
   }

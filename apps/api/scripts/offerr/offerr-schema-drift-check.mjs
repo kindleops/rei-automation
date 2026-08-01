@@ -384,7 +384,12 @@ async function main() {
   // for the eventual grant-remediation gate; activation itself blocks only on
   // genuine Offerr incompatibility.
   const strict = process.argv.includes('--strict');
-  const gateOk = strict ? result.failures.length === 0 : result.ok;
+  // Strict promotes SHARED_SCHEMA_SECURITY_WARNING to blocking — and only
+  // that. Gating on `failures.length` would also fail the build on a purely
+  // INFORMATIONAL finding, which is not what strict mode means.
+  const gateOk = strict
+    ? result.blocking.length + result.warnings.length === 0
+    : result.ok;
 
   if (asJson) {
     console.log(

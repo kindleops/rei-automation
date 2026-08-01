@@ -521,3 +521,16 @@ test('a rural route is rejected as a non-street address', async () => {
 test('a genuinely unparseable address still reports missing_street_number', async () => {
   assert.equal(parseSellerAddress('tx houston area').reason, 'missing_street_number');
 });
+
+test('the route-number rule does not swallow an ordinary suffix', async () => {
+  // "100 Main St 204": a comma-less address ending in a bare unit number. The
+  // route-style rule must NOT fire here, or "st" is absorbed into the street
+  // name and the address stops matching its own canonical row.
+  const parsed = parseSellerAddress('100 Main St 204');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_name, 'main');
+  assert.equal(parsed.suffix, 'st');
+
+  // The route-style rule still applies where it should.
+  assert.equal(parseSellerAddress('1234 Highway 6, Alvin, TX 77511').suffix, null);
+});

@@ -210,9 +210,10 @@ winner inside an unprovable set is never even evaluated.
 | `candidate_set_changed_during_pagination` | *retained, unreachable from the default loader* — described the count moving between reads |
 | `candidate_load_deadline_exceeded` | candidate loading outran its deadline |
 
-The last two reason codes describe interference *between* two reads. A
-single-statement read has no "between", so the default loader can no longer
-produce them; they are retained because the envelope is a public contract that
+`candidate_pagination_failed` and `candidate_set_changed_during_pagination`
+describe interference *between* two reads. A single-statement read has no
+"between", so the default loader can no longer produce them; they are retained
+because the envelope is a public contract that
 injected loaders and stored diagnostics may still carry, and because removing a
 fail-closed reason code is not a safe way to signal that a failure mode was
 eliminated.
