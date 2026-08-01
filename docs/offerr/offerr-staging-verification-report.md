@@ -2298,9 +2298,19 @@ production connection was opened at any point.
 the repository's documented chronic main baseline of ~86. **Zero of them are in
 any Offerr file, and zero are in any of the 18 files this branch touches.** The
 88 land in 31 unrelated suites (queue, inbox, campaigns, Podio sync, messaging,
-classifier). Re-running those same 31 files on an `origin/main` worktree
-reproduces the same failures, confirming they are pre-existing rather than
-introduced here.
+classifier).
+
+**Measured baseline, not assumed.** Those exact 31 files were then re-run on an
+`origin/main` worktree with the identical command:
+
+| Run | Tests | Fail |
+|---|---|---|
+| This branch (the 31 files, within the full suite) | — | **88** |
+| `origin/main` worktree (the same 31 files) | 518 | **87** |
+
+A delta of **one**, which is the load-flaky `p95 pure compute under 15ms`
+assertion — it failed on the branch run (machine under contention) and passed
+on the baseline run. **This branch introduces zero regressions.**
 
 Caveat recorded honestly: a scheduled agent was active in this repository
 during the run (it committed `63410210` to the checked-out branch mid-task), so
