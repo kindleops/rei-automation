@@ -1,4 +1,5 @@
 // ─── handle-textgrid-inbound.js ──────────────────────────────────────────
+import crypto from "node:crypto";
 import { loadContext } from "@/lib/domain/context/load-context.js";
 import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
 import { createBrain } from "@/lib/domain/context/resolve-brain.js";
@@ -784,7 +785,86 @@ function shouldBypassInboundOfferRouting({ classification = null, route = null }
   ].includes(routed_use_case);
 }
 
+// Terminal-disposition choke point. Every caller (webhook route, live
+// webhook-event processor, recovery crons, ops replays) enters through this
+// wrapper, so every inbound processing attempt — including thrown exceptions
+// and every early return in the core — lands one canonical terminal
+// disposition in the durable inbound_processing_ledger. Recording failures
+// never block inbound processing; the SLA scan surfaces the residual gap.
 export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
+  const started_at_ms = Date.now();
+  const [
+    { beginInboundLedgerEntry, recordInboundTerminalDisposition },
+    { resolveInboundTerminalDisposition, TERMINAL_DISPOSITIONS },
+  ] = await Promise.all([
+    import("@/lib/domain/inbound/inbound-processing-ledger.js"),
+    import("@/lib/domain/inbound/terminal-disposition.js"),
+  ]);
+
+  const sid = clean(
+    payload?.message_id ||
+      payload?.MessageSid ||
+      payload?.SmsMessageSid ||
+      payload?.sid
+  );
+  const from_phone = clean(payload?.from || payload?.From);
+  const to_phone = clean(payload?.to || payload?.To);
+  const body_preview = clean(payload?.message_body ?? payload?.Body ?? payload?.body);
+  const idempotency_key = sid
+    ? `textgrid_inbound:${sid}`
+    : `textgrid_inbound:nosid:${crypto
+        .createHash("sha256")
+        .update(`${from_phone}|${to_phone}|${body_preview}`, "utf8")
+        .digest("hex")
+        .slice(0, 32)}`;
+
+  const ledger = await beginInboundLedgerEntry({
+    idempotency_key,
+    provider_message_sid: sid || null,
+    thread_key: from_phone || null,
+    from_phone: from_phone || null,
+    to_phone: to_phone || null,
+    message_preview: body_preview,
+  });
+
+  try {
+    const result = await handleTextgridInboundWebhookCore(payload, opts);
+    if (!ledger.duplicate_completed) {
+      const resolved = resolveInboundTerminalDisposition(result);
+      await recordInboundTerminalDisposition({
+        ledger_id: ledger.ledger_id || null,
+        idempotency_key,
+        disposition: resolved.disposition,
+        detail: resolved.detail,
+        detected_intent:
+          result?.classification?.primary_intent ||
+          result?.classification?.detected_intent ||
+          null,
+        classifier_version: result?.classification?.version || null,
+        confidence: result?.classification?.confidence ?? null,
+        latency_ms: Date.now() - started_at_ms,
+      });
+      if (result && typeof result === "object") {
+        result.terminal_disposition = resolved.disposition;
+      }
+    }
+    return result;
+  } catch (error) {
+    if (!ledger.duplicate_completed) {
+      await recordInboundTerminalDisposition({
+        ledger_id: ledger.ledger_id || null,
+        idempotency_key,
+        disposition: TERMINAL_DISPOSITIONS.FAILED_RETRIABLE,
+        detail: { thrown: true },
+        error_message: error?.message || "unknown_inbound_processing_error",
+        latency_ms: Date.now() - started_at_ms,
+      });
+    }
+    throw error;
+  }
+}
+
+async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   const {
     inbound_debug_stage = null,
     dry_run = false,
@@ -1101,7 +1181,14 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
           },
         });
         fallback_message_event_id = fallback_event?.item_id || null;
-      } catch {}
+      } catch (fallback_event_error) {
+        // Without this warn, a failed Podio fallback write left zero trace of
+        // the message beyond the unknown-router Supabase attempts.
+        safeWarn("textgrid.inbound_unknown_fallback_event_failed", {
+          message_id: extracted.message_id,
+          error: fallback_event_error?.message || "fallback_event_write_failed",
+        });
+      }
 
       // Consolidate Discord review card posting or rely on router alert. 
       // Removed redundant card call to ensure exactly one notification per event.

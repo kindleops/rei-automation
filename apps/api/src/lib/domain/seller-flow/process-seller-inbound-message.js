@@ -1262,6 +1262,19 @@ export async function processSellerInboundMessage({
       patch.follow_up_at = contract.ownership_probe_transition.follow_up_at || null;
     }
 
+    // Latest-intent precedence: a superseding re-engagement reopens the
+    // conversation in the same authoritative patch that every other state
+    // consumer reads — never as a separate subsystem's opinion.
+    const precedence = execution?.automation_decision?.latest_intent_precedence;
+    if (precedence?.supersedes_prior_state === true && precedence.state_patch) {
+      patch.disposition = precedence.state_patch.disposition;
+      patch.operational_status = precedence.state_patch.operational_status;
+      patch.lead_temperature = precedence.state_patch.lead_temperature;
+      if (!patch.lifecycle_stage || patch.lifecycle_stage === "ownership_confirmation") {
+        patch.lifecycle_stage = "offer_interest";
+      }
+    }
+
     if (Object.keys(patch).length > 0) {
       try {
         universal_state_patch = await runtimeDeps.patchUniversalLeadState({
@@ -1295,6 +1308,16 @@ export async function processSellerInboundMessage({
               : {},
           },
         });
+        // A blocked patch returns without throwing; unchecked it silently
+        // drops lifecycle/status/temperature updates for this turn.
+        if (universal_state_patch?.blocked === true || universal_state_patch?.ok === false) {
+          runtimeDeps.warn("[SELLER_INBOUND_UNIVERSAL_STATE_BLOCKED]", {
+            thread_key: threadKey,
+            reason: universal_state_patch?.reason || "state_patch_blocked",
+            blocked_fields: universal_state_patch?.blocked_fields || null,
+            message_event_id: inboundEventId || providerMessageId || null,
+          });
+        }
       } catch (state_error) {
         runtimeDeps.warn("[SELLER_INBOUND_UNIVERSAL_STATE_FAILED]", {
           thread_key: threadKey,

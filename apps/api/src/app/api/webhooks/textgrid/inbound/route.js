@@ -350,7 +350,22 @@ export async function POST(request) {
       );
     }
 
-    const inbound_debug_stage = request.headers.get("x-inbound-debug-stage");
+    // Debug checkpoints short-circuit processing and persist nothing, so the
+    // header is honored only outside production or with the internal API
+    // secret — never for an arbitrary internet caller on the public webhook.
+    const raw_debug_stage = request.headers.get("x-inbound-debug-stage");
+    const debug_stage_authorized =
+      Boolean(raw_debug_stage) &&
+      (process.env.NODE_ENV !== "production" ||
+        (Boolean(process.env.INTERNAL_API_SECRET) &&
+          request.headers.get("x-internal-api-secret") ===
+            process.env.INTERNAL_API_SECRET));
+    if (raw_debug_stage && !debug_stage_authorized) {
+      safeRouteLog("warn", "textgrid_inbound.debug_stage_rejected", {
+        stage: raw_debug_stage,
+      });
+    }
+    const inbound_debug_stage = debug_stage_authorized ? raw_debug_stage : null;
     if (inbound_debug_stage === "after_normalized") {
       return NextResponse.json({ ok: true, stage: "after_normalized" });
     }

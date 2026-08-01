@@ -1436,6 +1436,37 @@ export async function executeInboundAutomationDecision({
     latestThreadContext,
   });
 
+  // Latest-intent precedence is evaluated for EVERY inbound (pure, no I/O) so
+  // supersession and re-engagement are visible on the decision even when a
+  // later gate (policy block, mode disabled) ends processing early. The
+  // suppression-aware refinement below overwrites this when the thread has
+  // active suppression rows.
+  try {
+    const { resolveLatestIntentPrecedence } = await import(
+      "@/lib/domain/seller-flow/latest-intent-precedence.js"
+    );
+    const prior_summary = latestThreadContext || context?.summary || {};
+    const prior_inbound_ts = Date.parse(prior_summary.last_inbound_at || "");
+    const message_ts = Date.parse(inboundReceivedAt || "");
+    base_decision.latest_intent_precedence = resolveLatestIntentPrecedence({
+      classification,
+      message_body: message,
+      prior_state: {
+        disposition: prior_summary.disposition,
+        last_intent: prior_summary.last_intent,
+        automation_paused:
+          lower(prior_summary.automation_status || prior_summary.automation_state) === "paused",
+      },
+      active_suppressions: [],
+      message_is_stale:
+        Number.isFinite(prior_inbound_ts) &&
+        Number.isFinite(message_ts) &&
+        message_ts < prior_inbound_ts,
+    });
+  } catch {
+    base_decision.latest_intent_precedence = null;
+  }
+
   // Deterministic negotiation strategy directive (spec §7/§12): the router's
   // template selection overrides the intent-profile route at S5+. Suppression
   // and opt-out handling above/below always win — the directive never
@@ -1666,15 +1697,84 @@ export async function executeInboundAutomationDecision({
           context: context || latestThreadContext,
         });
 
+  let precedence_reopened = false;
   if (active_suppression.suppressed) {
+    // Latest-intent precedence: the newest clear positive intent may supersede
+    // SOFT suppression (not_interested / no_response / nurture). Binding
+    // opt-outs and anything unrecognized stay in force and route to a human.
+    const { resolveLatestIntentPrecedence, releaseSoftSuppressions } = await import(
+      "@/lib/domain/seller-flow/latest-intent-precedence.js"
+    );
+    const prior_summary = latestThreadContext || context?.summary || {};
+    const prior_inbound_ts = Date.parse(prior_summary.last_inbound_at || "");
+    const message_ts = Date.parse(inboundReceivedAt || "");
+    let precedence = resolveLatestIntentPrecedence({
+      classification,
+      message_body: message,
+      prior_state: {
+        disposition: prior_summary.disposition,
+        last_intent: prior_summary.last_intent,
+        automation_paused:
+          lower(prior_summary.automation_status || prior_summary.automation_state) === "paused",
+      },
+      active_suppressions: [
+        active_suppression.row || { suppression_reason: active_suppression.reason },
+      ],
+      message_is_stale:
+        Number.isFinite(prior_inbound_ts) &&
+        Number.isFinite(message_ts) &&
+        message_ts < prior_inbound_ts,
+    });
+
+    if (precedence.supersedes_prior_state && precedence.clear_soft_suppression && !dryRun) {
+      const release = await releaseSoftSuppressions(
+        {
+          supabase,
+          phone_number: inboundFrom || threadKey,
+          decision: precedence,
+          thread_key: threadKey,
+          message_event_id: inboundEventId,
+        },
+        { info, warn }
+      );
+      if (!release.ok) {
+        // Fail safe: if the release did not land, the thread stays suppressed.
+        precedence = {
+          ...precedence,
+          supersedes_prior_state: false,
+          clear_soft_suppression: false,
+          reason_codes: [...precedence.reason_codes, "soft_release_failed_fail_safe"],
+        };
+      }
+    }
+
+    base_decision.latest_intent_precedence = precedence;
+
+    if (precedence.supersedes_prior_state) {
+      precedence_reopened = true;
+      info("[LATEST_INTENT_REENGAGEMENT_REOPENED]", {
+        thread_key: threadKey || null,
+        primary_intent: classification?.primary_intent || null,
+        evidence: precedence.evidence,
+        reason_codes: precedence.reason_codes,
+        version: precedence.version,
+      });
+    }
+  }
+
+  if (active_suppression.suppressed && !precedence_reopened) {
+    const precedence = base_decision.latest_intent_precedence || null;
     const suppression_decision = {
       ...base_decision,
       should_queue_reply: false,
       should_suppress_contact: true,
-      should_mark_human_review: false,
+      should_mark_human_review: precedence?.blocked_by_binding_suppression === true,
       reply_mode: "none",
       suppression_reason: active_suppression.reason || "suppressed",
-      audit_reason: active_suppression.reason || "suppressed",
+      audit_reason:
+        precedence?.blocked_by_binding_suppression === true
+          ? "seller_initiated_after_stop"
+          : active_suppression.reason || "suppressed",
     };
 
     warn("[AUTO_REPLY_BLOCKED]", {

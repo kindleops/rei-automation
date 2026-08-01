@@ -48,6 +48,10 @@
     {
       "path": "/api/internal/webhooks/recover-inbound",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/internal/inbound/disposition-slo-scan",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
