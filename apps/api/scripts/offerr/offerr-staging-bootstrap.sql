@@ -216,6 +216,12 @@ ON CONFLICT (contract_name) DO UPDATE
 REVOKE ALL ON public.buyer_comp_raw_v2  FROM anon, authenticated;
 REVOKE ALL ON public.buyer_entities_v2  FROM anon, authenticated;
 REVOKE ALL ON public.v_recent_sold_comps FROM anon, authenticated;
+-- public.properties is created by canonical/010 in THIS run, i.e. after
+-- offerr-supabase-prereqs.sql installed Supabase's ALTER DEFAULT PRIVILEGES, so
+-- it inherits anon/authenticated DML exactly like the comp tables above. It was
+-- omitted from this list, which left the SUBJECT table anon-writable in staging
+-- and weakened the side-effect proof for the very record under evaluation.
+REVOKE ALL ON public.properties         FROM anon, authenticated;
 -- The marker table is created after offerr-supabase-prereqs.sql has installed
 -- Supabase's ALTER DEFAULT PRIVILEGES, so it inherits anon/authenticated DML
 -- unless explicitly revoked. Schema-contract state is operator metadata.

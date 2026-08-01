@@ -45,6 +45,41 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 
 const moduleLogger = child({ module: 'domain.offerr.evaluation' });
 
+/** Sentinel returned by withDeadline when a stage outlives the budget. */
+const STAGE_TIMEOUT = Symbol('offerr_stage_timeout');
+
+/**
+ * Bound an awaited stage by the remaining evaluation budget.
+ *
+ * Clock comparison AFTER a stage resolves cannot fire while that stage is
+ * still hanging: a wedged network call simply ran to the route's 60 s
+ * `maxDuration` and the caller never saw `evaluation_timeout`. Racing the work
+ * against a timer bounds the wait itself.
+ *
+ * The canonical acquisition loaders take no `AbortSignal`, and threading one
+ * through them would mean changing shared acquisition infrastructure, which is
+ * out of scope here. So the losing request may still complete in the
+ * background — what is guaranteed is that Offerr stops waiting on it and
+ * returns a structured `evaluation_timeout` inside the budget. Only read-only
+ * and pure stages are raced; persistence is never raced, because abandoning a
+ * write whose transaction may still commit would break idempotency.
+ */
+function withDeadline(promise, remainingMs) {
+  if (!(remainingMs > 0)) return Promise.resolve(STAGE_TIMEOUT);
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(STAGE_TIMEOUT), remainingMs);
+  });
+  // The timer is deliberately NOT unref'd: an unref'd timer does not hold the
+  // event loop open, so if the hung stage is the only other pending work the
+  // loop drains and the timeout never fires — which is precisely the failure
+  // this helper exists to prevent. Clearing it in `finally` is what guarantees
+  // no handle outlives the race, whichever side wins.
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -174,11 +209,14 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   const deadline = startedAt + timeoutMs;
   const timings = {};
 
-  const overDeadline = (stage) => {
-    if (Date.now() <= deadline) return null;
+  const remainingMs = () => deadline - Date.now();
+
+  const timedOut = (stage) => {
     logger.warn('offerr_evaluation.timeout', { timeout_stage: stage, timeout_ms: timeoutMs });
     return failure('evaluation_timeout', { timeout_stage: stage }, timings, startedAt);
   };
+
+  const overDeadline = (stage) => (Date.now() <= deadline ? null : timedOut(stage));
 
   // ── Stage 1: validate + normalize intake ─────────────────────────────────
   let stageStart = Date.now();
@@ -211,8 +249,12 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   // ── Stage 2: idempotent replay ───────────────────────────────────────────
   const store = deps.store ?? createSupabaseOfferrEvaluationStore(deps);
   stageStart = Date.now();
-  const existing = await store.findByIdempotencyKey(intake.idempotency_key);
+  const existing = await withDeadline(
+    store.findByIdempotencyKey(intake.idempotency_key),
+    remainingMs(),
+  );
   timings.idempotency_ms = Date.now() - stageStart;
+  if (existing === STAGE_TIMEOUT) return timedOut('idempotency_lookup');
   if (!existing.ok) {
     logger.error('offerr_evaluation.failed', {
       request_id: intake.request_id,
@@ -255,12 +297,15 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   stageStart = Date.now();
   let resolution;
   try {
-    resolution = await resolveSubject(
-      {
-        rawAddress: intake.raw_submitted_address,
-        normalizedAddress: intake.normalized_submitted_address,
-      },
-      deps,
+    resolution = await withDeadline(
+      resolveSubject(
+        {
+          rawAddress: intake.raw_submitted_address,
+          normalizedAddress: intake.normalized_submitted_address,
+        },
+        deps,
+      ),
+      remainingMs(),
     );
   } catch (error) {
     timings.resolution_ms = Date.now() - stageStart;
@@ -272,15 +317,36 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     return failure('property_resolution_error', {}, timings, startedAt);
   }
   timings.resolution_ms = Date.now() - stageStart;
-  let timedOut = overDeadline('resolution');
-  if (timedOut) return timedOut;
+  if (resolution === STAGE_TIMEOUT) return timedOut('resolution');
+  let deadlinePassed = overDeadline('resolution');
+  if (deadlinePassed) return deadlinePassed;
 
   // ── Stage 4: canonical subject hydration ─────────────────────────────────
   const subjectLoader = deps.loadSubjectProperty ?? loadSubjectProperty;
   let rawSubject = null;
   stageStart = Date.now();
   if (resolution.status === OFFERR_RESOLUTION_STATUSES.RESOLVED) {
-    rawSubject = await subjectLoader(resolution.property_id, deps);
+    // Hydration is a network call like every other stage: without its own
+    // boundary a transient Supabase fault escaped to the route catch and
+    // surfaced as HTTP 500 + a Sentry report instead of a structured,
+    // retryable failure code.
+    let hydrated;
+    try {
+      hydrated = await withDeadline(subjectLoader(resolution.property_id, deps), remainingMs());
+    } catch (error) {
+      timings.subject_ms = Date.now() - stageStart;
+      logger.error('offerr_evaluation.failed', {
+        request_id: intake.request_id,
+        failure_code: 'subject_hydration_error',
+        error_message: clean(error?.message) || 'unknown',
+      });
+      return failure('subject_hydration_error', {}, timings, startedAt);
+    }
+    if (hydrated === STAGE_TIMEOUT) {
+      timings.subject_ms = Date.now() - stageStart;
+      return timedOut('subject_hydration');
+    }
+    rawSubject = hydrated;
     if (!rawSubject) {
       // Resolution and hydration disagree: fail closed to ambiguity.
       resolution = {
@@ -292,8 +358,8 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     }
   }
   timings.subject_ms = Date.now() - stageStart;
-  timedOut = overDeadline('subject_hydration');
-  if (timedOut) return timedOut;
+  deadlinePassed = overDeadline('subject_hydration');
+  if (deadlinePassed) return deadlinePassed;
 
   // ── Stage 5: asset classification + seller-fact overlay (claims only) ───
   stageStart = Date.now();
@@ -328,12 +394,16 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
     let comps;
     let buyerPurchases;
     let v3Loaded;
+    let loaded;
     try {
-      [comps, buyerPurchases, v3Loaded] = await Promise.all([
-        compLoader(subject, deps),
-        buyerLoader(subject, deps),
-        v3Enabled ? v3Loader(subject, deps) : Promise.resolve(null),
-      ]);
+      loaded = await withDeadline(
+        Promise.all([
+          compLoader(subject, deps),
+          buyerLoader(subject, deps),
+          v3Enabled ? v3Loader(subject, deps) : Promise.resolve(null),
+        ]),
+        remainingMs(),
+      );
     } catch (error) {
       timings.comp_load_ms = Date.now() - stageStart;
       logger.error('offerr_evaluation.failed', {
@@ -344,8 +414,10 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
       return failure('comp_load_error', {}, timings, startedAt);
     }
     timings.comp_load_ms = Date.now() - stageStart;
-    timedOut = overDeadline('comp_loading');
-    if (timedOut) return timedOut;
+    if (loaded === STAGE_TIMEOUT) return timedOut('comp_loading');
+    [comps, buyerPurchases, v3Loaded] = loaded;
+    deadlinePassed = overDeadline('comp_loading');
+    if (deadlinePassed) return deadlinePassed;
 
     const compEvidence = v3Loaded?.candidates ?? comps ?? [];
     compCandidateCount = compEvidence.length;
@@ -354,19 +426,32 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
 
     stageStart = Date.now();
     const calculate = deps.calculateDecision ?? calculateAcquisitionDecision;
-    decision = calculate({
-      subject,
-      comps,
-      buyerPurchases,
-      now,
-      targetAssignmentFee: num(deps.targetAssignmentFee) ?? undefined,
-      v3Enabled,
-      v3CompCandidates: v3Loaded?.candidates ?? null,
-      v3LoaderDiagnostics: loaderDiagnostics,
-    });
+    // The engine is the one stage with no boundary of its own. A throw from
+    // calculateAcquisitionDecision reached the route catch as an unhandled
+    // fault (HTTP 500 + Sentry) rather than a structured failure code.
+    try {
+      decision = await calculate({
+        subject,
+        comps,
+        buyerPurchases,
+        now,
+        targetAssignmentFee: num(deps.targetAssignmentFee) ?? undefined,
+        v3Enabled,
+        v3CompCandidates: v3Loaded?.candidates ?? null,
+        v3LoaderDiagnostics: loaderDiagnostics,
+      });
+    } catch (error) {
+      timings.engine_ms = Date.now() - stageStart;
+      logger.error('offerr_evaluation.failed', {
+        request_id: intake.request_id,
+        failure_code: 'decision_engine_error',
+        error_message: clean(error?.message) || 'unknown',
+      });
+      return failure('decision_engine_error', {}, timings, startedAt);
+    }
     timings.engine_ms = Date.now() - stageStart;
-    timedOut = overDeadline('acquisition_calculation');
-    if (timedOut) return timedOut;
+    deadlinePassed = overDeadline('acquisition_calculation');
+    if (deadlinePassed) return deadlinePassed;
   }
 
   // ── Stage 7: Offerr fail-closed safety gates ─────────────────────────────
@@ -503,12 +588,20 @@ export async function evaluateOfferrProperty(input = {}, deps = {}) {
   timings.persistence_ms = Date.now() - stageStart;
 
   if (!persisted.ok) {
+    // An orphaned request row is NOT retryable: the idempotency key stays
+    // consumed until an operator removes the row, so it must not be reported
+    // with the transient-retry code.
+    const persistenceFailureCode =
+      persisted.error === 'offerr_evaluation_write_orphaned'
+        ? 'offerr_persistence_orphaned'
+        : 'offerr_persistence_failed';
     logger.error('offerr_evaluation.failed', {
       request_id: intake.request_id,
-      failure_code: 'offerr_persistence_failed',
+      failure_code: persistenceFailureCode,
       detail: persisted.error,
+      orphaned_request_id: persisted.orphaned_request_id ?? null,
     });
-    return failure('offerr_persistence_failed', {}, timings, startedAt);
+    return failure(persistenceFailureCode, {}, timings, startedAt);
   }
   if (persisted.duplicate) {
     // Concurrent request with the same idempotency key won the insert race:

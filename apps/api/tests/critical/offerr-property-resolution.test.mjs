@@ -102,6 +102,61 @@ test('parser normalizes suffixes, directionals, states, ZIP+4, units, and glued 
   assert.equal(normalizeZip5('77035-4712'), '77035');
 });
 
+test('five-digit house numbers are never consumed as a ZIP (comma-less input)', () => {
+  // Regression: extractZip scanned the whole token stream from the end. With
+  // no comma tail the stream IS the street segment, so a five-digit house
+  // number matched the ZIP pattern, was spliced out, and left tokens[0]='main'
+  // -> reason 'missing_street_number' -> INVALID_INPUT for a valid address.
+  // Canonical property_address_full values parse through this same function,
+  // so those rows failed to parse too.
+  const bare = parseSellerAddress('12345 Main St');
+  assert.equal(bare.ok, true, bare.reason ?? 'should parse');
+  assert.equal(bare.street_number, '12345');
+  assert.equal(bare.street_name, 'main');
+  assert.equal(bare.suffix, 'st');
+  assert.equal(bare.zip5, null, 'the house number is not a ZIP');
+
+  const noZip = parseSellerAddress('12345 Main St Houston TX');
+  assert.equal(noZip.ok, true);
+  assert.equal(noZip.street_number, '12345');
+  assert.equal(noZip.city, 'houston');
+  assert.equal(noZip.state, 'tx');
+  assert.equal(noZip.zip5, null);
+
+  // A real trailing ZIP is still extracted, and the house number survives.
+  const withZip = parseSellerAddress('12345 Main St Houston TX 77002');
+  assert.equal(withZip.street_number, '12345');
+  assert.equal(withZip.zip5, '77002');
+
+  // Comma-separated input was never affected and must stay correct.
+  const commas = parseSellerAddress('12345 Main St, Houston, TX 77002');
+  assert.equal(commas.street_number, '12345');
+  assert.equal(commas.zip5, '77002');
+
+  // A leading token that is genuinely not a street number is still refused.
+  const noNumber = parseSellerAddress('tx houston area 77035');
+  assert.equal(noNumber.ok, false);
+  assert.equal(noNumber.reason, 'missing_street_number');
+  assert.equal(noNumber.zip5, '77035');
+});
+
+test('a five-digit house number resolves end to end', async () => {
+  const bigNumber = row(
+    'p-bignum',
+    '12345 Sandbox Ridge Rd, Houston, TX 77035',
+    'Houston',
+    'TX',
+    '77035',
+  );
+  const r = await resolve('12345 Sandbox Ridge Rd, Houston, TX 77035', [bigNumber]);
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(r.property_id, 'p-bignum');
+
+  const commaless = await resolve('12345 Sandbox Ridge Rd Houston TX 77035', [bigNumber]);
+  assert.equal(commaless.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(commaless.property_id, 'p-bignum');
+});
+
 // ── 1-8: variation that must still resolve ──────────────────────────────────
 
 test('1. exact canonical address resolves', async () => {
@@ -338,8 +393,14 @@ test('20. resolver makes no external provider request', async () => {
 });
 
 test('service maps INVALID_INPUT resolution to a confirm-address review, no range', async () => {
+  // A leading token that is not a street number is genuinely unparseable.
+  // (The former fixture here was '77035 tx houston area', which only parsed as
+  // INVALID_INPUT because a leading five-digit token was being eaten as a ZIP.
+  // That defect is fixed, so the leading 77035 is now correctly read as a house
+  // number — see the five-digit house-number regressions above. Both inputs
+  // still fail closed to the same seller-facing confirm-address review.)
   const result = await evaluateOfferrProperty(
-    { address: '77035 tx houston area', idempotency_key: 'resolution-invalid-1' },
+    { address: 'tx houston area 77035', idempotency_key: 'resolution-invalid-1' },
     serviceDeps(),
   );
   assert.equal(result.ok, true);

@@ -122,7 +122,13 @@ function makeRecordingSupabase({ tableData = {}, insertErrors = {} } = {}) {
               if (WRITE_METHODS.has(String(method))) {
                 return makeQuery({ data: [], error: null });
               }
-              return makeQuery({ data: tableData[table] ?? [], error: null });
+              // PostgREST returns an exact row count alongside the data when
+              // the caller asks for one, and the Offerr resolver proves
+              // candidate completeness from it. A double that omitted `count`
+              // would make every real-path read look truncated, so the canned
+              // rows carry their own count exactly as the server would.
+              const rows = tableData[table] ?? [];
+              return makeQuery({ data: rows, error: null, count: rows.length });
             };
           },
         },

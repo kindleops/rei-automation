@@ -11,13 +11,16 @@
  * path use, and nothing more:
  *
  *   .rpc(fn, args)                                   -> comp candidate retrieval
- *   .from(t).select(cols).eq/.in/.gte/.lte/.ilike(...)
- *          .order(c,{ascending}).limit(n).maybeSingle()/.single()
+ *   .from(t).select(cols, { count })
+ *          .eq/.in/.gte/.lte/.ilike(...)
+ *          .order(c,{ascending,nullsFirst})          (repeatable, left to right)
+ *          .limit(n) / .range(from, to)              -> deterministic paging
+ *          .maybeSingle()/.single()
  *   .from(t).insert(row).select(cols).single()
  *   .from(t).insert(row)                             (awaited directly)
  *   .from(t).delete().eq(c,v)
  *
- * Two behaviours matter for fidelity and are implemented deliberately:
+ * Three behaviours matter for fidelity and are implemented deliberately:
  *
  *   1. COLUMN PROJECTION IS REAL. `.select('a,b,c')` emits `SELECT a, b, c`,
  *      not `SELECT *`. A column the application asks for but the database does
@@ -30,6 +33,14 @@
  *      where error carries the Postgres SQLSTATE in `.code`. The store branches
  *      on 23505 to detect an idempotency-key race, and the engine branches on
  *      42P01 to treat a source as optional-missing.
+ *
+ *   3. ORDERING, RANGES AND EXACT COUNTS ARE REAL. Repeated `.order()` calls
+ *      compose left to right with explicit NULLS FIRST/LAST, `.range(from,to)`
+ *      is inclusive on both ends like PostgREST's Range header, and
+ *      `{ count: 'exact' }` returns the total matching rows IGNORING the
+ *      range. The Offerr resolver proves candidate-set completeness from
+ *      exactly these three behaviours, so imitating them loosely would let a
+ *      truncation defect pass verification.
  *
  * Every operation is recorded so a caller can prove which tables were touched
  * and that the comp path performed no writes.
@@ -86,11 +97,28 @@ export function createPgRestAdapter(pool, options = {}) {
   function makeBuilder({ table, kind, payload = null }) {
     const state = {
       filters: [],
-      orderBy: null,
+      // PostgREST accepts repeated `order=` keys and applies them left to
+      // right, so this is an ordered list, not a single column. The Offerr
+      // resolver relies on a multi-key order ending in a unique tie-breaker.
+      orderBy: [],
       limitCount: null,
+      offsetCount: null,
+      countMode: null,
       returning: false,
       columns: '*',
     };
+
+    /**
+     * `Prefer: count=exact`. PostgREST reports the total number of rows the
+     * filters match, IGNORING limit/offset, in Content-Range; supabase-js
+     * surfaces it as `count`. Reproduced with a separate COUNT(*) over the
+     * same WHERE clause so range queries can be proven complete.
+     */
+    async function exactCount(whereSql, params) {
+      const sql = `SELECT COUNT(*)::bigint AS exact_count FROM ${ident(table)}${whereSql}`;
+      const result = await pool.query(sql, params);
+      return Number(result.rows[0]?.exact_count ?? 0);
+    }
 
     async function run() {
       const params = [];
@@ -112,11 +140,25 @@ export function createPgRestAdapter(pool, options = {}) {
 
       let sql;
       if (kind === 'select') {
-        const order = state.orderBy
-          ? ` ORDER BY ${ident(state.orderBy.column)} ${state.orderBy.ascending ? 'ASC' : 'DESC'}`
+        // supabase-js omits the nulls modifier unless it is passed, letting
+        // Postgres apply its own default (ASC -> NULLS LAST, DESC -> NULLS
+        // FIRST). Emitting one unconditionally would silently diverge from
+        // PostgREST for DESC, so it is only rendered when explicitly given.
+        const order = state.orderBy.length
+          ? ` ORDER BY ${state.orderBy
+              .map((o) => {
+                const dir = o.ascending ? 'ASC' : 'DESC';
+                const nulls =
+                  typeof o.nullsFirst === 'boolean'
+                    ? ` NULLS ${o.nullsFirst ? 'FIRST' : 'LAST'}`
+                    : '';
+                return `${ident(o.column)} ${dir}${nulls}`;
+              })
+              .join(', ')}`
           : '';
         const limit = state.limitCount != null ? ` LIMIT ${Number(state.limitCount)}` : '';
-        sql = `SELECT ${projection(state.columns)} FROM ${ident(table)}${whereSql}${order}${limit}`;
+        const offset = state.offsetCount ? ` OFFSET ${Number(state.offsetCount)}` : '';
+        sql = `SELECT ${projection(state.columns)} FROM ${ident(table)}${whereSql}${order}${limit}${offset}`;
       } else if (kind === 'insert') {
         const rows = Array.isArray(payload) ? payload : [payload];
         const cols = [...new Set(rows.flatMap((r) => Object.keys(r ?? {})))].filter(
@@ -147,6 +189,10 @@ export function createPgRestAdapter(pool, options = {}) {
       const started = Date.now();
       try {
         const result = await pool.query(sql, params);
+        const count =
+          kind === 'select' && state.countMode === 'exact'
+            ? await exactCount(whereSql, params)
+            : null;
         record({
           table,
           method: kind,
@@ -154,7 +200,7 @@ export function createPgRestAdapter(pool, options = {}) {
           row_count: result.rowCount,
           duration_ms: Date.now() - started,
         });
-        return { data: result.rows, error: null };
+        return { data: result.rows, error: null, count };
       } catch (error) {
         record({
           table,
@@ -163,7 +209,7 @@ export function createPgRestAdapter(pool, options = {}) {
           code: error.code,
           duration_ms: Date.now() - started,
         });
-        return { data: null, error: toPgError(error) };
+        return { data: null, error: toPgError(error), count: null };
       }
     }
 
@@ -173,9 +219,10 @@ export function createPgRestAdapter(pool, options = {}) {
     };
 
     const api = {
-      select(columns) {
+      select(columns, options = {}) {
         state.returning = true;
         if (columns !== undefined) state.columns = columns;
+        if (options?.count) state.countMode = options.count;
         return api;
       },
       eq: filter('eq'),
@@ -189,11 +236,25 @@ export function createPgRestAdapter(pool, options = {}) {
         return api;
       },
       order(column, opts = {}) {
-        state.orderBy = { column, ascending: opts.ascending !== false };
+        state.orderBy.push({
+          column,
+          ascending: opts.ascending !== false,
+          // Left undefined when the caller did not specify it, so Postgres'
+          // own null ordering applies — exactly as PostgREST behaves.
+          nullsFirst: typeof opts.nullsFirst === 'boolean' ? opts.nullsFirst : undefined,
+        });
         return api;
       },
       limit(count) {
         state.limitCount = count;
+        return api;
+      },
+      /** PostgREST `Range: from-to` — INCLUSIVE on both ends. */
+      range(from, to) {
+        const start = Math.max(0, Number(from) || 0);
+        const end = Number(to);
+        state.offsetCount = start;
+        state.limitCount = Number.isFinite(end) ? Math.max(0, end - start + 1) : null;
         return api;
       },
       async maybeSingle() {
@@ -230,7 +291,8 @@ export function createPgRestAdapter(pool, options = {}) {
     },
     from(table) {
       return {
-        select: (columns) => makeBuilder({ table, kind: 'select' }).select(columns),
+        select: (columns, options) =>
+          makeBuilder({ table, kind: 'select' }).select(columns, options),
         insert: (payload) => makeBuilder({ table, kind: 'insert', payload }),
         delete: () => makeBuilder({ table, kind: 'delete' }),
       };

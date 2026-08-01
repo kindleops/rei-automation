@@ -242,21 +242,34 @@ export async function checkSchemaContract(client, contract) {
   // ── 7. Grant posture: the comp corpus must not be writable by anon ──────
   // Advisory but load-bearing: an anon-writable comp corpus invalidates every
   // read-only guarantee the evaluation path claims.
+  // `properties` is included: it is the SUBJECT table of every evaluation, so
+  // an anon-writable subject undermines the same read-only guarantee as an
+  // anon-writable comp corpus. Note this makes the check assert the posture the
+  // staging bootstrap applies, not only the posture production happens to have
+  // — production is known to grant anon DML on all three and therefore reports
+  // this as a PRE-EXISTING failure (see verification report §14.4). That is a
+  // reporting change only; no production grant is modified by this task.
+  //
+  // has_table_privilege() is used rather than information_schema.role_table_grants:
+  // that view only reports grants involving CURRENTLY ENABLED roles, so a
+  // session that is not a member of `anon` sees zero rows whether or not the
+  // grants exist, and the check would pass vacuously.
   const writableByAnon = await q(
-    `SELECT table_name, grantee, privilege_type
-       FROM information_schema.role_table_grants
-      WHERE table_schema = 'public'
-        AND grantee IN ('anon')
-        AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')
-        AND table_name IN ('buyer_comp_raw_v2','buyer_entities_v2')`,
+    `SELECT c.relname AS table_name, p.privilege_type
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE']) AS p(privilege_type)
+      WHERE n.nspname = 'public'
+        AND c.relname IN ('buyer_comp_raw_v2','buyer_entities_v2','properties')
+        AND has_table_privilege('anon', c.oid, p.privilege_type)`,
   );
   if (writableByAnon.length) {
     fail('grant_posture_mismatch', {
-      detail: 'anon holds write privileges on the comp corpus',
+      detail: 'anon holds write privileges on the comp corpus or the subject table',
       grants: writableByAnon.map((r) => `${r.table_name}:${r.privilege_type}`),
     });
   } else {
-    pass('anon holds no write privilege on the comp corpus');
+    pass('anon holds no write privilege on the comp corpus or the subject table');
   }
 
   return { ok: failures.length === 0, failures, checks };

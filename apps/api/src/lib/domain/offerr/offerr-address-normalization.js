@@ -86,8 +86,19 @@ function normalizeSegmentText(value) {
     .trim();
 }
 
-function extractZip(tokens) {
-  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+/**
+ * Pull a ZIP / ZIP+4 out of a token stream, scanning from the end.
+ *
+ * `minIndex` protects the leading street number. Without a comma tail the
+ * combined stream IS the street segment, so token 0 is the house number — and
+ * a five-digit house number ("12345 Main St") matches the ZIP pattern exactly.
+ * Consuming it left `tokens[0] === 'main'`, which failed the street-number
+ * test and returned `missing_street_number` for a perfectly valid address.
+ * Canonical `property_address_full` values are parsed by this same function,
+ * so those rows failed to parse too.
+ */
+function extractZip(tokens, { minIndex = 0 } = {}) {
+  for (let i = tokens.length - 1; i >= minIndex; i -= 1) {
     const m = /^(\d{5})(?:-(\d{4}))?$/.exec(tokens[i]);
     if (m) {
       tokens.splice(i, 1);
@@ -205,7 +216,10 @@ export function parseSellerAddress(raw) {
   // ZIP and state always live in the tail of the combined token stream.
   const hasCommaTail = tailTokens.length > 0;
   const combinedTail = hasCommaTail ? tailTokens : streetTokens;
-  const { zip5, zip4 } = extractZip(combinedTail);
+  // With a comma tail the tail contains no house number, so every token is a
+  // ZIP candidate. Without one, token 0 is the house number and must never be
+  // consumed as a ZIP.
+  const { zip5, zip4 } = extractZip(combinedTail, { minIndex: hasCommaTail ? 0 : 1 });
   const state = extractState(combinedTail, { allowCollisions: hasCommaTail });
 
   const unit =
