@@ -1443,36 +1443,80 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     });
 
     if (!contact_window.allowed && !manual_inbox_send) {
-      const { buildContactWindowDeferral } = await import(
-        "@/lib/domain/queue/contact-window-deferral.js"
-      );
-      const deferral = buildContactWindowDeferral(contact_window, now);
-      await releaseSkippedQueueRow(
-        queue_row,
-        lock_token,
-        deferral.reason || contact_window.reason,
-        {
+      // Bounded internal-proof bypass: an exact-conjunction check (scoped
+      // canary + single-row authorization + pinned internal session row) that
+      // no real seller row can satisfy. Any failure falls through to the
+      // normal deferral.
+      let proof_bypass = null;
+      try {
+        const { evaluateInternalProofContactWindowBypass } = await import(
+          "@/lib/domain/queue/internal-proof-session.js"
+        );
+        proof_bypass = await evaluateInternalProofContactWindowBypass(queue_row, {
           ...deps,
           now,
-          queue_status: deferral.queue_status || "scheduled",
-          metadata_patch: {
-            ...(deferral.metadata || {}),
-            next_eligible_at: deferral.next_eligible_at,
-            deferred_contact_window: true,
-          },
-        }
-      );
+        });
+      } catch (bypass_error) {
+        proof_bypass = {
+          allowed: false,
+          reason: `bypass_evaluation_error:${bypass_error?.message || "unknown"}`,
+        };
+      }
 
-      return {
-        ok: true,
-        skipped: true,
-        reason: deferral.reason || "deferred_contact_window",
-        queue_status: deferral.queue_status || "scheduled",
-        final_queue_status: deferral.queue_status || "scheduled",
-        next_eligible_at: deferral.next_eligible_at,
-        queue_row_id,
-        queue_item_id: queue_row_id,
-      };
+      if (proof_bypass?.allowed === true) {
+        // Durable audit before transport: if this write fails, the send fails.
+        const bypass_metadata = {
+          ...(queue_row.metadata ?? {}),
+          contact_window_bypass: {
+            session_id: proof_bypass.session_id,
+            leg: proof_bypass.leg,
+            canary_run_id: clean(deps.canary_run_id) || null,
+            bypassed_at: now,
+            underlying_reason: contact_window.reason,
+            session_expires_at: proof_bypass.expires_at,
+          },
+        };
+        await updateQueueRow(queue_row_id, { metadata: bypass_metadata }, deps);
+        queue_row = normalizeSendQueueRow({ ...queue_row, metadata: bypass_metadata });
+        info("queue.contact_window_internal_proof_bypass", {
+          queue_row_id,
+          session_id: proof_bypass.session_id,
+          leg: proof_bypass.leg,
+          canary_run_id: clean(deps.canary_run_id) || null,
+          underlying_reason: contact_window.reason,
+        });
+      } else {
+        const { buildContactWindowDeferral } = await import(
+          "@/lib/domain/queue/contact-window-deferral.js"
+        );
+        const deferral = buildContactWindowDeferral(contact_window, now);
+        await releaseSkippedQueueRow(
+          queue_row,
+          lock_token,
+          deferral.reason || contact_window.reason,
+          {
+            ...deps,
+            now,
+            queue_status: deferral.queue_status || "scheduled",
+            metadata_patch: {
+              ...(deferral.metadata || {}),
+              next_eligible_at: deferral.next_eligible_at,
+              deferred_contact_window: true,
+            },
+          }
+        );
+
+        return {
+          ok: true,
+          skipped: true,
+          reason: deferral.reason || "deferred_contact_window",
+          queue_status: deferral.queue_status || "scheduled",
+          final_queue_status: deferral.queue_status || "scheduled",
+          next_eligible_at: deferral.next_eligible_at,
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
     }
 
     const destination = resolveQueueDestinationPhone(queue_row);

@@ -423,6 +423,11 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
           campaign_id: parsed.campaign_id,
           authorization_token: deps.authorization_token,
           scoped_canary: true,
+          // Execution context for the internal-proof contact-window bypass:
+          // it must see the run's manifest shape, never infer it from the row.
+          queue_execution_mode: execution_mode,
+          scoped_canary_max_rows: parsed.max_rows,
+          scoped_canary_requested_ids: evaluation.requested_ids,
         });
         if (result?.sent) {
           sent_count += 1;
