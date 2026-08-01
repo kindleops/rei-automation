@@ -237,7 +237,6 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       const { runScopedCampaignCanary } = await import("@/lib/domain/queue/run-scoped-campaign-canary.js");
       const { readCanaryAuthorizationToken } = await import("@/lib/security/scoped-canary-auth.js");
       const {
-        consumeCanaryAuthorization,
         validateCanaryAuthorizationToken,
       } = await import("@/lib/domain/queue/queue-canary-authorization.js");
       const { supabase: default_supabase } = await import("@/lib/supabase/client.js");
@@ -260,18 +259,13 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         );
       }
 
-      if (!scoped_canary_request.validate_only && !dry_run) {
-        const consumed = await consumeCanaryAuthorization(
-          supabase_client,
-          auth_validation.authorization_id
-        );
-        if (!consumed.ok) {
-          return json_response(
-            { ok: false, error: consumed.reason || "authorization_consume_failed" },
-            { status: 401 }
-          );
-        }
-      }
+      // The authorization is NOT consumed here. Consuming before dispatch made
+      // every scoped canary impossible: queue_atomic_claim_send_row rejects any
+      // authorization whose consumed_at is already set, so the request denied
+      // itself and nothing was ever sent. Consumption now happens inside that
+      // same claim RPC, in the transaction that actually claims the row, so a
+      // claim and its consumption are one atomic act and a failed preclaim
+      // leaves the authorization unspent.
 
       scoped_canary_request.dry_run =
         scoped_canary_request.validate_only || dry_run;

@@ -101,6 +101,10 @@ export async function atomicClaimSendQueueRow(row, deps = {}) {
     claim_token,
     claimed_at: result.claimed_at || deps.now || new Date().toISOString(),
     processing_run_id: result.processing_run_id || processing_run_id,
+    // Set by the claim RPC when this claim also spent the scoped-canary
+    // authorization. Null for unrestricted claims and for scoped claims whose
+    // manifest still has rows outstanding.
+    authorization_consumed_at: result.authorization_consumed_at || null,
   };
 }
 
