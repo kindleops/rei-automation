@@ -68,6 +68,39 @@ function req(name) {
   return v;
 }
 
+/**
+ * TLS settings for the Supabase connection.
+ *
+ * This connection carries database credentials to a Supabase branch across the
+ * public internet, so certificate verification stays ON. `rejectUnauthorized:
+ * false` accepts any certificate, including an attacker's, which turns the
+ * hop into an unauthenticated one.
+ *
+ * Supabase's pooler endpoints present publicly-trusted certificates, so the
+ * default needs no extra material. A direct `db.<ref>.supabase.co` host may
+ * present a project-specific CA — download it from the project's Database
+ * Settings and point OFFERR_SUPABASE_CA_CERT at the file.
+ *
+ * Verification can be disabled only by setting
+ * OFFERR_ALLOW_INSECURE_DB_TLS=true, and doing so prints a loud warning. It is
+ * never the default and never silent.
+ */
+function buildVerifiedSsl(connectionString) {
+  if (/@(localhost|127\.0\.0\.1)[:/]/.test(String(connectionString))) return false;
+
+  if (String(process.env.OFFERR_ALLOW_INSECURE_DB_TLS ?? '').trim() === 'true') {
+    console.warn(
+      '\n  !! TLS CERTIFICATE VERIFICATION DISABLED (OFFERR_ALLOW_INSECURE_DB_TLS=true).\n' +
+        '     Database credentials are being sent over an unauthenticated channel.\n',
+    );
+    return { rejectUnauthorized: false };
+  }
+
+  const caPath = String(process.env.OFFERR_SUPABASE_CA_CERT ?? '').trim();
+  if (caPath) return { rejectUnauthorized: true, ca: fs.readFileSync(caPath, 'utf8') };
+  return { rejectUnauthorized: true };
+}
+
 const results = [];
 let failures = 0;
 function check(name, condition, detail = '') {
@@ -194,7 +227,14 @@ async function main() {
   const identity = await assertOfferrPreviewBranch({ target: DB_URL });
   printPreviewIdentity(identity, { script: 'offerr-preview-https-verify', phase: PHASE, preview_url: PREVIEW_URL });
 
-  const pool = new pg.Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false }, max: 8 });
+  // buildVerifiedSsl() is the whole point of the TLS hardening: keeping a
+  // hard-coded `{ rejectUnauthorized: false }` here left the helper dead code
+  // and the credentials on an unauthenticated channel.
+  const pool = new pg.Pool({
+    connectionString: DB_URL,
+    ssl: buildVerifiedSsl(DB_URL),
+    max: 8,
+  });
   const report = { phase: PHASE, preview_url: PREVIEW_URL, branch: identity, cases: [], latency: null };
 
   if (SEED) {

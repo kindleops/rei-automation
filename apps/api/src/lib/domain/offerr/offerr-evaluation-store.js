@@ -16,7 +16,25 @@
  * — snapshots are immutable.
  */
 
+import { createHash } from 'node:crypto';
+
+import { child } from '@/lib/logging/logger.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
+
+const moduleLogger = child({ module: 'domain.offerr.evaluation_store' });
+
+/**
+ * The idempotency key is caller-supplied and up to 128 characters, so it is
+ * not guaranteed to be an opaque token — a caller may derive it from a seller
+ * email address or phone number. The rest of this spine keeps raw identifiers
+ * out of logs on purpose (`evaluateOfferrProperty` logs only a sha256 prefix
+ * of the address), and `orphaned_request_id` already gives an operator the
+ * exact row to delete, so the key itself carries no operational value here.
+ */
+function idempotencyKeyRef(value) {
+  if (!value) return null;
+  return createHash('sha256').update(String(value)).digest('hex').slice(0, 12);
+}
 
 export const OFFERR_REQUESTS_TABLE = 'offerr_evaluation_requests';
 export const OFFERR_EVALUATIONS_TABLE = 'offerr_evaluations';
@@ -34,6 +52,10 @@ function generateId(deps = {}) {
  */
 export function createSupabaseOfferrEvaluationStore(deps = {}) {
   const db = () => deps.db ?? deps.supabase ?? getDefaultSupabaseClient();
+  // Injectable like the service's, so what this store puts in a log line is
+  // assertable — redaction that cannot be tested is redaction that silently
+  // regresses.
+  const logger = deps.logger ?? moduleLogger;
 
   async function loadByRequestRow(requestRow) {
     const { data: evaluation, error } = await db()
@@ -98,16 +120,38 @@ export function createSupabaseOfferrEvaluationStore(deps = {}) {
         // The two inserts are not transactional: without compensation the
         // idempotency key would be consumed by a request row that has no
         // evaluation snapshot. Delete our own just-inserted request so the
-        // caller can retry cleanly; if the delete fails the replay path still
-        // refuses to present the partial snapshot as a success.
-        await db()
+        // caller can retry cleanly.
+        //
+        // The delete's own result is load-bearing. If it fails, the orphan
+        // request row survives and every later retry with the same key reads
+        // back `found: true, evaluation: null` -> `offerr_incomplete_snapshot`
+        // -> HTTP 503, which the route documents as a TRANSIENT race. The
+        // state is in fact permanent, so "retry" is wrong advice and only an
+        // operator deleting the orphan can clear it. Report it explicitly and
+        // name the row so it can be cleaned up.
+        const { error: compensationError } = await db()
           .from(OFFERR_REQUESTS_TABLE)
           .delete()
           .eq('id', insertedRequest.id);
+
+        if (compensationError) {
+          logger.error('offerr_evaluation_store.compensation_failed', {
+            idempotency_key_sha256_12: idempotencyKeyRef(request.idempotency_key),
+            orphaned_request_id: insertedRequest.id,
+            evaluation_error: evaluationError.message,
+            compensation_error: compensationError.message,
+          });
+        }
+
         return {
           ok: false,
-          error: 'offerr_evaluation_write_failed',
+          error: compensationError
+            ? 'offerr_evaluation_write_orphaned'
+            : 'offerr_evaluation_write_failed',
           detail: evaluationError.message,
+          compensation_failed: Boolean(compensationError),
+          compensation_error: compensationError?.message ?? null,
+          orphaned_request_id: compensationError ? insertedRequest.id : null,
         };
       }
 

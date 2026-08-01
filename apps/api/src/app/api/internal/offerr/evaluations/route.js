@@ -25,6 +25,24 @@ const FAILURE_STATUS = {
   offerr_persistence_unavailable: 503,
   offerr_persistence_failed: 503,
   offerr_idempotency_conflict_retry: 503,
+  // A transient canonical-read fault during subject hydration: retryable.
+  subject_hydration_error: 503,
+  // The candidate loader threw `offerr_property_lookup_failed` — the canonical
+  // `properties` table was unreachable. Same class of dependency fault as
+  // subject hydration, so it carries the same retryable status rather than
+  // falling through to the default 500.
+  property_resolution_error: 503,
+  // The comp/buyer loaders wrap the same class of Supabase read fault.
+  comp_load_error: 503,
+  // A deterministic compute fault inside the acquisition engine. Replaying the
+  // same input reproduces it, so it is not a retry candidate — it needs a fix,
+  // and 500 keeps it inside exception alerting.
+  decision_engine_error: 500,
+  // The evaluation snapshot failed to write AND the compensating delete of the
+  // request row also failed. The idempotency key is now permanently consumed by
+  // an orphan row until an operator removes it, so this must NOT be reported as
+  // a retryable 503 the way offerr_incomplete_snapshot is.
+  offerr_persistence_orphaned: 500,
   // A request row without its evaluation snapshot is a transiently inconsistent
   // server state, not an unhandled fault: under concurrent same-key traffic the
   // pre-flight replay lookup routinely observes the winner's request row before

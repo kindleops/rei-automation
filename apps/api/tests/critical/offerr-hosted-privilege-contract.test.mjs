@@ -87,34 +87,90 @@ test(
       }
     });
 
+    // ── Table grants: catalog functions, never information_schema ──────────
+    //
+    // information_schema.role_table_grants only reports grants involving roles
+    // that are CURRENTLY ENABLED for the session. A verifier connected as a
+    // superuser or as the schema owner is typically not a member of anon or
+    // authenticated, so the view returns zero rows whether or not those grants
+    // exist — an "is empty" assertion over it can pass vacuously and prove
+    // nothing. has_table_privilege() and aclexplode() read the catalog directly
+    // and are membership-independent, which is why the production proof in
+    // docs/offerr/offerr-staging-verification-report.md §14.4 uses them.
+
     await t.test('anon and authenticated hold zero privileges on offerr_* tables', async () => {
       const { rows } = await pool.query(`
-        SELECT table_name, grantee, privilege_type
-        FROM information_schema.role_table_grants
-        WHERE table_schema = 'public'
-          AND table_name LIKE 'offerr%'
-          AND grantee IN ('anon', 'authenticated', 'PUBLIC')
+        SELECT c.relname AS table_name, r.rolname AS grantee, p.privilege_type
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN (VALUES ('anon'), ('authenticated')) AS roles(rolname)
+        JOIN pg_roles r ON r.rolname = roles.rolname
+        CROSS JOIN unnest(ARRAY[
+          'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'
+        ]) AS p(privilege_type)
+        WHERE n.nspname = 'public'
+          AND c.relname LIKE 'offerr%'
+          AND c.relkind = 'r'
+          AND has_table_privilege(r.rolname, c.oid, p.privilege_type)
       `);
       assert.deepEqual(
         rows.map((r) => `${r.grantee}:${r.privilege_type} on ${r.table_name}`),
+        [],
+        'anon/authenticated must hold no privilege on any offerr_* table',
+      );
+    });
+
+    await t.test('PUBLIC appears in no offerr_* table ACL', async () => {
+      // aclexplode() renders grantee OID 0 as PUBLIC. A PUBLIC grant would be
+      // invisible to a per-role has_table_privilege sweep of named roles.
+      const { rows } = await pool.query(`
+        SELECT c.relname AS table_name, a.privilege_type
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN LATERAL aclexplode(c.relacl) AS a
+        WHERE n.nspname = 'public'
+          AND c.relname LIKE 'offerr%'
+          AND c.relkind = 'r'
+          AND a.grantee = 0
+      `);
+      assert.deepEqual(
+        rows.map((r) => `PUBLIC:${r.privilege_type} on ${r.table_name}`),
         [],
       );
     });
 
     await t.test('evaluations and events remain append-only for service_role', async () => {
       const { rows } = await pool.query(`
-        SELECT table_name, privilege_type
-        FROM information_schema.role_table_grants
-        WHERE table_schema = 'public'
-          AND table_name IN ('offerr_evaluations', 'offerr_evaluation_events')
-          AND grantee = 'service_role'
-          AND privilege_type IN ('UPDATE', 'DELETE')
+        SELECT c.relname AS table_name, p.privilege_type
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN unnest(ARRAY['UPDATE','DELETE','TRUNCATE']) AS p(privilege_type)
+        WHERE n.nspname = 'public'
+          AND c.relname IN ('offerr_evaluations', 'offerr_evaluation_events')
+          AND has_table_privilege('service_role', c.oid, p.privilege_type)
       `);
       assert.deepEqual(
         rows.map((r) => `${r.privilege_type} on ${r.table_name}`),
         [],
         'service_role must not be able to mutate a persisted evaluation or event',
       );
+    });
+
+    await t.test('service_role retains the append path it needs', async () => {
+      // The negative assertions above would also pass if service_role had lost
+      // every grant, which would break the spine silently. Pin the positive.
+      const { rows } = await pool.query(`
+        SELECT c.relname AS table_name, p.privilege_type
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        CROSS JOIN unnest(ARRAY['SELECT','INSERT']) AS p(privilege_type)
+        WHERE n.nspname = 'public'
+          AND c.relname LIKE 'offerr%'
+          AND c.relkind = 'r'
+          AND has_table_privilege('service_role', c.oid, p.privilege_type)
+      `);
+      // 3 Offerr tables x {SELECT, INSERT}
+      assert.equal(rows.length, 6, `expected 6 service_role read/append grants, got ${rows.length}`);
     });
   },
 );

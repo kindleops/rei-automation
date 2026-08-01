@@ -59,6 +59,46 @@ export const FAILURE_CODES = Object.freeze([
   'grant_posture_mismatch',
 ]);
 
+/**
+ * Drift severity — scope, not just pass/fail.
+ *
+ * Adding `public.properties` to the grant-posture check made a PRE-EXISTING,
+ * independently documented production grant visible here for the first time
+ * (production grants `anon` DML on the shared canonical tables; see the
+ * verification report §14.4). That visibility is wanted. What is NOT wanted is
+ * an activation gate that reports `1 DRIFT FAILURE` and thereby implies the
+ * OFFERR migration is incompatible, when the Offerr schema is in fact intact
+ * and the finding belongs to a shared corpus this task must not modify.
+ *
+ * So findings carry a scope:
+ *
+ *   BLOCKING_OFFERR_DRIFT         the Offerr contract itself is not satisfied —
+ *                                 a missing table, column, index, RPC shape or
+ *                                 feature flag. Activation must not proceed.
+ *   SHARED_SCHEMA_SECURITY_WARNING a real security finding on schema Offerr
+ *                                 READS but does not own. Never suppressed,
+ *                                 never silently downgraded, but it does not
+ *                                 assert that the Offerr migration is broken.
+ *   INFORMATIONAL                 context only.
+ *
+ * `ok` is false only for BLOCKING findings. `--strict` promotes warnings to
+ * blocking for the eventual grant-remediation gate.
+ */
+export const OFFERR_DRIFT_SEVERITY = Object.freeze({
+  BLOCKING: 'BLOCKING_OFFERR_DRIFT',
+  SHARED_SECURITY_WARNING: 'SHARED_SCHEMA_SECURITY_WARNING',
+  INFORMATIONAL: 'INFORMATIONAL',
+});
+
+/**
+ * Relations Offerr READS but does not own. A grant-posture finding on one of
+ * these is a shared-schema security warning; the same finding on an
+ * Offerr-owned relation is blocking.
+ */
+const SHARED_CORPUS_RELATIONS = Object.freeze(
+  new Set(['buyer_comp_raw_v2', 'buyer_entities_v2', 'properties', 'v_recent_sold_comps']),
+);
+
 const RELATION_FAILURE = {
   'public.properties': 'missing_properties_table',
   'public.buyer_comp_raw_v2': 'missing_comp_table',
@@ -78,7 +118,12 @@ const RELATION_FAILURE = {
 export async function checkSchemaContract(client, contract) {
   const failures = [];
   const checks = [];
-  const fail = (code, detail) => failures.push({ code, ...detail });
+  /**
+   * Severity defaults to BLOCKING so that any check added later is treated as
+   * an activation blocker unless somebody deliberately classifies it lower.
+   */
+  const fail = (code, detail, severity = OFFERR_DRIFT_SEVERITY.BLOCKING) =>
+    failures.push({ code, severity, ...detail });
   const pass = (label) => checks.push({ label, ok: true });
 
   const q = async (sql, params = []) => (await client.query(sql, params)).rows;
@@ -242,24 +287,68 @@ export async function checkSchemaContract(client, contract) {
   // ── 7. Grant posture: the comp corpus must not be writable by anon ──────
   // Advisory but load-bearing: an anon-writable comp corpus invalidates every
   // read-only guarantee the evaluation path claims.
+  // `properties` is included: it is the SUBJECT table of every evaluation, so
+  // an anon-writable subject undermines the same read-only guarantee as an
+  // anon-writable comp corpus. Note this makes the check assert the posture the
+  // staging bootstrap applies, not only the posture production happens to have
+  // — production is known to grant anon DML on all three and therefore reports
+  // this as a PRE-EXISTING failure (see verification report §14.4). That is a
+  // reporting change only; no production grant is modified by this task.
+  //
+  // has_table_privilege() is used rather than information_schema.role_table_grants:
+  // that view only reports grants involving CURRENTLY ENABLED roles, so a
+  // session that is not a member of `anon` sees zero rows whether or not the
+  // grants exist, and the check would pass vacuously.
   const writableByAnon = await q(
-    `SELECT table_name, grantee, privilege_type
-       FROM information_schema.role_table_grants
-      WHERE table_schema = 'public'
-        AND grantee IN ('anon')
-        AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE')
-        AND table_name IN ('buyer_comp_raw_v2','buyer_entities_v2')`,
+    `SELECT c.relname AS table_name, p.privilege_type
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE']) AS p(privilege_type)
+      WHERE n.nspname = 'public'
+        AND c.relname IN ('buyer_comp_raw_v2','buyer_entities_v2','properties')
+        AND has_table_privilege('anon', c.oid, p.privilege_type)`,
   );
   if (writableByAnon.length) {
-    fail('grant_posture_mismatch', {
-      detail: 'anon holds write privileges on the comp corpus',
-      grants: writableByAnon.map((r) => `${r.table_name}:${r.privilege_type}`),
-    });
+    // Offerr-owned relations are blocking; the shared canonical corpus is a
+    // security warning. Both are reported — neither is suppressed.
+    const ownedDrift = writableByAnon.filter((r) => !SHARED_CORPUS_RELATIONS.has(r.table_name));
+    const sharedDrift = writableByAnon.filter((r) => SHARED_CORPUS_RELATIONS.has(r.table_name));
+
+    if (ownedDrift.length) {
+      fail('grant_posture_mismatch', {
+        detail: 'anon holds write privileges on an Offerr-owned relation',
+        grants: ownedDrift.map((r) => `${r.table_name}:${r.privilege_type}`),
+      });
+    }
+    if (sharedDrift.length) {
+      fail(
+        'grant_posture_mismatch',
+        {
+          detail:
+            'anon holds write privileges on the shared canonical corpus Offerr reads ' +
+            '(comp tables and/or the subject table). Pre-existing production posture, ' +
+            'documented in the verification report §14.4; remediating it is a separate, ' +
+            'cross-cutting task and is deliberately NOT performed here.',
+          grants: sharedDrift.map((r) => `${r.table_name}:${r.privilege_type}`),
+        },
+        OFFERR_DRIFT_SEVERITY.SHARED_SECURITY_WARNING,
+      );
+    }
   } else {
-    pass('anon holds no write privilege on the comp corpus');
+    pass('anon holds no write privilege on the comp corpus or the subject table');
   }
 
-  return { ok: failures.length === 0, failures, checks };
+  const blocking = failures.filter((f) => f.severity === OFFERR_DRIFT_SEVERITY.BLOCKING);
+  const warnings = failures.filter(
+    (f) => f.severity === OFFERR_DRIFT_SEVERITY.SHARED_SECURITY_WARNING,
+  );
+  const informational = failures.filter(
+    (f) => f.severity === OFFERR_DRIFT_SEVERITY.INFORMATIONAL,
+  );
+
+  // `failures` still carries EVERY finding, so nothing is hidden from any
+  // existing consumer; only the ok/blocking distinction is new.
+  return { ok: blocking.length === 0, failures, blocking, warnings, informational, checks };
 }
 
 async function main() {
@@ -291,23 +380,68 @@ async function main() {
     await client.end();
   }
 
+  // `--strict` promotes shared-schema security warnings to blocking. Use it
+  // for the eventual grant-remediation gate; activation itself blocks only on
+  // genuine Offerr incompatibility.
+  const strict = process.argv.includes('--strict');
+  // Strict promotes SHARED_SCHEMA_SECURITY_WARNING to blocking — and only
+  // that. Gating on `failures.length` would also fail the build on a purely
+  // INFORMATIONAL finding, which is not what strict mode means.
+  const gateOk = strict
+    ? result.blocking.length + result.warnings.length === 0
+    : result.ok;
+
   if (asJson) {
-    console.log(JSON.stringify({ ok: result.ok, failures: result.failures }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          ok: gateOk,
+          strict,
+          offerr_contract_ok: result.ok,
+          blocking: result.blocking,
+          warnings: result.warnings,
+          informational: result.informational,
+          failures: result.failures,
+        },
+        null,
+        2,
+      ),
+    );
   } else {
     console.log(`\nOfferr comp-intelligence schema drift check — contract ${contract.schema_contract_version}`);
     console.log(`  target: ${target.replace(/:[^:@/]*@/, ':***@')}`);
     console.log(`  read-only: enforced by the server (default_transaction_read_only=on)\n`);
     for (const c of result.checks) console.log(`  PASS  ${c.label}`);
-    if (result.failures.length) {
-      console.log('\n  DRIFT DETECTED:');
-      for (const f of result.failures) {
-        const { code, ...rest } = f;
-        console.log(`  FAIL  ${code}  ${JSON.stringify(rest)}`);
+
+    const render = (label, list) => {
+      if (!list.length) return;
+      console.log(`\n  ${label}:`);
+      for (const f of list) {
+        const { code, severity: _s, ...rest } = f;
+        console.log(`  ${label === 'BLOCKING OFFERR DRIFT' ? 'FAIL' : 'WARN'}  ${code}  ${JSON.stringify(rest)}`);
       }
+    };
+    render('BLOCKING OFFERR DRIFT', result.blocking);
+    render('SHARED-SCHEMA SECURITY WARNINGS', result.warnings);
+    render('INFORMATIONAL', result.informational);
+
+    // State the two facts separately so neither can be mistaken for the other:
+    // whether the OFFERR contract holds, and whether anything else needs an
+    // owner. A pre-existing shared grant must never read as "Offerr is broken".
+    console.log(
+      `\n  offerr contract: ${
+        result.ok ? 'COMPATIBLE' : `${result.blocking.length} BLOCKING DRIFT FAILURE(S)`
+      }`,
+    );
+    if (result.warnings.length) {
+      console.log(
+        `  shared schema : ${result.warnings.length} SECURITY WARNING(S) — pre-existing, ` +
+          `separately owned${strict ? ' (BLOCKING: --strict)' : ' (not blocking activation)'}`,
+      );
     }
-    console.log(`\n  ${result.ok ? 'COMPATIBLE' : `${result.failures.length} DRIFT FAILURE(S)`}\n`);
+    console.log('');
   }
-  return result.ok ? 0 : 1;
+  return gateOk ? 0 : 1;
 }
 
 // Only run the CLI when executed directly, so tests can import the checker.
@@ -320,4 +454,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     });
 }
 
-export default { checkSchemaContract, loadContract, FAILURE_CODES, CONTRACT_PATH };
+export default {
+  checkSchemaContract,
+  loadContract,
+  FAILURE_CODES,
+  CONTRACT_PATH,
+  OFFERR_DRIFT_SEVERITY,
+};

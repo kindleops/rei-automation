@@ -102,6 +102,61 @@ test('parser normalizes suffixes, directionals, states, ZIP+4, units, and glued 
   assert.equal(normalizeZip5('77035-4712'), '77035');
 });
 
+test('five-digit house numbers are never consumed as a ZIP (comma-less input)', () => {
+  // Regression: extractZip scanned the whole token stream from the end. With
+  // no comma tail the stream IS the street segment, so a five-digit house
+  // number matched the ZIP pattern, was spliced out, and left tokens[0]='main'
+  // -> reason 'missing_street_number' -> INVALID_INPUT for a valid address.
+  // Canonical property_address_full values parse through this same function,
+  // so those rows failed to parse too.
+  const bare = parseSellerAddress('12345 Main St');
+  assert.equal(bare.ok, true, bare.reason ?? 'should parse');
+  assert.equal(bare.street_number, '12345');
+  assert.equal(bare.street_name, 'main');
+  assert.equal(bare.suffix, 'st');
+  assert.equal(bare.zip5, null, 'the house number is not a ZIP');
+
+  const noZip = parseSellerAddress('12345 Main St Houston TX');
+  assert.equal(noZip.ok, true);
+  assert.equal(noZip.street_number, '12345');
+  assert.equal(noZip.city, 'houston');
+  assert.equal(noZip.state, 'tx');
+  assert.equal(noZip.zip5, null);
+
+  // A real trailing ZIP is still extracted, and the house number survives.
+  const withZip = parseSellerAddress('12345 Main St Houston TX 77002');
+  assert.equal(withZip.street_number, '12345');
+  assert.equal(withZip.zip5, '77002');
+
+  // Comma-separated input was never affected and must stay correct.
+  const commas = parseSellerAddress('12345 Main St, Houston, TX 77002');
+  assert.equal(commas.street_number, '12345');
+  assert.equal(commas.zip5, '77002');
+
+  // A leading token that is genuinely not a street number is still refused.
+  const noNumber = parseSellerAddress('tx houston area 77035');
+  assert.equal(noNumber.ok, false);
+  assert.equal(noNumber.reason, 'missing_street_number');
+  assert.equal(noNumber.zip5, '77035');
+});
+
+test('a five-digit house number resolves end to end', async () => {
+  const bigNumber = row(
+    'p-bignum',
+    '12345 Sandbox Ridge Rd, Houston, TX 77035',
+    'Houston',
+    'TX',
+    '77035',
+  );
+  const r = await resolve('12345 Sandbox Ridge Rd, Houston, TX 77035', [bigNumber]);
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(r.property_id, 'p-bignum');
+
+  const commaless = await resolve('12345 Sandbox Ridge Rd Houston TX 77035', [bigNumber]);
+  assert.equal(commaless.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(commaless.property_id, 'p-bignum');
+});
+
 // ── 1-8: variation that must still resolve ──────────────────────────────────
 
 test('1. exact canonical address resolves', async () => {
@@ -338,8 +393,14 @@ test('20. resolver makes no external provider request', async () => {
 });
 
 test('service maps INVALID_INPUT resolution to a confirm-address review, no range', async () => {
+  // A leading token that is not a street number is genuinely unparseable.
+  // (The former fixture here was '77035 tx houston area', which only parsed as
+  // INVALID_INPUT because a leading five-digit token was being eaten as a ZIP.
+  // That defect is fixed, so the leading 77035 is now correctly read as a house
+  // number — see the five-digit house-number regressions above. Both inputs
+  // still fail closed to the same seller-facing confirm-address review.)
   const result = await evaluateOfferrProperty(
-    { address: '77035 tx houston area', idempotency_key: 'resolution-invalid-1' },
+    { address: 'tx houston area 77035', idempotency_key: 'resolution-invalid-1' },
     serviceDeps(),
   );
   assert.equal(result.ok, true);
@@ -350,4 +411,126 @@ test('service maps INVALID_INPUT resolution to a confirm-address review, no rang
     result.internal_result.resolution.status,
     OFFERR_RESOLUTION_STATUSES.INVALID_INPUT,
   );
+});
+
+/* ── Legitimate-address compatibility ─────────────────────────────────────────
+ *
+ * The normalizer is applied to BOTH the seller's input and the canonical
+ * `property_address_full`, so a form it cannot parse is not merely a rejected
+ * submission — the canonical rows for those properties cannot be parsed
+ * either, and the address could never resolve from either side. Each case
+ * below is an ordinary US address form that previously failed closed.
+ */
+
+test('hyphenated house numbers (Queens/Hawaii style) parse and resolve', async () => {
+  const canonical = row(
+    'p-queens',
+    '123-45 Roosevelt Ave, Queens, NY 11372',
+    'Queens',
+    'NY',
+    '11372',
+  );
+  const parsed = parseSellerAddress('123-45 Roosevelt Ave, Queens, NY 11372');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_number, '123-45');
+  assert.equal(parsed.street_name, 'roosevelt');
+
+  const r = await resolveOfferrSubjectProperty(
+    { rawAddress: '123-45 Roosevelt Ave, Queens, NY 11372' },
+    { loadCandidates: async () => [canonical] },
+  );
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(r.property_id, 'p-queens');
+});
+
+test('a highway street name is not eaten by the street-suffix scan', async () => {
+  // "highway" is a suffix homograph; followed by a bare route number it is
+  // part of the road's NAME. Treating it as a suffix consumed the street name
+  // entirely and returned INVALID_INPUT for a valid rural address.
+  const parsed = parseSellerAddress('1234 Highway 6, Alvin, TX 77511');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_name, 'highway 6');
+  assert.equal(parsed.suffix, null);
+
+  const canonical = row('p-hwy', '1234 Highway 6, Alvin, TX 77511', 'Alvin', 'TX', '77511');
+  const r = await resolveOfferrSubjectProperty(
+    { rawAddress: '1234 Highway 6, Alvin, TX 77511' },
+    { loadCandidates: async () => [canonical] },
+  );
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+});
+
+test('a state-highway route number is not mistaken for the city', async () => {
+  const parsed = parseSellerAddress('1234 State Highway 6, Alvin, TX 77511');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_name, 'state highway 6');
+  assert.equal(parsed.city, 'alvin', 'the real city must survive, not the route number');
+
+  const canonical = row(
+    'p-sh6',
+    '1234 State Highway 6, Alvin, TX 77511',
+    'Alvin',
+    'TX',
+    '77511',
+  );
+  const r = await resolveOfferrSubjectProperty(
+    { rawAddress: '1234 State Highway 6, Alvin, TX 77511' },
+    { loadCandidates: async () => [canonical] },
+  );
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+});
+
+test('a street named only by a suffix homograph still parses', async () => {
+  const parsed = parseSellerAddress('123 Way, Austin, TX 78701');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_name, 'way');
+});
+
+test('apostrophes and accents survive normalization on both sides', async () => {
+  for (const [seller, canonicalFull] of [
+    ["123 O'Connor St, Dallas, TX 75201", "123 O'Connor St, Dallas, TX 75201"],
+    ['77 Cañada Rd, Woodside, CA 94062', '77 Cañada Rd, Woodside, CA 94062'],
+    ['99 Peña Blvd, Denver, CO 80249', '99 Peña Blvd, Denver, CO 80249'],
+  ]) {
+    const seen = parseSellerAddress(seller);
+    const canon = parseSellerAddress(canonicalFull);
+    assert.equal(seen.ok, true, `${seller}: ${seen.reason ?? ''}`);
+    assert.equal(seen.street_name, canon.street_name, `${seller}: name must match canonical`);
+  }
+});
+
+test('a PO Box is rejected with a reason that names why, not a bogus parse error', async () => {
+  const parsed = parseSellerAddress('PO Box 123, Dallas, TX 75201');
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.reason, 'po_box_not_supported');
+
+  const r = await resolveOfferrSubjectProperty(
+    { rawAddress: 'PO Box 123, Dallas, TX 75201' },
+    { loadCandidates: async () => [] },
+  );
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.INVALID_INPUT);
+  assert.equal(r.reason, 'po_box_not_supported');
+});
+
+test('a rural route is rejected as a non-street address', async () => {
+  const parsed = parseSellerAddress('RR 2 Box 45, Sulphur, OK 73086');
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.reason, 'non_street_address');
+});
+
+test('a genuinely unparseable address still reports missing_street_number', async () => {
+  assert.equal(parseSellerAddress('tx houston area').reason, 'missing_street_number');
+});
+
+test('the route-number rule does not swallow an ordinary suffix', async () => {
+  // "100 Main St 204": a comma-less address ending in a bare unit number. The
+  // route-style rule must NOT fire here, or "st" is absorbed into the street
+  // name and the address stops matching its own canonical row.
+  const parsed = parseSellerAddress('100 Main St 204');
+  assert.equal(parsed.ok, true, parsed.reason ?? '');
+  assert.equal(parsed.street_name, 'main');
+  assert.equal(parsed.suffix, 'st');
+
+  // The route-style rule still applies where it should.
+  assert.equal(parseSellerAddress('1234 Highway 6, Alvin, TX 77511').suffix, null);
 });

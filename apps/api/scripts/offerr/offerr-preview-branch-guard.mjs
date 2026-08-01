@@ -165,11 +165,28 @@ export async function assertOfferrPreviewBranch({
   }
 
   // ── 4. The default branch IS production ──────────────────────────────────
-  if (match.is_default === true) {
+  // Require PROVEN non-default identity, not merely the absence of a `true`.
+  // Testing `is_default === true` alone fails OPEN: if the CLI omits the field,
+  // renames it, or serialises it as the string "true", the guard waves the run
+  // through — potentially against the parent project's own default branch.
+  // Anything that is not an explicit boolean `false` is unproven, and unproven
+  // identity is refused.
+  if (match.is_default !== false) {
+    const provenDefault = match.is_default === true;
     throw new OfferrPreviewBranchGuardError(
-      `REFUSING TO RUN AGAINST THE PRODUCTION BRANCH. "${projectRef}" ` +
-        `(${match.name}) is the DEFAULT branch of ${parentRef}.`,
-      { label, project_ref: projectRef, classification: 'default_branch' },
+      provenDefault
+        ? `REFUSING TO RUN AGAINST THE PRODUCTION BRANCH. "${projectRef}" ` +
+          `(${match.name}) is the DEFAULT branch of ${parentRef}.`
+        : `REFUSING TO RUN: branch "${projectRef}" (${match.name ?? 'unnamed'}) does not ` +
+          'positively prove it is a non-default branch. Expected boolean is_default=false, ' +
+          `got ${JSON.stringify(match.is_default ?? null)}. Offerr preview verification ` +
+          'never proceeds on unproven branch identity.',
+      {
+        label,
+        project_ref: projectRef,
+        classification: provenDefault ? 'default_branch' : 'unproven_branch_identity',
+        is_default: match.is_default ?? null,
+      },
     );
   }
 

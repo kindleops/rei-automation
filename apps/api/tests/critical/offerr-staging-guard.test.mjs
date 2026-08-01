@@ -267,6 +267,29 @@ test('the parent DEFAULT branch is refused even when reached by its own ref', as
   );
 });
 
+test('an unproven is_default fails closed instead of waving the run through', async () => {
+  // `is_default === true` alone fails OPEN. If the control plane omits the
+  // field, renames it, or serialises it as a string, the absent `true` would be
+  // read as "safe preview branch". Only an explicit boolean false proves
+  // non-default identity.
+  const ref = 'cccccccccccccccccccc';
+  for (const isDefault of [undefined, null, 'false', 'true', 0, 1]) {
+    await assert.rejects(
+      assertOfferrPreviewBranch({
+        target: `postgresql://postgres:pw@db.${ref}.supabase.co:5432/postgres`,
+        env: { ...previewEnv, OFFERR_STAGING_PROJECT_REF: ref },
+        listBranches: async () => ([
+          { id: 'b1', name: 'ambiguous', project_ref: ref, is_default: isDefault, status: 'OK' },
+        ]),
+      }),
+      (error) =>
+        error instanceof OfferrPreviewBranchGuardError &&
+        ['unproven_branch_identity', 'default_branch'].includes(error.details.classification),
+      `is_default=${JSON.stringify(isDefault)} must not be accepted`,
+    );
+  }
+});
+
 test('a real project that is not a branch of the parent is refused', async () => {
   const strangerRef = 'bbbbbbbbbbbbbbbbbbbb';
   await assert.rejects(

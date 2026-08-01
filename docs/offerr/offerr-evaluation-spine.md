@@ -108,9 +108,141 @@ rows, identifiers, or unresolved addresses.
 
 **Known limitation:** canonical rows store addresses as strings, so canonical
 components come from parsing `property_address_full` (structured city/state/
-ZIP columns override). A future provider adapter can supply pre-structured
-components through the same parsed-component shape without touching the
-resolver rules.
+ZIP columns override *where they agree* — see "Canonical field conflicts"
+below). A future provider adapter can supply pre-structured components through
+the same parsed-component shape without touching the resolver rules.
+
+### Candidate-set completeness (activation hardening, 2026-07-31)
+
+`RESOLVED` asserts that **exactly one** canonical property matches the
+submitted identity. That assertion is only defensible if the resolver has seen
+**every** candidate the filter can produce.
+
+The candidate query is a deliberate **superset** filter (street-number prefix
+`ILIKE '<number> %'` AND street-name-token containment `ILIKE '%<token>%'`).
+All identity-relevant discrimination — suffix, directionals, unit, duplicate
+parcels, geography — happens in JavaScript **after** the rows arrive.
+
+**The defect this replaces.** The original loader issued `.limit(25)` with
+**no `ORDER BY`**. Postgres was free to return any 25 matching rows, in any
+order, and to change that choice between two identical calls. A conflicting
+candidate outside the window was invisible, and the `AMBIGUOUS` guard — which
+counts only the rows it received — could not fire. The resolver returned a
+confident `RESOLVED` for a property that was **not uniquely identified**.
+Executed differential proof, identical fixture and identical database model:
+
+| Implementation | Rows seen | Ordered | Result |
+|---|---|---|---|
+| Pre-fix (`6a0fd934`) | 25 of 26 | **no** | `RESOLVED` → `true-match` (**wrong subject**) |
+| Hardened (this branch) | 26 of 26 | yes | `AMBIGUOUS` / `multiple_structured_matches` |
+
+#### Deterministic ordering
+
+Every candidate query orders by, in sequence:
+
+`property_address_full` → `property_address_city` → `property_address_state` →
+`property_address_zip` → `property_id` → **`property_export_id`**
+
+`property_id` carries a UNIQUE index (`uq_properties_property_id`) and
+`property_export_id` is the canonical **PRIMARY KEY**, so the final key
+guarantees a *total* order and the page boundary is reproducible. Natural
+database order is never relied upon. Ordering version:
+`offerr_candidate_order_v1`.
+
+#### Single-statement, exactly-counted retrieval
+
+The bounded candidate set is read in **one** request asking for
+`max_candidates + 1` rows with `{ count: 'exact' }`. PostgREST reports the total
+matching rows ignoring the range, so the resolver knows how many rows **exist**,
+not merely how many it received.
+
+One request is one SQL statement, and `count=exact` is computed inside that same
+statement, so rows and count are read from **one MVCC snapshot**.
+
+This replaced multi-request pagination, which could not prove membership
+stability. Comparing the exact count on every page detects *some* interference,
+but count equality is not set equality: a writer that deletes one row before the
+cursor and inserts another after it leaves the count untouched while shifting
+every unread row one position left, so the row on the page boundary is silently
+skipped — no count change, no duplicate, no guard fires. When that row was the
+duplicate parcel, the resolver answered `RESOLVED` for a property it had not
+uniquely identified. With a single statement there is no second read for a
+writer to interleave with, so the interference is *unrepresentable* rather than
+merely detectable.
+
+#### Bounds (explicit and documented)
+
+| Bound | Value | Purpose |
+|---|---|---|
+| `page_size` | 100 | retained row-budget unit |
+| `max_pages` | 5 | retained row-budget multiplier |
+| `max_candidates` | 500 | `page_size × max_pages`, asserted at module load |
+| `deadline_ms` | 5 000 | wall-clock ceiling on candidate loading |
+| `max_address_length` | 240 | refused **before** any database work |
+
+`page_size` and `max_pages` no longer describe round trips — they describe the
+same total row budget they always did, and their product **is** the bound
+enforced. The identity is asserted at module load so the documented budget and
+the enforced budget cannot silently diverge.
+
+A total count above `max_candidates` fails closed from that same single
+response. Street-name tokens are **truncated at the first character outside
+`[a-z0-9-]`** before interpolation, so a `%`, `_` or `*` in seller input cannot
+widen the `ILIKE` into a table-wide scan (PostgREST exposes no `ESCAPE` clause).
+Truncating rather than deleting matters for correctness: the fragment is matched
+against the raw canonical address, so deleting an apostrophe or an accent
+produced a fragment that was not a substring of the canonical text at all and
+the row could never be retrieved — `O'Connor`, `Cañada` and `Peña` all resolved
+to `NOT_FOUND` for perfectly legitimate addresses.
+
+#### Incompleteness always fails closed to `AMBIGUOUS`
+
+Completeness is checked **before** any matching runs, so a single apparent
+winner inside an unprovable set is never even evaluated.
+
+| Reason code | Trigger |
+|---|---|
+| `candidate_count_unavailable` | no exact count returned |
+| `candidate_set_exceeds_safe_bound` | total count above `max_candidates` |
+| `candidate_set_truncated` | the payload disagrees with its own exact count (server row cap or truncating client) |
+| `candidate_pagination_inconsistent` | a row appeared twice in one payload |
+| `candidate_pagination_failed` | *retained, unreachable from the default loader* — described a page after the first erroring |
+| `candidate_set_changed_during_pagination` | *retained, unreachable from the default loader* — described the count moving between reads |
+| `candidate_load_deadline_exceeded` | candidate loading outran its deadline |
+
+`candidate_pagination_failed` and `candidate_set_changed_during_pagination`
+describe interference *between* two reads. A single-statement read has no
+"between", so the default loader can no longer produce them; they are retained
+because the envelope is a public contract that
+injected loaders and stored diagnostics may still carry, and because removing a
+fail-closed reason code is not a safe way to signal that a failure mode was
+eliminated.
+
+A candidate query error is different in kind: the canonical source is
+unreachable, which is a dependency fault rather than an identity ambiguity. It
+throws `offerr_property_lookup_failed` → `property_resolution_error` so it is
+retried and alerted on, instead of telling a seller to confirm their address.
+
+#### Canonical field conflicts
+
+Structured columns take precedence over the parsed free-text address only where
+they **agree**. When both sides state a value and disagree (e.g.
+`property_address_full` says ZIP 77035 while `property_address_zip` says
+77099) the row is self-inconsistent: it can never win, and its presence among
+the base matches returns `AMBIGUOUS` / `canonical_field_conflict:<part>`.
+Conflicting canonical fields are never silently reconciled.
+
+#### Internal diagnostics
+
+`resolution.diagnostics` records `candidate_count`, `total_count`,
+`total_count_known`, `truncated`, `complete`, `pages_loaded`, `page_size`,
+`matching_candidate_count`, `conflicting_candidate_count`,
+`resolution_method`, `ordering_version`, `ordering_keys`, `reason_code`, and
+the active `bounds`. It lives on the internal result only. The seller-safe
+projection allowlists its fields one by one, so none of this can reach a
+seller — asserted directly in `offerr-candidate-completeness.test.mjs`.
+
+Resolution method identifier: `properties_structured_match_v3`.
 
 ## 4. Canonical components reused (no duplication)
 
@@ -512,6 +644,20 @@ Known limitations:
 - Canonical address components are parser-derived from strings (§3);
   comma-less inputs with unusual token order can fail closed to
   NOT_FOUND/AMBIGUOUS (never wrong-resolve).
+- Because the leading token of comma-less input is now protected as the house
+  number (the five-digit house-number fix, §3), an input whose leading token is
+  in fact a bare ZIP — `"77035 tx houston area"` — parses as house number 77035
+  on a street named "tx houston area" and fails closed to `NOT_FOUND` instead
+  of `INVALID_INPUT`. Both map to the same seller-facing outcome
+  (`REVIEW_REQUIRED` / `confirm_property_address`). The trade-off is
+  intrinsic: a leading five-digit token cannot simultaneously be protected as
+  a house number and consumed as a ZIP.
+- The candidate query remains a broad superset filter, so an address whose
+  first street-name token is also a very common city name can produce a large
+  candidate set. That now fails closed to `AMBIGUOUS`
+  (`candidate_set_exceeds_safe_bound`) rather than silently truncating, but it
+  is a review outcome, not a resolution. Narrowing the DB-side filter without
+  risking false exclusion is future work.
 - Overlay-conflict rules are v1 and compare only **seller claims against each
   other or against `estimated_value`** — `asking_price > 1.5 ×
   estimated_value`, and `condition ∈ {excellent, good}` with
@@ -534,9 +680,10 @@ Known limitations:
 - The PostgREST adapter used by the E2E harness
   (`offerr-pg-rest-adapter.mjs`) implements only the query surface the Offerr
   store and the acquisition comp path use — `.rpc`, `.select` (with real column
-  projection), `.eq/.in/.gte/.lte/.gt/.lt/.ilike`, `.order/.limit`,
-  `.single/.maybeSingle`, insert and delete. It is verification tooling, not a
-  general Supabase client.
+  projection), `.eq/.in/.gte/.lte/.gt/.lt/.ilike`, repeatable `.order` with
+  explicit NULLS placement, `.limit`, `.range` (inclusive, like the Range
+  header), `{ count: 'exact' }`, `.single/.maybeSingle`, insert and delete. It
+  is verification tooling, not a general Supabase client.
 - **Comp-retrieval SQL parity is closed; comp-*data* parity is not.** The
   canonical RPC and view are now exact production definitions (§10.1b) and the
   E2E harness runs them for real, but every run to date uses 40 synthetic comp
