@@ -75,6 +75,7 @@ function makeAtomicClaimSupabase(options = {}) {
     scheduled_audits,
     rows,
     controls,
+    authorizations,
     setStaleCacheMode(mode) {
       stale_cache_mode = mode;
     },
@@ -95,6 +96,7 @@ function makeAtomicClaimSupabase(options = {}) {
           }
           if (row.is_locked || row.lock_token) return block("queue_row_not_claimable");
 
+          let scoped_auth = null;
           if (claim_mode === "scoped_canary") {
             if (mode !== "scoped_canary_only") return block("queue_execution_mode_not_scoped_canary_only");
             if (lock.owner_type !== "scoped_canary" || lock.canary_run_id !== params.p_canary_run_id) {
@@ -109,6 +111,10 @@ function makeAtomicClaimSupabase(options = {}) {
             if (auth.expires_at <= NOW) return block("authorization_expired");
             if (auth.campaign_id !== params.p_campaign_id) return block("authorization_campaign_mismatch");
             if (!auth.queue_row_ids.includes(params.p_queue_row_id)) return block("authorization_row_not_allowlisted");
+            if ((auth.claimed_row_ids || []).includes(params.p_queue_row_id)) {
+              return block("authorization_row_already_claimed");
+            }
+            scoped_auth = auth;
           } else {
             if (mode !== "normal") {
               return block(mode === "stopped" ? "queue_execution_mode_stopped" : "queue_execution_mode_scoped_canary_only");
@@ -133,6 +139,20 @@ function makeAtomicClaimSupabase(options = {}) {
             },
           };
           rows.set(row.id, claimed);
+
+          // Mirrors the SQL: the authorization is consumed in the same atomic
+          // act that claims the row, and only once its manifest is complete.
+          let authorization_consumed_at = null;
+          if (scoped_auth) {
+            const claimed_row_ids = [
+              ...new Set([...(scoped_auth.claimed_row_ids || []), row.id]),
+            ];
+            authorization_consumed_at =
+              claimed_row_ids.length >= scoped_auth.queue_row_ids.length ? NOW : null;
+            scoped_auth.claimed_row_ids = claimed_row_ids;
+            scoped_auth.consumed_at = authorization_consumed_at;
+          }
+
           claim_audits.push({ ok: true, claim_token, row_id: row.id });
           return {
             data: {
@@ -143,6 +163,7 @@ function makeAtomicClaimSupabase(options = {}) {
               lock_token: claim_token,
               row: claimed,
               processing_run_id: params.p_processing_run_id,
+              authorization_consumed_at,
             },
             error: null,
           };
@@ -472,4 +493,253 @@ test("claimSendQueueRow delegates to atomic RPC and records block reason", async
   assert.equal(result.claimed, false);
   assert.equal(result.reason, "queue_execution_mode_stopped");
   assert.equal(harness.claim_audits.length, 1);
+});
+
+// ── Scoped-canary authorization: consumed atomically with a successful claim ──
+// Production defect 2026-07-31: the route consumed the authorization before
+// dispatch, so this RPC rejected the same request with
+// "authorization_already_consumed", dispatched nothing, and left the row
+// unlocked and unsent. Consumption now happens here, in the transaction that
+// actually claims the row.
+
+const SCOPED_CONTROLS = {
+  queue_execution_mode: "scoped_canary_only",
+  queue_processor_mode: "live",
+  queue_emergency_stop_at: "",
+};
+
+function makeScopedHarness(rows, canary_run_id, auth_overrides = {}, harness_overrides = {}) {
+  return makeAtomicClaimSupabase({
+    rows,
+    controls: SCOPED_CONTROLS,
+    lock_owner: "scoped_canary",
+    lock_canary: canary_run_id,
+    authorizations: new Map([
+      [
+        canary_run_id,
+        {
+          authorization_token_hash: hashCanaryAuthorizationToken(AUTH_TOKEN),
+          campaign_id: CAMPAIGN,
+          queue_row_ids: rows.map((row) => row.id),
+          consumed_at: null,
+          claimed_row_ids: [],
+          expires_at: "2026-06-25T20:30:00.000Z",
+          ...auth_overrides,
+        },
+      ],
+    ]),
+    ...harness_overrides,
+  });
+}
+
+function scopedClaim(harness, row, canary_run_id, overrides = {}) {
+  return atomicClaimSendQueueRow(row, {
+    supabase: harness.supabase,
+    claim_mode: CLAIM_MODES.SCOPED_CANARY,
+    canary_run_id,
+    authorization_token: AUTH_TOKEN,
+    campaign_id: CAMPAIGN,
+    ...overrides,
+  });
+}
+
+test("scoped canary claims its exact authorized row and is not rejected by its own request", async () => {
+  const row = makeRow("row-auth-atomic-claim");
+  const run = "canary-atomic-claim";
+  const harness = makeScopedHarness([row], run);
+
+  const result = await scopedClaim(harness, row, run);
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.reason, "claimed");
+  assert.notEqual(result.reason, "authorization_already_consumed");
+  assert.equal(harness.rows.get(row.id).queue_status, "processing");
+});
+
+test("authorization is consumed exactly when the claim succeeds", async () => {
+  const row = makeRow("row-auth-consume-on-claim");
+  const run = "canary-consume-on-claim";
+  const harness = makeScopedHarness([row], run);
+  const authorization = harness.authorizations.get(run);
+
+  assert.equal(authorization.consumed_at, null, "unspent before the claim");
+
+  const result = await scopedClaim(harness, row, run);
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.authorization_consumed_at, NOW);
+  assert.equal(authorization.consumed_at, NOW, "spent by the same act that claimed");
+  assert.deepEqual(authorization.claimed_row_ids, [row.id]);
+});
+
+test("second use of the same authorization is rejected after a successful claim", async () => {
+  const first = makeRow("row-auth-second-use-a");
+  const second = makeRow("row-auth-second-use-b");
+  const run = "canary-second-use";
+  // Manifest is the first row only; the second row is not on it.
+  const harness = makeScopedHarness([first, second], run, { queue_row_ids: [first.id] });
+
+  const claimed = await scopedClaim(harness, first, run);
+  assert.equal(claimed.claimed, true);
+
+  const replay = await scopedClaim(harness, second, run);
+  assert.equal(replay.claimed, false);
+  assert.equal(replay.reason, "authorization_already_consumed");
+});
+
+test("the same row cannot be claimed twice under one authorization", async () => {
+  const row = makeRow("row-auth-same-row-twice");
+  const other = makeRow("row-auth-same-row-twice-b");
+  const run = "canary-same-row-twice";
+  // Two-row manifest, so the authorization is still unspent after the first
+  // claim and the row-level guard — not the consumed check — is what denies.
+  const harness = makeScopedHarness([row, other], run);
+
+  const first = await scopedClaim(harness, row, run);
+  assert.equal(first.claimed, true);
+  assert.equal(first.authorization_consumed_at, null);
+
+  // Release the row lock; the authorization must still refuse to re-claim it.
+  harness.rows.set(row.id, { ...harness.rows.get(row.id), is_locked: false, lock_token: null });
+
+  const again = await scopedClaim(harness, row, run);
+  assert.equal(again.claimed, false);
+  assert.equal(again.reason, "authorization_row_already_claimed");
+});
+
+test("competing executions cannot both claim the same authorization", async () => {
+  const row = makeRow("row-auth-concurrent");
+  const run = "canary-concurrent";
+  const harness = makeScopedHarness([row], run);
+
+  const [a, b] = await Promise.all([
+    scopedClaim(harness, row, run),
+    scopedClaim(harness, row, run),
+  ]);
+
+  const claimed = [a, b].filter((result) => result.claimed === true);
+  const denied = [a, b].filter((result) => result.claimed !== true);
+  assert.equal(claimed.length, 1, "exactly one competing execution may claim");
+  assert.equal(denied.length, 1);
+  assert.ok(
+    ["authorization_already_consumed", "queue_row_not_claimable", "queue_item_claim_conflict"].includes(
+      denied[0].reason
+    ),
+    `unexpected denial reason: ${denied[0].reason}`
+  );
+});
+
+test("a failed preclaim leaves the authorization unconsumed", async () => {
+  const row = makeRow("row-auth-failed-preclaim", { is_locked: true, lock_token: "already-held" });
+  const run = "canary-failed-preclaim";
+  const harness = makeScopedHarness([row], run);
+
+  const blocked = await scopedClaim(harness, row, run);
+  assert.equal(blocked.claimed, false);
+  assert.equal(blocked.reason, "queue_row_not_claimable");
+
+  // The authorization was never spent, so a later legitimate claim still works.
+  harness.rows.set(row.id, { ...harness.rows.get(row.id), is_locked: false, lock_token: null });
+  const retry = await scopedClaim(harness, row, run);
+  assert.equal(retry.claimed, true);
+  assert.equal(retry.authorization_consumed_at, NOW);
+});
+
+test("a multi-row manifest is consumed only once every authorized row is claimed", async () => {
+  const first = makeRow("row-auth-manifest-a");
+  const second = makeRow("row-auth-manifest-b");
+  const run = "canary-manifest";
+  const harness = makeScopedHarness([first, second], run);
+
+  const one = await scopedClaim(harness, first, run);
+  assert.equal(one.claimed, true);
+  assert.equal(one.authorization_consumed_at, null, "manifest still open after the first row");
+
+  const two = await scopedClaim(harness, second, run);
+  assert.equal(two.claimed, true);
+  assert.equal(two.authorization_consumed_at, NOW, "manifest complete, authorization spent");
+});
+
+test("an unrelated queue row cannot be claimed under a scoped authorization", async () => {
+  const authorized = makeRow("row-auth-allowlisted");
+  const unrelated = makeRow("row-auth-unrelated");
+  const run = "canary-unrelated-row";
+  const harness = makeScopedHarness([authorized, unrelated], run, { queue_row_ids: [authorized.id] });
+
+  const result = await scopedClaim(harness, unrelated, run);
+
+  assert.equal(result.claimed, false);
+  assert.equal(result.reason, "authorization_row_not_allowlisted");
+  assert.notEqual(harness.rows.get(unrelated.id).queue_status, "processing");
+});
+
+test("wrong campaign, expired, and invalid token remain denied and consume nothing", async () => {
+  const run = "canary-denials";
+
+  const wrong_campaign_row = makeRow("row-auth-wrong-campaign");
+  const wrong_campaign = makeScopedHarness([wrong_campaign_row], run, {
+    campaign_id: "00000000-0000-0000-0000-0000000000ff",
+  });
+  const campaign_result = await scopedClaim(wrong_campaign, wrong_campaign_row, run);
+  assert.equal(campaign_result.reason, "authorization_campaign_mismatch");
+  assert.equal(campaign_result.claimed, false);
+
+  const expired_row = makeRow("row-auth-expired");
+  const expired = makeScopedHarness([expired_row], run, { expires_at: "2026-06-25T19:00:00.000Z" });
+  const expired_result = await scopedClaim(expired, expired_row, run);
+  assert.equal(expired_result.reason, "authorization_expired");
+  assert.equal(expired_result.claimed, false);
+
+  const bad_token_row = makeRow("row-auth-bad-token");
+  const bad_token = makeScopedHarness([bad_token_row], run);
+  const token_result = await scopedClaim(bad_token, bad_token_row, run, {
+    authorization_token: "not-the-authorized-token",
+  });
+  assert.equal(token_result.reason, "authorization_token_invalid");
+  assert.equal(token_result.claimed, false);
+});
+
+test("scoped canary claim still requires scoped_canary_only execution mode", async () => {
+  const row = makeRow("row-auth-mode-guard");
+  const run = "canary-mode-guard";
+  const harness = makeAtomicClaimSupabase({
+    rows: [row],
+    controls: { ...SCOPED_CONTROLS, queue_execution_mode: "stopped" },
+    lock_owner: "scoped_canary",
+    lock_canary: run,
+    authorizations: new Map([
+      [
+        run,
+        {
+          authorization_token_hash: hashCanaryAuthorizationToken(AUTH_TOKEN),
+          campaign_id: CAMPAIGN,
+          queue_row_ids: [row.id],
+          consumed_at: null,
+          claimed_row_ids: [],
+          expires_at: "2026-06-25T20:30:00.000Z",
+        },
+      ],
+    ]),
+  });
+
+  const result = await scopedClaim(harness, row, run);
+  assert.equal(result.claimed, false);
+  assert.equal(result.reason, "queue_execution_mode_not_scoped_canary_only");
+});
+
+test("normal-mode claims are unaffected by the authorization change", async () => {
+  const row = makeRow("row-normal-unaffected");
+  const harness = makeAtomicClaimSupabase({
+    rows: [row],
+    controls: {
+      queue_execution_mode: "normal",
+      queue_processor_mode: "live",
+      queue_emergency_stop_at: "",
+    },
+    lock_owner: "unrestricted",
+  });
+
+  const result = await atomicClaimSendQueueRow(row, { supabase: harness.supabase });
+  assert.equal(result.claimed, true);
+  assert.equal(result.authorization_consumed_at, null);
 });
