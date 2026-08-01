@@ -16,10 +16,25 @@
  * — snapshots are immutable.
  */
 
+import { createHash } from 'node:crypto';
+
 import { child } from '@/lib/logging/logger.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 
-const logger = child({ module: 'domain.offerr.evaluation_store' });
+const moduleLogger = child({ module: 'domain.offerr.evaluation_store' });
+
+/**
+ * The idempotency key is caller-supplied and up to 128 characters, so it is
+ * not guaranteed to be an opaque token — a caller may derive it from a seller
+ * email address or phone number. The rest of this spine keeps raw identifiers
+ * out of logs on purpose (`evaluateOfferrProperty` logs only a sha256 prefix
+ * of the address), and `orphaned_request_id` already gives an operator the
+ * exact row to delete, so the key itself carries no operational value here.
+ */
+function idempotencyKeyRef(value) {
+  if (!value) return null;
+  return createHash('sha256').update(String(value)).digest('hex').slice(0, 12);
+}
 
 export const OFFERR_REQUESTS_TABLE = 'offerr_evaluation_requests';
 export const OFFERR_EVALUATIONS_TABLE = 'offerr_evaluations';
@@ -37,6 +52,10 @@ function generateId(deps = {}) {
  */
 export function createSupabaseOfferrEvaluationStore(deps = {}) {
   const db = () => deps.db ?? deps.supabase ?? getDefaultSupabaseClient();
+  // Injectable like the service's, so what this store puts in a log line is
+  // assertable — redaction that cannot be tested is redaction that silently
+  // regresses.
+  const logger = deps.logger ?? moduleLogger;
 
   async function loadByRequestRow(requestRow) {
     const { data: evaluation, error } = await db()
@@ -117,7 +136,7 @@ export function createSupabaseOfferrEvaluationStore(deps = {}) {
 
         if (compensationError) {
           logger.error('offerr_evaluation_store.compensation_failed', {
-            idempotency_key: request.idempotency_key,
+            idempotency_key_sha256_12: idempotencyKeyRef(request.idempotency_key),
             orphaned_request_id: insertedRequest.id,
             evaluation_error: evaluationError.message,
             compensation_error: compensationError.message,

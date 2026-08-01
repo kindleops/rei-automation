@@ -27,6 +27,13 @@ const FAILURE_STATUS = {
   offerr_idempotency_conflict_retry: 503,
   // A transient canonical-read fault during subject hydration: retryable.
   subject_hydration_error: 503,
+  // The candidate loader threw `offerr_property_lookup_failed` — the canonical
+  // `properties` table was unreachable. Same class of dependency fault as
+  // subject hydration, so it carries the same retryable status rather than
+  // falling through to the default 500.
+  property_resolution_error: 503,
+  // The comp/buyer loaders wrap the same class of Supabase read fault.
+  comp_load_error: 503,
   // A deterministic compute fault inside the acquisition engine. Replaying the
   // same input reproduces it, so it is not a retry candidate — it needs a fix,
   // and 500 keeps it inside exception alerting.

@@ -35,15 +35,22 @@
  * a property that was not uniquely identified — a seller-facing
  * property-identity defect. This module now:
  *
- *   1. orders every candidate page deterministically, ending in a UNIQUE
- *      tie-breaker (`property_export_id`, the canonical PRIMARY KEY), so the
- *      page boundary itself is reproducible;
- *   2. asks PostgREST for an EXACT count on every page, so the resolver knows
- *      how many rows exist, not just how many it received;
- *   3. paginates with `.range()` until the full counted set is in hand;
+ *   1. orders candidates deterministically, ending in a UNIQUE tie-breaker
+ *      (`property_export_id`, the canonical PRIMARY KEY), so the retained
+ *      window is reproducible;
+ *   2. asks PostgREST for an EXACT count, so the resolver knows how many rows
+ *      exist, not just how many it received;
+ *   3. reads the entire bounded candidate set in ONE statement, so rows and
+ *      count come from ONE MVCC snapshot and no concurrent writer can
+ *      interleave between two reads;
  *   4. fails closed to AMBIGUOUS whenever completeness cannot be proven —
- *      count unavailable, bound exceeded, page error, duplicate rows across
- *      pages, a count that moved mid-pagination, or a deadline overrun.
+ *      count unavailable, bound exceeded, a payload that disagrees with its
+ *      own count, a duplicated row, or a deadline overrun.
+ *
+ * Point 3 replaced multi-request pagination, which could not prove membership
+ * stability: a concurrent delete-plus-insert keeps the count identical while
+ * shifting unread rows across the page boundary, silently skipping one. See
+ * `loadCandidatesFromProperties` for the full argument.
  *
  * Work is explicitly bounded (page size, max pages, max candidates, deadline,
  * input length) so a malformed or adversarial address cannot trigger an
@@ -120,12 +127,39 @@ export const OFFERR_CANDIDATE_BOUNDS = Object.freeze({
   max_name_token_length: 64,
 });
 
+/**
+ * The candidate set is read in ONE statement, so `page_size` and `max_pages`
+ * no longer describe round trips — they describe the same total row budget
+ * they always did, and their product IS the row bound actually enforced.
+ * Keeping the identity explicit means the documented budget and the enforced
+ * budget cannot silently diverge.
+ */
+if (
+  OFFERR_CANDIDATE_BOUNDS.page_size * OFFERR_CANDIDATE_BOUNDS.max_pages !==
+  OFFERR_CANDIDATE_BOUNDS.max_candidates
+) {
+  throw new Error(
+    'offerr candidate bounds are inconsistent: page_size * max_pages must equal max_candidates',
+  );
+}
+
 export const OFFERR_RESOLUTION_METHOD = 'properties_structured_match_v3';
 
 /**
  * Reasons the candidate set could not be proven complete. Each one forces
  * AMBIGUOUS. They are internal diagnostics — the seller-safe projection never
  * carries them.
+ *
+ * Reachable from the default single-statement loader:
+ *   COUNT_UNAVAILABLE, BOUND_EXCEEDED, TRUNCATED, PAGINATION_INCONSISTENT,
+ *   DEADLINE_EXCEEDED.
+ *
+ * PAGINATION_FAILED and SET_CHANGED described interference BETWEEN two reads.
+ * A single-statement read has no "between", so the default loader can no
+ * longer produce them. They are retained because the envelope is a public
+ * contract that injected loaders and stored diagnostics may still carry, and
+ * because removing a fail-closed reason code is not a safe way to signal that
+ * a failure mode was eliminated.
  */
 export const OFFERR_INCOMPLETE_CANDIDATE_REASONS = Object.freeze({
   COUNT_UNAVAILABLE: 'candidate_count_unavailable',
@@ -154,17 +188,39 @@ function finiteInt(value) {
 }
 
 /**
- * Reduce a parsed street-name token to characters that can appear in a real
- * canonical address, so an attacker-supplied `%`, `_` or `*` cannot widen the
- * ILIKE pattern into a table-wide scan. PostgREST offers no ESCAPE clause, so
- * an allowlist is the only reliable defence. The in-process equality match is
- * unaffected — this only narrows which rows the database is asked for.
+ * Reduce a parsed street-name token to a fragment that is safe to embed in an
+ * ILIKE pattern, so an attacker-supplied `%`, `_` or `*` cannot widen it into a
+ * table-wide scan. PostgREST offers no ESCAPE clause, so restricting the
+ * characters is the only reliable defence.
+ *
+ * The fragment is the token's LEADING RUN of allowlisted characters — it is
+ * never rebuilt by DELETING the disallowed ones.
+ *
+ * That distinction is load-bearing. This value is matched with
+ * `%fragment%` against the RAW canonical `property_address_full`, which still
+ * contains its apostrophes and accents. Deleting those characters produced a
+ * fragment that is not a substring of the canonical text at all:
+ *
+ *   "o'connor" -> delete -> "oconnor"  -> %oconnor% never matches "O'CONNOR"
+ *   "cañada"   -> delete -> "caada"    -> %caada%   never matches "CAÑADA"
+ *   "peña"     -> delete -> "pea"      -> %pea%     never matches "PEÑA"
+ *
+ * The row was therefore never retrieved, and the seller — whose address is
+ * perfectly legitimate and whose in-process structured comparison matches
+ * exactly — received NOT_FOUND. Truncating instead yields "o", "ca", "pe":
+ * always a genuine substring of the canonical value, still free of every LIKE
+ * metacharacter. Selectivity drops slightly; correctness is restored, and the
+ * street-number prefix plus the documented bounds keep the scan bounded.
+ *
+ * An empty fragment (a token whose first character is not allowlisted) simply
+ * omits the name filter — the street-number prefix still applies and the
+ * bounds still fail closed.
  */
 function likeSafeToken(value) {
-  return clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '')
-    .slice(0, OFFERR_CANDIDATE_BOUNDS.max_name_token_length);
+  const normalized = clean(value).toLowerCase();
+  const match = /^[a-z0-9-]+/.exec(normalized);
+  if (!match) return '';
+  return match[0].slice(0, OFFERR_CANDIDATE_BOUNDS.max_name_token_length);
 }
 
 function incompleteLoad(reason, partial = {}) {
@@ -184,8 +240,40 @@ function incompleteLoad(reason, partial = {}) {
 /**
  * Default candidate loader against the canonical `properties` table:
  * street-number prefix AND street-name containment — a deliberate superset —
- * retrieved deterministically, counted exactly, and paginated to completion or
- * to a documented bound. Read-only.
+ * retrieved deterministically and counted exactly IN A SINGLE STATEMENT.
+ * Read-only.
+ *
+ * WHY ONE STATEMENT AND NOT PAGINATION
+ * ------------------------------------
+ * The previous implementation issued up to five `.range()` requests and
+ * compared the exact count returned by each. That detects SOME concurrent
+ * interference (a count that moves) but it cannot prove membership stability,
+ * because count equality does not imply set equality. A writer that deletes one
+ * row before the cursor and inserts another after it leaves the count
+ * untouched while shifting every unread row one position left — so the row
+ * sitting exactly on a page boundary is never returned, no duplicate appears,
+ * and every guard stays silent. The loader then reports `complete: true` for a
+ * set that is missing a row.
+ *
+ * When the skipped row is the duplicate parcel, the second unit or the
+ * conflicting ZIP, the resolver returns a confident `RESOLVED` for a property
+ * that is not uniquely identified — precisely the seller-facing defect this
+ * module exists to prevent, reintroduced through the page boundary itself.
+ *
+ * Each PostgREST request is ONE SQL statement, and `count=exact` is computed
+ * inside that same statement, so rows and count are read from ONE MVCC
+ * snapshot. Reading the whole bounded candidate set in a single request
+ * therefore makes cross-read interference unrepresentable rather than merely
+ * detectable — there is no second read for a writer to interleave with.
+ *
+ * The work bound is unchanged: `page_size * max_pages === max_candidates`
+ * (100 × 5 = 500), so the resolver still reads at most 500 candidate rows and
+ * still fails closed above that. It simply does so in one round trip instead
+ * of five, which is also strictly faster.
+ *
+ * One extra row beyond `max_candidates` is requested so that "more candidates
+ * exist than we are willing to reason about" is decidable from the same
+ * snapshot as the rows themselves.
  *
  * @returns {Promise<object>} completeness envelope (see incompleteLoad).
  */
@@ -197,138 +285,97 @@ async function loadCandidatesFromProperties(parsed, deps = {}) {
 
   const nameToken = likeSafeToken(parsed.street_name.split(' ')[0]);
 
-  const rows = [];
-  const seenKeys = new Set();
-  let expectedTotal = null;
-  let pagesLoaded = 0;
-
-  for (let page = 0; page < bounds.max_pages; page += 1) {
-    if (nowMs() > deadline) {
-      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.DEADLINE_EXCEEDED, {
-        pages_loaded: pagesLoaded,
-        page_size: bounds.page_size,
-        total_count: expectedTotal,
-        total_count_known: expectedTotal !== null,
-      });
-    }
-
-    const from = page * bounds.page_size;
-    const to = from + bounds.page_size - 1;
-
-    // The exact count is requested on EVERY page, not just the first: a count
-    // that moves between pages proves the underlying set changed underneath
-    // the pagination, which makes any single-winner claim unsafe.
-    let query = db
-      .from('properties')
-      .select(PROPERTY_RESOLUTION_SELECT, { count: 'exact' })
-      .ilike('property_address_full', `${parsed.street_number} %`);
-    if (nameToken) query = query.ilike('property_address_full', `%${nameToken}%`);
-    for (const column of CANDIDATE_ORDER_KEYS) {
-      query = query.order(column, { ascending: true, nullsFirst: false });
-    }
-
-    const { data, error, count } = await query.range(from, to);
-
-    if (error) {
-      if (page === 0) {
-        // The canonical source is unreachable. That is a dependency fault, not
-        // an identity ambiguity: surface it so it is retried and alerted on,
-        // rather than telling a seller their address needs confirmation.
-        throw Object.assign(new Error('offerr_property_lookup_failed'), {
-          code: 'offerr_property_lookup_failed',
-          cause: error,
-        });
-      }
-      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_FAILED, {
-        pages_loaded: pagesLoaded,
-        page_size: bounds.page_size,
-        total_count: expectedTotal,
-        total_count_known: expectedTotal !== null,
-      });
-    }
-
-    const pageRows = Array.isArray(data) ? data : [];
-    const pageCount = finiteInt(count);
-
-    if (pageCount === null) {
-      // PostgREST answered without an exact count (Prefer honoured but
-      // Content-Range unusable, or a client that does not surface it).
-      // Completeness is unprovable — fail closed.
-      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.COUNT_UNAVAILABLE, {
-        pages_loaded: pagesLoaded,
-        page_size: bounds.page_size,
-      });
-    }
-
-    if (expectedTotal === null) {
-      expectedTotal = pageCount;
-      if (expectedTotal > bounds.max_candidates) {
-        return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.BOUND_EXCEEDED, {
-          pages_loaded: pagesLoaded,
-          page_size: bounds.page_size,
-          total_count: expectedTotal,
-          total_count_known: true,
-        });
-      }
-    } else if (pageCount !== expectedTotal) {
-      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.SET_CHANGED, {
-        pages_loaded: pagesLoaded,
-        page_size: bounds.page_size,
-        total_count: expectedTotal,
-        total_count_known: true,
-      });
-    }
-
-    pagesLoaded += 1;
-
-    for (const row of pageRows) {
-      // The deterministic total order guarantees each row appears on exactly
-      // one page. A repeat means the ordering was not total or the set shifted
-      // — either way the window is untrustworthy.
-      const key = `${clean(row?.property_export_id)}|${clean(row?.property_id)}`;
-      if (seenKeys.has(key)) {
-        return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_INCONSISTENT, {
-          pages_loaded: pagesLoaded,
-          page_size: bounds.page_size,
-          total_count: expectedTotal,
-          total_count_known: true,
-        });
-      }
-      seenKeys.add(key);
-      rows.push(row);
-    }
-
-    if (rows.length >= expectedTotal) break;
-
-    if (pageRows.length < bounds.page_size) {
-      // The server says more rows exist than it is willing to return. Never
-      // reconcile that silently.
-      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_INCONSISTENT, {
-        pages_loaded: pagesLoaded,
-        page_size: bounds.page_size,
-        total_count: expectedTotal,
-        total_count_known: true,
-      });
-    }
+  let query = db
+    .from('properties')
+    .select(PROPERTY_RESOLUTION_SELECT, { count: 'exact' })
+    .ilike('property_address_full', `${parsed.street_number} %`);
+  if (nameToken) query = query.ilike('property_address_full', `%${nameToken}%`);
+  // Deterministic total order, ending in the canonical PRIMARY KEY. Even
+  // within a single statement this matters: it makes the retained window
+  // reproducible and the diagnostics meaningful.
+  for (const column of CANDIDATE_ORDER_KEYS) {
+    query = query.order(column, { ascending: true, nullsFirst: false });
   }
 
-  if (expectedTotal === null || rows.length !== expectedTotal) {
-    return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.TRUNCATED, {
-      pages_loaded: pagesLoaded,
-      page_size: bounds.page_size,
-      total_count: expectedTotal,
-      total_count_known: expectedTotal !== null,
+  // Inclusive on both ends, so this asks for max_candidates + 1 rows.
+  const { data, error, count } = await query.range(0, bounds.max_candidates);
+
+  if (error) {
+    // The canonical source is unreachable. That is a dependency fault, not an
+    // identity ambiguity: surface it so it is retried and alerted on, rather
+    // than telling a seller their address needs confirmation.
+    throw Object.assign(new Error('offerr_property_lookup_failed'), {
+      code: 'offerr_property_lookup_failed',
+      cause: error,
     });
+  }
+
+  if (nowMs() > deadline) {
+    return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.DEADLINE_EXCEEDED, {
+      pages_loaded: 1,
+      page_size: bounds.page_size,
+    });
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const totalCount = finiteInt(count);
+
+  if (totalCount === null) {
+    // PostgREST answered without an exact count (Prefer honoured but
+    // Content-Range unusable, or a client that does not surface it).
+    // Completeness is unprovable — fail closed.
+    return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.COUNT_UNAVAILABLE, {
+      pages_loaded: 1,
+      page_size: bounds.page_size,
+    });
+  }
+
+  if (totalCount > bounds.max_candidates) {
+    return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.BOUND_EXCEEDED, {
+      pages_loaded: 1,
+      page_size: bounds.page_size,
+      total_count: totalCount,
+      total_count_known: true,
+    });
+  }
+
+  if (rows.length !== totalCount) {
+    // The statement counted more (or fewer) rows than it handed back — a
+    // server-side row cap (PostgREST `db-max-rows`) or a truncating client.
+    // Never reconcile that silently.
+    return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.TRUNCATED, {
+      pages_loaded: 1,
+      page_size: bounds.page_size,
+      total_count: totalCount,
+      total_count_known: true,
+    });
+  }
+
+  // Within one statement a duplicate is impossible against a table with a
+  // primary key, so a repeat means the transport is not returning what it
+  // claims. Cheap to check, and completeness must never rest on trust.
+  const seenKeys = new Set();
+  for (const row of rows) {
+    const key = `${clean(row?.property_export_id)}|${clean(row?.property_id)}`;
+    if (seenKeys.has(key)) {
+      return incompleteLoad(OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_INCONSISTENT, {
+        pages_loaded: 1,
+        page_size: bounds.page_size,
+        total_count: totalCount,
+        total_count_known: true,
+      });
+    }
+    seenKeys.add(key);
   }
 
   return {
     rows,
     complete: true,
     incomplete_reason: null,
-    total_count: expectedTotal,
+    total_count: totalCount,
     total_count_known: true,
     truncated: false,
-    pages_loaded: pagesLoaded,
+    pages_loaded: 1,
     page_size: bounds.page_size,
   };
 }

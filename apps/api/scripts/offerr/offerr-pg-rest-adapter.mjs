@@ -38,9 +38,11 @@
  *      compose left to right with explicit NULLS FIRST/LAST, `.range(from,to)`
  *      is inclusive on both ends like PostgREST's Range header, and
  *      `{ count: 'exact' }` returns the total matching rows IGNORING the
- *      range. The Offerr resolver proves candidate-set completeness from
- *      exactly these three behaviours, so imitating them loosely would let a
- *      truncation defect pass verification.
+ *      range, computed IN THE SAME STATEMENT that returns the rows — as
+ *      PostgREST does — so rows and count come from one MVCC snapshot. The
+ *      Offerr resolver proves candidate-set completeness from exactly these
+ *      three behaviours, so imitating them loosely would let a truncation
+ *      defect pass verification.
  *
  * Every operation is recorded so a caller can prove which tables were touched
  * and that the comp path performed no writes.
@@ -108,17 +110,8 @@ export function createPgRestAdapter(pool, options = {}) {
       columns: '*',
     };
 
-    /**
-     * `Prefer: count=exact`. PostgREST reports the total number of rows the
-     * filters match, IGNORING limit/offset, in Content-Range; supabase-js
-     * surfaces it as `count`. Reproduced with a separate COUNT(*) over the
-     * same WHERE clause so range queries can be proven complete.
-     */
-    async function exactCount(whereSql, params) {
-      const sql = `SELECT COUNT(*)::bigint AS exact_count FROM ${ident(table)}${whereSql}`;
-      const result = await pool.query(sql, params);
-      return Number(result.rows[0]?.exact_count ?? 0);
-    }
+    /** Column carrying the in-statement exact count; stripped before return. */
+    const EXACT_COUNT_ALIAS = '__offerr_exact_count';
 
     async function run() {
       const params = [];
@@ -158,7 +151,26 @@ export function createPgRestAdapter(pool, options = {}) {
           : '';
         const limit = state.limitCount != null ? ` LIMIT ${Number(state.limitCount)}` : '';
         const offset = state.offsetCount ? ` OFFSET ${Number(state.offsetCount)}` : '';
-        sql = `SELECT ${projection(state.columns)} FROM ${ident(table)}${whereSql}${order}${limit}${offset}`;
+        if (state.countMode === 'exact') {
+          // PostgREST computes `count=exact` INSIDE the same statement that
+          // returns the rows, so both are read from one MVCC snapshot. Issuing
+          // a separate COUNT(*) instead would make the harness strictly weaker
+          // than production: a concurrent writer could land between the two
+          // statements and the model would report a rows/count pair that real
+          // PostgREST can never produce — masking, or inventing, exactly the
+          // completeness defects this adapter exists to expose.
+          //
+          // The CTE selects * so ORDER BY may reference any column, while the
+          // outer projection keeps "asking for a column that does not exist is
+          // an error" true, which is the fidelity property callers rely on.
+          sql =
+            `WITH pgrst_source AS (SELECT * FROM ${ident(table)}${whereSql}) ` +
+            `SELECT ${projection(state.columns)}, ` +
+            `(SELECT COUNT(*)::bigint FROM pgrst_source) AS ${ident(EXACT_COUNT_ALIAS)} ` +
+            `FROM pgrst_source${order}${limit}${offset}`;
+        } else {
+          sql = `SELECT ${projection(state.columns)} FROM ${ident(table)}${whereSql}${order}${limit}${offset}`;
+        }
       } else if (kind === 'insert') {
         const rows = Array.isArray(payload) ? payload : [payload];
         const cols = [...new Set(rows.flatMap((r) => Object.keys(r ?? {})))].filter(
@@ -189,10 +201,32 @@ export function createPgRestAdapter(pool, options = {}) {
       const started = Date.now();
       try {
         const result = await pool.query(sql, params);
-        const count =
-          kind === 'select' && state.countMode === 'exact'
-            ? await exactCount(whereSql, params)
-            : null;
+        let rows = result.rows;
+        let count = null;
+
+        if (kind === 'select' && state.countMode === 'exact') {
+          if (rows.length > 0) {
+            count = Number(rows[0][EXACT_COUNT_ALIAS] ?? 0);
+            // The alias is transport detail; callers must see the projection
+            // they asked for and nothing else.
+            rows = rows.map(({ [EXACT_COUNT_ALIAS]: _dropped, ...rest }) => rest);
+          } else if (!state.offsetCount) {
+            // Offset 0 with no rows means the filters matched nothing.
+            count = 0;
+          } else {
+            // An empty page PAST the start: the statement returned no row to
+            // carry the total, so it has to be asked for separately. PostgREST
+            // still reports it (Content-Range `*\/n`). The Offerr resolver
+            // never takes this path — it always reads from offset 0 — so the
+            // single-snapshot guarantee it depends on is unaffected.
+            const totals = await pool.query(
+              `SELECT COUNT(*)::bigint AS exact_count FROM ${ident(table)}${whereSql}`,
+              params,
+            );
+            count = Number(totals.rows[0]?.exact_count ?? 0);
+          }
+        }
+
         record({
           table,
           method: kind,
@@ -200,7 +234,7 @@ export function createPgRestAdapter(pool, options = {}) {
           row_count: result.rowCount,
           duration_ms: Date.now() - started,
         });
-        return { data: result.rows, error: null, count };
+        return { data: rows, error: null, count };
       } catch (error) {
         record({
           table,

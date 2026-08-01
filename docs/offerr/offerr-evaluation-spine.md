@@ -149,28 +149,51 @@ guarantees a *total* order and the page boundary is reproducible. Natural
 database order is never relied upon. Ordering version:
 `offerr_candidate_order_v1`.
 
-#### Count-first, paginated retrieval
+#### Single-statement, exactly-counted retrieval
 
-Every page requests `{ count: 'exact' }`, not only the first. PostgREST reports
-the total matching rows ignoring the range, so the resolver knows how many rows
-**exist**, not merely how many it received — and a count that moves between
-pages proves the set shifted underneath the pagination.
+The bounded candidate set is read in **one** request asking for
+`max_candidates + 1` rows with `{ count: 'exact' }`. PostgREST reports the total
+matching rows ignoring the range, so the resolver knows how many rows **exist**,
+not merely how many it received.
+
+One request is one SQL statement, and `count=exact` is computed inside that same
+statement, so rows and count are read from **one MVCC snapshot**.
+
+This replaced multi-request pagination, which could not prove membership
+stability. Comparing the exact count on every page detects *some* interference,
+but count equality is not set equality: a writer that deletes one row before the
+cursor and inserts another after it leaves the count untouched while shifting
+every unread row one position left, so the row on the page boundary is silently
+skipped — no count change, no duplicate, no guard fires. When that row was the
+duplicate parcel, the resolver answered `RESOLVED` for a property it had not
+uniquely identified. With a single statement there is no second read for a
+writer to interleave with, so the interference is *unrepresentable* rather than
+merely detectable.
 
 #### Bounds (explicit and documented)
 
 | Bound | Value | Purpose |
 |---|---|---|
-| `page_size` | 100 | rows per `.range()` request |
-| `max_pages` | 5 | hard pagination ceiling |
-| `max_candidates` | 500 | `page_size × max_pages` |
+| `page_size` | 100 | retained row-budget unit |
+| `max_pages` | 5 | retained row-budget multiplier |
+| `max_candidates` | 500 | `page_size × max_pages`, asserted at module load |
 | `deadline_ms` | 5 000 | wall-clock ceiling on candidate loading |
 | `max_address_length` | 240 | refused **before** any database work |
 
-A total count above `max_candidates` stops after **one** request — the bound is
-enforced by the count, not by paging up to it. Street-name tokens are reduced
-to `[a-z0-9-]` before interpolation, so a `%`, `_` or `*` in seller input
-cannot widen the `ILIKE` into a table-wide scan (PostgREST exposes no `ESCAPE`
-clause, so an allowlist is the only reliable defence).
+`page_size` and `max_pages` no longer describe round trips — they describe the
+same total row budget they always did, and their product **is** the bound
+enforced. The identity is asserted at module load so the documented budget and
+the enforced budget cannot silently diverge.
+
+A total count above `max_candidates` fails closed from that same single
+response. Street-name tokens are **truncated at the first character outside
+`[a-z0-9-]`** before interpolation, so a `%`, `_` or `*` in seller input cannot
+widen the `ILIKE` into a table-wide scan (PostgREST exposes no `ESCAPE` clause).
+Truncating rather than deleting matters for correctness: the fragment is matched
+against the raw canonical address, so deleting an apostrophe or an accent
+produced a fragment that was not a substring of the canonical text at all and
+the row could never be retrieved — `O'Connor`, `Cañada` and `Peña` all resolved
+to `NOT_FOUND` for perfectly legitimate addresses.
 
 #### Incompleteness always fails closed to `AMBIGUOUS`
 
@@ -181,13 +204,20 @@ winner inside an unprovable set is never even evaluated.
 |---|---|
 | `candidate_count_unavailable` | no exact count returned |
 | `candidate_set_exceeds_safe_bound` | total count above `max_candidates` |
-| `candidate_set_truncated` | pages exhausted before the counted total |
-| `candidate_pagination_failed` | a page after the first errored |
-| `candidate_pagination_inconsistent` | a row repeated across pages, or a short page before the total |
-| `candidate_set_changed_during_pagination` | the exact count moved mid-pagination |
+| `candidate_set_truncated` | the payload disagrees with its own exact count (server row cap or truncating client) |
+| `candidate_pagination_inconsistent` | a row appeared twice in one payload |
+| `candidate_pagination_failed` | *retained, unreachable from the default loader* — described a page after the first erroring |
+| `candidate_set_changed_during_pagination` | *retained, unreachable from the default loader* — described the count moving between reads |
 | `candidate_load_deadline_exceeded` | candidate loading outran its deadline |
 
-A **first-page** query error is different in kind: the canonical source is
+The last two reason codes describe interference *between* two reads. A
+single-statement read has no "between", so the default loader can no longer
+produce them; they are retained because the envelope is a public contract that
+injected loaders and stored diagnostics may still carry, and because removing a
+fail-closed reason code is not a safe way to signal that a failure mode was
+eliminated.
+
+A candidate query error is different in kind: the canonical source is
 unreachable, which is a dependency fault rather than an identity ambiguity. It
 throws `offerr_property_lookup_failed` → `property_resolution_error` so it is
 retried and alerted on, instead of telling a seller to confirm their address.

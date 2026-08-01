@@ -433,3 +433,140 @@ test('INTERNAL_API_SECRET is configured by the critical-test runner itself', asy
   );
   assert.equal(wrongSecret.status, 401);
 });
+
+/* ── Independent review additions (clean-room re-review of this PR) ────────── */
+
+/**
+ * withDeadline begins with `if (!(remainingMs > 0)) return STAGE_TIMEOUT`.
+ *
+ * The stage promise is the ARGUMENT expression, so the caller has already
+ * started that work before withDeadline is entered. Returning the sentinel
+ * without subscribing left the promise unobserved, and a later rejection from
+ * it arrived as an unhandledRejection — which Node terminates the process on by
+ * default. A single request exceeding its budget could therefore take down the
+ * instance serving every other request.
+ *
+ * Against the pre-fix implementation this test does not fail, it CRASHES the
+ * test process, which is precisely the production failure mode.
+ */
+test('an already-spent budget still observes the stage it abandons', async () => {
+  const result = await evaluateOfferrProperty(
+    intake('hardening-spent-budget'),
+    deps({
+      // Budget exhausted before stage 2 runs, so remainingMs() <= 0 on the
+      // very first withDeadline call.
+      timeoutMs: 0,
+      store: {
+        findByIdempotencyKey: () =>
+          new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('late rejection after budget spent')), 20);
+          }),
+        persistEvaluation: async () => ({ ok: true }),
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure_code, 'evaluation_timeout');
+  assert.equal(result.timeout_stage, 'idempotency_lookup');
+  assert.equal(result.seller_projection, null, 'a timeout never produces a seller range');
+
+  // Outlive the abandoned stage so its rejection actually fires.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+});
+
+/**
+ * The retryability taxonomy this PR introduces (transient canonical-read fault
+ * -> 503, deterministic compute fault -> 500) left two sibling codes
+ * unclassified, so they fell through to the default 500 and were advertised as
+ * permanent when they are in fact retryable.
+ */
+test('property_resolution_error is a retryable 503, not a default 500', async () => {
+  const res = await handleOfferrEvaluationsRequest(
+    {
+      headers: new Headers({ 'x-internal-api-secret': 'test' }),
+      json: async () => intake('hardening-resolution-fault'),
+    },
+    deps({
+      getSystemFlag: async () => true,
+      resolveSubjectProperty: async () => {
+        throw Object.assign(new Error('offerr_property_lookup_failed'), {
+          code: 'offerr_property_lookup_failed',
+        });
+      },
+    }),
+  );
+  assert.equal(res.status, 503);
+  const payload = await res.json();
+  assert.equal(payload.failure_code, 'property_resolution_error');
+});
+
+test('comp_load_error is a retryable 503, not a default 500', async () => {
+  const res = await handleOfferrEvaluationsRequest(
+    {
+      headers: new Headers({ 'x-internal-api-secret': 'test' }),
+      json: async () => intake('hardening-comp-fault'),
+    },
+    deps({
+      getSystemFlag: async () => true,
+      loadComparableProperties: async () => {
+        throw new Error('supabase read failed');
+      },
+    }),
+  );
+  assert.equal(res.status, 503);
+  const payload = await res.json();
+  assert.equal(payload.failure_code, 'comp_load_error');
+});
+
+/**
+ * The idempotency key is caller-supplied and up to 128 characters, so it can
+ * carry a seller identifier. The compensation-failure log named it in the
+ * clear while the rest of the spine deliberately logs only hashed references.
+ */
+test('a failed compensation logs a hashed idempotency reference, never the raw key', async () => {
+  const RAW_KEY = 'seller+jane.doe@example.com';
+  const logged = [];
+  const evaluationError = { message: 'evaluation insert failed' };
+
+  const db = {
+    from(table) {
+      return {
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+        }),
+        insert: (payload) => ({
+          select: () => ({
+            single: async () =>
+              table === 'offerr_evaluations'
+                ? { data: null, error: evaluationError }
+                : { data: { id: 'req-orphan-1', ...payload }, error: null },
+          }),
+        }),
+        delete: () => ({
+          eq: async () => ({ error: { message: 'delete failed too' } }),
+        }),
+      };
+    },
+  };
+
+  const store = createSupabaseOfferrEvaluationStore({
+    db,
+    logger: { error: (event, fields) => logged.push({ event, fields }) },
+  });
+
+  const persisted = await store.persistEvaluation({
+    request: { idempotency_key: RAW_KEY },
+    evaluation: {},
+  });
+
+  assert.equal(persisted.ok, false);
+  assert.equal(persisted.error, 'offerr_evaluation_write_orphaned');
+
+  const serialized = JSON.stringify(logged);
+  assert.ok(!serialized.includes(RAW_KEY), 'the raw idempotency key must never be logged');
+  assert.ok(
+    serialized.includes('idempotency_key_sha256_12'),
+    'a hashed reference is logged instead',
+  );
+});

@@ -7,7 +7,7 @@
 **PR:** [#57](https://github.com/kindleops/rei-automation/pull/57) — **MERGED**
 2026-07-31T22:48:39Z, merge commit `6a0fd934`
 
-> ### Activation-safety headline (current state — read this first)
+> ## Activation-safety headline (current state — read this first)
 >
 > All **eleven** documented activation blockers are now closed or conclusively
 > disproven (§15). The highest-severity one — the resolver's unordered,
@@ -21,7 +21,7 @@
 > schema was touched, and the public UI is still not connected. The launch
 > prerequisites in §14.8 all remain open.
 
-> ### Production-landing headline (§14 — still accurate)
+> ## Production-landing headline (§14 — still accurate)
 >
 > The Offerr schema is **installed in production** (`lcppdrmrdfblstpcbgpf`) and
 > the merged API is **deployed**, with the feature **OFF**.
@@ -2182,14 +2182,14 @@ of scope, not of contradiction.
 
 | # | Blocker | Code path | Seller / operational consequence | Reachable with flag false? | Fix | Regression proof |
 |---|---|---|---|---|---|---|
-| 1 | Candidate query truncates at 25 with **no `ORDER BY`** | `offerr-property-resolution.js` | **Seller-facing property-identity defect.** A duplicate parcel, second unit or conflicting ZIP outside the window is invisible; the resolver returns `RESOLVED` for the **wrong subject** and the whole evaluation proceeds on it | No | Deterministic ordering + exact count + bounded pagination + fail-closed incompleteness | `offerr-candidate-completeness.test.mjs` (24 cases) |
+| 1 | Candidate query truncates at 25 with **no `ORDER BY`** | `offerr-property-resolution.js` | **Seller-facing property-identity defect.** A duplicate parcel, second unit or conflicting ZIP outside the window is invisible; the resolver returns `RESOLVED` for the **wrong subject** and the whole evaluation proceeds on it | No | Deterministic ordering + exact count + **single-statement bounded read** + fail-closed incompleteness. (The originally-shipped fix used bounded *pagination*; §16.1 explains why that could not prove completeness and was replaced.) | `offerr-candidate-completeness.test.mjs` (26 cases) |
 | 2 | Five-digit **house number** consumed as a ZIP in comma-less input | `offerr-address-normalization.js` | `"12345 Main St"` → `missing_street_number` → `INVALID_INPUT` for a valid address; canonical rows parse through the same function, so those rows fail too | No | ZIP scan floor `minIndex` protects the leading street number | `offerr-property-resolution.test.mjs` (2 new cases) |
 | 3 | Deadline is **advisory** — no awaited stage is bounded | `offerr-evaluation-service.js` | A hung dependency runs to the route's 60 s `maxDuration` instead of returning `evaluation_timeout` at 15 s; the caller waits 4× the budget | No | `withDeadline()` races every read-only stage against the remaining budget | `offerr-activation-hardening.test.mjs` (5 cases) |
 | 4 | Subject hydration and the engine call lack a failure-code boundary | `offerr-evaluation-service.js` | Transient Supabase faults and engine throws surface as HTTP 500 + Sentry noise instead of structured, correctly-classified codes | No | `subject_hydration_error` (503) and `decision_engine_error` (500) | `offerr-activation-hardening.test.mjs` (4 cases) |
 | 5 | Compensating `delete()` result unchecked | `offerr-evaluation-store.js` | A failed delete leaves an orphan request row; every retry then reads `offerr_incomplete_snapshot` → 503, which the route documents as **transient**. The state is permanent, so the retry advice is wrong and the key is consumed forever | No | `offerr_evaluation_write_orphaned` → `offerr_persistence_orphaned` (500), logged with the orphan row id | `offerr-activation-hardening.test.mjs` (3 cases) |
 | 6 | Table-grant assertions read `information_schema.role_table_grants` | `offerr-hosted-privilege-contract.test.mjs` | The view reports only grants involving **currently enabled** roles, so an "is empty" assertion **passes vacuously** for a session that is not a member of `anon`/`authenticated` — a privilege leak could ship unnoticed | n/a (test) | Rewritten on `has_table_privilege()` / `aclexplode()`; positive `service_role` grant assertion added | 4 DB-backed cases, all green |
 | 7 | Preview-branch guard accepts unproven `is_default` | `offerr-preview-branch-guard.mjs` | `is_default === true` fails **open**: a missing, renamed or string-serialised field lets verification write to the parent project's **default (production) branch** | n/a (tooling) | Require explicit boolean `false`; new `unproven_branch_identity` refusal | `offerr-staging-guard.test.mjs` (6 variants) |
-| 8 | TLS verification disabled on the Supabase pool | `offerr-preview-https-verify.mjs` | `rejectUnauthorized: false` accepts any certificate while database credentials cross the public internet | n/a (tooling) | Verified TLS by default, optional CA path, loud explicit opt-out only | Reviewed; no automated case (script has no harness) |
+| 8 | TLS verification disabled on the Supabase pool | `offerr-preview-https-verify.mjs` | `rejectUnauthorized: false` accepts any certificate while database credentials cross the public internet | n/a (tooling) | Verified TLS by default, optional CA path, loud explicit opt-out only. **Corrected in §16.4: as originally merged the helper was never called and the pool still passed `rejectUnauthorized: false`.** | Reviewed; no automated case (script has no harness) |
 | 9 | `public.properties` keeps inherited `anon`/`authenticated` DML in staging | `offerr-staging-bootstrap.sql` | The **subject** table is anon-writable in staging, weakening the side-effect proof for the very record under evaluation | n/a (staging) | `REVOKE ALL ON public.properties`; `properties` added to the drift checker | Drift check **COMPATIBLE** on a bootstrapped database |
 | 10 | Route tests assumed `INTERNAL_API_SECRET` was unset | `offerr-evaluations-route.test.mjs` | Claimed the 401 assertions could not run | n/a (test) | **FALSE POSITIVE** — see §15.5 | Precondition now asserted directly |
 | 11 | Both documents needed Pass-4 synchronisation | `docs/offerr/*` | Documentation drift | n/a (docs) | Closed by §14 (previous PR) and this §15 | — |
@@ -2387,3 +2387,214 @@ controlled canary, and a rollback plan.
 **Closing the activation blockers does not activate Offerr.** The feature flag
 remains `false`, the production Offerr tables remain empty, and Offerr remains
 unavailable to sellers.
+
+---
+
+## 16. Independent clean-room re-review of PR #61 (2026-08-01)
+
+Performed from a **fresh detached worktree pinned to the PR head SHA
+`c9f8db93`**, not from the previously contested checkout. Verified before
+reviewing anything:
+
+| Check | Result |
+|---|---|
+| PR head SHA | `c9f8db9373be06798eec41b9e57e41e3cfe51f8e` |
+| `origin/fix/offerr-activation-safety-hardening` | identical SHA |
+| Worktree state | clean |
+| Diff scope | exactly **18 files, +2343 / -118** |
+| PR #60 / scheduled-agent files in the diff | **none** |
+| Merge-base with current `origin/main` | `63410210` (the queue commit, already in main) |
+| `git diff c9f8db93...origin/main` | **empty** — newer main introduces nothing the PR lacks |
+| Test merge into `origin/main` | clean, no conflicts |
+
+The reported base `b1015753` is an ancestor but not the merge-base: the branch
+was actually cut from `63410210`, whose tree is byte-identical to PR #60's
+squash `0b5292d3`. The queue change is therefore in the branch's *ancestry* but
+correctly absent from its *diff*.
+
+**Blocker count independently confirmed.** PR [#57] carries exactly **11**
+review threads, all unresolved; PR [#59] carries **0**. The "eleven findings"
+claim in §15.1 is accurate.
+
+**The differential claim reproduces exactly.** Driving the row-26 fixture
+through one behavioural PostgREST model against both implementations:
+
+| Implementation | Result |
+|---|---|
+| Pre-fix `6a0fd934` | `RESOLVED` → `true-match` — **wrong subject** |
+| This branch | `AMBIGUOUS` / `multiple_structured_matches` |
+
+Six material defects were nonetheless found and fixed on the PR branch before
+merge. Each is proven by a regression test that fails against the code as it
+stood at `c9f8db93`.
+
+### 16.1 Offset pagination could not prove completeness (highest severity)
+
+`RESOLVED` is a uniqueness claim over the COMPLETE candidate set. The merged
+implementation paginated with `.range()` and compared the exact count returned
+by each page, failing closed when it moved.
+
+**Count equality is not set equality.** A writer that deletes one row *before*
+the cursor and inserts one *after* it leaves the count untouched while shifting
+every unread row one position left. The row sitting on the page boundary is
+then never returned, no duplicate appears, and no guard fires — so the loader
+reported `complete: true` for a set with a hole in it.
+
+Reproduced against the resolver as merged: a corpus of 150 rows containing a
+**duplicated parcel**, with one count-preserving concurrent delete+insert
+committed between page 0 and page 1:
+
+| Run | Result |
+|---|---|
+| Quiet corpus | `AMBIGUOUS` (both parcels seen) — correct |
+| Count-preserving concurrent write | **`RESOLVED`** for `P-S0001` — the duplicate parcel was skipped |
+
+That is the same class of seller-facing property-identity defect the PR set out
+to eliminate, reintroduced through the page boundary itself.
+
+**Fix — read the bounded candidate set in ONE statement.** Each PostgREST
+request is a single SQL statement and `count=exact` is computed inside it, so
+rows and count come from one MVCC snapshot. With no second read, concurrent
+interference is *unrepresentable* rather than merely detectable. The work bound
+is unchanged — `page_size × max_pages === max_candidates` (100 × 5 = 500) is
+now asserted at module load — so the resolver still reads at most 500 rows and
+still fails closed above that, in one round trip instead of five.
+
+`PAGINATION_FAILED` and `SET_CHANGED` describe interference *between* two
+reads and are consequently unreachable from the default loader. They are
+retained: the envelope is a public contract, and deleting a fail-closed reason
+code is not a safe way to record that a failure mode was eliminated.
+
+Regression: `offerr-candidate-completeness.test.mjs` case 12 — *a
+count-preserving concurrent write cannot skip a candidate*.
+
+### 16.2 The LIKE-safety allowlist silently rejected legitimate addresses
+
+`likeSafeToken()` built the DB prefilter fragment by **deleting** every
+non-`[a-z0-9-]` character, then matched `%fragment%` against the RAW canonical
+`property_address_full` — which still contains its apostrophes and accents.
+The fragment was therefore not a substring of the canonical text at all:
+
+| Seller input | Fragment asked of the DB | Canonical row | Retrieved? |
+|---|---|---|---|
+| `123 O'Connor St` | `%oconnor%` | `123 O'CONNOR ST` | **no** |
+| `45 O'Brien Ave` | `%obrien%` | `45 O'BRIEN AVE` | **no** |
+| `77 Cañada Rd` | `%caada%` | `77 CAÑADA RD` | **no** |
+| `99 Peña Blvd` | `%pea%` | `99 PEÑA BLVD` | **no** |
+| `108 1/2 Elm St` | `%12%` | `108 1/2 ELM ST` | **no** |
+
+The in-process structured comparison matched these perfectly — the row was
+simply never delivered to it, so the seller received `NOT_FOUND` for an
+entirely ordinary address.
+
+**Fix — truncate at the first disallowed character instead of deleting.**
+`"o'connor"` → `"o"`, `"cañada"` → `"ca"`. Always a genuine substring of the
+canonical value, still admitting no LIKE metacharacter. Selectivity drops
+slightly; the street-number prefix and the documented bounds keep the scan
+bounded, and an empty fragment simply omits the name filter.
+
+### 16.3 `withDeadline` crashed the process on an already-spent budget
+
+`withDeadline` opened with `if (!(remainingMs > 0)) return STAGE_TIMEOUT`. The
+stage promise is the *argument expression*, so the work was already in flight;
+returning the sentinel without subscribing left it unobserved, and a later
+rejection arrived as an `unhandledRejection` — which Node terminates the
+process on by default. **A single request exceeding its budget could take down
+the instance serving every other request.** Confirmed by direct execution: the
+Node process aborted with `Error: late_rejection_SKIPPED`.
+
+The raced branch is fine — `Promise.race` subscribes and absorbs a late
+rejection. Fix: observe the promise on the early-return branch too.
+
+Also verified for this helper: timed-out work cannot persist a snapshot (only
+read-only stages are raced, and persistence is never raced); a timeout never
+produces a seller range; abort signals are **not** threaded into the canonical
+loaders — a documented, accepted limitation, not a silent one.
+
+### 16.4 The TLS hardening was never wired up
+
+`buildVerifiedSsl()` was defined and documented but **never called**. The pool
+was still constructed with a hard-coded `ssl: { rejectUnauthorized: false }`,
+so database credentials still crossed the public internet on an unauthenticated
+channel — blocker #8 was reported closed while remaining fully open. Fixed by
+passing `buildVerifiedSsl(DB_URL)`. §15.1 row 8 has been annotated.
+
+### 16.5 Drift severity — an Offerr gate must not fail on a shared-schema grant
+
+Adding `properties` to the grant-posture check correctly surfaced a
+**pre-existing** production grant, but the checker had a single severity: the
+finding rendered identically to a genuine Offerr incompatibility and would have
+made an activation gate report that the Offerr migration was broken when it was
+intact.
+
+Findings now carry an explicit scope, and **nothing is suppressed**:
+
+| Severity | Meaning | Blocks activation |
+|---|---|---|
+| `BLOCKING_OFFERR_DRIFT` | the Offerr contract itself is unsatisfied | **yes** |
+| `SHARED_SCHEMA_SECURITY_WARNING` | real security finding on schema Offerr reads but does not own | no (reported prominently) |
+| `INFORMATIONAL` | context | no |
+
+`ok` is false only for blocking findings; `failures` still carries every
+finding; `--strict` promotes warnings to blocking for the eventual
+grant-remediation gate. The CLI now states the two facts separately so a
+pre-existing shared grant can never read as "Offerr is broken". No production
+grant was altered.
+
+Note also that adding `properties` does **not** move the production drift count
+from 2 to 3: all grants collapse into one `grant_posture_mismatch` finding, so
+the detail expands while the count does not.
+
+### 16.6 Smaller corrections
+
+- **Privacy** — the compensation-failure log emitted the raw `idempotency_key`,
+  which is caller-supplied, up to 128 characters, and may carry a seller email
+  or phone number. Now logged as `idempotency_key_sha256_12`, matching the
+  address-logging convention. The store's logger is injectable so the redaction
+  is assertable.
+- **Retryability taxonomy** — `property_resolution_error` and `comp_load_error`
+  were unclassified and fell through to 500 despite being the same class of
+  transient canonical-read fault as `subject_hydration_error`. Both are now 503.
+- **Adapter fidelity** — `count=exact` ran as a **separate** `COUNT(*)`
+  statement, making the verification harness strictly weaker than production
+  and unable to model the very snapshot property the resolver depends on. It is
+  now computed in the same statement, as PostgREST does.
+- **Address forms** — hyphenated house numbers (`123-45 Roosevelt Ave`,
+  standard in Queens and Hawaii) were rejected as `missing_street_number`;
+  `1234 Highway 6` lost its street name entirely to the suffix scan; `1234
+  State Highway 6` pushed the route number into the city slot, which then
+  fought the seller's real city as a geography conflict. All fixed and tested.
+  Because the same parser reads the canonical rows, these addresses could not
+  have resolved from **either** side.
+- **Non-street addresses** — PO Boxes and rural routes now fail closed with
+  `po_box_not_supported` / `non_street_address` instead of a misleading
+  `missing_street_number`, so the seller surface can route them to an
+  "unsupported" state rather than asking for a re-type.
+
+### 16.7 Verification (clean worktree, this branch)
+
+| Suite | Result |
+|---|---|
+| All Offerr critical tests | **180 tests — 177 pass, 0 fail, 3 skipped** (skips are DB-backed, no live database) |
+| Candidate completeness | 26/26 |
+| Property resolution | 34/34 |
+| Activation hardening | 19/19 |
+| Acquisition + comp regressions | **827 tests — 826 pass, 1 fail** |
+| Lint | pass (1495 files) |
+| Row-26 differential | pre-fix `RESOLVED` → hardened `AMBIGUOUS`, reproduced |
+
+The single acquisition failure (`acquisition-brain-context-classifier-v2` →
+*v3 collection spec present and empty of predictions*) was **baselined against
+the unmodified PR head `c9f8db93` and fails there identically**. It is
+pre-existing and unrelated to this work.
+
+Separately: `npm ci` cannot install this repository — `packages/seller-engine`
+exists as a workspace but is absent from `package-lock.json`, on `main` as well
+as on this branch. Pre-existing, out of scope here, but it means clean CI
+installs are broken and should be fixed.
+
+### 16.8 Production safety (unchanged)
+
+This remains an application-only change. `offerr_evaluation_enabled` is still
+`false`, the production Offerr tables are still empty, no production schema,
+grant or row was touched, and the public seller surface is still not connected.

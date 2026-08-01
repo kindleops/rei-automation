@@ -65,7 +65,21 @@ const STAGE_TIMEOUT = Symbol('offerr_stage_timeout');
  * write whose transaction may still commit would break idempotency.
  */
 function withDeadline(promise, remainingMs) {
-  if (!(remainingMs > 0)) return Promise.resolve(STAGE_TIMEOUT);
+  if (!(remainingMs > 0)) {
+    // The caller ALREADY started this work — `promise` is the argument
+    // expression, so it is in flight before this function is entered. Returning
+    // the sentinel without subscribing leaves that promise unobserved, and a
+    // later rejection from it is an unhandledRejection, which Node terminates
+    // the process on by default. A stage timing out must degrade one request,
+    // never take down the instance serving every other one.
+    //
+    // The outcome itself is genuinely no longer actionable — the budget is
+    // spent and the caller has already been told so — hence the empty handler.
+    // The RACED branch below needs no equivalent: Promise.race subscribes to
+    // `promise` itself, so it absorbs a late rejection on its own.
+    Promise.resolve(promise).catch(() => {});
+    return Promise.resolve(STAGE_TIMEOUT);
+  }
   let timer = null;
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve(STAGE_TIMEOUT), remainingMs);

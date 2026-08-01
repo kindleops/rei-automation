@@ -227,7 +227,14 @@ async function main() {
   const identity = await assertOfferrPreviewBranch({ target: DB_URL });
   printPreviewIdentity(identity, { script: 'offerr-preview-https-verify', phase: PHASE, preview_url: PREVIEW_URL });
 
-  const pool = new pg.Pool({ connectionString: DB_URL, ssl: { rejectUnauthorized: false }, max: 8 });
+  // buildVerifiedSsl() is the whole point of the TLS hardening: keeping a
+  // hard-coded `{ rejectUnauthorized: false }` here left the helper dead code
+  // and the credentials on an unauthenticated channel.
+  const pool = new pg.Pool({
+    connectionString: DB_URL,
+    ssl: buildVerifiedSsl(DB_URL),
+    max: 8,
+  });
   const report = { phase: PHASE, preview_url: PREVIEW_URL, branch: identity, cases: [], latency: null };
 
   if (SEED) {

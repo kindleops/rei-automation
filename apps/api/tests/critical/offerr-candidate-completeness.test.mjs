@@ -110,9 +110,14 @@ function PostgrestTable(rows, behaviour = {}) {
 
   const client = {
     _requests: state.requests,
-    /** Simulates a concurrent writer between pages. */
-    _insert(newRow, at = 0) {
+    /** Simulates a concurrent writer inserting a row. */
+    _insert(newRow, at = state.rows.length) {
       state.rows.splice(at, 0, newRow);
+    },
+    /** Simulates a concurrent writer deleting a row. */
+    _delete(id) {
+      const i = state.rows.findIndex((r) => r.property_id === id);
+      if (i >= 0) state.rows.splice(i, 1);
     },
     from(table) {
       return {
@@ -192,6 +197,13 @@ function PostgrestTable(rows, behaviour = {}) {
             }
             state.lastPageFirst = page[0] ?? null;
 
+            // A transport that hands back the same row twice inside ONE
+            // response. Impossible against a table with a primary key, which
+            // is exactly why the resolver must not take it on trust.
+            if (behaviour.duplicateInPayload && page.length > 1) {
+              page = [page[0], ...page.slice(0, -1)];
+            }
+
             if (behaviour.shortPageAtIndex === index) page = page.slice(0, 1);
 
             behaviour.afterPage?.(index, client);
@@ -268,17 +280,18 @@ test('3. one hundred repeated resolutions over shuffled order are byte-identical
   assert.equal(first, JSON.stringify({ s: 'RESOLVED', p: 'true-match', why: 'unique_structured_match' }));
 });
 
-test('4. a second exact match on the NEXT page still blocks resolution', async () => {
-  // page_size 10 => the second true match can only be seen by paginating.
+test('4. a second exact match far beyond the old 25-row window still blocks resolution', async () => {
+  // The duplicate sits at row 121 — invisible to the pre-fix `.limit(25)`.
   const second = row({ id: 'second-exact', full: '1400 Sycamore Ln, Houston, TX 77035' });
-  const client = PostgrestTable([TRUE_MATCH(), ...filler(15), second]);
+  const client = PostgrestTable([TRUE_MATCH(), ...filler(119), second]);
 
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 10, max_pages: 5 } });
+  const r = await resolve(SUBJECT, client);
 
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
   assert.equal(r.reason, 'multiple_structured_matches');
-  assert.ok(r.diagnostics.pages_loaded >= 2, 'pagination actually happened');
-  assert.equal(r.diagnostics.total_count, 17);
+  assert.equal(r.diagnostics.total_count, 121);
+  assert.equal(r.diagnostics.candidate_count, 121, 'the whole set was examined');
+  assert.equal(client._requests.length, 1, 'the bounded set is read in ONE statement');
 });
 
 test('5. a missing unit never auto-resolves when unit rows sit after row 25', async () => {
@@ -349,42 +362,71 @@ test('9b. a first-page query error surfaces as a dependency fault, never a resol
   );
 });
 
-test('10. a pagination failure after the first page fails closed', async () => {
-  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], { failPageIndexes: [1] });
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 10 } });
+test('10. a payload shorter than its own exact count fails closed', async () => {
+  // A server-side row cap (PostgREST `db-max-rows`) or a truncating client:
+  // the statement counted 16 rows and handed back 1. Never reconcile that.
+  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], { shortPageAtIndex: 0 });
+  const r = await resolve(SUBJECT, client);
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
-  assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_FAILED);
+  assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.TRUNCATED);
   assert.equal(r.property_id, null);
 });
 
-test('11. duplicate rows appearing across pages fail closed', async () => {
-  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], { duplicateAcrossPages: true });
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 10 } });
+test('11. a row duplicated inside one payload fails closed', async () => {
+  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], { duplicateInPayload: true });
+  const r = await resolve(SUBJECT, client);
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
   assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_INCONSISTENT);
+  assert.equal(r.property_id, null);
 });
 
-test('12. a candidate inserted BETWEEN pages fails closed as an unstable set', async () => {
-  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], {
+/**
+ * THE PAGE-BOUNDARY REGRESSION.
+ *
+ * Multi-request pagination compared the exact count returned by each page and
+ * failed closed when it moved. Count equality is NOT set equality: a writer
+ * that deletes one row before the cursor and inserts another after it leaves
+ * the count untouched while shifting every unread row one position left. The
+ * row on the page boundary is then never returned, no duplicate appears, and
+ * every guard stays silent — so the loader reported `complete: true` for a set
+ * with a hole in it, and when the missing row was the duplicate parcel the
+ * resolver answered RESOLVED for a property it had not uniquely identified.
+ *
+ * The fix is structural: the bounded candidate set is read in ONE statement,
+ * with `count=exact` computed inside that same statement. There is no second
+ * read for a writer to interleave with, so the interference is unrepresentable
+ * rather than merely detectable.
+ */
+test('12. a count-preserving concurrent write cannot skip a candidate', async () => {
+  const duplicate = row({ id: 'dup-parcel', full: '1400 Sycamore Ln, Houston, TX 77035' });
+  const client = PostgrestTable([TRUE_MATCH(), ...filler(119), duplicate], {
     afterPage(index, c) {
+      // A writer commits the moment the first read completes: one row removed
+      // from the front, one appended at the back. Net count: unchanged.
       if (index === 0) {
-        c._insert(row({ id: 'raced-in', full: '1400 Sycamore Ln, Houston, TX 77035' }), 0);
+        c._delete('f0');
+        c._insert(row({ id: 'raced-in', full: '1400 Elmwood Dr, Houston, TX 77035' }));
       }
     },
   });
 
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 10 } });
+  const r = await resolve(SUBJECT, client);
 
+  assert.equal(client._requests.length, 1, 'exactly ONE statement — no window to interleave with');
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
-  assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.SET_CHANGED);
-  assert.equal(r.property_id, null);
+  assert.equal(r.reason, 'multiple_structured_matches');
+  assert.equal(r.property_id, null, 'the duplicate parcel was seen, so nothing resolved');
+  assert.equal(r.diagnostics.matching_candidate_count, 2);
 });
 
-test('12b. a page shorter than promised fails closed instead of being reconciled', async () => {
-  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], { shortPageAtIndex: 0 });
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 10 } });
+test('12b. a payload longer than its own exact count fails closed', async () => {
+  const client = PostgrestTable([TRUE_MATCH(), ...filler(15)], {
+    countOverride: (_index, total) => total - 1,
+  });
+  const r = await resolve(SUBJECT, client);
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
-  assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.PAGINATION_INCONSISTENT);
+  assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.TRUNCATED);
+  assert.equal(r.property_id, null);
 });
 
 /* ── 13-16: ordering, bounds, and honest resolution ──────────────────────── */
@@ -422,14 +464,14 @@ test('14. exactly one complete candidate set still resolves', async () => {
 test('15. a large irrelevant candidate set with one structured match resolves', async () => {
   // 120 same-street-number rows that never base-match, plus one that does.
   const client = PostgrestTable([...filler(60), TRUE_MATCH(), ...filler(60, { prefix: 'g' })]);
-  const r = await resolve(SUBJECT, client, { candidateBounds: { page_size: 50, max_pages: 5 } });
+  const r = await resolve(SUBJECT, client);
 
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
   assert.equal(r.property_id, 'true-match');
   assert.equal(r.diagnostics.total_count, 121);
   assert.equal(r.diagnostics.candidate_count, 121, 'the WHOLE set was examined, not a window');
   assert.equal(r.diagnostics.matching_candidate_count, 1);
-  assert.ok(r.diagnostics.pages_loaded >= 3);
+  assert.equal(client._requests.length, 1, '121 rows still cost exactly one statement');
 });
 
 test('16. partial street-name similarity never resolves, however many rows exist', async () => {
@@ -556,17 +598,61 @@ test('20. work is bounded: oversized input and wildcard injection cannot widen t
   );
 });
 
-test('21. a deadline overrun during pagination fails closed', async () => {
+test('21. a candidate read that overruns the deadline fails closed', async () => {
   let clock = 0;
   const client = PostgrestTable([TRUE_MATCH(), ...filler(40)]);
   const r = await resolve(SUBJECT, client, {
-    candidateBounds: { page_size: 10, deadline_ms: 25 },
-    // Each call advances the clock past the deadline after the first page.
-    nowMs: () => (clock += 20),
+    candidateBounds: { deadline_ms: 25 },
+    // The clock passes the deadline while the statement is in flight, so the
+    // rows arrive too late to be trusted as a basis for a uniqueness claim.
+    nowMs: () => (clock += 30),
   });
   assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.AMBIGUOUS);
   assert.equal(r.reason, OFFERR_INCOMPLETE_CANDIDATE_REASONS.DEADLINE_EXCEEDED);
   assert.equal(r.property_id, null);
+});
+
+/* ── 23-24: the DB prefilter must be able to return the row it matches ────── */
+
+/**
+ * The candidate query narrows with `property_address_full ILIKE '%<token>%'`
+ * against the RAW canonical text, while identity is decided in JavaScript
+ * afterwards. Those two halves must agree about what the token IS.
+ *
+ * Building the token by DELETING non-`[a-z0-9-]` characters broke that:
+ * "o'connor" became "oconnor", which is not a substring of "O'CONNOR" at all,
+ * so the row was never retrieved and a seller with a perfectly ordinary
+ * address — whose structured comparison matches exactly — was told their
+ * property could not be found. Truncating at the first disallowed character
+ * keeps the fragment a genuine substring while still admitting no LIKE
+ * metacharacter.
+ */
+test('23. an apostrophe in the street name still retrieves and resolves the row', async () => {
+  const client = PostgrestTable([
+    row({ id: 'oconnor', full: "123 O'Connor St, Houston, TX 77035" }),
+    ...filler(10),
+  ]);
+  const r = await resolve("123 O'Connor St, Houston, TX 77035", client);
+
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(r.property_id, 'oconnor');
+  const namePattern = client._requests[0].filters.map((f) => f.pattern).find((p) => p.startsWith('%'));
+  assert.ok(namePattern, 'a street-name filter was applied');
+  assert.ok(
+    "123 o'connor st, houston, tx 77035".includes(namePattern.replaceAll('%', '')),
+    `the ILIKE fragment ${namePattern} must be a real substring of the canonical address`,
+  );
+});
+
+test('24. an accented street name still retrieves and resolves the row', async () => {
+  const client = PostgrestTable([
+    row({ id: 'canada', full: '77 Cañada Rd, Houston, TX 77035' }),
+    ...filler(10),
+  ]);
+  const r = await resolve('77 Cañada Rd, Houston, TX 77035', client);
+
+  assert.equal(r.status, OFFERR_RESOLUTION_STATUSES.RESOLVED);
+  assert.equal(r.property_id, 'canada');
 });
 
 test('22. a canonical row whose structured columns fight its own address never wins', async () => {

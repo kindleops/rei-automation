@@ -67,6 +67,16 @@ const STATE_ABBREVS = new Set(Object.values(STATE_NAME_MAP));
 
 const UNIT_DESIGNATORS = Object.freeze(['apt', 'apartment', 'unit', 'ste', 'suite', 'lot', '#']);
 
+/**
+ * House numbers: plain ("742"), letter-suffixed ("742a") or HYPHENATED
+ * ("123-45"). The hyphenated form is standard across Queens, NY and parts of
+ * Hawaii; rejecting it returned `missing_street_number` -> INVALID_INPUT for a
+ * perfectly valid address. Canonical `property_address_full` values are parsed
+ * by this same function, so those rows failed to parse too — meaning the
+ * address could never have resolved from either side.
+ */
+const STREET_NUMBER_RE = /^\d+(?:-\d+)?[a-z]?$/;
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -233,8 +243,19 @@ export function parseSellerAddress(raw) {
   // optional post-directional; without commas the remainder is the city.
   const tokens = streetTokens.filter(Boolean);
   const numberToken = tokens[0];
-  if (!numberToken || !/^\d+[a-z]?$/.test(numberToken)) {
-    return { ...empty, ok: false, reason: 'missing_street_number', zip5, zip4, state };
+  if (!numberToken || !STREET_NUMBER_RE.test(numberToken)) {
+    // Distinguish "this is not a street address at all" from "we could not
+    // find the house number". Both fail closed, but only the first is a
+    // property the programme structurally cannot evaluate, and the seller
+    // deserves to be told that rather than being asked to re-type a correct
+    // address. `normalizeSegmentText` has already turned "P.O." into "p o".
+    const lead = tokens.slice(0, 3).join(' ');
+    const reason = /^(?:p\s*o\s+box|post\s+office\s+box|box)\b/.test(lead)
+      ? 'po_box_not_supported'
+      : /^(?:rr|rfd|hc|rural\s+route|highway\s+contract)\b/.test(lead)
+        ? 'non_street_address'
+        : 'missing_street_number';
+    return { ...empty, ok: false, reason, zip5, zip4, state };
   }
   tokens.shift();
 
@@ -248,10 +269,16 @@ export function parseSellerAddress(raw) {
   // post-directional and (comma-less input) the city.
   let suffixIndex = -1;
   for (let i = tokens.length - 1; i >= 0; i -= 1) {
-    if (SUFFIX_MAP[tokens[i]]) {
-      suffixIndex = i;
-      break;
-    }
+    if (!SUFFIX_MAP[tokens[i]]) continue;
+    // "Highway 6", "State Highway 6": a suffix homograph followed by a bare
+    // number is part of the ROAD'S NAME, not a street-type suffix. Treating it
+    // as one consumed the name entirely ("1234 Highway 6" -> no street name ->
+    // INVALID_INPUT) or pushed the route number out into the city slot
+    // ("1234 State Highway 6" -> city "6"), which then fought the seller's
+    // real city and failed closed as a geography conflict.
+    if (i + 1 < tokens.length && /^\d+$/.test(tokens[i + 1])) continue;
+    suffixIndex = i;
+    break;
   }
 
   let nameTokens;
@@ -277,6 +304,15 @@ export function parseSellerAddress(raw) {
   if (nameTokens.length === 0 && preDirectional) {
     nameTokens = [preDirectional === 'n' ? 'north' : preDirectional === 's' ? 'south' : preDirectional === 'e' ? 'east' : preDirectional === 'w' ? 'west' : preDirectional];
     preDirectional = null;
+  }
+
+  // "123 Way", "40 Cove": the only token IS a suffix homograph, so treating it
+  // as the suffix left no street name at all. The word is the name.
+  if (nameTokens.length === 0 && suffixIndex >= 0) {
+    nameTokens = tokens.slice(0, suffixIndex + 1);
+    suffix = null;
+    postDirectional = null;
+    inlineCityTokens = tokens.slice(suffixIndex + 1);
   }
 
   if (nameTokens.length === 0) {
