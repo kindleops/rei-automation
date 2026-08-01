@@ -20,8 +20,22 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_SLA_MINUTES = 10;
 const DEFAULT_RETRY_HORIZON_MINUTES = 60;
+// Upper bounds keep a typo'd (or hostile) query string from neutering the
+// watchdog: a negative window moves the cutoff into the future and pages on a
+// healthy system; an enormous window hides every real breach.
+const MAX_SLA_MINUTES = 1440; // 24h
+const MAX_RETRY_HORIZON_MINUTES = 10080; // 7d
 
-async function runScan(request) {
+// Bounded positive integer minutes. Invalid, NaN, zero, and negative input
+// fall back to the default; fractional values round (floor 1); excessive
+// values clamp to the ceiling.
+export function clampScanMinutes(raw, fallback, max) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.max(1, Math.round(parsed)), max);
+}
+
+export async function handleDispositionSloScanRequest(request, deps = {}) {
   const auth = requireInternalSecret(request);
   if (!auth.ok) {
     return NextResponse.json(
@@ -31,11 +45,19 @@ async function runScan(request) {
   }
 
   const search_params = new URL(request.url).searchParams;
-  const sla_minutes = Number(search_params.get("sla_minutes")) || DEFAULT_SLA_MINUTES;
-  const retry_horizon_minutes =
-    Number(search_params.get("retry_horizon_minutes")) || DEFAULT_RETRY_HORIZON_MINUTES;
+  const sla_minutes = clampScanMinutes(
+    search_params.get("sla_minutes"),
+    DEFAULT_SLA_MINUTES,
+    MAX_SLA_MINUTES
+  );
+  const retry_horizon_minutes = clampScanMinutes(
+    search_params.get("retry_horizon_minutes"),
+    DEFAULT_RETRY_HORIZON_MINUTES,
+    MAX_RETRY_HORIZON_MINUTES
+  );
 
-  const scan = await findInboundLedgerSlaBreaches({
+  const scan_for_breaches = deps.findInboundLedgerSlaBreaches || findInboundLedgerSlaBreaches;
+  const scan = await scan_for_breaches({
     sla_minutes,
     retry_horizon_minutes,
   });
@@ -99,9 +121,9 @@ async function runScan(request) {
 }
 
 export async function GET(request) {
-  return runScan(request);
+  return handleDispositionSloScanRequest(request);
 }
 
 export async function POST(request) {
-  return runScan(request);
+  return handleDispositionSloScanRequest(request);
 }

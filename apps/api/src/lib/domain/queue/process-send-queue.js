@@ -1483,12 +1483,26 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
             session_expires_at: proof_bypass.expires_at,
           },
         };
-        const locked_update = await updateSendQueueRowWithLock(
-          queue_row_id,
-          lock_token,
-          { metadata: bypass_metadata, updated_at: now },
-          deps
-        );
+        let locked_update = null;
+        try {
+          locked_update = await updateSendQueueRowWithLock(
+            queue_row_id,
+            lock_token,
+            { metadata: bypass_metadata, updated_at: now },
+            deps
+          );
+        } catch (audit_error) {
+          // A thrown audit write is a denied bypass, never a transport
+          // failure: nothing has been sent yet, so the row must fall through
+          // to the ordinary contact-window deferral instead of the outer
+          // catch (which would finalize a false `failed` status and write an
+          // outbound FAILURE event for a message that never left).
+          warn("queue.contact_window_bypass_audit_write_failed", {
+            queue_row_id,
+            session_id: proof_bypass.session_id,
+            message: audit_error?.message || "unknown",
+          });
+        }
         if (locked_update) {
           bypass_crossed = true;
           queue_row = normalizeSendQueueRow({ ...queue_row, metadata: bypass_metadata });

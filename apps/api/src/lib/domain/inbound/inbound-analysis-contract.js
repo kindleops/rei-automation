@@ -17,7 +17,10 @@ function clean(value) {
 
 const EMOJI_RE = /\p{Extended_Pictographic}/gu;
 const QUESTION_RE = /\?/g;
-const SENTENCE_SPLIT_RE = /[.!?]+[\s$]|[.!?]+$/g;
+// Terminal punctuation followed by whitespace or true end-of-input. Inside a
+// character class `$` is a literal dollar sign, so `[\s$]` would count
+// currency-adjacent punctuation ("10.$") as a sentence boundary.
+const SENTENCE_SPLIT_RE = /[.!?]+(?:\s|$)/g;
 
 function safeCount(value, re) {
   const matches = clean(value).match(re);

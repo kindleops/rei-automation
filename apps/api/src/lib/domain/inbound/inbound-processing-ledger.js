@@ -10,12 +10,28 @@
 // retrying because our observability store hiccuped would double-process real
 // seller messages. The webhook_log cross-check in the SLA scan covers the
 // residual gap.
+//
+// PII minimization + retention: the ledger never stores raw seller message
+// text — only a SHA-256 digest and length (enough to correlate/deduplicate
+// without content). Phone numbers are kept because they ARE the thread
+// identifiers the SLA scan and ops correlation need, but every row carries
+// retain_until (receipt + INBOUND_LEDGER_RETENTION_DAYS) and is hard-deleted
+// by the daily /api/internal/inbound/ledger-retention-purge cron. The
+// migration (20260801060000_inbound_processing_ledger.sql) is the retention
+// policy of record.
 
+import crypto from "node:crypto";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { warn } from "@/lib/logging/logger.js";
 import { isTerminalDisposition } from "@/lib/domain/inbound/terminal-disposition.js";
 
 const LEDGER_TABLE = "inbound_processing_ledger";
+
+// Operational retention window for ledger rows (seller phone numbers + body
+// digests). The SLA scan only needs minutes-old rows; 30 days covers incident
+// forensics with margin while keeping seller PII bounded.
+export const INBOUND_LEDGER_RETENTION_DAYS = 30;
+const RETENTION_MS = INBOUND_LEDGER_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -25,6 +41,22 @@ function getSupabase(deps = {}) {
   const client = deps.supabase || deps.supabaseClient;
   if (client) return client;
   return hasSupabaseConfig() ? defaultSupabase : null;
+}
+
+// PII minimization: persist a content digest + length, never the seller text.
+function digestMessageBody(value) {
+  const text = String(value ?? "");
+  if (!text) return { body_sha256: null, body_length: 0 };
+  return {
+    body_sha256: crypto.createHash("sha256").update(text, "utf8").digest("hex"),
+    body_length: text.length,
+  };
+}
+
+function retainUntilFrom(received_at, now) {
+  const received_ms = Date.parse(clean(received_at));
+  const base_ms = Number.isFinite(received_ms) ? received_ms : Date.parse(now);
+  return new Date(base_ms + RETENTION_MS).toISOString();
 }
 
 function tableMissing(error) {
@@ -44,7 +76,7 @@ export async function beginInboundLedgerEntry(
     thread_key = null,
     from_phone = null,
     to_phone = null,
-    message_preview = null,
+    message_body = null,
     processing_run_id = null,
     received_at = null,
   } = {},
@@ -88,6 +120,7 @@ export async function beginInboundLedgerEntry(
       return { ok: true, ledger_id: existing.id, retry: true };
     }
 
+    const { body_sha256, body_length } = digestMessageBody(clean(message_body));
     const { data, error } = await supabase
       .from(LEDGER_TABLE)
       .insert({
@@ -96,8 +129,10 @@ export async function beginInboundLedgerEntry(
         thread_key: clean(thread_key) || null,
         from_phone: clean(from_phone) || null,
         to_phone: clean(to_phone) || null,
-        message_preview: clean(message_preview).slice(0, 160) || null,
+        body_sha256,
+        body_length,
         received_at: received_at || now,
+        retain_until: retainUntilFrom(received_at || now, now),
         processing_run_id,
         status: "processing",
       })
@@ -147,21 +182,41 @@ export async function recordInboundTerminalDisposition(
   try {
     let query = supabase
       .from(LEDGER_TABLE)
-      .update({
-        status: failed ? "failed" : "completed",
-        terminal_disposition: disposition,
-        disposition_detail: detail && typeof detail === "object" ? detail : {},
-        detected_intent: clean(detected_intent) || null,
-        classifier_version: clean(classifier_version) || null,
-        confidence: Number.isFinite(Number(confidence)) ? Number(confidence) : null,
-        latency_ms: Number.isFinite(Number(latency_ms)) ? Math.round(Number(latency_ms)) : null,
-        error_message: clean(error_message) || null,
-        completed_at: now,
-        updated_at: now,
-      });
+      .update(
+        {
+          status: failed ? "failed" : "completed",
+          terminal_disposition: disposition,
+          disposition_detail: detail && typeof detail === "object" ? detail : {},
+          detected_intent: clean(detected_intent) || null,
+          classifier_version: clean(classifier_version) || null,
+          confidence: Number.isFinite(Number(confidence)) ? Number(confidence) : null,
+          latency_ms: Number.isFinite(Number(latency_ms)) ? Math.round(Number(latency_ms)) : null,
+          error_message: clean(error_message) || null,
+          completed_at: now,
+          updated_at: now,
+        },
+        { count: "exact" }
+      );
     query = ledger_id ? query.eq("id", ledger_id) : query.eq("idempotency_key", key);
-    const { error } = await query;
+    const { error, count } = await query;
     if (error) throw error;
+    // Durable-write truthfulness: an update that matched no row (begin failed,
+    // row deleted, wrong reference) is a FAILURE — reporting success here
+    // would hide exactly the silent drop this ledger exists to make loud.
+    if (count !== 1) {
+      warn("inbound_ledger.record_row_missing", {
+        idempotency_key: key,
+        ledger_id,
+        disposition,
+        updated_count: count ?? 0,
+      });
+      return {
+        ok: false,
+        reason: "ledger_row_missing",
+        disposition,
+        updated_count: count ?? 0,
+      };
+    }
     return { ok: true, disposition };
   } catch (error) {
     if (tableMissing(error)) {
@@ -226,8 +281,54 @@ export async function findInboundLedgerSlaBreaches(
   }
 }
 
+/**
+ * Retention purge: hard-delete ledger rows past retain_until. The ledger holds
+ * seller phone numbers and body digests, so rows must not outlive the
+ * documented INBOUND_LEDGER_RETENTION_DAYS window. Select-then-delete keeps
+ * every cron invocation bounded (never an unbounded DELETE).
+ */
+export async function purgeExpiredInboundLedgerRows({ limit = 500 } = {}, deps = {}) {
+  const supabase = getSupabase(deps);
+  if (!supabase) return { ok: false, reason: "supabase_unconfigured", purged: 0 };
+  const now = deps.now || new Date().toISOString();
+  const parsed_limit = Number(limit);
+  const batch_limit =
+    Number.isFinite(parsed_limit) && parsed_limit > 0
+      ? Math.min(Math.round(parsed_limit), 2000)
+      : 500;
+
+  try {
+    const { data: expired, error: select_error } = await supabase
+      .from(LEDGER_TABLE)
+      .select("id")
+      .lt("retain_until", now)
+      .order("retain_until", { ascending: true })
+      .limit(batch_limit);
+    if (select_error) throw select_error;
+
+    const ids = (expired || []).map((row) => row.id);
+    if (!ids.length) return { ok: true, purged: 0, more: false };
+
+    const { error: delete_error, count } = await supabase
+      .from(LEDGER_TABLE)
+      .delete({ count: "exact" })
+      .in("id", ids);
+    if (delete_error) throw delete_error;
+
+    return { ok: true, purged: count ?? ids.length, more: ids.length === batch_limit };
+  } catch (error) {
+    if (tableMissing(error)) {
+      return { ok: false, reason: "ledger_table_missing", purged: 0 };
+    }
+    warn("inbound_ledger.purge_failed", { error: error?.message || "unknown" });
+    return { ok: false, reason: "ledger_purge_failed", message: error?.message, purged: 0 };
+  }
+}
+
 export default {
   beginInboundLedgerEntry,
   recordInboundTerminalDisposition,
   findInboundLedgerSlaBreaches,
+  purgeExpiredInboundLedgerRows,
+  INBOUND_LEDGER_RETENTION_DAYS,
 };

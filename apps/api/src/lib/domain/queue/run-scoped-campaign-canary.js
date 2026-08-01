@@ -44,24 +44,16 @@ function metadataObject(row = {}) {
   return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
 }
 
-export function isProofOrNoSendQueueRow(row = {}) {
-  const metadata = metadataObject(row);
-  return Boolean(
-    metadata.proof === true ||
-    metadata.proof_mode ||
-    metadata.no_send === true ||
-    metadata.proof_hydration === true ||
-    metadata.launch_mode === "proof_hydration_no_send" ||
-    metadata.internal_test_phone === true ||
-    metadata.exclude_from_kpis === true
-  );
-}
-
 // Markers that mean "this row must never be transported", regardless of any
 // manifest. Distinct from the internal-canary QUARANTINE vocabulary
 // (internal_test_phone / exclude_from_kpis), which excludes a row from KPIs
 // and unrestricted selection but must not brick the one lane that exists to
 // dispatch internal canary rows: an explicit scoped-canary manifest.
+//
+// SINGLE SOURCE OF TRUTH: any future absolute marker belongs HERE and only
+// here. isProofOrNoSendQueueRow derives from this function, so a marker added
+// here automatically applies to both exclusion gates — the internal-canary
+// exception can never bypass it.
 export function hasAbsoluteNoSendMarkers(row = {}) {
   const metadata = metadataObject(row);
   return Boolean(
@@ -71,6 +63,24 @@ export function hasAbsoluteNoSendMarkers(row = {}) {
     metadata.proof_hydration === true ||
     metadata.launch_mode === "proof_hydration_no_send"
   );
+}
+
+// Internal-canary QUARANTINE vocabulary: excluded from KPIs and unrestricted
+// selection, but dispatchable through an explicit scoped-canary manifest for
+// a genuine internal-canary row (isDispatchableInternalCanaryRow).
+export function hasQuarantineMarkers(row = {}) {
+  const metadata = metadataObject(row);
+  return Boolean(
+    metadata.internal_test_phone === true ||
+    metadata.exclude_from_kpis === true
+  );
+}
+
+// Broad proof/no-send predicate: absolute markers PLUS the quarantine
+// vocabulary. Deliberately expressed as a derivation (never a re-listed
+// marker set) so the absolute list cannot drift between the two gates.
+export function isProofOrNoSendQueueRow(row = {}) {
+  return hasAbsoluteNoSendMarkers(row) || hasQuarantineMarkers(row);
 }
 
 // A quarantine-marked row is scoped-canary dispatchable ONLY when it is a
