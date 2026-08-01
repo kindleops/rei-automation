@@ -33,6 +33,16 @@ export const INTERNAL_PROOF_SESSION_KEY = "internal_proof_session";
 // tampered expiration cannot produce a long-lived bypass.
 export const INTERNAL_PROOF_SESSION_MAX_MINUTES = 240;
 
+// The proof lane is pinned IN CODE to the one approved internal thread. A
+// session naming any other recipient, sender, or campaign — including the
+// other registered internal numbers — is invalid in its entirety, so the
+// exact-target requirement is structural, not delegated to session content.
+export const INTERNAL_PROOF_PINNED = Object.freeze({
+  recipient: "+16128072000",
+  sender: "+16128060495",
+  campaign_id: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
+});
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -89,6 +99,15 @@ export function parseInternalProofSession(raw, now = new Date()) {
   if (!recipient) return { ok: false, reason: "session_recipient_required" };
   if (!sender) return { ok: false, reason: "session_sender_required" };
   if (!isInternalTestPhone(recipient)) return { ok: false, reason: "session_recipient_not_internal" };
+  if (recipient !== INTERNAL_PROOF_PINNED.recipient) {
+    return { ok: false, reason: "session_recipient_not_pinned" };
+  }
+  if (sender !== INTERNAL_PROOF_PINNED.sender) {
+    return { ok: false, reason: "session_sender_not_pinned" };
+  }
+  if (campaign_id !== INTERNAL_PROOF_PINNED.campaign_id) {
+    return { ok: false, reason: "session_campaign_not_pinned" };
+  }
   if (created_ts === null) return { ok: false, reason: "session_created_at_invalid" };
   if (expires_ts === null) return { ok: false, reason: "session_expires_at_invalid" };
   if (expires_ts <= now_ts) return { ok: false, reason: "session_expired" };
@@ -112,12 +131,34 @@ export function parseInternalProofSession(raw, now = new Date()) {
   };
 }
 
+// Cache-bypassing system_control read. getSystemValue serves a ~30s in-process
+// cache, which is fine everywhere else but too stale for a bypass predicate:
+// an operator stop or session revocation must be seen on the next row, not up
+// to a cache-TTL later. When a Supabase client is on deps (always true inside
+// queue processing), read the table directly; DI'd getSystemValue (tests,
+// callers with their own source of truth) takes precedence.
+async function readSystemValueFresh(key, deps = {}) {
+  if (typeof deps.getSystemValue === "function") {
+    return deps.getSystemValue(key, deps);
+  }
+  const supabase = deps.supabase || deps.supabaseClient;
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("system_control")
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.value ?? null;
+  }
+  return getSystemValue(key, deps);
+}
+
 export async function loadActiveInternalProofSession(deps = {}) {
-  const get_system_value = deps.getSystemValue || getSystemValue;
   const now = deps.now || new Date();
   let raw;
   try {
-    raw = await get_system_value(INTERNAL_PROOF_SESSION_KEY, deps);
+    raw = await readSystemValueFresh(INTERNAL_PROOF_SESSION_KEY, deps);
   } catch {
     return { active: false, reason: "session_lookup_failed" };
   }
@@ -158,10 +199,10 @@ export async function evaluateInternalProofContactWindowBypass(queue_row, deps =
       return { allowed: false, reason: "request_manifest_not_single_row" };
     }
 
-    // Fresh execution-mode read: the bypass dies the moment an operator stops
-    // the queue, even mid-run.
-    const get_system_value = deps.getSystemValue || getSystemValue;
-    const raw_mode = await get_system_value("queue_execution_mode", deps);
+    // Cache-bypassing execution-mode read: an operator stop is honored on the
+    // next row evaluated (the claim RPC also enforces the mode in-DB before
+    // any row reaches this point).
+    const raw_mode = await readSystemValueFresh("queue_execution_mode", deps);
     if (normalizeQueueExecutionMode(raw_mode) !== QUEUE_EXECUTION_MODES.SCOPED_CANARY_ONLY) {
       return { allowed: false, reason: "queue_execution_mode_not_scoped_canary_only" };
     }
@@ -198,7 +239,8 @@ export async function evaluateInternalProofContactWindowBypass(queue_row, deps =
       // origin stamp written when the row was created.
       const origin =
         clean(metadata.origin_surface).toLowerCase() ||
-        clean(metadata.source).toLowerCase();
+        clean(metadata.source).toLowerCase() ||
+        clean(queue_row.source).toLowerCase();
       if (origin !== "internal_canary") {
         return { allowed: false, reason: "origin_surface_not_internal_canary" };
       }
@@ -211,8 +253,9 @@ export async function evaluateInternalProofContactWindowBypass(queue_row, deps =
     }
 
     // Auto-reply leg: only replies on the exact pinned internal thread, only
-    // while the session explicitly allows them, and only rows that provably
-    // answer a persisted inbound message.
+    // while the session explicitly allows them, and only rows that declare an
+    // inbound linkage (the linkage id is not re-verified against
+    // message_events here; recipient/sender/campaign pinning bounds the risk).
     if (session.allow_thread_auto_replies !== true) {
       return { allowed: false, reason: "thread_auto_replies_not_allowed" };
     }

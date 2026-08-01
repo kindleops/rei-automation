@@ -139,6 +139,11 @@ test("parseInternalProofSession: fail-closed parse matrix", () => {
     [JSON.stringify(makeSession({ sender: "" })), "session_sender_required"],
     // A session pinned to a REAL seller number is invalid in its entirety.
     [JSON.stringify(makeSession({ recipient: "+16125551234" })), "session_recipient_not_internal"],
+    // The pins are structural: even another REGISTERED internal number, or any
+    // other sender/campaign, invalidates the whole session.
+    [JSON.stringify(makeSession({ recipient: OTHER_INTERNAL })), "session_recipient_not_pinned"],
+    [JSON.stringify(makeSession({ sender: "+16125550000" })), "session_sender_not_pinned"],
+    [JSON.stringify(makeSession({ campaign_id: "11111111-1111-4111-8111-111111111111" })), "session_campaign_not_pinned"],
     [JSON.stringify(makeSession({ created_at: "garbage" })), "session_created_at_invalid"],
     [JSON.stringify(makeSession({ expires_at: "garbage" })), "session_expires_at_invalid"],
     [JSON.stringify(makeSession({ expires_at: "2026-08-01T05:29:59.000Z" })), "session_expired"],
@@ -310,17 +315,36 @@ test("integration: pinned canary row passes the contact window under the full co
   // guard immediately after the window branch — proving it crossed the window
   // without touching the provider.
   const row = makePinnedRow({ metadata: { provider_message_sid: "SMevidence1" } });
-  const { deps, updates, lock_updates } = makeItemDeps();
+  const { deps, lock_updates } = makeItemDeps();
   const result = await processSendQueueItem(row, deps);
   assert.equal(result.sent, true);
   assert.equal(result.reason, "idempotency_blocked_sid_exists");
-  // Durable bypass audit stamped onto the row before transport.
-  const bypass_update = updates.find((u) => u.payload?.metadata?.contact_window_bypass);
-  assert.ok(bypass_update, "bypass audit metadata write expected");
+  // Durable, lock-gated bypass audit stamped onto the row before transport.
+  const bypass_update = lock_updates.find((u) => u.payload?.metadata?.contact_window_bypass);
+  assert.ok(bypass_update, "lock-gated bypass audit write expected");
+  assert.equal(bypass_update.lock_token, "lock-token-proof");
   assert.equal(bypass_update.payload.metadata.contact_window_bypass.leg, "primary_canary_row");
   assert.equal(bypass_update.payload.metadata.contact_window_bypass.session_id, "proof-20260801T0500Z");
   assert.equal(bypass_update.payload.metadata.contact_window_bypass.canary_run_id, "canary-proof-run-1");
-  assert.equal(lock_updates.length, 0, "row must not be deferred");
+  assert.ok(
+    !lock_updates.some((u) => u.payload?.queue_status === "scheduled"),
+    "row must not be deferred"
+  );
+});
+
+test("integration: denied lock-gated audit write falls back to deferral", async () => {
+  const row = makePinnedRow({ metadata: { provider_message_sid: "SMevidence6" } });
+  const { deps, lock_updates } = makeItemDeps({
+    updateSendQueueRowWithLock: async (id, lock_token, payload) => {
+      lock_updates.push({ id, lock_token, payload });
+      // Simulate a stolen lock: the bypass audit write does not land, the
+      // deferral release afterwards does.
+      return payload?.metadata?.contact_window_bypass ? null : { id, ...payload };
+    },
+  });
+  const result = await processSendQueueItem(row, deps);
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "deferred_contact_window");
 });
 
 test("integration: expired session restores the deferral automatically", async () => {
@@ -340,15 +364,55 @@ test("integration: expired session restores the deferral automatically", async (
 
 test("integration: internal thread auto-reply passes the window during the session", async () => {
   const reply = makeReplyRow({ metadata: { provider_message_sid: "SMevidence3", source_event_id: "evt-internal-inbound-1", origin_surface: "canonical_automation" } });
-  const { deps, updates } = makeItemDeps({
+  const { deps, lock_updates } = makeItemDeps({
     canary_run_id: "canary-proof-reply-1",
     scoped_canary_requested_ids: [REPLY_ROW],
   });
   const result = await processSendQueueItem(reply, deps);
   assert.equal(result.sent, true);
   assert.equal(result.reason, "idempotency_blocked_sid_exists");
-  const bypass_update = updates.find((u) => u.payload?.metadata?.contact_window_bypass);
+  const bypass_update = lock_updates.find((u) => u.payload?.metadata?.contact_window_bypass);
   assert.equal(bypass_update.payload.metadata.contact_window_bypass.leg, "internal_thread_auto_reply");
+});
+
+// ── Scoped-canary allowlist: quarantine-marked internal rows stay dispatchable ──
+
+test("allowlist: quarantine-stamped internal canary row is dispatchable; no-send rows never are", async () => {
+  const { validateScopedCanaryAllowlist } = await import(
+    "@/lib/domain/queue/run-scoped-campaign-canary.js"
+  );
+  // Builder-shaped internal canary row: internal_test_phone + exclude_from_kpis
+  // + internal_canary, addressed to the registered internal recipient.
+  const internal_row = makePinnedRow({
+    metadata: { internal_test_phone: true, exclude_from_kpis: true },
+  });
+  const ok_result = validateScopedCanaryAllowlist([internal_row], {
+    campaign_id: CAMPAIGN,
+    queue_row_ids: [PINNED_ROW],
+  });
+  assert.equal(ok_result.ok, true, ok_result.reason);
+
+  // Same markers on a REAL seller recipient: still excluded.
+  const seller_marked = makePinnedRow({
+    to_phone_number: "+16125551234",
+    thread_key: "+16125551234",
+    metadata: { internal_test_phone: true, exclude_from_kpis: true, internal_canary: undefined },
+  });
+  const seller_result = validateScopedCanaryAllowlist([seller_marked], {
+    campaign_id: CAMPAIGN,
+    queue_row_ids: [PINNED_ROW],
+  });
+  assert.equal(seller_result.ok, false);
+  assert.equal(seller_result.reason, "scoped_canary_proof_row_excluded");
+
+  // Absolute no-send markers exclude even a genuine internal canary row.
+  const no_send_row = makePinnedRow({ metadata: { no_send: true } });
+  const no_send_result = validateScopedCanaryAllowlist([no_send_row], {
+    campaign_id: CAMPAIGN,
+    queue_row_ids: [PINNED_ROW],
+  });
+  assert.equal(no_send_result.ok, false);
+  assert.equal(no_send_result.reason, "scoped_canary_proof_row_excluded");
 });
 
 test("integration: auto-reply outside the session allowance stays deferred", async () => {

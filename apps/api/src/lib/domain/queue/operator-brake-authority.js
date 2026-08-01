@@ -31,6 +31,9 @@ export const OPERATOR_OWNED_SYSTEM_KEYS = Object.freeze([
   "queue_runner_enabled",
   "queue_auto_send_enabled",
   "outbound_sms_enabled",
+  // The bounded internal-proof contact-window session: creating, extending,
+  // or retargeting it is an operator act, never campaign automation.
+  "internal_proof_session",
 ]);
 
 /**

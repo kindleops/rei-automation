@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { info, warn } from "@/lib/logging/logger.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import {
   normalizeSendQueueRow,
   validateSendQueueRowPreclaim,
@@ -53,6 +54,33 @@ export function isProofOrNoSendQueueRow(row = {}) {
     metadata.launch_mode === "proof_hydration_no_send" ||
     metadata.internal_test_phone === true ||
     metadata.exclude_from_kpis === true
+  );
+}
+
+// Markers that mean "this row must never be transported", regardless of any
+// manifest. Distinct from the internal-canary QUARANTINE vocabulary
+// (internal_test_phone / exclude_from_kpis), which excludes a row from KPIs
+// and unrestricted selection but must not brick the one lane that exists to
+// dispatch internal canary rows: an explicit scoped-canary manifest.
+export function hasAbsoluteNoSendMarkers(row = {}) {
+  const metadata = metadataObject(row);
+  return Boolean(
+    metadata.proof === true ||
+    metadata.proof_mode ||
+    metadata.no_send === true ||
+    metadata.proof_hydration === true ||
+    metadata.launch_mode === "proof_hydration_no_send"
+  );
+}
+
+// A quarantine-marked row is scoped-canary dispatchable ONLY when it is a
+// genuine internal-canary row: stamped internal_canary and addressed to a
+// registered internal test phone. Anything else keeps the proof-row exclusion.
+function isDispatchableInternalCanaryRow(row = {}) {
+  const metadata = metadataObject(row);
+  return (
+    metadata.internal_canary === true &&
+    isInternalTestPhone(row.to_phone_number || row.thread_key)
   );
 }
 
@@ -157,7 +185,10 @@ export function validateScopedCanaryAllowlist(rows = [], request = {}) {
         actual_campaign_id: row_campaign_id,
       };
     }
-    if (isProofOrNoSendQueueRow(row)) {
+    if (hasAbsoluteNoSendMarkers(row)) {
+      return { ok: false, status: 423, reason: "scoped_canary_proof_row_excluded", queue_row_id: row.id };
+    }
+    if (isProofOrNoSendQueueRow(row) && !isDispatchableInternalCanaryRow(row)) {
       return { ok: false, status: 423, reason: "scoped_canary_proof_row_excluded", queue_row_id: row.id };
     }
     const status = clean(row.queue_status).toLowerCase();

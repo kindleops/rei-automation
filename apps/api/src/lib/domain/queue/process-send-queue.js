@@ -42,6 +42,7 @@ import {
   normalizeSendQueueRow,
   normalizeQueueRowId,
   releaseSkippedQueueRow,
+  updateSendQueueRowWithLock,
   resolveQueueSellerFirstName,
   resolveQueueDestinationPhone,
   reserveFromPhoneNumber,
@@ -1463,11 +1464,17 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         };
       }
 
+      let bypass_crossed = false;
       if (proof_bypass?.allowed === true) {
-        // Durable audit before transport: if this write fails, the send fails.
+        // Durable, lock-gated audit before transport. The stamp means "the
+        // contact window was crossed", not "sent" — dispatch-authorization and
+        // compliance gates still run after this. If the lock-gated write does
+        // not land (lock stolen, row mutated concurrently), the bypass is
+        // treated as denied and the row defers normally.
         const bypass_metadata = {
           ...(queue_row.metadata ?? {}),
           contact_window_bypass: {
+            stage: "contact_window_crossed",
             session_id: proof_bypass.session_id,
             leg: proof_bypass.leg,
             canary_run_id: clean(deps.canary_run_id) || null,
@@ -1476,16 +1483,31 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
             session_expires_at: proof_bypass.expires_at,
           },
         };
-        await updateQueueRow(queue_row_id, { metadata: bypass_metadata }, deps);
-        queue_row = normalizeSendQueueRow({ ...queue_row, metadata: bypass_metadata });
-        info("queue.contact_window_internal_proof_bypass", {
+        const locked_update = await updateSendQueueRowWithLock(
           queue_row_id,
-          session_id: proof_bypass.session_id,
-          leg: proof_bypass.leg,
-          canary_run_id: clean(deps.canary_run_id) || null,
-          underlying_reason: contact_window.reason,
-        });
-      } else {
+          lock_token,
+          { metadata: bypass_metadata, updated_at: now },
+          deps
+        );
+        if (locked_update) {
+          bypass_crossed = true;
+          queue_row = normalizeSendQueueRow({ ...queue_row, metadata: bypass_metadata });
+          info("queue.contact_window_internal_proof_bypass", {
+            queue_row_id,
+            session_id: proof_bypass.session_id,
+            leg: proof_bypass.leg,
+            canary_run_id: clean(deps.canary_run_id) || null,
+            underlying_reason: contact_window.reason,
+          });
+        } else {
+          warn("queue.contact_window_bypass_audit_write_denied", {
+            queue_row_id,
+            session_id: proof_bypass.session_id,
+          });
+        }
+      }
+
+      if (!bypass_crossed) {
         const { buildContactWindowDeferral } = await import(
           "@/lib/domain/queue/contact-window-deferral.js"
         );
