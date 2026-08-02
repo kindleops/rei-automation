@@ -805,6 +805,11 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   const recordTerminalDisposition =
     runtimeDeps.recordInboundTerminalDisposition ||
     ledger_module.recordInboundTerminalDisposition;
+  const claimInbound =
+    runtimeDeps.claimInboundProcessing || ledger_module.claimInboundProcessing;
+  const completeClaim =
+    runtimeDeps.completeInboundProcessingClaim ||
+    ledger_module.completeInboundProcessingClaim;
 
   const sid = clean(
     payload?.message_id ||
@@ -839,13 +844,18 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         .digest("hex")
         .slice(0, 32)}`;
 
-  const ledger = await beginLedgerEntry({
+  // ── ENFORCEMENT: atomic database claim ─────────────────────────────────
+  // The durable ledger is the idempotency AUTHORITY: exactly one delivery of
+  // a given idempotency key may hold a processing claim at a time. The
+  // per-instance /tmp runtime-state record inside the core is diagnostic
+  // caching only once a DB claim is active (see authoritative_claim below).
+  const claim = await claimInbound({
     idempotency_key,
     provider_message_sid: sid || null,
     thread_key: from_phone || null,
     from_phone: from_phone || null,
     to_phone: to_phone || null,
-    // PII minimization: the ledger digests this (SHA-256 + length) and never
+    // PII minimization: the claim digests this (SHA-256 + length) and never
     // persists the raw seller text.
     message_body: message_body_raw,
     received_at: Number.isFinite(received_at_ms)
@@ -853,12 +863,129 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
       : null,
   });
 
+  let db_claim_active = false;
+  if (claim?.authority === "db" && claim.outcome) {
+    if (
+      claim.outcome === "duplicate_completed" ||
+      claim.outcome === "terminally_failed"
+    ) {
+      // Duplicate delivery of a settled key. Never a silent drop: the claim
+      // RPC already bumped duplicate_delivery_count on the ledger row, and we
+      // return an explicit duplicate_ignored disposition carrying the prior
+      // disposition reference for the caller's audit trail.
+      safeInfo("textgrid.inbound_duplicate_delivery_ignored", {
+        idempotency_key,
+        provider_message_sid: sid || null,
+        claim_outcome: claim.outcome,
+        prior_disposition: claim.prior_disposition || null,
+        duplicate_delivery_count: claim.duplicate_delivery_count || null,
+      });
+      return {
+        ok: true,
+        duplicate: true,
+        updated: false,
+        reason:
+          claim.outcome === "duplicate_completed"
+            ? "duplicate_completed_delivery"
+            : "terminally_failed_delivery",
+        terminal_disposition: "duplicate_ignored",
+        prior_disposition: claim.prior_disposition || null,
+        ledger_id: claim.ledger_id || null,
+        duplicate_delivery_count: claim.duplicate_delivery_count || null,
+        idempotency_key,
+      };
+    }
+    if (claim.outcome === "already_processing") {
+      safeInfo("textgrid.inbound_already_processing", {
+        idempotency_key,
+        provider_message_sid: sid || null,
+        lease_expires_at: claim.lease_expires_at || null,
+      });
+      return {
+        ok: true,
+        duplicate: true,
+        updated: false,
+        reason: "event_already_processing",
+        ledger_id: claim.ledger_id || null,
+        lease_expires_at: claim.lease_expires_at || null,
+        idempotency_key,
+      };
+    }
+    if (claim.outcome === "invalid_claim") {
+      return {
+        ok: false,
+        reason: claim.reason || "invalid_claim",
+        idempotency_key,
+      };
+    }
+    // claimed_new | retry_claimed → we hold the claim; process.
+    db_claim_active = true;
+  } else if (claim?.fail_closed) {
+    // Supabase IS configured but the claim could not be established (RPC
+    // missing pre-migration, transient DB failure). Processing without a
+    // claim is exactly the double-execution the contract forbids — fail
+    // closed and let the provider retry.
+    safeWarn("textgrid.inbound_claim_unavailable_fail_closed", {
+      idempotency_key,
+      provider_message_sid: sid || null,
+      reason: claim.reason || "unknown",
+    });
+    return {
+      ok: false,
+      reason: claim.reason || "inbound_claim_unavailable",
+      fail_closed: true,
+      // The route maps retryable → HTTP 503 + Retry-After, so the provider
+      // redelivers once the claim path is back (migration applied / DB up).
+      retryable: true,
+      retry_after_seconds: 30,
+      idempotency_key,
+    };
+  }
+  // authority === "unavailable" (Supabase unconfigured: hermetic tests, local
+  // dev) → fall through to the legacy observability begin + /tmp enforcement.
+
+  const ledger = db_claim_active
+    ? { ok: true, ledger_id: claim.ledger_id || null }
+    : await beginLedgerEntry({
+        idempotency_key,
+        provider_message_sid: sid || null,
+        thread_key: from_phone || null,
+        from_phone: from_phone || null,
+        to_phone: to_phone || null,
+        // PII minimization: the ledger digests this (SHA-256 + length) and
+        // never persists the raw seller text.
+        message_body: message_body_raw,
+        received_at: Number.isFinite(received_at_ms)
+          ? new Date(received_at_ms).toISOString()
+          : null,
+      });
+
   // Durable-write truthfulness: a failed disposition write is exactly the
   // silent drop the ledger exists to make loud — surface it in the wrapper
   // and raise the P0 inbound_no_disposition alert. supabase_unconfigured is
   // exempt (no ledger AND no alert sink exist; local/test environments).
+  async function writeTerminalDisposition(record_args) {
+    if (db_claim_active) {
+      // Run-id-fenced write: only the current claim holder may record. A
+      // zombie (lease expired, row reclaimed) gets claim_fenced, never a
+      // silent overwrite of the reclaiming worker's disposition.
+      return completeClaim({
+        idempotency_key,
+        processing_run_id: claim.processing_run_id,
+        disposition: record_args.disposition,
+        detail: record_args.detail || {},
+        detected_intent: record_args.detected_intent || null,
+        classifier_version: record_args.classifier_version || null,
+        confidence: record_args.confidence ?? null,
+        latency_ms: record_args.latency_ms ?? null,
+        error_message: record_args.error_message || null,
+      });
+    }
+    return recordTerminalDisposition(record_args);
+  }
+
   async function recordDispositionOrAlert(record_args) {
-    const record_result = await recordTerminalDisposition(record_args);
+    const record_result = await writeTerminalDisposition(record_args);
     if (record_result?.ok || record_result?.reason === "supabase_unconfigured") {
       return record_result;
     }
@@ -890,7 +1017,16 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   }
 
   try {
-    const result = await handleTextgridInboundWebhookCore(payload, opts);
+    const result = await handleTextgridInboundWebhookCore(payload, {
+      ...opts,
+      authoritative_claim: db_claim_active
+        ? {
+            processing_run_id: claim.processing_run_id,
+            outcome: claim.outcome,
+            attempt_count: claim.attempt_count,
+          }
+        : null,
+    });
     if (!ledger.duplicate_completed) {
       const resolved = resolveInboundTerminalDisposition(result);
       await recordDispositionOrAlert({
@@ -937,6 +1073,12 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
     auto_post_discord_card = null,
     auto_reply_delay_seconds = null,
     inbound_user_initiated = true,
+    // Set by the wrapper when the durable DB claim contract authorized this
+    // execution. When present, the per-instance /tmp runtime-state record is
+    // NON-AUTHORITATIVE diagnostic caching: its duplicate verdicts are logged
+    // as divergence but never skip processing, and its write failures never
+    // block a DB-claimed execution.
+    authoritative_claim = null,
   } = opts;
 
   // Feature flags: env -> system_control -> default
@@ -1102,8 +1244,13 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   }
 
   // ── SEGMENT: message_event_lookup ────────────────────────────────────────
-  // beginIdempotentProcessing checks the ledger for prior processing of this
-  // message ID — this is the "lookup" before we commit to processing.
+  // beginIdempotentProcessing checks the per-instance runtime-state record for
+  // prior processing of this message ID. When the wrapper holds a durable DB
+  // claim (authoritative_claim), this store is DIAGNOSTIC ONLY: the database
+  // claim contract has already guaranteed exactly-one execution across
+  // instances, so a local duplicate/failure verdict is logged as divergence
+  // and processing continues. Without a DB claim (Supabase unconfigured:
+  // hermetic tests, local dev) it remains the enforcement fallback.
   let idempotency_key, idempotency;
   try {
     idempotency_key = buildInboundIdempotencyKey(extracted);
@@ -1116,38 +1263,78 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
         provider_message_id: clean(extracted.message_id) || null,
         inbound_from,
         inbound_to,
+        ...(authoritative_claim
+          ? {
+              diagnostic_only: true,
+              authoritative_claim_run_id:
+                authoritative_claim.processing_run_id || null,
+            }
+          : {}),
       },
     });
   } catch (err) {
-    return buildInboundStepFailure("textgrid_inbound_failed_message_event_lookup", err);
+    if (authoritative_claim) {
+      safeWarn("textgrid.inbound_runtime_state_begin_failed_nonblocking", {
+        message_id: extracted.message_id,
+        idempotency_key,
+        error: err?.message || "runtime_state_begin_failed",
+      });
+      idempotency = { ok: true, duplicate: false, record_item_id: null, degraded: true };
+    } else {
+      return buildInboundStepFailure("textgrid_inbound_failed_message_event_lookup", err);
+    }
   }
 
   if (!idempotency.ok) {
-    return {
-      ok: false,
-      reason: idempotency.reason,
-      message_id: extracted.message_id,
-      idempotency_key,
-    };
+    if (authoritative_claim) {
+      safeWarn("textgrid.inbound_runtime_state_unavailable_nonblocking", {
+        message_id: extracted.message_id,
+        idempotency_key,
+        reason: idempotency.reason || "unknown",
+      });
+      idempotency = { ok: true, duplicate: false, record_item_id: null, degraded: true };
+    } else {
+      return {
+        ok: false,
+        reason: idempotency.reason,
+        message_id: extracted.message_id,
+        idempotency_key,
+      };
+    }
   }
 
   if (idempotency.duplicate) {
-    safeInfo("textgrid.inbound_duplicate_ignored", {
-      message_id: extracted.message_id,
-      inbound_from,
-      reason: idempotency.reason,
-      idempotency_key,
-    });
-    return {
-      ok: true,
-      duplicate: true,
-      updated: false,
-      reason: idempotency.reason,
-      message_id: extracted.message_id,
-      inbound_from,
-      inbound_to,
-      idempotency_key,
-    };
+    if (authoritative_claim) {
+      // The DB claim authorized this execution; the warm-instance /tmp record
+      // disagrees (e.g. a prior attempt on this instance crashed after its
+      // lease expired and the key was reclaimed). The database is the
+      // authority — record the divergence and continue processing.
+      safeInfo("textgrid.inbound_runtime_state_divergence_ignored", {
+        message_id: extracted.message_id,
+        inbound_from,
+        runtime_state_reason: idempotency.reason,
+        claim_outcome: authoritative_claim.outcome,
+        idempotency_key,
+      });
+      idempotency = { ...idempotency, duplicate: false };
+    } else {
+      safeInfo("textgrid.inbound_duplicate_ignored", {
+        message_id: extracted.message_id,
+        inbound_from,
+        reason: idempotency.reason,
+        idempotency_key,
+      });
+      return {
+        ok: true,
+        duplicate: true,
+        updated: false,
+        reason: idempotency.reason,
+        message_id: extracted.message_id,
+        inbound_from,
+        inbound_to,
+        idempotency_key,
+      };
+    }
   }
 
   if (inbound_debug_stage === "after_message_event_lookup") {
