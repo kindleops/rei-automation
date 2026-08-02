@@ -41,6 +41,14 @@ const ACTIVE_AUTO_REPLY_STATUSES = new Set([
 ]);
 const HIGH_RISK_OBJECTIONS = new Set(["financial_distress", "probate", "divorce"]);
 const REVIEW_ONLY_OBJECTIONS = new Set(["wants_proof_of_funds", "property_correction"]);
+// Legal/authority intents (classify.js legal tier): always a human lane.
+const LEGAL_AUTHORITY_REVIEW_INTENTS = new Set([
+  "title_issue",
+  "lien_tax_issue",
+  "bankruptcy_disclosed",
+  "trust_ownership",
+  "llc_corporation",
+]);
 
 const ROUTE_PROFILES = Object.freeze({
   ownership_confirmed: {
@@ -150,6 +158,32 @@ const ROUTE_PROFILES = Object.freeze({
     route_hint: "text_only_redirect",
     allowed_template_stages: ["text_only_redirect", "sms_only_response"],
     template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  // Voicemail reference/ask routes like a callback: acknowledge by SMS, a
+  // human handles the phone leg.
+  voicemail_call_request: {
+    route_hint: "text_only_redirect",
+    allowed_template_stages: ["text_only_redirect", "sms_only_response"],
+    template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  // Email preference is an email lane (ontology contract), routed through the
+  // same SMS acknowledgement templates until an email leg exists.
+  requests_email: {
+    route_hint: "text_only_redirect",
+    allowed_template_stages: ["text_only_redirect", "sms_only_response"],
+    template_use_case_candidates: ["text_only_redirect", "sms_only_response"],
+    next_action: "queue_auto_reply",
+  },
+  // Explicit language-switch request: no stage restriction — the template
+  // selector's language-continuity layer (resolveThreadLanguage + the
+  // language fail-closed rule) picks the right-language template for the
+  // thread's current stage, or fails closed to human review when none exists.
+  language_switch: {
+    route_hint: "language_continuity",
+    allowed_template_stages: [],
+    template_use_case_candidates: [],
     next_action: "queue_auto_reply",
   },
   not_interested: {
@@ -342,6 +376,23 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // Legal/authority disclosures (ontology legal_financial lane): title
+  // problems, liens/back taxes, bankruptcy, trust-held or entity-held
+  // ownership. Authority/payoff verification is a human lane BEFORE any offer
+  // conversation — precise reason preserved for audit; never suppression.
+  if (LEGAL_AUTHORITY_REVIEW_INTENTS.has(primary_intent)) {
+    return buildDecisionResult({
+      should_mark_human_review: true,
+      reply_mode: "manual_review",
+      human_review_reason: primary_intent,
+      route_hint,
+      stage_hint,
+      allowed_template_stages,
+      next_action: "mark_human_review",
+      audit_reason: primary_intent,
+    });
+  }
+
   if (
     primary_intent === "hostile_or_legal" ||
     (automation_decision?.human_review_required === true &&
@@ -467,6 +518,9 @@ function computeInboundAutomationDecisionRaw({
       "tenant_occupied",
       "condition_disclosed",
       "callback_requested",
+      "voicemail_call_request",
+      "requests_email",
+      "language_switch",
       "info_request",
     ].includes(primary_intent) ||
     objection === "needs_call" ||
@@ -479,6 +533,9 @@ function computeInboundAutomationDecisionRaw({
 
     const resolved_profile =
       primary_intent === "callback_requested" ? ROUTE_PROFILES.callback_requested :
+      primary_intent === "voicemail_call_request" ? ROUTE_PROFILES.voicemail_call_request :
+      primary_intent === "requests_email" ? ROUTE_PROFILES.requests_email :
+      primary_intent === "language_switch" ? ROUTE_PROFILES.language_switch :
       objection === "needs_call" ? ROUTE_PROFILES.needs_call :
       objection === "needs_email" ? ROUTE_PROFILES.needs_email :
       route_profile;
@@ -1096,11 +1153,19 @@ const NATURAL_REPLY_PROHIBITED_CLAIMS = [
 
 /**
  * Natural-response wording layer (natural-response-engine.js). Env-gated and
- * DEFAULT OFF (NATURAL_REPLY_ENGINE=enabled). Every policy, compliance, and
- * state decision above this point is untouched: the engine may only re-word
- * the already-approved deterministic template text, the generated candidate
- * must survive the engine's policy validator AND the same SMS queue guard the
- * template passed, and any failure keeps the template text byte-identical.
+ * DEFAULT OFF. NATURAL_REPLY_ENGINE modes:
+ *   disabled/unset  — nothing runs (production default);
+ *   shadow          — generate + validate + persist an audit event, but the
+ *                     deterministic template ALWAYS ships;
+ *   internal_proof  — substitution only when the reply recipient is an
+ *                     internal test phone (internal-phones.js); every other
+ *                     recipient behaves as shadow;
+ *   enabled         — full substitution.
+ * Every policy, compliance, and state decision above this point is untouched:
+ * the engine may only re-word the already-approved deterministic template
+ * text, the generated candidate must survive the engine's policy validator
+ * AND the same SMS queue guard the template passed, and any failure keeps the
+ * template text byte-identical.
  */
 async function maybeGenerateNaturalReply({
   decision = null,
@@ -1110,16 +1175,43 @@ async function maybeGenerateNaturalReply({
   useCase = null,
   templateId = null,
   modelCall = null,
+  inboundFrom = "",
+  threadKey = "",
+  inboundEventId = null,
+  supabaseClient = null,
 } = {}) {
-  if (lower(process.env.NATURAL_REPLY_ENGINE) !== "enabled") {
-    return { applied: false, reason: "disabled", audit: null };
-  }
+  let engine_mode = null;
   try {
-    const { generateConstrainedReply, buildModelCallFromEnv } = await import(
-      "@/lib/domain/seller-flow/natural-response-engine.js"
-    );
+    const {
+      generateConstrainedReply,
+      buildModelCallFromEnv,
+      resolveNaturalReplyMode,
+      resolveNaturalReplyTimeoutMs,
+      NATURAL_REPLY_MODES,
+    } = await import("@/lib/domain/seller-flow/natural-response-engine.js");
+
+    const resolved_mode = resolveNaturalReplyMode(process.env);
+    engine_mode = resolved_mode.mode;
+    if (engine_mode === NATURAL_REPLY_MODES.DISABLED) {
+      return { applied: false, reason: "disabled", audit: null };
+    }
+
     const call = modelCall || buildModelCallFromEnv();
     if (!call) return { applied: false, reason: "no_model_configured", audit: null };
+
+    // internal_proof substitutes only for the internal test registry; any
+    // other recipient downgrades to shadow evaluation.
+    let substitution_allowed = engine_mode === NATURAL_REPLY_MODES.ENABLED;
+    let shadow_reason = engine_mode === NATURAL_REPLY_MODES.SHADOW ? "shadow_mode" : null;
+    if (engine_mode === NATURAL_REPLY_MODES.INTERNAL_PROOF) {
+      const { isInternalTestPhone } = await import("@/lib/config/internal-phones.js");
+      const recipient = clean(inboundFrom) || clean(threadKey);
+      if (isInternalTestPhone(recipient)) {
+        substitution_allowed = true;
+      } else {
+        shadow_reason = "internal_proof_recipient_not_internal";
+      }
+    }
 
     const precedence = decision?.latest_intent_precedence || null;
     // Live shape nests turns under recent.recent_events; older callers may
@@ -1142,23 +1234,44 @@ async function maybeGenerateNaturalReply({
     if (seller_first_name) allowed_facts.seller_first_name = seller_first_name;
 
     const language = clean(classification?.language) || "English";
+    // Wiring completeness: the engine's suppression hard-gate and question
+    // validators are live inputs, not dead code. Suppression mirrors the
+    // decision's own verdict (defense-in-depth — a suppressed decision never
+    // reaches template render in the first place); open questions and the
+    // next question come from the thread summary when the memory layer has
+    // recorded them.
+    const unanswered_questions = asArray(
+      context?.summary?.unanswered_seller_questions || context?.summary?.open_questions
+    )
+      .map(clean)
+      .filter(Boolean);
     const result = await generateConstrainedReply({
       objective: clean(useCase) || clean(decision?.route_hint) || "reply",
       deterministicText,
       allowedFacts: allowed_facts,
       prohibitedClaims: NATURAL_REPLY_PROHIBITED_CLAIMS,
+      unansweredSellerQuestions: unanswered_questions,
+      nextQuestion:
+        clean(decision?.next_question) || clean(context?.summary?.next_question) || null,
       conversationHistory: history,
       stage: decision?.lifecycle_stage || null,
       status: decision?.operational_status || null,
       temperature: decision?.lead_temperature || null,
+      sellerTone: clean(classification?.emotion) || null,
       language,
       languageConfidence: Number(
         classification?.language_confidence ?? (lower(language) === "english" ? 1 : 0)
       ),
+      maxLength: 320,
       reEngagement:
         precedence?.state_patch?.contextual_reply_required === true ||
         precedence?.re_engagement_detected === true,
+      suppression: {
+        active: decision?.should_suppress_contact === true,
+        reason: clean(decision?.suppression_reason) || null,
+      },
       modelCall: call,
+      timeoutMs: resolveNaturalReplyTimeoutMs(process.env),
     });
 
     const audit = {
@@ -1168,8 +1281,55 @@ async function maybeGenerateNaturalReply({
       model: result.model || null,
       confidence: result.confidence ?? null,
       facts_used: result.facts_used || [],
+      mode: engine_mode,
+      model_latency_ms: result.audit?.model_latency_ms ?? null,
+      model_usage: result.audit?.model_usage ?? null,
+      model_attempts: result.audit?.model_attempts ?? null,
+      model_allowlist_fallback: result.audit?.model_allowlist_fallback === true,
     };
+
+    // Observability: every generation outcome persists one automation event
+    // (never raw seller text; the generated text only when it actually ships
+    // as the outbound message). Emission failures never block the reply path.
+    async function persistNaturalReplyAudit(event_type, extra_payload = {}) {
+      try {
+        const { emitAutomationEvent } = await import(
+          "@/lib/domain/automation/automation-events.js"
+        );
+        await emitAutomationEvent(
+          {
+            event_type,
+            source: "natural_response_engine",
+            dedupe_key: `natural-reply:${inboundEventId || threadKey || ""}:${event_type}`,
+            conversation_thread_id: clean(threadKey) || null,
+            payload: {
+              mode: engine_mode,
+              source: audit.source,
+              fallback_reason: audit.fallback_reason,
+              engine_version: audit.engine_version,
+              model: audit.model,
+              confidence: audit.confidence,
+              facts_used: audit.facts_used,
+              model_latency_ms: audit.model_latency_ms,
+              model_usage: audit.model_usage,
+              model_attempts: audit.model_attempts,
+              model_allowlist_fallback: audit.model_allowlist_fallback,
+              inbound_event_id: inboundEventId || null,
+              use_case: clean(useCase) || null,
+              template_id: templateId || null,
+              ...extra_payload,
+            },
+          },
+          supabaseClient ? { supabaseClient } : {}
+        );
+      } catch {
+        // Audit emission is observability — never blocks the wording layer.
+      }
+    }
+
     if (result.source !== "generated" || !clean(result.response_text)) {
+      audit.fallback_reason = result.fallback_reason || "fallback";
+      await persistNaturalReplyAudit("NATURAL_REPLY_FALLBACK");
       return { applied: false, reason: result.fallback_reason || "fallback", audit };
     }
 
@@ -1179,12 +1339,41 @@ async function maybeGenerateNaturalReply({
       template_source: "natural_response_engine",
     });
     if (!prepared.ok || !clean(prepared.text)) {
+      const guard_audit = {
+        ...audit,
+        source: "deterministic_fallback",
+        fallback_reason: prepared.reason || "sms_guard_rejected",
+      };
+      await persistNaturalReplyAudit("NATURAL_REPLY_FALLBACK", {
+        source: "deterministic_fallback",
+        fallback_reason: guard_audit.fallback_reason,
+      });
       return {
         applied: false,
         reason: prepared.reason || "sms_guard_rejected",
-        audit: { ...audit, source: "deterministic_fallback", fallback_reason: prepared.reason || "sms_guard_rejected" },
+        audit: guard_audit,
       };
     }
+
+    if (!substitution_allowed) {
+      // Shadow evaluation: a valid candidate existed, but this mode (or a
+      // non-internal recipient under internal_proof) never substitutes.
+      const shadow_audit = {
+        ...audit,
+        shadow_reason,
+        would_apply: true,
+      };
+      await persistNaturalReplyAudit("NATURAL_REPLY_SHADOW_EVALUATED", {
+        shadow_reason,
+        would_apply: true,
+      });
+      return { applied: false, reason: shadow_reason || "shadow_mode", audit: shadow_audit };
+    }
+
+    await persistNaturalReplyAudit("NATURAL_REPLY_APPLIED", {
+      applied_text: prepared.text,
+      applied_text_length: prepared.text.length,
+    });
     return { applied: true, text: prepared.text, audit };
   } catch (error) {
     warn("[NATURAL_REPLY_ENGINE_ERROR]", { message: error?.message || "unknown" });
@@ -2098,6 +2287,10 @@ export async function executeInboundAutomationDecision({
     useCase: selected_use_case,
     templateId: selected_template.template_id || selected_template.id || null,
     modelCall: naturalReplyModelCall,
+    inboundFrom,
+    threadKey,
+    inboundEventId,
+    supabaseClient: supabase,
   });
   const rendered_message_text = natural_reply.applied
     ? natural_reply.text
@@ -2214,6 +2407,7 @@ export async function executeInboundAutomationDecision({
       automation_decision: blocked_decision,
       selected_template,
       rendered_message_text,
+      natural_reply: natural_reply.audit,
       queued: false,
       queue_item_id: null,
       queue_row_id: null,
@@ -2380,6 +2574,7 @@ export async function executeInboundAutomationDecision({
       automation_decision: blocked_decision,
       selected_template,
       rendered_message_text,
+      natural_reply: natural_reply.audit,
       queued: false,
       queue_item_id: queue_result?.queue_item_id || null,
       queue_row_id: queue_result?.queue_row_id || null,

@@ -3578,15 +3578,35 @@ export const INTENT_PRIORITY = Object.freeze([
   "hostile_or_legal",
   "not_interested",
   "need_time",
+  // Legal/authority tier: these outrank engagement and pricing because the
+  // ontology routes them to a human lane BEFORE any offer conversation —
+  // "interested but there's an IRS lien" must resolve to the legal lane with
+  // the interest preserved as a secondary intent, never to an auto price ask.
+  // They stay strictly below opt_out/wrong_number/hostility and below an
+  // explicit decline (a "not interested + lien" message is still a decline).
+  "title_issue",
+  "lien_tax_issue",
+  "bankruptcy_disclosed",
+  "trust_ownership",
+  "llc_corporation",
   "seller_interested",
   "asking_price_provided",
   "asks_offer",
   "callback_requested",
+  // Contact-modality tier: voicemail/email preferences route like callbacks
+  // (acknowledge by SMS, human follows up on the requested channel).
+  "voicemail_call_request",
+  "requests_email",
   "property_correction",
   "ownership_confirmed",
   "latent_interest",
   "tenant_occupied",
   "condition_disclosed",
+  // Explicit language-switch request: only primary when no substantive
+  // content intent fired — "en español por favor" alone. Combined with real
+  // content ("sí es mi casa, en español por favor") the content wins and the
+  // switch is preserved as a secondary intent + the language field.
+  "language_switch",
   "info_request",
   "reaction_only",
   "acknowledgement",
@@ -3758,6 +3778,260 @@ function matchesPropertyTypeCorrection(text = "") {
     "wrong house", "wrong property", "wrong home",
     "casa equivocada", "propiedad equivocada",
   ]);
+}
+
+// ─── Legal / authority / logistics detectors (launch-critical ontology
+// coverage). Every matcher here is negation-guarded: assurances ("no liens",
+// "clear title", "not in foreclosure") and unrelated senses ("trust me",
+// "corporate job") must never fire. ───────────────────────────────────────────
+
+const TITLE_ISSUE_IDIOMS = [
+  "cloud on title",
+  "cloud on the title",
+  "clouded title",
+  "quiet title",
+  "no clear title",
+  "title is not clear",
+  "title isn't clear",
+  "title isnt clear",
+  "not on the deed",
+  "name is not on the deed",
+  "name isn't on the deed",
+  "problema con el título",
+  "problema con el titulo",
+  "problemas de título",
+  "problemas de titulo",
+];
+
+const TITLE_PROBLEM_NEARBY_RE =
+  /\btitle\b[^.?!]{0,40}\b(?:problem|problems|issue|issues|dispute|disputes|messed|mess|lost|missing|complicated by a lien)\b|\b(?:problem|problems|issue|issues|dispute|disputes)\b[^.?!]{0,40}\btitle\b/i;
+
+function matchesTitleIssue(text = "") {
+  const normalized = lower(text);
+  // "job title" is a different sense entirely.
+  if (/\bjob title\b/.test(normalized)) return false;
+  if (includesAny(normalized, TITLE_ISSUE_IDIOMS)) return true;
+  return TITLE_PROBLEM_NEARBY_RE.test(normalized);
+}
+
+// Assurance guard shared by the lien/tax matcher: "no liens", "free of liens",
+// "taxes are paid/current" are the opposite of a lien/tax problem.
+const LIEN_TAX_ASSURANCE_RE =
+  /\b(?:no|without|free of|clear of|paid(?:\s+off)?|current on|up to date on|caught up on|sin|no hay)\b[^.?!]{0,30}\b(?:liens?|back taxes|taxes|impuestos)\b|\blien[- ]free\b/i;
+
+const LIEN_TAX_PHRASES = [
+  "tax lien",
+  "irs lien",
+  "hoa lien",
+  "code enforcement lien",
+  "mechanic's lien",
+  "mechanics lien",
+  "lien on",
+  "has a lien",
+  "there's a lien",
+  "theres a lien",
+  "judgment against",
+  "back taxes",
+  "behind on taxes",
+  "behind on property taxes",
+  "owe taxes",
+  "owe back taxes",
+  "tax delinquent",
+  "delinquent taxes",
+  "delinquent on taxes",
+  "impuestos atrasados",
+  "debo impuestos",
+  "gravamen",
+  "embargo fiscal",
+];
+
+function matchesLienTaxIssue(text = "") {
+  const normalized = lower(text);
+  if (LIEN_TAX_ASSURANCE_RE.test(normalized)) return false;
+  if (includesAny(normalized, LIEN_TAX_PHRASES)) return true;
+  // Bare "lien(s)" with no assurance frame is still a disclosure.
+  return /\bliens?\b/.test(normalized);
+}
+
+function matchesBankruptcy(text = "") {
+  const normalized = lower(text);
+  if (/\b(?:not|no|never|wasn'?t|wasnt)\b[^.?!]{0,20}\bbankrupt/.test(normalized)) {
+    return false;
+  }
+  return /\bbankruptc?y?\b|\bchapter\s*(?:7|11|13)\b|\bbancarrota\b|\bquiebra\b/.test(
+    normalized
+  );
+}
+
+// Trust OWNERSHIP (the property is held in a trust / speaker is trustee) —
+// never the conversational sense ("trust me", "don't trust texts").
+const TRUST_OWNERSHIP_PHRASES = [
+  "in a trust",
+  "in the trust",
+  "held in trust",
+  "held in a trust",
+  "living trust",
+  "revocable trust",
+  "irrevocable trust",
+  "family trust",
+  "the trust owns",
+  "trust owns",
+  "i'm the trustee",
+  "im the trustee",
+  "i am the trustee",
+  "trustee of",
+  "as trustee",
+  "en un fideicomiso",
+  "fideicomiso",
+];
+
+function matchesTrustOwnership(text = "") {
+  return includesAny(lower(text), TRUST_OWNERSHIP_PHRASES);
+}
+
+// Entity (LLC/corporation) ownership or signing authority. Word-boundary
+// anchored so "corporate job" / "incredible" can never fire.
+const ENTITY_OWNERSHIP_RE =
+  /\b(?:an?|the|our|my)\s+(?:llc|corp\.?|corporation|inc\.?)\b|\b(?:llc|corporation|company|corp)\s+owns\b|\bowned\s+by\s+(?:an?\s+|the\s+)?(?:llc|corp\.?|corporation|company|inc\.?)\b|\bllc[- ]to[- ]llc\b|\bs[- ]corp\b|\bc[- ]corp\b|\bon\s+behalf\s+of\s+the\s+(?:company|llc|corporation)\b/i;
+
+const AUTHORIZED_SIGNER_PHRASES = [
+  "authorized signer",
+  "authorized to sign",
+  "signing authority",
+  "signer on the account",
+  "i can sign for",
+  "autorizado para firmar",
+  "autorizada para firmar",
+];
+
+function matchesEntityOwnership(text = "") {
+  const normalized = lower(text);
+  return (
+    ENTITY_OWNERSHIP_RE.test(normalized) ||
+    includesAny(normalized, AUTHORIZED_SIGNER_PHRASES)
+  );
+}
+
+const VOICEMAIL_REQUEST_PHRASES = [
+  "voicemail",
+  "voice mail",
+  "buzón de voz",
+  "buzon de voz",
+  "correo de voz",
+];
+
+function matchesVoicemailRequest(text = "") {
+  const normalized = lower(text);
+  // "don't leave a voicemail" is a contact-preference refusal, not a request.
+  if (/\b(?:don'?t|dont|do not|never|no)\s+(?:leave|call)\b[^.?!]{0,30}\b(?:voicemail|voice mail|message)\b/.test(normalized)) {
+    return false;
+  }
+  return includesAny(normalized, VOICEMAIL_REQUEST_PHRASES);
+}
+
+const EMAIL_REQUEST_REFUSAL_RE =
+  /\b(?:don'?t|dont|do not|stop|never|no)\s+(?:email|e-?mail)/i;
+
+function matchesEmailRequest(text = "") {
+  const normalized = lower(text);
+  if (EMAIL_REQUEST_REFUSAL_RE.test(normalized)) return false;
+  return includesAny(normalized, [
+    "email me",
+    "e-mail me",
+    "send me an email",
+    "send an email",
+    "send to my email",
+    "send it to my email",
+    "prefer email",
+    "by email",
+    "via email",
+    "over email",
+    "my email is",
+    "here's my email",
+    "heres my email",
+    "mándame un correo",
+    "mandame un correo",
+    "envíame un email",
+    "enviame un email",
+    "prefiero correo",
+    "por correo electrónico",
+    "por correo electronico",
+  ]);
+}
+
+// Explicit language-switch REQUEST (not merely writing in another language —
+// language detection handles that; this label marks the ask itself).
+const LANGUAGE_SWITCH_PHRASES = [
+  "en español por favor",
+  "en espanol por favor",
+  "español por favor",
+  "espanol por favor",
+  "hablas español",
+  "habla español",
+  "hablas espanol",
+  "no hablo inglés",
+  "no hablo ingles",
+  "no english",
+  "spanish please",
+  "in spanish please",
+  "can you text in spanish",
+  "do you speak spanish",
+  "prefiero español",
+  "prefiero espanol",
+  "solo español",
+  "solo espanol",
+];
+
+function matchesLanguageSwitchRequest(text = "") {
+  return includesAny(lower(text), LANGUAGE_SWITCH_PHRASES);
+}
+
+// Spanish-target subset: every switch phrase that unambiguously requests
+// Spanish ("no english" alone names no target language and is excluded).
+const SPANISH_TARGET_SWITCH_PHRASES = LANGUAGE_SWITCH_PHRASES.filter(
+  (phrase) => phrase !== "no english"
+);
+
+function matchesSpanishTargetSwitch(text = "") {
+  return includesAny(lower(text), SPANISH_TARGET_SWITCH_PHRASES);
+}
+
+// Intent families for the compound_intent meta-marker: a message whose
+// components span ≥2 of these families is a compound message whose full
+// component set must be preserved (never flattened to the primary alone).
+const COMPOUND_INTENT_FAMILIES = Object.freeze({
+  compliance: ["opt_out", "wrong_number", "hostile_or_legal"],
+  identity: ["who_is_this"],
+  authority_legal: [
+    "title_issue",
+    "lien_tax_issue",
+    "bankruptcy_disclosed",
+    "trust_ownership",
+    "llc_corporation",
+  ],
+  engagement: [
+    "not_interested",
+    "need_time",
+    "seller_interested",
+    "latent_interest",
+    "ownership_confirmed",
+  ],
+  pricing: ["asking_price_provided", "asks_offer"],
+  logistics: [
+    "callback_requested",
+    "voicemail_call_request",
+    "requests_email",
+    "language_switch",
+  ],
+  property_facts: ["tenant_occupied", "condition_disclosed", "property_correction"],
+});
+
+function countCompoundFamilies(unique_intents = []) {
+  let families = 0;
+  for (const members of Object.values(COMPOUND_INTENT_FAMILIES)) {
+    if (members.some((intent) => unique_intents.includes(intent))) families += 1;
+  }
+  return families;
 }
 
 function pickPrimaryIntent(unique_intents = []) {
@@ -4594,6 +4868,73 @@ function resolveIntents(
     intents.push("condition_disclosed");
   }
 
+  // 12.5 LEGAL / AUTHORITY DISCLOSURES (launch-critical ontology coverage).
+  // These are negation-guarded (see the matchers) and sit in the legal tier
+  // of INTENT_PRIORITY: above engagement/pricing, below compliance and
+  // explicit declines. Components are preserved — a lien disclosed alongside
+  // interest keeps the interest as a secondary intent.
+  if (matchesTitleIssue(text)) {
+    intents.push("title_issue");
+    matched_rule_ids.push("title_issue_disclosure");
+  }
+  if (matchesLienTaxIssue(text)) {
+    intents.push("lien_tax_issue");
+    matched_rule_ids.push("lien_tax_disclosure");
+  }
+  if (matchesBankruptcy(text)) {
+    intents.push("bankruptcy_disclosed");
+    matched_rule_ids.push("bankruptcy_disclosure");
+  }
+  if (matchesTrustOwnership(text)) {
+    intents.push("trust_ownership");
+    matched_rule_ids.push("trust_ownership_disclosure");
+  }
+  if (matchesEntityOwnership(text)) {
+    intents.push("llc_corporation");
+    matched_rule_ids.push("entity_ownership_disclosure");
+  }
+
+  // 12.6 CONTACT-MODALITY / LANGUAGE LOGISTICS
+  if (matchesVoicemailRequest(text)) {
+    intents.push("voicemail_call_request");
+    matched_rule_ids.push("voicemail_call_request");
+  }
+  if (
+    (normalized_objection === "needs_email" && !EMAIL_REQUEST_REFUSAL_RE.test(text)) ||
+    matchesEmailRequest(text)
+  ) {
+    // The needs_email OBJECTION matcher has no refusal guard ("do not email
+    // me" contains "email me"), so the refusal regex gates both paths here.
+    intents.push("requests_email");
+    matched_rule_ids.push("requests_email");
+  }
+  if (matchesLanguageSwitchRequest(text)) {
+    intents.push("language_switch");
+    matched_rule_ids.push("language_switch_request");
+  }
+
+  // 12.7 "IS THE BUYER STILL INTERESTED" — the ask_offer detector already
+  // routes these; the finer ontology label rides along as a component so the
+  // re-engagement layer and audit can see the exact ask.
+  if (
+    intents.includes("asks_offer") &&
+    includesAny(text, [
+      "still interested in buying",
+      "still want to buy",
+      "still buying",
+      "offer still stand",
+      "still on the table",
+      "is the offer still",
+      "sigues interesado",
+      "siguen interesados",
+      "todavía les interesa",
+      "todavia les interesa",
+    ])
+  ) {
+    intents.push("asks_buyer_still_interested");
+    matched_rule_ids.push("asks_buyer_still_interested");
+  }
+
   // 13. REACTION / EMOJI ONLY / SYSTEM REACTION
   // Pure digit tokens (ZIP/year/phone) are NOT reactions — Unicode digit emoji props can false-match.
   const is_pure_digit_token = /^\s*[\d\s\-()]+\s*$/.test(text);
@@ -4688,6 +5029,15 @@ function resolveIntents(
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
   const secondary_intents = unique_intents.filter((intent) => intent !== primary);
+
+  // Compound preservation: when the components span ≥2 distinct intent
+  // families (e.g. probate/authority + asking price + interest), append the
+  // ontology's compound_intent meta-marker so downstream consumers know the
+  // message must not be treated as its primary label alone. Never primary.
+  const compound_families = countCompoundFamilies(unique_intents);
+  if (compound_families >= 2 && !secondary_intents.includes("compound_intent")) {
+    secondary_intents.push("compound_intent");
+  }
 
   const ambiguous = [];
   if (primary === "unclear") ambiguous.push("no_confident_intent");
@@ -4883,6 +5233,16 @@ function computeHeuristicConfidence({
     condition_disclosed: 0.85,
     tenant_occupied:    0.85,
     opt_out:            0.99,
+    // Legal/authority disclosures — phrase-anchored, negation-guarded
+    title_issue:            0.88,
+    lien_tax_issue:         0.88,
+    bankruptcy_disclosed:   0.90,
+    trust_ownership:        0.87,
+    llc_corporation:        0.87,
+    // Contact-modality / language logistics
+    voicemail_call_request: 0.85,
+    requests_email:         0.85,
+    language_switch:        0.90,
   };
 
   let confidence = FIXED_CONFIDENCE[objection] ?? FIXED_CONFIDENCE[primary_intent] ?? 0.60;
@@ -4991,7 +5351,13 @@ function estimateMotivationScore({ objection, emotion, positive_signals = [] }) 
 
 function classifyHeuristic(message, brain_item = null, options = {}) {
   const compliance_flag  = detectComplianceFlag(message);
-  const language         = detectLanguageHeuristic(message, brain_item);
+  let language           = detectLanguageHeuristic(message, brain_item);
+  // An explicit Spanish-switch request ("no hablo inglés", "en español por
+  // favor") is deterministic evidence of language preference even when the
+  // message is too short for script/pattern detection to flag Spanish.
+  if (language === "English" && matchesSpanishTargetSwitch(message)) {
+    language = "Spanish";
+  }
   const objection        = compliance_flag ? null : detectObjection(message);
   const emotion          = detectEmotion(message);
   const positive_signals = detectPositiveSignals(message);
@@ -5038,6 +5404,9 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
     primary_intent: intents.primary_intent,
     secondary_intent: intents.secondary_intent,
     secondary_intents: intents.secondary_intents || [],
+    // Full component set (compound preservation): previously dropped at this
+    // boundary, which flattened multi-intent messages for every consumer.
+    matched_intents: intents.matched_intents || [],
     detected_intent: intents.primary_intent, // Backward compatibility
     positive_signals,
     confidence,
@@ -5198,6 +5567,27 @@ function deriveAutomationDecision({
     };
   }
 
+  // Legal/authority disclosures: the ontology routes every one of these to a
+  // human lane BEFORE any offer conversation (authority/payoff verification
+  // is not automatable). Never auto-reply, never suppress.
+  if (
+    [
+      "title_issue",
+      "lien_tax_issue",
+      "bankruptcy_disclosed",
+      "trust_ownership",
+      "llc_corporation",
+    ].includes(intent)
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
+    };
+  }
+
   if (intent === "not_interested") {
     return {
       auto_reply_allowed: false,
@@ -5228,6 +5618,9 @@ function deriveAutomationDecision({
       "tenant_occupied",
       "condition_disclosed",
       "callback_requested",
+      "voicemail_call_request",
+      "requests_email",
+      "language_switch",
       "who_is_this",
       "info_request",
     ].includes(intent)

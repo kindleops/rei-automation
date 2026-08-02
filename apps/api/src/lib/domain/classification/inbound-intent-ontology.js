@@ -356,7 +356,7 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Confirm continued interest and advance." },
     state_hints: { lifecycle_stage: "offer_interest", operational_status: "active_communication", lead_temperature: "warm", disposition: "interested", automation: "continue" },
-    classifier_aliases: [],
+    classifier_aliases: ["asks_buyer_still_interested"],
     compliance: NO_COMPLIANCE,
   },
   info_request: {
@@ -497,7 +497,7 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Collect/confirm email and move the material over." },
     state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "warm", disposition: "none", automation: "continue" },
-    classifier_aliases: ["needs_email"],
+    classifier_aliases: ["needs_email", "requests_email"],
     compliance: NO_COMPLIANCE,
   },
   voicemail_call_request: {
@@ -506,7 +506,7 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "Acknowledge the voicemail ask; a human returns the call." },
     state_hints: { lifecycle_stage: null, operational_status: "follow_up_due", lead_temperature: "warm", disposition: "none", automation: "continue" },
-    classifier_aliases: [],
+    classifier_aliases: ["voicemail_call_request"],
     compliance: NO_COMPLIANCE,
   },
   language_switch: {
@@ -515,7 +515,7 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Continue in the seller's language via the language registry." },
     state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "unscored", disposition: "none", automation: "continue" },
-    classifier_aliases: [],
+    classifier_aliases: ["language_switch"],
     compliance: NO_COMPLIANCE,
   },
   asks_which_property: {
@@ -609,7 +609,7 @@ const RAW = {
     terminal_hint: "human_review_required",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human verifies trustee authority before negotiating." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "unscored", disposition: "none", automation: "pause" },
-    classifier_aliases: [],
+    classifier_aliases: ["trust_ownership"],
     compliance: NO_COMPLIANCE,
   },
   llc_corporation: {
@@ -618,7 +618,7 @@ const RAW = {
     terminal_hint: "human_review_required",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human verifies entity signing authority." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "unscored", disposition: "none", automation: "pause" },
-    classifier_aliases: ["entity_representative_respondent"],
+    classifier_aliases: ["entity_representative_respondent", "llc_corporation"],
     compliance: NO_COMPLIANCE,
   },
   title_issue: {
@@ -627,7 +627,7 @@ const RAW = {
     terminal_hint: "human_review_required",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human scopes the title issue before advancing." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "unscored", disposition: "none", automation: "pause" },
-    classifier_aliases: [],
+    classifier_aliases: ["title_issue"],
     compliance: NO_COMPLIANCE,
   },
   lien_tax_issue: {
@@ -636,7 +636,7 @@ const RAW = {
     terminal_hint: "human_review_required",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human scopes liens/taxes and payoff feasibility." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "unscored", disposition: "none", automation: "pause" },
-    classifier_aliases: [],
+    classifier_aliases: ["lien_tax_issue"],
     compliance: NO_COMPLIANCE,
   },
   foreclosure_urgency: {
@@ -646,6 +646,15 @@ const RAW = {
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "Time-critical distress; a human engages immediately." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "hot", disposition: "interested", automation: "pause" },
     classifier_aliases: ["financial_distress", "financial_pressure"],
+    compliance: NO_COMPLIANCE,
+  },
+  bankruptcy: {
+    category: "legal_financial",
+    description: "Seller discloses a bankruptcy (filed or pending, ch. 7/11/13). Automatic-stay and trustee-approval implications — a human verifies what can legally be sold before any offer.",
+    terminal_hint: "human_review_required",
+    reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human verifies bankruptcy posture (automatic stay, trustee approval) before advancing." },
+    state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "warm", disposition: "none", automation: "pause" },
+    classifier_aliases: ["bankruptcy_disclosed"],
     compliance: NO_COMPLIANCE,
   },
 
@@ -665,7 +674,7 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Preserve all component intents; respond to the highest-priority one." },
     state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "unscored", disposition: "none", automation: "continue" },
-    classifier_aliases: [],
+    classifier_aliases: ["compound_intent"],
     compliance: NO_COMPLIANCE,
   },
   sarcasm: {

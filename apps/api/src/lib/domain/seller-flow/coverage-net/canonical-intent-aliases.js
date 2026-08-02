@@ -56,6 +56,18 @@ export const CANONICAL_INTENTS = Object.freeze([
   "co_owner_respondent",
   "executor_heir_respondent",
   "entity_representative_respondent",
+  // Launch-critical detector expansion (classify.js legal/authority +
+  // contact-modality tiers). Kept 1:1 with INTENT_PRIORITY additions so the
+  // safety/coverage net sees them as first-class rather than folding to
+  // "unclear".
+  "title_issue",
+  "lien_tax_issue",
+  "bankruptcy_disclosed",
+  "trust_ownership",
+  "llc_corporation",
+  "voicemail_call_request",
+  "requests_email",
+  "language_switch",
 ]);
 
 const CANONICAL_INTENT_SET = new Set(CANONICAL_INTENTS);
@@ -118,8 +130,26 @@ const INTENT_ALIASES = Object.freeze({
   not_ready: "need_time",
   text_me_later: "need_time",
   needs_call: "callback_requested",
-  needs_email: "callback_requested",
+  // needs_email previously folded to callback_requested, diverging from the
+  // ontology (which folds it to requests_email). The ontology is the declared
+  // contract: an email preference is an email lane, not a callback lane —
+  // requests_email now exists as a live classifier label with its own route
+  // profile, so the runtime registry agrees with the ontology.
+  needs_email: "requests_email",
   wants_call: "callback_requested",
+  voicemail: "voicemail_call_request",
+  wants_voicemail: "voicemail_call_request",
+
+  // ── legal / authority disclosures ─────────────────────────────────────────
+  bankruptcy: "bankruptcy_disclosed",
+  title_problem: "title_issue",
+  lien: "lien_tax_issue",
+  tax_lien: "lien_tax_issue",
+  back_taxes: "lien_tax_issue",
+  trust: "trust_ownership",
+  trustee: "trust_ownership",
+  llc: "llc_corporation",
+  corporation: "llc_corporation",
 
   // ── identity / info ───────────────────────────────────────────────────────
   who_is_this_: "who_is_this",
