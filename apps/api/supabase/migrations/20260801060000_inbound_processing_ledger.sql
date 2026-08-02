@@ -24,8 +24,15 @@ CREATE TABLE IF NOT EXISTS public.inbound_processing_ledger (
   thread_key text,
   from_phone text,
   to_phone text,
-  message_preview text,
+  -- PII minimization: never store raw seller message text. A SHA-256 digest +
+  -- length is enough to correlate retries and detect divergent payloads.
+  body_sha256 text,
+  body_length integer NOT NULL DEFAULT 0,
   received_at timestamptz NOT NULL DEFAULT now(),
+  -- Retention deadline: receipt + INBOUND_LEDGER_RETENTION_DAYS (30 days).
+  -- Rows past this instant are hard-deleted by the daily
+  -- /api/internal/inbound/ledger-retention-purge cron.
+  retain_until timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
   status text NOT NULL DEFAULT 'processing'
     CHECK (status IN ('processing', 'completed', 'failed')),
   attempt_count integer NOT NULL DEFAULT 1,
@@ -73,5 +80,25 @@ CREATE INDEX IF NOT EXISTS inbound_processing_ledger_provider_sid_idx
 
 CREATE INDEX IF NOT EXISTS inbound_processing_ledger_thread_key_idx
   ON public.inbound_processing_ledger (thread_key);
+
+-- Retention purge: the daily cleanup selects expired rows by retain_until in
+-- bounded batches (select-then-delete), so the deadline column must be
+-- indexed or the purge degrades to a sequential scan as the table grows.
+CREATE INDEX IF NOT EXISTS inbound_processing_ledger_retain_until_idx
+  ON public.inbound_processing_ledger (retain_until);
+
+-- Retention policy of record. The ledger stores seller phone numbers (they ARE
+-- the thread identifiers the SLA scan and ops correlation need) and message
+-- digests, never raw message text. Every row is hard-deleted once retain_until
+-- passes; the writer (inbound-processing-ledger.js, INBOUND_LEDGER_RETENTION_DAYS)
+-- and this default must stay at the same 30-day window.
+COMMENT ON TABLE public.inbound_processing_ledger IS
+  'Durable per-inbound terminal-disposition ledger. PII minimization: no raw message text (body_sha256 + body_length only); seller phone numbers kept as thread identifiers. Retention: rows are hard-deleted after retain_until (receipt + 30 days) by the daily /api/internal/inbound/ledger-retention-purge cron.';
+
+COMMENT ON COLUMN public.inbound_processing_ledger.retain_until IS
+  'Hard-delete deadline: received_at + 30-day retention window (INBOUND_LEDGER_RETENTION_DAYS). Enforced by /api/internal/inbound/ledger-retention-purge.';
+
+COMMENT ON COLUMN public.inbound_processing_ledger.body_sha256 IS
+  'SHA-256 hex digest of the inbound message body. The raw seller text is deliberately never persisted here.';
 
 ALTER TABLE public.inbound_processing_ledger ENABLE ROW LEVEL SECURITY;

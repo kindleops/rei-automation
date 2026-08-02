@@ -793,13 +793,18 @@ function shouldBypassInboundOfferRouting({ classification = null, route = null }
 // never block inbound processing; the SLA scan surfaces the residual gap.
 export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   const started_at_ms = Date.now();
-  const [
-    { beginInboundLedgerEntry, recordInboundTerminalDisposition },
-    { resolveInboundTerminalDisposition, TERMINAL_DISPOSITIONS },
-  ] = await Promise.all([
-    import("@/lib/domain/inbound/inbound-processing-ledger.js"),
-    import("@/lib/domain/inbound/terminal-disposition.js"),
-  ]);
+  const [ledger_module, { resolveInboundTerminalDisposition, TERMINAL_DISPOSITIONS }] =
+    await Promise.all([
+      import("@/lib/domain/inbound/inbound-processing-ledger.js"),
+      import("@/lib/domain/inbound/terminal-disposition.js"),
+    ]);
+  // Injectable for tests (via __setTextgridInboundTestDeps): the durable
+  // ledger writes are otherwise unobservable without live Supabase config.
+  const beginLedgerEntry =
+    runtimeDeps.beginInboundLedgerEntry || ledger_module.beginInboundLedgerEntry;
+  const recordTerminalDisposition =
+    runtimeDeps.recordInboundTerminalDisposition ||
+    ledger_module.recordInboundTerminalDisposition;
 
   const sid = clean(
     payload?.message_id ||
@@ -809,29 +814,86 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
   );
   const from_phone = clean(payload?.from || payload?.From);
   const to_phone = clean(payload?.to || payload?.To);
-  const body_preview = clean(payload?.message_body ?? payload?.Body ?? payload?.body);
+  const message_body_raw = clean(payload?.message_body ?? payload?.Body ?? payload?.body);
+  // Stable receipt instant for the no-SID key, derived ONLY from
+  // provider/route-supplied payload fields — never new Date(), which would
+  // hand every internal retry of the same request a fresh key and defeat
+  // idempotency. The webhook route stamps http_received_at exactly once at
+  // HTTP receipt and persists it with the payload (webhook_log), so a replay
+  // or retry of the same request re-derives the same key, while the same text
+  // arriving again later (a new HTTP receipt) gets a distinct one. When no
+  // receipt field is present at all (direct invocations), the hint is empty
+  // and the key degrades to the stable from|to|body hash.
+  const received_at_hint = clean(
+    payload?.received_at ||
+      payload?.http_received_at ||
+      payload?.timestamp ||
+      payload?.created_at
+  );
+  const received_at_ms = Date.parse(received_at_hint);
   const idempotency_key = sid
     ? `textgrid_inbound:${sid}`
     : `textgrid_inbound:nosid:${crypto
         .createHash("sha256")
-        .update(`${from_phone}|${to_phone}|${body_preview}`, "utf8")
+        .update(`${from_phone}|${to_phone}|${message_body_raw}|${received_at_hint}`, "utf8")
         .digest("hex")
         .slice(0, 32)}`;
 
-  const ledger = await beginInboundLedgerEntry({
+  const ledger = await beginLedgerEntry({
     idempotency_key,
     provider_message_sid: sid || null,
     thread_key: from_phone || null,
     from_phone: from_phone || null,
     to_phone: to_phone || null,
-    message_preview: body_preview,
+    // PII minimization: the ledger digests this (SHA-256 + length) and never
+    // persists the raw seller text.
+    message_body: message_body_raw,
+    received_at: Number.isFinite(received_at_ms)
+      ? new Date(received_at_ms).toISOString()
+      : null,
   });
+
+  // Durable-write truthfulness: a failed disposition write is exactly the
+  // silent drop the ledger exists to make loud — surface it in the wrapper
+  // and raise the P0 inbound_no_disposition alert. supabase_unconfigured is
+  // exempt (no ledger AND no alert sink exist; local/test environments).
+  async function recordDispositionOrAlert(record_args) {
+    const record_result = await recordTerminalDisposition(record_args);
+    if (record_result?.ok || record_result?.reason === "supabase_unconfigured") {
+      return record_result;
+    }
+    safeWarn("textgrid.inbound_terminal_disposition_record_failed", {
+      idempotency_key,
+      ledger_id: record_args.ledger_id || null,
+      disposition: record_args.disposition,
+      reason: record_result?.reason || "unknown",
+    });
+    try {
+      const record_alert =
+        runtimeDeps.recordInboundNoDispositionAlert ||
+        (await import("@/lib/domain/alerts/launch-critical-alerts.js")).launchAlerts
+          .inboundNoDisposition;
+      await record_alert({
+        record_failure: true,
+        record_failure_reason: record_result?.reason || "unknown",
+        idempotency_key,
+        provider_message_sid: sid || null,
+        disposition: record_args.disposition,
+      });
+    } catch (alert_error) {
+      safeWarn("textgrid.inbound_disposition_record_alert_failed", {
+        idempotency_key,
+        error: alert_error?.message || "unknown",
+      });
+    }
+    return record_result;
+  }
 
   try {
     const result = await handleTextgridInboundWebhookCore(payload, opts);
     if (!ledger.duplicate_completed) {
       const resolved = resolveInboundTerminalDisposition(result);
-      await recordInboundTerminalDisposition({
+      await recordDispositionOrAlert({
         ledger_id: ledger.ledger_id || null,
         idempotency_key,
         disposition: resolved.disposition,
@@ -851,7 +913,7 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     return result;
   } catch (error) {
     if (!ledger.duplicate_completed) {
-      await recordInboundTerminalDisposition({
+      await recordDispositionOrAlert({
         ledger_id: ledger.ledger_id || null,
         idempotency_key,
         disposition: TERMINAL_DISPOSITIONS.FAILED_RETRIABLE,

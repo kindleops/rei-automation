@@ -13,7 +13,15 @@ import {
   isTerminalDisposition,
   resolveInboundTerminalDisposition,
 } from "@/lib/domain/inbound/terminal-disposition.js";
-import { recordInboundTerminalDisposition } from "@/lib/domain/inbound/inbound-processing-ledger.js";
+import {
+  beginInboundLedgerEntry,
+  recordInboundTerminalDisposition,
+} from "@/lib/domain/inbound/inbound-processing-ledger.js";
+import {
+  handleTextgridInboundWebhook,
+  __setTextgridInboundTestDeps,
+  __resetTextgridInboundTestDeps,
+} from "@/lib/flows/handle-textgrid-inbound.js";
 
 test("canonical set is exactly the ten launch dispositions", () => {
   assert.deepEqual(
@@ -91,7 +99,7 @@ test("ledger refuses non-canonical dispositions", async () => {
   assert.equal(result.reason, "invalid_terminal_disposition");
 });
 
-test("handler wrapper records failed_retriable when the core throws", async () => {
+test("ledger persists a failed_retriable terminal disposition with the error message", async () => {
   const recorded = [];
   const supabase_double = (() => {
     const rows = new Map();
@@ -114,7 +122,8 @@ test("handler wrapper records failed_retriable when the core throws", async () =
           update: (patch) => {
             recorded.push(patch);
             return {
-              eq: async () => ({ error: null }),
+              // The writer requests { count: "exact" }; exactly one row matched.
+              eq: async () => ({ error: null, count: 1 }),
             };
           },
         };
@@ -123,15 +132,12 @@ test("handler wrapper records failed_retriable when the core throws", async () =
     };
   })();
 
-  const { beginInboundLedgerEntry, recordInboundTerminalDisposition: record } = await import(
-    "@/lib/domain/inbound/inbound-processing-ledger.js"
-  );
   const begin = await beginInboundLedgerEntry(
     { idempotency_key: "textgrid_inbound:SMx", provider_message_sid: "SMx" },
     { supabase: supabase_double }
   );
   assert.equal(begin.ok, true);
-  const record_result = await record(
+  const record_result = await recordInboundTerminalDisposition(
     {
       ledger_id: begin.ledger_id,
       idempotency_key: "textgrid_inbound:SMx",
@@ -145,4 +151,43 @@ test("handler wrapper records failed_retriable when the core throws", async () =
   assert.equal(recorded[0].status, "failed");
   assert.equal(recorded[0].terminal_disposition, "failed_retriable");
   assert.equal(recorded[0].error_message, "boom");
+});
+
+test("handler wrapper records failed_retriable when the core throws", async () => {
+  const recorded = [];
+  __setTextgridInboundTestDeps({
+    beginInboundLedgerEntry: async () => ({ ok: true, ledger_id: "ledger-throw-1" }),
+    recordInboundTerminalDisposition: async (args) => {
+      recorded.push(args);
+      return { ok: true, disposition: args.disposition };
+    },
+    // First awaited dependency inside the core: throwing here proves the
+    // WRAPPER's catch path records the disposition — no inner failure handler
+    // is reachable yet.
+    getSystemFlags: async () => {
+      throw new Error("core exploded");
+    },
+  });
+  try {
+    await assert.rejects(
+      () =>
+        handleTextgridInboundWebhook({
+          message_id: "SM-throw-1",
+          from: "+15550000001",
+          to: "+15550000002",
+          body: "hello",
+          status: "received",
+        }),
+      /core exploded/
+    );
+  } finally {
+    __resetTextgridInboundTestDeps();
+  }
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].disposition, TERMINAL_DISPOSITIONS.FAILED_RETRIABLE);
+  assert.equal(recorded[0].idempotency_key, "textgrid_inbound:SM-throw-1");
+  assert.equal(recorded[0].ledger_id, "ledger-throw-1");
+  assert.equal(recorded[0].error_message, "core exploded");
+  assert.deepEqual(recorded[0].detail, { thrown: true });
 });

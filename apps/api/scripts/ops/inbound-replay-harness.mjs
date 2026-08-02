@@ -23,6 +23,26 @@ function argValue(flag, fallback) {
 
 const envFile = argValue("--env", ".env.local");
 const limit = Math.min(5000, Number(argValue("--limit", 500)) || 500);
+// PII guard: raw seller message bodies are NEVER written to the report unless
+// the operator explicitly opts in. The report pairs each excerpt with
+// event_id, making it re-identifiable; report files are gitignored
+// (inbound-replay-report-*.json) and must never be committed either way.
+const includeRawBodies = process.argv.includes("--include-raw-bodies");
+
+if (includeRawBodies) {
+  console.warn(
+    [
+      "",
+      "!".repeat(74),
+      "!! PRIVACY WARNING: --include-raw-bodies is enabled.",
+      "!! The report file will contain RAW SELLER MESSAGE CONTENT (personal",
+      "!! data) paired with re-identifiable event IDs. Handle it as sensitive:",
+      "!! do NOT commit it, share it, or leave it outside this machine.",
+      "!".repeat(74),
+      "",
+    ].join("\n")
+  );
+}
 
 const envPath = path.resolve(process.cwd(), envFile);
 for (const line of readFileSync(envPath, "utf8").split("\n")) {
@@ -103,7 +123,9 @@ for (const event of events) {
   if (samples[bucket].length < 3) {
     samples[bucket].push({
       event_id: event.id,
-      body: String(event.message_body || "").slice(0, 120),
+      // Redacted by default: raw seller text only behind --include-raw-bodies.
+      body: includeRawBodies ? String(event.message_body || "").slice(0, 120) : null,
+      body_length: String(event.message_body || "").length,
       historical_intent: historical,
       replayed_intent: replayed,
       disposition: result.disposition,
@@ -114,6 +136,7 @@ for (const event of events) {
 
 const report = {
   generated_for: "inbound-replay-harness",
+  bodies_redacted: !includeRawBodies,
   events_loaded: events.length,
   events_replayed: processed,
   internal_canary_skipped: internal_skipped,
@@ -137,3 +160,8 @@ console.log(JSON.stringify(report.coverage, null, 2));
 console.log("Disposition histogram:", JSON.stringify(dispositions, null, 2));
 console.log(`Invariant violations: ${violations.length}`);
 console.log(`Full report: ${out}`);
+if (includeRawBodies) {
+  console.warn(
+    "PRIVACY WARNING: the report above contains raw seller message content — do not commit or share it."
+  );
+}
