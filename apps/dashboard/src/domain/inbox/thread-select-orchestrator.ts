@@ -147,6 +147,8 @@ export interface ThreadSelectExecutionCallbacks {
   onThreadContext: (result: Extract<ThreadSelectFetchResult, { kind: 'thread_context' }>) => void
   onParticipants?: (result: Extract<ThreadSelectFetchResult, { kind: 'participants' }>) => void
   onTelemetry?: (event: { phase: string; ms: number; stillSelected: boolean }) => void
+  /** Fired the moment a fetch is dispatched — used to assert true parallel start (DD-024). */
+  onStart?: (event: { phase: ThreadSelectFetchKind; atMs: number }) => void
 }
 
 export interface CreateThreadSelectHandlersOptions {
@@ -235,6 +237,7 @@ export async function executeThreadSelectFetches(
     const handler = handlers[kind]
     if (!handler) return
     const kindStarted = performance.now()
+    callbacks.onStart?.({ phase: kind, atMs: kindStarted })
     try {
       const result = await handler(signal)
       const still = isStillSelected()
@@ -272,12 +275,10 @@ export async function executeThreadSelectFetches(
     }
   }
 
-  const otherKinds = kinds.filter((kind) => kind !== 'messages')
-  if (kinds.includes('messages')) {
-    await runKind('messages')
-  }
-  if (otherKinds.length > 0) {
-    await Promise.all(otherKinds.map((kind) => runKind(kind)))
-  }
+  // DD-024: every plan entry is labelled `parallelGroup: 'primary'`, but this executor
+  // used to `await runKind('messages')` to completion before starting the other three.
+  // All primary fetches now start in the same tick; `isStillSelected` continues to gate
+  // which responses may commit, so commit ordering is unchanged.
+  await Promise.all(kinds.map((kind) => runKind(kind)))
   return { parallelStarted: kinds.length, applied, rejected }
 }
