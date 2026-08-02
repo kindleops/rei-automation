@@ -18,9 +18,12 @@
 //   verify        read-only: row status, provider sid, delivery, inbound reply,
 //                 auto-reply queue rows on the internal thread
 //   stamp-reply   stamp campaign_id onto the newest internal auto-reply row so
-//                 the reply leg is scoped-canary dispatchable (audited patch,
-//                 conditional on the observed queue_status — aborts if the row
-//                 transitioned between read and write)
+//                 the reply leg is scoped-canary dispatchable. The write is the
+//                 internal_proof_stamp_queue_row RPC: an atomic server-side
+//                 jsonb merge (allowlisted stamp keys only) CASed on the
+//                 observed queue_status — aborts if the row transitioned, and
+//                 can never clobber concurrent metadata writers. Records the
+//                 open proof session id + a fresh processing run id.
 //   mint-reply    mint an authorization for that reply row
 //   fire-reply    dispatch the reply row via a second scoped canary run
 //   close         restore queue_execution_mode=paused and expire the session;
@@ -66,6 +69,15 @@ function parseSessionValue(raw) {
   } catch {
     return null;
   }
+}
+
+function rpcFunctionMissing(error) {
+  const msg = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    error?.code === "42883" ||
+    error?.code === "PGRST202" ||
+    msg.includes("could not find the function")
+  );
 }
 
 export function createInternalProofRunbook({ supabase, now = () => new Date(), log = console.log } = {}) {
@@ -286,36 +298,65 @@ export function createInternalProofRunbook({ supabase, now = () => new Date(), l
       if (reply.campaign_id && reply.campaign_id !== PINNED.campaign) {
         throw new Error(`reply row carries foreign campaign ${reply.campaign_id}`);
       }
-      // Conditional write keyed on the queue_status observed above: a row the
-      // queue engine or inbound automation moved between the read and this
-      // write matches zero rows and the step aborts instead of overwriting
-      // concurrent queue metadata with the stale snapshot. count must be
-      // exactly 1 or nothing is treated as stamped.
+      // Atomic server-side stamp via internal_proof_stamp_queue_row: the RPC
+      // CASes on the queue_status (and campaign state) observed above and
+      // merges ONLY the allowlisted stamp keys with `metadata || stamp` in
+      // one statement — a concurrent metadata writer (delivery reconcile,
+      // inbound automation) can no longer be clobbered by a stale JS
+      // snapshot, because no snapshot is ever written back.
       const observed_status = reply.queue_status;
-      const { error: update_error, count } = await supabase
-        .from("send_queue")
-        .update(
-          {
-            campaign_id: PINNED.campaign,
-            metadata: {
-              ...(reply.metadata || {}),
-              internal_canary: true,
-              campaign_id_stamped_for_internal_proof: true,
-              campaign_stamped_at: now().toISOString(),
-            },
-          },
-          { count: "exact" }
-        )
-        .eq("id", reply.id)
-        .eq("queue_status", observed_status);
-      if (update_error) throw update_error;
-      if (count !== 1) {
+      const session = parseSessionValue(await getControl("internal_proof_session"));
+      const session_id = String(session?.session_id || argValue("--session-id", "") || "");
+      if (!session_id) {
         throw new Error(
-          `reply row ${reply.id} transitioned from '${observed_status}' between read and write ` +
-            `(update matched ${count ?? 0} rows) — nothing stamped, re-run stamp-reply`
+          "no active internal_proof_session found (run open-session first) and no --session-id " +
+            "override given — stamp-reply refuses to stamp without a session reference"
         );
       }
-      log("stamped reply row:", reply.id, `(queue_status '${observed_status}' verified at write)`);
+      const processing_run_id = `stamp-${crypto.randomUUID()}`;
+      const { data: stamped, error: stamp_error } = await supabase.rpc(
+        "internal_proof_stamp_queue_row",
+        {
+          p_queue_row_id: reply.id,
+          p_expected_status: observed_status,
+          p_expected_campaign_id: reply.campaign_id || null,
+          p_campaign_id: PINNED.campaign,
+          p_stamp: {
+            internal_canary: true,
+            campaign_id_stamped_for_internal_proof: true,
+            campaign_stamped_at: now().toISOString(),
+          },
+          p_proof_session_id: session_id,
+          p_processing_run_id: processing_run_id,
+        }
+      );
+      if (stamp_error) {
+        if (rpcFunctionMissing(stamp_error)) {
+          // No fallback to the old read-modify-write path exists by design:
+          // that path is the metadata-clobber race this RPC was built to
+          // close.
+          throw new Error(
+            "internal_proof_stamp_queue_row RPC is missing — apply migration " +
+              "20260802092000_internal_proof_stamp_merge.sql before running stamp-reply " +
+              "(there is deliberately no client-side fallback)"
+          );
+        }
+        throw stamp_error;
+      }
+      if (stamped?.ok !== true) {
+        throw new Error(
+          `stamp refused for reply row ${reply.id}: ${stamped?.reason || "unknown"}` +
+            (stamped?.current_status !== undefined
+              ? ` (current status '${stamped.current_status}', campaign ${stamped.current_campaign_id ?? "null"})`
+              : "") +
+            " — nothing stamped, re-run stamp-reply"
+        );
+      }
+      log(
+        "stamped reply row:",
+        reply.id,
+        `(atomic merge; queue_status '${observed_status}' verified at write; session ${session_id}; run ${processing_run_id})`
+      );
     },
 
     async "mint-reply"() {
