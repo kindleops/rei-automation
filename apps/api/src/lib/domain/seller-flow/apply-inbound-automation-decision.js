@@ -1078,6 +1078,120 @@ function renderSafeTemplate({
   };
 }
 
+// Claims automation may never volunteer in generated wording. Deterministic
+// templates are pre-approved so this list guards ONLY the natural-response
+// path; a match falls back to the template text.
+const NATURAL_REPLY_PROHIBITED_CLAIMS = [
+  "guaranteed",
+  "guarantee",
+  "no fees ever",
+  "licensed agent",
+  "licensed realtor",
+  "attorney",
+  "legal advice",
+  "we will close in",
+  "highest offer",
+  "above market",
+];
+
+/**
+ * Natural-response wording layer (natural-response-engine.js). Env-gated and
+ * DEFAULT OFF (NATURAL_REPLY_ENGINE=enabled). Every policy, compliance, and
+ * state decision above this point is untouched: the engine may only re-word
+ * the already-approved deterministic template text, the generated candidate
+ * must survive the engine's policy validator AND the same SMS queue guard the
+ * template passed, and any failure keeps the template text byte-identical.
+ */
+async function maybeGenerateNaturalReply({
+  decision = null,
+  classification = null,
+  context = null,
+  deterministicText = "",
+  useCase = null,
+  templateId = null,
+  modelCall = null,
+} = {}) {
+  if (lower(process.env.NATURAL_REPLY_ENGINE) !== "enabled") {
+    return { applied: false, reason: "disabled", audit: null };
+  }
+  try {
+    const { generateConstrainedReply, buildModelCallFromEnv } = await import(
+      "@/lib/domain/seller-flow/natural-response-engine.js"
+    );
+    const call = modelCall || buildModelCallFromEnv();
+    if (!call) return { applied: false, reason: "no_model_configured", audit: null };
+
+    const precedence = decision?.latest_intent_precedence || null;
+    // Live shape nests turns under recent.recent_events; older callers may
+    // pass an array directly.
+    const recent_rows = Array.isArray(context?.recent)
+      ? context.recent
+      : asArray(context?.recent?.recent_events);
+    const history = recent_rows
+      .map((row) => ({
+        direction: lower(row?.direction) === "outbound" ? "outbound" : "inbound",
+        text: clean(row?.message_body || row?.body || row?.text),
+      }))
+      .filter((turn) => turn.text);
+    const allowed_facts = { our_role: "local homebuyer" };
+    const property_address = clean(context?.summary?.property_address);
+    if (property_address) allowed_facts.property_address = property_address;
+    const seller_first_name = clean(
+      context?.summary?.seller_first_name || context?.summary?.first_name
+    );
+    if (seller_first_name) allowed_facts.seller_first_name = seller_first_name;
+
+    const language = clean(classification?.language) || "English";
+    const result = await generateConstrainedReply({
+      objective: clean(useCase) || clean(decision?.route_hint) || "reply",
+      deterministicText,
+      allowedFacts: allowed_facts,
+      prohibitedClaims: NATURAL_REPLY_PROHIBITED_CLAIMS,
+      conversationHistory: history,
+      stage: decision?.lifecycle_stage || null,
+      status: decision?.operational_status || null,
+      temperature: decision?.lead_temperature || null,
+      language,
+      languageConfidence: Number(
+        classification?.language_confidence ?? (lower(language) === "english" ? 1 : 0)
+      ),
+      reEngagement:
+        precedence?.state_patch?.contextual_reply_required === true ||
+        precedence?.re_engagement_detected === true,
+      modelCall: call,
+    });
+
+    const audit = {
+      source: result.source,
+      fallback_reason: result.fallback_reason || null,
+      engine_version: result.engine_version,
+      model: result.model || null,
+      confidence: result.confidence ?? null,
+      facts_used: result.facts_used || [],
+    };
+    if (result.source !== "generated" || !clean(result.response_text)) {
+      return { applied: false, reason: result.fallback_reason || "fallback", audit };
+    }
+
+    const prepared = prepareRenderedSmsForQueue({
+      rendered_message_text: result.response_text,
+      template_id: templateId,
+      template_source: "natural_response_engine",
+    });
+    if (!prepared.ok || !clean(prepared.text)) {
+      return {
+        applied: false,
+        reason: prepared.reason || "sms_guard_rejected",
+        audit: { ...audit, source: "deterministic_fallback", fallback_reason: prepared.reason || "sms_guard_rejected" },
+      };
+    }
+    return { applied: true, text: prepared.text, audit };
+  } catch (error) {
+    warn("[NATURAL_REPLY_ENGINE_ERROR]", { message: error?.message || "unknown" });
+    return { applied: false, reason: "engine_exception", audit: null };
+  }
+}
+
 export async function findRecentInboundAutoReplyDuplicate({
   supabaseClient = null,
   threadKey = "",
@@ -1402,6 +1516,7 @@ export async function executeInboundAutomationDecision({
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
+  naturalReplyModelCall = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -1435,6 +1550,34 @@ export async function executeInboundAutomationDecision({
     conversationBrain,
     latestThreadContext,
   });
+
+  // Latest-intent precedence is evaluated for EVERY inbound (pure, no I/O) so
+  // supersession and re-engagement are visible on the decision even when a
+  // later gate (policy block, mode disabled) ends processing early. The
+  // suppression-aware refinement below overwrites this when the thread has
+  // active suppression rows.
+  try {
+    const { resolveLatestIntentPrecedence, resolvePriorThreadState } = await import(
+      "@/lib/domain/seller-flow/latest-intent-precedence.js"
+    );
+    // The live path nests prior state under latestThreadContext.summary — the
+    // shared extractor is the only reader so both call sites see the same
+    // disposition/last_intent/automation state and staleness verdict.
+    const { prior_state, message_is_stale } = resolvePriorThreadState({
+      latestThreadContext,
+      context,
+      inboundReceivedAt,
+    });
+    base_decision.latest_intent_precedence = resolveLatestIntentPrecedence({
+      classification,
+      message_body: message,
+      prior_state,
+      active_suppressions: [],
+      message_is_stale,
+    });
+  } catch {
+    base_decision.latest_intent_precedence = null;
+  }
 
   // Deterministic negotiation strategy directive (spec §7/§12): the router's
   // template selection overrides the intent-profile route at S5+. Suppression
@@ -1666,15 +1809,79 @@ export async function executeInboundAutomationDecision({
           context: context || latestThreadContext,
         });
 
+  let precedence_reopened = false;
   if (active_suppression.suppressed) {
+    // Latest-intent precedence: the newest clear positive intent may supersede
+    // SOFT suppression (not_interested / no_response / nurture). Binding
+    // opt-outs and anything unrecognized stay in force and route to a human.
+    const { resolveLatestIntentPrecedence, resolvePriorThreadState, releaseSoftSuppressions } =
+      await import("@/lib/domain/seller-flow/latest-intent-precedence.js");
+    const { prior_state, message_is_stale } = resolvePriorThreadState({
+      latestThreadContext,
+      context,
+      inboundReceivedAt,
+    });
+    let precedence = resolveLatestIntentPrecedence({
+      classification,
+      message_body: message,
+      prior_state,
+      active_suppressions: [
+        active_suppression.row || { suppression_reason: active_suppression.reason },
+      ],
+      message_is_stale,
+    });
+
+    if (precedence.supersedes_prior_state && precedence.clear_soft_suppression && !dryRun) {
+      const release = await releaseSoftSuppressions(
+        {
+          supabase,
+          phone_number: inboundFrom || threadKey,
+          decision: precedence,
+          thread_key: threadKey,
+          message_event_id: inboundEventId,
+        },
+        { info, warn }
+      );
+      if (!release.ok) {
+        // Fail safe: if the release did not land (including a zero-row
+        // update), the thread stays suppressed and no reopen patch survives.
+        precedence = {
+          ...precedence,
+          supersedes_prior_state: false,
+          clear_soft_suppression: false,
+          state_patch: null,
+          reason_codes: [...precedence.reason_codes, "soft_release_failed_fail_safe"],
+        };
+      }
+    }
+
+    base_decision.latest_intent_precedence = precedence;
+
+    if (precedence.supersedes_prior_state) {
+      precedence_reopened = true;
+      info("[LATEST_INTENT_REENGAGEMENT_REOPENED]", {
+        thread_key: threadKey || null,
+        primary_intent: classification?.primary_intent || null,
+        evidence: precedence.evidence,
+        reason_codes: precedence.reason_codes,
+        version: precedence.version,
+      });
+    }
+  }
+
+  if (active_suppression.suppressed && !precedence_reopened) {
+    const precedence = base_decision.latest_intent_precedence || null;
     const suppression_decision = {
       ...base_decision,
       should_queue_reply: false,
       should_suppress_contact: true,
-      should_mark_human_review: false,
+      should_mark_human_review: precedence?.blocked_by_binding_suppression === true,
       reply_mode: "none",
       suppression_reason: active_suppression.reason || "suppressed",
-      audit_reason: active_suppression.reason || "suppressed",
+      audit_reason:
+        precedence?.blocked_by_binding_suppression === true
+          ? "seller_initiated_after_stop"
+          : active_suppression.reason || "suppressed",
     };
 
     warn("[AUTO_REPLY_BLOCKED]", {
@@ -1877,11 +2084,24 @@ export async function executeInboundAutomationDecision({
   }
 
   const selected_template = template_result.template;
-  const rendered_message_text = render_result.rendered_message_text;
   const selected_use_case =
     clean(selected_template.use_case) ||
     routeProfileCandidates(base_decision.route_hint, classification?.primary_intent)[0] ||
     null;
+  // Wording layer: may only substitute validated generated text for the
+  // approved template rendering; decisions above are already final.
+  const natural_reply = await maybeGenerateNaturalReply({
+    decision: base_decision,
+    classification,
+    context: context || latestThreadContext,
+    deterministicText: render_result.rendered_message_text,
+    useCase: selected_use_case,
+    templateId: selected_template.template_id || selected_template.id || null,
+    modelCall: naturalReplyModelCall,
+  });
+  const rendered_message_text = natural_reply.applied
+    ? natural_reply.text
+    : render_result.rendered_message_text;
   const scheduled_for = new Date(
     new Date(now).getTime() + Math.max(Number(scheduleDelaySeconds) || 0, 0) * 1000
   ).toISOString();
@@ -1925,6 +2145,7 @@ export async function executeInboundAutomationDecision({
       automation_decision: preview_decision,
       selected_template,
       rendered_message_text,
+      natural_reply: natural_reply.audit,
       queued: false,
       queue_item_id: null,
       queue_row_id: null,
@@ -2201,6 +2422,7 @@ export async function executeInboundAutomationDecision({
     automation_decision: base_decision,
     selected_template,
     rendered_message_text,
+    natural_reply: natural_reply.audit,
     queued: true,
     queue_item_id: queue_result.queue_item_id || null,
     queue_row_id: queue_result.queue_row_id || null,

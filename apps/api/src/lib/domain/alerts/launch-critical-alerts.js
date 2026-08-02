@@ -38,6 +38,7 @@ export const LAUNCH_CRITICAL_ALERT_CODES = Object.freeze({
   SUPPRESSION_INVARIANT_FAILURE: "suppression_invariant_failure",
   CANARY_SCOPE_VIOLATION: "canary_scope_violation",
   UNEXPECTED_OUTBOUND_WHILE_STOPPED: "unexpected_outbound_while_stopped",
+  INBOUND_NO_DISPOSITION: "inbound_no_disposition",
 });
 
 /**
@@ -69,6 +70,9 @@ const ALWAYS_CRITICAL = new Set([
   LAUNCH_CRITICAL_ALERT_CODES.SUPPRESSION_INVARIANT_FAILURE,
   LAUNCH_CRITICAL_ALERT_CODES.CANARY_SCOPE_VIOLATION,
   LAUNCH_CRITICAL_ALERT_CODES.UNEXPECTED_OUTBOUND_WHILE_STOPPED,
+  // An inbound without a terminal disposition inside the SLA is the silent
+  // drop the launch invariant forbids — always a P0.
+  LAUNCH_CRITICAL_ALERT_CODES.INBOUND_NO_DISPOSITION,
 ]);
 
 function clean(value) {
@@ -238,6 +242,16 @@ export const launchAlerts = Object.freeze({
         subsystem: "inbound",
         severity: "high",
         summary: "Inbound webhook processing failed",
+        metadata,
+      },
+      deps,
+    ),
+  inboundNoDisposition: (metadata, deps) =>
+    recordLaunchCriticalAlert(
+      {
+        code: LAUNCH_CRITICAL_ALERT_CODES.INBOUND_NO_DISPOSITION,
+        subsystem: "inbound",
+        summary: "Inbound message has no terminal disposition within SLA",
         metadata,
       },
       deps,

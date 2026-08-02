@@ -10,6 +10,7 @@ import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
@@ -4486,6 +4487,25 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     row.metadata = attachOutboundProvenance(row);
   } catch {
     // Provenance stamping must never block a send.
+  }
+
+  // Internal test-phone quarantine: any outbound to a registered internal
+  // number carries the internal_canary marker, so KPI exclusion
+  // (isInternalCanaryFactRow) and the internal-proof predicates hold no
+  // matter which surface created the row.
+  try {
+    if (
+      isInternalTestPhone(resolveQueueDestinationPhone(row).phone) &&
+      row.metadata?.internal_canary !== true
+    ) {
+      row.metadata = {
+        ...(row.metadata || {}),
+        internal_canary: true,
+        internal_canary_stamped_by: "internal_phone_registry",
+      };
+    }
+  } catch {
+    // Quarantine stamping must never block a send.
   }
 
   // ── Inbox send-now validation guard ────────────────────────────────
