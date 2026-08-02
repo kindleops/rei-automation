@@ -5,9 +5,16 @@
 //
 // Honesty rule: deterministic surface signals are computed here; behavioral /
 // psychological estimates (sentiment, hostility, trust, motivation, …) are
-// EVIDENCE-BEARING ESTIMATES that require a scoring model. Until one is wired,
-// those fields are null with scorer:"unscored" — never fabricated from message
-// length or punctuation. Message length alone reveals typing, not psychology.
+// EVIDENCE-BEARING ESTIMATES produced by conversation-behavior-scoring.js —
+// deterministic evidence first, every score carrying value/confidence/
+// evidence/scorer/version, and value:null + fallback_reason when the evidence
+// is insufficient. Nothing is fabricated from message length or punctuation
+// (message length alone reveals typing, not psychology; only the explicitly
+// mechanical reply_effort measure may use it). Dimensions outside the scorer's
+// scope (emotional_tone, ownership_authority_confidence,
+// property_identity_confidence) remain scorer:"unscored".
+
+import { scoreConversationBehavior } from "@/lib/domain/seller-flow/conversation-behavior-scoring.js";
 
 export const INBOUND_ANALYSIS_VERSION = "inbound_analysis_contract_v1";
 
@@ -45,6 +52,12 @@ function minutesBetween(later, earlier) {
  *   prior_outbound_at, thread_created_at }
  * @param {object} [input.precedence] latest-intent precedence decision
  * @param {object} [input.decision] automation decision (route/reply policy)
+ * @param {object} [input.extraction] extractSellerFacts() record (optional
+ *   evidence source for the behavior scorer)
+ * @param {object} [input.thread_stats] { seller_reply_count,
+ *   conversation_depth, reply_latency_seconds } (optional)
+ * @param {object} [input.behavior] precomputed scoreConversationBehavior()
+ *   result — when omitted, scores are computed here from the same inputs
  */
 export function buildInboundAnalysis({
   raw_text = "",
@@ -52,6 +65,9 @@ export function buildInboundAnalysis({
   timing = {},
   precedence = null,
   decision = null,
+  extraction = null,
+  thread_stats = null,
+  behavior = null,
 } = {}) {
   const raw = String(raw_text ?? "");
   const normalized = clean(raw).replace(/\s+/g, " ");
@@ -61,6 +77,30 @@ export function buildInboundAnalysis({
   const punctuation = normalized.replace(/[a-zA-Z0-9\s]/g, "");
 
   const unscored = { value: null, scorer: "unscored", evidence: null };
+
+  // Behavioral scores: evidence-based, confidence-qualified, safe-degrading.
+  // A scorer failure (or absent classification) yields all-null score objects
+  // carrying fallback_reason — the contract never throws because of scoring.
+  const reply_latency_minutes_for_stats = minutesBetween(
+    timing.received_at,
+    timing.prior_outbound_at
+  );
+  const behavior_result =
+    behavior && behavior.scores
+      ? behavior
+      : scoreConversationBehavior({
+          raw_text: raw,
+          classification,
+          extraction,
+          precedence,
+          thread_stats:
+            thread_stats ||
+            (reply_latency_minutes_for_stats != null
+              ? { reply_latency_seconds: reply_latency_minutes_for_stats * 60 }
+              : null),
+        });
+  const scores = behavior_result?.scores || {};
+  const dim = (name) => scores[name] || unscored;
 
   return {
     version: INBOUND_ANALYSIS_VERSION,
@@ -109,21 +149,34 @@ export function buildInboundAnalysis({
     precedence_evidence: precedence?.evidence ?? null,
     precedence_version: precedence?.version ?? null,
 
-    // ── Behavioral estimates: require a scoring model; never fabricated ────
-    sentiment: unscored,
+    // ── Behavioral estimates (conversation-behavior-scoring.js) ────────────
+    // Evidence-backed score objects: { value, confidence, evidence, scorer,
+    // scorer_version, fallback_reason }. Insufficient evidence → value:null.
+    sentiment: dim("sentiment"),
     emotional_tone: unscored,
-    hostility: unscored,
-    urgency: unscored,
-    confusion: unscored,
-    skepticism: unscored,
-    trust: unscored,
-    engagement: unscored,
-    motivation: unscored,
-    sale_readiness: unscored,
-    price_sensitivity: unscored,
-    timing_sensitivity: unscored,
+    hostility: dim("hostility"),
+    urgency: dim("urgency"),
+    confusion: dim("confusion"),
+    skepticism: dim("skepticism"),
+    // `trust` predates the scorer; it now carries the trust_concern score
+    // (higher value = more seller concern about legitimacy).
+    trust: dim("trust_concern"),
+    trust_concern: dim("trust_concern"),
+    engagement: dim("engagement"),
+    motivation: dim("motivation"),
+    sale_readiness: dim("sale_readiness"),
+    price_sensitivity: dim("price_sensitivity"),
+    timing_sensitivity: dim("timing_sensitivity"),
+    reply_effort: dim("reply_effort"),
+    conversational_momentum: dim("conversational_momentum"),
+    re_engagement_strength: dim("re_engagement_strength"),
     ownership_authority_confidence: unscored,
     property_identity_confidence: unscored,
+    behavior_scoring: {
+      version: behavior_result?.version || null,
+      scorer: behavior_result?.scorer || "unscored",
+      model_assist: behavior_result?.model_assist || null,
+    },
 
     // ── Recommended action (from the deterministic decision layer) ─────────
     recommended_action: decision?.next_action ?? null,
