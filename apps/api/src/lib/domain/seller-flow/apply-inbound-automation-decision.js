@@ -1078,6 +1078,115 @@ function renderSafeTemplate({
   };
 }
 
+// Claims automation may never volunteer in generated wording. Deterministic
+// templates are pre-approved so this list guards ONLY the natural-response
+// path; a match falls back to the template text.
+const NATURAL_REPLY_PROHIBITED_CLAIMS = [
+  "guaranteed",
+  "guarantee",
+  "no fees ever",
+  "licensed agent",
+  "licensed realtor",
+  "attorney",
+  "legal advice",
+  "we will close in",
+  "highest offer",
+  "above market",
+];
+
+/**
+ * Natural-response wording layer (natural-response-engine.js). Env-gated and
+ * DEFAULT OFF (NATURAL_REPLY_ENGINE=enabled). Every policy, compliance, and
+ * state decision above this point is untouched: the engine may only re-word
+ * the already-approved deterministic template text, the generated candidate
+ * must survive the engine's policy validator AND the same SMS queue guard the
+ * template passed, and any failure keeps the template text byte-identical.
+ */
+async function maybeGenerateNaturalReply({
+  decision = null,
+  classification = null,
+  context = null,
+  deterministicText = "",
+  useCase = null,
+  templateId = null,
+  modelCall = null,
+} = {}) {
+  if (lower(process.env.NATURAL_REPLY_ENGINE) !== "enabled") {
+    return { applied: false, reason: "disabled", audit: null };
+  }
+  try {
+    const { generateConstrainedReply, buildModelCallFromEnv } = await import(
+      "@/lib/domain/seller-flow/natural-response-engine.js"
+    );
+    const call = modelCall || buildModelCallFromEnv();
+    if (!call) return { applied: false, reason: "no_model_configured", audit: null };
+
+    const precedence = decision?.latest_intent_precedence || null;
+    const history = asArray(context?.recent)
+      .map((row) => ({
+        direction: lower(row?.direction) === "outbound" ? "outbound" : "inbound",
+        text: clean(row?.message_body || row?.body || row?.text),
+      }))
+      .filter((turn) => turn.text);
+    const allowed_facts = { our_role: "local homebuyer" };
+    const property_address = clean(context?.summary?.property_address);
+    if (property_address) allowed_facts.property_address = property_address;
+    const seller_first_name = clean(
+      context?.summary?.seller_first_name || context?.summary?.first_name
+    );
+    if (seller_first_name) allowed_facts.seller_first_name = seller_first_name;
+
+    const language = clean(classification?.language) || "English";
+    const result = await generateConstrainedReply({
+      objective: clean(useCase) || clean(decision?.route_hint) || "reply",
+      deterministicText,
+      allowedFacts: allowed_facts,
+      prohibitedClaims: NATURAL_REPLY_PROHIBITED_CLAIMS,
+      conversationHistory: history,
+      stage: decision?.lifecycle_stage || null,
+      status: decision?.operational_status || null,
+      temperature: decision?.lead_temperature || null,
+      language,
+      languageConfidence: Number(
+        classification?.language_confidence ?? (lower(language) === "english" ? 1 : 0)
+      ),
+      reEngagement:
+        precedence?.state_patch?.contextual_reply_required === true ||
+        precedence?.re_engagement_detected === true,
+      modelCall: call,
+    });
+
+    const audit = {
+      source: result.source,
+      fallback_reason: result.fallback_reason || null,
+      engine_version: result.engine_version,
+      model: result.model || null,
+      confidence: result.confidence ?? null,
+      facts_used: result.facts_used || [],
+    };
+    if (result.source !== "generated" || !clean(result.response_text)) {
+      return { applied: false, reason: result.fallback_reason || "fallback", audit };
+    }
+
+    const prepared = prepareRenderedSmsForQueue({
+      rendered_message_text: result.response_text,
+      template_id: templateId,
+      template_source: "natural_response_engine",
+    });
+    if (!prepared.ok || !clean(prepared.text)) {
+      return {
+        applied: false,
+        reason: prepared.reason || "sms_guard_rejected",
+        audit: { ...audit, source: "deterministic_fallback", fallback_reason: prepared.reason || "sms_guard_rejected" },
+      };
+    }
+    return { applied: true, text: prepared.text, audit };
+  } catch (error) {
+    warn("[NATURAL_REPLY_ENGINE_ERROR]", { message: error?.message || "unknown" });
+    return { applied: false, reason: "engine_exception", audit: null };
+  }
+}
+
 export async function findRecentInboundAutoReplyDuplicate({
   supabaseClient = null,
   threadKey = "",
@@ -1402,6 +1511,7 @@ export async function executeInboundAutomationDecision({
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
+  naturalReplyModelCall = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   const effective_auto_reply_mode = normalizeAutoReplyMode(
@@ -1969,11 +2079,24 @@ export async function executeInboundAutomationDecision({
   }
 
   const selected_template = template_result.template;
-  const rendered_message_text = render_result.rendered_message_text;
   const selected_use_case =
     clean(selected_template.use_case) ||
     routeProfileCandidates(base_decision.route_hint, classification?.primary_intent)[0] ||
     null;
+  // Wording layer: may only substitute validated generated text for the
+  // approved template rendering; decisions above are already final.
+  const natural_reply = await maybeGenerateNaturalReply({
+    decision: base_decision,
+    classification,
+    context: context || latestThreadContext,
+    deterministicText: render_result.rendered_message_text,
+    useCase: selected_use_case,
+    templateId: selected_template.template_id || selected_template.id || null,
+    modelCall: naturalReplyModelCall,
+  });
+  const rendered_message_text = natural_reply.applied
+    ? natural_reply.text
+    : render_result.rendered_message_text;
   const scheduled_for = new Date(
     new Date(now).getTime() + Math.max(Number(scheduleDelaySeconds) || 0, 0) * 1000
   ).toISOString();
@@ -2017,6 +2140,7 @@ export async function executeInboundAutomationDecision({
       automation_decision: preview_decision,
       selected_template,
       rendered_message_text,
+      natural_reply: natural_reply.audit,
       queued: false,
       queue_item_id: null,
       queue_row_id: null,
@@ -2293,6 +2417,7 @@ export async function executeInboundAutomationDecision({
     automation_decision: base_decision,
     selected_template,
     rendered_message_text,
+    natural_reply: natural_reply.audit,
     queued: true,
     queue_item_id: queue_result.queue_item_id || null,
     queue_row_id: queue_result.queue_row_id || null,
