@@ -15,6 +15,7 @@ import {
   INBOUND_LEDGER_RETENTION_DAYS,
   purgeExpiredInboundLedgerRows,
 } from "@/lib/domain/inbound/inbound-processing-ledger.js";
+import { purgeExpiredWebhookRequestReceipts } from "@/lib/domain/webhooks/webhook-request-receipts.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 export const dynamic = "force-dynamic";
@@ -80,10 +81,42 @@ export async function handleLedgerRetentionPurgeRequest(request, deps = {}) {
     if (!more) break;
   }
 
+  // Same retention contract for route-level request receipts (masked/hashed
+  // phone identifiers + body digests). A receipt-purge failure is reported
+  // but does not mask a successful ledger purge; receipt_table_missing is
+  // the pre-migration state.
+  const purge_receipts =
+    deps.purgeExpiredWebhookRequestReceipts || purgeExpiredWebhookRequestReceipts;
+  let receipts_purged_total = 0;
+  let receipt_batches = 0;
+  let receipts_more = false;
+  let receipts_purge_reason = null;
+  while (receipt_batches < max_batches) {
+    const result = await purge_receipts({ limit: batch_limit });
+    if (!result.ok) {
+      receipts_purge_reason = result.reason;
+      if (result.reason !== "receipt_table_missing") {
+        warn("inbound_ledger_retention.receipts_purge_failed", {
+          reason: result.reason,
+          batches: receipt_batches,
+          purged: receipts_purged_total,
+        });
+      }
+      break;
+    }
+    receipt_batches += 1;
+    receipts_purged_total += result.purged || 0;
+    receipts_more = Boolean(result.more);
+    if (!receipts_more) break;
+  }
+
   info("inbound_ledger_retention.purge_completed", {
     purged: purged_total,
     batches,
     more,
+    receipts_purged: receipts_purged_total,
+    receipt_batches,
+    receipts_more,
     retention_days: INBOUND_LEDGER_RETENTION_DAYS,
   });
 
@@ -92,6 +125,10 @@ export async function handleLedgerRetentionPurgeRequest(request, deps = {}) {
     purged: purged_total,
     batches,
     more,
+    receipts_purged: receipts_purged_total,
+    receipt_batches,
+    receipts_more,
+    receipts_purge_reason,
     retention_days: INBOUND_LEDGER_RETENTION_DAYS,
   });
 }
