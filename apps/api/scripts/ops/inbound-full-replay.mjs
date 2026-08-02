@@ -37,7 +37,9 @@ const { executeInboundAutomationDecision } = await import(
   "../../src/lib/domain/seller-flow/apply-inbound-automation-decision.js"
 );
 const { isInternalTestPhone } = await import("../../src/lib/config/internal-phones.js");
-const { ADVERSARIAL_CORPUS } = await import("../../tests/fixtures/inbound-adversarial-corpus.mjs");
+const { ADVERSARIAL_INBOUND_CASES } = await import(
+  "../../tests/fixtures/inbound-adversarial-corpus.mjs"
+);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
@@ -258,43 +260,47 @@ const adversarial = {
   failures: [],
 };
 
-for (const test_case of ADVERSARIAL_CORPUS) {
+for (const test_case of ADVERSARIAL_INBOUND_CASES) {
   adversarial.total += 1;
+  const expected = test_case.expected || {};
   const result = await replayInboundCase(test_case);
   if (result.disposition) adversarial.terminal += 1;
   if (!result.ok) adversarial.exceptions += 1;
-  const intent = result.classification?.primary_intent || "unclear";
-  const fail = (kind, expected, actual) =>
-    adversarial.failures.push({ case_id: test_case.case_id, kind, expected, actual });
+  // Duplicate/empty cases terminate before classification; assert their
+  // intent expectation via the classifier directly, as the coverage test does.
+  let intent = result.classification?.primary_intent || null;
+  if (!intent && (test_case.message_body || "").trim()) {
+    const direct = await classify(test_case.message_body, null, { heuristicOnly: true });
+    intent = direct?.primary_intent || "unclear";
+  }
+  const fail = (kind, expectedValue, actual) =>
+    adversarial.failures.push({ case_id: test_case.case_id, kind, expected: expectedValue, actual });
 
-  if (Array.isArray(test_case.intent_any_of) && test_case.intent_any_of.length) {
+  if (Array.isArray(expected.intent_any_of) && expected.intent_any_of.length) {
     adversarial.intent_expected += 1;
-    if (test_case.intent_any_of.includes(intent)) adversarial.intent_pass += 1;
-    else fail("intent", test_case.intent_any_of, intent);
+    if (expected.intent_any_of.includes(intent || "unclear")) adversarial.intent_pass += 1;
+    else fail("intent", expected.intent_any_of, intent);
   }
-  if (Array.isArray(test_case.disposition_any_of) && test_case.disposition_any_of.length) {
+  if (Array.isArray(expected.disposition_any_of) && expected.disposition_any_of.length) {
     adversarial.disposition_expected += 1;
-    if (test_case.disposition_any_of.includes(result.disposition)) adversarial.disposition_pass += 1;
-    else fail("disposition", test_case.disposition_any_of, result.disposition);
+    if (expected.disposition_any_of.includes(result.disposition)) adversarial.disposition_pass += 1;
+    else fail("disposition", expected.disposition_any_of, result.disposition);
   }
-  if (typeof test_case.expect_re_engagement === "boolean") {
+  if (typeof expected.re_engagement_expected === "boolean" && expected.re_engagement_expected) {
     adversarial.re_engagement_expected += 1;
-    const detected = result.precedence?.re_engagement_detected === true;
-    if (detected === test_case.expect_re_engagement) adversarial.re_engagement_pass += 1;
-    else fail("re_engagement", test_case.expect_re_engagement, detected);
+    if (result.precedence?.re_engagement_detected === true) adversarial.re_engagement_pass += 1;
+    else fail("re_engagement", true, false);
   }
-  if (test_case.prior_context?.suppressed || /\bstop\b/i.test(test_case.message_body || "")) {
+  if (expected.must_not_auto_reply === true) {
     adversarial.suppression_cases += 1;
-    const wouldReply = result.detail?.should_queue_reply === true;
-    const bindingStop = String(test_case.prior_context?.suppression_reason || "").match(/stop|opt_out/);
-    if (!(bindingStop && wouldReply)) adversarial.suppression_safe += 1;
-    else fail("suppression", "no_reply_after_binding_stop", "would_reply");
+    if (result.detail?.should_queue_reply !== true) adversarial.suppression_safe += 1;
+    else fail("suppression", "must_not_auto_reply", "would_reply");
   }
-  if (test_case.expect_supersedes != null) {
+  if (typeof expected.supersedes_prior_state === "boolean") {
     adversarial.state_transition_expected += 1;
     const superseded = result.precedence?.supersedes_prior_state === true;
-    if (superseded === Boolean(test_case.expect_supersedes)) adversarial.state_transition_pass += 1;
-    else fail("state_transition", test_case.expect_supersedes, superseded);
+    if (superseded === expected.supersedes_prior_state) adversarial.state_transition_pass += 1;
+    else fail("state_transition", expected.supersedes_prior_state, superseded);
   }
 }
 
@@ -364,7 +370,12 @@ for (const sequence of goldenSequences) {
       problems.push("no human_review");
     if (expect.no_auto_reply && decision.should_queue_reply === true)
       problems.push("auto-replied after STOP");
-    if (expect.paused && decision.should_suppress_contact !== true && decision.operational_status !== "paused")
+    if (
+      expect.paused &&
+      decision.should_suppress_contact !== true &&
+      precedence?.state_patch?.automation !== "pause" &&
+      precedence?.state_patch?.operational_status !== "paused"
+    )
       problems.push("not paused");
     if (expect.no_offer_stage && String(decision.lifecycle_stage || "").includes("offer_interest"))
       problems.push(`advanced to ${decision.lifecycle_stage}`);

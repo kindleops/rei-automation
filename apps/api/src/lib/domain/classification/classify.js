@@ -414,6 +414,8 @@ const COMPLIANCE_PHRASES = [
   "quit calling me",
   "remove me", "remove my number", "remove me from your list",
   "remove me from your database", "remove my number from your list",
+  "remove my name", "remove my info", "remove my contact info",
+  "stop communication", "stop all communication", "stop the messages",
   "take me off", "take me off your list", "take me off this list",
   "take my number off", "take my number off your list",
   "delete my number", "delete me from your list",
@@ -610,6 +612,28 @@ function detectComplianceFlag(message) {
     if (trimmed.startsWith(kw + " ") || trimmed.startsWith(kw + ",")) {
       return "stop_texting";
     }
+  }
+
+  // Sentence-final standalone STOP ("NFS. Stop", "NOT for sale. STOP !!!",
+  // "please stop!!!!"): carriers only honor the bare keyword message, so an
+  // embedded trailing directive must be caught here or it degrades to a soft
+  // decline that a later re-engagement could reopen. Restricted to the
+  // unambiguous English keywords (Spanish "para" etc. are common words in
+  // final position) and guarded against "...bus stop" / "don't stop"
+  // non-directives.
+  const final_tokens = trimmed.replace(/[^a-z'\s-]+$/g, "").trim().split(/\s+/);
+  const last_token = final_tokens[final_tokens.length - 1] || "";
+  const prev_token = final_tokens[final_tokens.length - 2] || "";
+  const TRAILING_STOP_KEYWORDS = new Set(["stop", "unsubscribe", "stopall", "optout", "opt-out"]);
+  const TRAILING_STOP_BLOCKERS = new Set([
+    "bus", "pit", "dont", "don't", "never", "wont", "won't", "cant", "can't",
+    "doesnt", "doesn't", "didnt", "didn't",
+  ]);
+  if (
+    (TRAILING_STOP_KEYWORDS.has(last_token) && !TRAILING_STOP_BLOCKERS.has(prev_token)) ||
+    (last_token === "out" && prev_token === "opt")
+  ) {
+    return "stop_texting";
   }
 
   // Phrase-intent match
