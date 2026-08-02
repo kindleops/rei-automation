@@ -179,7 +179,7 @@ const threaded = {
 };
 
 async function replayTurnWithContext(body, priorSummary, receivedAt) {
-  const classification = await classify(body, { heuristicOnly: true });
+  const classification = await classify(body, null, { heuristicOnly: true });
   const execution = await executeInboundAutomationDecision({
     message: body,
     threadKey: "+16125550100",

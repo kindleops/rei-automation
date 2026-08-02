@@ -3276,6 +3276,8 @@ const ASKING_PRICE_PATTERNS = [
   /\b\d{1,3}\s+mil\b/i,
   /\b(?:half|quarter|three\s+quarter)s?\s+(?:mil|million)\b/i,
   /\bno\s+less\s+than\s+\$?\s*\d[\d,.]*/i,
+  /\b(?:can'?t|cant|cannot|won'?t|wont)\s+(?:do|take|go|accept)?\s*(?:less|lower)\s+than\s+\$?\s*\d[\d,.]*/i,
+  /\bworth\s+\$?\s*\d[\d,.]*/i,
   /\bbetween\s+\$?\s*\d[\d,.]*\s+and\s+\$?\s*\d[\d,.]*/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
@@ -3448,6 +3450,17 @@ export function parseSellerAskingPrice(message) {
     evidence = noLess[0];
   }
 
+  // "cant do less than 380" / "won't take lower than 200k" — floor counter
+  const cantLess = text.match(
+    /\b(?:can'?t|cant|cannot|won'?t|wont)\s+(?:do|take|go|accept)?\s*(?:less|lower)\s+than\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i
+  );
+  if (!ruleId && cantLess) {
+    value = scalePriceToken(cantLess[1], cantLess[2]);
+    qualifier = "floor";
+    ruleId = "price_cant_do_less_than";
+    evidence = cantLess[0];
+  }
+
   const bottom = text.match(/\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
   if (!ruleId && bottom) {
     value = scalePriceToken(bottom[1], bottom[2]);
@@ -3526,7 +3539,13 @@ function scalePriceToken(numStr, suffix) {
   return val;
 }
 
-const INTENT_PRIORITY = Object.freeze([
+/**
+ * The classifier's REAL output vocabulary, in precedence order. Every
+ * primary_intent this module can emit appears here. Exported so downstream
+ * registries (inbound-intent-ontology.js) validate coverage against the live
+ * list instead of a hand-copied mirror that can drift.
+ */
+export const INTENT_PRIORITY = Object.freeze([
   "opt_out",
   "wrong_number",
   "who_is_this",
@@ -3564,9 +3583,48 @@ function matchesTrueWrongNumber(text = "") {
   ]) || (/\bthis is not\b/.test(normalized) && !/\bthis is not a\b/.test(normalized));
 }
 
+/**
+ * Negated-ownership scope — "that's not my house", "this isn't my property",
+ * "I do not own that house", "esa no es mi casa", "la vendí", "nah not my
+ * crib". MUST be evaluated before any positive ownership phrase can match:
+ * matchesOwnershipDisconnect() consumes this in resolveIntents §2 (which runs
+ * before the §11 ownership_confirmed block), and §11 additionally gates its
+ * positive phrase list on ownership_negated, which includes this detector.
+ * Typo'd property nouns ("hosue", "propery") are folded in so misspellings
+ * cannot slip past negation into a positive "my house" match.
+ */
+const NEGATED_OWNERSHIP_NOUN =
+  "(?:house|hosue|huose|hous|home|hme|property|propery|proprty|propertey|properti|place|plce|crib|casa|condo|apartment|apt|land|lot|building|address|addres)";
+
+const NEGATED_OWNERSHIP_PATTERNS = [
+  // "that's not my house" / "this isn't our property" / "ain't my crib" /
+  // "thats not my hosue" / "no longer my home"
+  new RegExp(
+    `\\b(?:not|isn'?t|isnt|ain'?t|aint|never\\s+been|no\\s+longer)\\s+(?:my|mine|our)\\s+${NEGATED_OWNERSHIP_NOUN}\\b`,
+    "i"
+  ),
+  // "I do not own (that house)" / "we don't own it" / "never owned it"
+  /\b(?:do\s+not|don'?t|dont|never|didn'?t|didnt|doesn'?t|doesnt)\s+own\b/i,
+  // Spanish: "esa no es mi casa" / "no es nuestra propiedad"
+  /\bno\s+es\s+(?:mi|nuestra|nuestro)\s+(?:casa|propiedad|hogar|terreno|departamento|apartamento|condominio|domicilio|direcci[oó]n)\b/i,
+  // Spanish: "no soy dueño" / "no soy la propietaria" (article optional)
+  /\bno\s+soy\s+(?:el\s+|la\s+)?(?:due[ñn][oa]|propietari[oa]|owner)\b/i,
+  // Spanish sold: "la vendí" / "ya lo vendi" / "la vendimos"
+  // (custom trailing boundary — "\b" is ASCII-only and fails after "í")
+  /\b(?:ya\s+)?(?:la|lo)\s+vend(?:[íi]|imos)(?![a-z0-9À-ſ])/i,
+  // Spanish sold: "vendí esa casa" / "vendimos la propiedad"
+  /\bvend(?:[íi]|imos)\s+(?:esa|esta|la|mi)\s+(?:casa|propiedad)\b/i,
+];
+
+function matchesNegatedOwnership(text = "") {
+  const normalized = lower(text);
+  return NEGATED_OWNERSHIP_PATTERNS.some((re) => re.test(normalized));
+}
+
 /** Sold / never owned / not owner — still routed as wrong_number for production suppression. */
 function matchesOwnershipDisconnect(text = "") {
   const normalized = lower(text);
+  if (matchesNegatedOwnership(normalized)) return true;
   if (
     includesAny(normalized, [
       "not the owner",
@@ -3593,6 +3651,17 @@ function matchesOwnershipDisconnect(text = "") {
       "sold years ago",
       "i sold it",
       "we sold it",
+      "sold that property",
+      "sold that house",
+      "sold the property",
+      "sold the house",
+      "sold my house",
+      "sold my property",
+      "do not own",
+      "doesn't belong to me",
+      "doesnt belong to me",
+      "does not belong to me",
+      "belongs to someone else",
       "no soy el dueño",
       "no soy el dueno",
       "no soy el propietario",
@@ -3653,6 +3722,10 @@ function matchesPropertyTypeCorrection(text = "") {
     "wrong address", "incorrect address",
     "this is not a", "this isn't a",
     "property type is wrong", "incorrect property",
+    // Property mismatch: we referenced the wrong property entirely
+    // ("Wrong house." / "You have the wrong property.").
+    "wrong house", "wrong property", "wrong home",
+    "casa equivocada", "propiedad equivocada",
   ]);
 }
 
@@ -3956,9 +4029,11 @@ function resolveIntents(
     }
   }
 
-  // 5. NEED TIME / MAYBE LATER
+  // 5. NEED TIME / MAYBE LATER (family-approval gates are a deferred decision,
+  // not a decline — route them as need_time so the follow-up lane applies)
   if (
     normalized_objection === "need_time" ||
+    normalized_objection === "need_family_ok" ||
     includesAny(text, [
       "maybe later",
       "sometime later",
@@ -4081,6 +4156,13 @@ function resolveIntents(
       "price range",
       "ballpark",
       "would you pay",
+      "what could you pay",
+      "could you pay",
+      "still on the table",
+      "offer still stand",
+      "offer still good",
+      "is the offer still",
+      "is that offer still",
       "send me a proposal",
       "send me the proposal",
       "send a proposal",
@@ -4118,6 +4200,12 @@ function resolveIntents(
       "quiero una oferta",
       "cuánto ofrecen",
       "cuanto ofrecen",
+      "cuánto me dan",
+      "cuanto me dan",
+      "cuánto me das",
+      "cuanto me das",
+      "cuánto pagan",
+      "cuanto pagan",
       "mándeme los números",
       "mandeme los numeros",
       "envíen el contrato",
@@ -4184,16 +4272,35 @@ function resolveIntents(
     "my sister owns",
     "my wife owns",
     "my husband owns",
+    "my mother owns",
+    "my mom owns",
+    "my father owns",
+    "my dad owns",
+    "my son owns",
+    "my daughter owns",
+    "mother owns it",
+    "mom owns it",
+    "father owns it",
+    "dad owns it",
     "brother owns it",
     "wife owns it",
     "es de mi hermano",
+    "es de mi madre",
+    "es de mi mamá",
+    "es de mi mama",
+    "es de mi papá",
+    "es de mi papa",
     "mi esposa",
     "soy inquilino",
     "soy el administrador",
     "soy el agente",
     "soy la agente",
   ]);
+  // Negation scope is evaluated BEFORE the positive ownership phrase list
+  // below: a negated claim ("that's not my house") must never fall through to
+  // a positive fragment match ("my house").
   const ownership_negated =
+    matchesNegatedOwnership(text) ||
     includesAny(text, [
       "not selling",
       "don't own",
@@ -4220,6 +4327,11 @@ function resolveIntents(
     if (!intents.includes("wrong_number")) intents.push("wrong_number");
     matched_rule_ids.push("former_owner_disconnect");
   }
+
+  // Sarcastic transfer framing ("sure, I'll just GIVE you my house lol") is
+  // not an ownership affirmation; without other signals it stays unclear.
+  const ownership_sarcastic_transfer =
+    /\bgiv(?:e|ing)\s+(?:you|u|ya)\s+(?:my|the)\s+/i.test(text);
 
   if (is_non_owner_role) {
     // Agent / manager / tenant / family — never ownership_confirmed
@@ -4258,11 +4370,19 @@ function resolveIntents(
     !is_non_owner_role &&
     !is_ownership_disconnect &&
     !ownership_negated &&
+    !ownership_sarcastic_transfer &&
     !intents.includes("wrong_number") &&
     (includesAny(text, [
       "yes i own it",
       "yes i do",
       "i own it",
+      "i am the owner",
+      "i'm the owner",
+      "im the owner",
+      "yes this is the owner",
+      "i am the homeowner",
+      "i'm the homeowner",
+      "im the homeowner",
       "still own it",
       "still own the place",
       "still own the",
@@ -4423,6 +4543,16 @@ function resolveIntents(
       "needs replacement",
       "need work",
       "renovated",
+      // Financial/legal distress disclosures (liens, foreclosure clock) feed
+      // underwriting the same way physical-condition facts do.
+      "tax lien",
+      "lien on it",
+      "lien on the",
+      "back taxes",
+      "foreclosure",
+      "foreclose",
+      "bank is about to take",
+      "bank is taking",
       "techo",
       "aire acondicionado",
       "techo malo",
@@ -4483,6 +4613,16 @@ function resolveIntents(
       "owner finance",
       "close in 30",
       "close in 60",
+      "how does this work",
+      "how does this actually work",
+      "how does it work",
+      "how do you work",
+      "do you charge",
+      "any fees",
+      "fees or commissions",
+      "how fast can you close",
+      "how fast could you close",
+      "how quickly can you close",
       "under contract",
       "bajo contrato",
       "say a price",

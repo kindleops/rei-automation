@@ -126,7 +126,9 @@ export async function replayInboundCase(test_case = {}, deps = {}) {
       };
     }
 
-    const classification = await (deps.classify || classify)(body, { heuristicOnly: true });
+    // classify(message, brain_item, options) — heuristicOnly must ride in the
+    // options slot so replay stays deterministic (no AI-assist attempts).
+    const classification = await (deps.classify || classify)(body, null, { heuristicOnly: true });
 
     const suppressions = prior.suppressed
       ? [

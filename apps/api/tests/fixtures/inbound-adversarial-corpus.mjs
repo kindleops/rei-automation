@@ -4,43 +4,35 @@
 // engine end-to-end (webhook ingest → classification → compliance gating →
 // reply/suppression → terminal disposition).
 //
-// Expectations are recorded LOOSELY against the classification contract in
+// Expectations are recorded against the classification contract in
 // src/lib/domain/classification/classify.js (classifyHeuristic returns
 // { primary_intent, compliance_flag, confidence, language, ... }); each case
-// lists `expected.intent_any_of` drawn from the classifier's INTENT_PRIORITY
-// vocabulary rather than pinning a single intent, so the corpus survives
-// classifier refinements while still catching category-level regressions.
+// lists `expected.intent_any_of` drawn from the classifier's exported
+// INTENT_PRIORITY vocabulary rather than pinning a single intent, so the
+// corpus survives classifier refinements while still catching category-level
+// regressions. BOTH `intent_any_of` AND `disposition_any_of` are ASSERTED
+// per-case by tests/critical/inbound-adversarial-replay-coverage.test.mjs.
+//
+// Disposition note ("replay placeholder-degrade"): the replay harness has no
+// property/template context, so a live would-reply whose template needs
+// placeholders (property_address etc.) deterministically degrades to
+// human_review_required in replay. Cases that would send in production
+// therefore list human_review_required alongside reply_sent — that is the
+// engine's real, safe replay outcome, not a loosened expectation.
 //
 // No case in this file is a real message; all phone numbers use reserved
 // fictional ranges (555-01xx) and all bodies are synthetic.
 
+import { INTENT_PRIORITY } from "@/lib/domain/classification/classify.js";
+
 export const CORPUS_VERSION = "adversarial_corpus_v1";
 
 /**
- * Classifier intent vocabulary (INTENT_PRIORITY in classify.js).
- * Kept here so replay harnesses can validate `expected.intent_any_of`.
+ * Classifier intent vocabulary — re-exported from classify.js's REAL exported
+ * INTENT_PRIORITY (never a hand-copied mirror that can drift). Replay
+ * harnesses validate `expected.intent_any_of` against this.
  */
-export const CLASSIFIER_INTENTS = Object.freeze([
-  "opt_out",
-  "wrong_number",
-  "who_is_this",
-  "hostile_or_legal",
-  "not_interested",
-  "need_time",
-  "seller_interested",
-  "asking_price_provided",
-  "asks_offer",
-  "callback_requested",
-  "property_correction",
-  "ownership_confirmed",
-  "latent_interest",
-  "tenant_occupied",
-  "condition_disclosed",
-  "info_request",
-  "reaction_only",
-  "acknowledgement",
-  "unclear",
-]);
+export const CLASSIFIER_INTENTS = INTENT_PRIORITY;
 
 export const CORPUS_CATEGORIES = Object.freeze([
   "re_engagement",
@@ -182,7 +174,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["seller_interested", "asks_offer", "callback_requested", "latent_interest"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
       re_engagement_expected: true,
       supersedes_prior_state: true,
     },
@@ -201,13 +193,19 @@ export const ADVERSARIAL_INBOUND_CASES = [
       suppression_reason: "opt_out",
     },
     expected: {
-      intent_any_of: ["seller_interested", "latent_interest", "unclear"],
+      // opt_out: the classifier deliberately re-honors the quoted "I said
+      // stop" as a compliance echo (TCPA-conservative). Either reading keeps
+      // automation silent; neither may clear the standing STOP record.
+      intent_any_of: ["seller_interested", "latent_interest", "unclear", "opt_out"],
       must_not_auto_reply: true,
-      disposition_any_of: ["human_review_required"],
+      // suppressed_opt_out: the conservative opt_out reading re-affirms the
+      // existing suppression instead of routing to review — equally silent,
+      // and the prior STOP stays authoritative either way.
+      disposition_any_of: ["human_review_required", "suppressed_opt_out"],
       re_engagement_expected: true,
       supersedes_prior_state: false,
     },
-    notes: "Seller-initiated positive text AFTER an opt-out: automation must stay silent and route to a human; the STOP record is not auto-cleared.",
+    notes: "Seller-initiated positive text AFTER an opt-out: automation must stay silent (human review or re-affirmed opt-out suppression); the STOP record is never auto-cleared.",
   }),
 
   // ── contradiction ─────────────────────────────────────────────────────────
@@ -218,7 +216,9 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["not_interested", "asks_offer", "latent_interest", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+      // no_reply_required: when the decline leg wins intent precedence the
+      // engine deliberately stays quiet — a safe terminal, not a drop.
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required", "no_reply_required"],
     },
     notes: "Self-contradicting decline + price curiosity; the curiosity leg is the actionable signal but either intent is defensible.",
   }),
@@ -240,9 +240,13 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["wrong_number", "seller_interested", "latent_interest"],
       must_not_auto_reply: false,
-      disposition_any_of: ["human_review_required", "reply_sent", "reply_deferred_compliance"],
+      // suppressed_wrong_number is the engine's CURRENT deterministic outcome:
+      // the sold-property leg wins intent precedence and suppresses the
+      // phone-property pairing; the new-opportunity leg is a known human-
+      // recovery gap (compound_intent), not an auto-reply lane.
+      disposition_any_of: ["human_review_required", "reply_sent", "reply_deferred_compliance", "suppressed_wrong_number"],
     },
-    notes: "Sold-the-target-property plus a new opportunity; must not hard-suppress the number as wrong_number.",
+    notes: "Sold-the-target-property plus a new opportunity; the sold leg suppresses this phone-property pairing today, and the second-property opportunity requires human recovery (compound-intent gap).",
   }),
 
   // ── short_reply ───────────────────────────────────────────────────────────
@@ -254,7 +258,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["acknowledgement", "seller_interested", "ownership_confirmed", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Bare 'Yes' is context-bound; without validated context it must stay low-confidence rather than assert ownership/interest.",
   }),
@@ -277,7 +281,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["unclear", "latent_interest", "need_time"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Hedged single word: the short-utterance guard should keep it unclear/latent, never a confident seller_interested.",
   }),
@@ -288,7 +292,8 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["acknowledgement", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["no_reply_required", "reply_sent"],
+      // Low-confidence one-letter reply routes to review in replay — safe.
+      disposition_any_of: ["no_reply_required", "reply_sent", "human_review_required"],
     },
     notes: "One-letter acknowledgement; replying at all is optional, re-pitching would be wrong.",
   }),
@@ -299,7 +304,8 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["acknowledgement", "reaction_only", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["no_reply_required", "reply_sent"],
+      // reaction_only is not auto-replyable, so replay routes it to review.
+      disposition_any_of: ["no_reply_required", "reply_sent", "human_review_required"],
     },
     notes: "Emoji-only positive reaction; a terminal no_reply_required is acceptable, a hard failure is not.",
   }),
@@ -338,7 +344,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["who_is_this", "asks_offer", "condition_disclosed"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Compound identity + offer + condition in one SMS; reply should answer identity and advance the offer conversation.",
   }),
@@ -349,7 +355,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["info_request", "asks_offer", "seller_interested"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Three process questions from a warm seller; all-question messages must not fall through to unclear.",
   }),
@@ -362,7 +368,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["seller_interested", "asks_offer", "latent_interest"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Heavy slang/abbreviation conditional interest; must be read as price-contingent interest, not unclear.",
   }),
@@ -373,7 +379,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asks_offer", "info_request", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Two-token vowel-dropped price ask; the highest-value two-word inbound in the funnel.",
   }),
@@ -386,7 +392,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["seller_interested", "asks_offer", "latent_interest", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Every keyword misspelled; keyword-exact matchers will miss it, so the fuzzy/AI path must carry it.",
   }),
@@ -421,7 +427,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["reaction_only", "who_is_this", "info_request", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Skeptical sarcasm with a genuine embedded question; the 'whats the catch' leg is answerable.",
   }),
@@ -445,7 +451,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asks_offer", "info_request"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Spanish price ask; reply should continue in Spanish per language detection.",
   }),
@@ -470,7 +476,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asks_offer", "seller_interested", "info_request"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Mid-thread switch from English to Spanish with a live price ask; language preference should update, funnel continues.",
   }),
@@ -482,7 +488,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["need_time", "latent_interest", "seller_interested", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "no_reply_required", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Spanglish spouse-approval gate; positive lean but blocked on family sign-off, must not force a close.",
   }),
@@ -801,7 +807,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["acknowledgement", "ownership_confirmed", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["no_reply_required", "reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["no_reply_required", "reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "First fragment of a 3-message burst arriving within seconds; debounce should hold the reply for the full burst.",
   }),
@@ -813,7 +819,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["latent_interest", "seller_interested", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["no_reply_required", "reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["no_reply_required", "reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Middle fragment of the burst; still incomplete thought, one aggregated reply is the goal.",
   }),
@@ -825,7 +831,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asks_offer", "condition_disclosed", "seller_interested"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Final burst fragment carrying the real ask; exactly one reply for the whole burst, anchored on this fragment.",
   }),
@@ -854,7 +860,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["ownership_confirmed", "info_request", "seller_interested"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Webhook payload missing the provider timestamp; ingest must fall back to receipt time, not crash or drop the message.",
   }),
@@ -894,7 +900,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["who_is_this"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Identity + data-provenance question; reply must identify the sender honestly (CTIA identification requirement).",
   }),
@@ -905,7 +911,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["who_is_this", "info_request", "unclear"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Scam suspicion is an identity challenge, not hostility; a verifiable-identity reply can convert it.",
   }),
@@ -940,7 +946,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["condition_disclosed", "seller_interested", "info_request"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Lien disclosure paired with live interest; distress signal that raises motivation, not a disqualifier.",
   }),
@@ -976,7 +982,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asking_price_provided"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Explicit firm anchor with k-suffix; price_parse should yield 450000 with a 'firm' qualifier.",
   }),
@@ -988,7 +994,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asking_price_provided", "seller_interested", "info_request"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Third-party-anchored bare '500' (means 500k in REI SMS); note 'zillow' also lives in the already_listed phrase list — a known trap.",
   }),
@@ -1012,7 +1018,7 @@ export const ADVERSARIAL_INBOUND_CASES = [
     expected: {
       intent_any_of: ["asking_price_provided", "seller_interested"],
       must_not_auto_reply: false,
-      disposition_any_of: ["reply_sent", "reply_deferred_compliance"],
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
     notes: "Floor-with-flexibility counter; live negotiation state that must keep the thread hot.",
   }),

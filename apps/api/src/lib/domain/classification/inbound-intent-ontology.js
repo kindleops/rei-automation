@@ -7,10 +7,13 @@
 //   1. classify.js INTENT_PRIORITY (LIVE production classifier labels)
 //   2. seller-flow/coverage-net/canonical-intent-aliases.js (alias folding)
 //   3. classify.js OBJECTION_MAP keys (objection/tone detectors)
-// Every current classifier label appears in exactly ONE entry's
-// classifier_aliases below (load-time enforced — duplicate registration
-// throws). Entries whose classifier_aliases is EMPTY are known detector gaps:
-// the ontology names the meaning before a detector exists for it.
+// Every current classifier output label (including "unclear") appears in
+// exactly ONE entry's classifier_aliases below. Both halves are load-time
+// enforced against classify.js's EXPORTED INTENT_PRIORITY — not a copied
+// list that can drift: duplicate alias registration throws, and a live
+// classifier label with no alias registration throws. Entries whose
+// classifier_aliases is EMPTY are known detector gaps: the ontology names
+// the meaning before a detector exists for it.
 //
 // SEMANTIC CONTRACTS encoded here (do not weaken):
 //   - not_interested is a TEMPORARY rejection, never a legal opt-out.
@@ -32,6 +35,7 @@ import {
   LEAD_TEMPERATURE_CODES,
   OPERATIONAL_STATUS_CODES,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import { INTENT_PRIORITY as LIVE_CLASSIFIER_INTENT_PRIORITY } from "@/lib/domain/classification/classify.js";
 
 export const ONTOLOGY_VERSION = "inbound_intent_ontology_v1";
 
@@ -806,6 +810,20 @@ for (const [slug, def] of Object.entries(RAW)) {
       );
     }
     ALIAS_INDEX.set(key, slug);
+  }
+}
+
+// Load-time classifier coverage: every label the LIVE classifier can emit
+// (classify.js's exported INTENT_PRIORITY — the real output vocabulary, not a
+// copied mirror) must resolve to exactly ONE ontology entry. "Exactly one" is
+// the pairing of this membership check with the duplicate-registration throw
+// above.
+for (const label of LIVE_CLASSIFIER_INTENT_PRIORITY) {
+  const key = String(label).trim().toLowerCase();
+  if (!ALIAS_INDEX.has(key)) {
+    throw new Error(
+      `inbound-intent-ontology: live classifier label "${key}" is not registered in any entry's classifier_aliases`
+    );
   }
 }
 

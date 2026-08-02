@@ -12,31 +12,9 @@ import {
   getIntentDefinition,
   listIntentsWithoutClassifierCoverage,
 } from "@/lib/domain/classification/inbound-intent-ontology.js";
-
-// classify.js does NOT export INTENT_PRIORITY, so the 19 live labels are
-// hardcoded here verbatim (mirror of classify.js ~line 3529). If classify.js
-// ever exports INTENT_PRIORITY, import it instead of this mirror.
-const CLASSIFY_INTENT_PRIORITY = [
-  "opt_out",
-  "wrong_number",
-  "who_is_this",
-  "hostile_or_legal",
-  "not_interested",
-  "need_time",
-  "seller_interested",
-  "asking_price_provided",
-  "asks_offer",
-  "callback_requested",
-  "property_correction",
-  "ownership_confirmed",
-  "latent_interest",
-  "tenant_occupied",
-  "condition_disclosed",
-  "info_request",
-  "reaction_only",
-  "acknowledgement",
-  "unclear",
-];
+// The classifier's REAL exported output vocabulary — the same export the
+// ontology validates against at load time. Never re-mirror this list by hand.
+import { INTENT_PRIORITY as CLASSIFY_INTENT_PRIORITY } from "@/lib/domain/classification/classify.js";
 
 const REQUIRED_SLUGS = [
   "owner_confirmation", "wrong_number", "not_owner", "former_owner",
@@ -105,7 +83,12 @@ test("(b) no classifier alias maps to two entries", () => {
   }
 });
 
-test("(c) every live INTENT_PRIORITY label from classify.js maps to a canonical slug", () => {
+test("(c) every live INTENT_PRIORITY label exported by classify.js maps to exactly one canonical slug", () => {
+  assert.ok(
+    Array.isArray(CLASSIFY_INTENT_PRIORITY) && CLASSIFY_INTENT_PRIORITY.length >= 19,
+    "classify.js must export its real output vocabulary"
+  );
+  assert.ok(CLASSIFY_INTENT_PRIORITY.includes("unclear"), "vocabulary must include unclear");
   const aliasOwner = new Map();
   for (const def of Object.values(INBOUND_INTENT_ONTOLOGY)) {
     for (const alias of def.classifier_aliases) {
