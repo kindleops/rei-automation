@@ -1442,26 +1442,23 @@ export async function executeInboundAutomationDecision({
   // suppression-aware refinement below overwrites this when the thread has
   // active suppression rows.
   try {
-    const { resolveLatestIntentPrecedence } = await import(
+    const { resolveLatestIntentPrecedence, resolvePriorThreadState } = await import(
       "@/lib/domain/seller-flow/latest-intent-precedence.js"
     );
-    const prior_summary = latestThreadContext || context?.summary || {};
-    const prior_inbound_ts = Date.parse(prior_summary.last_inbound_at || "");
-    const message_ts = Date.parse(inboundReceivedAt || "");
+    // The live path nests prior state under latestThreadContext.summary — the
+    // shared extractor is the only reader so both call sites see the same
+    // disposition/last_intent/automation state and staleness verdict.
+    const { prior_state, message_is_stale } = resolvePriorThreadState({
+      latestThreadContext,
+      context,
+      inboundReceivedAt,
+    });
     base_decision.latest_intent_precedence = resolveLatestIntentPrecedence({
       classification,
       message_body: message,
-      prior_state: {
-        disposition: prior_summary.disposition,
-        last_intent: prior_summary.last_intent,
-        automation_paused:
-          lower(prior_summary.automation_status || prior_summary.automation_state) === "paused",
-      },
+      prior_state,
       active_suppressions: [],
-      message_is_stale:
-        Number.isFinite(prior_inbound_ts) &&
-        Number.isFinite(message_ts) &&
-        message_ts < prior_inbound_ts,
+      message_is_stale,
     });
   } catch {
     base_decision.latest_intent_precedence = null;
@@ -1702,28 +1699,21 @@ export async function executeInboundAutomationDecision({
     // Latest-intent precedence: the newest clear positive intent may supersede
     // SOFT suppression (not_interested / no_response / nurture). Binding
     // opt-outs and anything unrecognized stay in force and route to a human.
-    const { resolveLatestIntentPrecedence, releaseSoftSuppressions } = await import(
-      "@/lib/domain/seller-flow/latest-intent-precedence.js"
-    );
-    const prior_summary = latestThreadContext || context?.summary || {};
-    const prior_inbound_ts = Date.parse(prior_summary.last_inbound_at || "");
-    const message_ts = Date.parse(inboundReceivedAt || "");
+    const { resolveLatestIntentPrecedence, resolvePriorThreadState, releaseSoftSuppressions } =
+      await import("@/lib/domain/seller-flow/latest-intent-precedence.js");
+    const { prior_state, message_is_stale } = resolvePriorThreadState({
+      latestThreadContext,
+      context,
+      inboundReceivedAt,
+    });
     let precedence = resolveLatestIntentPrecedence({
       classification,
       message_body: message,
-      prior_state: {
-        disposition: prior_summary.disposition,
-        last_intent: prior_summary.last_intent,
-        automation_paused:
-          lower(prior_summary.automation_status || prior_summary.automation_state) === "paused",
-      },
+      prior_state,
       active_suppressions: [
         active_suppression.row || { suppression_reason: active_suppression.reason },
       ],
-      message_is_stale:
-        Number.isFinite(prior_inbound_ts) &&
-        Number.isFinite(message_ts) &&
-        message_ts < prior_inbound_ts,
+      message_is_stale,
     });
 
     if (precedence.supersedes_prior_state && precedence.clear_soft_suppression && !dryRun) {
@@ -1738,11 +1728,13 @@ export async function executeInboundAutomationDecision({
         { info, warn }
       );
       if (!release.ok) {
-        // Fail safe: if the release did not land, the thread stays suppressed.
+        // Fail safe: if the release did not land (including a zero-row
+        // update), the thread stays suppressed and no reopen patch survives.
         precedence = {
           ...precedence,
           supersedes_prior_state: false,
           clear_soft_suppression: false,
+          state_patch: null,
           reason_codes: [...precedence.reason_codes, "soft_release_failed_fail_safe"],
         };
       }

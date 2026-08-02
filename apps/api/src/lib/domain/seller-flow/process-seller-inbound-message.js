@@ -1270,7 +1270,13 @@ export async function processSellerInboundMessage({
       patch.disposition = precedence.state_patch.disposition;
       patch.operational_status = precedence.state_patch.operational_status;
       patch.lead_temperature = precedence.state_patch.lead_temperature;
-      if (!patch.lifecycle_stage || patch.lifecycle_stage === "ownership_confirmation") {
+      // Only a true reopen advances the lifecycle. A reversal (decline over a
+      // prior positive) supersedes disposition/status/temperature but must
+      // never move a not_interested lead forward to an interest stage.
+      if (
+        precedence.state_patch.reopen_conversation === true &&
+        (!patch.lifecycle_stage || patch.lifecycle_stage === "ownership_confirmation")
+      ) {
         patch.lifecycle_stage = "offer_interest";
       }
     }

@@ -18,6 +18,8 @@
 // Pure decision logic + one explicitly-bounded side effect helper
 // (releaseSoftSuppressions). Version every decision for audit.
 
+import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
+
 export const LATEST_INTENT_PRECEDENCE_VERSION = "latest_intent_precedence_v1";
 
 // Suppression reasons that inbound re-engagement may clear.
@@ -103,6 +105,40 @@ function classifySuppressionReason(reason) {
   if (BINDING_SUPPRESSION_REASONS.has(normalized)) return "binding";
   if (SOFT_SUPPRESSION_REASONS.has(normalized)) return "soft";
   return "unknown";
+}
+
+/**
+ * Resolve prior thread state for precedence evaluation — the ONE extraction
+ * every call site must share. The live inbound path passes the loaded thread
+ * context object whose prior state lives under `.summary`
+ * (process-seller-inbound-message.js passes `latestThreadContext: context`);
+ * `context.summary` covers callers that only pass `context`; a FLAT
+ * latestThreadContext (replay engine, older harnesses) is the compatibility
+ * fallback. The send-time staleness comparison is centralized here so a
+ * delayed/replayed message is judged identically everywhere.
+ */
+export function resolvePriorThreadState({
+  latestThreadContext = null,
+  context = null,
+  inboundReceivedAt = null,
+} = {}) {
+  const summary =
+    latestThreadContext?.summary || context?.summary || latestThreadContext || {};
+  const prior_inbound_ts = Date.parse(summary.last_inbound_at || "");
+  const message_ts = Date.parse(inboundReceivedAt || "");
+  return {
+    prior_state: {
+      disposition: summary.disposition,
+      last_intent: summary.last_intent,
+      automation_paused:
+        lower(summary.automation_status || summary.automation_state) === "paused",
+      last_inbound_at: summary.last_inbound_at || null,
+    },
+    message_is_stale:
+      Number.isFinite(prior_inbound_ts) &&
+      Number.isFinite(message_ts) &&
+      message_ts < prior_inbound_ts,
+  };
 }
 
 /**
@@ -261,6 +297,9 @@ export function resolveLatestIntentPrecedence({
     lead_temperature: hot ? "hot" : "warm",
     automation: "continue",
     reopen_conversation: true,
+    // A reopened thread must be answered in context (address what the seller
+    // actually asked), never with a mechanical restart of the opener.
+    contextual_reply_required: true,
   };
 
   return decision;
@@ -275,7 +314,11 @@ export async function releaseSoftSuppressions(
   { supabase, phone_number, decision, thread_key = null, message_event_id = null },
   logger = {}
 ) {
-  const phone = clean(phone_number);
+  // Lookups must match the writers byte-for-byte: applyInboundSuppression and
+  // findActiveSmsSuppression both store/search normalizeUsPhoneToE164(phone)
+  // with clean() only as the non-US fallback. A formatted inbound number
+  // ("555-123-4567") must still hit the stored "+15551234567" row.
+  const phone = normalizeUsPhoneToE164(phone_number) || clean(phone_number);
   if (!supabase || !phone) return { ok: false, reason: "missing_supabase_or_phone", released: 0 };
   if (decision?.clear_soft_suppression !== true || decision?.supersedes_prior_state !== true) {
     return { ok: true, released: 0, reason: "not_applicable" };
@@ -292,16 +335,28 @@ export async function releaseSoftSuppressions(
     if (error) throw error;
 
     const released = data?.length || 0;
-    if (released > 0) {
-      logger.info?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASED]", {
+    if (released === 0) {
+      // The decision claimed an active soft suppression exists (that is the
+      // only path into a release), so updating zero rows means it was NOT
+      // deactivated — format drift, a race, or a non-soft reason. Fail
+      // closed: the caller must not reopen on an unreleased suppression.
+      logger.warn?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASE_MISSED]", {
         phone_number: phone,
         thread_key,
         message_event_id,
-        released,
-        reasons: data.map((row) => row.suppression_reason),
         version: decision.version,
       });
+      return { ok: false, reason: "no_active_soft_suppression_released", released: 0 };
     }
+
+    logger.info?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASED]", {
+      phone_number: phone,
+      thread_key,
+      message_event_id,
+      released,
+      reasons: data.map((row) => row.suppression_reason),
+      version: decision.version,
+    });
     return { ok: true, released };
   } catch (error) {
     logger.warn?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASE_FAILED]", {
