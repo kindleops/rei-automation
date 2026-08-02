@@ -99,7 +99,9 @@ test("model timeout falls back with model_timeout", async () => {
 });
 
 test("invalid schema falls back", async () => {
-  for (const bad of [null, "just text", { facts_used: [] }, { response_text: "" }, { response_text: "ok", confidence: "high" }]) {
+  // Missing confidence is invalid_schema: an omitted value must not bypass
+  // the MIN_MODEL_CONFIDENCE floor.
+  for (const bad of [null, "just text", { facts_used: [] }, { response_text: "" }, { response_text: "ok", confidence: "high" }, { response_text: "ok" }]) {
     const result = await generateConstrainedReply({ ...BASE_ARGS, modelCall: mockModel(bad) });
     assert.equal(result.source, "deterministic_fallback", JSON.stringify(bad));
     assert.equal(result.fallback_reason, "invalid_schema");

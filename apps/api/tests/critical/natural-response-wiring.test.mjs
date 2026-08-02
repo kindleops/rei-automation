@@ -110,13 +110,23 @@ async function runDecision({ naturalReplyModelCall = null } = {}) {
 
 function withEngineEnabled(fn) {
   return async () => {
-    const prior = process.env.NATURAL_REPLY_ENGINE;
+    // Clear provider keys so no test run can ever reach a live paid provider
+    // through buildModelCallFromEnv when no model is injected.
+    const prior = {
+      NATURAL_REPLY_ENGINE: process.env.NATURAL_REPLY_ENGINE,
+      GROQ_API_KEY: process.env.GROQ_API_KEY,
+      OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    };
     process.env.NATURAL_REPLY_ENGINE = "enabled";
+    delete process.env.GROQ_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     try {
       await fn();
     } finally {
-      if (prior === undefined) delete process.env.NATURAL_REPLY_ENGINE;
-      else process.env.NATURAL_REPLY_ENGINE = prior;
+      for (const [key, value] of Object.entries(prior)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   };
 }

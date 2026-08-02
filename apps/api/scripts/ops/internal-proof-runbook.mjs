@@ -319,7 +319,7 @@ export function createInternalProofRunbook({ supabase, now = () => new Date(), l
     },
 
     async "mint-reply"() {
-      const { data: replies } = await supabase
+      const { data: replies, error } = await supabase
         .from("send_queue")
         .select("id")
         .eq("to_phone_number", PINNED.recipient)
@@ -328,6 +328,9 @@ export function createInternalProofRunbook({ supabase, now = () => new Date(), l
         .in("queue_status", ["queued", "scheduled", "pending", "ready", "approved"])
         .order("created_at", { ascending: false })
         .limit(1);
+      // A transient read failure must not masquerade as "no row" — that
+      // message sends the operator back to re-run stamp-reply for nothing.
+      if (error) throw new Error(`mint-reply read failed: ${error.message}`);
       const reply = replies?.[0];
       if (!reply) throw new Error("no stamped reply row found");
       await mintAuthorization(reply.id, `canary-proof-reply-${now().getTime()}`);

@@ -17,7 +17,7 @@ otherwise.
 
 ## 1. Architecture map (inbound spine)
 
-```
+```text
 TextGrid webhook  POST /api/webhooks/textgrid/inbound (route.js)
   → webhook_log (raw HTTP payload; http_received_at stamped once at receipt)
   → handleTextgridInboundWebhook  ← DISPOSITION CHOKE POINT (wrapper)
@@ -174,7 +174,7 @@ webhooks, or concurrent production state.
 ## 6. Test reality (hermetic baseline, this branch)
 
 `npm run test:critical` in a clean worktree at PR head `0f018cd1`: 4,613
-tests, 4,519 pass, **89 fail** (91 distinct failure names; dominated by
+tests — 4,519 pass, **89 fail**, 5 skipped (91 distinct failure names; dominated by
 `queue-run-finalization`, `queue-run-selection`, `inbound-stage-lifecycle`;
 includes `launch-critical-alerting`'s stale wrapper-count assert). This is
 the honest reproducible baseline — larger than the "19 known red tests" rev 1

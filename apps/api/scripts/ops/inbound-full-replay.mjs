@@ -60,6 +60,7 @@ for (let fromIdx = 0; ; fromIdx += PAGE) {
     )
     .eq("direction", "inbound")
     .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
     .range(fromIdx, fromIdx + PAGE - 1);
   if (error) {
     console.error("load failed:", error.message);
@@ -223,8 +224,11 @@ for (const [, turns] of threads) {
       if (optedOut && decision.should_queue_reply === true) {
         threaded.post_optout_replies.push({ event_id: event.id, body_sha256: digest(event.message_body) });
       }
-      if (classification?.primary_intent === "opt_out" || classification?.compliance_flag) {
-        optedOut = optedOut || classification?.primary_intent === "opt_out";
+      if (
+        classification?.primary_intent === "opt_out" ||
+        String(classification?.compliance_flag || "").includes("stop")
+      ) {
+        optedOut = true;
       }
       summary = {
         disposition: decision.disposition || null,

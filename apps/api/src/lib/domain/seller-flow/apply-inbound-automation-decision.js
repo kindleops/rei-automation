@@ -1122,7 +1122,12 @@ async function maybeGenerateNaturalReply({
     if (!call) return { applied: false, reason: "no_model_configured", audit: null };
 
     const precedence = decision?.latest_intent_precedence || null;
-    const history = asArray(context?.recent)
+    // Live shape nests turns under recent.recent_events; older callers may
+    // pass an array directly.
+    const recent_rows = Array.isArray(context?.recent)
+      ? context.recent
+      : asArray(context?.recent?.recent_events);
+    const history = recent_rows
       .map((row) => ({
         direction: lower(row?.direction) === "outbound" ? "outbound" : "inbound",
         text: clean(row?.message_body || row?.body || row?.text),

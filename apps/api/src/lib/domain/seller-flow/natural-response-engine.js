@@ -99,7 +99,9 @@ function validateModelOutputSchema(output) {
   if (output.questions_answered != null && !Array.isArray(output.questions_answered)) {
     return "invalid_schema";
   }
-  if (output.confidence != null && typeof output.confidence !== "number") {
+  // confidence is REQUIRED: the prompt demands it, and an omitted value would
+  // otherwise bypass the MIN_MODEL_CONFIDENCE floor entirely.
+  if (typeof output.confidence !== "number" || Number.isNaN(output.confidence)) {
     return "invalid_schema";
   }
   return null;
@@ -126,7 +128,7 @@ export function validateGeneratedReply({
 
   if (text.length > maxLength) return "excessive_length";
 
-  if (candidate.confidence != null && Number(candidate.confidence) < MIN_MODEL_CONFIDENCE) {
+  if (Number(candidate.confidence) < MIN_MODEL_CONFIDENCE) {
     return "low_confidence";
   }
 

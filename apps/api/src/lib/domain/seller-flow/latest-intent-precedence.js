@@ -99,6 +99,13 @@ export function matchReEngagementPatterns(message_body = "") {
   return { matched: false, evidence: null };
 }
 
+// Full subscriber numbers are PII: log a masked form (country code + area
+// code prefix) only.
+function maskPhoneForLog(value = "") {
+  const normalized = clean(value);
+  return normalized.length >= 5 ? `${normalized.slice(0, 5)}***` : "***";
+}
+
 function classifySuppressionReason(reason) {
   const normalized = lower(reason);
   if (!normalized) return "unknown";
@@ -341,7 +348,7 @@ export async function releaseSoftSuppressions(
       // deactivated — format drift, a race, or a non-soft reason. Fail
       // closed: the caller must not reopen on an unreleased suppression.
       logger.warn?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASE_MISSED]", {
-        phone_number: phone,
+        phone_number: maskPhoneForLog(phone),
         thread_key,
         message_event_id,
         version: decision.version,
@@ -350,7 +357,7 @@ export async function releaseSoftSuppressions(
     }
 
     logger.info?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASED]", {
-      phone_number: phone,
+      phone_number: maskPhoneForLog(phone),
       thread_key,
       message_event_id,
       released,
@@ -360,7 +367,7 @@ export async function releaseSoftSuppressions(
     return { ok: true, released };
   } catch (error) {
     logger.warn?.("[LATEST_INTENT_SOFT_SUPPRESSION_RELEASE_FAILED]", {
-      phone_number: phone,
+      phone_number: maskPhoneForLog(phone),
       error: error?.message || "release_failed",
     });
     // Fail safe: suppression stays in force.

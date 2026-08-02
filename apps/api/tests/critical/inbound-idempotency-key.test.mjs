@@ -12,6 +12,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import "../helpers/critical-test-environment.mjs";
+
 import {
   handleTextgridInboundWebhook,
   __setTextgridInboundTestDeps,

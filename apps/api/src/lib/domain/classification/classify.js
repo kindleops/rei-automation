@@ -3301,7 +3301,9 @@ const ASKING_PRICE_PATTERNS = [
   /\b(?:half|quarter|three\s+quarter)s?\s+(?:mil|million)\b/i,
   /\bno\s+less\s+than\s+\$?\s*\d[\d,.]*/i,
   /\b(?:can'?t|cant|cannot|won'?t|wont)\s+(?:do|take|go|accept)?\s*(?:less|lower)\s+than\s+\$?\s*\d[\d,.]*/i,
-  /\bworth\s+\$?\s*\d[\d,.]*/i,
+  // Negation-guarded: "not worth 200k" / "isn't worth 50k" are refusals, not
+  // asking prices.
+  /\b(?<!\b(?:not|isn't|isnt|ain't|aint|never|wasn't|wasnt)\s)worth\s+\$?\s*\d[\d,.]*/i,
   /\bbetween\s+\$?\s*\d[\d,.]*\s+and\s+\$?\s*\d[\d,.]*/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
@@ -3662,6 +3664,11 @@ function matchesOwnershipDisconnect(text = "") {
       "dont own this",
       "no longer own",
       "not mine",
+      "aint mine",
+      "ain't mine",
+      "isnt mine",
+      "isn't mine",
+      "not ours",
       "not my property",
       "never owned",
       "never been the owner",
