@@ -29,6 +29,7 @@
 // dedupe) and identical decision_idempotency_key. attempt_count bounds
 // retries; exhaustion finalizes the burst as FAILED (explicit, observable).
 
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import {
   aggregateBurstMessage,
   BURST_STATUSES,
@@ -67,6 +68,46 @@ export function isSellerInboundBurstEnabled({
 } = {}) {
   if (enabled != null) return Boolean(enabled);
   return asBoolean(env?.SELLER_INBOUND_BURST_ENABLED, false);
+}
+
+/**
+ * Burst activation mode.
+ *   disabled       — default; no burst behavior anywhere.
+ *   enabled        — global activation (boolean-truthy env values; unchanged).
+ *   internal_proof — burst engages ONLY for internal test phones, and the
+ *                    webhook additionally requires an active bounded
+ *                    internal-proof session. Real seller threads behave
+ *                    exactly as disabled. This is the activation path for the
+ *                    burst leg of the internal automation proof without any
+ *                    production seller exposure.
+ * Unknown values fall back to disabled (fail-closed).
+ */
+export function resolveSellerInboundBurstMode({ env = process.env } = {}) {
+  const raw = String(env?.SELLER_INBOUND_BURST_ENABLED ?? "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return "enabled";
+  if (raw === "internal_proof") return "internal_proof";
+  return "disabled";
+}
+
+/**
+ * Thread-scoped burst gate. In internal_proof mode only an internal test
+ * phone thread may engage burst; callers that can check the proof session
+ * (the webhook) must ALSO verify one is active before honoring this.
+ */
+export function isSellerInboundBurstEnabledForThread({
+  thread_key = null,
+  enabled = null,
+  env = process.env,
+  mode = null,
+  isInternalPhone = null,
+} = {}) {
+  if (enabled != null) return Boolean(enabled);
+  const resolved_mode = mode || resolveSellerInboundBurstMode({ env });
+  if (resolved_mode === "enabled") return true;
+  if (resolved_mode !== "internal_proof") return false;
+  const checker = isInternalPhone || isInternalTestPhone;
+  const key = clean(thread_key);
+  return Boolean(key) && Boolean(checker(key));
 }
 
 export function createSellerInboundBurstCoordinator({

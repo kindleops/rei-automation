@@ -26,7 +26,9 @@ import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-se
 import {
   createSellerInboundBurstCoordinator,
   isSellerInboundBurstEnabled,
+  resolveSellerInboundBurstMode,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js";
+import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { detectImmediateSafetySignal } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import { cancelPendingFollowUpsForThread } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { buildIntelligenceMessageEventPatch } from "@/lib/domain/seller-flow/persist-inbound-intelligence.js";
@@ -1112,10 +1114,17 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   // Acquisition/business advancement — brains, offers, underwriting,
   // contracts, pipeline, follow-up queueing, reply queueing — happens exactly
   // once per finalized burst via the aggregate V2 turn, never per fragment.
-  const seller_burst_enabled = runtimeDeps.isSellerInboundBurstEnabled
+  const seller_burst_mode = runtimeDeps.resolveSellerInboundBurstMode
+    ? runtimeDeps.resolveSellerInboundBurstMode()
+    : resolveSellerInboundBurstMode();
+  // Global part of the gate. internal_proof mode starts DISABLED here and is
+  // upgraded per-thread below (internal phone + active proof session), after
+  // inbound_from is final — a real seller thread can never engage burst in
+  // internal_proof mode.
+  let seller_burst_enabled = runtimeDeps.isSellerInboundBurstEnabled
     ? runtimeDeps.isSellerInboundBurstEnabled()
-    : isSellerInboundBurstEnabled();
-  const podio_business_writes_enabled = podio_sync_enabled && !seller_burst_enabled;
+    : seller_burst_mode === "enabled";
+  let podio_business_writes_enabled = podio_sync_enabled && !seller_burst_enabled;
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
     ? { mode: "disabled", source: "queue_emergency_stop" }
@@ -1243,6 +1252,46 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
     return { ok: false, reason: "empty_inbound_body" };
   }
 
+  // internal_proof burst mode: upgrade the per-thread gate ONLY for an
+  // internal test phone AND an active bounded internal-proof session. Every
+  // failure mode (non-internal thread, no session, session expired, session
+  // lookup error) leaves burst DISABLED for this message — real sellers can
+  // never engage the burst leg in this mode.
+  if (seller_burst_mode === "internal_proof" && !seller_burst_enabled) {
+    const isInternalPhoneImpl =
+      runtimeDeps.isInternalTestPhone || isInternalTestPhone;
+    if (isInternalPhoneImpl(inbound_from)) {
+      try {
+        const loadSession =
+          runtimeDeps.loadActiveInternalProofSession ||
+          (await import("@/lib/domain/queue/internal-proof-session.js"))
+            .loadActiveInternalProofSession;
+        const session = await loadSession({});
+        if (session?.active) {
+          seller_burst_enabled = true;
+          podio_business_writes_enabled = false;
+          safeInfo("textgrid.inbound_burst_internal_proof_engaged", {
+            message_id: extracted.message_id,
+            inbound_from,
+            session_id: session.session?.session_id || null,
+          });
+        } else {
+          safeInfo("textgrid.inbound_burst_internal_proof_denied", {
+            message_id: extracted.message_id,
+            inbound_from,
+            reason: session?.reason || "no_active_session",
+          });
+        }
+      } catch (session_error) {
+        safeWarn("textgrid.inbound_burst_internal_proof_session_error", {
+          message_id: extracted.message_id,
+          inbound_from,
+          error: session_error?.message || "session_lookup_failed",
+        });
+      }
+    }
+  }
+
   // ── SEGMENT: message_event_lookup ────────────────────────────────────────
   // beginIdempotentProcessing checks the per-instance runtime-state record for
   // prior processing of this message ID. When the wrapper holds a durable DB
@@ -1338,7 +1387,13 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   }
 
   if (inbound_debug_stage === "after_message_event_lookup") {
-    return { ok: true, stage: "after_message_event_lookup", idempotency_key };
+    return {
+      ok: true,
+      stage: "after_message_event_lookup",
+      idempotency_key,
+      seller_burst_enabled,
+      seller_burst_mode,
+    };
   }
 
   // From here the idempotency record exists; the outer catch calls
