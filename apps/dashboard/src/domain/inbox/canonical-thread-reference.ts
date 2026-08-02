@@ -326,6 +326,37 @@ export const rowMatchesThreadReference = (
   return isSameCanonicalThread(resolveCanonicalThreadReference(row, options), reference)
 }
 
+/**
+ * Does a loose external reference name this thread?
+ *
+ * External surfaces (deep links, the entity graph, pipeline hand-offs, keyboard commands)
+ * hand Deal Desk a bare string that may be a row id, a thread key, a composite
+ * conversation id or an E.164 phone. This is the one place that decides whether such a
+ * string identifies a thread — replacing the scattered
+ * `thread.id === ref || (thread.threadKey || thread.id) === ref` comparisons.
+ *
+ * Each candidate is compared as itself. Nothing is coerced: a phone only matches
+ * `canonicalE164`, a composite only matches `conversationId`.
+ */
+export const threadMatchesLooseRef = (
+  thread: ThreadIdentityInput,
+  ref: unknown,
+  options: ResolveThreadReferenceOptions = {},
+): boolean => {
+  const needle = asTrimmedString(ref)
+  if (!needle) return false
+  const reference = resolveCanonicalThreadReference(thread, options)
+  if (!reference) return false
+  if (reference.selectionKey === needle) return true
+  if (reference.threadId === needle) return true
+  if (reference.conversationId && reference.conversationId === needle) return true
+  if (reference.canonicalE164 && reference.canonicalE164 === needle) return true
+  // A raw `threadKey` that is neither the selection key nor the row id (a legacy shape)
+  // still identifies the row, but only by exact string equality.
+  const record = thread as Record<string, unknown>
+  return asTrimmedString(record.threadKey ?? record.thread_key) === needle
+}
+
 /** Human-readable diagnostic — used in dev logs and error surfaces, never in a request. */
 export const describeThreadReference = (reference: CanonicalThreadReference | null): string => {
   if (!reference) return 'no_thread_reference'

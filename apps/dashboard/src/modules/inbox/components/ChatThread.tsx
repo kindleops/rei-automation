@@ -11,6 +11,7 @@ import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarket
 import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
+import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -471,6 +472,10 @@ export const ChatThread = ({
   masterOwnerHouseholdLabel = null,
   onBack,
 }: ChatThreadProps) => {
+  // Remount counter for the N.1 performance guardrails (silent, dev/harness only).
+  useEffect(() => {
+    markDealDeskMount('conversation')
+  }, [])
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
   const listRef = useRef<HTMLDivElement | null>(null)
   const scrollSnapshotRef = useRef<{ height: number; top: number; nearBottom: boolean }>({

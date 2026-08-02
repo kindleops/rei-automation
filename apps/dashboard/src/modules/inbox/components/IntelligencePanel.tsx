@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react'
+import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../../lib/data/dealContext'
@@ -5989,6 +5990,12 @@ export const IntelligencePanel = ({
 }: IntelligencePanelProps) => {
   void threadContext
   void isSuppressed
+
+  // Remount counter for the N.1 performance guardrails (silent, dev/harness only).
+  // Declared before the `!thread` early return so both branches count as one mount.
+  useEffect(() => {
+    markDealDeskMount('deal_intelligence')
+  }, [])
 
   const snapshot = useMemo(() => normalizePropertySnapshot(intelligence || null, thread), [intelligence, thread])
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)

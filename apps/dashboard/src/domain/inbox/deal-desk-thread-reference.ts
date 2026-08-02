@@ -16,6 +16,7 @@ import {
   resolveCanonicalThreadReference,
   resolveWritableThreadKey,
   rowMatchesThreadReference,
+  threadMatchesLooseRef,
   threadSelectionKey,
   type CanonicalThreadReference,
   type ThreadIdentityInput,
@@ -51,5 +52,14 @@ export const dealDeskRowMatchesReference = (
   reference: CanonicalThreadReference | null | undefined,
 ): boolean =>
   rowMatchesThreadReference(row, reference, { conversationId: conversationIdFor(row) })
+
+/**
+ * Does a bare external reference (row id, thread key, conversation id, phone) name this
+ * thread? Use instead of ad-hoc `thread.id === ref || (thread.threadKey || thread.id) === ref`.
+ */
+export const dealDeskThreadMatchesRef = (
+  thread: ThreadIdentityInput,
+  ref: unknown,
+): boolean => threadMatchesLooseRef(thread, ref, { conversationId: conversationIdFor(thread) })
 
 export type { CanonicalThreadReference, WritableThreadKeyResult }

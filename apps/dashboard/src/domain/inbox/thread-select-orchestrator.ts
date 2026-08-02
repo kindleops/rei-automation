@@ -15,6 +15,7 @@ import {
   resolveThreadMessageCacheKey,
 } from './thread-selection-cache'
 import { markUncachedMessagesMs } from './inbox-proof-bridge'
+import { threadSelectionKey } from './canonical-thread-reference'
 
 export type ThreadSelectFetchKind = 'messages' | 'hydration' | 'thread_context' | 'dossier' | 'participants'
 
@@ -62,15 +63,26 @@ export interface ThreadSelectOrchestratorInput {
   nowMs?: number
 }
 
+/**
+ * Cache key for a thread's messages.
+ *
+ * Delegates to the canonical thread-reference contract so this is not a separate
+ * implementation of thread identity (DD-003). `resolveThreadMessageCacheKey` remains the
+ * last-resort path for records the canonical resolver cannot identify at all.
+ */
 export function resolveThreadCacheKey(
   thread: InboxWorkflowThread | null | undefined,
   fallbackId = '',
   conversationThreadId?: string | null,
 ): string {
   if (!thread) return String(fallbackId || '').trim()
+  const canonical = threadSelectionKey(thread as unknown as Record<string, unknown>, {
+    conversationId: conversationThreadId ?? null,
+  })
+  if (canonical) return canonical
   return resolveThreadMessageCacheKey({
     conversationThreadId: conversationThreadId ?? null,
-    threadKey: thread.threadKey || thread.id,
+    threadKey: thread.threadKey,
     id: thread.id,
   })
 }
@@ -204,7 +216,10 @@ export function createThreadSelectHandlers(
       if (thread.prospectId) qs.set('prospect_id', thread.prospectId)
       if (masterOwnerId) qs.set('master_owner_id', masterOwnerId)
       if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
-      const threadKey = thread.threadKey || thread.id
+      // Route identifier comes from the shared contract rather than an ad-hoc
+      // `threadKey || id` fallback, so the dossier route and the thread-state writes
+      // agree on what identifies this conversation (DD-003).
+      const threadKey = resolveThreadCacheKey(thread, thread.id)
       const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
       if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }
       const payload = result.data as { ok?: boolean; data?: Record<string, unknown> }

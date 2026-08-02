@@ -64,6 +64,12 @@ export interface DealDeskSelectionState {
   selectionOutOfView: boolean
   /** Buckets already auto-selected into — enforces "exactly once" per transition. */
   autoSelectedBuckets: readonly string[]
+  /**
+   * `version` at the moment the pending bucket transition started. If the version has
+   * moved on by the time the list resolves, the operator selected something during the
+   * request and auto-select must stand down.
+   */
+  transitionStartVersion: number | null
   /** True once any selection has ever been made. Gates the global blank workspace. */
   hasEverSelected: boolean
   /** True when a list resolved empty for the active bucket — an *intentional* empty state. */
@@ -110,6 +116,7 @@ export const initialDealDeskSelectionState = (
   listStatus: 'idle',
   selectionOutOfView: false,
   autoSelectedBuckets: [],
+  transitionStartVersion: null,
   hasEverSelected: false,
   emptyBucketConfirmed: false,
   version: 0,
@@ -242,6 +249,7 @@ export function dealDeskSelectionReducer(
         emptyBucketConfirmed: false,
         // Re-entering a bucket is a fresh transition: allow one auto-select again.
         autoSelectedBuckets: state.autoSelectedBuckets.filter((b) => b !== action.bucket),
+        transitionStartVersion: state.version,
         lastReconcileReason: `bucket_requested:${action.bucket}`,
       }
     }
@@ -251,6 +259,7 @@ export function dealDeskSelectionReducer(
         ...state,
         // The bucket is not adopted on failure — the operator keeps looking at what worked.
         requestedBucket: null,
+        transitionStartVersion: null,
         listStatus: 'error',
         lastReconcileReason: `list_failed:${action.bucket}`,
       }
@@ -266,10 +275,21 @@ export function dealDeskSelectionReducer(
     case 'LIST_RESOLVED': {
       const isTransition = state.requestedBucket !== null && state.requestedBucket === action.bucket
       const activeBucket = isTransition ? action.bucket : state.activeBucket
+      /**
+       * The operator selected a row while this bucket's list was still in flight. Their
+       * click is newer information than the response, so auto-select stands down —
+       * "no category response may overwrite a valid user selection".
+       */
+      const selectedDuringTransition =
+        isTransition &&
+        state.transitionStartVersion !== null &&
+        state.version > state.transitionStartVersion &&
+        state.origin === 'user'
       const base: DealDeskSelectionState = {
         ...state,
         activeBucket,
         requestedBucket: isTransition ? null : state.requestedBucket,
+        transitionStartVersion: isTransition ? null : state.transitionStartVersion,
         listStatus: 'ready',
       }
 
@@ -281,6 +301,14 @@ export function dealDeskSelectionReducer(
           selectionOutOfView: false,
           emptyBucketConfirmed: false,
           lastReconcileReason: 'preserved_selection',
+        }
+      }
+
+      if (selectedDuringTransition) {
+        return {
+          ...base,
+          selectionOutOfView: true,
+          lastReconcileReason: 'user_selected_during_transition',
         }
       }
 
