@@ -334,7 +334,12 @@ test("integration: pinned canary row passes the contact window under the full co
 
 test("integration: denied lock-gated audit write falls back to deferral", async () => {
   const row = makePinnedRow({ metadata: { provider_message_sid: "SMevidence6" } });
+  const textgrid_calls = [];
   const { deps, lock_updates } = makeItemDeps({
+    sendTextgridSMS: async (fields) => {
+      textgrid_calls.push(fields);
+      return { ok: true, sid: "SM_must_never_send" };
+    },
     updateSendQueueRowWithLock: async (id, lock_token, payload) => {
       lock_updates.push({ id, lock_token, payload });
       // Simulate a stolen lock: the bypass audit write does not land, the
@@ -345,6 +350,84 @@ test("integration: denied lock-gated audit write falls back to deferral", async 
   const result = await processSendQueueItem(row, deps);
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "deferred_contact_window");
+  // Zero-row audit write is a denied bypass, never a transport failure: no
+  // TextGrid call, no failed finalization.
+  assert.equal(textgrid_calls.length, 0, "TextGrid must never be called");
+  assert.notEqual(result.sent, true);
+  assert.ok(!lock_updates.some((u) => u.payload?.queue_status === "failed"));
+});
+
+test("integration: thrown lock-gated audit write denies the bypass without a transport failure", async () => {
+  // A Supabase error thrown from the audit write must read as "bypass denied",
+  // never as a send failure: the row defers normally, is not finalized failed,
+  // writes no outbound FAILURE event, and TextGrid is never called.
+  const row = makePinnedRow();
+  const textgrid_calls = [];
+  const { deps, lock_updates } = makeItemDeps({
+    sendTextgridSMS: async (fields) => {
+      textgrid_calls.push(fields);
+      return { ok: true, sid: "SM_must_never_send" };
+    },
+    updateSendQueueRowWithLock: async (id, lock_token, payload) => {
+      lock_updates.push({ id, lock_token, payload });
+      if (payload?.metadata?.contact_window_bypass) {
+        throw new Error("supabase_unreachable_audit_write");
+      }
+      return normalizeSendQueueRow({ id, ...payload });
+    },
+  });
+  // The queue logger is module-scoped (not DI'd) and emits JSON lines through
+  // console.log outside development — capture them to observe warn events.
+  const logged_events = [];
+  const original_console_log = console.log;
+  console.log = (...args) => {
+    for (const arg of args) {
+      if (typeof arg === "string" && arg.startsWith("{")) {
+        try {
+          const entry = JSON.parse(arg);
+          if (entry?.event) logged_events.push(entry);
+        } catch {}
+      }
+    }
+  };
+  let result;
+  try {
+    result = await processSendQueueItem(row, deps);
+  } finally {
+    console.log = original_console_log;
+  }
+  // Denied bypass falls through to the ordinary contact-window deferral.
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "deferred_contact_window");
+  assert.equal(result.final_queue_status, "scheduled");
+  assert.notEqual(result.sent, true);
+  const deferral_update = lock_updates.find(
+    (u) => u.payload?.metadata?.deferred_contact_window === true
+  );
+  assert.ok(deferral_update, "deferral release expected after the thrown audit write");
+  assert.equal(deferral_update.payload.queue_status, "scheduled");
+  // The audit failure is surfaced as its own warnings (failed + denied)...
+  assert.ok(
+    logged_events.some(
+      (e) =>
+        e.event === "queue.contact_window_bypass_audit_write_failed" &&
+        e.meta?.queue_row_id === PINNED_ROW &&
+        e.meta?.message === "supabase_unreachable_audit_write"
+    ),
+    "audit write failure warning expected"
+  );
+  assert.ok(
+    logged_events.some((e) => e.event === "queue.contact_window_bypass_audit_write_denied"),
+    "denied-bypass warning expected"
+  );
+  // ...and the transport-failure path never runs: no TextGrid call, no
+  // transport-failure log, no failed finalization, no outbound FAILURE event,
+  // and no bypass-crossed info event.
+  assert.equal(textgrid_calls.length, 0, "TextGrid must never be called");
+  assert.ok(!logged_events.some((e) => e.event === "queue.textgrid_send_failure"));
+  assert.ok(!logged_events.some((e) => e.event === "queue.failure_message_event_write_failed"));
+  assert.ok(!logged_events.some((e) => e.event === "queue.contact_window_internal_proof_bypass"));
+  assert.ok(!lock_updates.some((u) => u.payload?.queue_status === "failed"));
 });
 
 test("integration: expired session restores the deferral automatically", async () => {
