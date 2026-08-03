@@ -77,6 +77,7 @@ test('ThreadStateBar is the only Deal Desk N.2 mutation owner', () => {
   const dealIntel = readFileSync(new URL('../../src/modules/deal-intelligence/DealIntelligenceLeadStateBar.tsx', import.meta.url), 'utf8')
   const intelligence = readFileSync(new URL('../../src/modules/inbox/components/IntelligencePanel.tsx', import.meta.url), 'utf8')
   const inboxPage = readFileSync(new URL('../../src/modules/inbox/InboxPage.tsx', import.meta.url), 'utf8')
+  const chatThread = readFileSync(new URL('../../src/modules/inbox/components/ChatThread.tsx', import.meta.url), 'utf8')
 
   assert.match(stateBar, /useCanonicalControlMutations/)
   assert.match(stateBar, /patchLeadStateFromView/)
@@ -87,6 +88,7 @@ test('ThreadStateBar is the only Deal Desk N.2 mutation owner', () => {
   assert.match(dealIntel, /data-state-mirror="deal-intelligence"/)
   assert.doesNotMatch(intelligence, /onStatusChange\(|onStageChange\(/)
   assert.doesNotMatch(inboxPage, /updateThreadStatus\(|updateThreadStage\(|markThreadRead\(|markThreadUnread\(/)
+  assert.doesNotMatch(chatThread, /autopilotDisabled=\{isSuppressed\}/)
 })
 
 test('legacy adapter no longer reconstructs operator mode from queue state', () => {

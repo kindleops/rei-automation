@@ -789,7 +789,6 @@ export const ChatThread = ({
         thread={thread}
         onRefetch={(threadKey) => onThreadAction?.(thread.id, 'refetch', { threadKey })}
         compact={Boolean(onBack)}
-        autopilotDisabled={isSuppressed}
       />
 
       {/* ── MESSAGE TIMELINE ──────────────────────────────────────────── */}

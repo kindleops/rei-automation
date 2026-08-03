@@ -352,14 +352,18 @@ export const ThreadStateBar = ({
       serverValue: manualStageLockServerValue,
       resolve: booleanResolution,
       persist: (value) => persist({ manual_stage_lock: Boolean(value) }, { manual_stage_lock: Boolean(value) }),
-      readBack: (serverRow) => readBooleanFromRow(serverRow || {}, 'manual_stage_lock'),
+      readBack: (serverRow) => serverRow && Object.hasOwn(serverRow, 'manual_stage_lock')
+        ? readBooleanFromRow(serverRow, 'manual_stage_lock')
+        : null,
     },
     {
       field: 'is_read',
       serverValue: readServerValue,
       resolve: booleanResolution,
       persist: (value) => persist({ is_read: value }),
-      readBack: (serverRow) => readBooleanFromRow(serverRow || {}, 'is_read'),
+      readBack: (serverRow) => serverRow && Object.hasOwn(serverRow, 'is_read')
+        ? readBooleanFromRow(serverRow, 'is_read')
+        : null,
     },
   ], [
     automationServerValue,
