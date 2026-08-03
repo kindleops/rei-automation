@@ -97,7 +97,7 @@ jobs:
     name: N.2 isolated browser and N.1 continuity
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 65
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,16 +110,29 @@ jobs:
       - name: Install Chromium
         working-directory: apps/dashboard
         run: npx playwright install --with-deps chromium
-      - name: Run N.2 controls and N.1 selection browser proofs
+      - name: Run bounded N.2 control proof
         working-directory: apps/dashboard
         run: |
           set -o pipefail
           mkdir -p proof/deal-desk-n2/commands
-          npx playwright test \
+          timeout --signal=TERM 12m npx playwright test \
             tests/ui/deal-desk-n2-controls.spec.ts \
-            tests/ui/deal-desk-selection-continuity.spec.ts \
+            --workers=1 \
+            --timeout=90000 \
+            --global-timeout=600000 \
             --reporter=line \
-            2>&1 | tee proof/deal-desk-n2/commands/browser.log
+            2>&1 | tee proof/deal-desk-n2/commands/browser-n2.log
+      - name: Run bounded N.1 selection continuity proof
+        working-directory: apps/dashboard
+        run: |
+          set -o pipefail
+          timeout --signal=TERM 8m npx playwright test \
+            tests/ui/deal-desk-selection-continuity.spec.ts \
+            --workers=1 \
+            --timeout=90000 \
+            --global-timeout=420000 \
+            --reporter=line \
+            2>&1 | tee proof/deal-desk-n2/commands/browser-n1.log
       - name: Upload redacted browser evidence
         if: always()
         uses: actions/upload-artifact@v4
