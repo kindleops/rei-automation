@@ -1,28 +1,17 @@
 /**
- * One canonical operational control = one mutation, validated, reversible, reconciled.
+ * Canonical Deal Desk control mutation overlay.
  *
- * Replaces `ThreadStateBar`'s local `useOptimisticField`, which had four defects:
- *   1. `previousRef.current = value` was reassigned on *every* commit, so a rollback
- *      after two rapid changes restored an optimistic value the server never held.
- *   2. Success kept the *requested* value; the server's authoritative row was discarded
- *      (`persist` returned only `{ ok }`).
- *   3. No validation — an unmappable legacy value was sent and silently coerced
- *      server-side (DD-002).
- *   4. No serialization — two rapid writes to the same field raced, and the loser could
- *      land last.
- *
- * Identity comes from the N.1 canonical contract, so a UUID or composite key is never
- * sent to the server's `/^\+1\d{10}$/` guard, and a thread with no writable route is
- * refused locally with an explicit reason instead of firing a doomed request (DD-003).
- *
- * **Reconciliation is derivation, not synchronisation.** The authoritative value is
- * always `spec.serverValue`; this hook stores only the *in-flight overlay*. A poll,
- * realtime patch or list refresh therefore reconciles for free — with no effect, and with
- * no possibility of erasing a pending change, because the overlay wins while it exists.
+ * One server-derived value per field, one scoped optimistic overlay per conversation,
+ * strict validation before write, authoritative readback after write, real rollback, and
+ * per-field last-write-wins stale-response protection. Polling/realtime values remain the
+ * fallback truth and cannot overwrite a pending overlay.
  */
 
-import { useCallback, useMemo, useState } from 'react'
-import { resolveDealDeskWritableThreadKey } from '../../domain/inbox/deal-desk-thread-reference'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  resolveDealDeskThreadReference,
+  resolveDealDeskWritableThreadKey,
+} from '../../domain/inbox/deal-desk-thread-reference'
 import type { ThreadIdentityInput } from '../../domain/inbox/canonical-thread-reference'
 import { createFieldMutationTracker, type MutationErrorKind } from '../../domain/inbox/deal-desk-mutation-state'
 import {
@@ -30,50 +19,50 @@ import {
   type VocabularyResolution,
 } from '../../domain/lead-state/canonical-control-vocabularies'
 
+export type CanonicalControlValue = string | boolean
+
 export interface CanonicalControlMutationResult {
   ok: boolean
-  /** The server's authoritative row, when it returned one. */
   row?: Record<string, unknown> | null
   errorMessage?: string | null
   errorCode?: string | null
 }
 
-export interface CanonicalControlSpec<T extends string> {
-  /** Canonical DB/API field name, e.g. `lifecycle_stage`. Also the serialization key. */
+export interface CanonicalControlSpec<T extends CanonicalControlValue = CanonicalControlValue> {
   field: string
-  /** Authoritative value from the current thread row. Always the fallback truth. */
   serverValue: T
-  /** Strict resolver — must refuse unknown values rather than coerce them. */
   resolve: (value: unknown) => VocabularyResolution<T>
-  /** Issues the request. Should return the server's authoritative row. */
+  /** Optional operator/business preflight. Server enforcement remains authoritative. */
+  preflight?: (canonicalValue: T) => string | null
   persist: (canonicalValue: T) => Promise<CanonicalControlMutationResult>
-  /** Reads this field back out of the server's authoritative row. */
   readBack: (row: Record<string, unknown> | null | undefined) => T | null
 }
 
-export interface CanonicalControlHandle<T extends string> {
-  /** What the control should render. */
+export interface CanonicalControlHandle<T extends CanonicalControlValue = CanonicalControlValue> {
   value: T
   pending: boolean
   failed: boolean
-  /** Operator-facing reason, or null. Never a raw error or internal identifier. */
   errorMessage: string | null
-  /** True when this thread has no server-writable route — the control is unsupported. */
   unsupported: boolean
   unsupportedReason: string | null
   commit: (next: T) => Promise<void>
   dismissError: () => void
 }
 
-/**
- * Per-field overlay. Absent means "show the authoritative value".
- *
- * `confirmed` exists because dropping the overlay the instant the server confirms would
- * fall back to `spec.serverValue`, which still holds the *pre-mutation* value until the
- * caller re-reads the row — so the control would visibly revert and then jump forward.
- * The confirmed overlay holds the persisted value until `serverValue` catches up.
- */
-type Overlay<T> =
+export interface CanonicalControlTelemetryEvent {
+  event: 'unsupported_thread_control' | 'control_mutation_failed'
+  field: string
+  reason: string
+  errorCode?: string
+  /** Opaque selection source only; never a phone, seller name, or message body. */
+  selectionSource: string | null
+}
+
+export interface CanonicalControlMutationOptions {
+  onTelemetry?: (event: CanonicalControlTelemetryEvent) => void
+}
+
+type Overlay<T extends CanonicalControlValue> =
   | { kind: 'pending'; optimisticValue: T; mutationId: string }
   | { kind: 'confirmed'; persistedValue: T }
   | { kind: 'failed'; error: { kind: MutationErrorKind; message: string; code?: string } }
@@ -81,119 +70,145 @@ type Overlay<T> =
 const UNSUPPORTED_MESSAGE =
   'This conversation has no writable canonical phone route, so its state cannot be saved.'
 
-export function useCanonicalControlMutations<T extends string>(
+const overlayKey = (scope: string, field: string): string => `${scope}::${field}`
+
+export function useCanonicalControlMutations<T extends CanonicalControlValue>(
   thread: ThreadIdentityInput,
   specs: ReadonlyArray<CanonicalControlSpec<T>>,
+  options: CanonicalControlMutationOptions = {},
 ): Record<string, CanonicalControlHandle<T>> {
+  const reference = useMemo(() => resolveDealDeskThreadReference(thread), [thread])
   const writable = useMemo(() => resolveDealDeskWritableThreadKey(thread), [thread])
+  const scope = reference?.selectionKey || 'unresolved-thread'
   const unsupported = !writable?.ok
   const unsupportedReason = unsupported ? UNSUPPORTED_MESSAGE : null
 
   const [tracker] = useState(() => createFieldMutationTracker())
   const [overlays, setOverlays] = useState<Record<string, Overlay<T> | undefined>>({})
 
-  const setOverlay = useCallback((field: string, next: Overlay<T> | undefined) => {
+  const setOverlay = useCallback((key: string, next: Overlay<T> | undefined) => {
     setOverlays((current) => {
-      if (current[field] === next) return current
+      if (current[key] === next) return current
       const updated = { ...current }
-      if (next === undefined) delete updated[field]
-      else updated[field] = next
+      if (next === undefined) delete updated[key]
+      else updated[key] = next
       return updated
     })
   }, [])
 
-  /**
-   * The spec is passed in rather than looked up, so this callback depends only on stable
-   * values. Callers rebuild `specs` every render; reading them through a ref would be a
-   * render-phase ref write, which is unsafe under concurrent rendering.
-   */
-  const commit = useCallback(
-    async (spec: CanonicalControlSpec<T>, next: T) => {
-      const field = spec.field
+  const commit = useCallback(async (spec: CanonicalControlSpec<T>, next: T) => {
+    const field = spec.field
+    const key = overlayKey(scope, field)
 
-      // 1. Refuse locally when there is no writable route — no doomed request (DD-003).
-      if (unsupported) {
-        setOverlay(field, { kind: 'failed', error: { kind: 'missing_writable_route', message: UNSUPPORTED_MESSAGE } })
-        return
+    if (unsupported) {
+      setOverlay(key, { kind: 'failed', error: { kind: 'missing_writable_route', message: UNSUPPORTED_MESSAGE } })
+      options.onTelemetry?.({
+        event: 'unsupported_thread_control',
+        field,
+        reason: writable && !writable.ok ? writable.reason : 'no_canonical_route',
+        selectionSource: reference?.source || null,
+      })
+      return
+    }
+
+    const resolution = spec.resolve(next)
+    if (!resolution.ok) {
+      setOverlay(key, {
+        kind: 'failed',
+        error: {
+          kind: resolution.reason === 'unmapped_legacy' ? 'unsupported_legacy_value' : 'invalid_value',
+          message: describeVocabularyRejection(resolution),
+        },
+      })
+      return
+    }
+
+    const preflightFailure = spec.preflight?.(resolution.value) || null
+    if (preflightFailure) {
+      setOverlay(key, { kind: 'failed', error: { kind: 'invalid_value', message: preflightFailure } })
+      return
+    }
+
+    // The tracker is scoped by immutable selection identity + field. A response for the
+    // old thread can settle only the old key after the operator changes selection.
+    const mutationId = tracker.begin(key)
+    setOverlay(key, { kind: 'pending', optimisticValue: resolution.value, mutationId })
+
+    let result: CanonicalControlMutationResult
+    let transportFailed = false
+    try {
+      result = await spec.persist(resolution.value)
+    } catch {
+      transportFailed = true
+      result = { ok: false, errorMessage: 'The change could not be sent. Check your connection and retry.' }
+    }
+
+    if (!tracker.settle(key, mutationId)) return
+
+    if (!result.ok) {
+      const code = result.errorCode ?? undefined
+      setOverlay(key, {
+        kind: 'failed',
+        error: {
+          kind: transportFailed ? 'network' : 'server_error',
+          message: result.errorMessage || 'The change could not be saved.',
+          code,
+        },
+      })
+      options.onTelemetry?.({
+        event: 'control_mutation_failed',
+        field,
+        reason: transportFailed ? 'network' : 'server_rejection',
+        errorCode: code,
+        selectionSource: reference?.source || null,
+      })
+      return
+    }
+
+    const persisted = spec.readBack(result.row)
+    if (persisted == null) {
+      setOverlay(key, {
+        kind: 'failed',
+        error: {
+          kind: 'malformed_response',
+          message: 'Saved, but the server did not confirm the new value. Reload to see the current state.',
+        },
+      })
+      return
+    }
+
+    setOverlay(key, { kind: 'confirmed', persistedValue: persisted })
+  }, [options, reference?.source, scope, setOverlay, tracker, unsupported, writable])
+
+  // Retire confirmed overlays only after the external row catches up. This is intentionally
+  // an effect rather than a render-phase state write.
+  useEffect(() => {
+    const caughtUp: string[] = []
+    for (const spec of specs) {
+      const key = overlayKey(scope, spec.field)
+      const overlay = overlays[key]
+      if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) caughtUp.push(key)
+    }
+    if (!caughtUp.length) return
+    setOverlays((current) => {
+      const next = { ...current }
+      let changed = false
+      for (const key of caughtUp) {
+        if (next[key]?.kind === 'confirmed') {
+          delete next[key]
+          changed = true
+        }
       }
-
-      // 2. Validate before applying anything optimistically (DD-002).
-      const resolution = spec.resolve(next)
-      if (!resolution.ok) {
-        setOverlay(field, {
-          kind: 'failed',
-          error: {
-            kind: resolution.reason === 'unmapped_legacy' ? 'unsupported_legacy_value' : 'invalid_value',
-            message: describeVocabularyRejection(resolution),
-          },
-        })
-        return
-      }
-
-      // 3. Serialize per field; the newest write wins.
-      const mutationId = tracker.begin(field)
-      setOverlay(field, { kind: 'pending', optimisticValue: resolution.value, mutationId })
-
-      let result: CanonicalControlMutationResult
-      let transportFailed = false
-      try {
-        result = await spec.persist(resolution.value)
-      } catch {
-        transportFailed = true
-        result = { ok: false, errorMessage: 'The change could not be sent. Check your connection and retry.' }
-      }
-
-      // 4. A superseded response may not commit, in either direction.
-      if (!tracker.settle(field, mutationId)) return
-
-      if (!result.ok) {
-        // Dropping the pending overlay IS the rollback: the control falls back to the
-        // authoritative `serverValue`, which is what the database still holds.
-        setOverlay(field, {
-          kind: 'failed',
-          error: {
-            // A thrown request is a transport failure, not a server rejection.
-            kind: transportFailed ? 'network' : 'server_error',
-            message: result.errorMessage || 'The change could not be saved.',
-            // Machine-readable code retained for telemetry; never rendered.
-            code: result.errorCode ?? undefined,
-          },
-        })
-        return
-      }
-
-      // 5. Confirm from the AUTHORITATIVE row, never the requested value. A response that
-      //    cannot confirm the field is a contract failure and is surfaced, not papered
-      //    over with the optimistic value.
-      const persisted = spec.readBack(result.row)
-      if (persisted == null) {
-        setOverlay(field, {
-          kind: 'failed',
-          error: {
-            kind: 'malformed_response',
-            message: 'Saved, but the server did not confirm the new value. Reload to see the current state.',
-          },
-        })
-        return
-      }
-      // Hold the persisted value until the caller's refetch makes `serverValue` match it.
-      setOverlay(field, { kind: 'confirmed', persistedValue: persisted })
-    },
-    [setOverlay, tracker, unsupported],
-  )
+      return changed ? next : current
+    })
+  }, [overlays, scope, specs])
 
   return useMemo(() => {
     const out: Record<string, CanonicalControlHandle<T>> = {}
     for (const spec of specs) {
-      let overlay = overlays[spec.field]
-      // A confirmed overlay retires itself once the authoritative value catches up, so it
-      // can never mask a later server-side change.
-      if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) {
-        overlay = undefined
-      }
+      const key = overlayKey(scope, spec.field)
+      const overlay = overlays[key]
       out[spec.field] = {
-        // Derived, not synchronised: an overlay wins while it exists, otherwise the
-        // authoritative server value shows through automatically.
         value: overlay?.kind === 'pending'
           ? overlay.optimisticValue
           : overlay?.kind === 'confirmed'
@@ -205,9 +220,9 @@ export function useCanonicalControlMutations<T extends string>(
         unsupported,
         unsupportedReason,
         commit: (next: T) => commit(spec, next),
-        dismissError: () => setOverlay(spec.field, undefined),
+        dismissError: () => setOverlay(key, undefined),
       }
     }
     return out
-  }, [commit, overlays, setOverlay, specs, unsupported, unsupportedReason])
+  }, [commit, overlays, scope, setOverlay, specs, unsupported, unsupportedReason])
 }

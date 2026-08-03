@@ -5,6 +5,7 @@ import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib
 import type { DealContext } from '../../../lib/data/dealContext'
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
+import { focusCanonicalThreadControl } from '../canonical-thread-control-focus'
 import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
@@ -1005,8 +1006,6 @@ const getNextBestAction = (thread: WorkflowThread): NextActionResult => {
 
 export const WorkflowControl = ({
   thread,
-  onStatusChange,
-  onStageChange,
   onOpenSellerAutomation,
 }: {
   thread: WorkflowThread
@@ -1014,80 +1013,71 @@ export const WorkflowControl = ({
   onStageChange: (stage: SellerStage) => void
   onOpenSellerAutomation?: () => void
 }) => {
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [stageOpen, setStageOpen] = useState(false)
   const statusVisual = getStatusVisual(thread.inboxStatus)
   const stageVisual = getSellerStageVisual(thread.conversationStage)
   const autoVisual = automationStateVisuals[thread.automationState || 'manual']
 
-  const handleStatusChange = (status: InboxStatus) => { onStatusChange(status); setStatusOpen(false) }
-  const handleStageChange = (stage: SellerStage) => { onStageChange(stage); setStageOpen(false) }
-
   return (
-    <DossierCard className="nx-workflow-control">
+    <DossierCard className="nx-workflow-control" data-state-mirror="legacy-workflow-control">
       <div className="nx-workflow-control__row">
         <span className="nx-workflow-control__label">Status</span>
-        <div className="nx-workflow-control__dropdown">
-          <button type="button" className="nx-workflow-btn" style={statusStyleVars(statusVisual)} onClick={() => setStatusOpen(!statusOpen)}>
-            <i className="nx-workflow-dot" style={{ background: statusVisual.color }} />
-            {statusVisual.label}
-            <Icon name="chevron-down" />
-          </button>
-          {statusOpen && (
-            <div className="nx-workflow-menu nx-liquid-panel">
-              {inboxStatusOptions.map((opt) => (
-                <button type="button" key={opt.value} className={cls('nx-workflow-menu-item', opt.value === thread.inboxStatus && 'is-selected')} style={statusStyleVars(opt)} onClick={() => handleStatusChange(opt.value as InboxStatus)}>
-                  <i className="nx-workflow-dot" style={{ background: opt.color }} />
-                  <div><strong>{opt.label}</strong><small>{opt.description}</small></div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          className="nx-workflow-btn"
+          style={statusStyleVars(statusVisual)}
+          onClick={() => focusCanonicalThreadControl('operational_status')}
+          title="Read-only mirror. Edit status in the conversation state bar."
+        >
+          <i className="nx-workflow-dot" style={{ background: statusVisual.color }} />
+          {statusVisual.label}
+          <Icon name="arrow-up-right" />
+        </button>
       </div>
       <div className="nx-workflow-control__row">
         <span className="nx-workflow-control__label">Stage</span>
-        <div className="nx-workflow-control__dropdown">
-          <button type="button" className="nx-workflow-btn" style={statusStyleVars(stageVisual)} onClick={() => setStageOpen(!stageOpen)}>
-            <i className="nx-workflow-dot" style={{ background: stageVisual.color }} />
-            {stageVisual.label}
-            <Icon name="chevron-down" />
-          </button>
-          {stageOpen && (
-            <div className="nx-workflow-menu nx-liquid-panel">
-              {sellerStageOptions.map((opt) => (
-                <button type="button" key={opt.value} className={cls('nx-workflow-menu-item', opt.value === thread.conversationStage && 'is-selected')} style={statusStyleVars(opt)} onClick={() => handleStageChange(opt.value as SellerStage)}>
-                  <i className="nx-workflow-dot" style={{ background: opt.color }} />
-                  <div><strong>{opt.label}</strong><small>{opt.description}</small></div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          className="nx-workflow-btn"
+          style={statusStyleVars(stageVisual)}
+          onClick={() => focusCanonicalThreadControl('lifecycle_stage')}
+          title="Read-only mirror. Edit stage in the conversation state bar."
+        >
+          <i className="nx-workflow-dot" style={{ background: stageVisual.color }} />
+          {stageVisual.label}
+          <Icon name="arrow-up-right" />
+        </button>
       </div>
       <div className="nx-workflow-control__row">
         <span className="nx-workflow-control__label">Automation</span>
-        <span className="nx-workflow-pill" style={{ '--wp-color': autoVisual?.color || '#a0aec0' } as any}>{autoVisual?.label || 'Manual'}</span>
+        <button
+          type="button"
+          className="nx-workflow-pill"
+          style={{ '--wp-color': autoVisual?.color || '#a0aec0' } as React.CSSProperties}
+          onClick={() => focusCanonicalThreadControl('automation_state')}
+          title="Read-only mirror. Edit automation in the conversation state bar."
+        >
+          {autoVisual?.label || 'Manual'}
+        </button>
       </div>
-      {thread.queueStatus && (
+      {thread.queueStatus ? (
         <div className="nx-workflow-control__row">
           <span className="nx-workflow-control__label">Queue</span>
-          <span className="nx-workflow-pill">{asStr(thread.queueStatus)}</span>
+          <span className="nx-workflow-pill" title="Read-only execution status">{asStr(thread.queueStatus)}</span>
         </div>
-      )}
-      {thread.nextSystemAction && (
+      ) : null}
+      {thread.nextSystemAction ? (
         <div className="nx-workflow-control__row nx-workflow-next">
           <Icon name="spark" />
           <span>{thread.nextSystemAction}</span>
         </div>
-      )}
-      {onOpenSellerAutomation && (
+      ) : null}
+      {onOpenSellerAutomation ? (
         <div className="nx-workflow-control__row">
           <button type="button" className="nx-intel-action-btn" onClick={onOpenSellerAutomation}>
             <Icon name="bolt" /> Open Live Automation
           </button>
         </div>
-      )}
+      ) : null}
     </DossierCard>
   )
 }
@@ -3085,9 +3075,6 @@ export const SellerCommandCard = ({
   onStatusChange: (status: InboxStatus | 'sent_message') => void
   onStageChange: (stage: SellerStage) => void
 }) => {
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [stageOpen, setStageOpen] = useState(false)
-
   const stageVisual = getSellerStageVisual(thread.conversationStage)
   const statusVisual = getStatusVisual(thread.inboxStatus)
   const finalScore = thread.finalAcquisitionScore || (thread as any).ai_score || thread.motivationScore
@@ -3125,44 +3112,31 @@ export const SellerCommandCard = ({
           <SellerTemperatureIndicator interest={sellerInterest} />
         </div>
 
-        <div className="nx-header-actions-v3">
-          <div className="nx-header-dropdown-v3">
-            <button type="button" onClick={() => setStatusOpen(!statusOpen)}>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <i className="nx-dot" style={{ background: statusVisual.color }} />
-                {statusVisual.label}
-              </div>
-              <Icon name="chevron-down" />
-            </button>
-            {statusOpen && (
-              <div className="nx-workflow-menu-v3" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
-                {inboxStatusOptions.map((opt) => (
-                  <button type="button" key={opt.value} className={cls('nx-workflow-menu-item-v3', opt.value === thread.inboxStatus && 'is-selected')} onClick={() => { onStatusChange(opt.value as InboxStatus); setStatusOpen(false) }}>
-                    <strong>{opt.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="nx-header-dropdown-v3">
-            <button type="button" onClick={() => setStageOpen(!stageOpen)}>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <i className="nx-dot" style={{ background: stageVisual.color }} />
-                {stageVisual.label}
-              </div>
-              <Icon name="chevron-down" />
-            </button>
-            {stageOpen && (
-              <div className="nx-workflow-menu-v3" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
-                {sellerStageOptions.map((opt) => (
-                  <button type="button" key={opt.value} className={cls('nx-workflow-menu-item-v3', opt.value === thread.conversationStage && 'is-selected')} onClick={() => { onStageChange(opt.value as SellerStage); setStageOpen(false) }}>
-                    <strong>{opt.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="nx-header-actions-v3" data-state-mirror="seller-command-card">
+          <button
+            type="button"
+            className="nx-header-dropdown-v3"
+            onClick={() => focusCanonicalThreadControl('operational_status')}
+            title="Read-only mirror. Edit status in the conversation state bar."
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <i className="nx-dot" style={{ background: statusVisual.color }} />
+              {statusVisual.label}
+            </div>
+            <Icon name="arrow-up-right" />
+          </button>
+          <button
+            type="button"
+            className="nx-header-dropdown-v3"
+            onClick={() => focusCanonicalThreadControl('lifecycle_stage')}
+            title="Read-only mirror. Edit stage in the conversation state bar."
+          >
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <i className="nx-dot" style={{ background: stageVisual.color }} />
+              {stageVisual.label}
+            </div>
+            <Icon name="arrow-up-right" />
+          </button>
         </div>
 
         <div className="nx-header-telemetry-rail-v3">

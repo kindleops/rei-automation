@@ -427,6 +427,7 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = Object.freeze([
   'lead_temperature',
   'disposition',
   'contactability_status',
+  'automation_state',
   'next_action',
   'next_action_at',
   'follow_up_at',
@@ -457,7 +458,24 @@ export const LEGACY_FIELD_ALIASES = Object.freeze({
   temperature: 'lead_temperature',
   stage: 'lifecycle_stage',
   status: 'operational_status',
+  autopilot_mode: 'automation_state',
 });
+
+const AUTOMATION_STATE_ALIASES = Object.freeze({
+  running: 'running',
+  active: 'running',
+  autopilot_on: 'running',
+  paused: 'paused',
+  autopilot_paused: 'paused',
+  manual: 'manual',
+  manual_only: 'manual',
+  human_controlled: 'manual',
+});
+
+export function normalizeAutomationState(value) {
+  const key = normalizeKey(value);
+  return AUTOMATION_STATE_ALIASES[key] || null;
+}
 
 export function normalizePatchToCanonical(patch = {}) {
   const normalized = {};
@@ -474,7 +492,10 @@ export function normalizePatchToCanonical(patch = {}) {
     else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value);
     else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value);
     else if (canonicalKey === 'contactability_status') normalized.contactability_status = normalizeContactability(value);
-    else normalized[canonicalKey] = value;
+    else if (canonicalKey === 'automation_state') {
+      const state = normalizeAutomationState(value);
+      if (state) normalized.automation_state = state;
+    } else normalized[canonicalKey] = value;
   }
   return normalized;
 }

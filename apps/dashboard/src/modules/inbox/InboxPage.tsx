@@ -4,15 +4,12 @@ import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
 import { useDealDeskSelection } from './useDealDeskSelection'
-import {
-  describeThreadReference,
-  resolveThreadRouteKey,
-} from '../../domain/inbox/canonical-thread-reference'
+import { focusCanonicalThreadControl } from './canonical-thread-control-focus'
+import { resolveThreadRouteKey } from '../../domain/inbox/canonical-thread-reference'
 import {
   dealDeskThreadMatchesRef,
   resolveDealDeskSelectionKey,
   resolveDealDeskThreadReference,
-  resolveDealDeskWritableThreadKey,
 } from '../../domain/inbox/deal-desk-thread-reference'
 import { createComposerDraftStore } from '../../domain/inbox/composer-draft-store'
 import { DEAL_DESK_RESOURCES } from '../../domain/inbox/selection-request-guard'
@@ -23,20 +20,12 @@ import {
 } from '../../domain/inbox/deal-desk-runtime-proof'
 import './inbox-universal.css'
 import {
-  updateThreadStage,
-  updateThreadStatus,
   starThread,
   unstarThread,
   pinThread,
   unpinThread,
   archiveThread,
   unarchiveThread,
-  markThreadRead,
-  markThreadUnread,
-  markThreadHot,
-  snoozeThread,
-  pauseAutomation,
-  resumeAutomation,
   retryFailedSend,
   suppressThread,
   approveQueueItem,
@@ -3399,15 +3388,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           optimisticAction = 'unpin'
           break
         case 'read':
-          label = 'Marked Read'
-          mutation = () => markThreadRead(thread)
-          optimisticAction = 'read'
-          break
         case 'unread':
-          label = 'Marked Unread'
-          mutation = () => markThreadUnread(thread)
-          optimisticAction = 'unread'
-          break
+          setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+          selectThread(thread)
+          window.setTimeout(() => focusCanonicalThreadControl('is_read'), 0)
+          return
         default:
           return
       }
@@ -3450,46 +3435,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           }
         : undefined,
     })
-  }, [threads, handleWorkflowMutation, DEV])
+  }, [DEV, handleWorkflowMutation, selectThread, setActiveContext, threads])
 
-  const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
+  const handleStatusChange = useCallback((_status: InboxStatus | 'sent_message') => {
     if (!selected) return
-    const actualStatus: InboxStatus = status === 'sent_message' ? 'waiting' : status
-    const optimistic = buildOptimisticThreadPatch({ type: 'status', status }, selected)
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
-    markOptimisticPatch(`status_${status}`, selected.id, optimistic as Record<string, unknown>)
-    
-    if (DEV) {
-      console.log(`[NexusWorkflowStatus]`, {
-        action: `status_change_${status}`,
-        thread_id: selected.id.slice(-8),
-        optimistic: true,
-        preventedDefault: true,
-        stoppedPropagation: true
-      })
-    }
+    focusCanonicalThreadControl('operational_status')
+  }, [selected])
 
-    await handleWorkflowMutation(`Status: ${actualStatus.replace(/_/g, ' ')}`, () => updateThreadStatus(selected, actualStatus), { skipRefresh: true })
-  }, [selected, handleWorkflowMutation, DEV])
-
-  const handleStageChange = useCallback(async (stage: SellerStage) => {
+  const handleStageChange = useCallback((_stage: SellerStage) => {
     if (!selected) return
-    const optimistic = buildOptimisticThreadPatch({ type: 'stage', stage }, selected)
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
-    markOptimisticPatch(`stage_${stage}`, selected.id, optimistic as Record<string, unknown>)
-
-    if (DEV) {
-      console.log(`[NexusWorkflowStatus]`, {
-        action: `stage_change_${stage}`,
-        thread_id: selected.id.slice(-8),
-        optimistic: true,
-        preventedDefault: true,
-        stoppedPropagation: true
-      })
-    }
-
-    await handleWorkflowMutation(`Stage: ${stage.replace(/_/g, ' ')}`, () => updateThreadStage(selected, stage), { skipRefresh: true })
-  }, [selected, handleWorkflowMutation, DEV])
+    focusCanonicalThreadControl('lifecycle_stage')
+  }, [selected])
 
   const handleToggleStar = useCallback(() => {
     if (!selected) return
@@ -3596,31 +3552,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       console.warn('[DealDesk] select ignored — no thread for ref', { ref: id })
     }
 
-    // Mark thread read. The key now comes from the shared write contract, so a composite
-    // or UUID identifier is never sent to the server's /^\+1\d{10}$/ guard (DD-003).
-    // Full mutation repair (rollback, surfaced errors) belongs to N.2; this lane only
-    // stops firing a request that is guaranteed to be rejected.
-    const writeKey = resolveDealDeskWritableThreadKey(thread ?? { thread_key: threadKey, threadKey })
-    if (writeKey?.ok) {
-      void callBackend('/api/cockpit/inbox/thread-state', {
-        method: 'PATCH',
-        body: JSON.stringify({ thread_key: writeKey.threadKey, patch: { is_read: true } }),
-      })
-    } else {
-      // Surface it. The operator clicked the thread, so it will stay unread; silently
-      // skipping (DEV-only logging) left them with no way to know why. Full mutation
-      // error UX is N.2 — this is the minimum honest signal.
-      emitNotification({
-        title: 'Could not mark as read',
-        detail: 'This conversation has no writable canonical phone route.',
-        severity: 'warning',
-      })
-      if (DEV) {
-        console.warn('[DealDesk] read-mark skipped — no writable thread reference', {
-          reference: describeThreadReference(writeKey?.reference ?? null),
-        })
-      }
-    }
+    // Read state is operator-controlled by the canonical ThreadStateBar. Selection alone
+    // never emits a hidden write or reports a success the server did not confirm.
 
     if (isMobileInboxShell) {
       setMobileThreadOpen(true)
@@ -4119,22 +4052,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         await handleWorkflowMutation('Auto-Reply: Queueing...', () => executeAutoReply(thread, null, { dryRun: autonomyControls.dryRun }), { skipRefresh: false })
         break
       case 'mark_hot':
-// ... rest of switch
-        await handleWorkflowMutation('Lead: HOT', () => markThreadHot(thread), { skipRefresh: true })
+        setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+        selectThread(thread)
+        window.setTimeout(() => focusCanonicalThreadControl('lead_temperature'), 0)
         break
-      case 'snooze': {
-        const optimistic = buildOptimisticThreadPatch('snooze', thread)
-        setOptimisticPatches((prev) => ({ ...prev, [thread.id]: { ...prev[thread.id], ...optimistic } }))
-        markOptimisticPatch('snooze', thread.id, optimistic as Record<string, unknown>)
-        await handleWorkflowMutation('Thread: Snoozed', () => snoozeThread(thread), { skipRefresh: true })
-        break
-      }
+      case 'snooze':
+        setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+        selectThread(thread)
+        window.setTimeout(() => focusCanonicalThreadControl('operational_status'), 0)
         break
       case 'pause_automation':
-        await handleWorkflowMutation('Automation: Paused', () => pauseAutomation(thread), { skipRefresh: true })
-        break
       case 'resume_automation':
-        await handleWorkflowMutation('Automation: Resumed', () => resumeAutomation(thread), { skipRefresh: true })
+        setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+        selectThread(thread)
+        window.setTimeout(() => focusCanonicalThreadControl('automation_state'), 0)
         break
       case 'suppress':
         await handleWorkflowMutation('Thread: Suppressed (DNC)', () => suppressThread(thread), { skipRefresh: true })
@@ -4184,7 +4115,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       default:
         console.warn('[OperatorAction] Unknown action', action)
     }
-  }, [DEV, handleOpenDealIntelligence, handleThreadAction, handleWorkflowMutation, setActiveOverlay, setDraftText, threads])
+  }, [DEV, handleOpenDealIntelligence, handleThreadAction, handleWorkflowMutation, selectThread, setActiveContext, setActiveOverlay, setDraftText, threads])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {

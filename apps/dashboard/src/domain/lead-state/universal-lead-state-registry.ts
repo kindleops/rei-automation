@@ -130,6 +130,7 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = [
   'lead_temperature',
   'disposition',
   'contactability_status',
+  'automation_state',
   'stage_source',
   'status_source',
   'temperature_source',
@@ -156,9 +157,28 @@ export const LEGACY_FIELD_ALIASES: Record<string, string> = {
   temperature: 'lead_temperature',
   stage: 'lifecycle_stage',
   status: 'operational_status',
+  autopilot_mode: 'automation_state',
 }
 
 const normalizeKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s-/]+/g, '_')
+
+export type PersistedAutomationState = 'running' | 'paused' | 'manual'
+
+const AUTOMATION_STATE_ALIASES: Record<string, PersistedAutomationState> = {
+  running: 'running',
+  active: 'running',
+  autopilot_on: 'running',
+  paused: 'paused',
+  autopilot_paused: 'paused',
+  manual: 'manual',
+  manual_only: 'manual',
+  human_controlled: 'manual',
+}
+
+export const normalizeAutomationState = (value: unknown): PersistedAutomationState | null => {
+  const key = normalizeKey(value)
+  return AUTOMATION_STATE_ALIASES[key] ?? null
+}
 
 const STAGE_ALIASES: Record<string, LifecycleStageCode> = {
   ownership_check: 'ownership_confirmation',
@@ -344,7 +364,10 @@ export const normalizePatchToCanonical = (patch: Record<string, unknown> = {}): 
     else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value)
     else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value)
     else if (canonicalKey === 'contactability_status') normalized.contactability_status = normalizeContactability(value)
-    else normalized[canonicalKey] = value
+    else if (canonicalKey === 'automation_state') {
+      const state = normalizeAutomationState(value)
+      if (state) normalized.automation_state = state
+    } else normalized[canonicalKey] = value
   }
   return normalized
 }

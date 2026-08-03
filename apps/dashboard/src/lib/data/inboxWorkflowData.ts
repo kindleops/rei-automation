@@ -147,14 +147,12 @@ export interface WorkflowMutationResult {
   mutationPayload: AnyRecord | null
 }
 
-const INBOX_STATUS_TO_OPERATIONAL: Record<InboxStatus, OperationalStatusCode> = {
+const INBOX_STATUS_TO_OPERATIONAL: Partial<Record<InboxStatus, OperationalStatusCode>> = {
   new_reply: 'new_reply',
   needs_review: 'needs_review',
   ai_draft_ready: 'needs_review',
   queued: 'scheduled',
   waiting: 'waiting_on_seller',
-  suppressed: 'paused',
-  closed: 'paused',
 }
 
 const toWorkflowResult = (result: UniversalLeadStateMutationResult): WorkflowMutationResult => ({
@@ -171,7 +169,8 @@ const mapWorkflowPatchToCanonical = (
   const canonical: UniversalLeadStatePatch = {}
 
   if (patch.inboxStatus) {
-    canonical.operational_status = INBOX_STATUS_TO_OPERATIONAL[patch.inboxStatus] ?? patch.inboxStatus
+    const operational = INBOX_STATUS_TO_OPERATIONAL[patch.inboxStatus]
+    if (operational) canonical.operational_status = operational
   }
   if (patch.conversationStage) {
     canonical.lifecycle_stage = patch.conversationStage
@@ -195,14 +194,13 @@ const mapWorkflowPatchToCanonical = (
   if (patch.isSuppressed != null) {
     if (patch.isSuppressed) {
       canonical.contactability_status = 'opted_out'
-      canonical.lifecycle_stage = 'closed'
-      canonical.operational_status = 'paused'
     } else {
       canonical.contactability_status = 'contactable'
-      canonical.operational_status = 'needs_review'
     }
   }
-  if (patch.automationState === 'paused') canonical.operational_status = 'paused'
+  if (patch.automationState === 'paused') canonical.automation_state = 'paused'
+  if (patch.automationState === 'active') canonical.automation_state = 'running'
+  if (patch.automationState === 'manual_control') canonical.automation_state = 'manual'
   if (patch.isHotLead) canonical.lead_temperature = 'hot'
 
   return canonical
@@ -346,9 +344,14 @@ const inferSellerStage = (thread: InboxThread): SellerStage => {
 }
 
 const getAutomationState = (thread: InboxThread): AutomationState => {
-  if ((thread as any).isArchived || thread.isOptOut || thread.status === 'archived') return 'completed'
-  if (thread.uiIntent === 'info_request' || thread.uiIntent === 'needs_review') return 'manual_control'
-  return 'active'
+  const raw = normalizeStatus((thread as any).automation_state ?? (thread as any).autopilot_mode)
+  if (raw === 'running' || raw === 'active' || raw === 'autopilot_on') return 'active'
+  if (raw === 'paused' || raw === 'autopilot_paused') return 'paused'
+  if (raw === 'manual' || raw === 'manual_only' || raw === 'human_controlled') return 'manual_control'
+  if (raw === 'completed' || raw === 'disabled') return 'completed'
+  // Unknown/empty data is not proof automation is active. Keep legacy displays conservative;
+  // ThreadStateBar shows the raw unsupported value and owns all operator writes.
+  return 'manual_control'
 }
 
 const getNextSystemAction = (status: InboxStatus): string => {

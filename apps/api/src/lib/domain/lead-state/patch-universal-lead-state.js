@@ -27,6 +27,7 @@ const TRACKED_FIELDS = new Set([
   'lead_temperature',
   'disposition',
   'contactability_status',
+  'automation_state',
   'next_action',
   'is_starred',
   'is_pinned',
@@ -35,7 +36,32 @@ const TRACKED_FIELDS = new Set([
   'snoozed_until',
   'manual_stage_lock',
   'manual_temperature_lock',
+  'is_read',
 ]);
+
+const LEAD_STATE_RESPONSE_FIELDS = Object.freeze([
+  ...UNIVERSAL_LEAD_STATE_PATCH_FIELDS,
+  'automation_status',
+  'manual_override',
+  'is_suppressed',
+  'property_id',
+]);
+
+const TERMINAL_AUTOMATION_STATUSES = new Set(['suppressed', 'off', 'disabled', 'completed', 'terminal']);
+
+function automationResumeBlock(previous = {}) {
+  if (previous?.is_suppressed === true) return 'automation_resume_blocked_suppressed';
+  if (previous?.is_archived === true) return 'automation_resume_blocked_archived';
+  if (clean(previous?.lifecycle_stage).toLowerCase() === 'closed') return 'automation_resume_blocked_closed';
+  if (BLOCKING_CONTACTABILITY.has(clean(previous?.contactability_status).toLowerCase())) {
+    return 'automation_resume_blocked_contactability';
+  }
+  const executionStatus = clean(previous?.automation_status).toLowerCase();
+  if (TERMINAL_AUTOMATION_STATUSES.has(executionStatus)) {
+    return `automation_resume_blocked_execution_${executionStatus}`;
+  }
+  return null;
+}
 
 export async function fetchCurrentLeadState(supabase, threadKey) {
   const { data, error } = await supabase
@@ -167,6 +193,20 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     rowPatch.status_source = meta.change_source || STATE_SOURCE_CODES.MANUAL;
   }
 
+  if ('automation_state' in canonicalPatch) {
+    // Operator mode is persisted only on automation_state. automation_status is the
+    // execution/queue dimension and is deliberately read-only here.
+    rowPatch.automation_state = canonicalPatch.automation_state;
+  }
+
+  if ('manual_stage_lock' in canonicalPatch) {
+    rowPatch.manual_stage_lock = asBoolean(canonicalPatch.manual_stage_lock, false);
+  }
+
+  if ('manual_temperature_lock' in canonicalPatch) {
+    rowPatch.manual_temperature_lock = asBoolean(canonicalPatch.manual_temperature_lock, false);
+  }
+
   if ('lead_temperature' in canonicalPatch) {
     rowPatch.lead_temperature = canonicalPatch.lead_temperature;
     rowPatch.temperature = canonicalPatch.lead_temperature;
@@ -263,6 +303,19 @@ export async function patchUniversalLeadState({
 
   const previous = await fetchCurrentLeadState(supabase, key);
 
+  if (canonicalPatch.automation_state === 'running') {
+    const resumeBlock = automationResumeBlock(previous || {});
+    if (resumeBlock) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: resumeBlock,
+        thread_key: key,
+        previous,
+      };
+    }
+  }
+
   // Lifecycle stage writes pass the single registry transition validator:
   // automated writers (autopilot/AI/system) can only hold or advance, never
   // override an operator's manual stage lock, and can only enter the
@@ -310,7 +363,7 @@ export async function patchUniversalLeadState({
   const { data, error } = await supabase
     .from('inbox_thread_state')
     .upsert(rowPatch, { onConflict: 'thread_key' })
-    .select(UNIVERSAL_LEAD_STATE_PATCH_FIELDS.join(','))
+    .select(LEAD_STATE_RESPONSE_FIELDS.join(','))
     .maybeSingle();
 
   if (error) throw error;
