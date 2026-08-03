@@ -61,34 +61,24 @@ jobs:
         run: |
           set -o pipefail
           {
-            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-              tests/critical/deal-desk-n2-control-mutations.test.mjs
-            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-              tests/critical/inbox-thread-context-route.test.mjs
-            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-              tests/critical/inbox-canonical-row-contract.test.mjs
-            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-              tests/critical/inbox-state-transition-matrix.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/deal-desk-n2-control-mutations.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-thread-context-route.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-canonical-row-contract.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-state-transition-matrix.test.mjs
           } 2>&1 | tee ../../proof/deal-desk-n2/commands/api-integration.log
-      - name: Relevant dashboard lint
+      - name: Canonical N.2 dashboard lint
         id: dashboard_lint
         continue-on-error: true
         working-directory: apps/dashboard
         run: |
           set -o pipefail
           npx eslint \
+            src/domain/inbox/resolveCanonicalThreadStateKey.ts \
             src/domain/lead-state/deal-desk-control-contract.ts \
             src/domain/lead-state/persistUniversalLeadState.ts \
             src/domain/lead-state/universal-lead-state-registry.ts \
-            src/lib/data/inboxWorkflowData.ts \
-            src/modules/deal-intelligence/DealIntelligence25Panel.tsx \
-            src/modules/deal-intelligence/DealIntelligenceLeadStateBar.tsx \
-            src/modules/inbox/InboxPage.tsx \
             src/modules/inbox/canonical-thread-control-focus.ts \
-            src/modules/inbox/components/ChatThread.tsx \
-            src/modules/inbox/components/IntelligencePanel.tsx \
             src/modules/inbox/components/ThreadStateBar.tsx \
-            src/modules/inbox/inbox.adapter.ts \
             src/modules/inbox/useCanonicalControlMutation.ts \
             tests/unit/deal-desk-n2-control-contract.test.ts \
             tests/ui/deal-desk-n2-controls.spec.ts \
@@ -128,8 +118,7 @@ jobs:
           DASHBOARD_TYPECHECK: ${{ steps.dashboard_typecheck.outcome }}
           DASHBOARD_BUILD: ${{ steps.dashboard_build.outcome }}
         run: |
-          printf 'dashboard_lint=%s\napi_lint=%s\ndashboard_typecheck=%s\ndashboard_build=%s\n' \
-            "$DASHBOARD_LINT" "$API_LINT" "$DASHBOARD_TYPECHECK" "$DASHBOARD_BUILD"
+          printf 'dashboard_lint=%s\napi_lint=%s\ndashboard_typecheck=%s\ndashboard_build=%s\n' "$DASHBOARD_LINT" "$API_LINT" "$DASHBOARD_TYPECHECK" "$DASHBOARD_BUILD"
           test "$DASHBOARD_LINT" = success
           test "$API_LINT" = success
           test "$DASHBOARD_TYPECHECK" = success
@@ -160,11 +149,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p proof/deal-desk-n2/commands
-          npx playwright test \
-            tests/ui/deal-desk-n2-controls.spec.ts \
-            tests/ui/deal-desk-selection-continuity.spec.ts \
-            --reporter=line \
-            2>&1 | tee proof/deal-desk-n2/commands/browser.log
+          npx playwright test tests/ui/deal-desk-n2-controls.spec.ts tests/ui/deal-desk-selection-continuity.spec.ts --reporter=line 2>&1 | tee proof/deal-desk-n2/commands/browser.log
       - name: Upload redacted browser evidence
         if: always()
         uses: actions/upload-artifact@v4
