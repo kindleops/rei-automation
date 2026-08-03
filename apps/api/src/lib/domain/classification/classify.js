@@ -3642,6 +3642,13 @@ function matchesTrueWrongNumber(text = "") {
 const NEGATED_OWNERSHIP_NOUN =
   "(?:house|hosue|huose|hous|home|hme|property|propery|proprty|propertey|properti|place|plce|crib|casa|condo|apartment|apt|land|lot|building|address|addres)";
 
+// "years ago" counts as an ownership disconnect ONLY with a transfer verb
+// nearby ("sold it years ago", "moved out 5 years ago", "lost the house
+// years ago"). A bare time reference is common in owner anecdotes ("we
+// painted it three years ago") and must never suppress a real owner.
+const OWNERSHIP_TRANSFER_YEARS_AGO_RE =
+  /\b(?:sold|moved|left|lost|foreclosed|gave\s+up|got\s+rid\s+of|deeded|signed\s+(?:it\s+)?over)\b[^.!?\n]{0,50}?\b(?:yrs?|years?)\s+ago\b|\b(?:yrs?|years?)\s+ago\b[^.!?\n]{0,30}?\b(?:sold|moved(?:\s+out)?|lost)\b/i;
+
 const NEGATED_OWNERSHIP_PATTERNS = [
   // "that's not my house" / "this isn't our property" / "ain't my crib" /
   // "thats not my hosue" / "no longer my home"
@@ -4617,16 +4624,24 @@ function resolveIntents(
       "never owned",
       "no i don't",
       "no i dont",
-      "years ago",
       "was mine",
     ]) ||
+    // "years ago" negates ownership only when bound to a transfer verb —
+    // "sold it years ago", "moved out years ago". A bare "years ago" also
+    // appears in owner anecdotes ("we painted it three years ago") and was
+    // falsely suppressing real owners (verified against the historical
+    // corpus: an owner describing renovations replayed as wrong_number).
+    OWNERSHIP_TRANSFER_YEARS_AGO_RE.test(text) ||
     /\bi do not\b/.test(text) ||
     /\bi don't\b/.test(text) ||
     /\bi dont\b/.test(text);
 
-  // Former owner / "was mine years ago" → ownership disconnect
+  // Former owner / "was mine years ago" → ownership disconnect. The
+  // years-ago branch requires transfer context (sold/moved/left/lost/
+  // used-to-own), never a bare time reference.
   if (
-    /\b(was\s+mine|used\s+to\s+own|years\s+ago)\b/i.test(text) &&
+    (/\b(was\s+mine|used\s+to\s+own)\b/i.test(text) ||
+      OWNERSHIP_TRANSFER_YEARS_AGO_RE.test(text)) &&
     !/\bstill\b/i.test(text)
   ) {
     if (!intents.includes("wrong_number")) intents.push("wrong_number");
