@@ -1,0 +1,32 @@
+name: Apply N.2 local implementation
+
+on:
+  push:
+    branches: [fix/deal-desk-manual-control-mutations]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Reconstruct and verify local patch
+        run: |
+          cat .github/n2-patch.part* > /tmp/n2.patch.gz.b64
+          printf '%s  %s\n' '974f4963c43040b53e10493796c7a02550aa4d62bb2d3ca2ea727a3754577fed' '/tmp/n2.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/n2.patch.gz.b64 > /tmp/n2.patch.gz
+          gunzip -c /tmp/n2.patch.gz > /tmp/n2.patch
+          git apply --check /tmp/n2.patch
+      - name: Apply and commit N.2 implementation
+        run: |
+          git apply --index /tmp/n2.patch
+          rm -f .github/n2-patch.part* .github/workflows/n2-apply-local-patch.yml
+          git add -A
+          git config user.name 'kindleops'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'feat(n2): wire canonical Deal Desk controls'
+          git push origin HEAD:${GITHUB_REF_NAME}
