@@ -6,6 +6,7 @@ import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.ada
 import { useDealDeskSelection } from './useDealDeskSelection'
 import { focusCanonicalThreadControl } from './canonical-thread-control-focus'
 import { resolveThreadRouteKey } from '../../domain/inbox/canonical-thread-reference'
+import { resolveCanonicalThreadStateKey } from '../../domain/inbox/resolveCanonicalThreadStateKey'
 import {
   dealDeskThreadMatchesRef,
   resolveDealDeskSelectionKey,
@@ -3388,11 +3389,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           optimisticAction = 'unpin'
           break
         case 'read':
-        case 'unread':
+        case 'unread': {
+          const canonicalStateKey = resolveCanonicalThreadStateKey(thread)
+          if (DEV && !canonicalStateKey) {
+            console.info('[DealDesk] opening canonical read control without a writable route')
+          }
           setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
           selectThread(thread)
           window.setTimeout(() => focusCanonicalThreadControl('is_read'), 0)
           return
+        }
         default:
           return
       }
