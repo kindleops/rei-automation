@@ -160,7 +160,104 @@ write is implemented but **gated** — see "Automation" below.
 
 ---
 
+---
+
+## Canonical vocabularies (delivered)
+
+`apps/dashboard/src/domain/lead-state/canonical-control-vocabularies.ts`
+
+The mutation-path vocabulary. It differs from `universal-lead-state-registry.ts` in one
+decisive way: **it never guesses.** An unrecognised value returns
+`{ ok: false, reason, input, dimension }` instead of a valid-but-unrelated default. The
+registry's lenient `normalize*` helpers remain appropriate on *read* paths, where coercing
+a legacy row into something displayable is reasonable; they must not decide what to persist.
+
+| Dimension | Canonical values | Source |
+|---|---|---|
+| Lifecycle stage | `ownership_confirmation`, `offer_interest`, `asking_price`, `property_condition`, `offer`, `formal_contract`, `disposition`, `under_contract`, `prepared_to_close`, `closed` | existing `LIFECYCLE_STAGE_ORDER` |
+| Operational status | `not_contacted`, `scheduled`, `new_reply`, `active_communication`, `waiting_on_seller`, `follow_up_due`, `needs_review`, `snoozed`, `paused` | existing `OPERATIONAL_STATUS_ORDER` |
+| Lead temperature | `unscored`, `cold`, `warm`, `hot` | existing `LEAD_TEMPERATURE_ORDER` |
+| **Automation mode** | `active`, `paused`, `human_controlled`, `review_required`, `disabled`, `completed` | **new — none existed** |
+
+### Unknown-value policy
+
+Rejected with a typed reason, never coerced:
+
+| Reason | Meaning | Operator message |
+|---|---|---|
+| `empty` | nothing selected | "No value was selected." |
+| `wrong_dimension` | belongs to another dimension | "…is not a lifecycle stage value. Suppression, inbox bucket and delivery states are tracked separately." |
+| `unmapped_legacy` | recognisably legacy, no defined equivalent | "…is a legacy value with no current equivalent. It must be remapped before this control can be edited." |
+| `unknown` | unrecognised | "…is not a recognised … value." |
+
+### Legacy mappings
+
+Explicit, one deliberate entry each — `LEGACY_STAGE_MAP` (24), `LEGACY_STATUS_MAP` (10),
+`LEGACY_TEMPERATURE_MAP` (7), `LEGACY_AUTOMATION_MAP` (14). Notable decisions:
+
+- `mf_suppressed`, `dead_suppressed` → **refused** (`wrong_dimension`). Previously
+  `ownership_confirmation` and `closed`. Suppression is a contactability fact.
+- `mf_units_confirmed`, `mf_occupancy_requested`, `mf_rent_roll_requested`,
+  `mf_gross_rents_requested` → **refused** (`unmapped_legacy`). The canonical ladder has no
+  equivalent position, so any mapping would be a fabrication.
+- `closed` as a *status* → **refused**. `INBOX_STATUS_TO_OPERATIONAL` collapsed both
+  `closed` and `suppressed` onto `paused`, destroying the distinction.
+
+### Resolution precedence
+
+canonical → **suppression guard (absolute)** → explicit legacy mapping → generic dimension
+nets → unknown. The suppression guard is the DD-002 invariant and no mapping may override
+it. Explicit mappings outrank the generic nets because a declared mapping is a decision
+while the net is a heuristic — `dead` is a legitimate legacy stage meaning `closed` even
+though `dead` is also a bucket name, and `queued` is a legitimate legacy status meaning
+`scheduled` even though `queued` is also a delivery state. The first draft had this
+backwards and the tests caught it.
+
+---
+
+## Optimistic state machine (delivered)
+
+`apps/dashboard/src/domain/inbox/deal-desk-mutation-state.ts` — the `revertOptimisticPatch`
+DD-004 asks for, which did not exist.
+
+```
+idle → pending → confirmed
+             └─→ failed  (rolled back)
+```
+
+| Guarantee | Mechanism |
+|---|---|
+| Failure restores the prior authoritative value | `failMutation` returns `{status:'failed', value: previousValue}` |
+| No patch outlives its mutation | every terminal transition drops `optimisticValue` |
+| Server wins on success | `confirmMutation` adopts `serverValue`, discarding the requested value |
+| Rapid changes roll back correctly | `previousValue` is carried forward while pending, not reassigned per commit |
+| Superseded responses cannot commit | `mutationId` checked in both `confirmMutation` and `failMutation` |
+| Polling/realtime cannot erase intent | `reconcileExternalValue` returns unchanged while pending |
+
+**Rapid-write policy: last write wins, older responses refused**, tracked per field by
+`createFieldMutationTracker`. Chosen over queueing because operator intent is a *state*,
+not a *sequence* — cold → warm → hot means "hot", and replaying the first two against the
+server is slower and visibly wrong. Chosen over compare-and-set because the server exposes
+no revision token today.
+
+---
+
 ## Status of this lane
 
-See the completion report. This record documents the settled schema contract (Part 3),
-which was the prerequisite for the automation repair.
+**Partial.** The pure, tested core is delivered; no control is wired to it, so this branch
+changes no runtime behaviour.
+
+**Delivered:** canonical vocabularies with the suppression invariant, the optimistic
+state machine with real rollback, per-field serialization, the schema contract above, the
+incident record, the pre-merge production gate, and the read-only production observation.
+147 tests pass (34 new; the N.1 regression suites unchanged), typecheck clean, build clean.
+
+**Not delivered:** wiring `ThreadStateBar` and both `IntelligencePanel` `WorkflowControl`
+variants to these modules; writer consolidation; the mutation service call layer; the
+`buildRowPatch` automation branch and the widened response select; read/unread repair and
+unsupported-thread telemetry; browser verification of mutations.
+
+**Blocking input for the automation write:** whether
+`inbox_thread_state.automation_state` exists in production (see above). Everything else in
+N.2 can proceed without it.
+
