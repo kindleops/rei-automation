@@ -147,6 +147,9 @@ test('stage, status, and temperature stay dimension-separated in one authoritati
   assert.equal(result.row.manual_temperature_lock, true)
 })
 
+// The dashboard resolver is not the only guard. The API mutation boundary must
+// independently refuse unknown or wrong-dimension values rather than normalize
+// them to a valid-but-unrelated default.
 test('wrong-dimension and unknown stage values are rejected without a fallback write', async () => {
   for (const invalid of ['mf_suppressed', 'new_reply', 'delivered', 'motivation_discovery']) {
     const supabase = makeSupabase({ lifecycle_stage: 'ownership_confirmation' })
