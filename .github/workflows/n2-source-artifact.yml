@@ -1,0 +1,33 @@
+name: N.2 source artifact
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source-artifact:
+    if: github.event.pull_request.number == 65
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Package reviewed source
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='**/node_modules' \
+            --exclude='**/.next' \
+            --exclude='**/dist' \
+            --exclude='**/build' \
+            -czf /tmp/rei-automation-pr65-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rei-automation-pr65-source
+          path: /tmp/rei-automation-pr65-source.tgz
+          retention-days: 1
+          if-no-files-found: error
