@@ -1,0 +1,110 @@
+{
+  "capturedAt": "2026-08-03T00:47:40.886Z",
+  "mode": "fixture-backed (no production credentials, no live data, no sends)",
+  "selection": {
+    "finalKey": "ct:prospect:prospect-5|property:prop-5|owner:owner-5|phone:+19015551005",
+    "selectionVersion": 7,
+    "selectionCommits": 7,
+    "lastReconcileReason": "reselect_same_thread"
+  },
+  "requestsByResource": {
+    "conversation": 7,
+    "participants": 7
+  },
+  "staleRejections": 7,
+  "abortedRequests": 12,
+  "mounts": {
+    "conversation": 1,
+    "deal_intelligence": 1,
+    "workspace": 1
+  },
+  "remountsAfterSelectionPhase": {
+    "conversation": 1,
+    "deal_intelligence": 1,
+    "workspace": 1
+  },
+  "globalEmptyWorkspaceSamplesDuringBucketSwitch": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "draftPreservedAcrossRefresh": true,
+  "delayedIntelligenceChecked": true,
+  "rowsAvailableForDelayedIntelligenceCheck": 6,
+  "consoleErrors": [],
+  "failedRequests": [
+    "GET http://127.0.0.1:4173/api/cockpit/deal-context/thread/%2B19015551006",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/phones",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551006",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/prospects",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/properties",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/send_queue",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551005",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/properties",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/send_queue",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/prospects",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551004",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551003",
+    "GET http://127.0.0.1:4173/api/cockpit/inbox/thread-messages",
+    "GET http://127.0.0.1:4173/api/cockpit/inbox/thread-hydration",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551003",
+    "GET http://127.0.0.1:4173/_supabase_stub/rest/v1/phones",
+    "GET http://127.0.0.1:4173/api/cockpit/inbox/property-participants",
+    "GET http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551003"
+  ],
+  "duplicateApiRequests": [
+    [
+      "http://127.0.0.1:4173/api/cockpit/inbox/live",
+      4
+    ],
+    [
+      "https://maps.googleapis.com/maps/api/streetview",
+      30
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/inbox/thread-state",
+      7
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551006",
+      6
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/inbox/thread-messages",
+      7
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/inbox/thread-hydration",
+      7
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/inbox/property-participants",
+      7
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551005",
+      5
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551004",
+      3
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551003",
+      3
+    ],
+    [
+      "http://127.0.0.1:4173/api/cockpit/deal-intelligence/thread/%2B19015551002",
+      3
+    ]
+  ]
+}

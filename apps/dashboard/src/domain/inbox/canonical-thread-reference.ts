@@ -111,7 +111,7 @@ export const normalizeCanonicalE164 = (value: unknown): string | null => {
   if (SERVER_THREAD_KEY_RE.test(raw)) return raw
   // Reject anything carrying non-phone characters before touching the digits, so a UUID
   // or a slug can never have its digit run reinterpreted as a phone number.
-  if (/[^\d\s()+.\-]/.test(raw)) return null
+  if (/[^\d\s()+.-]/.test(raw)) return null
   const digits = raw.replace(/\D/g, '')
   if (digits.length === 10) return `+1${digits}`
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
@@ -136,8 +136,15 @@ export const extractCanonicalPhoneFromCompositeKey = (value: unknown): string | 
   return normalizeCanonicalE164(segment)
 }
 
-/** Loose record shape — Deal Desk threads arrive in camelCase and snake_case forms. */
-export type ThreadIdentityInput = Record<string, unknown> | null | undefined
+/**
+ * Loose record shape — Deal Desk threads arrive in camelCase and snake_case forms, and
+ * as declared interfaces (`InboxWorkflowThread`) that carry no index signature. `object`
+ * accepts all of them; every read below goes through an explicit cast and a defined-check,
+ * so an unexpected shape yields `null` rather than a wrong identity.
+ */
+export type ThreadIdentityInput = object | null | undefined
+
+const asRecord = (thread: object): Record<string, unknown> => thread as Record<string, unknown>
 
 export interface ResolveThreadReferenceOptions {
   /**
@@ -192,12 +199,13 @@ const firstNonEmpty = (thread: Record<string, unknown>, keys: readonly string[])
  */
 export const resolveDialablePhoneFromThread = (thread: ThreadIdentityInput): string | null => {
   if (!thread) return null
+  const record = asRecord(thread)
   for (const key of PHONE_FIELD_CANDIDATES) {
-    const resolved = normalizeCanonicalE164(thread[key])
+    const resolved = normalizeCanonicalE164(record[key])
     if (resolved) return resolved
   }
   for (const key of [...CONVERSATION_ID_CANDIDATES, 'threadKey', 'thread_key']) {
-    const raw = thread[key]
+    const raw = record[key]
     const fromComposite = extractCanonicalPhoneFromCompositeKey(raw)
     if (fromComposite) return fromComposite
     const direct = normalizeCanonicalE164(raw)
@@ -217,7 +225,7 @@ export const resolveCanonicalThreadReference = (
   options: ResolveThreadReferenceOptions = {},
 ): CanonicalThreadReference | null => {
   if (!thread) return null
-  const record = thread as Record<string, unknown>
+  const record = asRecord(thread)
 
   const canonicalE164 = resolveDialablePhoneFromThread(record)
 
@@ -294,6 +302,23 @@ export const resolveWritableThreadKey = (
   return { ok: false, reason: reference.reason ?? 'no_canonical_phone', reference }
 }
 
+/**
+ * Identifier for a thread-scoped server GET route (`/deal-intelligence/thread/{key}`,
+ * `/inbox/thread-dossier/{key}`).
+ *
+ * Prefers the canonical phone, which is what these routes have always received and what
+ * the server's thread identity currently is (DD-012). Falls back to the selection key
+ * only when the thread has no dialable phone at all. Every caller must use this, or the
+ * same conversation gets fetched twice under two key shapes — which is exactly what the
+ * runtime verification for this lane caught.
+ */
+export const resolveThreadRouteKey = (
+  reference: CanonicalThreadReference | null | undefined,
+): string | null => {
+  if (!reference) return null
+  return reference.canonicalE164 ?? reference.selectionKey ?? null
+}
+
 /** Stable key for any Deal Desk cache, selection or effect dependency. */
 export const threadSelectionKey = (
   thread: ThreadIdentityInput,
@@ -344,7 +369,7 @@ export const threadMatchesLooseRef = (
   options: ResolveThreadReferenceOptions = {},
 ): boolean => {
   const needle = asTrimmedString(ref)
-  if (!needle) return false
+  if (!needle || !thread) return false
   const reference = resolveCanonicalThreadReference(thread, options)
   if (!reference) return false
   if (reference.selectionKey === needle) return true
@@ -353,7 +378,7 @@ export const threadMatchesLooseRef = (
   if (reference.canonicalE164 && reference.canonicalE164 === needle) return true
   // A raw `threadKey` that is neither the selection key nor the row id (a legacy shape)
   // still identifies the row, but only by exact string equality.
-  const record = thread as Record<string, unknown>
+  const record = asRecord(thread)
   return asTrimmedString(record.threadKey ?? record.thread_key) === needle
 }
 

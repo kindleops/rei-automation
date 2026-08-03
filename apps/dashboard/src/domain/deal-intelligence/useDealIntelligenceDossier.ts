@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchDealIntelligenceDossier, getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
+import {
+  resolveCanonicalThreadReference,
+  resolveThreadRouteKey,
+} from '../inbox/canonical-thread-reference'
 import type { DealIntelligenceDossier, EngineProgressStage } from './deal-intelligence.types'
 import { ENGINE_STAGE_DISPLAY_ORDER, ENGINE_STAGE_LABELS } from './deal-intelligence.types'
 
@@ -108,7 +112,13 @@ export function useDealIntelligenceDossier(
     if (currentThread.masterOwnerId) qs.set('master_owner_id', currentThread.masterOwnerId)
 
     try {
-      const result = await fetchDealIntelligenceDossier(currentThread.threadKey, qs.toString(), signal)
+      // Same route key as the thread-select orchestrator, so one conversation is never
+      // fetched twice under two different key shapes (N.1 runtime verification).
+      const routeKey =
+        resolveThreadRouteKey(
+          resolveCanonicalThreadReference(currentThread as unknown as Record<string, unknown>),
+        ) ?? currentThread.threadKey
+      const result = await fetchDealIntelligenceDossier(routeKey, qs.toString(), signal)
       if (requestId !== requestIdRef.current) return
       if (!result.ok) throw new Error(`dossier_http_${result.status}`)
       const payload = result.data as { ok?: boolean; data?: DealIntelligenceDossier; error?: string }

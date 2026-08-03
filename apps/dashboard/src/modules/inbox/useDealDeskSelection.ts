@@ -19,7 +19,7 @@
  *     workspace stays renderable while the next list request is in flight (DD-017).
  */
 
-import { useCallback, useMemo, useReducer, useRef } from 'react'
+import { useCallback, useMemo, useReducer, useState } from 'react'
 import {
   dealDeskSelectionReducer,
   initialDealDeskSelectionState,
@@ -41,7 +41,8 @@ import {
 } from '../../domain/inbox/selection-request-guard'
 import type { CanonicalThreadReference } from '../../domain/inbox/canonical-thread-reference'
 
-type ThreadLike = Record<string, unknown>
+/** Accepts declared interfaces (`InboxWorkflowThread`) as well as loose records. */
+type ThreadLike = object
 
 /** How many previously visited threads stay renderable after leaving them. */
 const REMEMBERED_THREAD_LIMIT = 50
@@ -86,32 +87,34 @@ export function useDealDeskSelection<TThread extends ThreadLike>(
     initialDealDeskSelectionState,
   )
 
-  const guardRef = useRef<SelectionRequestGuard | null>(null)
-  if (guardRef.current === null) guardRef.current = createSelectionRequestGuard()
-  const guard = guardRef.current
-
+  // Lazily-created singletons. `useState` rather than `useRef` because both are read
+  // during render (the guard is handed to callers, the remembered map backs the
+  // anti-blank fallback), and reading a ref during render is unsafe under concurrent
+  // rendering. Neither value is ever replaced, so no re-render is ever triggered.
+  const [guard] = useState<SelectionRequestGuard>(createSelectionRequestGuard)
   // Last-known thread object per selection key. This is what keeps the center and right
   // panels rendering the previous conversation while a new bucket list is in flight.
-  const rememberedRef = useRef<Map<string, TThread>>(new Map())
+  const [remembered] = useState<Map<string, TThread>>(() => new Map())
 
   const rememberThread = useCallback((thread: TThread | null | undefined) => {
     if (!thread) return
     const reference = resolveDealDeskThreadReference(thread)
     if (!reference) return
-    const store = rememberedRef.current
-    store.delete(reference.selectionKey)
-    store.set(reference.selectionKey, thread)
-    if (store.size > REMEMBERED_THREAD_LIMIT) {
-      const oldest = store.keys().next()
-      if (!oldest.done) store.delete(oldest.value)
+    // Re-inserting gives the Map recency ordering, so the trim below drops the
+    // least-recently-visited conversation rather than an arbitrary one.
+    remembered.delete(reference.selectionKey)
+    remembered.set(reference.selectionKey, thread)
+    if (remembered.size > REMEMBERED_THREAD_LIMIT) {
+      const oldest = remembered.keys().next()
+      if (!oldest.done) remembered.delete(oldest.value)
     }
-  }, [])
+  }, [remembered])
 
   const resolveRememberedThread = useCallback((key: string | null | undefined): TThread | null => {
     const normalized = String(key ?? '').trim()
     if (!normalized) return null
-    return rememberedRef.current.get(normalized) ?? null
-  }, [])
+    return remembered.get(normalized) ?? null
+  }, [remembered])
 
   const selectThread = useCallback(
     (

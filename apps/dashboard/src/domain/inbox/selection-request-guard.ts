@@ -146,6 +146,8 @@ export function createSelectionRequestGuard(): SelectionRequestGuard {
         resourceStat(token.resource).accepted += 1
         return true
       }
+      // The response belongs to a superseded selection or generation. Counted here, at
+      // the point of refusal, so the tally reflects responses actually discarded.
       stats.rejectedStale += 1
       resourceStat(token.resource).rejectedStale += 1
       return false

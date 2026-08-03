@@ -15,7 +15,8 @@
 import { resolveDealDeskThreadReference } from './deal-desk-thread-reference'
 import type { DealDeskSelectionCandidate } from './deal-desk-selection'
 
-type ThreadLike = Record<string, unknown> | null | undefined
+/** Accepts declared interfaces (`InboxWorkflowThread`) as well as loose records. */
+type ThreadLike = object | null | undefined
 
 const readId = (thread: Record<string, unknown>, keys: readonly string[]): string | null => {
   for (const key of keys) {
@@ -42,7 +43,7 @@ export const toSelectionCandidate = (
   if (!thread) return null
   const reference = resolveDealDeskThreadReference(thread)
   if (!reference) return null
-  const record = thread as Record<string, unknown>
+  const record = thread as unknown as Record<string, unknown>
   return {
     reference,
     propertyId: readId(record, PROPERTY_ID_FIELDS),

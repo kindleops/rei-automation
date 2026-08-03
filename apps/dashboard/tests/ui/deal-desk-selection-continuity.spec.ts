@@ -68,7 +68,11 @@ const threadById = new Map(ALL_THREADS.map((t) => [t.id, t]))
 const routeDelays: Record<string, number> = {}
 
 const jsonRoute = async (route: Route, body: unknown, delayMs = 0) => {
-  if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  // `routeDelays.all` slows EVERY stubbed response. Used to force overlapping in-flight
+  // requests without having to know which exact endpoint serves a given resource — the
+  // app has several fallbacks per resource.
+  const effectiveDelay = Math.max(delayMs, routeDelays.all ?? 0)
+  if (effectiveDelay > 0) await new Promise((resolve) => setTimeout(resolve, effectiveDelay))
   await route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -76,11 +80,81 @@ const jsonRoute = async (route: Route, body: unknown, delayMs = 0) => {
   })
 }
 
+/**
+ * Synthetic Supabase session.
+ *
+ * `.env.local` points `VITE_SUPABASE_URL` at `http://127.0.0.1:4173/_supabase_stub`, a
+ * local origin that does not exist. These handlers answer its auth endpoints so the
+ * dashboard's auth gate opens. No production Supabase project is contacted and no real
+ * credential is used anywhere in this file.
+ */
+const STUB_USER = {
+  id: '00000000-0000-4000-8000-000000000001',
+  aud: 'authenticated',
+  role: 'authenticated',
+  email: 'fixture@localhost.invalid',
+  app_metadata: {},
+  user_metadata: {},
+  created_at: '2026-01-01T00:00:00.000Z',
+}
+
+const STUB_SESSION = {
+  access_token: 'fixture-access-token',
+  refresh_token: 'fixture-refresh-token',
+  token_type: 'bearer',
+  expires_in: 3600,
+  expires_at: Math.floor(Date.now() / 1000) + 3600,
+  user: STUB_USER,
+}
+
+async function installSupabaseAuthStub(page: Page) {
+  // Seed the session into localStorage so `getSession()` resolves without a network call.
+  await page.addInitScript((session) => {
+    try {
+      window.localStorage.setItem(
+        'sb-127-auth-token',
+        JSON.stringify({ currentSession: session, expiresAt: session.expires_at }),
+      )
+    } catch { /* storage unavailable — the route handlers below still cover it */ }
+  }, STUB_SESSION)
+
+  await page.route('**/_supabase_stub/auth/v1/user**', (route) =>
+    jsonRoute(route, STUB_USER))
+  await page.route('**/_supabase_stub/auth/v1/token**', (route) =>
+    jsonRoute(route, STUB_SESSION))
+  await page.route('**/_supabase_stub/auth/v1/**', (route) =>
+    jsonRoute(route, { data: { session: STUB_SESSION, user: STUB_USER } }))
+  // Realtime is intentionally unavailable: the workspace must degrade to polling, which
+  // is itself one of the behaviours under test.
+  await page.route('**/_supabase_stub/realtime/**', (route) => route.abort())
+  await page.route('**/_supabase_stub/rest/**', (route) => jsonRoute(route, []))
+}
+
 async function installFixtures(page: Page) {
   await page.addInitScript(() => {
     ;(window as Window & { __DEAL_DESK_PROOF_ENABLED__?: boolean }).__DEAL_DESK_PROOF_ENABLED__ = true
     // Auto-select is left ON: it is part of what this spec verifies.
   })
+
+  await installSupabaseAuthStub(page)
+
+  // NOTE: Playwright matches `page.route` handlers in REVERSE registration order — the
+  // most recently registered wins. The broad catch-alls are therefore registered FIRST so
+  // the specific fixture handlers below take precedence over them.
+
+  // Hard stop: nothing may leave for a real Supabase project, backend or message provider.
+  // If any of these ever fire, the run is invalid and the abort makes that loud.
+  await page.route('**://*.supabase.co/**', (route) => route.abort())
+  await page.route('**://*.textgrid.com/**', (route) => route.abort())
+  await page.route('**://*.vercel.app/**', (route) => route.abort())
+
+  // Anything else under the stubbed backend returns an empty OK so nothing 404-storms.
+  // The catch-all honours `routeDelays.catchAll` so a scenario can slow down whichever
+  // endpoint the app actually uses for a resource without having to name it exactly.
+  await page.route('**/api/cockpit/**', (route) =>
+    jsonRoute(route, { ok: true, data: null }, routeDelays.catchAll ?? 0))
+  await page.route('**/api/internal/**', (route) =>
+    jsonRoute(route, { ok: true, data: null }, routeDelays.catchAll ?? 0))
 
   await page.route('**/api/cockpit/inbox/live**', async (route) => {
     const url = new URL(route.request().url())
@@ -133,12 +207,6 @@ async function installFixtures(page: Page) {
       ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"ok":false}' })
       : jsonRoute(route, { ok: true, data: {} }, routeDelays.intelligence ?? 0))
 
-  // Anything else under the cockpit API returns an empty OK so nothing 404-storms.
-  await page.route('**/api/cockpit/**', (route) => jsonRoute(route, { ok: true, data: null }))
-
-  // Hard stop: no request may leave for Supabase or a message provider.
-  await page.route('**://*.supabase.co/**', (route) => route.abort())
-  await page.route('**://*.textgrid.com/**', (route) => route.abort())
 }
 
 const readProof = (page: Page) =>
@@ -148,6 +216,10 @@ const threadRows = (page: Page) =>
   page.locator('[data-thread-id], .nx-thread-card-rebuilt, .nx-thread-row')
 
 test.describe('Deal Desk selection and hydration continuity (fixture-backed)', () => {
+  // The scenario deliberately injects response delays to force races, so it needs more
+  // than the project-wide 60s budget.
+  test.setTimeout(180_000)
+
   test.beforeEach(async ({ page }) => {
     Object.keys(routeDelays).forEach((k) => delete routeDelays[k])
     await installFixtures(page)
@@ -172,13 +244,17 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
     const rowCount = Math.min(await rows.count(), 5)
     expect(rowCount, 'fixture list must render at least 3 rows').toBeGreaterThanOrEqual(3)
 
-    routeDelays.messages = 400 // force responses to overlap the next click
+    // Slow every stubbed response so each selection's fetches are still in flight when
+    // the next click lands. This is what makes the stale-response race real rather than
+    // theoretical.
+    routeDelays.all = 500
     for (let i = 0; i < rowCount; i += 1) {
       await rows.nth(i).click()
       await page.waitForTimeout(40)
     }
-    await page.waitForTimeout(1200)
-    delete routeDelays.messages
+    // Long enough for every superseded response to arrive and be refused.
+    await page.waitForTimeout(2500)
+    delete routeDelays.all
 
     const afterRapid = await readProof(page)
     expect(afterRapid, 'proof counters must be published').not.toBeNull()
@@ -227,17 +303,27 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
     expect(afterRefresh!.selectionVersion).toBe(beforeRefresh!.selectionVersion)
 
     // ── 8-9. a delayed Intelligence response cannot overwrite the current property ──
+    // Return to a bucket that definitely holds two rows before forcing the delayed
+    // Intelligence response — the previous bucket may legitimately hold only one.
+    const allTab = page.getByRole('tab', { name: /All Threads|All Conversations|All Messages/i }).first()
+    if (await allTab.count() > 0) {
+      await allTab.click()
+      await page.waitForTimeout(1200)
+    }
     routeDelays.intelligence = 1200
     const rowsNow = threadRows(page)
-    if (await rowsNow.count() >= 2) {
+    const rowsNowCount = await rowsNow.count()
+    let delayedIntelligenceChecked = false
+    if (rowsNowCount >= 2) {
       await rowsNow.nth(0).click()
       await page.waitForTimeout(80)
       await rowsNow.nth(1).click()   // switch away while intelligence is still in flight
-      await page.waitForTimeout(1800)
-      const afterDelayed = await readProof(page)
       const expectedKey = await rowsNow.nth(1).getAttribute('data-thread-id')
+      await page.waitForTimeout(2000)
+      const afterDelayed = await readProof(page)
       if (expectedKey) {
         expect(afterDelayed!.selectionKey, 'a late Intelligence response must not re-point the workspace').toBe(expectedKey)
+        delayedIntelligenceChecked = true
       }
     }
     delete routeDelays.intelligence
@@ -272,6 +358,8 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
       remountsAfterSelectionPhase: remountsAfterSelection,
       globalEmptyWorkspaceSamplesDuringBucketSwitch: blankSamples,
       draftPreservedAcrossRefresh: draftPreserved,
+      delayedIntelligenceChecked,
+      rowsAvailableForDelayedIntelligenceCheck: rowsNowCount,
       consoleErrors,
       failedRequests,
       duplicateApiRequests: Object.entries(

@@ -20,6 +20,8 @@ export interface DealDeskProofCounters {
   selectionCommits: number
   /** Requests issued per resource for the current session. */
   requestsByResource: Record<string, number>
+  /** Responses that proved current and were allowed to commit. */
+  acceptedResponses: number
   /** Responses refused because they belonged to a superseded selection. */
   staleRejections: number
   /** Requests cancelled because a newer request superseded them. */
@@ -44,6 +46,7 @@ const emptyCounters = (): DealDeskProofCounters => ({
   selectionVersion: 0,
   selectionCommits: 0,
   requestsByResource: {},
+  acceptedResponses: 0,
   staleRejections: 0,
   abortedRequests: 0,
   mounts: {},
@@ -101,11 +104,13 @@ export const markDealDeskSelection = (input: {
 
 /** Mirror the selection request guard's counters. */
 export const markDealDeskGuardStats = (stats: {
+  accepted: number
   rejectedStale: number
   aborted: number
   byResource: Record<string, { issued: number }>
 }): void => {
   if (!isEnabled()) return
+  counters.acceptedResponses = stats.accepted
   counters.staleRejections = stats.rejectedStale
   counters.abortedRequests = stats.aborted
   counters.requestsByResource = Object.fromEntries(

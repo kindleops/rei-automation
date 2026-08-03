@@ -223,7 +223,6 @@ import {
   type ViewWidthPercent,
 } from '../../domain/inbox/view-layout'
 import {
-  buildIsStillSelected,
   createThreadSelectHandlers,
   executeThreadSelectFetches,
   planThreadSelect,
@@ -681,12 +680,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
    * longer independently decide which thread is selected.
    */
   const dealDeskSelection = useDealDeskSelection<InboxWorkflowThread>('all_messages')
+  // Destructured so effects and callbacks depend on the individually stable actions
+  // rather than on the hook object, whose identity changes with the selection state.
   const {
     selectionKey: canonicalSelectionKey,
     selectionVersion,
     selectedId,
-    selectedThreadKey,
     guard: selectionGuard,
+    selectThread,
+    selectFromExternalContext,
+    clearSelection: clearThreadSelection,
+    requestBucket,
+    reconcileList,
+    rememberThread,
+    resolveRememberedThread,
   } = dealDeskSelection
   const [activeContext, setActiveContextState] = useState<ActiveInboxContext>({ sourceView: 'inbox' })
   const [previewContext, setPreviewContext] = useState<ActiveInboxContext | null>(null)
@@ -827,19 +834,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => new Map(threads.map((t) => [t.id, t])),
     [threads],
   )
-  const threadByKey = useMemo(
-    () => {
-      const byKey = new Map<string, InboxWorkflowThread>()
-      for (const thread of threads) {
-        const conversationId = getConversationThreadIdForThread(thread)
-        if (conversationId) byKey.set(conversationId, thread)
-        if (thread.threadKey) byKey.set(thread.threadKey, thread)
-        if (thread.id) byKey.set(thread.id, thread)
-      }
-      return byKey
-    },
-    [threads],
-  )
+  // NOTE: the former `threadByKey` map (conversation id + threadKey + id all pointing at
+  // the same row) is gone. Its only consumer was the multi-representation `selected` memo;
+  // lookups now go through `threadBySelectionKey`, keyed by the one canonical key.
 
   // Phase 2 trace — log whether the thread array reference is stable across refreshes
   useEffect(() => {
@@ -1092,8 +1089,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const byId = threadById.get(selectedId)
       if (byId) return byId
     }
-    return dealDeskSelection.resolveRememberedThread(canonicalSelectionKey)
-  }, [canonicalSelectionKey, dealDeskSelection, selectedId, threadById, threadBySelectionKey])
+    return resolveRememberedThread(canonicalSelectionKey)
+  }, [canonicalSelectionKey, resolveRememberedThread, selectedId, threadById, threadBySelectionKey])
 
   // Stable string key — the message effect depends on this so it only fires when the
   // thread changes, not on every inbox refresh that produces a new object reference.
@@ -1232,8 +1229,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   // Keep the last-known object for the selected conversation renderable. This is what
   // lets the workspace survive a bucket switch without blanking (DD-017).
   useEffect(() => {
-    if (selected) dealDeskSelection.rememberThread(selected)
-  }, [dealDeskSelection, selected])
+    if (selected) rememberThread(selected)
+  }, [rememberThread, selected])
   const buyerDataEnabled = selectedWorkspaceViews.includes('buyer_match') || selectedWorkspaceViews.includes('command_map')
   const buyerCommandData = useBuyerCommandData(workspaceThread, buyerFilters, { enabled: buyerDataEnabled })
 
@@ -1296,8 +1293,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // No match: routing context stays pointed at the entity, but we do NOT invent a
     // selection out of a bare threadKey — that was one of the eight representations.
     if (!match) return
-    dealDeskSelection.selectFromExternalContext(match)
-  }, [dealDeskSelection, effectiveActiveContext, selected, threads])
+    selectFromExternalContext(match)
+  }, [effectiveActiveContext, selectFromExternalContext, selected, threads])
 
   /**
    * Reconcile the canonical selection against every resolved list.
@@ -1316,8 +1313,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (_dataLoading) return
-    dealDeskSelection.reconcileList(String(viewFilter), filtered)
-  }, [_dataLoading, dealDeskSelection, filtered, isMobileInboxShell, viewFilter])
+    reconcileList(String(viewFilter), filtered)
+  }, [_dataLoading, filtered, isMobileInboxShell, reconcileList, viewFilter])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
 
@@ -1432,7 +1429,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSidebarListScrollOffset(0)
     // DD-017: mark the *list* as transitioning. The selection and its hydrated panels are
     // deliberately left intact until the new list resolves and the reducer reconciles.
-    dealDeskSelection.requestBucket(String(nextView))
+    requestBucket(String(nextView))
     void refreshInbox({
       filters: {
         view: nextView,
@@ -1450,7 +1447,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setSelectedWorkspaceViews((current) => (['thread', ...current] as InboxWorkspaceView[]).slice(0, MAX_TOGGLED_VIEWS))
     }
     pushRoutePath('/inbox')
-  }, [refreshInbox, searchQuery, selectedWorkspaceViews, serverAdvancedPayload, stageFilter])
+  }, [refreshInbox, requestBucket, searchQuery, selectedWorkspaceViews, serverAdvancedPayload, stageFilter])
 
   const viewLabelByKey = useMemo(
     () => new Map(WORKSPACE_VIEW_OPTIONS.map((view) => [view.key, view.label.replace(' View', '')])),
@@ -1587,7 +1584,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // branch and blanked the center and right panels before an auto-select effect picked
     // another row. The transition is now list-local: the previously hydrated workspace
     // stays on screen and the reducer reconciles once the new rows land.
-    dealDeskSelection.requestBucket(String(nextView))
+    requestBucket(String(nextView))
 
     // Load category-specific rows from backend so paginated local state reflects the selected tab.
     void refreshInbox({
@@ -1603,7 +1600,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       _timeoutMode: 'manual_bucket_switch',
       _refreshReason: 'manual_bucket_switch',
     })
-  }, [DEV, advancedFilters, refreshInbox, searchQuery, stageFilter, viewFilter])
+  }, [advancedFilters, DEV, refreshInbox, requestBucket, searchQuery, stageFilter, viewFilter])
 
   const applyRightSavedPreset = useCallback((preset: InboxSavedFilterPreset) => {
     if (DEV) {
@@ -1635,7 +1632,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setAdvancedFilters(cleared)
     setSavedPreset('all_messages')
     // Filter reset is a list transition, not a selection teardown (DD-017).
-    dealDeskSelection.requestBucket('all_conversations')
+    requestBucket('all_conversations')
     void refreshInbox({
       filters: {
         view: 'all_conversations',
@@ -1648,7 +1645,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       _force: true,
       _refreshReason: 'clear_all_filters',
     })
-  }, [refreshInbox])
+  }, [refreshInbox, requestBucket])
 
   const handleApplyAdvancedFilters = useCallback((payload: {
     view: InboxViewSelectValue
@@ -1925,7 +1922,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const match = findThreadForActiveContext(threads, merged)
       // Routing context anchors a selection only when it resolves to a real thread. A
       // bare `threadKey` no longer becomes a selection of its own (DD-018).
-      if (match) dealDeskSelection.selectFromExternalContext(match)
+      if (match) selectFromExternalContext(match)
       return merged
     })
     setPreviewContext(null)
@@ -1966,7 +1963,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       focusWorkspaceView('sms_thread')
       if (isMobileInboxShell) setMobileThreadOpen(true)
     }
-  }, [dealDeskSelection, focusWorkspaceView, isMobile, isMobileInboxShell, isRouteFullscreen, threads])
+  }, [focusWorkspaceView, isMobile, isMobileInboxShell, isRouteFullscreen, selectFromExternalContext, threads])
 
   const resolveDealIntelThreadId = useCallback((): string | null => {
     const active = selectedRef.current
@@ -1979,8 +1976,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const match = threads.find((thread) => dealDeskThreadMatchesRef(thread, threadId))
       ?? filtered.find((thread) => dealDeskThreadMatchesRef(thread, threadId))
     if (!match) return false
-    return dealDeskSelection.selectThread(match)
-  }, [dealDeskSelection, filtered, threads])
+    return selectThread(match)
+  }, [filtered, selectThread, threads])
 
   const handleOpenDealIntelligence = useCallback((threadId?: string | null) => {
     const resolvedThreadId = threadId || resolveDealIntelThreadId()
@@ -2137,17 +2134,28 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       DEAL_DESK_RESOURCES.conversation,
       { selectionKey: selectedKeyForEffect, selectionVersion },
     )
+    // Publish here as well as at the settle points: a superseded request is counted as
+    markDealDeskGuardStats(selectionGuard.stats())
     const controller = { signal: hydrationSignal }
-    const isStillSelected = buildIsStillSelected(
-      selectedKeyForEffect,
-      () => {
-        if (!selectionGuard.isCurrent(hydrationToken)) return null
-        const active = selectedRef.current
-        if (!active) return null
-        return resolveMessageCacheKeyForThread(active)
-      },
-      () => cancelled,
-    )
+    /**
+     * Called once per resolved (or rejected) primary fetch.
+     *
+     * The guard is consulted FIRST, before the local `cancelled` flag. `buildIsStillSelected`
+     * short-circuits on `cancelled`, which meant a superseded response never reached the
+     * guard and every stale rejection went uncounted — the first runtime-verification pass
+     * showed `staleRejections: 0` alongside `abortedRequests: 6`. Protection was working;
+     * the measurement was blind.
+     */
+    const isStillSelected = () => {
+      const acceptedByGuard = selectionGuard.accept(hydrationToken)
+      // Publish here rather than from a render effect: responses settle long after the
+      // selection changed, so a render effect would only ever sample pre-response counters.
+      markDealDeskGuardStats(selectionGuard.stats())
+      if (!acceptedByGuard || cancelled) return false
+      const active = selectedRef.current
+      if (!active) return false
+      return resolveMessageCacheKeyForThread(active) === selectedKeyForEffect
+    }
 
     markThreadSelectTelemetry({
       cacheHit: plan.telemetry.cacheHit,
@@ -2259,12 +2267,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     return () => {
       cancelled = true
-      // Settling the token records the stale rejection and aborts the in-flight requests.
-      selectionGuard.accept(hydrationToken)
+      // Invalidate the token and cancel the in-flight requests. The outcome is
+      // deliberately NOT settled here: at cleanup time this token is still the current
+      // generation, so calling `accept` would record a superseded request as accepted.
       selectionGuard.abortResource(DEAL_DESK_RESOURCES.conversation)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [DEV, selectedKeyForEffect, messageRefetchKey])
+  }, [DEV, selectedKeyForEffect, messageRefetchKey, selectionVersion])
 
   useEffect(() => {
     if (!selectedKeyForEffect || !messageFetchDegraded) return
@@ -2668,7 +2677,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     } finally {
       setDraftTranslationLoading(false)
     }
-  }, [sellerLanguageCode])
+  }, [sellerLanguageCode, setDraftText])
 
 
   useEffect(() => {
@@ -3180,7 +3189,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           ? 0
           : Math.max(0, Math.min(filtered.length - 1, currentIndex + delta))
         const nextThread = filtered[nextIndex]
-        if (nextThread) dealDeskSelection.selectThread(nextThread)
+        if (nextThread) selectThread(nextThread)
         return
       }
 
@@ -3244,7 +3253,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [announceLayout, applySavedPreset, filtered, layoutState.activeOverlay, layoutState.mapMode, layoutState.leftPanelMode, layoutState.inboxMode, openGlobalCommand, selected, setActiveOverlay])
+  }, [announceLayout, applySavedPreset, filtered, layoutState.activeOverlay, layoutState.inboxMode, layoutState.leftPanelMode, layoutState.mapMode, openGlobalCommand, selected, selectThread, setActiveOverlay])
 
   const handleWorkflowMutation = useCallback(async (label: string, mutation: () => Promise<any>, options?: { action?: { label: string, onClick: () => void }, skipRefresh?: boolean }) => {
     try {
@@ -3493,15 +3502,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // used to create a phantom selection whose panels could never hydrate.
     if (!thread) return
     setActiveContext(buildContextFromThread(thread, 'pipeline'), { preserveCurrentViews: true })
-    dealDeskSelection.selectThread(thread)
-  }, [dealDeskSelection, setActiveContext, threads])
+    selectThread(thread)
+  }, [selectThread, setActiveContext, threads])
 
   const handleMobileBack = useCallback(() => {
     setMobileThreadOpen(false)
-    dealDeskSelection.clearSelection('mobile_back')
+    clearThreadSelection('mobile_back')
     setMobileIntelOpen(false)
     setMobileSidebarOpen(false)
-  }, [dealDeskSelection])
+  }, [clearThreadSelection])
 
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)
@@ -3533,7 +3542,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       }
       setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
-      dealDeskSelection.selectThread(thread)
+      selectThread(thread)
     } else if (DEV) {
       // A row id that resolves to no thread carries no identity to select. Anchoring on
       // the bare id used to create a phantom selection that could never hydrate.
@@ -3560,7 +3569,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setMobileThreadOpen(true)
       setMobileIntelOpen(false)
     }
-  }, [DEV, canonicalSelectionKey, dealDeskSelection, isMobileInboxShell, setActiveContext, threads, viewFilter])
+  }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
 
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
@@ -3616,8 +3625,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       DEAL_DESK_RESOURCES.participants,
       { selectionKey: canonicalSelectionKey ?? `property:${propertyId}`, selectionVersion },
     )
+    markDealDeskGuardStats(selectionGuard.stats())
     const controller = { signal: participantsSignal }
-    const stillCurrent = () => !cancelled && selectionGuard.isCurrent(participantsToken)
+    // Settled exactly once per request: `stillCurrent` is consulted from `.then`,
+    // `.catch` and `.finally`, and settling on each would triple-count the outcome.
+    let participantsSettled: boolean | null = null
+    const stillCurrent = () => {
+      if (cancelled) return false
+      if (participantsSettled === null) {
+        participantsSettled = selectionGuard.accept(participantsToken)
+        markDealDeskGuardStats(selectionGuard.stats())
+      }
+      return participantsSettled
+    }
     setPropertyParticipantsLoading(true)
     const fallbackSeed = selected ? (() => {
       const selectedRecord = selected as unknown as Record<string, unknown>
@@ -3724,9 +3744,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const active = syncPayloadFromUniversal(next, activeContext.sourceView ?? 'inbox')
       setActiveContextState((current) => ({ ...current, ...active }))
       const match = findThreadForActiveContext(threads, active)
-      if (match) dealDeskSelection.selectFromExternalContext(match)
+      if (match) selectFromExternalContext(match)
     })
-  }, [activeContext.sourceView, dealDeskSelection, threads])
+  }, [activeContext.sourceView, selectFromExternalContext, threads])
 
   useEffect(() => {
     const active = effectiveActiveContext
@@ -3801,7 +3821,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setUniversalEntityContext(universal)
     setUniversalEntityContextSnapshot(universal)
     const match = findThreadForActiveContext(threads, active)
-    if (match) dealDeskSelection.selectFromExternalContext(match)
+    if (match) selectFromExternalContext(match)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threads])
 
@@ -3948,7 +3968,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         const nextView = typeof detail.view === 'string' ? detail.view as InboxViewSelectValue : 'priority'
         setViewFilter(nextView)
         // List transition, not a selection teardown (DD-017).
-        dealDeskSelection.requestBucket(String(nextView))
+        requestBucket(String(nextView))
         void refreshInbox({
           filters: {
             view: nextView,
@@ -3987,7 +4007,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
     return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
-  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, searchQuery, setSourceMode, setActiveContext, stageFilter])
+  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, requestBucket, searchQuery, setActiveContext, setSourceMode, stageFilter])
 
   const handleMapSellerContext = useCallback((context: {
     propertyId?: string
@@ -4102,7 +4122,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       default:
         console.warn('[OperatorAction] Unknown action', action)
     }
-  }, [threads, handleWorkflowMutation, handleThreadAction, handleOpenDealIntelligence, setActiveOverlay, DEV])
+  }, [DEV, handleOpenDealIntelligence, handleThreadAction, handleWorkflowMutation, setActiveOverlay, setDraftText, threads])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
@@ -4246,7 +4266,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       inFlightSendMapRef.current.delete(clientSendId)
       setIsSending(false)
     }
-  }, [currentInboxQuery, isSending, refreshInbox, selected, selectedSuppressed, threadContext])
+  }, [currentInboxQuery, isSending, refreshInbox, selected, selectedSuppressed, setDraftText, threadContext])
 
   const handleSendTemplate = useCallback(async (payload: TemplateActionPayload) => {
     await handleSend(payload.text, payload.template)
@@ -4268,7 +4288,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (result.ok) {
       setDraftText('')
     }
-  }, [selected, threadContext])
+  }, [selected, setDraftText, threadContext])
 
 
   const handleSelectCalendarEvent = useCallback((event: import('../../lib/data/calendarData').CalendarEvent) => {
@@ -4308,11 +4328,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setScheduledTemplatePayload(payload)
     setDraftText(payload.text)
     setSchedulePanelOpen(true)
-  }, [])
+  }, [setDraftText])
 
   const insertAiSuggestion = useCallback((suggestionText: string) => {
     setDraftText(suggestionText)
-  }, [])
+  }, [setDraftText])
 
   const updateAutonomyControl = useCallback(async (
     patch: Partial<AutonomyControlState>,

@@ -15,7 +15,11 @@ import {
   resolveThreadMessageCacheKey,
 } from './thread-selection-cache'
 import { markUncachedMessagesMs } from './inbox-proof-bridge'
-import { threadSelectionKey } from './canonical-thread-reference'
+import {
+  resolveCanonicalThreadReference,
+  resolveThreadRouteKey,
+  threadSelectionKey,
+} from './canonical-thread-reference'
 
 export type ThreadSelectFetchKind = 'messages' | 'hydration' | 'thread_context' | 'dossier' | 'participants'
 
@@ -217,9 +221,12 @@ export function createThreadSelectHandlers(
       if (masterOwnerId) qs.set('master_owner_id', masterOwnerId)
       if (thread.canonicalE164) qs.set('canonical_e164', thread.canonicalE164)
       // Route identifier comes from the shared contract rather than an ad-hoc
-      // `threadKey || id` fallback, so the dossier route and the thread-state writes
-      // agree on what identifies this conversation (DD-003).
-      const threadKey = resolveThreadCacheKey(thread, thread.id)
+      // `threadKey || id` fallback (DD-003). `resolveThreadRouteKey` is used by *every*
+      // Deal Intelligence caller so one conversation is never fetched twice under two
+      // different key shapes.
+      const threadKey =
+        resolveThreadRouteKey(resolveCanonicalThreadReference(thread as unknown as Record<string, unknown>))
+        ?? resolveThreadCacheKey(thread, thread.id)
       const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
       if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }
       const payload = result.data as { ok?: boolean; data?: Record<string, unknown> }
