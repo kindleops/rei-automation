@@ -65,10 +65,18 @@ export interface CanonicalControlHandle<T extends string> {
   dismissError: () => void
 }
 
-/** In-flight overlay for one field. Absent means "show the authoritative value". */
+/**
+ * Per-field overlay. Absent means "show the authoritative value".
+ *
+ * `confirmed` exists because dropping the overlay the instant the server confirms would
+ * fall back to `spec.serverValue`, which still holds the *pre-mutation* value until the
+ * caller re-reads the row — so the control would visibly revert and then jump forward.
+ * The confirmed overlay holds the persisted value until `serverValue` catches up.
+ */
 type Overlay<T> =
   | { kind: 'pending'; optimisticValue: T; mutationId: string }
-  | { kind: 'failed'; error: { kind: MutationErrorKind; message: string } }
+  | { kind: 'confirmed'; persistedValue: T }
+  | { kind: 'failed'; error: { kind: MutationErrorKind; message: string; code?: string } }
 
 const UNSUPPORTED_MESSAGE =
   'This conversation has no writable canonical phone route, so its state cannot be saved.'
@@ -127,9 +135,11 @@ export function useCanonicalControlMutations<T extends string>(
       setOverlay(field, { kind: 'pending', optimisticValue: resolution.value, mutationId })
 
       let result: CanonicalControlMutationResult
+      let transportFailed = false
       try {
         result = await spec.persist(resolution.value)
       } catch {
+        transportFailed = true
         result = { ok: false, errorMessage: 'The change could not be sent. Check your connection and retry.' }
       }
 
@@ -141,7 +151,13 @@ export function useCanonicalControlMutations<T extends string>(
         // authoritative `serverValue`, which is what the database still holds.
         setOverlay(field, {
           kind: 'failed',
-          error: { kind: 'server_error', message: result.errorMessage || 'The change could not be saved.' },
+          error: {
+            // A thrown request is a transport failure, not a server rejection.
+            kind: transportFailed ? 'network' : 'server_error',
+            message: result.errorMessage || 'The change could not be saved.',
+            // Machine-readable code retained for telemetry; never rendered.
+            code: result.errorCode ?? undefined,
+          },
         })
         return
       }
@@ -160,9 +176,8 @@ export function useCanonicalControlMutations<T extends string>(
         })
         return
       }
-      // Clear the overlay. The caller re-reads the row, so `serverValue` becomes the
-      // persisted value; until it does, showing the authoritative value is still correct.
-      setOverlay(field, undefined)
+      // Hold the persisted value until the caller's refetch makes `serverValue` match it.
+      setOverlay(field, { kind: 'confirmed', persistedValue: persisted })
     },
     [setOverlay, tracker, unsupported],
   )
@@ -170,11 +185,20 @@ export function useCanonicalControlMutations<T extends string>(
   return useMemo(() => {
     const out: Record<string, CanonicalControlHandle<T>> = {}
     for (const spec of specs) {
-      const overlay = overlays[spec.field]
+      let overlay = overlays[spec.field]
+      // A confirmed overlay retires itself once the authoritative value catches up, so it
+      // can never mask a later server-side change.
+      if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) {
+        overlay = undefined
+      }
       out[spec.field] = {
-        // Derived, not synchronised: the overlay wins while in flight, otherwise the
+        // Derived, not synchronised: an overlay wins while it exists, otherwise the
         // authoritative server value shows through automatically.
-        value: overlay?.kind === 'pending' ? overlay.optimisticValue : spec.serverValue,
+        value: overlay?.kind === 'pending'
+          ? overlay.optimisticValue
+          : overlay?.kind === 'confirmed'
+            ? overlay.persistedValue
+            : spec.serverValue,
         pending: overlay?.kind === 'pending',
         failed: overlay?.kind === 'failed',
         errorMessage: overlay?.kind === 'failed' ? overlay.error.message : null,

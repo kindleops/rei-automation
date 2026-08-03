@@ -98,8 +98,11 @@ export const confirmMutation = <T>(
   mutationId: string,
   serverValue: T,
 ): MutationState<T> => {
-  // A response for a superseded mutation must not commit.
-  if (state.status === 'pending' && state.mutationId !== mutationId) return state
+  // Only a *pending* mutation may be confirmed. Without this, a late response arriving
+  // after `failMutation` (or after `clearMutationError`) would erase the rollback and the
+  // operator-facing error, silently reinstating a value the write never achieved.
+  if (state.status !== 'pending') return state
+  if (state.mutationId !== mutationId) return state
   return { status: 'confirmed', value: serverValue }
 }
 

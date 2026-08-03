@@ -33,8 +33,24 @@ record it. The guard can only make the session more read-only; it cannot cause a
 The guard was removed at the end by reloading the page; `window.__RO_GUARD__` is gone and
 `window.fetch` is native again, verified, so no operator session can be silently blocked.
 
-**No production data was created, updated or deleted. No message was sent. No automation,
-campaign, scrape, queue run or live proof was triggered.**
+### Scope of the write-safety claim — read this before relying on it
+
+The guard wraps **`window.fetch` and `XMLHttpRequest` in one browser context only**. It is
+a convenience barrier, not a security control. It does **not** cover `navigator.sendBeacon`,
+native form submissions, WebSocket frames, service-worker requests, or any other browser
+context.
+
+Therefore the accurate claim is: **no write was observed or emitted over the channels the
+guard covers, and those are the channels this application uses for state mutations.** Every
+mutation path in the Deal Desk code reviewed for N.2 goes through `fetch`, so the coverage
+is believed complete for this application — but that is an argument from code reading, not
+a guarantee from the barrier itself.
+
+A genuine guarantee would need a server-side read-only identity or a network-level deny
+rule. Neither was available for this check.
+
+Within that scope: **no production data was created, updated or deleted; no message was
+sent; no automation, campaign, scrape, queue run or live proof was triggered.**
 
 ---
 

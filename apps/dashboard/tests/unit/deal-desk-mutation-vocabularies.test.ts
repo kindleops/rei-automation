@@ -9,8 +9,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   AUTOMATION_MODE_ORDER,
+  LEGACY_AUTOMATION_MAP,
   LEGACY_STAGE_MAP,
   LEGACY_STATUS_MAP,
+  LEGACY_TEMPERATURE_MAP,
+  OPERATOR_SELECTABLE_AUTOMATION_MODES,
   SUPPRESSION_VOCABULARY,
   UNMAPPED_LEGACY_STAGES,
   describeVocabularyRejection,
@@ -18,6 +21,7 @@ import {
   resolveLeadTemperatureForWrite,
   resolveLifecycleStageForWrite,
   resolveOperationalStatusForWrite,
+  resolveOperatorAutomationMode,
 } from '../../src/domain/lead-state/canonical-control-vocabularies.ts'
 import {
   LEAD_TEMPERATURE_ORDER,
@@ -163,8 +167,28 @@ test('every declared legacy stage alias maps to a real canonical stage', () => {
 
 test('every declared legacy status alias maps to a real canonical status', () => {
   for (const [legacy, canonical] of Object.entries(LEGACY_STATUS_MAP)) {
-    assert.ok((OPERATIONAL_STATUS_ORDER as readonly string[]).includes(canonical), legacy)
-    assert.equal(resolveOperationalStatusForWrite(legacy).ok, true)
+    assert.ok(
+      (OPERATIONAL_STATUS_ORDER as readonly string[]).includes(canonical),
+      `${legacy} maps to ${canonical}, which is not canonical`,
+    )
+    const r = resolveOperationalStatusForWrite(legacy)
+    assert.equal(r.ok, true, `${legacy} must resolve`)
+    // Assert the resolved VALUE, not merely that it resolved — the weaker form would
+    // pass even if the resolver returned an unrelated status.
+    assert.equal(r.ok === true && r.value, canonical, `${legacy} must resolve to ${canonical}`)
+  }
+})
+
+test('every declared legacy temperature and automation alias resolves to its mapping', () => {
+  for (const [legacy, canonical] of Object.entries(LEGACY_TEMPERATURE_MAP)) {
+    const r = resolveLeadTemperatureForWrite(legacy)
+    assert.equal(r.ok, true, legacy)
+    assert.equal(r.ok === true && r.value, canonical, `${legacy} → ${canonical}`)
+  }
+  for (const [legacy, canonical] of Object.entries(LEGACY_AUTOMATION_MAP)) {
+    const r = resolveAutomationModeForWrite(legacy)
+    assert.equal(r.ok, true, legacy)
+    assert.equal(r.ok === true && r.value, canonical, `${legacy} → ${canonical}`)
   }
 })
 
@@ -183,6 +207,38 @@ test('unknown values are rejected, never defaulted to a valid unrelated value', 
     const r = resolveLifecycleStageForWrite(junk)
     assert.equal(r.ok, false, `"${junk}" must not resolve`)
     assert.equal(r.ok === false && r.reason, 'unknown')
+  }
+})
+
+test('inherited Object.prototype keys cannot escape any resolver', () => {
+  // A bare `MAP[key]` truthiness test reaches the prototype chain — `Object.freeze` does
+  // not detach `Object.prototype`. Before the fix, all four resolvers returned
+  // `{ ok: true }` for `constructor` (the Object *function*) and `__proto__` (an object),
+  // typed as canonical string codes, and that value would have reached the write path.
+  const resolvers = [
+    ['lifecycle_stage', resolveLifecycleStageForWrite],
+    ['operational_status', resolveOperationalStatusForWrite],
+    ['lead_temperature', resolveLeadTemperatureForWrite],
+    ['automation_mode', resolveAutomationModeForWrite],
+  ] as const
+  for (const probe of ['constructor', '__proto__', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf']) {
+    for (const [name, resolve] of resolvers) {
+      const r = resolve(probe)
+      assert.equal(r.ok, false, `${name}("${probe}") must not resolve`)
+    }
+  }
+})
+
+test('a resolved alias is always a canonical string, never any other type', () => {
+  const resolvers = [
+    resolveLifecycleStageForWrite, resolveOperationalStatusForWrite,
+    resolveLeadTemperatureForWrite, resolveAutomationModeForWrite,
+  ]
+  for (const resolve of resolvers) {
+    for (const probe of ['constructor', '__proto__', 'ownership_check', 'urgent', 'autopilot_on', 'queued']) {
+      const r = resolve(probe)
+      if (r.ok) assert.equal(typeof r.value, 'string', `${probe} resolved to a non-string`)
+    }
   }
 })
 
@@ -271,6 +327,38 @@ test('a realtime update reconciles once nothing is pending', () => {
 test('reconcile returns the identical state when the value is unchanged', () => {
   const confirmed = confirmMutation(beginMutation(idleMutation('cold'), 'hot', 'm1'), 'm1', 'hot')
   assert.equal(reconcileExternalValue(confirmed, 'hot'), confirmed, 'no churn')
+})
+
+test('operator controls cannot select system-only automation modes', () => {
+  // `operatorSelectable` was declared but unenforced, so nothing stopped an operator
+  // control from persisting a mode the system sets as a consequence of its own state.
+  for (const systemOnly of ['review_required', 'disabled', 'completed']) {
+    assert.equal(resolveAutomationModeForWrite(systemOnly).ok, true, 'system writers may set it')
+    assert.equal(
+      resolveOperatorAutomationMode(systemOnly).ok,
+      false,
+      `an operator must not be able to select "${systemOnly}"`,
+    )
+  }
+  for (const selectable of OPERATOR_SELECTABLE_AUTOMATION_MODES) {
+    assert.equal(resolveOperatorAutomationMode(selectable).ok, true, selectable)
+  }
+  assert.deepEqual([...OPERATOR_SELECTABLE_AUTOMATION_MODES], ['active', 'paused', 'human_controlled'])
+})
+
+test('a late response cannot commit after a terminal transition', () => {
+  // Without the `status === 'pending'` guard, a response arriving after a rollback would
+  // erase both the rollback and the operator-facing error.
+  const failed = failMutation(beginMutation(idleMutation('cold'), 'hot', 'm1'), 'm1', ERR)
+  const late = confirmMutation(failed, 'm1', 'hot')
+  assert.equal(late, failed, 'the rollback and error survive a late response')
+  assert.equal(displayedValue(late), 'cold')
+
+  const cleared = clearMutationError(failed)
+  assert.equal(confirmMutation(cleared, 'm1', 'hot'), cleared, 'nothing pending ⇒ nothing to confirm')
+
+  const confirmed = confirmMutation(beginMutation(idleMutation('cold'), 'hot', 'm2'), 'm2', 'hot')
+  assert.equal(confirmMutation(confirmed, 'm2', 'warm'), confirmed, 'cannot re-confirm')
 })
 
 test('a failed control stays usable for retry and its error can be cleared', () => {

@@ -39,20 +39,25 @@ connection from the paths you changed.
 
 ### 2. Does the target branch auto-deploy to production?
 
-Check the project's Git integration (Vercel dashboard → Project → Settings → Git):
-production branch, and whether "Automatically expose System Environment Variables" /
-auto-deploy is enabled for it.
+Check the project's Git integration (Vercel dashboard → Project → Settings → Git) for
+**one thing only**: which branch is the Production Branch, and whether a push to it
+triggers a production deployment.
 
-Empirical cross-check — look for production deployments whose age lines up with recent
-merges to the branch:
+Do **not** conflate this with "Automatically expose System Environment Variables" — that is
+a separate Vercel control about what the build can read, and it has no bearing on whether a
+merge deploys. They are independent settings and answering one does not answer the other.
+
+Empirical cross-check — list deployments **without truncating**, because a truncated list
+can hide exactly the production entry you are looking for:
 
 ```bash
-npx vercel ls <project> --scope <team> | head -10
+npx vercel ls <project> --scope <team>
 ```
 
-Two production deployments matching your last two merge times means the branch
-auto-deploys. **This check alone is not sufficient before the fact** — it is confirmation,
-not prediction. The settings are the source of truth.
+Look for production deployments whose age lines up with recent merges to the branch. Two
+production deployments matching your last two merge times means the branch auto-deploys.
+**This check alone is not sufficient before the fact** — it is confirmation, not
+prediction. The settings are the source of truth.
 
 ### 3. Which applications will actually deploy?
 
@@ -60,14 +65,17 @@ Record for each connected project: will it build, and will that build be Preview
 Production? Note that a project may build on any push to the branch regardless of which
 subdirectory changed, unless it has an "Ignored Build Step" configured.
 
-Known state for this repository as of 2026-08-03 (re-verify; do not trust this table
-blindly):
+Record the state **per connected project**, not once for the repository — in a monorepo
+the projects differ, and assuming they behave alike is how the 2026-08-03 incident
+happened.
 
-| Project | Production URL | Auto-deploys production from `main`? |
-|---|---|---|
-| `rei-automation-dashboard` | https://ops.leadcommand.ai | **Yes — confirmed twice** |
-| `api` | api-steel-three-96.vercel.app | **No** — PR #63 changed only `apps/api/**` and produced no production deploy |
-| `real-estate-automation` | real-estate-automation-three.vercel.app | Unknown — stale (37d+) |
+Known state as of 2026-08-03 (re-verify; do not trust this table blindly):
+
+| Project | Production URL | Auto-deploys production from `main`? | Evidence | Last verified |
+|---|---|---|---|---|
+| `rei-automation-dashboard` | https://ops.leadcommand.ai | **Yes** | two production deploys matching the merges of PR #64 (02:29Z) and PR #63 (03:25Z) | 2026-08-03 |
+| `api` | api-steel-three-96.vercel.app | **No** | PR #63 changed only `apps/api/**`; newest production build remained 2 days old | 2026-08-03 |
+| `real-estate-automation` | real-estate-automation-three.vercel.app | Unknown | stale (37d+), not exercised | — |
 
 ### 4. Is promotion to production automatic, or manual?
 
@@ -108,10 +116,12 @@ Immediately verify what actually deployed and report it — including when you e
 nothing to deploy:
 
 ```bash
-npx vercel ls <project> --scope <team> | head -5
+npx vercel ls <project> --scope <team>
 ```
 
-Record the deployment id, environment, and timestamp. If a production deployment appeared
+Run it for **every connected project**, not just the one you expected to deploy, and do not
+pipe through `head` — truncation can hide the entry that matters. Record the deployment id,
+environment, and timestamp for each. If a production deployment appeared
 without authorization, say so plainly and immediately, and take no corrective action
 against production until the operator decides — a rollback is itself a production action
 with its own blast radius.

@@ -53,6 +53,37 @@ export type VocabularyResolution<T> =
 const asKey = (value: unknown): string =>
   String(value ?? '').trim().toLowerCase().replace(/[\s\-/]+/g, '_')
 
+/**
+ * Own-property alias lookup.
+ *
+ * A bare `MAP[key]` truthiness test reaches the prototype chain: `Object.freeze` does not
+ * detach `Object.prototype`, so `MAP['constructor']` returns the `Object` **function** and
+ * `MAP['__proto__']` returns an **object** — both truthy. Every resolver would then return
+ * `{ ok: true, value }` typed as a canonical string code while actually holding a
+ * function, and that value would reach the write path.
+ *
+ * Verified before fixing: all four resolvers leaked on `constructor` and `__proto__`.
+ */
+const lookupAlias = <T>(map: Readonly<Record<string, T>>, key: string): T | undefined =>
+  Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined
+
+/**
+ * Belt-and-braces: an alias must resolve into its dimension's canonical set. Guarantees a
+ * non-string can never escape even if a future map gains a bad entry.
+ */
+const acceptAlias = <T extends string>(
+  dimension: string,
+  input: string,
+  canonical: ReadonlySet<string>,
+  candidate: T | undefined,
+): VocabularyResolution<T> | null => {
+  if (candidate === undefined) return null
+  if (typeof candidate !== 'string' || !canonical.has(candidate)) {
+    return reject<T>(dimension, input, 'unknown')
+  }
+  return { ok: true, value: candidate, viaAlias: true }
+}
+
 const reject = <T>(
   dimension: string,
   input: string,
@@ -156,7 +187,8 @@ export const resolveLifecycleStageForWrite = (
   if (CANONICAL_STAGES.has(key)) return { ok: true, value: key as LifecycleStageCode, viaAlias: false }
   // Absolute: a suppression value must never become a stage (DD-002).
   if (SUPPRESSION_VOCABULARY.has(key)) return reject('lifecycle_stage', key, 'wrong_dimension')
-  if (LEGACY_STAGE_MAP[key]) return { ok: true, value: LEGACY_STAGE_MAP[key], viaAlias: true }
+  const stageAlias = acceptAlias('lifecycle_stage', key, CANONICAL_STAGES, lookupAlias(LEGACY_STAGE_MAP, key))
+  if (stageAlias) return stageAlias
   if (UNMAPPED_LEGACY_STAGES.has(key)) return reject('lifecycle_stage', key, 'unmapped_legacy')
   if (INBOX_BUCKET_VOCABULARY.has(key)) return reject('lifecycle_stage', key, 'wrong_dimension')
   return reject('lifecycle_stage', key, 'unknown')
@@ -200,7 +232,8 @@ export const resolveOperationalStatusForWrite = (
   if (SUPPRESSION_VOCABULARY.has(key)) return reject('operational_status', key, 'wrong_dimension')
   // `closed` is a lifecycle stage, not a status — reject rather than collapse to `paused`.
   if (key === 'closed') return reject('operational_status', key, 'wrong_dimension')
-  if (LEGACY_STATUS_MAP[key]) return { ok: true, value: LEGACY_STATUS_MAP[key], viaAlias: true }
+  const statusAlias = acceptAlias('operational_status', key, CANONICAL_STATUSES, lookupAlias(LEGACY_STATUS_MAP, key))
+  if (statusAlias) return statusAlias
   if (DELIVERY_VOCABULARY.has(key)) return reject('operational_status', key, 'wrong_dimension')
   return reject('operational_status', key, 'unknown')
 }
@@ -232,7 +265,8 @@ export const resolveLeadTemperatureForWrite = (
   if (DELIVERY_VOCABULARY.has(key)) return reject('lead_temperature', key, 'wrong_dimension')
   if (SUPPRESSION_VOCABULARY.has(key)) return reject('lead_temperature', key, 'wrong_dimension')
   if (CANONICAL_TEMPERATURES.has(key)) return { ok: true, value: key as LeadTemperatureCode, viaAlias: false }
-  if (LEGACY_TEMPERATURE_MAP[key]) return { ok: true, value: LEGACY_TEMPERATURE_MAP[key], viaAlias: true }
+  const tempAlias = acceptAlias('lead_temperature', key, CANONICAL_TEMPERATURES, lookupAlias(LEGACY_TEMPERATURE_MAP, key))
+  if (tempAlias) return tempAlias
   return reject('lead_temperature', key, 'unknown')
 }
 
@@ -257,6 +291,8 @@ export const AUTOMATION_MODE_ORDER = [
 ] as const
 
 export type AutomationModeCode = (typeof AUTOMATION_MODE_ORDER)[number]
+
+const CANONICAL_AUTOMATION_MODES = new Set<string>(AUTOMATION_MODE_ORDER)
 
 export const AUTOMATION_MODE_META: Readonly<Record<AutomationModeCode, {
   label: string
@@ -290,18 +326,44 @@ export const LEGACY_AUTOMATION_MAP: Readonly<Record<string, AutomationModeCode>>
   finished: 'completed',
 })
 
+/**
+ * Resolve an automation mode for a **system/automation** write. Accepts every canonical
+ * mode, including ones an operator may not choose directly.
+ */
 export const resolveAutomationModeForWrite = (
   value: unknown,
 ): VocabularyResolution<AutomationModeCode> => {
   const key = asKey(value)
   if (!key) return reject('automation_mode', key, 'empty')
   if (SUPPRESSION_VOCABULARY.has(key)) return reject('automation_mode', key, 'wrong_dimension')
-  if ((AUTOMATION_MODE_ORDER as readonly string[]).includes(key)) {
-    return { ok: true, value: key as AutomationModeCode, viaAlias: false }
-  }
-  if (LEGACY_AUTOMATION_MAP[key]) return { ok: true, value: LEGACY_AUTOMATION_MAP[key], viaAlias: true }
+  if (CANONICAL_AUTOMATION_MODES.has(key)) return { ok: true, value: key as AutomationModeCode, viaAlias: false }
+  const autoAlias = acceptAlias('automation_mode', key, CANONICAL_AUTOMATION_MODES, lookupAlias(LEGACY_AUTOMATION_MAP, key))
+  if (autoAlias) return autoAlias
   return reject('automation_mode', key, 'unknown')
 }
+
+/**
+ * Resolve an automation mode for an **operator-initiated** write.
+ *
+ * `operatorSelectable` was declared on the metadata but never enforced, so nothing stopped
+ * an operator-facing control from persisting `review_required`, `disabled` or `completed` —
+ * modes the system sets as a consequence of its own state, not choices a human makes. Use
+ * this at every operator control; use `resolveAutomationModeForWrite` for system writers.
+ */
+export const resolveOperatorAutomationMode = (
+  value: unknown,
+): VocabularyResolution<AutomationModeCode> => {
+  const resolved = resolveAutomationModeForWrite(value)
+  if (!resolved.ok) return resolved
+  if (!AUTOMATION_MODE_META[resolved.value].operatorSelectable) {
+    return reject('automation_mode', asKey(value), 'wrong_dimension')
+  }
+  return resolved
+}
+
+/** The modes an operator control may offer. */
+export const OPERATOR_SELECTABLE_AUTOMATION_MODES: readonly AutomationModeCode[] =
+  AUTOMATION_MODE_ORDER.filter((mode) => AUTOMATION_MODE_META[mode].operatorSelectable)
 
 // ── operator-facing messages ─────────────────────────────────────────────────
 

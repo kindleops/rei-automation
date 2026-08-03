@@ -116,7 +116,7 @@ write is implemented but **gated** — see "Automation" below.
 | Lead temperature | `lead_temperature` | `LEAD_TEMPERATURE_ORDER` (4) | `lead_temperature` | `priority` / `isHotLead` | `temperature` | ✅ |
 | **Automation mode** | **`automation_state`** (view-confirmed; existence unconfirmed) | *no registry exists* | `autopilot_mode` (view alias) | `automationState` (**fabricated**) | `autopilot_mode` (column, unwritten), `automation_status` (legacy) | ❌ **not written by any path today** |
 | Manual stage lock | `manual_stage_lock` | boolean | `manual_stage_lock` | — | — | ✅ (via `meta`) |
-| Manual override | `manual_override` | boolean | `manual_review` (view alias) | `needsReview` (combined w/ confidence) | — | ❌ read-only today |
+| Manual override | `manual_override` | boolean | `manual_review` (view alias) | `needsReview` (combined w/ confidence) | — | ❌ read-only — resume must not clear it (see Q7) |
 | Read / unread | `is_read` | boolean | `is_read` | `isRead` | `read_at`, `last_read_at` | ✅ |
 | Change provenance | `*_source` | `ai\|manual\|system\|autopilot` | `change_source` (meta) | — | — | ✅ |
 
@@ -134,18 +134,29 @@ write is implemented but **gated** — see "Automation" below.
 3. **What does `autopilot_mode` represent?** Two different things, which is the bug. As a
    **column** on `inbox_thread_state` it is a dead field written by nobody. As a
    **client-facing field name** it is the view's alias for `automation_state`.
-4. **Which field should pause/resume mutate?** `automation_state` (plus a mirror write to
-   the `autopilot_mode` column, matching the established `buildRowPatch` convention of
-   writing canonical + legacy aliases together). Requires adding the missing branch.
+4. **Which field should pause/resume mutate?** **`automation_state` only.** It is the
+   value the canonical read view exposes, and it is the whole round-trip. The physical
+   `autopilot_mode` column is populated by nothing today, so mirroring to it would create
+   a second unread copy rather than keep an existing reader working. If a legacy reader is
+   later found to depend on that column, add the mirror then — and write both in the same
+   row patch so they cannot diverge. Requires adding the missing branch either way.
 5. **Which field should the dashboard display?** The server-projected `autopilot_mode`
    from the row contract — never the fabricated `automationState`.
 6. **Which fields must remain read-only?** `manual_review` / `manual_override`,
    `confidence`, and all `*_source` provenance fields (server-set from `change_source`).
-7. **Does resuming automation need to clear a manual lock?** The precedent exists and is
-   explicit: `meta.resume_automatic_scoring === true` clears `manual_temperature_lock` and
-   resets `temperature_source` to `ai` (`patch-universal-lead-state.js:181-184`). Resume
-   should follow the same shape. There is **no equivalent automation lock field** today, so
-   resume clears `manual_override` only if the operator explicitly asks.
+7. **Does resuming automation need to clear a manual lock?** **No — resume must not touch
+   `manual_override`.**
+
+   An earlier draft of this record said `manual_override` is read-only *and* that resume
+   may clear it on request. That was a contradiction, and resolving it in favour of
+   mutability would let a routine resume erase operator state. The contract is:
+   `manual_override` stays **read-only on the resume path**.
+
+   The precedent for a lock-clearing flag does exist —
+   `meta.resume_automatic_scoring === true` clears `manual_temperature_lock` and resets
+   `temperature_source` to `ai` (`patch-universal-lead-state.js:181-184`) — and if clearing
+   an automation override is wanted later it should follow that shape: a **separate,
+   explicitly-authorized, audited operation**, not a side effect of resume.
 8. **Which terminal/suppression states forbid resume?** `BLOCKING_CONTACTABILITY` (which
    sets `is_suppressed`), `contactability_status` ∈ {`opted_out`, `dnc`,
    `provider_blacklisted`, `invalid_number`, `do_not_text`}, and `lifecycle_stage = closed`.
