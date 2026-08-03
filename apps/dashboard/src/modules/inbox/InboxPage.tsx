@@ -4,10 +4,14 @@ import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
 import { useDealDeskSelection } from './useDealDeskSelection'
-import { describeThreadReference } from '../../domain/inbox/canonical-thread-reference'
+import {
+  describeThreadReference,
+  resolveThreadRouteKey,
+} from '../../domain/inbox/canonical-thread-reference'
 import {
   dealDeskThreadMatchesRef,
   resolveDealDeskSelectionKey,
+  resolveDealDeskThreadReference,
   resolveDealDeskWritableThreadKey,
 } from '../../domain/inbox/deal-desk-thread-reference'
 import { createComposerDraftStore } from '../../domain/inbox/composer-draft-store'
@@ -686,6 +690,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     selectionKey: canonicalSelectionKey,
     selectionVersion,
     selectedId,
+    bucketTransitionPending,
     guard: selectionGuard,
     selectThread,
     selectFromExternalContext,
@@ -801,6 +806,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const selectedRef = useRef<InboxWorkflowThread | null>(null)
   // `selectedThreadFallbackRef` is gone — the last-known thread object per selection key
   // now lives in `useDealDeskSelection` (DD-018).
+  // Latest-render mirrors for values the hydration effect reads outside its dep list.
+  const showGlobalEmptyWorkspaceRef = useRef(false)
+  const effectiveActiveContextRef = useRef<ActiveInboxContext>({ sourceView: 'inbox' })
   const publishingUniversalRef = useRef(false)
   const [isSending, setIsSending] = useState(false)
   const [debugModalOpen, setDebugModalOpen] = useState(false)
@@ -1107,6 +1115,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   useLayoutEffect(() => {
     selectedRef.current = selected
     draftThreadKeyRef.current = canonicalSelectionKey
+    // Values the hydration effect reads but cannot list as dependencies without
+    // re-running on every list reconcile. Refreshed every render, before the passive
+    // hydration effect runs, so the effect never reads a stale capture of them.
+    showGlobalEmptyWorkspaceRef.current = dealDeskSelection.showGlobalEmptyWorkspace
+    effectiveActiveContextRef.current = effectiveActiveContext
   })
 
   /**
@@ -1313,8 +1326,33 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (_dataLoading) return
+    /**
+     * Reconcile only when the result can actually change the selection.
+     *
+     * `filtered` is recomputed on every 15s poll and every realtime patch, and
+     * `reconcileList` resolves a canonical thread reference per row — an O(n) identity
+     * pass over up to `visibleThreadCount` (1000) rows. Running it on every poll was a
+     * measurable regression for no benefit: with no transition pending and the selected
+     * key present, the reducer's only possible outcome is `preserved_selection`.
+     *
+     * The two cases that need it: a pending bucket transition, and a selection that is
+     * absent from the current list (successor policy / auto-select).
+     */
+    const needsReconcile =
+      bucketTransitionPending ||
+      canonicalSelectionKey === null ||
+      !filtered.some((thread) => resolveDealDeskSelectionKey(thread) === canonicalSelectionKey)
+    if (!needsReconcile) return
     reconcileList(String(viewFilter), filtered)
-  }, [_dataLoading, filtered, isMobileInboxShell, reconcileList, viewFilter])
+  }, [
+    _dataLoading,
+    bucketTransitionPending,
+    canonicalSelectionKey,
+    filtered,
+    isMobileInboxShell,
+    reconcileList,
+    viewFilter,
+  ])
 
   const selectedSuppressed = useMemo(() => (selected ? isSuppressedThread(selected) : false), [selected])
 
@@ -2033,7 +2071,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       propertyId: thread.propertyId || canonicalSelectedContext?.identity?.property_id || null,
       prospectId: thread.prospectId || canonicalSelectedContext?.identity?.prospect_id || null,
       masterOwnerId: thread.ownerId || canonicalSelectedContext?.identity?.master_owner_id || null,
-      threadKey: resolveDealDeskSelectionKey(thread),
+      // Seller Automation applies this as `thread_id=eq.<value>` against
+      // `seller_automation_execution_steps`, so it needs a thread-state key, NOT the Deal
+      // Desk selection key — a composite `ct:…` key can never satisfy an equality filter.
+      // `resolveThreadRouteKey` prefers the canonical phone, which is that contract.
+      threadKey: resolveThreadRouteKey(resolveDealDeskThreadReference(thread)),
       preservePath: true,
     })
     setWorkspaceWidthOverrides({})
@@ -2072,13 +2114,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
        * workspace has never held a valid selection; otherwise the last hydrated
        * conversation stays on screen behind the empty-selection affordance.
        */
-      if (dealDeskSelection.showGlobalEmptyWorkspace) {
+      // Read through refs, not the render-time closure: this effect's dep list is
+      // `[DEV, selectedKeyForEffect, messageRefetchKey, selectionVersion]`, so a closure
+      // capture would go stale whenever `showGlobalEmptyWorkspace` changes from a list
+      // reconcile without the selection key changing — and the confirmed-empty cleanup
+      // would then never run.
+      if (showGlobalEmptyWorkspaceRef.current) {
         setSelectedMessages([])
         setHasOlderMessages(false)
         setOlderMessagesLoading(false)
         setThreadContext(null)
         setThreadIntelligence(null)
-        if (!hasEntityAnchor(effectiveActiveContext)) {
+        if (!hasEntityAnchor(effectiveActiveContextRef.current)) {
           setDealContext(null)
         }
         setThreadTranslations({})
@@ -3559,10 +3606,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         method: 'PATCH',
         body: JSON.stringify({ thread_key: writeKey.threadKey, patch: { is_read: true } }),
       })
-    } else if (DEV) {
-      console.warn('[DealDesk] read-mark skipped — no writable thread reference', {
-        reference: describeThreadReference(writeKey?.reference ?? null),
+    } else {
+      // Surface it. The operator clicked the thread, so it will stay unread; silently
+      // skipping (DEV-only logging) left them with no way to know why. Full mutation
+      // error UX is N.2 — this is the minimum honest signal.
+      emitNotification({
+        title: 'Could not mark as read',
+        detail: 'This conversation has no writable canonical phone route.',
+        severity: 'warning',
       })
+      if (DEV) {
+        console.warn('[DealDesk] read-mark skipped — no writable thread reference', {
+          reference: describeThreadReference(writeKey?.reference ?? null),
+        })
+      }
     }
 
     if (isMobileInboxShell) {
@@ -3608,6 +3665,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const propertyId = selected?.propertyId || effectiveActiveContext.propertyId
     const selectedPhone = selected?.canonicalE164 || selected?.bestPhone || selected?.sellerPhone || selected?.threadKey
     if (!propertyId) {
+      // Clear the loading flag here too. A superseded request's `.finally` intentionally
+      // does not clear it (it no longer owns the flag), so if the next effect run takes
+      // this early-return path nothing else would ever clear it and ActiveProspectCard
+      // would spin forever.
+      setPropertyParticipantsLoading(false)
       setPropertyParticipants([])
       setSelectedParticipant(null)
       setMasterOwnerHouseholdLabel(null)

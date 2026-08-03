@@ -382,13 +382,37 @@ export const threadMatchesLooseRef = (
   return asTrimmedString(record.threadKey ?? record.thread_key) === needle
 }
 
-/** Human-readable diagnostic — used in dev logs and error surfaces, never in a request. */
+/**
+ * Mask a phone for diagnostics: `+19015551234` → `+1*****1234`.
+ * A phone number identifies a person, and diagnostics can reach a log sink or telemetry
+ * payload, so the full value must never appear in one.
+ */
+const maskPhoneValue = (phone: string): string =>
+  phone.length <= 6
+    ? '*'.repeat(phone.length)
+    : `${phone.slice(0, 2)}${'*'.repeat(phone.length - 6)}${phone.slice(-4)}`
+
+const maskPhoneForDiagnostics = (phone: string | null): string =>
+  phone ? maskPhoneValue(phone) : 'none'
+
+/**
+ * A selection key can itself embed a phone — either as a bare E.164 key or inside a
+ * composite (`ct:…|phone:+19015551234`). Mask every embedded number so the diagnostic
+ * cannot leak one through the key either.
+ */
+const maskPhonesInKey = (key: string): string =>
+  key.replace(/\+?1?\d{10,11}/g, (match) => maskPhoneValue(match))
+
+/**
+ * Human-readable diagnostic — used in dev logs and error surfaces, never in a request.
+ * The phone is masked; `selectionKey`, `source` and `writable` carry the diagnostic value.
+ */
 export const describeThreadReference = (reference: CanonicalThreadReference | null): string => {
   if (!reference) return 'no_thread_reference'
   return [
-    `key=${reference.selectionKey}`,
+    `key=${maskPhonesInKey(reference.selectionKey)}`,
     `source=${reference.source}`,
-    `phone=${reference.canonicalE164 ?? 'none'}`,
+    `phone=${maskPhoneForDiagnostics(reference.canonicalE164)}`,
     `writable=${reference.writable}`,
     reference.reason ? `reason=${reference.reason}` : '',
   ]

@@ -177,6 +177,29 @@ test('abortAll invalidates every outstanding token', () => {
   assert.equal(guard.accept(two.token), false)
 })
 
+test('stats.aborted counts only real cancellations, not settled requests', () => {
+  const guard = createSelectionRequestGuard()
+  // One request that settles normally, then a second for a new selection.
+  const first = guard.begin(DEAL_DESK_RESOURCES.conversation, { selectionKey: 'A', selectionVersion: 1 })
+  assert.equal(guard.accept(first.token), true)
+  guard.begin(DEAL_DESK_RESOURCES.conversation, { selectionKey: 'B', selectionVersion: 2 })
+  assert.equal(
+    guard.stats().aborted,
+    0,
+    'aborting an already-settled controller is a no-op and must not be counted — these ' +
+    'counters are published as runtime evidence for cancellation behaviour',
+  )
+  assert.equal(first.signal.aborted, false, 'a settled request is not retroactively aborted')
+})
+
+test('stats.aborted still counts a genuinely in-flight supersede', () => {
+  const guard = createSelectionRequestGuard()
+  const inFlight = guard.begin(DEAL_DESK_RESOURCES.conversation, { selectionKey: 'A', selectionVersion: 1 })
+  guard.begin(DEAL_DESK_RESOURCES.conversation, { selectionKey: 'B', selectionVersion: 2 })
+  assert.equal(guard.stats().aborted, 1)
+  assert.equal(inFlight.signal.aborted, true)
+})
+
 test('guard stats report stale rejections per resource for the perf budget', () => {
   const guard = createSelectionRequestGuard()
   const a = guard.begin(DEAL_DESK_RESOURCES.conversation, { selectionKey: 'A', selectionVersion: 1 })

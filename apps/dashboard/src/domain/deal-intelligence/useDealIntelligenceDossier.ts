@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchDealIntelligenceDossier, getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
-import {
-  resolveCanonicalThreadReference,
-  resolveThreadRouteKey,
-} from '../inbox/canonical-thread-reference'
+import { resolveThreadRouteKey } from '../inbox/canonical-thread-reference'
+import { resolveDealDeskThreadReference } from '../inbox/deal-desk-thread-reference'
 import type { DealIntelligenceDossier, EngineProgressStage } from './deal-intelligence.types'
 import { ENGINE_STAGE_DISPLAY_ORDER, ENGINE_STAGE_LABELS } from './deal-intelligence.types'
 
@@ -114,10 +112,14 @@ export function useDealIntelligenceDossier(
     try {
       // Same route key as the thread-select orchestrator, so one conversation is never
       // fetched twice under two different key shapes (N.1 runtime verification).
+      //
+      // Must go through the Deal Desk *binding*, not the pure resolver: the pure resolver
+      // receives no composite conversation id, so a thread with a composite identity and
+      // no dialable phone would fall back to a different selection key here than on the
+      // selection path — reintroducing the duplicate fetch this line exists to prevent.
       const routeKey =
-        resolveThreadRouteKey(
-          resolveCanonicalThreadReference(currentThread as unknown as Record<string, unknown>),
-        ) ?? currentThread.threadKey
+        resolveThreadRouteKey(resolveDealDeskThreadReference(currentThread)) ??
+        currentThread.threadKey
       const result = await fetchDealIntelligenceDossier(routeKey, qs.toString(), signal)
       if (requestId !== requestIdRef.current) return
       if (!result.ok) throw new Error(`dossier_http_${result.status}`)

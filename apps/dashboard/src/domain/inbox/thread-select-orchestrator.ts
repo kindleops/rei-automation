@@ -15,11 +15,8 @@ import {
   resolveThreadMessageCacheKey,
 } from './thread-selection-cache'
 import { markUncachedMessagesMs } from './inbox-proof-bridge'
-import {
-  resolveCanonicalThreadReference,
-  resolveThreadRouteKey,
-  threadSelectionKey,
-} from './canonical-thread-reference'
+import { resolveThreadRouteKey, threadSelectionKey } from './canonical-thread-reference'
+import { resolveDealDeskThreadReference } from './deal-desk-thread-reference'
 
 export type ThreadSelectFetchKind = 'messages' | 'hydration' | 'thread_context' | 'dossier' | 'participants'
 
@@ -224,8 +221,10 @@ export function createThreadSelectHandlers(
       // `threadKey || id` fallback (DD-003). `resolveThreadRouteKey` is used by *every*
       // Deal Intelligence caller so one conversation is never fetched twice under two
       // different key shapes.
+      // Via the Deal Desk binding so the composite conversation id is injected — the pure
+      // resolver would compute a different key here than on the selection path.
       const threadKey =
-        resolveThreadRouteKey(resolveCanonicalThreadReference(thread as unknown as Record<string, unknown>))
+        resolveThreadRouteKey(resolveDealDeskThreadReference(thread))
         ?? resolveThreadCacheKey(thread, thread.id)
       const result = await fetchDealIntelligenceDossier(threadKey, qs.toString(), signal)
       if (!result.ok) return { kind: 'dossier' as const, dealContext: null, intelligence: null }

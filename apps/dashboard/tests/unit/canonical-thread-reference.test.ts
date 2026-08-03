@@ -253,3 +253,27 @@ test('describeThreadReference never leaks an unwritable key as if it were usable
   assert.match(described, /reason=no_canonical_phone/)
   assert.match(described, /phone=none/)
 })
+
+test('describeThreadReference never emits a full phone number', () => {
+  const reference = resolveCanonicalThreadReference({ id: UUID, canonicalE164: '+19015551234' })
+  const described = describeThreadReference(reference)
+  assert.equal(
+    described.includes('+19015551234'),
+    false,
+    'a diagnostic can reach a log sink or telemetry payload — it must not carry a phone',
+  )
+  assert.match(described, /phone=\+1\*+1234/, 'masked, but still useful for correlation')
+})
+
+test('describeThreadReference masks a phone embedded in the selection key too', () => {
+  // A bare E.164 selection key would otherwise leak the number through `key=`.
+  const phoneKeyed = resolveCanonicalThreadReference({ phoneNumber: '9015551234' })
+  const describedPhoneKey = describeThreadReference(phoneKeyed)
+  assert.equal(describedPhoneKey.includes('+19015551234'), false)
+
+  // …and so would a composite key carrying a phone segment.
+  const compositeKeyed = resolveCanonicalThreadReference({ id: 'x', threadKey: COMPOSITE })
+  const describedComposite = describeThreadReference(compositeKeyed)
+  assert.equal(describedComposite.includes('+19015551234'), false)
+  assert.match(describedComposite, /key=ct:prospect:p-1\|property:prop-9\|phone:\+1\*+1234/)
+})

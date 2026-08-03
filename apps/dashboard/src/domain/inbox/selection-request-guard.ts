@@ -142,6 +142,11 @@ export function createSelectionRequestGuard(): SelectionRequestGuard {
         slot!.identity!.selectionKey === token.selectionKey &&
         slot!.identity!.selectionVersion === token.selectionVersion
       if (current) {
+        // Release the controller: the request has settled, so a later `abortSlot` must
+        // not count it as a cancellation. Without this, `stats.aborted` inflates with
+        // no-op aborts on already-settled controllers — and these counters are published
+        // as runtime evidence for cancellation behaviour, so the inflation is misleading.
+        slot!.controller = null
         stats.accepted += 1
         resourceStat(token.resource).accepted += 1
         return true

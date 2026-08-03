@@ -245,6 +245,78 @@ test('the global empty workspace renders only before any selection has ever exis
   )
 })
 
+// ── review findings (PR #64) ─────────────────────────────────────────────────
+
+test('a late LIST_FAILED for an abandoned bucket does not break the current transition', () => {
+  // Operator: priority → B → C. B's request then fails, late.
+  let state = run(
+    initialDealDeskSelectionState('priority'),
+    { type: 'SELECT_THREAD', candidate: A },
+    { type: 'BUCKET_REQUESTED', bucket: 'b' },
+    { type: 'BUCKET_REQUESTED', bucket: 'c' },
+    { type: 'LIST_FAILED', bucket: 'b' },
+  )
+  assert.equal(state.requestedBucket, 'c', "B's failure must not cancel C's transition")
+  assert.equal(state.lastReconcileReason, 'list_failed_stale_bucket:b')
+  assert.notEqual(state.listStatus, 'error', 'a bucket the operator already left cannot set the error state')
+
+  state = run(state, { type: 'LIST_RESOLVED', bucket: 'c', rows: [B, C] })
+  assert.equal(state.activeBucket, 'c', 'C is adopted')
+  assert.equal(selectionKeyOf(state), 'thread-b', 'auto-select still runs for C')
+})
+
+test('an external_context selection during a transition is not replaced by auto-select', () => {
+  const state = run(
+    initialDealDeskSelectionState('priority'),
+    { type: 'BUCKET_REQUESTED', bucket: 'cold' },
+    // A deep link resolves while the list is still in flight.
+    { type: 'SELECT_THREAD', candidate: C, origin: 'external_context' },
+    { type: 'LIST_RESOLVED', bucket: 'cold', rows: [A, B] },
+  )
+  assert.equal(selectionKeyOf(state), 'thread-c', 'the deep-link anchor survives')
+  assert.equal(state.lastReconcileReason, 'user_selected_during_transition')
+})
+
+test('an auto selection during a transition IS still replaceable', () => {
+  // Only deliberate origins are protected; `auto` must not lock out a later reconcile.
+  const state = run(
+    initialDealDeskSelectionState('priority'),
+    { type: 'BUCKET_REQUESTED', bucket: 'cold' },
+    { type: 'LIST_RESOLVED', bucket: 'cold', rows: [B, C] },
+  )
+  assert.equal(state.origin, 'auto')
+  assert.equal(selectionKeyOf(state), 'thread-b')
+})
+
+test('ROWS_PATCHED clears selectionOutOfView even when the row data is identical', () => {
+  // Get into the out-of-view state via a same-bucket refresh that omits the selection.
+  let state = run(
+    initialDealDeskSelectionState('priority'),
+    { type: 'SELECT_THREAD', candidate: A },
+    { type: 'LIST_RESOLVED', bucket: 'priority', rows: [B] },
+  )
+  assert.equal(state.selectionOutOfView, true)
+
+  // The identical row comes back in a patch — byte-identical derived data.
+  state = run(state, { type: 'ROWS_PATCHED', rows: [A] })
+  assert.equal(
+    state.selectionOutOfView,
+    false,
+    'the row being present is proof the selection is back in view',
+  )
+  assert.equal(state.lastReconcileReason, 'row_patched_back_in_view')
+})
+
+test('ROWS_PATCHED still returns the identical state when nothing changed at all', () => {
+  const selected = run(
+    initialDealDeskSelectionState(),
+    { type: 'SELECT_THREAD', candidate: A },
+  )
+  assert.equal(selected.selectionOutOfView, false)
+  const patched = dealDeskSelectionReducer(selected, { type: 'ROWS_PATCHED', rows: [A] })
+  assert.equal(patched, selected, 'no re-render churn when there is genuinely nothing to change')
+})
+
 test('the inbox bucket is explicit and separate from thread identity', () => {
   const state = run(
     initialDealDeskSelectionState('priority'),

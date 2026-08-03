@@ -19,7 +19,7 @@
  *     workspace stays renderable while the next list request is in flight (DD-017).
  */
 
-import { useCallback, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import {
   dealDeskSelectionReducer,
   initialDealDeskSelectionState,
@@ -95,6 +95,13 @@ export function useDealDeskSelection<TThread extends ThreadLike>(
   // Last-known thread object per selection key. This is what keeps the center and right
   // panels rendering the previous conversation while a new bucket list is in flight.
   const [remembered] = useState<Map<string, TThread>>(() => new Map())
+
+  /**
+   * Cancel every selection-bound request when the workspace unmounts.
+   * `clearSelection` was the only path that aborted, so after an unmount the in-flight
+   * hydration kept running and late responses could still reach consumer state setters.
+   */
+  useEffect(() => () => { guard.abortAll() }, [guard])
 
   const rememberThread = useCallback((thread: TThread | null | undefined) => {
     if (!thread) return

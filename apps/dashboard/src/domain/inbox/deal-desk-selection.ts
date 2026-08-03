@@ -255,6 +255,15 @@ export function dealDeskSelectionReducer(
     }
 
     case 'LIST_FAILED': {
+      /**
+       * Only the *pending* bucket's failure may end the transition. Without this guard,
+       * a late failure for a bucket the operator already left (B fails after they moved
+       * to C) clears `requestedBucket`, so C's own `LIST_RESOLVED` no longer counts as a
+       * transition — `activeBucket` never advances and auto-select never runs for C.
+       */
+      if (state.requestedBucket !== action.bucket) {
+        return { ...state, lastReconcileReason: `list_failed_stale_bucket:${action.bucket}` }
+      }
       return {
         ...state,
         // The bucket is not adopted on failure — the operator keeps looking at what worked.
@@ -276,15 +285,18 @@ export function dealDeskSelectionReducer(
       const isTransition = state.requestedBucket !== null && state.requestedBucket === action.bucket
       const activeBucket = isTransition ? action.bucket : state.activeBucket
       /**
-       * The operator selected a row while this bucket's list was still in flight. Their
-       * click is newer information than the response, so auto-select stands down —
-       * "no category response may overwrite a valid user selection".
+       * A deliberate selection landed while this bucket's list was still in flight. It is
+       * newer information than the response, so auto-select stands down — "no category
+       * response may overwrite a valid user selection".
+       *
+       * Both explicit origins count. An `external_context` anchor (deep link, entity
+       * graph, pipeline hand-off) is just as deliberate as a click; only `auto` is not.
        */
       const selectedDuringTransition =
         isTransition &&
         state.transitionStartVersion !== null &&
         state.version > state.transitionStartVersion &&
-        state.origin === 'user'
+        (state.origin === 'user' || state.origin === 'external_context')
       const base: DealDeskSelectionState = {
         ...state,
         activeBucket,
@@ -381,7 +393,17 @@ export function dealDeskSelectionReducer(
       const match = findMatchingRow(action.rows, state.selection)
       if (!match) return state
       const selection = reconcileSelectionData(state.selection, match)
-      if (selection === state.selection) return state
+      // The row being present is itself proof the selection is back in view, even when
+      // its derived data is byte-identical. Returning early here used to leave the
+      // "not in this view" affordance stuck on until the next list resolve.
+      if (selection === state.selection) {
+        if (!state.selectionOutOfView) return state
+        return {
+          ...state,
+          selectionOutOfView: false,
+          lastReconcileReason: 'row_patched_back_in_view',
+        }
+      }
       return {
         ...state,
         selection,

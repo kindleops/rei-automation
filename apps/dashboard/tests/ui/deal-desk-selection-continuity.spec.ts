@@ -67,6 +67,14 @@ const threadById = new Map(ALL_THREADS.map((t) => [t.id, t]))
 /** Delays applied to specific routes, so a stale response can be forced. */
 const routeDelays: Record<string, number> = {}
 
+/**
+ * Third-party requests the harness intercepted. Playwright's `page.on('request')` fires
+ * for intercepted requests too, so the raw request log alone cannot distinguish "stubbed
+ * locally" from "sent to a live third party". This counter is the proof that nothing
+ * escaped.
+ */
+const interceptedThirdParty = { maps: 0 }
+
 const jsonRoute = async (route: Route, body: unknown, delayMs = 0) => {
   // `routeDelays.all` slows EVERY stubbed response. Used to force overlapping in-flight
   // requests without having to know which exact endpoint serves a given resource — the
@@ -148,6 +156,35 @@ async function installFixtures(page: Page) {
   await page.route('**://*.textgrid.com/**', (route) => route.abort())
   await page.route('**://*.vercel.app/**', (route) => route.abort())
 
+  /**
+   * Google Maps must be stubbed, not merely unused.
+   *
+   * The first run of this spec issued 30 live requests to
+   * `maps.googleapis.com/maps/api/streetview` carrying the real Maps API key — visible in
+   * the captured evidence, and flatly contradicting this file's own isolation claim. A
+   * live third-party call from a test costs money, can hit rate limits, and leaks the key
+   * into CI network traces.
+   *
+   * Street View / static map / embed endpoints return a 1x1 transparent GIF so the media
+   * components still mount and the remount counters stay meaningful.
+   */
+  const TRANSPARENT_GIF = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64',
+  )
+  await page.route('**://maps.googleapis.com/**', (route) => {
+    interceptedThirdParty.maps += 1
+    return route.fulfill({ status: 200, contentType: 'image/gif', body: TRANSPARENT_GIF })
+  })
+  await page.route('**://maps.gstatic.com/**', (route) => {
+    interceptedThirdParty.maps += 1
+    return route.fulfill({ status: 200, contentType: 'image/gif', body: TRANSPARENT_GIF })
+  })
+  await page.route('**://*.google.com/maps/**', (route) => {
+    interceptedThirdParty.maps += 1
+    return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>stub</title>' })
+  })
+
   // Anything else under the stubbed backend returns an empty OK so nothing 404-storms.
   // The catch-all honours `routeDelays.catchAll` so a scenario can slow down whichever
   // endpoint the app actually uses for a resource without having to name it exactly.
@@ -222,6 +259,7 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
 
   test.beforeEach(async ({ page }) => {
     Object.keys(routeDelays).forEach((k) => delete routeDelays[k])
+    interceptedThirdParty.maps = 0
     await installFixtures(page)
   })
 
@@ -233,7 +271,9 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
     page.on('requestfailed', (req) => failedRequests.push(`${req.method()} ${req.url().split('?')[0]}`))
     page.on('request', (req) => {
       const url = req.url()
-      if (url.includes('/api/')) requestLog.push(url.split('?')[0])
+      if (url.includes('/api/') || url.includes('googleapis.com') || url.includes('gstatic.com')) {
+        requestLog.push(url.split('?')[0])
+      }
     })
 
     await page.goto('/inbox', { waitUntil: 'domcontentloaded' })
@@ -362,6 +402,7 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
       rowsAvailableForDelayedIntelligenceCheck: rowsNowCount,
       consoleErrors,
       failedRequests,
+      thirdPartyRequestsInterceptedNotSent: { ...interceptedThirdParty },
       duplicateApiRequests: Object.entries(
         requestLog.reduce<Record<string, number>>((acc, url) => {
           acc[url] = (acc[url] ?? 0) + 1
@@ -374,5 +415,14 @@ test.describe('Deal Desk selection and hydration continuity (fixture-backed)', (
 
     // The workspace must never have been remounted by a bucket or filter change.
     expect(finalProof!.mounts.workspace, 'the workspace must mount exactly once').toBe(1)
+
+    // Network isolation must be provable, not assumed. Every Google Maps request the page
+    // made has to have been answered by a local stub.
+    const mapsRequestsObserved = requestLog.filter((u) => u.includes('maps.googleapis.com')
+      || u.includes('maps.gstatic.com')).length
+    expect(
+      interceptedThirdParty.maps,
+      'every Google Maps request must be stubbed locally — none may reach the live API',
+    ).toBeGreaterThanOrEqual(mapsRequestsObserved)
   })
 })
