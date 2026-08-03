@@ -132,7 +132,7 @@ test('stage, status, and temperature stay dimension-separated in one authoritati
   const result = await patchUniversalLeadState({
     threadKey: THREAD,
     patch: {
-      lifecycle_stage: 'motivation_discovery',
+      lifecycle_stage: 'offer_interest',
       operational_status: 'active_communication',
       lead_temperature: 'hot',
     },
@@ -140,9 +140,25 @@ test('stage, status, and temperature stay dimension-separated in one authoritati
     supabase,
   })
   assert.equal(result.ok, true)
-  assert.equal(result.row.lifecycle_stage, 'motivation_discovery')
+  assert.equal(result.row.lifecycle_stage, 'offer_interest')
   assert.equal(result.row.operational_status, 'active_communication')
   assert.equal(result.row.lead_temperature, 'hot')
   assert.equal(result.row.manual_stage_lock, true)
   assert.equal(result.row.manual_temperature_lock, true)
+})
+
+test('wrong-dimension and unknown stage values are rejected without a fallback write', async () => {
+  for (const invalid of ['mf_suppressed', 'new_reply', 'delivered', 'motivation_discovery']) {
+    const supabase = makeSupabase({ lifecycle_stage: 'ownership_confirmation' })
+    const result = await patchUniversalLeadState({
+      threadKey: THREAD,
+      patch: { lifecycle_stage: invalid },
+      meta: { change_source: 'manual' },
+      supabase,
+    })
+    assert.equal(result.ok, false, invalid)
+    assert.equal(result.reason, 'no_allowed_patch_fields', invalid)
+    assert.equal(supabase.writes.length, 0, invalid)
+    assert.equal(supabase.state.lifecycle_stage, 'ownership_confirmation', invalid)
+  }
 })
