@@ -3600,6 +3600,20 @@ export async function syncClassifiedInboxThreadState({
   // fragments (STOP / wrong number / hostile) do NOT set this — immediate
   // suppression keeps the full projection.
   fragment_safe = false,
+  // Decision-owned deferral (non-burst seller inbound path): the webhook's
+  // classification sync runs BEFORE processSellerInboundMessage, and its
+  // upsert would otherwise overwrite decision-owned columns from the raw
+  // classifier's interpretation (and hardcoded defaults: status "active",
+  // automation_state "running", stage/next_action cleared) — unaudited, and
+  // left standing if the spine fails mid-flight. When the caller KNOWS the
+  // seller decision spine will process this message, it sets this flag so
+  // the sync writes presentation/triage fields only and the single decision
+  // object (buildSellerFlowDecision → patchUniversalLeadState) remains the
+  // one writer of stage/status/next_action/automation_state/disposition.
+  // Safety-latched messages (STOP / wrong number / hostile) must NOT set
+  // this — immediate suppression keeps the full projection, exactly like
+  // burst fragments.
+  decision_fields_deferred = false,
 } = {}, deps = {}) {
   const supabase = getSupabase(deps);
   const normalizedThreadKey = clean(thread_key);
@@ -3672,6 +3686,7 @@ export async function syncClassifiedInboxThreadState({
     automation_state: "running",
   });
   if (fragment_safe) inboxPayload.__fragment_safe = true;
+  if (decision_fields_deferred) inboxPayload.__decision_fields_deferred = true;
 
   return upsertInboxThreadState(inboxPayload, deps);
 }
@@ -4806,11 +4821,18 @@ export async function upsertInboxThreadState(payload, deps = {}) {
   // from the upsert leaves the stored values untouched; the finalized
   // aggregate turn changes them through patchUniversalLeadState only. A brand
   // new row keeps the normal defaults — there is no prior state to protect.
-  if (payload.__fragment_safe && prior) {
+  if ((payload.__fragment_safe || payload.__decision_fields_deferred) && prior) {
     delete insert_payload.status;
     delete insert_payload.next_action;
     delete insert_payload.automation_state;
     delete insert_payload.disposition;
+    // Decision-owned deferral additionally protects stage: the seller
+    // decision spine (patchUniversalLeadState) is the only stage writer on
+    // the classified inbound path, and the sync payload's stage would clear
+    // it. Burst fragments keep their exact pre-existing field set.
+    if (payload.__decision_fields_deferred) {
+      delete insert_payload.stage;
+    }
     // Suppression is monotonic across non-safety fragments:
     // false → true is allowed only via safety-latched (fragment_safe=false) paths;
     // true → false is NEVER allowed. A benign fragment must not clear STOP.

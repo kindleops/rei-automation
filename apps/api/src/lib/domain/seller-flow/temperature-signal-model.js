@@ -7,10 +7,28 @@
 // Rules:
 //   • Explicit message meaning dominates. "Not interested" stays cold no
 //     matter how fast or long the reply was.
-//   • Secondary signals (latency, reply count, length, depth) only ever
+//   • Secondary signals (latency, reply count, depth, questions) only ever
 //     nudge WITHIN the band the explicit signals allow — they never override
 //     explicit language and never create HOT on their own.
 //   • Output is component-by-component so every temperature is explainable.
+//
+// Behavior-score seam (`behavior` arg, conversation-behavior-scoring.js) —
+// the ONLY bounded rules by which behavioral scores may influence
+// temperature; every one is additive, capped, and reason-coded:
+//   • hostility.value >= 0.6 with confidence >= 0.7 → +0.3 friction
+//     (BEHAVIOR_HOSTILITY_FRICTION). Explicit negative intents already cap
+//     COLD before this matters; friction only explains.
+//   • urgency.value >= 0.7 with confidence >= 0.6 AND no explicit timeline
+//     fact → urgency_score lifted to at most 0.4
+//     (BEHAVIOR_URGENCY_CORROBORATED). 0.4 is below every floor threshold
+//     (HOT needs 0.7), so corroborated behavioral urgency can never create
+//     WARM/HOT on its own.
+//   • engagement.value >= 0.5 with confidence >= 0.6 → reason code
+//     BEHAVIOR_ENGAGEMENT_CORROBORATED only; the engagement score itself is
+//     computed from thread stats here and the engagement-only floor stays
+//     capped at COLD (see floor resolution below).
+// Absent/null behavior scores change nothing: output is byte-identical to a
+// call without the `behavior` argument.
 
 import { LEAD_TEMPERATURE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 
@@ -45,13 +63,18 @@ const WARM_INTENTS = new Set(["seller_interested", "latent_interest", "condition
  *   listing_status …).
  * @param {object} [args.objections] - extraction objections fact value.
  * @param {object} [args.secondary] - { reply_latency_seconds, seller_reply_count,
- *   message_word_count, question_count, conversation_depth }.
+ *   question_count, conversation_depth }. (message_word_count was documented
+ *   here historically but never consumed — raw length is typing, not
+ *   psychology, and is deliberately not an input.)
+ * @param {object} [args.behavior] - optional scoreConversationBehavior()
+ *   result; consumed only through the bounded rules in the module header.
  */
 export function computeTemperatureSignal({
   intent = "unclear",
   facts = {},
   objections = null,
   secondary = {},
+  behavior = null,
 } = {}) {
   const intentKey = lower(intent);
   const reason_codes = [];
@@ -147,6 +170,40 @@ export function computeTemperatureSignal({
     reason_codes.push("SELLER_ASKING_QUESTIONS");
   }
   engagement_score = clamp01(engagement_score);
+
+  // ── Behavior-score seam (bounded rules — see module header table) ─────────
+  const behavior_scores = behavior?.scores || null;
+  if (behavior_scores) {
+    const b_hostility = behavior_scores.hostility;
+    if (
+      Number(b_hostility?.value) >= 0.6 &&
+      Number(b_hostility?.confidence) >= 0.7
+    ) {
+      friction_score = clamp01(friction_score + 0.3);
+      reason_codes.push("BEHAVIOR_HOSTILITY_FRICTION");
+    }
+    const b_urgency = behavior_scores.urgency;
+    if (
+      urgency_score === 0 &&
+      !timeline &&
+      Number(b_urgency?.value) >= 0.7 &&
+      Number(b_urgency?.confidence) >= 0.6
+    ) {
+      // 0.4 sits below every floor threshold (HOT requires 0.7): behavioral
+      // urgency corroborates but can never create WARM/HOT on its own.
+      urgency_score = 0.4;
+      reason_codes.push("BEHAVIOR_URGENCY_CORROBORATED");
+    }
+    const b_engagement = behavior_scores.engagement;
+    if (
+      Number(b_engagement?.value) >= 0.5 &&
+      Number(b_engagement?.confidence) >= 0.6
+    ) {
+      // Reason code only — the engagement component itself stays derived
+      // from thread stats above, and the engagement-only floor stays COLD.
+      reason_codes.push("BEHAVIOR_ENGAGEMENT_CORROBORATED");
+    }
+  }
 
   const components = {
     intent_score,

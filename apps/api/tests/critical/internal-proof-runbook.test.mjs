@@ -8,8 +8,10 @@
 //   * getControl surfaces Supabase read errors instead of returning null;
 //   * close never claims "expired" unless the expiry write succeeds AND is
 //     read back and verified;
-//   * stamp-reply is a conditional write keyed on the observed queue_status,
-//     verifies exactly one row matched, and aborts loudly otherwise.
+//   * stamp-reply goes through the internal_proof_stamp_queue_row RPC (atomic
+//     server-side jsonb merge, allowlisted keys only, CASed on the observed
+//     queue_status), aborts loudly on any refusal, and NEVER falls back to
+//     the old client-side read-modify-write path.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -53,10 +55,11 @@ function makeSupabaseMock({
   reply_update_count = 1,
   control_read_error = null, // Error | (key, nth_read_of_key) => Error | null
   drop_upsert_keys = [], // upserts report success but do not persist (lost write)
+  rpc_result = { data: { ok: true, row: {} }, error: null }, // internal_proof_stamp_queue_row response
 } = {}) {
   const control_values = new Map(Object.entries(controls));
   const read_counts = new Map();
-  const calls = { upserts: [], updates: [], reads: [] };
+  const calls = { upserts: [], updates: [], reads: [], rpcs: [] };
   const client = {
     from(table) {
       if (table === "system_control") {
@@ -122,6 +125,10 @@ function makeSupabaseMock({
         };
       }
       throw new Error(`unexpected table access in test: ${table}`);
+    },
+    async rpc(fn, args) {
+      calls.rpcs.push({ fn, args });
+      return typeof rpc_result === "function" ? rpc_result(fn, args) : rpc_result;
     },
   };
   return { client, control_values, calls };
@@ -349,52 +356,113 @@ function makeReplyRow(overrides = {}) {
   };
 }
 
-test("stamp-reply: conditional update is keyed on the observed queue_status with count verification", async () => {
+const ACTIVE_SESSION_CONTROLS = {
+  internal_proof_session: JSON.stringify(makeStoredSession()),
+};
+
+test("stamp-reply: atomic RPC merge with only allowlisted stamp keys, CASed on the observed status", async () => {
   const reply = makeReplyRow();
-  const { steps, logs, calls } = makeRunbook({ reply_rows: [reply], reply_update_count: 1 });
+  const { steps, logs, calls } = makeRunbook({
+    controls: { ...ACTIVE_SESSION_CONTROLS },
+    reply_rows: [reply],
+    rpc_result: {
+      data: {
+        ok: true,
+        row: { id: reply.id, queue_status: "queued", campaign_id: PINNED.campaign },
+      },
+      error: null,
+    },
+  });
   await steps["stamp-reply"]();
-  assert.equal(calls.updates.length, 1);
-  const update = calls.updates[0];
-  // Exact-count request and both predicates: id AND the previously observed
-  // eligible queue status.
-  assert.deepEqual(update.options, { count: "exact" });
-  assert.deepEqual(update.filters, [
-    ["id", reply.id],
-    ["queue_status", "queued"],
+  // The racy client-side read-modify-write path must never run.
+  assert.equal(calls.updates.length, 0);
+  assert.equal(calls.rpcs.length, 1);
+  const { fn, args } = calls.rpcs[0];
+  assert.equal(fn, "internal_proof_stamp_queue_row");
+  assert.equal(args.p_queue_row_id, reply.id);
+  assert.equal(args.p_expected_status, "queued");
+  assert.equal(args.p_expected_campaign_id, null);
+  assert.equal(args.p_campaign_id, PINNED.campaign);
+  // The stamp payload is EXACTLY the contract keys — nothing else may ride
+  // along (the server rejects unknown keys; the client must not send any).
+  assert.deepEqual(Object.keys(args.p_stamp).sort(), [
+    "campaign_id_stamped_for_internal_proof",
+    "campaign_stamped_at",
+    "internal_canary",
   ]);
-  // Metadata merge preserves the snapshot and adds the stamp fields.
-  assert.equal(update.payload.campaign_id, PINNED.campaign);
-  assert.equal(update.payload.metadata.origin_surface, "canonical_automation");
-  assert.equal(update.payload.metadata.source_event_id, "evt-internal-1");
-  assert.equal(update.payload.metadata.internal_canary, true);
-  assert.equal(update.payload.metadata.campaign_id_stamped_for_internal_proof, true);
-  assert.equal(update.payload.metadata.campaign_stamped_at, NOW_ISO);
+  assert.equal(args.p_stamp.internal_canary, true);
+  assert.equal(args.p_stamp.campaign_id_stamped_for_internal_proof, true);
+  assert.equal(args.p_stamp.campaign_stamped_at, NOW_ISO);
+  // Session + processing run recorded with the stamp.
+  assert.equal(args.p_proof_session_id, "proof-ORIGINAL0000Z");
+  assert.match(args.p_processing_run_id, /^stamp-/);
   assert.ok(logs.some((l) => l.includes(`stamped reply row: ${reply.id}`)));
 });
 
-test("stamp-reply: aborts when the row transitioned between read and write (count 0)", async () => {
+test("stamp-reply: aborts when the RPC reports the row left the expected state", async () => {
   const reply = makeReplyRow();
-  const { steps, logs } = makeRunbook({ reply_rows: [reply], reply_update_count: 0 });
+  const { steps, logs } = makeRunbook({
+    controls: { ...ACTIVE_SESSION_CONTROLS },
+    reply_rows: [reply],
+    rpc_result: {
+      data: {
+        ok: false,
+        reason: "row_not_in_expected_state",
+        current_status: "sent",
+        current_campaign_id: null,
+      },
+      error: null,
+    },
+  });
   await assert.rejects(
     steps["stamp-reply"](),
     (error) =>
       error.message.includes(reply.id) &&
-      error.message.includes("transitioned from 'queued'") &&
+      error.message.includes("row_not_in_expected_state") &&
+      error.message.includes("current status 'sent'") &&
       error.message.includes("nothing stamped")
   );
   assert.ok(!logs.some((l) => l.includes("stamped reply row")));
 });
 
-test("stamp-reply: aborts when the update matches more than one row", async () => {
+test("stamp-reply: missing RPC fails loudly with the migration name — no racy fallback", async () => {
   const reply = makeReplyRow();
-  const { steps, logs } = makeRunbook({ reply_rows: [reply], reply_update_count: 2 });
-  await assert.rejects(steps["stamp-reply"](), /update matched 2 rows/);
+  const { steps, logs, calls } = makeRunbook({
+    controls: { ...ACTIVE_SESSION_CONTROLS },
+    reply_rows: [reply],
+    rpc_result: {
+      data: null,
+      error: {
+        code: "PGRST202",
+        message:
+          "Could not find the function public.internal_proof_stamp_queue_row in the schema cache",
+      },
+    },
+  });
+  await assert.rejects(
+    steps["stamp-reply"](),
+    /apply migration 20260802092000_internal_proof_stamp_merge\.sql/
+  );
+  // The old client-side update path must not be used as a fallback.
+  assert.equal(calls.updates.length, 0);
   assert.ok(!logs.some((l) => l.includes("stamped reply row")));
+});
+
+test("stamp-reply: refuses to stamp without an open proof session or --session-id", async () => {
+  const reply = makeReplyRow();
+  const { steps, calls } = makeRunbook({ reply_rows: [reply] });
+  await assert.rejects(steps["stamp-reply"](), /no active internal_proof_session/);
+  assert.equal(calls.rpcs.length, 0);
+  assert.equal(calls.updates.length, 0);
 });
 
 test("stamp-reply: refuses a reply row carrying a foreign campaign", async () => {
   const reply = makeReplyRow({ campaign_id: "11111111-1111-4111-8111-111111111111" });
-  const { steps, calls } = makeRunbook({ reply_rows: [reply] });
+  const { steps, calls } = makeRunbook({
+    controls: { ...ACTIVE_SESSION_CONTROLS },
+    reply_rows: [reply],
+  });
   await assert.rejects(steps["stamp-reply"](), /foreign campaign/);
+  assert.equal(calls.rpcs.length, 0);
   assert.equal(calls.updates.length, 0);
 });

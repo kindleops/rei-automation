@@ -135,8 +135,32 @@ const FAMILY_MEMBER_PHRASES = [
 ];
 const AGENT_PHRASES = ["realtor", "real estate agent", "listing agent", "my agent"];
 const SPOUSE_PHRASES = ["my wife owns", "my husband owns", "spouse owns", "co-owner", "co owner"];
-const EXECUTOR_PHRASES = ["executor", "heir", "estate", "probate", "trustee"];
-const LLC_PHRASES = ["llc", "representative for", "on behalf of the company"];
+const EXECUTOR_PHRASES = ["executor", "heir", "estate", "probate", "trustee", "administrator of the estate", "estate administrator", "albacea"];
+const LLC_PHRASES = ["llc", "representative for", "on behalf of the company", "authorized signer", "authorized to sign", "signing authority", "autorizado para firmar", "autorizada para firmar"];
+
+// Estate context markers: an "administrator" inside an estate frame is an
+// estate administrator (authority holder), NOT a property manager — the
+// Spanish "soy el administrador" must not fold to property_manager when the
+// message is about a deceased owner / inheritance / probate.
+const ESTATE_CONTEXT_PHRASES = [
+  "estate",
+  "probate",
+  "deceased",
+  "passed away",
+  "inherit",
+  "herencia",
+  "sucesión",
+  "sucesion",
+  "falleció",
+  "fallecio",
+  "murió",
+  "murio",
+];
+
+// Referral hand-off phrasings that carry no extractable name/phone but still
+// designate a new decision-maker ("talk to my brother, he handles it").
+const REFERRAL_HANDOFF_RE =
+  /\b(?:talk to|speak to|speak with|contact|call|text|reach out to|deal with)\s+my\s+(?:brother|sister|son|daughter|husband|wife|mom|mother|dad|father|aunt|uncle|cousin|lawyer|attorney)\b|\b(?:he|she|they)\s+handles?\s+(?:it|that|this|the property|everything)\b|\bhabla con mi\b|\bhable con mi\b/i;
 
 const SAFETY_PRIORITY_INTENTS = new Set(["opt_out", "hostile_or_legal"]);
 
@@ -186,6 +210,15 @@ function detectRelationshipClaim(message = "") {
   if (includesAny(text, NEVER_OWNER_PHRASES)) return "never_been_owner";
   if (includesAny(text, FORMER_OWNER_PHRASES)) return "former_owner";
   if (includesAny(text, TENANT_PHRASES)) return "tenant";
+  // Estate-context administrator outranks property manager: "soy el
+  // administrador (de la herencia)" / "administrator" inside an estate frame
+  // is an authority claim, not building management.
+  if (
+    (/\badministrat(?:or|ora?)\b/.test(text) || text.includes("administrador") || text.includes("administradora")) &&
+    includesAny(text, ESTATE_CONTEXT_PHRASES)
+  ) {
+    return "executor_heir";
+  }
   if (includesAny(text, PROPERTY_MANAGER_PHRASES)) return "property_manager";
   if (includesAny(text, FAMILY_MEMBER_PHRASES)) return "family_member";
   if (includesAny(text, AGENT_PHRASES)) return "agent";
@@ -368,7 +401,11 @@ export function resolveInboundRelationship({
   const referral_detected =
     !SAFETY_PRIORITY_INTENTS.has(classifier_intent) &&
     !ownership_confirmed &&
-    referral_candidates.referral_detected;
+    (referral_candidates.referral_detected ||
+      // Hand-off phrasings without an extractable name/phone ("talk to my
+      // brother, he handles the property") are still referrals to a new
+      // decision-maker — the launch ontology's referral_new_decision_maker.
+      REFERRAL_HANDOFF_RE.test(lower(text)));
 
   const referrals = referral_candidates.referrals;
   const primary_referral = referrals.find((r) => r.name || r.phone_e164) || null;

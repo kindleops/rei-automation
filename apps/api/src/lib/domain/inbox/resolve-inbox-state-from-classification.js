@@ -238,6 +238,31 @@ export function resolveUniversalStatusFromClassification(classification = {}, me
     };
   }
 
+  // Legal/authority disclosures: human verification lane (same contract as
+  // the decision engine's LEGAL_AUTHORITY_REVIEW branch).
+  if (
+    ["title_issue", "lien_tax_issue", "bankruptcy_disclosed", "trust_ownership", "llc_corporation"].includes(primary)
+  ) {
+    return {
+      universal_status: "needs_review",
+      universal_stage: "legal_authority"
+    };
+  }
+
+  if (primary === "voicemail_call_request" || primary === "requests_email") {
+    return {
+      universal_status: "active",
+      universal_stage: classification.stage_hint || "active"
+    };
+  }
+
+  if (primary === "language_switch") {
+    return {
+      universal_status: "active",
+      universal_stage: classification.stage_hint || "new_reply"
+    };
+  }
+
   // Unclear inbound replies stay in the automation lane until a true exception is detected.
   return {
     universal_status: "active",
@@ -250,6 +275,10 @@ const PRIORITY_INTENTS = [
   "asking_price_provided",
   "asks_offer",
   "callback_requested",
+  // Contact-modality asks route with the callback family: a human owes the
+  // seller a same-channel follow-up.
+  "voicemail_call_request",
+  "requests_email",
   "latent_interest",
   "ownership_confirmed",
 ];
@@ -268,6 +297,14 @@ const OPERATOR_EXCEPTION_INTENTS = new Set([
   "identity_conflict",
   "legal_exception",
   "compliance_exception",
+  // Legal/authority disclosures (classify.js legal tier): title problems,
+  // liens/back taxes, bankruptcy, trust/entity-held ownership. Same
+  // needs_review lane as the decision engine's LEGAL_AUTHORITY_REVIEW branch.
+  "title_issue",
+  "lien_tax_issue",
+  "bankruptcy_disclosed",
+  "trust_ownership",
+  "llc_corporation",
 ]);
 
 const NEW_REPLY_INTENTS = [
@@ -275,6 +312,7 @@ const NEW_REPLY_INTENTS = [
   "condition_disclosed",
   "tenant_occupied",
   "need_time",
+  "language_switch",
 ];
 
 function isOperatorEscalation(classification = {}) {

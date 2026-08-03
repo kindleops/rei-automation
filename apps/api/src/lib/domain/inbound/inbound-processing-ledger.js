@@ -69,6 +69,227 @@ function tableMissing(error) {
   );
 }
 
+function rpcFunctionMissing(error) {
+  const msg = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    error?.code === "42883" ||
+    error?.code === "PGRST202" ||
+    msg.includes("could not find the function")
+  );
+}
+
+// ─── Atomic claim contract (enforcement authority) ──────────────────────────
+// claim_inbound_processing / complete_inbound_processing are the DATABASE
+// enforcement layer for inbound idempotency: exactly one processing claim per
+// idempotency key, leases with expiry, attempt counts, and run-id fencing so
+// a zombie worker (lease expired, row reclaimed) can never overwrite the
+// reclaiming worker's terminal disposition.
+//
+// Failure posture is the OPPOSITE of the observability writes above: when
+// Supabase is configured but the claim cannot be established (RPC missing,
+// transient DB error), the caller must FAIL CLOSED (defer to provider retry)
+// rather than process without a claim — processing unclaimed is exactly the
+// double-execution the contract exists to prevent. Only the fully
+// unconfigured environment (hermetic tests, local dev) reports
+// authority:"unavailable" so the legacy per-instance path can take over.
+
+export const INBOUND_CLAIM_OUTCOMES = Object.freeze({
+  CLAIMED_NEW: "claimed_new",
+  RETRY_CLAIMED: "retry_claimed",
+  DUPLICATE_COMPLETED: "duplicate_completed",
+  ALREADY_PROCESSING: "already_processing",
+  TERMINALLY_FAILED: "terminally_failed",
+  INVALID_CLAIM: "invalid_claim",
+});
+
+export const INBOUND_CLAIM_LEASE_SECONDS = 600;
+export const INBOUND_CLAIM_MAX_ATTEMPTS = 5;
+
+export async function claimInboundProcessing(
+  {
+    idempotency_key,
+    provider_message_sid = null,
+    thread_key = null,
+    from_phone = null,
+    to_phone = null,
+    message_body = null,
+    received_at = null,
+    processing_run_id = null,
+    lease_seconds = INBOUND_CLAIM_LEASE_SECONDS,
+    max_attempts = INBOUND_CLAIM_MAX_ATTEMPTS,
+  } = {},
+  deps = {}
+) {
+  const key = clean(idempotency_key);
+  if (!key) {
+    return {
+      ok: false,
+      authority: "none",
+      outcome: INBOUND_CLAIM_OUTCOMES.INVALID_CLAIM,
+      reason: "idempotency_key_required",
+      fail_closed: false,
+    };
+  }
+  const supabase = getSupabase(deps);
+  if (!supabase) {
+    return {
+      ok: false,
+      authority: "unavailable",
+      outcome: null,
+      reason: "supabase_unconfigured",
+      fail_closed: false,
+    };
+  }
+
+  const { body_sha256, body_length } = digestMessageBody(clean(message_body));
+  try {
+    const { data, error } = await supabase.rpc("claim_inbound_processing", {
+      p_idempotency_key: key,
+      p_provider_message_sid: clean(provider_message_sid) || null,
+      p_thread_key: clean(thread_key) || null,
+      p_from_phone: clean(from_phone) || null,
+      p_to_phone: clean(to_phone) || null,
+      p_body_sha256: body_sha256,
+      p_body_length: body_length,
+      p_received_at: clean(received_at) || null,
+      p_processing_run_id: clean(processing_run_id) || null,
+      p_lease_seconds: lease_seconds,
+      p_max_attempts: max_attempts,
+    });
+    if (error) throw error;
+    const outcome = clean(data?.outcome) || null;
+    // Fail closed on an unrecognized RPC result: a null/malformed payload
+    // must never read as "no claim needed" — processing unclaimed is the
+    // double-execution this contract exists to prevent.
+    if (!outcome || !Object.values(INBOUND_CLAIM_OUTCOMES).includes(outcome)) {
+      warn("inbound_ledger.claim_outcome_unrecognized", {
+        idempotency_key: key,
+        outcome,
+      });
+      return {
+        ok: false,
+        authority: "db",
+        outcome: null,
+        reason: "claim_outcome_unrecognized",
+        fail_closed: true,
+      };
+    }
+    return {
+      ok: data?.ok !== false,
+      authority: "db",
+      outcome,
+      reason: clean(data?.reason) || null,
+      ledger_id: data?.ledger_id || null,
+      processing_run_id: data?.processing_run_id || null,
+      attempt_count: Number(data?.attempt_count) || null,
+      lease_expires_at: data?.lease_expires_at || null,
+      prior_disposition: data?.prior_disposition || null,
+      prior_completed_at: data?.prior_completed_at || null,
+      duplicate_delivery_count: Number(data?.duplicate_delivery_count) || 0,
+      holder_processing_run_id: data?.holder_processing_run_id || null,
+      fail_closed: false,
+    };
+  } catch (error) {
+    if (rpcFunctionMissing(error)) {
+      warn("inbound_ledger.claim_function_unavailable", { idempotency_key: key });
+      return {
+        ok: false,
+        authority: "db",
+        outcome: null,
+        reason: "claim_function_unavailable",
+        fail_closed: true,
+      };
+    }
+    warn("inbound_ledger.claim_failed", {
+      idempotency_key: key,
+      error: error?.message || "unknown",
+    });
+    return {
+      ok: false,
+      authority: "db",
+      outcome: null,
+      reason: "claim_rpc_failed",
+      message: error?.message,
+      fail_closed: true,
+    };
+  }
+}
+
+export async function completeInboundProcessingClaim(
+  {
+    idempotency_key,
+    processing_run_id,
+    disposition,
+    detail = {},
+    detected_intent = null,
+    classifier_version = null,
+    confidence = null,
+    latency_ms = null,
+    error_message = null,
+  } = {},
+  deps = {}
+) {
+  const key = clean(idempotency_key);
+  if (!key) return { ok: false, reason: "idempotency_key_required" };
+  if (!clean(processing_run_id)) {
+    return { ok: false, reason: "processing_run_id_required" };
+  }
+  if (!isTerminalDisposition(disposition)) {
+    warn("inbound_ledger.invalid_claim_disposition", {
+      disposition,
+      idempotency_key: key,
+    });
+    return { ok: false, reason: "invalid_terminal_disposition" };
+  }
+  const supabase = getSupabase(deps);
+  if (!supabase) return { ok: false, reason: "supabase_unconfigured" };
+
+  try {
+    const { data, error } = await supabase.rpc("complete_inbound_processing", {
+      p_idempotency_key: key,
+      p_processing_run_id: clean(processing_run_id),
+      p_disposition: disposition,
+      p_detail: detail && typeof detail === "object" ? detail : {},
+      p_detected_intent: clean(detected_intent) || null,
+      p_classifier_version: clean(classifier_version) || null,
+      p_confidence: Number.isFinite(Number(confidence)) ? Number(confidence) : null,
+      p_latency_ms: Number.isFinite(Number(latency_ms))
+        ? Math.round(Number(latency_ms))
+        : null,
+      p_error_message: clean(error_message) || null,
+    });
+    if (error) throw error;
+    if (data?.ok !== true) {
+      warn("inbound_ledger.claim_complete_rejected", {
+        idempotency_key: key,
+        disposition,
+        reason: data?.reason || "unknown",
+        current_status: data?.current_status || null,
+      });
+      return {
+        ok: false,
+        reason: clean(data?.reason) || "claim_complete_rejected",
+        current_status: data?.current_status || null,
+        current_disposition: data?.current_disposition || null,
+      };
+    }
+    return { ok: true, disposition };
+  } catch (error) {
+    if (rpcFunctionMissing(error)) {
+      warn("inbound_ledger.complete_function_unavailable", {
+        idempotency_key: key,
+      });
+      return { ok: false, reason: "claim_function_unavailable" };
+    }
+    warn("inbound_ledger.claim_complete_failed", {
+      idempotency_key: key,
+      disposition,
+      error: error?.message || "unknown",
+    });
+    return { ok: false, reason: "claim_complete_rpc_failed", message: error?.message };
+  }
+}
+
 export async function beginInboundLedgerEntry(
   {
     idempotency_key,
@@ -328,7 +549,12 @@ export async function purgeExpiredInboundLedgerRows({ limit = 500 } = {}, deps =
 export default {
   beginInboundLedgerEntry,
   recordInboundTerminalDisposition,
+  claimInboundProcessing,
+  completeInboundProcessingClaim,
   findInboundLedgerSlaBreaches,
   purgeExpiredInboundLedgerRows,
   INBOUND_LEDGER_RETENTION_DAYS,
+  INBOUND_CLAIM_OUTCOMES,
+  INBOUND_CLAIM_LEASE_SECONDS,
+  INBOUND_CLAIM_MAX_ATTEMPTS,
 };

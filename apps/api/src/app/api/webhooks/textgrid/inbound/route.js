@@ -22,6 +22,7 @@ import { captureRouteException, addSentryBreadcrumb } from "@/lib/monitoring/sen
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendHotLeadAlert } from "@/lib/alerts/discord.js";
 import { sendInboundSmsDiscordAlert } from "@/lib/discord/inbound-alerts.js";
+import { recordWebhookRequestReceipt } from "@/lib/domain/webhooks/webhook-request-receipts.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +57,7 @@ const defaultDeps = {
   logSupabaseInboundMessageEventImpl: logSupabaseInboundMessageEvent,
   processInboundWebhookLiveImpl: processInboundWebhookLive,
   sendInboundSmsDiscordAlertImpl: sendInboundSmsDiscordAlert,
+  recordWebhookRequestReceiptImpl: recordWebhookRequestReceipt,
 };
 
 let runtimeDeps = { ...defaultDeps };
@@ -86,6 +88,19 @@ function safeErrorMessage(error, fallback = "Unknown error") {
 
 function safeErrorStack(error) {
   return error?.stack ? redactRouteSecrets(error.stack) : null;
+}
+
+// Route-level oversize guard: TextGrid inbound SMS webhooks are small
+// form/JSON posts; 256 KB is far above any legitimate message payload.
+const MAX_INBOUND_REQUEST_BYTES = 256 * 1024;
+
+function resolveReceiptSignatureStatus({ mode, verified, bypassed, header_name } = {}) {
+  if (verified) return "valid";
+  if (mode === "off" || bypassed) return "skipped_mode_off";
+  if (!header_name) return "missing";
+  if (mode === "log_only") return "skipped_log_only";
+  if (mode === "strict") return "invalid";
+  return "unknown";
 }
 
 function asBool(value, fallback = false) {
@@ -249,11 +264,74 @@ export async function POST(request) {
     }
   }
 
+  // ── Route-level request receipt (durable audit for EVERY outcome) ────────
+  // One receipt per HTTP request, including requests rejected before the core
+  // handler. First terminal outcome wins; the write never throws and never
+  // changes the response.
+  const receipt_correlation_id = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `wrr-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let receipt_written = false;
+  let receipt_raw_body = "";
+  const receipt_flags = {};
+  const writeRequestReceipt = async (fields = {}) => {
+    if (receipt_written) return;
+    receipt_written = true;
+    try {
+      await runtimeDeps.recordWebhookRequestReceiptImpl({
+        correlation_id: receipt_correlation_id,
+        webhook_log_id: inbound_webhook_log_row?.id || null,
+        provider: "textgrid",
+        endpoint: "/api/webhooks/textgrid/inbound",
+        event_kind: normalized_payload?.header_event || "inbound",
+        provider_message_sid: safe_message_id,
+        from_phone: safe_from,
+        to_phone: safe_to,
+        raw_body: receipt_raw_body,
+        signature_status: resolveReceiptSignatureStatus({
+          mode: safe_signature_verification_mode,
+          verified: safe_signature_verified,
+          bypassed: safe_signature_bypassed,
+          header_name: safe_signature_header_name,
+        }),
+        ...fields,
+        // Merged LAST so caller detail can never drop the accumulated route
+        // flags (e.g. debug_stage_misuse) — fields.detail alone would.
+        detail: {
+          ...receipt_flags,
+          ...(fields.detail || {}),
+        },
+      });
+    } catch (receipt_error) {
+      safeRouteLog("warn", "textgrid_inbound.request_receipt_failed", {
+        message_id: safe_message_id,
+        message: safeErrorMessage(receipt_error, "request_receipt_failed"),
+      });
+    }
+  };
+
   try {
     const raw_body = await request.clone().text().catch(() => "");
+    receipt_raw_body = raw_body;
     console.log("TEXTGRID INBOUND WEBHOOK HIT", serializeForConsole({ method: "POST", url: request.url }));
     const content_type = clean(request.headers.get("content-type"));
     console.log("INBOUND CONTENT TYPE", serializeForConsole({ content_type }));
+
+    // Oversized requests are rejected before any parsing/processing. TextGrid
+    // SMS payloads are a few KB; anything beyond this is not a message.
+    if (raw_body.length > MAX_INBOUND_REQUEST_BYTES) {
+      await writeRequestReceipt({
+        outcome: "rejected",
+        rejection_reason: "oversized_request",
+        http_status: 413,
+        detail: { body_bytes: raw_body.length, limit: MAX_INBOUND_REQUEST_BYTES },
+      });
+      return NextResponse.json(
+        { ok: false, error: "oversized_request" },
+        { status: 413 }
+      );
+    }
+
     const body = await parseRequestBody(request);
 
     // form_params is the decoded key/value object when the body is form-encoded.
@@ -364,6 +442,10 @@ export async function POST(request) {
       safeRouteLog("warn", "textgrid_inbound.debug_stage_rejected", {
         stage: raw_debug_stage,
       });
+      // Not a terminal reject (the header is ignored and processing
+      // continues) — stamp the misuse onto whatever receipt this request
+      // ultimately writes.
+      receipt_flags.debug_stage_misuse = true;
     }
     const inbound_debug_stage = debug_stage_authorized ? raw_debug_stage : null;
     if (inbound_debug_stage === "after_normalized") {
@@ -613,6 +695,15 @@ export async function POST(request) {
           );
         }
 
+        await writeRequestReceipt({
+          outcome: "rejected",
+          rejection_reason:
+            parsed_body_keys.length === 0 && receipt_raw_body
+              ? "malformed_payload"
+              : "missing_sender",
+          http_status: 400,
+          detail: { response_error: "invalid_textgrid_inbound_payload" },
+        });
         return NextResponse.json(
           {
             ok: false,
@@ -664,6 +755,17 @@ export async function POST(request) {
             );
           }
 
+          await writeRequestReceipt({
+            outcome: "rejected",
+            rejection_reason: payload.header_signature
+              ? "invalid_signature"
+              : "missing_signature",
+            signature_status: payload.header_signature ? "invalid" : "missing",
+            http_status: 401,
+            detail: {
+              signature_failure_reason: safe_signature_failure_reason,
+            },
+          });
           return NextResponse.json(
             {
               ok: false,
@@ -830,6 +932,12 @@ export async function POST(request) {
         );
       }
 
+      await writeRequestReceipt({
+        outcome: "rejected",
+        rejection_reason: "parser_exception",
+        http_status: 500,
+        detail: { response_error: "textgrid_inbound_failed_pre_accept" },
+      });
       return NextResponse.json(
         {
           ok: false,
@@ -1148,6 +1256,63 @@ export async function POST(request) {
     );
 
     const main_handler_response_status = result?.retryable ? 503 : 200;
+
+    // Durable receipt for the request's terminal outcome. Duplicates are
+    // first-class (never misrepresented as fresh seller messages); handler
+    // refusals map onto the canonical rejection vocabulary.
+    {
+      const media_only =
+        !clean(payload?.message_body ?? payload?.body ?? "") &&
+        (Number(payload?.num_media) > 0 ||
+          (Array.isArray(payload?.media_urls) && payload.media_urls.length > 0));
+      let receipt_fields;
+      if (result?.duplicate) {
+        receipt_fields = {
+          outcome: "duplicate",
+          http_status: main_handler_response_status,
+          idempotency_key: result?.idempotency_key || null,
+          detail: {
+            duplicate_reason: result?.reason || null,
+            prior_disposition: result?.prior_disposition || null,
+          },
+        };
+      } else if (result?.fail_closed) {
+        receipt_fields = {
+          outcome: "rejected",
+          rejection_reason: "inbound_claim_unavailable",
+          http_status: main_handler_response_status,
+          idempotency_key: result?.idempotency_key || null,
+          detail: { handler_reason: result?.reason || null },
+        };
+      } else if (result?.ok === false) {
+        const handler_reason = clean(result?.reason || result?.error || "");
+        receipt_fields = {
+          outcome: "rejected",
+          rejection_reason:
+            handler_reason === "missing_inbound_from"
+              ? "missing_sender"
+              : handler_reason === "empty_inbound_body"
+                ? media_only
+                  ? "unsupported_media_only"
+                  : "empty_body"
+                : "internal_error",
+          http_status: main_handler_response_status,
+          idempotency_key: result?.idempotency_key || null,
+          detail: { handler_reason: handler_reason || null },
+        };
+      } else {
+        receipt_fields = {
+          outcome: "accepted",
+          http_status: main_handler_response_status,
+          idempotency_key: result?.idempotency_key || null,
+          detail: {
+            terminal_disposition: result?.terminal_disposition || null,
+          },
+        };
+      }
+      await writeRequestReceipt(receipt_fields);
+    }
+
     const response_headers = {};
     const retry_after_seconds = Number(result?.retry_after_seconds);
     if (Number.isFinite(retry_after_seconds) && retry_after_seconds > 0) {
@@ -1296,6 +1461,13 @@ export async function POST(request) {
       },
       severity: "error",
       final_response_status: 500,
+    });
+
+    await writeRequestReceipt({
+      outcome: "rejected",
+      rejection_reason: "internal_error",
+      http_status: 500,
+      detail: { response_error: "textgrid_inbound_failed" },
     });
 
     return NextResponse.json(

@@ -20,6 +20,66 @@ const DEFAULT_TIMEOUT_MS = 3500;
 const MIN_MODEL_CONFIDENCE = 0.6;
 const MIN_LANGUAGE_CONFIDENCE = 0.8;
 
+// ── Engine modes ─────────────────────────────────────────────────────────────
+// NATURAL_REPLY_ENGINE resolves to exactly one of these. Anything else —
+// unset, "disabled", typos, legacy values — is DISABLED, the production-safe
+// default. "shadow" generates + validates + audits but NEVER substitutes
+// text; "internal_proof" substitutes only when the reply recipient is an
+// internal test phone (src/lib/config/internal-phones.js) and behaves as
+// shadow otherwise; "enabled" is the full substitution path.
+export const NATURAL_REPLY_MODES = Object.freeze({
+  DISABLED: "disabled",
+  SHADOW: "shadow",
+  INTERNAL_PROOF: "internal_proof",
+  ENABLED: "enabled",
+});
+
+export function resolveNaturalReplyMode(env = process.env) {
+  const raw = String(env?.NATURAL_REPLY_ENGINE ?? "").trim().toLowerCase();
+  if (raw === NATURAL_REPLY_MODES.ENABLED) return { mode: NATURAL_REPLY_MODES.ENABLED, reason: null };
+  if (raw === NATURAL_REPLY_MODES.SHADOW) return { mode: NATURAL_REPLY_MODES.SHADOW, reason: null };
+  if (raw === NATURAL_REPLY_MODES.INTERNAL_PROOF) {
+    return { mode: NATURAL_REPLY_MODES.INTERNAL_PROOF, reason: null };
+  }
+  return {
+    mode: NATURAL_REPLY_MODES.DISABLED,
+    reason: raw && raw !== "disabled" ? "unrecognized_mode_value" : "engine_disabled",
+  };
+}
+
+// Model timeout: NATURAL_REPLY_TIMEOUT_MS, clamped so a bad value can neither
+// hang the inbound path nor produce an instant-abort storm.
+const ENV_TIMEOUT_DEFAULT_MS = 8000;
+const ENV_TIMEOUT_MIN_MS = 1000;
+const ENV_TIMEOUT_MAX_MS = 20000;
+
+export function resolveNaturalReplyTimeoutMs(env = process.env) {
+  const raw = Number(env?.NATURAL_REPLY_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return ENV_TIMEOUT_DEFAULT_MS;
+  return Math.min(Math.max(Math.round(raw), ENV_TIMEOUT_MIN_MS), ENV_TIMEOUT_MAX_MS);
+}
+
+// Hardcoded per-provider model allowlist. NATURAL_REPLY_MODEL outside this
+// list falls back to the provider default and audits model_not_allowlisted —
+// an operator typo can never route seller traffic to an arbitrary model.
+export const NATURAL_REPLY_MODEL_ALLOWLIST = Object.freeze({
+  groq: Object.freeze([
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-8b-instant",
+  ]),
+  openrouter: Object.freeze([
+    "meta-llama/llama-3.3-70b-instruct",
+    "meta-llama/llama-3.1-70b-instruct",
+    "meta-llama/llama-3.1-8b-instruct",
+  ]),
+});
+
+const PROVIDER_DEFAULT_MODEL = Object.freeze({
+  groq: "llama-3.3-70b-versatile",
+  openrouter: "meta-llama/llama-3.3-70b-instruct",
+});
+
 // Suppression reasons after which no reply may ever be generated. Kept as an
 // explicit allow-nothing list so a new binding reason fails closed by default
 // via the generic `active` check in generateConstrainedReply.
@@ -182,6 +242,12 @@ export function validateGeneratedReply({
 // OpenAI-compatible chat completions dialect already present in the AI router
 // priority list. No key configured ⇒ null ⇒ the engine falls back
 // deterministically, which is the required production-safe default.
+//
+// Contract: strict structured output (response_format json_object), model
+// allowlist, AbortController timeout, at most ONE retry (network / 429 / 5xx
+// only — never other 4xx, never JSON-parse failures), bounded max_tokens
+// derived from the SMS length cap, and latency + provider usage metadata on
+// every successful call for the audit record.
 export function buildModelCallFromEnv({ env = process.env, fetchImpl = fetch } = {}) {
   const groqKey = clean(env.GROQ_API_KEY);
   const openrouterKey = clean(env.OPENROUTER_API_KEY);
@@ -193,11 +259,20 @@ export function buildModelCallFromEnv({ env = process.env, fetchImpl = fetch } =
       ? "https://api.groq.com/openai/v1/chat/completions"
       : "https://openrouter.ai/api/v1/chat/completions";
   const api_key = provider === "groq" ? groqKey : openrouterKey;
-  const model =
-    clean(env.NATURAL_REPLY_MODEL) ||
-    (provider === "groq" ? "llama-3.3-70b-versatile" : "meta-llama/llama-3.3-70b-instruct");
 
-  return async function modelCall({ system, prompt, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+  const requested_model = clean(env.NATURAL_REPLY_MODEL);
+  const allowlisted =
+    !requested_model || NATURAL_REPLY_MODEL_ALLOWLIST[provider].includes(requested_model);
+  const model = allowlisted && requested_model ? requested_model : PROVIDER_DEFAULT_MODEL[provider];
+  const model_allowlist_fallback = Boolean(requested_model) && !allowlisted;
+
+  const env_timeout_ms = resolveNaturalReplyTimeoutMs(env);
+
+  function isRetryableStatus(status) {
+    return status === 429 || status >= 500;
+  }
+
+  async function attemptOnce({ system, prompt, timeoutMs, max_tokens }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -211,6 +286,7 @@ export function buildModelCallFromEnv({ env = process.env, fetchImpl = fetch } =
         body: JSON.stringify({
           model,
           temperature: 0.4,
+          max_tokens,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: system },
@@ -218,13 +294,77 @@ export function buildModelCallFromEnv({ env = process.env, fetchImpl = fetch } =
           ],
         }),
       });
-      if (!response.ok) throw new Error(`model_http_${response.status}`);
-      const payload = await response.json();
-      const content = payload?.choices?.[0]?.message?.content;
-      return { output: JSON.parse(String(content ?? "")), provider, model };
+      if (!response.ok) {
+        const err = new Error(`model_http_${response.status}`);
+        err.retryable = isRetryableStatus(response.status);
+        throw err;
+      }
+      return response.json();
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  return async function modelCall({
+    system,
+    prompt,
+    timeoutMs = env_timeout_ms,
+    maxLength = DEFAULT_MAX_SMS_LENGTH,
+  }) {
+    // Output budget: ~1 token per 3 characters of the SMS cap plus margin for
+    // the JSON envelope; hard-capped so a runaway cap cannot inflate cost.
+    const max_tokens = Math.min(Math.ceil(Number(maxLength || DEFAULT_MAX_SMS_LENGTH) / 3) + 80, 400);
+    // Single timeout authority: timeoutMs is the TOTAL deadline for this call
+    // (attempts + retry delay together). Each attempt's abort budget is the
+    // remaining slice, and a retry is attempted only when at least a quarter
+    // of the budget is left — so the engine's outer deadline (the same
+    // timeoutMs) can never be exceeded by a late second attempt.
+    const started_ms = Date.now();
+    const deadline_ms = started_ms + Math.max(1000, Number(timeoutMs) || 8000);
+    let attempts = 0;
+    let payload;
+    for (;;) {
+      attempts += 1;
+      const remaining_ms = deadline_ms - Date.now();
+      if (remaining_ms <= 0) {
+        const timeout_error = new Error("model_timeout");
+        timeout_error.name = "AbortError";
+        throw timeout_error;
+      }
+      try {
+        payload = await attemptOnce({ system, prompt, timeoutMs: remaining_ms, max_tokens });
+        break;
+      } catch (error) {
+        const network_error =
+          error?.name === "AbortError" || error?.name === "TypeError" || error?.code === "ECONNRESET";
+        // Abort = the deadline passed: surface as-is (no retry). Network
+        // drops and retryable HTTP statuses get exactly one retry with a
+        // small jittered delay, and only while budget remains.
+        const budget_allows_retry =
+          deadline_ms - Date.now() > Math.max(250, (Number(timeoutMs) || 8000) / 4);
+        const retryable =
+          error?.retryable === true || (network_error && error?.name !== "AbortError");
+        if (!retryable || attempts >= 2 || !budget_allows_retry) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 75 + Math.floor(Math.random() * 100)));
+      }
+    }
+    const content = payload?.choices?.[0]?.message?.content;
+    return {
+      output: JSON.parse(String(content ?? "")),
+      provider,
+      model,
+      latency_ms: Date.now() - started_ms,
+      attempts,
+      usage:
+        payload?.usage && typeof payload.usage === "object"
+          ? {
+              prompt_tokens: payload.usage.prompt_tokens ?? null,
+              completion_tokens: payload.usage.completion_tokens ?? null,
+              total_tokens: payload.usage.total_tokens ?? null,
+            }
+          : null,
+      model_allowlist_fallback,
+    };
   };
 }
 
@@ -360,7 +500,7 @@ export async function generateConstrainedReply({
   let call_result;
   try {
     call_result = await Promise.race([
-      modelCall({ system, prompt, timeoutMs }),
+      modelCall({ system, prompt, timeoutMs, maxLength }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("model_timeout")), timeoutMs)
       ),
@@ -368,6 +508,23 @@ export async function generateConstrainedReply({
   } catch (error) {
     const reason = String(error?.message || "") === "model_timeout" ? "model_timeout" : "model_error";
     return fallbackResult({ deterministicText, reason, audit });
+  }
+
+  // Cost/latency observability for the audit record; absent for injected
+  // test doubles that don't report it.
+  if (call_result && typeof call_result === "object") {
+    if (Number.isFinite(Number(call_result.latency_ms))) {
+      audit.model_latency_ms = Number(call_result.latency_ms);
+    }
+    if (Number.isFinite(Number(call_result.attempts))) {
+      audit.model_attempts = Number(call_result.attempts);
+    }
+    if (call_result.usage && typeof call_result.usage === "object") {
+      audit.model_usage = call_result.usage;
+    }
+    if (call_result.model_allowlist_fallback === true) {
+      audit.model_allowlist_fallback = true;
+    }
   }
 
   const candidate = call_result?.output ?? null;

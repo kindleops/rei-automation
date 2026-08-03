@@ -33,6 +33,7 @@ import { resolveSellerConversationState } from "@/lib/domain/seller-flow/resolve
 import { resolveSellerNextBestAction } from "@/lib/domain/seller-flow/resolve-seller-next-best-action.js";
 import { resolveSellerResponseStrategy } from "@/lib/domain/seller-flow/resolve-seller-response-strategy.js";
 import { computeTemperatureSignal } from "@/lib/domain/seller-flow/temperature-signal-model.js";
+import { scoreConversationBehavior } from "@/lib/domain/seller-flow/conversation-behavior-scoring.js";
 import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
@@ -674,6 +675,48 @@ export async function processSellerInboundMessage({
   });
   const extraction_facts = extractionToResolverFacts(fact_extraction);
 
+  // ── Evidence-based behavioral scores (conversation-behavior-scoring.js).
+  // Deterministic evidence only; a scoring failure degrades to all-null
+  // scores and the decision proceeds exactly as before. Scores never write
+  // state — they reach temperature only through the model's bounded seam and
+  // ride the intelligence snapshot for audit/replay.
+  // (re_engagement_strength stays null here by design: latest-intent
+  // precedence resolves later, inside the execution phase, and behavioral
+  // corroboration may never precede or create a re-engagement.)
+  // Reply latency uses the SAME derivation as the analysis contract
+  // (received_at − prior outbound instant, when both are known): the two
+  // scoreConversationBehavior entry points must never disagree on an input.
+  const behavior_reply_latency_seconds = (() => {
+    const prior_out = Date.parse(
+      context?.summary?.last_outbound_at ??
+        context?.summary?.latest_outbound_at ??
+        ""
+    );
+    const received = Date.parse(inboundReceivedAt ?? "");
+    if (!Number.isFinite(prior_out) || !Number.isFinite(received)) return null;
+    return Math.max(0, Math.round((received - prior_out) / 1000));
+  })();
+  let behavior_scores = null;
+  try {
+    behavior_scores = scoreConversationBehavior({
+      raw_text: message,
+      classification,
+      extraction: fact_extraction,
+      thread_stats: {
+        seller_reply_count:
+          context?.summary?.seller_reply_count ?? context?.summary?.inbound_count ?? null,
+        conversation_depth: context?.summary?.message_count ?? null,
+        reply_latency_seconds: behavior_reply_latency_seconds,
+      },
+      precedence: null,
+    });
+  } catch (scoring_error) {
+    runtimeDeps.warn("[CONVERSATION_BEHAVIOR_SCORING_FAILED]", {
+      thread_key: threadKey || inboundFrom,
+      error: scoring_error?.message || "scoring_failed",
+    });
+  }
+
   const legacy_plan = await runtimeDeps.resolveSellerAutoReplyPlan({
     inbound_event: {
       item_id: inboundEventId,
@@ -724,6 +767,12 @@ export async function processSellerInboundMessage({
   // replayable alongside the decision that consumed it.
   if (intelligence_snapshot && fact_extraction) {
     intelligence_snapshot.fact_extraction = fact_extraction;
+  }
+  // Behavioral scores persist with the snapshot so every temperature/analysis
+  // consumer can see the evidence behind them (or the fallback_reason when
+  // scoring degraded).
+  if (intelligence_snapshot && behavior_scores) {
+    intelligence_snapshot.behavior_scores = behavior_scores;
   }
   // Burst provenance: which finalized generation produced this single V2 turn
   // (audit + idempotency proof — the decision key is stable across reclaims).
@@ -798,6 +847,8 @@ export async function processSellerInboundMessage({
 
   // ── Explainable deterministic temperature signal (Mission 4): explicit
   // meaning dominates; secondary engagement signals only nudge within band.
+  // (message_word_count was passed here historically but never consumed by
+  // the model — dropped: raw length is typing, not psychology.)
   const temperature_signal = computeTemperatureSignal({
     intent: intelligence_snapshot?.canonical_intent || contract.normalized_intent || "unclear",
     facts: {
@@ -807,13 +858,13 @@ export async function processSellerInboundMessage({
     },
     objections: fact_extraction?.facts?.objections?.value || null,
     secondary: {
-      message_word_count: String(message || "").trim().split(/\s+/).filter(Boolean).length,
       question_count: (String(message || "").match(/\?/g) || []).length,
       seller_reply_count:
         context?.summary?.seller_reply_count ?? context?.summary?.inbound_count ?? null,
       conversation_depth: context?.summary?.message_count ?? null,
-      reply_latency_seconds: null,
+      reply_latency_seconds: behavior_reply_latency_seconds,
     },
+    behavior: behavior_scores,
   });
 
   // ── Auto Reply Intelligence V2 (deterministic, no AI) ───────────────────

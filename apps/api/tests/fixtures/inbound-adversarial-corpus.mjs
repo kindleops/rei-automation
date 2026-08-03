@@ -61,6 +61,10 @@ export const CORPUS_CATEGORIES = Object.freeze([
   "identity",
   "legal_financial",
   "negotiation",
+  // Detector-completion pass: contact-modality logistics + explicit
+  // compound-intent preservation cases.
+  "logistics",
+  "compound",
 ]);
 
 export const TERMINAL_DISPOSITIONS = Object.freeze([
@@ -933,7 +937,12 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "legal_financial",
     message_body: "The property is held in our family trust, I'm the trustee. It would be an LLC-to-LLC sale. What are you offering?",
     expected: {
-      intent_any_of: ["ownership_confirmed", "asks_offer", "info_request"],
+      // trust_ownership/llc_corporation added (detector-completion pass):
+      // entity-held title now resolves to the finer legal/authority label —
+      // human verification lane per the ontology — instead of a bare
+      // ownership/offer read. The offer ask is preserved as a secondary
+      // intent (compound preservation).
+      intent_any_of: ["trust_ownership", "llc_corporation", "ownership_confirmed", "asks_offer", "info_request"],
       must_not_auto_reply: false,
       disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
     },
@@ -944,7 +953,11 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "legal_financial",
     message_body: "Theres a tax lien on it from 2023, would you still buy it?",
     expected: {
-      intent_any_of: ["condition_disclosed", "seller_interested", "info_request"],
+      // lien_tax_issue added (detector-completion pass): a lien disclosure is
+      // now the finer legal/authority label (human scopes payoff feasibility
+      // per the ontology) instead of folding into generic condition facts.
+      // The live interest is preserved as a secondary intent.
+      intent_any_of: ["lien_tax_issue", "condition_disclosed", "seller_interested", "info_request"],
       must_not_auto_reply: false,
       disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"], // review = replay placeholder-degrade (see header)
     },
@@ -960,6 +973,155 @@ export const ADVERSARIAL_INBOUND_CASES = [
       disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
     },
     notes: "Foreclosure urgency with an impossible-timeline ask; highest-motivation seller in the corpus, needs fast human escalation.",
+  }),
+
+  // ── legal_financial: detector-completion pass (title/lien/bankruptcy/
+  //    trust/entity + negation guards) ────────────────────────────────────────
+  makeCase({
+    case_id: "legal-title-cloud-quiet-title",
+    category: "legal_financial",
+    // "lawyer says" would rank hostile_or_legal first (any legal-counsel
+    // mention is conservatively a human lane) — this case pins the title
+    // detector itself.
+    message_body: "Theres a cloud on the title from my late husbands name, we need a quiet title action first",
+    expected: {
+      intent_any_of: ["title_issue"],
+      must_not_auto_reply: true,
+      disposition_any_of: ["human_review_required"],
+    },
+    notes: "Clouded title requiring legal cure; human lane before any offer per the legal_financial ontology contract.",
+  }),
+  makeCase({
+    case_id: "legal-bankruptcy-chapter13-wants-sale",
+    category: "legal_financial",
+    message_body: "Im in chapter 13 right now but I was told I can sell the house, how fast could you close?",
+    expected: {
+      intent_any_of: ["bankruptcy_disclosed"],
+      must_not_auto_reply: true,
+      disposition_any_of: ["human_review_required"],
+    },
+    notes: "Bankruptcy disclosure: automatic-stay/trustee-approval implications force a human verification lane despite the live interest.",
+  }),
+  makeCase({
+    case_id: "legal-corporation-authorized-signer",
+    category: "legal_financial",
+    message_body: "That property belongs to our corporation. I am the authorized signer so you can deal with me directly",
+    expected: {
+      intent_any_of: ["llc_corporation"],
+      must_not_auto_reply: true,
+      disposition_any_of: ["human_review_required"],
+    },
+    notes: "Entity-held ownership with an authorized-signer claim; signing authority must be verified by a human.",
+  }),
+  makeCase({
+    case_id: "legal-spanish-tax-lien",
+    category: "legal_financial",
+    message_body: "La casa tiene un gravamen de impuestos, ¿todavía la quieren comprar?",
+    expected: {
+      intent_any_of: ["lien_tax_issue"],
+      must_not_auto_reply: true,
+      disposition_any_of: ["human_review_required"],
+    },
+    notes: "Spanish lien disclosure (gravamen) with live interest; legal lane wins, interest preserved as secondary.",
+  }),
+  makeCase({
+    case_id: "legal-negated-lien-clean-title-guard",
+    category: "legal_financial",
+    message_body: "No liens on it and taxes are current. what would you offer for it?",
+    expected: {
+      // Negation guard: assurances must NOT trip the lien/title detectors —
+      // this is a clean offer ask.
+      intent_any_of: ["asks_offer", "seller_interested", "info_request"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Lien/tax negation guard: 'no liens' + 'taxes are current' is an assurance, not a disclosure.",
+  }),
+  makeCase({
+    case_id: "legal-trust-me-sense-guard",
+    category: "legal_financial",
+    message_body: "trust me you dont want this place lol it needs everything",
+    expected: {
+      // Sense guard: conversational "trust me" must never trip trust_ownership.
+      intent_any_of: ["condition_disclosed", "not_interested", "unclear"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "no_reply_required", "human_review_required"],
+    },
+    notes: "Trust-ownership sense guard: 'trust me' is conversation, not a trust-held title.",
+  }),
+
+  // ── logistics: contact modality + language switch (detector-completion) ───
+  makeCase({
+    case_id: "logistics-voicemail-callback",
+    category: "logistics",
+    message_body: "Just call and leave a voicemail if I dont pick up, I do want to hear the number",
+    expected: {
+      intent_any_of: ["voicemail_call_request", "callback_requested", "asks_offer"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Voicemail-mediated callback ask; routes with the callback family (SMS acknowledges, human calls).",
+  }),
+  makeCase({
+    case_id: "logistics-email-preference",
+    category: "logistics",
+    message_body: "Can you email me the details instead? I prefer email over texting",
+    expected: {
+      intent_any_of: ["requests_email"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Email-preference lane (ontology requests_email) — no longer folded into callback_requested.",
+  }),
+  makeCase({
+    case_id: "logistics-dont-email-guard",
+    category: "logistics",
+    message_body: "do not email me, text is fine. what is your offer?",
+    expected: {
+      // Refusal guard: "do not email" must not become requests_email.
+      intent_any_of: ["asks_offer", "info_request", "seller_interested"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Email-refusal guard: a channel refusal is not a channel request; the offer ask should drive.",
+  }),
+  makeCase({
+    case_id: "logistics-language-switch-solo",
+    category: "language_switch",
+    message_body: "No hablo ingles. En español por favor",
+    expected: {
+      intent_any_of: ["language_switch"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Pure language-switch request with no other content; conversation continues in Spanish via language continuity.",
+  }),
+
+  // ── compound: multi-family preservation (detector-completion) ─────────────
+  makeCase({
+    case_id: "compound-probate-executor-price",
+    category: "compound",
+    message_body: "Property is in probate, my sister is the executor, and we want 150k for it",
+    expected: {
+      // Compound preservation: price + ownership/authority components must
+      // both survive; primary is the price (INTENT_PRIORITY), the probate
+      // objection + executor relationship carry the authority state.
+      intent_any_of: ["asking_price_provided", "ownership_confirmed"],
+      must_not_auto_reply: false,
+      disposition_any_of: ["reply_sent", "reply_deferred_compliance", "human_review_required"],
+    },
+    notes: "Canonical compound message: probate authority + executor identity + asking price in one turn; nothing may be flattened away.",
+  }),
+  makeCase({
+    case_id: "compound-lien-plus-interest",
+    category: "compound",
+    message_body: "Yes id sell. Heads up there is an IRS lien on it though",
+    expected: {
+      intent_any_of: ["lien_tax_issue"],
+      must_not_auto_reply: true,
+      disposition_any_of: ["human_review_required"],
+    },
+    notes: "Interest + lien: the legal tier outranks engagement so payoff feasibility is scoped by a human; interest survives as secondary.",
   }),
   makeCase({
     case_id: "legal-cease-and-desist-attorney",
