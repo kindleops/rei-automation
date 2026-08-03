@@ -42,6 +42,8 @@ jobs:
           cache: npm
       - name: Install repository dependencies
         run: npm install
+      - name: Prepare command evidence directory
+        run: mkdir -p proof/deal-desk-n2/commands
       - name: N.2 and N.1 dashboard unit regressions
         working-directory: apps/dashboard
         run: |
@@ -52,20 +54,25 @@ jobs:
             tests/unit/deal-desk-selection-continuity.test.ts \
             tests/unit/deal-desk-selection.test.ts \
             tests/unit/deal-desk-hydration.test.ts \
-            tests/unit/canonical-thread-reference.test.ts
+            tests/unit/canonical-thread-reference.test.ts \
+            2>&1 | tee ../../proof/deal-desk-n2/commands/dashboard-unit.log
       - name: N.2 API mutation integration and current inbox regressions
         working-directory: apps/api
         run: |
           set -o pipefail
-          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/deal-desk-n2-control-mutations.test.mjs
-          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/inbox-thread-context-route.test.mjs
-          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/inbox-canonical-row-contract.test.mjs
-          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/inbox-state-transition-matrix.test.mjs
+          {
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+              tests/critical/deal-desk-n2-control-mutations.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+              tests/critical/inbox-thread-context-route.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+              tests/critical/inbox-canonical-row-contract.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+              tests/critical/inbox-state-transition-matrix.test.mjs
+          } 2>&1 | tee ../../proof/deal-desk-n2/commands/api-integration.log
       - name: Relevant dashboard lint
+        id: dashboard_lint
+        continue-on-error: true
         working-directory: apps/dashboard
         run: |
           set -o pipefail
@@ -84,14 +91,49 @@ jobs:
             src/modules/inbox/inbox.adapter.ts \
             src/modules/inbox/useCanonicalControlMutation.ts \
             tests/unit/deal-desk-n2-control-contract.test.ts \
-            tests/ui/deal-desk-n2-controls.spec.ts
+            tests/ui/deal-desk-n2-controls.spec.ts \
+            2>&1 | tee ../../proof/deal-desk-n2/commands/dashboard-lint.log
       - name: API critical lint
+        id: api_lint
+        continue-on-error: true
         working-directory: apps/api
-        run: npm run lint
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../../proof/deal-desk-n2/commands/api-lint.log
       - name: Dashboard typecheck
-        run: npm --workspace apps/dashboard run typecheck
+        id: dashboard_typecheck
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm --workspace apps/dashboard run typecheck 2>&1 | tee proof/deal-desk-n2/commands/dashboard-typecheck.log
       - name: Dashboard build
-        run: npm --workspace apps/dashboard run build
+        id: dashboard_build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm --workspace apps/dashboard run build 2>&1 | tee proof/deal-desk-n2/commands/dashboard-build.log
+      - name: Upload command evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deal-desk-n2-command-evidence
+          path: proof/deal-desk-n2/commands/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Enforce compiler and lint outcomes
+        if: always()
+        env:
+          DASHBOARD_LINT: ${{ steps.dashboard_lint.outcome }}
+          API_LINT: ${{ steps.api_lint.outcome }}
+          DASHBOARD_TYPECHECK: ${{ steps.dashboard_typecheck.outcome }}
+          DASHBOARD_BUILD: ${{ steps.dashboard_build.outcome }}
+        run: |
+          printf 'dashboard_lint=%s\napi_lint=%s\ndashboard_typecheck=%s\ndashboard_build=%s\n' \
+            "$DASHBOARD_LINT" "$API_LINT" "$DASHBOARD_TYPECHECK" "$DASHBOARD_BUILD"
+          test "$DASHBOARD_LINT" = success
+          test "$API_LINT" = success
+          test "$DASHBOARD_TYPECHECK" = success
+          test "$DASHBOARD_BUILD" = success
 
   n2-browser:
     name: N.2 isolated browser and N.1 continuity
@@ -112,12 +154,17 @@ jobs:
         working-directory: apps/dashboard
         run: npx playwright install --with-deps chromium
       - name: Run N.2 controls and N.1 selection browser proofs
+        id: browser_proof
+        continue-on-error: true
         working-directory: apps/dashboard
         run: |
           set -o pipefail
+          mkdir -p proof/deal-desk-n2/commands
           npx playwright test \
             tests/ui/deal-desk-n2-controls.spec.ts \
-            tests/ui/deal-desk-selection-continuity.spec.ts
+            tests/ui/deal-desk-selection-continuity.spec.ts \
+            --reporter=line \
+            2>&1 | tee proof/deal-desk-n2/commands/browser.log
       - name: Upload redacted browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,3 +176,10 @@ jobs:
             apps/dashboard/test-results/playwright/
           if-no-files-found: warn
           retention-days: 30
+      - name: Enforce browser outcome
+        if: always()
+        env:
+          BROWSER_PROOF: ${{ steps.browser_proof.outcome }}
+        run: |
+          printf 'browser_proof=%s\n' "$BROWSER_PROOF"
+          test "$BROWSER_PROOF" = success
