@@ -306,11 +306,23 @@ export function createInternalProofRunbook({ supabase, now = () => new Date(), l
       // snapshot, because no snapshot is ever written back.
       const observed_status = reply.queue_status;
       const session = parseSessionValue(await getControl("internal_proof_session"));
-      const session_id = String(session?.session_id || argValue("--session-id", "") || "");
+      // ACTIVE session required, not merely present: an expired session (or
+      // one past close) must not authorize stamping. Expiry uses the stored
+      // expires_at, the same field close writes and the engine parser checks.
+      const session_expires_ts = Date.parse(String(session?.expires_at || ""));
+      const session_active =
+        Boolean(session?.session_id) &&
+        Number.isFinite(session_expires_ts) &&
+        session_expires_ts > now().getTime();
+      const session_id = String(
+        (session_active ? session.session_id : "") || argValue("--session-id", "") || ""
+      );
       if (!session_id) {
         throw new Error(
-          "no active internal_proof_session found (run open-session first) and no --session-id " +
-            "override given — stamp-reply refuses to stamp without a session reference"
+          session?.session_id
+            ? `internal_proof_session ${session.session_id} is expired (expires_at ${session?.expires_at ?? "unset"}) — run open-session for a fresh bounded session, or pass --session-id to override deliberately`
+            : "no active internal_proof_session found (run open-session first) and no --session-id " +
+              "override given — stamp-reply refuses to stamp without a session reference"
         );
       }
       const processing_run_id = `stamp-${crypto.randomUUID()}`;

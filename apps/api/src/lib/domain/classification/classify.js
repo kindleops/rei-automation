@@ -3929,8 +3929,18 @@ const VOICEMAIL_REQUEST_PHRASES = [
 
 function matchesVoicemailRequest(text = "") {
   const normalized = lower(text);
-  // "don't leave a voicemail" is a contact-preference refusal, not a request.
-  if (/\b(?:don'?t|dont|do not|never|no)\s+(?:leave|call)\b[^.?!]{0,30}\b(?:voicemail|voice mail|message)\b/.test(normalized)) {
+  // Contact-preference refusals are not requests. Three refusal shapes:
+  //   * strong negator anywhere in the clause before "voicemail"
+  //     ("don't want a voicemail", "do not ever leave voicemails");
+  //   * adjacent "no voicemail(s)" / "no more voicemails" — bare "no" is only
+  //     a refusal when directly bound, so "if no answer, leave a voicemail"
+  //     still counts as a request;
+  //   * the original leave/call form, kept for the generic "message" noun.
+  if (
+    /\b(?:don'?t|dont|do not|never|stop)\b[^.?!]{0,30}\b(?:voicemail|voice mail)\b/.test(normalized) ||
+    /\bno\s+(?:more\s+)?voice\s?mails?\b/.test(normalized) ||
+    /\b(?:don'?t|dont|do not|never|no)\s+(?:leave|call)\b[^.?!]{0,30}\b(?:voicemail|voice mail|message)\b/.test(normalized)
+  ) {
     return false;
   }
   return includesAny(normalized, VOICEMAIL_REQUEST_PHRASES);

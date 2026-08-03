@@ -25,10 +25,26 @@ if (!DB_URL) {
   console.error("SELLER_BURST_PROOF_DB_URL is required (a disposable local Postgres, never production).");
   process.exit(2);
 }
-if (/supabase\.co|prod/i.test(DB_URL)) {
-  console.error("Refusing to run against something that looks like production.");
-  process.exit(2);
+function assertLocalScratchDb(url, envName) {
+  // FAIL-CLOSED allowlist: the proof/simulation may only ever touch a local
+  // scratch Postgres. Anything that is not loopback/localhost is refused —
+  // a managed host without "supabase.co"/"prod" in its name must not pass.
+  let host;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    console.error(`${envName} is not a parseable URL.`);
+    process.exit(2);
+  }
+  const allowed = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+  if (!allowed.has(host)) {
+    console.error(
+      `${envName} host "${host}" is not a local scratch database (allowed: localhost/127.0.0.1/::1). Refusing.`
+    );
+    process.exit(2);
+  }
 }
+assertLocalScratchDb(DB_URL, "SELLER_BURST_PROOF_DB_URL");
 
 const PARALLEL = Number(process.env.SELLER_BURST_PROOF_PARALLEL || 16);
 const pool = new Pool({ connectionString: DB_URL, max: PARALLEL + 2 });

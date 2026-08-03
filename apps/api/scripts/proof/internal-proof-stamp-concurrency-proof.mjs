@@ -34,9 +34,25 @@ if (!DB_URL) {
   );
   process.exit(2);
 }
-if (/supabase\.co|prod/i.test(DB_URL)) {
-  console.error("Refusing to run the stamp concurrency proof against something that looks like production.");
-  process.exit(2);
+// FAIL-CLOSED allowlist: only a loopback/localhost scratch Postgres is ever
+// acceptable — the proof creates and mutates a public.send_queue table, so a
+// managed host that merely lacks "supabase.co"/"prod" in its name must not
+// slip through a substring blocklist.
+{
+  let host;
+  try {
+    host = new URL(DB_URL).hostname;
+  } catch {
+    console.error("INTERNAL_PROOF_STAMP_PROOF_DB_URL is not a parseable URL.");
+    process.exit(2);
+  }
+  const allowed = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+  if (!allowed.has(host)) {
+    console.error(
+      `INTERNAL_PROOF_STAMP_PROOF_DB_URL host "${host}" is not a local scratch database (allowed: localhost/127.0.0.1/::1). Refusing.`
+    );
+    process.exit(2);
+  }
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

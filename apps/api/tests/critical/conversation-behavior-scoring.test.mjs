@@ -47,28 +47,25 @@ test("every dimension is present with the full score-object contract", async () 
 });
 
 test("hostile/legal message scores high hostility with intent evidence", async () => {
-  const classification = await classify(
-    "Stop harassing me. This is harassment and I will sue you",
-    null,
-    { heuristicOnly: true }
-  );
+  // Deliberately no STOP-family or harassment-complaint token: both bind the
+  // opt-out compliance path (harassment complaints are suppression facts, by
+  // design) and would make every hostility assertion below vacuous. Raw
+  // profanity-hostility is the vocabulary that classifies hostile_or_legal.
+  const body = "Fuck off, you scumbag";
+  const classification = await classify(body, null, { heuristicOnly: true });
   const result = scoreConversationBehavior({
-    raw_text: "Stop harassing me. This is harassment and I will sue you",
+    raw_text: body,
     classification,
   });
   const hostility = result.scores.hostility;
-  // The classifier routes legal-threat language to hostile_or_legal (primary
-  // or secondary) — hostility must be scored high with that intent evidence.
   const intents = [classification.primary_intent, ...(classification.secondary_intents || [])];
   assert.ok(
-    intents.includes("hostile_or_legal") || classification.primary_intent === "opt_out",
-    `unexpected classification ${JSON.stringify(intents)}`
+    intents.includes("hostile_or_legal"),
+    `fixture must classify hostile_or_legal, got ${JSON.stringify(intents)}`
   );
-  if (intents.includes("hostile_or_legal")) {
-    assert.ok(hostility.value >= 0.7, `hostility=${hostility.value}`);
-    assert.ok(evidenceDetails(hostility).includes("intent:hostile_or_legal"));
-    assert.ok(hostility.confidence >= 0.7);
-  }
+  assert.ok(hostility.value >= 0.7, `hostility=${hostility.value}`);
+  assert.ok(evidenceDetails(hostility).includes("intent:hostile_or_legal"));
+  assert.ok(hostility.confidence >= 0.7);
 });
 
 test("Spanish distress message scores urgency + motivation with matched evidence", async () => {

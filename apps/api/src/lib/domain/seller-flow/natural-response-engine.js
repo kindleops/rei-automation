@@ -314,22 +314,37 @@ export function buildModelCallFromEnv({ env = process.env, fetchImpl = fetch } =
     // Output budget: ~1 token per 3 characters of the SMS cap plus margin for
     // the JSON envelope; hard-capped so a runaway cap cannot inflate cost.
     const max_tokens = Math.min(Math.ceil(Number(maxLength || DEFAULT_MAX_SMS_LENGTH) / 3) + 80, 400);
+    // Single timeout authority: timeoutMs is the TOTAL deadline for this call
+    // (attempts + retry delay together). Each attempt's abort budget is the
+    // remaining slice, and a retry is attempted only when at least a quarter
+    // of the budget is left — so the engine's outer deadline (the same
+    // timeoutMs) can never be exceeded by a late second attempt.
     const started_ms = Date.now();
+    const deadline_ms = started_ms + Math.max(1000, Number(timeoutMs) || 8000);
     let attempts = 0;
     let payload;
     for (;;) {
       attempts += 1;
+      const remaining_ms = deadline_ms - Date.now();
+      if (remaining_ms <= 0) {
+        const timeout_error = new Error("model_timeout");
+        timeout_error.name = "AbortError";
+        throw timeout_error;
+      }
       try {
-        payload = await attemptOnce({ system, prompt, timeoutMs, max_tokens });
+        payload = await attemptOnce({ system, prompt, timeoutMs: remaining_ms, max_tokens });
         break;
       } catch (error) {
         const network_error =
           error?.name === "AbortError" || error?.name === "TypeError" || error?.code === "ECONNRESET";
-        // Abort = our own timeout: surface it as-is (no retry — the caller's
-        // deadline has passed). Network drops and retryable HTTP statuses get
-        // exactly one retry with a small jittered delay.
-        const retryable = error?.retryable === true || (network_error && error?.name !== "AbortError");
-        if (!retryable || attempts >= 2) throw error;
+        // Abort = the deadline passed: surface as-is (no retry). Network
+        // drops and retryable HTTP statuses get exactly one retry with a
+        // small jittered delay, and only while budget remains.
+        const budget_allows_retry =
+          deadline_ms - Date.now() > Math.max(250, (Number(timeoutMs) || 8000) / 4);
+        const retryable =
+          error?.retryable === true || (network_error && error?.name !== "AbortError");
+        if (!retryable || attempts >= 2 || !budget_allows_retry) throw error;
         await new Promise((resolve) => setTimeout(resolve, 75 + Math.floor(Math.random() * 100)));
       }
     }

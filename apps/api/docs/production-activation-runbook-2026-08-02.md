@@ -27,10 +27,12 @@ after merge); `$DB` = the prod Postgres connection string (operator-held).
 ```bash
 git fetch origin main
 git log origin/main --oneline -3
-git rev-parse origin/main          # → $MERGE_SHA
-git merge-base --is-ancestor c83488d1ae36679d1adf58701a17e797dd28ec75 origin/main && echo PR62_ANCESTOR_OK
-git status --short                  # must be empty on the operator checkout
+export MERGE_SHA=$(git rev-parse origin/main)   # bind it — every later step reads this
+echo "MERGE_SHA=$MERGE_SHA"                      # record in the proof log
+git merge-base --is-ancestor c83488d1ae36679d1adf58701a17e797dd28ec75 "$MERGE_SHA" && echo PR62_ANCESTOR_OK
+git status --short                               # must be empty on the operator checkout
 git checkout "$MERGE_SHA"
+[ "$(git rev-parse HEAD)" = "$MERGE_SHA" ] && echo CHECKOUT_PINNED
 ```
 
 Verify: `PR62_ANCESTOR_OK` prints; `origin/main` head is the reviewed final
@@ -46,10 +48,16 @@ transaction guarantees all-or-nothing.
 
 ```bash
 psql "$DB" -tA <<'SQL'
+-- One probe per OBJECT each migration creates (not just its entry point):
+-- tables, every function, and the claim-contract columns added by ALTER.
 select 'seller_inbound_bursts:'        || coalesce(to_regclass('public.seller_inbound_bursts')::text,        'MISSING');
+select 'claim_seller_inbound_burst:'   || coalesce(to_regprocedure('public.claim_seller_inbound_burst(text,text,timestamptz,text,text,bigint)')::text, 'MISSING');
 select 'inbound_processing_ledger:'    || coalesce(to_regclass('public.inbound_processing_ledger')::text,    'MISSING');
-select 'webhook_request_receipts:'     || coalesce(to_regclass('public.webhook_request_receipts')::text,     'MISSING');
+select 'ledger.lease_expires_at:'      || coalesce((select 'ok' from information_schema.columns where table_name='inbound_processing_ledger' and column_name='lease_expires_at'), 'MISSING');
+select 'ledger.duplicate_delivery_count:' || coalesce((select 'ok' from information_schema.columns where table_name='inbound_processing_ledger' and column_name='duplicate_delivery_count'), 'MISSING');
 select 'claim_inbound_processing:'     || coalesce(to_regprocedure('public.claim_inbound_processing(text,text,text,text,text,text,integer,timestamptz,uuid,integer,integer)')::text, 'MISSING');
+select 'complete_inbound_processing:'  || coalesce(to_regprocedure('public.complete_inbound_processing(text,uuid,text,jsonb,text,text,numeric,integer,text)')::text, 'MISSING');
+select 'webhook_request_receipts:'     || coalesce(to_regclass('public.webhook_request_receipts')::text,     'MISSING');
 select 'internal_proof_stamp:'         || coalesce(to_regprocedure('public.internal_proof_stamp_queue_row(uuid,text,uuid,uuid,jsonb,text,text)')::text, 'MISSING');
 SQL
 ```
@@ -79,54 +87,73 @@ Idempotent: re-running the apply block is a no-op.
 
 ## Step 3 — Verify live database functions behaviorally
 
-Read-only-effect probes against throwaway keys (rows are created only under
-the `runbook:probe:` namespace and deleted immediately):
+Behavioral probes against a UNIQUE per-run key (no collision with a prior
+run or a concurrent caller), asserted mechanically — any mismatch RAISES and
+aborts the block; nothing to eyeball:
 
 ```bash
-psql "$DB" -v ON_ERROR_STOP=1 -tA <<'SQL'
--- claim contract: fresh claim then duplicate-completed round trip
-select (public.claim_inbound_processing('runbook:probe:claim'))->>'outcome';                     -- claimed_new
-select (public.complete_inbound_processing('runbook:probe:claim',
-        (select processing_run_id from public.inbound_processing_ledger
-          where idempotency_key='runbook:probe:claim'), 'no_reply_required'))->>'ok';            -- true
-select (public.claim_inbound_processing('runbook:probe:claim'))->>'outcome';                     -- duplicate_completed
-delete from public.inbound_processing_ledger where idempotency_key = 'runbook:probe:claim';
--- stamp merge: zero-row targeting must fail closed
-select (public.internal_proof_stamp_queue_row('00000000-0000-0000-0000-000000000000',
-        'queued', null, 'b7c9a000-0000-0000-0000-000000000000'::uuid,
-        '{"internal_canary": true}'::jsonb, 'probe', 'probe'))->>'ok';                           -- false
--- burst claim: no-op on an absent thread
-select count(*) from public.claim_seller_inbound_burst('runbook:probe:none', null, now(), 'probe', gen_random_uuid()::text, 300000);  -- 0
+PROBE="runbook:probe:$(date +%s)-$RANDOM"; echo "PROBE=$PROBE"   # record in proof log
+# NOTE: unquoted heredoc delimiter — bash substitutes $PROBE into the SQL.
+psql "$DB" -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+DECLARE
+  k text := '$PROBE';
+  r jsonb;
+BEGIN
+  r := public.claim_inbound_processing(k);
+  IF r->>'outcome' <> 'claimed_new' THEN RAISE EXCEPTION 'probe claim: expected claimed_new, got %', r; END IF;
+  r := public.complete_inbound_processing(k,
+        (SELECT processing_run_id FROM public.inbound_processing_ledger WHERE idempotency_key = k),
+        'no_reply_required');
+  IF (r->>'ok')::boolean IS DISTINCT FROM true THEN RAISE EXCEPTION 'probe complete: %', r; END IF;
+  r := public.claim_inbound_processing(k);
+  IF r->>'outcome' <> 'duplicate_completed' THEN RAISE EXCEPTION 'probe duplicate: expected duplicate_completed, got %', r; END IF;
+  DELETE FROM public.inbound_processing_ledger WHERE idempotency_key = k;
+  r := public.internal_proof_stamp_queue_row('00000000-0000-0000-0000-000000000000',
+        'queued', NULL, 'b7c9a000-0000-0000-0000-000000000000'::uuid,
+        '{"internal_canary": true}'::jsonb, 'probe', 'probe');
+  IF (r->>'ok')::boolean IS DISTINCT FROM false THEN RAISE EXCEPTION 'stamp zero-row must fail closed, got %', r; END IF;
+  IF (SELECT count(*) FROM public.claim_seller_inbound_burst(k || ':none', NULL, now(), 'probe', gen_random_uuid()::text, 300000)) <> 0
+    THEN RAISE EXCEPTION 'burst claim on absent thread must return 0 rows'; END IF;
+  RAISE NOTICE 'ALL_FUNCTION_PROBES_PASSED';
+END \$\$;
 SQL
 ```
 
-Verify: outputs exactly as annotated. Abort otherwise.
-Idempotent: probe rows deleted in-line; functions are pure claims.
+Verify: `ALL_FUNCTION_PROBES_PASSED` notice; any deviation raises and the
+block exits non-zero. Cleanup is identity-scoped to `$PROBE`.
+Idempotent: unique key per run; probe rows deleted in-line.
 
 ## Step 4 — Deploy the exact clean merge SHA
 
 ```bash
 cd apps/api
-vercel deploy --prod --yes --build-env DEPLOY_GIT_SHA="$MERGE_SHA"
+DEPLOY_URL=$(vercel deploy --prod --yes --build-env DEPLOY_GIT_SHA="$MERGE_SHA" | tail -1)
+echo "DEPLOY_URL=$DEPLOY_URL"        # record in proof log
+vercel inspect "$DEPLOY_URL" | tee -a proof-log.txt   # note the dpl_ id + state READY
 ```
 
 `--build-env DEPLOY_GIT_SHA` is REQUIRED — without it `/api/version` reports
 provenance "unknown" (recorded deploy-protocol lesson). Queue remains paused
 (`queue_execution_mode=paused` — containment unchanged by deploy).
 
-Verify: deployment completes; note the deployment URL/id. Abort on build
-failure (nothing has changed in prod behavior: same DB, queue paused).
+Verify: deployment READY; `DEPLOY_URL` recorded. Abort on build failure
+(nothing has changed in prod behavior: same DB, queue paused).
 Idempotent: redeploying the same SHA is safe.
 
-## Step 5 — Verify /api/version
+## Step 5 — Verify /api/version on BOTH the deployment and the live alias
 
 ```bash
+# 5a. The exact deployment from Step 4 serves the merge SHA:
+curl -s "$DEPLOY_URL/api/version" | jq .
+# 5b. The live host is served by THAT deployment (alias attached to the dpl_ id):
+vercel alias ls | grep api-steel-three-96 || vercel inspect api-steel-three-96.vercel.app
 curl -s https://api-steel-three-96.vercel.app/api/version | jq .
 ```
 
-Verify: reported SHA == `$MERGE_SHA`. Abort on mismatch (alias may point at
-the previous deployment — do not proceed until the live host serves the
-merge SHA).
+Verify: BOTH endpoints report SHA == `$MERGE_SHA`, and the alias resolves to
+the Step-4 `dpl_` id — a matching SHA alone could be a stale identical
+deployment. Abort until the live host provably serves the Step-4 deployment.
 
 ## Step 6 — Configure required environment variables (explicit operator actions)
 
@@ -243,22 +270,30 @@ classified intent; before/after audit rows present for each changed field.
 
 ```bash
 node --import ./scripts/register-aliases-ops.mjs scripts/ops/internal-proof-runbook.mjs stamp-reply
-psql "$DB" -tA -c "select event_type, payload->>'source', payload->>'model', payload->>'fallback_reason' from public.automation_events where event_type like 'NATURAL_REPLY_%' order by created_at desc limit 3;"
 ```
 
 `stamp-reply` uses the atomic `internal_proof_stamp_queue_row` RPC (expected
 status + campaign guard + allowlisted jsonb merge) — it aborts rather than
-overwrite a concurrently-mutated row. Then:
+overwrite a concurrently-mutated row, and refuses without an ACTIVE
+(unexpired) proof session. Then dispatch:
 
 ```bash
 node --import ./scripts/register-aliases-ops.mjs scripts/ops/internal-proof-runbook.mjs mint-reply
 node --import ./scripts/register-aliases-ops.mjs scripts/ops/internal-proof-runbook.mjs fire-reply
 ```
 
-Verify: reply SMS arrives on the handset; `NATURAL_REPLY_APPLIED` (or
-`NATURAL_REPLY_FALLBACK` with the deterministic template — record which)
-audit event persisted with model/latency/usage; the queued message passed
-validation (no invented numerics, length within bounds).
+AFTER fire-reply (the generation event is written on dispatch — querying
+earlier can only show stale rows), verify the audit:
+
+```bash
+psql "$DB" -tA -c "select event_type, payload->>'source', payload->>'model', payload->>'fallback_reason', created_at from public.automation_events where event_type like 'NATURAL_REPLY_%' and created_at > now() - interval '15 minutes' order by created_at desc limit 3;"
+```
+
+Verify: reply SMS arrives on the handset; a fresh (post-fire-reply)
+`NATURAL_REPLY_APPLIED` — or `NATURAL_REPLY_FALLBACK` with the deterministic
+template; record which — audit event persisted with model/latency/usage; the
+queued message passed validation (no invented numerics, length within
+bounds).
 
 ## Step 15 — Verify follow-up planning
 
@@ -274,11 +309,14 @@ outside the pinned manifest.
 
 ```bash
 psql "$DB" -tA -c "select inbox_bucket, latest_message_preview is not null from public.inbox_thread_state where thread_key='<internal-e164>';"
-psql "$DB" -tA -c "select event_type, severity from public.notification_events where created_at > now() - interval '1 hour' order by created_at desc limit 5;"
+# The exact alert predicate, not a generic tail: zero inbound_no_disposition
+# (any severity) during the session window is the invariant.
+psql "$DB" -tA -c "select count(*) from public.notification_events where event_type='inbound_no_disposition' and created_at > now() - interval '4 hours';"   -- must be 0
+psql "$DB" -tA -c "select event_type, severity, created_at from public.notification_events where created_at > now() - interval '1 hour' order by created_at desc limit 5;"
 ```
 
 Verify: bucket reflects the reply state; notification event(s) emitted for
-the inbound; NO `inbound_no_disposition` P0 alerts fired during the session.
+the inbound; the `inbound_no_disposition` count is exactly 0.
 
 ## Step 17 — Close the proof session
 
@@ -304,32 +342,42 @@ removing them restores the pre-proof configuration exactly.
 
 ## Step 19 — Prove zero other recipients or rows were touched
 
-All bounded to the session window `[T_open, T_close]`:
+Bind the window FIRST from the proof log (Step 9's open timestamp and Step
+17's close timestamp — both printed by the runbook script), then run the
+queries with those exact psql variables:
 
 ```bash
-psql "$DB" -tA <<'SQL'
+T_OPEN="<open-session timestamp from Step 9, ISO-8601>"
+T_CLOSE="<close timestamp from Step 17, ISO-8601>"
+psql "$DB" -tA -v T_OPEN="$T_OPEN" -v T_CLOSE="$T_CLOSE" <<'SQL'
 -- outbound sends to anyone other than the internal recipient: must be 0
-select count(*) from public.message_events
+select 'other_recipient_sends:' || count(*) from public.message_events
  where direction='outbound' and created_at between :'T_OPEN' and :'T_CLOSE'
    and to_phone_number <> '<internal-e164>';
 -- queue rows claimed outside the pinned manifest: must be 0
-select count(*) from public.send_queue
+select 'other_queue_claims:' || count(*) from public.send_queue
  where updated_at between :'T_OPEN' and :'T_CLOSE'
    and to_phone_number <> '<internal-e164>'
    and queue_status in ('sending','sent');
--- thread-state mutations outside the internal thread (audited writers): must be 0
-select count(*) from public.universal_lead_state_events
+-- audited thread-state mutations outside the internal thread: must be 0
+select 'other_state_mutations:' || count(*) from public.universal_lead_state_events
  where created_at between :'T_OPEN' and :'T_CLOSE'
    and thread_key <> '<internal-e164>';
--- inbound claims processed for non-internal threads during the window:
--- expected = organic inbound traffic; verify each has a terminal disposition
-select count(*) filter (where status='processing') from public.inbound_processing_ledger
- where received_at between :'T_OPEN' and :'T_CLOSE';
+-- NON-INTERNAL inbound claims still processing after the window: organic
+-- traffic is EXPECTED to appear here while live — the invariant is that all
+-- of it reaches a terminal disposition (zero stuck processing), and the
+-- internal thread is excluded so the proof's own rows can't mask a breach.
+select 'non_internal_stuck_processing:' || count(*)
+  from public.inbound_processing_ledger
+ where received_at between :'T_OPEN' and :'T_CLOSE'
+   and (thread_key is null or thread_key <> '<internal-e164>')
+   and status = 'processing';
 SQL
 ```
 
-Verify: first three counts are 0; the fourth is 0 once the SLA window has
-passed. Record all outputs in the proof log.
+Verify: all four labeled counts are 0 (run the fourth after the 10-minute
+SLA window has passed; a non-zero there is exactly what the
+disposition-slo-scan pages on). Record all outputs in the proof log.
 
 ---
 

@@ -501,7 +501,17 @@ function applyModelAssist(scores, sig, suppression, modelAssistScorer) {
     next[dimension] = {
       ...det,
       value: round3(clamp(proposed_value, -1, 1)),
-      confidence: round3(clamp(det.confidence + Math.min(0.1, Number(proposal?.confidence_delta) || 0), 0, 1)),
+      // Bounded BOTH directions: the documented contract is ≤ ±0.1 — a large
+      // negative delta must not zero out deterministic confidence any more
+      // than a large positive one may inflate it.
+      confidence: round3(
+        clamp(
+          det.confidence +
+            clamp(Number(proposal?.confidence_delta) || 0, -0.1, 0.1),
+          0,
+          1
+        )
+      ),
       evidence: [...det.evidence, { kind: "model_assist", detail: "mid_range_refinement" }],
     };
     adjusted.push(dimension);

@@ -158,6 +158,22 @@ export async function claimInboundProcessing(
     });
     if (error) throw error;
     const outcome = clean(data?.outcome) || null;
+    // Fail closed on an unrecognized RPC result: a null/malformed payload
+    // must never read as "no claim needed" — processing unclaimed is the
+    // double-execution this contract exists to prevent.
+    if (!outcome || !Object.values(INBOUND_CLAIM_OUTCOMES).includes(outcome)) {
+      warn("inbound_ledger.claim_outcome_unrecognized", {
+        idempotency_key: key,
+        outcome,
+      });
+      return {
+        ok: false,
+        authority: "db",
+        outcome: null,
+        reason: "claim_outcome_unrecognized",
+        fail_closed: true,
+      };
+    }
     return {
       ok: data?.ok !== false,
       authority: "db",

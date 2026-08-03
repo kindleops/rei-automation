@@ -294,11 +294,13 @@ export async function POST(request) {
           bypassed: safe_signature_bypassed,
           header_name: safe_signature_header_name,
         }),
+        ...fields,
+        // Merged LAST so caller detail can never drop the accumulated route
+        // flags (e.g. debug_stage_misuse) — fields.detail alone would.
         detail: {
           ...receipt_flags,
           ...(fields.detail || {}),
         },
-        ...fields,
       });
     } catch (receipt_error) {
       safeRouteLog("warn", "textgrid_inbound.request_receipt_failed", {

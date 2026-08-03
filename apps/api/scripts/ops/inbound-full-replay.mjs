@@ -133,9 +133,24 @@ const idempotency_sim = {
 }
 
 const CLAIM_DB_URL = process.env.INBOUND_REPLAY_CLAIM_DB_URL || "";
-if (CLAIM_DB_URL && /supabase\.co|prod/i.test(CLAIM_DB_URL)) {
-  console.error("Refusing to run the claim simulation against a production-looking URL.");
-  process.exit(1);
+if (CLAIM_DB_URL) {
+  // FAIL-CLOSED allowlist: the claim simulation writes ledger rows, so only
+  // a loopback/localhost scratch Postgres is ever acceptable — a managed
+  // host without "prod" in its name must not pass a substring blocklist.
+  let claim_host;
+  try {
+    claim_host = new URL(CLAIM_DB_URL).hostname;
+  } catch {
+    console.error("INBOUND_REPLAY_CLAIM_DB_URL is not a parseable URL.");
+    process.exit(1);
+  }
+  const allowed_hosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+  if (!allowed_hosts.has(claim_host)) {
+    console.error(
+      `INBOUND_REPLAY_CLAIM_DB_URL host "${claim_host}" is not a local scratch database (allowed: localhost/127.0.0.1/::1). Refusing.`
+    );
+    process.exit(1);
+  }
 }
 if (CLAIM_DB_URL && receipts.length) {
   const { default: pgPkg } = await import("pg");
@@ -313,20 +328,26 @@ for (const event of events) {
     });
   }
 
-  // Reply-policy self-consistency: a suppressed/review disposition must never
-  // coexist with a queued reply, and a would-reply outcome must carry one.
+  // Reply-policy self-consistency, BOTH directions: a suppressed/review/
+  // no-reply disposition must never coexist with a queued reply, AND a
+  // reply-implying disposition (reply_sent / reply_deferred_compliance) must
+  // carry a queued reply.
   {
     const queued = result.detail?.should_queue_reply === true;
     const suppressed_or_review =
       String(disposition || "").startsWith("suppressed_") ||
       disposition === "human_review_required" ||
       disposition === "no_reply_required";
-    const consistent = queued ? !suppressed_or_review : true;
+    const reply_implied =
+      disposition === "reply_sent" || disposition === "reply_deferred_compliance";
+    const consistent =
+      (queued ? !suppressed_or_review : true) && (reply_implied ? queued : true);
     if (consistent) bulk.reply_policy_consistent += 1;
     else if (bulk.reply_policy_inconsistent.length < 50) {
       bulk.reply_policy_inconsistent.push({
         event_id: event.id,
         disposition,
+        queued,
         body_sha256: digest(body),
       });
     }

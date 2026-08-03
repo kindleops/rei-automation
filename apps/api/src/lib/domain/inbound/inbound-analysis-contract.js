@@ -76,7 +76,17 @@ export function buildInboundAnalysis({
   const uppercase = normalized.replace(/[^A-Z]/g, "");
   const punctuation = normalized.replace(/[a-zA-Z0-9\s]/g, "");
 
-  const unscored = { value: null, scorer: "unscored", evidence: null };
+  // Deliberately-unscored dimensions carry the FULL score-object contract
+  // (value/confidence/evidence/scorer/scorer_version/fallback_reason) so no
+  // consumer needs a special case for out-of-scope fields.
+  const unscored = {
+    value: null,
+    confidence: 0,
+    evidence: [],
+    scorer: "unscored",
+    scorer_version: null,
+    fallback_reason: "out_of_scope",
+  };
 
   // Behavioral scores: evidence-based, confidence-qualified, safe-degrading.
   // A scorer failure (or absent classification) yields all-null score objects
