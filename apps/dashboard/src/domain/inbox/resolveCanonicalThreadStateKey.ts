@@ -1,84 +1,37 @@
 /**
- * Resolve E.164 thread_key required by /api/cockpit/inbox/thread-state.
- * Returns null when no canonical phone identity is available.
+ * Thread-state key resolution — now a thin delegation to the canonical contract.
+ *
+ * Historically this module was the *read-path* resolver (phone-first, then any thread
+ * identity) while `inboxWorkflowData.toThreadKey` was the *write-path* resolver
+ * (threadKey/id-first). Two resolvers, one table, different answers — DD-003.
+ *
+ * Both now resolve through `canonical-thread-reference.ts`. The one behavioural change:
+ * a key is returned **only** when it satisfies the server's `/^\+1\d{10}$/` guard
+ * (`cockpit-service.js:27-31`). Previously this function could return a UUID or a
+ * composite key, which the server rejected with a 400 that no caller inspected.
+ * Callers must now handle `null` explicitly instead of firing a doomed request.
+ *
+ * Kept dependency-free (delegates to the pure module, not the app adapter) because
+ * `inboxData.ts` imports this file — importing the adapter here would be circular.
  */
 
-const E164_RE = /^\+1\d{10}$/
+import {
+  isSyntheticThreadIdentity as isSyntheticThreadIdentityCore,
+  resolveDialablePhoneFromThread as resolveDialablePhoneFromThreadCore,
+  resolveWritableThreadKey,
+} from './canonical-thread-reference'
 
-const SYNTHETIC_THREAD_IDENTITY_RE = /^(property|owner|lead|prospect):/i
+export const isSyntheticThreadIdentity = isSyntheticThreadIdentityCore
 
-export const isSyntheticThreadIdentity = (value: unknown): boolean => {
-  const raw = String(value ?? '').trim()
-  return Boolean(raw) && SYNTHETIC_THREAD_IDENTITY_RE.test(raw)
-}
+/** Resolve a dialable seller phone from explicit phone fields (never synthetic keys). */
+export const resolveDialablePhoneFromThread = resolveDialablePhoneFromThreadCore
 
-const toCanonicalE164 = (value: unknown): string | null => {
-  const raw = String(value ?? '').trim()
-  if (!raw) return null
-  if (isSyntheticThreadIdentity(raw)) return null
-  if (E164_RE.test(raw)) return raw
-  const digits = raw.replace(/\D/g, '')
-  if (digits.length === 10) return `+1${digits}`
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
-  return null
-}
-
-const extractPhoneFromCompositeKey = (value: unknown): string | null => {
-  const raw = String(value ?? '').trim()
-  if (!raw) return null
-  const phoneSegment = raw.match(/(?:^|\|)phone:(\+1\d{10})\b/i)?.[1]
-  if (phoneSegment) return phoneSegment
-  const legacyPhonePrefix = raw.match(/^phone:(\+1\d{10})$/i)?.[1]
-  if (legacyPhonePrefix) return legacyPhonePrefix
-  return null
-}
-
-const PHONE_FIELD_CANDIDATES = [
-  'canonicalE164',
-  'canonical_e164',
-  'sellerPhone',
-  'seller_phone',
-  'bestPhone',
-  'best_phone',
-  'phoneNumber',
-  'phone_number',
-  'phone',
-  'displayPhone',
-  'display_phone',
-  'prospect_best_phone',
-  'prospectBestPhone',
-  'normalizedPhone',
-  'normalized_phone',
-] as const
-
-const THREAD_IDENTITY_CANDIDATES = [
-  'conversationThreadId',
-  'conversation_thread_id',
-  'threadKey',
-  'thread_key',
-  'id',
-] as const
-
-const resolveFromCandidates = (
-  thread: Record<string, unknown>,
-  keys: readonly string[],
-): string | null => {
-  for (const key of keys) {
-    const candidate = thread[key]
-    const compositePhone = extractPhoneFromCompositeKey(candidate)
-    if (compositePhone) return compositePhone
-    const resolved = toCanonicalE164(candidate)
-    if (resolved) return resolved
-  }
-  return null
-}
-
-/** Resolve dialable seller phone from explicit phone fields only (never synthetic property:* keys). */
-export const resolveDialablePhoneFromThread = (thread: Record<string, unknown>): string | null =>
-  resolveFromCandidates(thread, PHONE_FIELD_CANDIDATES)
-
+/**
+ * Resolve the E.164 `thread_key` required by `/api/cockpit/inbox/thread-state`.
+ * Returns null when no server-writable contact route exists — callers must surface that
+ * rather than substituting an unrelated identifier.
+ */
 export const resolveCanonicalThreadStateKey = (thread: Record<string, unknown>): string | null => {
-  const dialablePhone = resolveDialablePhoneFromThread(thread)
-  if (dialablePhone) return dialablePhone
-  return resolveFromCandidates(thread, THREAD_IDENTITY_CANDIDATES)
+  const result = resolveWritableThreadKey(thread)
+  return result?.ok ? result.threadKey : null
 }

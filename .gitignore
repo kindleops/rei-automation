@@ -21,6 +21,9 @@ apps/api/classify_tail.txt
 
 # Local/generated audit outputs
 audits/
+# ...except the committed, human-authored audit reports under docs/
+!docs/audits/
+!docs/audits/**
 
 # Local dev supervisor and MCP artifacts
 .dev-all/
