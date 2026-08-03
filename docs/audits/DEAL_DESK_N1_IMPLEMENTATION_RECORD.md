@@ -273,6 +273,28 @@ structurally dead), N.7, N.8 are untouched.
 
 ---
 
+## 11b. Code review (PR #64)
+
+CodeRabbit's full review produced **13 findings. All 13 were valid and all are fixed**
+in `457713ec`; every thread is resolved. Three are worth recording because they change
+what this document previously claimed.
+
+| Finding | Why it mattered |
+|---|---|
+| `stats.aborted` counted settled requests | `accept` never released the controller, so `abortSlot` incremented on no-op aborts of already-settled controllers. The originally reported **12 aborts was inflated**. Fixed and the evidence file regenerated. |
+| Google Maps was never intercepted | The first run made **29 live requests to `maps.googleapis.com` carrying the real API key**, which contradicted this document's own "no live data" claim. Maps/gstatic are now stubbed, and the spec asserts every observed Maps request was answered locally (29/29 intercepted, 0 escaped). |
+| Seller Automation thread key | A **regression introduced by this lane**: `handleOpenSellerAutomation` was changed to send the Deal Desk selection key, which can be a composite `ct:…`. Seller Automation applies it as `thread_id=eq.<value>`, which a composite can never satisfy. Now uses `resolveThreadRouteKey`. |
+
+The other ten: `LIST_FAILED` stale-bucket guard; `external_context` selections protected
+during a transition; `ROWS_PATCHED` clearing a stuck `selectionOutOfView`; stale closure
+reads in the hydration effect; participants loading flag stuck on the early-return path;
+`guard.abortAll()` on unmount; read-mark failures surfaced to the operator rather than
+DEV-only; `reconcileList` no longer running its O(n) identity pass on every poll; and the
+pure-vs-binding resolver misuse in **both** `useDealIntelligenceDossier` and
+`thread-select-orchestrator` (the second was not flagged — found while fixing the first).
+
+Test count rose 104 → **113**.
+
 ## 12. Known limitations
 
 1. **No component-level DOM tests.** No jsdom/RTL in the repository. Integration coverage
@@ -285,9 +307,10 @@ structurally dead), N.7, N.8 are untouched.
    thread in the trace) by different panels. This lane removed the *two-key-shape*
    duplication; collapsing the remaining duplicate fetches belongs to N.7.
 4. **Read-mark now fails loudly instead of silently.** A thread with no dialable phone no
-   longer fires a request the server would reject. That is the intended DD-003 behaviour,
-   but it is a behaviour change: such threads will now visibly not mark as read rather
-   than appearing to and failing. Surfacing that to the operator is N.2's error work.
+   longer fires a request the server would reject, and now shows the operator a warning
+   ("This conversation has no writable canonical phone route.") rather than the DEV-only
+   log it had at first review. The thread still will not mark as read — making that
+   *succeed* requires the N.2 mutation work.
 5. **`selectionOutOfView` is set but has no UI affordance yet.** The state is correct and
    tested; rendering a "not in this view" control is an N.8 presentation concern.
 6. `apps/dashboard/.env.local` is written for local verification only and is gitignored.
