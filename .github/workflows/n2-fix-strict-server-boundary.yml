@@ -1,0 +1,37 @@
+name: Apply strict N.2 server boundary
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 65
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+      - name: Make mutation normalization strict
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('apps/api/src/lib/domain/lead-state/universal-lead-state-registry.js')
+          source = path.read_text()
+          old = """    if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value);\n    else if (canonicalKey === 'operational_status') normalized.operational_status = normalizeOperationalStatus(value);\n    else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value);\n    else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value);\n    else if (canonicalKey === 'contactability_status') normalized.contactability_status = normalizeContactability(value);\n"""
+          new = """    if (canonicalKey === 'lifecycle_stage') {\n      const stage = normalizeLifecycleStage(value, null);\n      if (stage) normalized.lifecycle_stage = stage;\n    } else if (canonicalKey === 'operational_status') {\n      const status = normalizeOperationalStatus(value, null);\n      if (status) normalized.operational_status = status;\n    } else if (canonicalKey === 'lead_temperature') {\n      const temperature = normalizeLeadTemperature(value, null);\n      if (temperature) normalized.lead_temperature = temperature;\n    } else if (canonicalKey === 'disposition') {\n      const disposition = normalizeDisposition(value, null);\n      if (disposition) normalized.disposition = disposition;\n    } else if (canonicalKey === 'contactability_status') {\n      const contactability = normalizeContactability(value, null);\n      if (contactability) normalized.contactability_status = contactability;\n    }\n"""
+          if old not in source:
+              raise SystemExit('expected permissive normalization block not found')
+          path.write_text(source.replace(old, new))
+          PY
+          rm -f .github/workflows/n2-fix-strict-server-boundary.yml
+          git add -A
+          git config user.name 'kindleops'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'fix(n2): reject server-side vocabulary fallbacks'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
