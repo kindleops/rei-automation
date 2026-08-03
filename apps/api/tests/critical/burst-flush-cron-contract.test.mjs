@@ -98,16 +98,24 @@ test("flush route accepts the canonical internal secret header", async () => {
 
 // ── flag-off / zero-work safety, and the stable success contract ─────────────
 
-test("route source keeps the documented activation prerequisites and contract", () => {
-  const routePath = path.resolve(
+test("route exports both cron GET and internal POST onto the shared handler", async () => {
+  // The 2026-08-03 outage: Vercel Cron issues GET and this route exported POST
+  // only, so the scheduled worker never ran. Behaviour of both methods is
+  // covered in burst-flush-cron-get-integration.test.mjs.
+  const route = await import("@/app/api/internal/seller-flow/flush-inbound-bursts/route.js");
+  assert.equal(typeof route.GET, "function", "Vercel Cron issues GET");
+  assert.equal(typeof route.POST, "function", "operator/internal invocation");
+});
+
+test("handler keeps the documented activation prerequisites and contract", () => {
+  const handlerPath = path.resolve(
     __dirname,
-    "../../src/app/api/internal/seller-flow/flush-inbound-bursts/route.js",
+    "../../src/lib/domain/seller-flow/flush-inbound-bursts-request.js",
   );
-  const source = fs.readFileSync(routePath, "utf8");
-  // Canonical internal auth (not a hand-rolled check).
-  assert.match(source, /requireInternalSecret\(request\)/);
-  // Stable success contract: ok + flushed + results.
-  assert.match(source, /ok:\s*true,\s*\n\s*flushed:/);
+  const source = fs.readFileSync(handlerPath, "utf8");
+  // Canonical internal + cron auth (not a hand-rolled check).
+  assert.match(source, /requireInternalSecret/);
+  assert.match(source, /requireCronAuth/);
   // Supabase precondition returns 503 rather than throwing.
   assert.match(source, /missing_supabase/);
   // Flush crashes are contained AND alerted, never silent.

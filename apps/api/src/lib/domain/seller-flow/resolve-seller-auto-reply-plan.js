@@ -8,6 +8,11 @@ import {
 } from "./seller-flow-safety-policy.js";
 import { SELLER_FLOW_STAGES } from "./canonical-seller-flow.js";
 
+// Canonical automation confidence gate. Must stay in step with the threshold in
+// classify.js `deriveAutomationDecision`; a second, stricter number here silently
+// re-vetoes messages that already cleared the real gate.
+export const SELLER_AUTO_REPLY_CONFIDENCE_THRESHOLD = 0.82;
+
 // Phase 8: only these intents qualify for live auto-reply
 const AUTO_REPLY_WHITELIST = new Set([
   'ownership_confirmed',
@@ -320,7 +325,15 @@ export function shouldSuppressSellerAutoReply(input) {
   if (!input.auto_reply_enabled && !input.force_queue_reply) return { suppress: true, reason: "auto_reply_disabled" };
   
   if (automation_state === "paused" || automation_state === "manual") return { suppress: true, reason: "manual_pause" };
-  if (confidence < 0.90) return { suppress: true, reason: "confidence_too_low" };
+  // 0.82 is the canonical automation gate (classify.js deriveAutomationDecision).
+  // This path used to demand 0.90 — stricter than every other gate in the system
+  // — so a context-resolved short reply (0.88 from applyContextualShortReply)
+  // was suppressed here as `confidence_too_low` even after clearing the real
+  // gate. Reconciled to the canonical threshold; a genuinely uncertain message
+  // still suppresses.
+  if (confidence < SELLER_AUTO_REPLY_CONFIDENCE_THRESHOLD) {
+    return { suppress: true, reason: "confidence_too_low" };
+  }
   if (intent === "hostile_or_legal") return { suppress: true, reason: "hostile_or_legal_intent" };
   if (intent === "timing_complaint") return { suppress: true, reason: "timing_complaint_manual_review" };
   if (intent === "opt_out" && input.system_only) return { suppress: false, reason: null };

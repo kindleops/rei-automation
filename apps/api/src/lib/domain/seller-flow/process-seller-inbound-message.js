@@ -1,4 +1,5 @@
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
+import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import {
@@ -574,7 +575,23 @@ export async function processSellerInboundMessage({
     // `classification`, but any other/future caller landing here must stay
     // off the AI-assist branch too — see the matching heuristicOnly call in
     // handle-textgrid-inbound.js.
-    classification = await runtimeDeps.classify(message, conversationBrain, { heuristicOnly: true });
+    //
+    // conversation_context binds a short reply ("Yeah") to the question it
+    // answers. Without it classify caps confidence at 0.72 and a plain
+    // ownership confirmation is routed to human review — the 2026-08-03
+    // incident. Resolution failure is non-fatal: classify falls back to its
+    // existing `context_status: unavailable` behaviour.
+    const conversation_context = await buildConversationContext({
+      thread_key: threadKey || inboundFrom,
+      inbound_received_at: inboundReceivedAt || new Date().toISOString(),
+      supabase,
+      canonical_stage: stageBefore,
+    }).catch(() => null);
+
+    classification = await runtimeDeps.classify(message, conversationBrain, {
+      heuristicOnly: true,
+      conversation_context,
+    });
   }
 
   const contractResult = normalizeClassificationContract({
