@@ -52,16 +52,18 @@ jobs:
             tests/unit/deal-desk-selection.test.ts \
             tests/unit/deal-desk-hydration.test.ts \
             tests/unit/canonical-thread-reference.test.ts
-      - name: N.2 API mutation integration and Deal Desk regressions
+      - name: N.2 API mutation integration and current inbox regressions
         working-directory: apps/api
         run: |
           set -o pipefail
           node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
             tests/critical/deal-desk-n2-control-mutations.test.mjs
           node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/dashboard-ops-service.test.mjs
-          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
             tests/critical/inbox-thread-context-route.test.mjs
+          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+            tests/critical/inbox-canonical-row-contract.test.mjs
+          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+            tests/critical/inbox-state-transition-matrix.test.mjs
       - name: Relevant dashboard lint
         working-directory: apps/dashboard
         run: |
