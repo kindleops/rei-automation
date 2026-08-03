@@ -1,18 +1,21 @@
 name: Apply N.2 local implementation
 
 on:
-  push:
-    branches: [fix/deal-desk-manual-control-mutations]
+  pull_request:
+    branches: [main]
+    types: [synchronize]
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event.pull_request.number == 65
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 1
       - name: Reconstruct and verify local patch
         run: |
@@ -29,4 +32,4 @@ jobs:
           git config user.name 'kindleops'
           git config user.email 'actions@users.noreply.github.com'
           git commit -m 'feat(n2): wire canonical Deal Desk controls'
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
