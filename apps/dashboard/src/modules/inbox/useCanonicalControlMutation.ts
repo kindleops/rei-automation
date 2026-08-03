@@ -23,6 +23,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { resolveDealDeskWritableThreadKey } from '../../domain/inbox/deal-desk-thread-reference'
+import type { ThreadIdentityInput } from '../../domain/inbox/canonical-thread-reference'
 import { createFieldMutationTracker, type MutationErrorKind } from '../../domain/inbox/deal-desk-mutation-state'
 import {
   describeVocabularyRejection,
@@ -73,7 +74,7 @@ const UNSUPPORTED_MESSAGE =
   'This conversation has no writable canonical phone route, so its state cannot be saved.'
 
 export function useCanonicalControlMutations<T extends string>(
-  thread: unknown,
+  thread: ThreadIdentityInput,
   specs: ReadonlyArray<CanonicalControlSpec<T>>,
 ): Record<string, CanonicalControlHandle<T>> {
   const writable = useMemo(() => resolveDealDeskWritableThreadKey(thread), [thread])
