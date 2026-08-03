@@ -129,8 +129,6 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
       return
     }
 
-    // The tracker is scoped by immutable selection identity + field. A response for the
-    // old thread can settle only the old key after the operator changes selection.
     const mutationId = tracker.begin(key)
     setOverlay(key, { kind: 'pending', optimisticValue: resolution.value, mutationId })
 
@@ -180,8 +178,6 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
     setOverlay(key, { kind: 'confirmed', persistedValue: persisted })
   }, [options, reference?.source, scope, setOverlay, tracker, unsupported, writable])
 
-  // Retire confirmed overlays only after the external row catches up. This is intentionally
-  // an effect rather than a render-phase state write.
   useEffect(() => {
     const caughtUp: string[] = []
     for (const spec of specs) {
@@ -190,17 +186,20 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
       if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) caughtUp.push(key)
     }
     if (!caughtUp.length) return
-    setOverlays((current) => {
-      const next = { ...current }
-      let changed = false
-      for (const key of caughtUp) {
-        if (next[key]?.kind === 'confirmed') {
-          delete next[key]
-          changed = true
+    const timer = window.setTimeout(() => {
+      setOverlays((current) => {
+        const next = { ...current }
+        let changed = false
+        for (const key of caughtUp) {
+          if (next[key]?.kind === 'confirmed') {
+            delete next[key]
+            changed = true
+          }
         }
-      }
-      return changed ? next : current
-    })
+        return changed ? next : current
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [overlays, scope, specs])
 
   return useMemo(() => {
