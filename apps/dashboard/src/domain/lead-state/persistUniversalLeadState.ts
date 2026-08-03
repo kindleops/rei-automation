@@ -37,6 +37,15 @@ export interface UniversalLeadStateMutationResult {
   ok: boolean
   threadKey: string
   errorMessage: string | null
+  /**
+   * Canonical machine-readable reason from the server (`reason` / `error` in the body).
+   *
+   * `errorMessage` is the transport's diagnostic string: it embeds the request URL, and
+   * the thread key in that URL is the seller's phone number. Callers that render to an
+   * operator must localise from this code instead — see `describeServerRefusal` in
+   * `domain/inbox/deal-desk-control-contract.ts`.
+   */
+  errorCode?: string | null
   mutationPayload: AnyRecord | null
   writeTarget: 'inbox_thread_state' | 'none'
   data?: unknown
@@ -66,6 +75,7 @@ function toMutationResult(
     ok: false,
     threadKey,
     errorMessage: result.message,
+    errorCode: result.error ?? null,
     mutationPayload,
     writeTarget: 'none',
   }

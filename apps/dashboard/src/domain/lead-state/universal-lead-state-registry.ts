@@ -128,6 +128,14 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = [
   'lifecycle_stage',
   'operational_status',
   'lead_temperature',
+  // Operator automation mode. Mirrors the API registry
+  // (`apps/api/src/lib/domain/lead-state/universal-lead-state-registry.js`). Without it
+  // this client-side allowlist silently dropped every automation write, `persistUniversalLeadState`
+  // returned "No allowed universal lead state fields in patch", and NO REQUEST WAS EVER
+  // SENT — the control reported a generic save failure with nothing on the wire to explain
+  // it. Caught by the N.2 browser verification, not by the component tests, which stub the
+  // transport above this layer.
+  'automation_state',
   'disposition',
   'contactability_status',
   'stage_source',
@@ -329,6 +337,24 @@ export const normalizeContactability = (value: unknown, fallback: Contactability
   return fallback
 }
 
+/**
+ * The `automation_state` values `inbox_thread_state` is known to hold.
+ *
+ * Duplicated from `automation-persistence-contract.ts` rather than imported, because that
+ * module imports the control vocabularies and this registry is imported BY them — the
+ * import would be circular. The `deal-desk-automation-contract` test asserts the two lists
+ * agree, so a drift fails the suite.
+ */
+export const PERSISTED_AUTOMATION_STATE_VALUES = ['running', 'paused', 'manual'] as const
+
+const PERSISTED_AUTOMATION_STATE_SET = new Set<string>(PERSISTED_AUTOMATION_STATE_VALUES)
+
+const normalizeAutomationStateForPatch = (value: unknown): string | null => {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return null
+  return PERSISTED_AUTOMATION_STATE_SET.has(key) ? key : null
+}
+
 export const normalizePatchToCanonical = (patch: Record<string, unknown> = {}): Record<string, unknown> => {
   const normalized: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(patch || {})) {
@@ -340,6 +366,13 @@ export const normalizePatchToCanonical = (patch: Record<string, unknown> = {}): 
       continue
     }
     if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value)
+    else if (canonicalKey === 'automation_state') {
+      // Strict, exactly as on the server: only the three located `automation_state` values
+      // pass. An unrecognised one is dropped rather than coerced, so a display label can
+      // never be persisted.
+      const automationState = normalizeAutomationStateForPatch(value)
+      if (automationState) normalized.automation_state = automationState
+    }
     else if (canonicalKey === 'operational_status') normalized.operational_status = normalizeOperationalStatus(value)
     else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value)
     else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value)

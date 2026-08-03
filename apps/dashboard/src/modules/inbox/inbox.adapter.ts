@@ -8,6 +8,7 @@ import type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/
 export type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/inbox/inbox-model-types'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
+import { deserializeAutomationState } from '../../domain/lead-state/automation-persistence-contract'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import {
@@ -520,6 +521,25 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
   }
 }
 
+/**
+ * `inbox_thread_state.automation_state` → the panel-facing `AutomationState` union.
+ *
+ * Kept separate from the canonical automation contract because `AutomationState` is a
+ * display vocabulary used by the intelligence panels, not a write vocabulary. Operator
+ * writes go through `automation-persistence-contract.ts`; this only decides what the
+ * read-only telemetry rails render.
+ */
+const toLegacyAutomationState = (stored: unknown, archivedOrSuppressed: boolean): AutomationState => {
+  const mode = deserializeAutomationState(stored)
+  if (String(stored ?? '').trim()) {
+    if (mode === 'paused') return 'paused'
+    if (mode === 'human_controlled') return 'manual_control'
+    if (mode === 'completed' || mode === 'disabled') return 'completed'
+    if (mode === 'active') return archivedOrSuppressed ? 'completed' : 'active'
+  }
+  return archivedOrSuppressed ? 'completed' : 'active'
+}
+
 export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   const lastAt = t.lastMessageIso || new Date().toISOString()
   const inboxStatus = (t.threadWorkflowStatus || (t.status === 'unread' ? 'new_reply' : 'waiting')) as InboxStatus
@@ -547,7 +567,15 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
     inboxStatus,
     conversationStage,
     inboxStage: conversationStage,
-    automationState: (t.threadIsArchived || t.threadIsSuppressed ? 'completed' : 'active') as AutomationState,
+    // Derived from the stored `automation_state` column when the row carries one. The
+    // previous unconditional `archived||suppressed ? 'completed' : 'active'` was a
+    // fabrication: it reported "Automation Active" for every non-archived thread
+    // regardless of whether automation was actually paused or under manual control.
+    // The archived/suppressed heuristic survives only as the no-data fallback.
+    automationState: toLegacyAutomationState(
+      (t as InboxThread & { automation_state?: unknown }).automation_state,
+      Boolean(t.threadIsArchived || t.threadIsSuppressed),
+    ),
     nextSystemAction: 'Review thread for system recommended next steps.',
     isArchived: t.threadIsArchived ?? (t.status === 'archived' || t.isArchived) ?? false,
     isRead: t.threadIsRead ?? (t.status === 'read' || t.unreadCount === 0) ?? true,

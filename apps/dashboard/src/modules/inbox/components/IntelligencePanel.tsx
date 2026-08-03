@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react'
 import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
-import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
+import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../../lib/data/dealContext'
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
@@ -24,13 +24,14 @@ import {
   formatRelativeTime 
 } from '../../../shared/formatters'
 
+// `inboxStatusOptions` and `statusStyleVars` are deliberately no longer imported: they
+// were the legacy option lists the two removed writers rendered as selectable values.
+// `sellerStageOptions` stays, used only to position a read-only stage-progress indicator.
 import {
   automationStateVisuals,
   getSellerStageVisual,
   getStatusVisual,
-  inboxStatusOptions,
   sellerStageOptions,
-  statusStyleVars,
 } from '../status-visuals'
 
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
@@ -46,6 +47,9 @@ import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../
 import type { CensusData } from '../../../lib/data/censusData'
 import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
 import { DealIntelligenceHeaderActions } from '../../deal-intelligence/DealIntelligenceLeadStateBar'
+import { useDealDeskControlsForThread } from '../deal-desk-controls-context'
+import { ThreadStateMirror } from './ThreadStateBar'
+import { AUTOMATION_MODE_META } from '../../../domain/lead-state/canonical-control-vocabularies'
 import '../../deal-intelligence/deal-intelligence-25.css'
 
 const formatMoney = formatCurrency
@@ -1003,76 +1007,52 @@ const getNextBestAction = (thread: WorkflowThread): NextActionResult => {
 
 // ── 2. Workflow Control ───────────────────────────────────────────────────
 
+/**
+ * Read-only workflow mirror.
+ *
+ * This used to be an independent writer: it rendered `inboxStatusOptions` and
+ * `sellerStageOptions` — the legacy `InboxStatus` / `SellerStage` vocabularies — and
+ * pushed the raw selection out through `onStatusChange` / `onStageChange`. Two defects
+ * followed from that. It offered values from other dimensions as if they were status or
+ * stage (`suppressed`, `closed`, `mf_suppressed`), and it held no in-flight state, so its
+ * writes could race the conversation state bar's.
+ *
+ * It now renders the canonical control handles for the open conversation. There is one
+ * mutation owner; this is a projection of it. Editing happens in the state bar.
+ */
 export const WorkflowControl = ({
   thread,
-  onStatusChange,
-  onStageChange,
   onOpenSellerAutomation,
 }: {
   thread: WorkflowThread
-  onStatusChange: (status: InboxStatus | 'sent_message') => void
-  onStageChange: (stage: SellerStage) => void
   onOpenSellerAutomation?: () => void
 }) => {
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [stageOpen, setStageOpen] = useState(false)
-  const statusVisual = getStatusVisual(thread.inboxStatus)
-  const stageVisual = getSellerStageVisual(thread.conversationStage)
-  const autoVisual = automationStateVisuals[thread.automationState || 'manual']
-
-  const handleStatusChange = (status: InboxStatus) => { onStatusChange(status); setStatusOpen(false) }
-  const handleStageChange = (stage: SellerStage) => { onStageChange(stage); setStageOpen(false) }
+  const controls = useDealDeskControlsForThread(thread)
+  const autoVisual = automationStateVisuals[thread.automationState || 'manual_control']
 
   return (
     <DossierCard className="nx-workflow-control">
-      <div className="nx-workflow-control__row">
-        <span className="nx-workflow-control__label">Status</span>
-        <div className="nx-workflow-control__dropdown">
-          <button type="button" className="nx-workflow-btn" style={statusStyleVars(statusVisual)} onClick={() => setStatusOpen(!statusOpen)}>
-            <i className="nx-workflow-dot" style={{ background: statusVisual.color }} />
-            {statusVisual.label}
-            <Icon name="chevron-down" />
-          </button>
-          {statusOpen && (
-            <div className="nx-workflow-menu nx-liquid-panel">
-              {inboxStatusOptions.map((opt) => (
-                <button type="button" key={opt.value} className={cls('nx-workflow-menu-item', opt.value === thread.inboxStatus && 'is-selected')} style={statusStyleVars(opt)} onClick={() => handleStatusChange(opt.value as InboxStatus)}>
-                  <i className="nx-workflow-dot" style={{ background: opt.color }} />
-                  <div><strong>{opt.label}</strong><small>{opt.description}</small></div>
-                </button>
-              ))}
-            </div>
-          )}
+      {controls ? (
+        <ThreadStateMirror controls={controls} />
+      ) : (
+        <div className="nx-workflow-control__row">
+          <span className="nx-workflow-control__label">State</span>
+          <span className="nx-workflow-pill">Not available for this conversation</span>
         </div>
-      </div>
-      <div className="nx-workflow-control__row">
-        <span className="nx-workflow-control__label">Stage</span>
-        <div className="nx-workflow-control__dropdown">
-          <button type="button" className="nx-workflow-btn" style={statusStyleVars(stageVisual)} onClick={() => setStageOpen(!stageOpen)}>
-            <i className="nx-workflow-dot" style={{ background: stageVisual.color }} />
-            {stageVisual.label}
-            <Icon name="chevron-down" />
-          </button>
-          {stageOpen && (
-            <div className="nx-workflow-menu nx-liquid-panel">
-              {sellerStageOptions.map((opt) => (
-                <button type="button" key={opt.value} className={cls('nx-workflow-menu-item', opt.value === thread.conversationStage && 'is-selected')} style={statusStyleVars(opt)} onClick={() => handleStageChange(opt.value as SellerStage)}>
-                  <i className="nx-workflow-dot" style={{ background: opt.color }} />
-                  <div><strong>{opt.label}</strong><small>{opt.description}</small></div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
       <div className="nx-workflow-control__row">
         <span className="nx-workflow-control__label">Automation</span>
-        <span className="nx-workflow-pill" style={{ '--wp-color': autoVisual?.color || '#a0aec0' } as any}>{autoVisual?.label || 'Manual'}</span>
+        <span className="nx-workflow-pill" style={{ '--wp-color': autoVisual?.color || '#a0aec0' } as React.CSSProperties}>
+          {controls
+            ? AUTOMATION_MODE_META[controls.automation.value]?.label ?? controls.automation.value
+            : autoVisual?.label || 'Manual'}
+        </span>
       </div>
-      {thread.queueStatus && (
+      {/* Queue status is the `automation_status` dimension, shown separately from mode. */}
+      {(controls?.queueStatus ?? thread.queueStatus) && (
         <div className="nx-workflow-control__row">
           <span className="nx-workflow-control__label">Queue</span>
-          <span className="nx-workflow-pill">{asStr(thread.queueStatus)}</span>
+          <span className="nx-workflow-pill">{asStr(controls?.queueStatus ?? thread.queueStatus)}</span>
         </div>
       )}
       {thread.nextSystemAction && (
@@ -3074,19 +3054,21 @@ const ContactIntelligenceCard = ({
   )
 }
 
+/**
+ * Seller command card — status and stage are a read-only mirror.
+ *
+ * The two dropdowns here were the second `WorkflowControl` variant: same legacy
+ * vocabularies, same absence of in-flight state, same ability to race the conversation
+ * state bar. They are now projections of the canonical control handles.
+ */
 export const SellerCommandCard = ({
   thread,
   phase3,
-  onStatusChange,
-  onStageChange,
 }: {
   thread: WorkflowThread
   phase3: Phase3Intelligence | null
-  onStatusChange: (status: InboxStatus | 'sent_message') => void
-  onStageChange: (stage: SellerStage) => void
 }) => {
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [stageOpen, setStageOpen] = useState(false)
+  const controls = useDealDeskControlsForThread(thread)
 
   const stageVisual = getSellerStageVisual(thread.conversationStage)
   const statusVisual = getStatusVisual(thread.inboxStatus)
@@ -3126,43 +3108,18 @@ export const SellerCommandCard = ({
         </div>
 
         <div className="nx-header-actions-v3">
-          <div className="nx-header-dropdown-v3">
-            <button type="button" onClick={() => setStatusOpen(!statusOpen)}>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <i className="nx-dot" style={{ background: statusVisual.color }} />
+          {controls ? (
+            <ThreadStateMirror controls={controls} />
+          ) : (
+            <>
+              <span className="nx-workflow-pill" style={{ '--wp-color': statusVisual.color } as React.CSSProperties}>
                 {statusVisual.label}
-              </div>
-              <Icon name="chevron-down" />
-            </button>
-            {statusOpen && (
-              <div className="nx-workflow-menu-v3" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
-                {inboxStatusOptions.map((opt) => (
-                  <button type="button" key={opt.value} className={cls('nx-workflow-menu-item-v3', opt.value === thread.inboxStatus && 'is-selected')} onClick={() => { onStatusChange(opt.value as InboxStatus); setStatusOpen(false) }}>
-                    <strong>{opt.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="nx-header-dropdown-v3">
-            <button type="button" onClick={() => setStageOpen(!stageOpen)}>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <i className="nx-dot" style={{ background: stageVisual.color }} />
+              </span>
+              <span className="nx-workflow-pill" style={{ '--wp-color': stageVisual.color } as React.CSSProperties}>
                 {stageVisual.label}
-              </div>
-              <Icon name="chevron-down" />
-            </button>
-            {stageOpen && (
-              <div className="nx-workflow-menu-v3" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
-                {sellerStageOptions.map((opt) => (
-                  <button type="button" key={opt.value} className={cls('nx-workflow-menu-item-v3', opt.value === thread.conversationStage && 'is-selected')} onClick={() => { onStageChange(opt.value as SellerStage); setStageOpen(false) }}>
-                    <strong>{opt.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+              </span>
+            </>
+          )}
         </div>
 
         <div className="nx-header-telemetry-rail-v3">
@@ -5877,8 +5834,6 @@ const DealCommandDossier = ({
   onOpenDossier,
   onOpenAi,
   onOpenSellerAutomation,
-  onStatusChange,
-  onStageChange,
   dealContext,
 }: {
   thread: WorkflowThread
@@ -5892,8 +5847,6 @@ const DealCommandDossier = ({
   onOpenDossier: () => void
   onOpenAi: () => void
   onOpenSellerAutomation?: () => void
-  onStatusChange: (status: InboxStatus | 'sent_message') => void
-  onStageChange: (stage: SellerStage) => void
   dealContext?: DealContext | null
 }) => {
   return (
@@ -5912,8 +5865,6 @@ const DealCommandDossier = ({
           <DealDecisionStrip thread={thread} dealContext={dealContext} />
           <WorkflowControl
             thread={thread}
-            onStatusChange={onStatusChange}
-            onStageChange={onStageChange}
             onOpenSellerAutomation={onOpenSellerAutomation}
           />
         </div>
@@ -5965,8 +5916,6 @@ export interface IntelligencePanelProps {
   onOpenDossier?: () => void
   onOpenAi?: () => void
   onOpenSellerAutomation?: () => void
-  onStatusChange: (status: InboxStatus | 'sent_message') => void
-  onStageChange: (stage: SellerStage) => void
   messages: ThreadMessage[]
 }
 
@@ -5984,8 +5933,6 @@ export const IntelligencePanel = ({
   onOpenDossier = () => undefined,
   onOpenAi = () => undefined,
   onOpenSellerAutomation = () => undefined,
-  onStatusChange,
-  onStageChange,
   messages,
 }: IntelligencePanelProps) => {
   void threadContext
@@ -6093,8 +6040,6 @@ export const IntelligencePanel = ({
             onOpenDossier={onOpenDossier}
             onOpenAi={onOpenAi}
             onOpenSellerAutomation={onOpenSellerAutomation}
-            onStatusChange={onStatusChange}
-            onStageChange={onStageChange}
           />
         )}
       </div>

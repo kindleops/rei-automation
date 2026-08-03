@@ -420,11 +420,54 @@ export function isAllowedLifecycleTransition(fromCode, toCode) {
   return toIdx >= fromIdx || to === LIFECYCLE_STAGE_CODES.CLOSED;
 }
 
+// ─── Automation state (operator automation mode) ─────────────────────────────
+//
+// `inbox_thread_state.automation_state` is the operator automation-mode column;
+// `inbox_thread_state.automation_status` is the separate queue/execution column.
+// The canonical_inbox_threads view projects them as `autopilot_mode` and
+// `queue_status` respectively — `autopilot_mode` is a view alias, never a column,
+// and must never be used as a write target.
+//
+// Every value below already exists in this repository:
+//   'running' — written by syncClassifiedInboxThreadState (sms-engine.js:3686) and
+//               assumed as the default by shouldSuppressSellerAutoReply
+//               (resolve-seller-auto-reply-plan.js:318).
+//   'paused'  — suppression branch of shouldSuppressSellerAutoReply (:322).
+//   'manual'  — same branch, same line.
+// No other value is accepted; an unrecognised one is dropped rather than stored,
+// so a UI display label can never become a persisted automation state.
+export const AUTOMATION_STATE_CODES = Object.freeze({
+  RUNNING: 'running',
+  PAUSED: 'paused',
+  MANUAL: 'manual',
+});
+
+export const AUTOMATION_STATE_VALUES = Object.freeze(Object.values(AUTOMATION_STATE_CODES));
+
+const AUTOMATION_STATE_SET = new Set(AUTOMATION_STATE_VALUES);
+
+/** Automation states in which the engine will not send. */
+export const NON_SENDING_AUTOMATION_STATES = Object.freeze([
+  AUTOMATION_STATE_CODES.PAUSED,
+  AUTOMATION_STATE_CODES.MANUAL,
+]);
+
+/**
+ * Strict automation-state normalizer. Returns null (not a default) for anything
+ * unrecognised, so callers must decide explicitly rather than inherit a guess.
+ */
+export function normalizeAutomationState(value) {
+  const key = String(value ?? '').trim().toLowerCase();
+  if (!key) return null;
+  return AUTOMATION_STATE_SET.has(key) ? key : null;
+}
+
 /** Canonical patchable field names on inbox_thread_state / property lead state. */
 export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = Object.freeze([
   'lifecycle_stage',
   'operational_status',
   'lead_temperature',
+  'automation_state',
   'disposition',
   'contactability_status',
   'next_action',
@@ -470,6 +513,13 @@ export function normalizePatchToCanonical(patch = {}) {
       continue;
     }
     if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value);
+    else if (canonicalKey === 'automation_state') {
+      // Strict: an unrecognised automation state is dropped, never coerced. A dropped
+      // field yields `no_allowed_patch_fields` upstream, which the caller surfaces as a
+      // failure — the operator is never told a value was saved that was not.
+      const automationState = normalizeAutomationState(value);
+      if (automationState) normalized.automation_state = automationState;
+    }
     else if (canonicalKey === 'operational_status') normalized.operational_status = normalizeOperationalStatus(value);
     else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value);
     else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value);

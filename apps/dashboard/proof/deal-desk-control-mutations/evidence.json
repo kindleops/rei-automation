@@ -1,0 +1,330 @@
+{
+  "capturedAt": "2026-08-03T23:07:31.860Z",
+  "note": "Fixture-backed. Every phone number is masked. No production data was read or written.",
+  "steps": [
+    {
+      "step": "1_stage_success",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lifecycle_stage": "asking_price"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lifecycle_stage": "asking_price"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "2_stage_failure_rollback",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lifecycle_stage": "property_condition"
+          },
+          "response": {
+            "ok": false,
+            "reason": "manual_stage_lock_blocked_stage_write",
+            "thread_key": "+1******1001"
+          }
+        }
+      ],
+      "rolledBackTo": "asking_price",
+      "operatorMessage": "A manual stage lock is active on this lead, so the stage was not changed.×"
+    },
+    {
+      "step": "3_status_success",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "operational_status": "waiting_on_seller"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "operational_status": "waiting_on_seller"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "4_status_failure_rollback",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "operational_status": "needs_review"
+          },
+          "response": {
+            "ok": false,
+            "reason": "server_error",
+            "thread_key": "+1******1001"
+          }
+        }
+      ]
+    },
+    {
+      "step": "5_6_temperature_rapid_last_wins",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lead_temperature": "cold"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lead_temperature": "cold"
+            }
+          }
+        },
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lead_temperature": "warm"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lead_temperature": "warm"
+            }
+          }
+        },
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lead_temperature": "hot"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lead_temperature": "hot"
+            }
+          }
+        }
+      ],
+      "finalValue": "hot",
+      "writes": [
+        "cold",
+        "warm",
+        "hot"
+      ]
+    },
+    {
+      "step": "7_automation_pause",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "automation_state": "paused"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "automation_state": "paused"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "8_automation_resume",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "automation_state": "running"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "automation_state": "running"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "9_automation_manual_control",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "automation_state": "manual",
+            "manual_stage_lock": true
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "automation_state": "manual",
+              "manual_stage_lock": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "10_system_only_modes_absent",
+      "requests": [],
+      "offered": [
+        "Autopilot On",
+        "Paused",
+        "Manual Only"
+      ]
+    },
+    {
+      "step": "11a_resume_suppressed_refused",
+      "requests": [],
+      "operatorMessage": "This conversation is suppressed. Automation cannot be resumed until suppression is lifted.×"
+    },
+    {
+      "step": "11b_resume_terminal_refused",
+      "requests": [],
+      "operatorMessage": "This lead is closed. Move it out of the closed stage before resuming automation.×"
+    },
+    {
+      "step": "11c_unsupported_legacy_stage",
+      "requests": [],
+      "rendered": "Unsupported: mf_suppressed▾"
+    },
+    {
+      "step": "12_mark_read",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "is_read": true
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "is_read": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "13_mark_unread",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "is_read": false
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "is_read": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "14_unsupported_thread",
+      "requests": []
+    },
+    {
+      "step": "15_thread_switch_during_pending",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lead_temperature": "warm"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lead_temperature": "warm"
+            }
+          }
+        }
+      ],
+      "threadTwoTemperature": "cold"
+    },
+    {
+      "step": "16_17_poll_during_pending",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "lead_temperature": "hot"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "lead_temperature": "hot"
+            }
+          }
+        }
+      ],
+      "duringPoll": "hot"
+    },
+    {
+      "step": "18_mirrors_agree",
+      "requests": [],
+      "note": "no mirror rendered in this layout"
+    },
+    {
+      "step": "19_no_duplicate_requests",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "operational_status": "snoozed"
+          },
+          "response": {
+            "ok": true,
+            "action": "patch_universal_lead_state",
+            "row": {
+              "operational_status": "snoozed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "20_no_premature_success",
+      "requests": [
+        {
+          "thread_key": "+1******1001",
+          "patch": {
+            "operational_status": "paused"
+          },
+          "response": {
+            "ok": true,
+            "blocked": true,
+            "reason": "no_allowed_patch_fields"
+          }
+        }
+      ],
+      "note": "HTTP 200 + blocked:true is reported as a failure and rolled back"
+    }
+  ],
+  "remountDeltas": {
+    "conversation": 0,
+    "deal_intelligence": 0,
+    "workspace": 0
+  },
+  "consoleErrors": []
+}

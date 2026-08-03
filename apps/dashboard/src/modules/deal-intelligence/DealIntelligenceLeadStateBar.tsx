@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import type { IconName } from '../../shared/icons'
 import { patchLeadStateFromView } from '../../domain/lead-state/persistUniversalLeadState'
+import { useDealDeskControlsForThread } from '../inbox/deal-desk-controls-context'
 import type { LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
 import {
   LEAD_TEMPERATURE_META,
@@ -11,10 +12,10 @@ import {
   type LeadTemperatureCode,
 } from '../../domain/lead-state/universal-lead-state-registry'
 import { StageChangeConfirmModal } from '../inbox/components/StageChangeConfirmModal'
+// The lenient `resolveThread*` helpers are deliberately not imported: they coerce an
+// unrecognised value into a canonical neighbour, which is fine for a list pill and wrong
+// for anything that can be written. Values come from the canonical control handles.
 import {
-  resolveThreadStage,
-  resolveThreadStatus,
-  resolveThreadTemperature,
   threadStageVisuals,
   threadStatusVisuals,
   threadTemperatureVisuals,
@@ -46,11 +47,14 @@ interface PillOption<T extends string> {
 
 interface GlassControlProps<T extends string> {
   label: string
-  value: T
+  value: string
   options: PillOption<T>[]
   pending: boolean
-  error: boolean
+  /** Localised operator-facing reason, or null. Never a raw error. */
+  errorMessage: string | null
   disabled: boolean
+  /** The stored value has no canonical equivalent — show it verbatim, do not guess. */
+  unsupportedValue?: boolean
   onChange: (next: T) => void
   className?: string
   lockActive?: boolean
@@ -62,8 +66,9 @@ function GlassControl<T extends string>({
   value,
   options,
   pending,
-  error,
+  errorMessage,
   disabled,
+  unsupportedValue = false,
   onChange,
   className,
   lockActive = false,
@@ -72,7 +77,10 @@ function GlassControl<T extends string>({
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const current = options.find((o) => o.value === value) ?? options[0]
+  const menuRef = useRef<HTMLDivElement>(null)
+  const error = Boolean(errorMessage)
+  // No `?? options[0]`: an unmatched value is reported verbatim, never substituted.
+  const current = options.find((o) => o.value === value) ?? null
 
   useLayoutEffect(() => {
     if (!open || !btnRef.current) {
@@ -99,6 +107,12 @@ function GlassControl<T extends string>({
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node
       if (btnRef.current?.contains(target)) return
+      // The menu is a PORTAL into document.body, so it is outside `btnRef`. Without this
+      // check, mousedown on an option closed the menu and unmounted the option before its
+      // click event could fire — every option in the dropdown was unselectable with a real
+      // mouse. Component tests missed it because they dispatch `click` alone; the browser
+      // verification caught it.
+      if (menuRef.current?.contains(target)) return
       setOpen(false)
     }
     document.addEventListener('keydown', onKey)
@@ -110,7 +124,7 @@ function GlassControl<T extends string>({
   }, [open])
 
   const dotColor = error ? '#ff453a' : current?.visual.color ?? 'var(--di25-accent, #5096f5)'
-  const btnStyle = current && !error
+  const btnStyle = current && !error && !unsupportedValue
     ? ({
         '--ctrl-color': current.visual.color,
         '--ctrl-bg': current.visual.bg,
@@ -126,6 +140,7 @@ function GlassControl<T extends string>({
   const menu = open && menuPos && typeof document !== 'undefined'
     ? createPortal(
       <div
+        ref={menuRef}
         className="nx-conv-dropdown-portal"
         role="listbox"
         aria-label={label}
@@ -150,7 +165,11 @@ function GlassControl<T extends string>({
     )
     : null
 
-  const valueLabel = error ? 'Failed' : current?.visual.label
+  const valueLabel = error
+    ? 'Failed'
+    : current && !unsupportedValue
+      ? current.visual.label
+      : (value ? `Unsupported: ${value}` : 'Not set')
 
   return (
     <div className={cls(
@@ -204,33 +223,13 @@ function GlassControl<T extends string>({
         )}
       </button>
       {menu}
+      {errorMessage ? (
+        <div className="nx-conv-control-error" role="alert">
+          <span>{errorMessage}</span>
+        </div>
+      ) : null}
     </div>
   )
-}
-
-function useOptimisticField<T extends string>(initial: T) {
-  const [value, setValue] = useState<T>(initial)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState(false)
-  const previousRef = useRef<T>(initial)
-
-  const commit = async (next: T, persist: () => Promise<{ ok: boolean }>) => {
-    previousRef.current = value
-    setValue(next)
-    setPending(true)
-    setError(false)
-    const result = await persist()
-    setPending(false)
-    if (!result.ok) {
-      setValue(previousRef.current)
-      setError(true)
-      setTimeout(() => setError(false), 3000)
-    }
-  }
-
-  const reset = (next: T) => { setValue(next); setPending(false); setError(false); previousRef.current = next }
-
-  return { value, pending, error, commit, reset }
 }
 
 const STATUS_OPTIONS: PillOption<ThreadStatus>[] = (Object.keys(threadStatusVisuals) as ThreadStatus[]).map(
@@ -245,28 +244,14 @@ const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = LEAD_TEMPERATURE_ORDER.map
   (v) => ({ value: v, visual: threadTemperatureVisuals[v] }),
 )
 
-function toThreadShape(data: DealIntelligenceLeadStateData) {
-  return {
-    lifecycle_stage: data.lifecycle_stage ?? undefined,
-    operational_status: data.operational_status ?? undefined,
-    lead_temperature: data.lead_temperature ?? undefined,
-    is_starred: data.is_starred ?? undefined,
-    is_pinned: data.is_pinned ?? undefined,
-    is_archived: data.is_archived ?? undefined,
-    snoozed_until: data.snoozed_until ?? undefined,
-    manual_stage_lock: data.manual_stage_lock ?? undefined,
-    manual_temperature_lock: data.manual_temperature_lock ?? undefined,
-  }
-}
-
-function useLeadStateSync(data: DealIntelligenceLeadStateData) {
-  const threadKey = data.threadKey
-  const shape = toThreadShape(data)
-
-  const status = useOptimisticField<ThreadStatus>(resolveThreadStatus(shape))
-  const stage = useOptimisticField<ThreadStage>(resolveThreadStage(shape))
-  const temperature = useOptimisticField<ThreadTemperature>(resolveThreadTemperature(shape))
-
+/**
+ * Flag state for the header actions (star / pin / archive / snooze / locks).
+ *
+ * Status, stage and temperature are deliberately absent: they are canonical control
+ * fields owned by `DealDeskControlsContext`, and holding a second copy here is what let
+ * this panel's optimistic value disagree with the conversation state bar's.
+ */
+function useLeadStateFlags(data: DealIntelligenceLeadStateData) {
   const [starred, setStarred] = useState(Boolean(data.is_starred))
   const [pinned, setPinned] = useState(Boolean(data.is_pinned))
   const [archived, setArchived] = useState(Boolean(data.is_archived))
@@ -275,31 +260,16 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
   const [manualTemperatureLock, setManualTemperatureLock] = useState(Boolean(data.manual_temperature_lock))
   const [actionPending, setActionPending] = useState(false)
 
-  const prevKeyRef = useRef(threadKey)
   useEffect(() => {
-    if (prevKeyRef.current !== threadKey) {
-      prevKeyRef.current = threadKey
-      status.reset(resolveThreadStatus(shape))
-      stage.reset(resolveThreadStage(shape))
-      temperature.reset(resolveThreadTemperature(shape))
-    } else if (!status.pending && !stage.pending && !temperature.pending && !actionPending) {
-      status.reset(resolveThreadStatus(shape))
-      stage.reset(resolveThreadStage(shape))
-      temperature.reset(resolveThreadTemperature(shape))
-    }
-    if (!actionPending) {
-      setStarred(Boolean(data.is_starred))
-      setPinned(Boolean(data.is_pinned))
-      setArchived(Boolean(data.is_archived))
-      setSnoozedUntil(String(data.snoozed_until || ''))
-      setManualStageLock(Boolean(data.manual_stage_lock))
-      setManualTemperatureLock(Boolean(data.manual_temperature_lock))
-    }
+    if (actionPending) return
+    setStarred(Boolean(data.is_starred))
+    setPinned(Boolean(data.is_pinned))
+    setArchived(Boolean(data.is_archived))
+    setSnoozedUntil(String(data.snoozed_until || ''))
+    setManualStageLock(Boolean(data.manual_stage_lock))
+    setManualTemperatureLock(Boolean(data.manual_temperature_lock))
   }, [
-    threadKey,
-    data.lifecycle_stage,
-    data.operational_status,
-    data.lead_temperature,
+    data.threadKey,
     data.is_starred,
     data.is_pinned,
     data.is_archived,
@@ -310,71 +280,57 @@ function useLeadStateSync(data: DealIntelligenceLeadStateData) {
   ])
 
   return {
-    status,
-    stage,
-    temperature,
-    starred,
-    setStarred,
-    pinned,
-    setPinned,
-    archived,
-    setArchived,
-    snoozedUntil,
-    setSnoozedUntil,
-    manualStageLock,
-    setManualStageLock,
-    manualTemperatureLock,
-    setManualTemperatureLock,
-    actionPending,
-    setActionPending,
+    starred, setStarred,
+    pinned, setPinned,
+    archived, setArchived,
+    snoozedUntil, setSnoozedUntil,
+    manualStageLock, setManualStageLock,
+    manualTemperatureLock, setManualTemperatureLock,
+    actionPending, setActionPending,
   }
 }
 
 export interface DealIntelligenceCommandRowProps {
   data: DealIntelligenceLeadStateData
+  /** @deprecated Reconciliation is owned by the canonical control handles. */
   onPatched?: () => void
   disabled?: boolean
 }
 
-export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }: DealIntelligenceCommandRowProps) {
-  const threadKey = data.threadKey
-  const {
-    status,
-    stage,
-    manualStageLock,
-  } = useLeadStateSync(data)
+export function DealIntelligenceCommandRow({ data, disabled = false }: DealIntelligenceCommandRowProps) {
+  const controls = useDealDeskControlsForThread(data.threadKey)
+  const [stageConfirm, setStageConfirm] = useState<{ open: boolean; next: ThreadStage | null }>(
+    { open: false, next: null },
+  )
 
-  const [stageConfirm, setStageConfirm] = useState<{
-    open: boolean
-    next: ThreadStage | null
-  }>({ open: false, next: null })
-
-  const persist = async (patch: Record<string, string>, executeNextAction = false) => {
-    const result = await patchLeadStateFromView('deal_intelligence', threadKey, patch, {
-      execute_next_action: executeNextAction,
-    })
-    if (result.ok) onPatched?.()
-    return { ok: result.ok }
+  // A thread switch cancels a pending confirmation so it cannot be applied to the next
+  // conversation. Derived from state during render rather than through a ref, so it is
+  // safe under concurrent rendering.
+  const [confirmThreadKey, setConfirmThreadKey] = useState(data.threadKey)
+  if (confirmThreadKey !== data.threadKey) {
+    setConfirmThreadKey(data.threadKey)
+    if (stageConfirm.open) setStageConfirm({ open: false, next: null })
   }
 
-  const handleStageChangeRequest = (next: ThreadStage) => {
-    if (next === stage.value) return
-    setStageConfirm({ open: true, next })
+  if (!controls) {
+    // The provider is bound to a different conversation. Render nothing rather than fall
+    // back to a private mutation path.
+    return null
   }
 
-  const handleStageConfirm = async (executeNextAction: boolean) => {
+  const handleStageConfirm = async () => {
     const next = stageConfirm.next
     if (!next) return
     setStageConfirm({ open: false, next: null })
-    await stage.commit(next, () => persist({ lifecycle_stage: next }, executeNextAction))
+    await controls.stage.commit(next)
   }
 
-  const anyPending = status.pending || stage.pending
+  const anyPending = controls.status.pending || controls.stage.pending
 
   return (
     <>
       <div className="nx-di25-pipeline-console">
-        {manualStageLock ? (
+        {controls.manualStageLock ? (
           <div className="nx-di25-pipeline-console__lock" role="status">
             <Icon name="key" />
             <span>Manual stage lock active</span>
@@ -386,41 +342,46 @@ export function DealIntelligenceCommandRow({ data, onPatched, disabled = false }
         >
           <GlassControl
             label="Stage"
-            value={stage.value}
+            value={controls.stage.value}
             options={STAGE_OPTIONS}
-            pending={stage.pending}
-            error={stage.error}
-            disabled={disabled}
+            pending={controls.stage.pending}
+            errorMessage={controls.stage.errorMessage}
+            unsupportedValue={controls.stage.current.unsupported}
+            disabled={disabled || controls.unsupported}
             className="nx-di25-ctrl--stage"
-            lockActive={manualStageLock}
+            lockActive={controls.manualStageLock}
             layout="card"
-            onChange={handleStageChangeRequest}
+            onChange={(next) => {
+              if (next === controls.stage.value) return
+              setStageConfirm({ open: true, next })
+            }}
           />
           <span className="nx-di25-lead-command__bridge" aria-hidden="true">
             <Icon name="chevron-right" />
           </span>
           <GlassControl
             label="Status"
-            value={status.value}
+            value={controls.status.value}
             options={STATUS_OPTIONS}
-            pending={status.pending}
-            error={status.error}
-            disabled={disabled}
+            pending={controls.status.pending}
+            errorMessage={controls.status.errorMessage}
+            unsupportedValue={controls.status.current.unsupported}
+            disabled={disabled || controls.unsupported}
             className="nx-di25-ctrl--status"
             layout="card"
-            onChange={(next) => status.commit(next, () => persist({ operational_status: next }))}
+            onChange={(next) => void controls.status.commit(next)}
           />
         </div>
       </div>
 
       <StageChangeConfirmModal
         open={stageConfirm.open}
-        fromStage={stage.value as LifecycleStageCode}
+        fromStage={controls.stage.value as LifecycleStageCode}
         toStage={stageConfirm.next as LifecycleStageCode | null}
-        pending={stage.pending}
+        pending={controls.stage.pending}
         onCancel={() => setStageConfirm({ open: false, next: null })}
-        onChangeStageOnly={() => void handleStageConfirm(false)}
-        onChangeStageAndRunAction={() => void handleStageConfirm(true)}
+        onChangeStageOnly={() => void handleStageConfirm()}
+        onChangeStageAndRunAction={() => void handleStageConfirm()}
       />
     </>
   )
@@ -442,6 +403,9 @@ export interface DealIntelligenceHeaderActionsProps {
 
 export function DealIntelligenceHeaderActions({ data, onPatched, disabled = false }: DealIntelligenceHeaderActionsProps) {
   const threadKey = data.threadKey
+  // Operational status has exactly one owner. Snooze/unsnooze needs to move it, so it asks
+  // the canonical control rather than adding `operational_status` to its own patch.
+  const controls = useDealDeskControlsForThread(threadKey)
   const {
     starred,
     setStarred,
@@ -457,7 +421,7 @@ export function DealIntelligenceHeaderActions({ data, onPatched, disabled = fals
     setManualTemperatureLock,
     actionPending,
     setActionPending,
-  } = useLeadStateSync(data)
+  } = useLeadStateFlags(data)
 
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
@@ -511,12 +475,19 @@ export function DealIntelligenceHeaderActions({ data, onPatched, disabled = fals
     if (key === 'snooze') {
       if (isSnoozed) {
         setSnoozedUntil('')
-        await runAction({ snoozed_until: null, snooze_reason: null, operational_status: 'needs_review' })
+        // Clearing the snooze does not move the status server-side (`buildRowPatch` only
+        // sets `snoozed` when `snoozed_until` is truthy), so the status change is an
+        // explicit second step through its single owner.
+        const cleared = await runAction({ snoozed_until: null, snooze_reason: null })
+        if (cleared) await controls?.status.commit('needs_review')
         return
       }
       const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       setSnoozedUntil(until)
-      await runAction({ snoozed_until: until, operational_status: 'snoozed' })
+      // `operational_status: 'snoozed'` is NOT sent: `buildRowPatch` already sets it as a
+      // documented coupled transition of `snoozed_until`. Sending it too would make this
+      // panel a second status writer.
+      await runAction({ snoozed_until: until })
     }
   }
 
@@ -571,7 +542,15 @@ export function DealIntelligenceHeaderActions({ data, onPatched, disabled = fals
                 setMoreOpen(false)
                 setManualStageLock(false)
                 setManualTemperatureLock(false)
-                void runAction({}, { resume_automatic_scoring: true, manual_stage_lock: false, manual_temperature_lock: false })
+                // The locks travel in the PATCH body, not in meta. As meta-only they were
+                // unreachable: `buildRowPatch` read `meta.manual_stage_lock` solely inside
+                // its `lifecycle_stage` branch, and this call sends no stage — so the
+                // request carried an empty patch and the server refused it with
+                // `no_allowed_patch_fields`. Releasing a lock never worked.
+                void runAction(
+                  { manual_stage_lock: false, manual_temperature_lock: false },
+                  { resume_automatic_scoring: true },
+                )
               }}
             >
               <Icon name="zap" />
@@ -586,8 +565,10 @@ export function DealIntelligenceHeaderActions({ data, onPatched, disabled = fals
 
 export interface DealIntelligenceTemperatureBadgeProps {
   threadKey: string
+  /** Display fallback only, used when the provider names a different conversation. */
   temperature?: string | null
   manualTemperatureLock?: boolean | null
+  /** @deprecated Reconciliation is owned by the canonical control handles. */
   onPatched?: () => void
   disabled?: boolean
 }
@@ -596,21 +577,11 @@ export function DealIntelligenceTemperatureBadge({
   threadKey,
   temperature,
   manualTemperatureLock = false,
-  onPatched,
   disabled = false,
 }: DealIntelligenceTemperatureBadgeProps) {
-  const normalized = normalizeLeadTemperature(temperature)
-  const visual = threadTemperatureVisuals[normalized]
-  const meta = LEAD_TEMPERATURE_META[normalized as LeadTemperatureCode]
-
+  const controls = useDealDeskControlsForThread(threadKey)
   const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [value, setValue] = useState<ThreadTemperature>(normalized)
   const popoverRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    setValue(normalizeLeadTemperature(temperature))
-  }, [temperature, threadKey])
 
   useEffect(() => {
     if (!open) return
@@ -622,19 +593,21 @@ export function DealIntelligenceTemperatureBadge({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
+  // Falls back to the passed-in value only for DISPLAY when the provider names a different
+  // conversation. In that case the badge is not interactive — it never writes on its own.
+  const displayValue = controls ? controls.temperature.value : normalizeLeadTemperature(temperature)
+  const normalized = normalizeLeadTemperature(displayValue)
+  const visual = threadTemperatureVisuals[normalized]
+  const meta = LEAD_TEMPERATURE_META[normalized as LeadTemperatureCode]
+  const pending = controls?.temperature.pending ?? false
+  const interactive = Boolean(controls) && !disabled && !controls?.unsupported
+
   const handleSelect = async (next: ThreadTemperature) => {
-    if (next === value || disabled) return
-    const prev = value
-    setValue(next)
-    setPending(true)
-    const result = await patchLeadStateFromView('deal_intelligence', threadKey, { lead_temperature: next })
-    setPending(false)
-    if (!result.ok) {
-      setValue(prev)
-      return
-    }
-    setOpen(false)
-    onPatched?.()
+    if (!controls || next === controls.temperature.value) return
+    // No local optimistic state: the canonical handle owns pending, rollback and
+    // serialization, so three rapid clicks resolve to the last one.
+    const outcome = await controls.temperature.commit(next)
+    if (outcome.ok) setOpen(false)
   }
 
   return (
@@ -650,22 +623,29 @@ export function DealIntelligenceTemperatureBadge({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Lead temperature: ${visual.label}`}
-        disabled={disabled || pending}
+        disabled={!interactive || pending}
         onClick={() => setOpen((v) => !v)}
       >
         {manualTemperatureLock ? <Icon name="key" className="nx-di25-temp-badge__lock" /> : null}
         <span>{visual.label}</span>
       </button>
 
-      {open ? (
+      {controls?.temperature.errorMessage ? (
+        <div className="nx-conv-control-error" role="alert">
+          <span>{controls.temperature.errorMessage}</span>
+          <button type="button" className="nx-conv-control-error__dismiss" onClick={controls.temperature.dismissError} aria-label="Dismiss">×</button>
+        </div>
+      ) : null}
+
+      {open && interactive ? (
         <div className="nx-di25-temp-popover" role="listbox" aria-label="Edit temperature">
           {TEMP_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
               role="option"
-              aria-selected={opt.value === value}
-              className={cls('nx-di25-temp-popover__opt', opt.value === value && 'is-selected')}
+              aria-selected={opt.value === displayValue}
+              className={cls('nx-di25-temp-popover__opt', opt.value === displayValue && 'is-selected')}
               onClick={() => void handleSelect(opt.value)}
             >
               <span className="nx-conv-dropdown-option__dot" style={{ background: opt.visual.color }} />

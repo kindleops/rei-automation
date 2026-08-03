@@ -22,29 +22,37 @@ import {
   markDealDeskSelection,
 } from '../../domain/inbox/deal-desk-runtime-proof'
 import './inbox-universal.css'
+/**
+ * N.2 — `updateThreadStage`, `updateThreadStatus`, `markThreadRead`, `markThreadUnread`,
+ * `markThreadHot`, `pauseAutomation` and `resumeAutomation` are deliberately NOT imported
+ * any more. Each was a second writer for a field the canonical state bar owns, and each
+ * carried its own vocabulary defect:
+ *   - `updateThreadStage` sent raw `SellerStage` values, so `mf_suppressed` reached the
+ *     server's lenient normalizer and was persisted as `ownership_confirmation`;
+ *   - `pauseAutomation` mapped "pause automation" onto `operational_status: 'paused'` —
+ *     the wrong dimension — and `resumeAutomation` mapped to nothing at all, so resuming
+ *     produced an empty patch the server rejected as `no_allowed_patch_fields`;
+ *   - `markThreadHot` wrote `lead_temperature` outside the temperature control.
+ * They now route through `useCanonicalThreadWriter`.
+ */
 import {
-  updateThreadStage,
-  updateThreadStatus,
   starThread,
   unstarThread,
   pinThread,
   unpinThread,
   archiveThread,
   unarchiveThread,
-  markThreadRead,
-  markThreadUnread,
-  markThreadHot,
   snoozeThread,
-  pauseAutomation,
-  resumeAutomation,
   retryFailedSend,
   suppressThread,
   approveQueueItem,
   cancelQueueItem,
-  type InboxStatus,
-  type SellerStage,
   type InboxWorkflowThread,
   } from '../../lib/data/inboxWorkflowData'
+import { DealDeskControlsProvider } from './DealDeskControlsProvider'
+import { useCanonicalThreadWriter } from './deal-desk-controls-context'
+import { readStageValue } from '../../domain/inbox/deal-desk-control-contract'
+import { LIFECYCLE_STAGE_ORDER } from '../../domain/lead-state/universal-lead-state-registry'
 
 import { executeAutoReply } from '../../lib/data/inboxAutoReply'
 
@@ -3398,16 +3406,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           mutation = () => unpinThread(thread)
           optimisticAction = 'unpin'
           break
-        case 'read':
-          label = 'Marked Read'
-          mutation = () => markThreadRead(thread)
-          optimisticAction = 'read'
-          break
-        case 'unread':
-          label = 'Marked Unread'
-          mutation = () => markThreadUnread(thread)
-          optimisticAction = 'unread'
-          break
+        // `read` / `unread` are handled by `handleCanonicalReadState` below, NOT here.
+        // The optimistic-patch path this switch feeds never reverts on failure
+        // (`optimisticPatches` is written and never cleared), so a failed read write used
+        // to stay visible under a green success toast until reload. The canonical control
+        // rolls back instead.
         default:
           return
       }
@@ -3452,44 +3455,68 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     })
   }, [threads, handleWorkflowMutation, DEV])
 
-  const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
-    if (!selected) return
-    const actualStatus: InboxStatus = status === 'sent_message' ? 'waiting' : status
-    const optimistic = buildOptimisticThreadPatch({ type: 'status', status }, selected)
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
-    markOptimisticPatch(`status_${status}`, selected.id, optimistic as Record<string, unknown>)
-    
-    if (DEV) {
-      console.log(`[NexusWorkflowStatus]`, {
-        action: `status_change_${status}`,
-        thread_id: selected.id.slice(-8),
-        optimistic: true,
-        preventedDefault: true,
-        stoppedPropagation: true
-      })
+  /**
+   * Canonical writer for any thread, wired to the Deal Desk controls provider.
+   *
+   * When the target is the open conversation this returns the state bar's own control
+   * handle, so a row action and the bar share one serialization and one rollback. For any
+   * other thread it is the same validated write without a UI overlay.
+   */
+  const writeCanonicalField = useCanonicalThreadWriter()
+
+  /**
+   * Report a canonical write that the operator triggered from somewhere other than the
+   * state bar (a row menu, the command palette, a keyboard action).
+   *
+   * The bar renders its own inline error, so this only speaks up for off-bar actions.
+   * `errorMessage` here is always the localised text from the control contract — never the
+   * transport's diagnostic string, which embeds the request URL and therefore the seller's
+   * phone number.
+   */
+  const reportCanonicalWrite = useCallback((label: string, outcome: { ok: boolean; errorMessage: string | null; superseded: boolean }) => {
+    if (outcome.superseded) return
+    if (outcome.ok) {
+      emitNotification({ title: label, detail: 'Saved.', severity: 'success' })
+      return
     }
+    emitNotification({
+      title: label,
+      detail: outcome.errorMessage ?? 'The change could not be saved.',
+      severity: 'critical',
+    })
+  }, [])
 
-    await handleWorkflowMutation(`Status: ${actualStatus.replace(/_/g, ' ')}`, () => updateThreadStatus(selected, actualStatus), { skipRefresh: true })
-  }, [selected, handleWorkflowMutation, DEV])
-
-  const handleStageChange = useCallback(async (stage: SellerStage) => {
+  const handleStatusChange = useCallback(async (status: string) => {
     if (!selected) return
-    const optimistic = buildOptimisticThreadPatch({ type: 'stage', stage }, selected)
-    setOptimisticPatches(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...optimistic } }))
-    markOptimisticPatch(`stage_${stage}`, selected.id, optimistic as Record<string, unknown>)
+    // `sent_message` is a presentation-only pseudo-status (outbound-last + waiting). It is
+    // not a persisted operational status, so it is mapped before the write rather than
+    // sent and silently coerced.
+    const requested = status === 'sent_message' ? 'waiting_on_seller' : status
+    const outcome = await writeCanonicalField(selected, 'operational_status', requested)
+    reportCanonicalWrite('Conversation status', outcome)
+  }, [reportCanonicalWrite, selected, writeCanonicalField])
 
-    if (DEV) {
-      console.log(`[NexusWorkflowStatus]`, {
-        action: `stage_change_${stage}`,
-        thread_id: selected.id.slice(-8),
-        optimistic: true,
-        preventedDefault: true,
-        stoppedPropagation: true
-      })
-    }
+  const handleStageChange = useCallback(async (stage: string) => {
+    if (!selected) return
+    const outcome = await writeCanonicalField(selected, 'lifecycle_stage', stage)
+    reportCanonicalWrite('Acquisition stage', outcome)
+  }, [reportCanonicalWrite, selected, writeCanonicalField])
 
-    await handleWorkflowMutation(`Stage: ${stage.replace(/_/g, ' ')}`, () => updateThreadStage(selected, stage), { skipRefresh: true })
-  }, [selected, handleWorkflowMutation, DEV])
+  /**
+   * Canonical read/unread write.
+   *
+   * A thread with no writable canonical route is refused before any request is emitted and
+   * reports the localised unsupported-state message — it is never silently marked read.
+   * N.3 consumes `is_read` for counts and pagination, so a read state that only ever
+   * existed as an un-reverted optimistic patch would corrupt those counts.
+   */
+  const handleCanonicalReadState = useCallback(async (
+    thread: InboxWorkflowThread,
+    next: 'read' | 'unread',
+  ) => {
+    const outcome = await writeCanonicalField(thread, 'is_read', next)
+    reportCanonicalWrite(next === 'read' ? 'Marked read' : 'Marked unread', outcome)
+  }, [reportCanonicalWrite, writeCanonicalField])
 
   const handleToggleStar = useCallback(() => {
     if (!selected) return
@@ -3508,11 +3535,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         : selectedRef.current
       if (!target) return
       if (action.startsWith('stage:')) {
-        void handleStageChange(action.slice(6) as SellerStage)
+        void handleStageChange(action.slice(6))
         return
       }
       if (action.startsWith('status:')) {
-        void handleStatusChange(action.slice(7) as InboxStatus | 'sent_message')
+        void handleStatusChange(action.slice(7))
         return
       }
       if (action === 'snooze') {
@@ -4119,8 +4146,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         await handleWorkflowMutation('Auto-Reply: Queueing...', () => executeAutoReply(thread, null, { dryRun: autonomyControls.dryRun }), { skipRefresh: false })
         break
       case 'mark_hot':
-// ... rest of switch
-        await handleWorkflowMutation('Lead: HOT', () => markThreadHot(thread), { skipRefresh: true })
+        // Temperature is a canonical control field. `markThreadHot` also wrote
+        // `priority: 'high'`, which the legacy mapper then folded back into
+        // `lead_temperature: 'warm'` — two writes to one field, in disagreement.
+        reportCanonicalWrite('Lead temperature', await writeCanonicalField(thread, 'lead_temperature', 'hot'))
         break
       case 'snooze': {
         const optimistic = buildOptimisticThreadPatch('snooze', thread)
@@ -4131,10 +4160,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       }
         break
       case 'pause_automation':
-        await handleWorkflowMutation('Automation: Paused', () => pauseAutomation(thread), { skipRefresh: true })
+        reportCanonicalWrite('Automation paused', await writeCanonicalField(thread, 'automation_state', 'paused'))
         break
       case 'resume_automation':
-        await handleWorkflowMutation('Automation: Resumed', () => resumeAutomation(thread), { skipRefresh: true })
+        // Refused locally for a suppressed or terminal record — no doomed request, and no
+        // success toast over a thread automation will never touch.
+        reportCanonicalWrite('Automation resumed', await writeCanonicalField(thread, 'automation_state', 'active'))
+        break
+      case 'manual_control':
+        reportCanonicalWrite('Manual control', await writeCanonicalField(thread, 'automation_state', 'human_controlled'))
         break
       case 'suppress':
         await handleWorkflowMutation('Thread: Suppressed (DNC)', () => suppressThread(thread), { skipRefresh: true })
@@ -4161,10 +4195,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         await handleThreadAction(thread, 'unpin')
         break
       case 'read':
-        await handleThreadAction(thread, 'read')
+        await handleCanonicalReadState(thread, 'read')
         break
       case 'unread':
-        await handleThreadAction(thread, 'unread')
+        await handleCanonicalReadState(thread, 'unread')
         break
       case 'open_dossier':
         handleOpenDealIntelligence(thread.id)
@@ -4173,7 +4207,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         handleOpenDealIntelligence(thread.id)
         break
       case 'mark_reviewed':
-        await handleThreadAction(thread, 'read')
+        await handleCanonicalReadState(thread, 'read')
         break
       case 'open_property':
         handleOpenDealIntelligence(thread.id)
@@ -4184,7 +4218,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       default:
         console.warn('[OperatorAction] Unknown action', action)
     }
-  }, [DEV, handleOpenDealIntelligence, handleThreadAction, handleWorkflowMutation, setActiveOverlay, setDraftText, threads])
+  }, [
+    DEV, handleCanonicalReadState, handleOpenDealIntelligence, handleThreadAction,
+    handleWorkflowMutation, reportCanonicalWrite, setActiveOverlay, setDraftText, threads,
+    writeCanonicalField,
+  ])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
@@ -4548,19 +4586,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           requiresThread: true,
           keywords: ['advance', 'stage', 'workflow'],
           action: () => {
-            const stageOrder: SellerStage[] = [
-              'ownership_check',
-              'interest_probe',
-              'seller_response',
-              'price_discovery',
-              'condition_details',
-              'offer_reveal',
-              'negotiation',
-              'contract_path',
-              'dead_suppressed',
+            // The canonical ladder, not the legacy `SellerStage` list. The old list ended
+            // at `dead_suppressed`, so "advance stage" on the last stage wrote a
+            // suppression value as a lifecycle stage.
+            const current = readStageValue(selected).canonical
+            const currentIndex = current ? LIFECYCLE_STAGE_ORDER.indexOf(current) : -1
+            const nextStage = LIFECYCLE_STAGE_ORDER[
+              Math.min(LIFECYCLE_STAGE_ORDER.length - 1, Math.max(0, currentIndex + 1))
             ]
-            const currentIndex = stageOrder.indexOf(selected.conversationStage)
-            const nextStage = stageOrder[Math.min(stageOrder.length - 1, Math.max(0, currentIndex + 1))]
             void handleStageChange(nextStage)
           },
         },
@@ -4996,8 +5029,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           threadContext={threadContext}
           intelligence={threadIntelligence}
           dealContext={canonicalSelectedContext}
-          onStatusChange={handleStatusChange}
-          onStageChange={handleStageChange}
           onCollapse={useMobileInboxFlow ? () => setMobileIntelOpen(false) : undefined}
           onOpenMap={() => focusWorkspaceViewOnMobile('command_map')}
           onOpenComps={() => focusWorkspaceViewOnMobile('comp_intelligence')}
@@ -5223,6 +5254,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   return (
     <WatchlistProvider>
+    {/*
+      One canonical control owner for the open conversation. Every surface below — the
+      state bar, Deal Intelligence, the intelligence panel, row actions — writes through
+      these handles, so there is exactly one in-flight state per field.
+
+      Bound to `workspaceThread` (the selected thread, or the context stub when a bucket
+      request is in flight) so the bar and the right-hand panels always name the same
+      conversation. The provider sits above the whole tree at a stable position, so
+      mounting it does not remount the workspace on selection changes.
+    */}
+    <DealDeskControlsProvider thread={workspaceThread}>
     <div
       id="nx-inbox-root"
       data-nexus-theme={activeNexusThemeId}
@@ -5627,6 +5669,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         />
       )}
     </div>
+    </DealDeskControlsProvider>
     </WatchlistProvider>
   )
 }

@@ -1,4 +1,5 @@
 import {
+  AUTOMATION_STATE_CODES,
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
@@ -21,10 +22,20 @@ function asBoolean(value, fallback = false) {
 
 const AUDIT_TABLE = 'universal_lead_state_events';
 
+/**
+ * Dispositions after which there is no live conversation for automation to continue.
+ * Mirrors DISPOSITION_ORDER in the registry, minus the non-terminal codes
+ * (`interested`, `referred`, `no_response`, `none`).
+ */
+const TERMINAL_DISPOSITIONS = new Set([
+  'not_interested', 'wrong_person', 'wrong_number', 'sold', 'duplicate', 'unqualified',
+]);
+
 const TRACKED_FIELDS = new Set([
   'lifecycle_stage',
   'operational_status',
   'lead_temperature',
+  'automation_state',
   'disposition',
   'contactability_status',
   'next_action',
@@ -184,6 +195,17 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     }
   }
 
+  // Operator automation mode. Writes `automation_state` ONLY — `automation_status` is
+  // the queue/execution column and is owned by the send pipeline, not by this route.
+  // The value arrives already strict-normalized by normalizePatchToCanonical, so an
+  // unrecognised state never reaches here.
+  // No `automation_state_source` mirror is written: unlike stage/status/temperature there
+  // is no such column on inbox_thread_state, and inventing one would fail the upsert.
+  // Provenance for this field lives in the audit event instead (TRACKED_FIELDS).
+  if ('automation_state' in canonicalPatch) {
+    rowPatch.automation_state = canonicalPatch.automation_state;
+  }
+
   if ('disposition' in canonicalPatch) {
     rowPatch.disposition = canonicalPatch.disposition;
     rowPatch.disposition_source = meta.change_source || STATE_SOURCE_CODES.MANUAL;
@@ -236,6 +258,16 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   }
   if ('is_pinned' in canonicalPatch) rowPatch.is_pinned = asBoolean(canonicalPatch.is_pinned, false);
   if ('is_starred' in canonicalPatch) rowPatch.is_starred = asBoolean(canonicalPatch.is_starred, false);
+  // Standalone manual-lock writes. Previously `manual_stage_lock` was only reachable
+  // through `meta` AND only alongside a `lifecycle_stage` write, so "put this thread under
+  // human control" had no way to set the lock on its own. Placed after the lifecycle
+  // branch so an explicit patch field outranks the meta-derived default.
+  if ('manual_stage_lock' in canonicalPatch) {
+    rowPatch.manual_stage_lock = asBoolean(canonicalPatch.manual_stage_lock, false);
+  }
+  if ('manual_temperature_lock' in canonicalPatch) {
+    rowPatch.manual_temperature_lock = asBoolean(canonicalPatch.manual_temperature_lock, false);
+  }
   // Identity backfill (not state): allow callers to attach entity ids.
   if (clean(canonicalPatch.master_owner_id)) rowPatch.master_owner_id = clean(canonicalPatch.master_owner_id);
   if (clean(canonicalPatch.property_id)) rowPatch.property_id = clean(canonicalPatch.property_id);
@@ -262,6 +294,38 @@ export async function patchUniversalLeadState({
   }
 
   const previous = await fetchCurrentLeadState(supabase, key);
+
+  // Automation resume guard.
+  //
+  // Turning automation back ON for a suppressed or terminal thread persists a state the
+  // send engine will refuse to act on, leaving the operator looking at a green control
+  // over a dead thread. Reject the whole patch instead, so the caller rolls back and
+  // shows the refusal rather than a success.
+  //
+  // Evaluated against the RESULT of the patch, not the previous row, so an operator who
+  // lifts suppression and resumes in one request is still allowed.
+  if (canonicalPatch.automation_state === AUTOMATION_STATE_CODES.RUNNING) {
+    const resulting = { ...(previous || {}), ...canonicalPatch };
+    const blockedContactability = BLOCKING_CONTACTABILITY.has(
+      clean(resulting.contactability_status).toLowerCase(),
+    );
+    const suppressed = resulting.is_suppressed === true || blockedContactability;
+    const terminalStage = clean(resulting.lifecycle_stage).toLowerCase() === 'closed';
+    const terminalDisposition = TERMINAL_DISPOSITIONS.has(clean(resulting.disposition).toLowerCase());
+    if (suppressed || terminalStage || terminalDisposition) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: suppressed
+          ? 'automation_resume_blocked_suppressed'
+          : terminalStage
+            ? 'automation_resume_blocked_terminal_stage'
+            : 'automation_resume_blocked_terminal_disposition',
+        thread_key: key,
+        previous,
+      };
+    }
+  }
 
   // Lifecycle stage writes pass the single registry transition validator:
   // automated writers (autopilot/AI/system) can only hold or advance, never

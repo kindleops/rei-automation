@@ -1,6 +1,8 @@
 node_modules
 .next
 dist
+# Isolated fixture build used by the browser verification spec. Never deployed.
+dist-fixture
 build
 .vercel
 .env

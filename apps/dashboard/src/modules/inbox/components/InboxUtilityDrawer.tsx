@@ -78,8 +78,6 @@ export const MapDossierDrawer = ({
       ) : thread ? (
         <IntelligencePanel
           thread={thread}
-          onStatusChange={() => {}}
-          onStageChange={() => {}}
           onOpenMap={() => {}}
           onOpenDossier={() => {}}
           onOpenAi={() => {}}
