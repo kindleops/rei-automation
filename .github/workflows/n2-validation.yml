@@ -57,8 +57,10 @@ jobs:
         run: |
           set -o pipefail
           node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
-            tests/critical/deal-desk-n2-control-mutations.test.mjs \
-            tests/critical/dashboard-ops-service.test.mjs \
+            tests/critical/deal-desk-n2-control-mutations.test.mjs
+          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
+            tests/critical/dashboard-ops-service.test.mjs
+          node --import ./tests/register-aliases.mjs --test --test-concurrency=1 \
             tests/critical/inbox-thread-context-route.test.mjs
       - name: Relevant dashboard lint
         working-directory: apps/dashboard
