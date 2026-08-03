@@ -12,21 +12,17 @@ import {
 import {
   AUTOMATION_MODE_META,
   OPERATOR_SELECTABLE_AUTOMATION_MODES,
-  describeVocabularyRejection,
   resolveLeadTemperatureForWrite,
   resolveLifecycleStageForWrite,
   resolveOperationalStatusForWrite,
   resolveOperatorAutomationMode,
-  type AutomationModeCode,
   type VocabularyResolution,
 } from '../../../domain/lead-state/canonical-control-vocabularies'
 import {
   LEAD_TEMPERATURE_ORDER,
   LIFECYCLE_STAGE_ORDER,
   OPERATIONAL_STATUS_ORDER,
-  type LeadTemperatureCode,
   type LifecycleStageCode,
-  type OperationalStatusCode,
 } from '../../../domain/lead-state/universal-lead-state-registry'
 import {
   buildOperatorAutomationPatch,

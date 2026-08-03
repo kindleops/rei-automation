@@ -29,7 +29,6 @@ import {
   automationStateVisuals,
   getSellerStageVisual,
   getStatusVisual,
-  inboxStatusOptions,
   sellerStageOptions,
   statusStyleVars,
 } from '../status-visuals'
@@ -3067,8 +3066,6 @@ const ContactIntelligenceCard = ({
 export const SellerCommandCard = ({
   thread,
   phase3,
-  onStatusChange,
-  onStageChange,
 }: {
   thread: WorkflowThread
   phase3: Phase3Intelligence | null
