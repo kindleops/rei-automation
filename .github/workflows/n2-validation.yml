@@ -1,5 +1,6 @@
 name: N.2 Deal Desk validation
 
+# PR #65 only: proves the canonical N.1 identity handoff and N.2 operator controls together.
 on:
   pull_request:
     branches: [main]
