@@ -1670,9 +1670,16 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
         // (status/next_action/disposition/automation_state) wait for the
         // finalized aggregate. Safety-latched fragments keep the full
         // projection so immediate suppression state lands instantly.
-        const fragment_safety = seller_burst_enabled
-          ? detectImmediateSafetySignal({ message: message_body, classification })
-          : { latch: false };
+        // Safety latch is evaluated for EVERY classified seller inbound: a
+        // latched message (STOP / wrong number / hostile) keeps the full
+        // immediate projection; everything else defers the decision-owned
+        // columns to the seller decision spine, which is guaranteed to run
+        // on this path (the unknown-inbound branch returned earlier) or the
+        // webhook fails and the recovery cron re-runs it.
+        const fragment_safety = detectImmediateSafetySignal({
+          message: message_body,
+          classification,
+        });
         await syncClassifiedInboxThreadState({
           thread_key: inbound_from,
           seller_phone: inbound_from,
@@ -1684,6 +1691,7 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           conversationStage: stage_before,
           classification,
           fragment_safe: seller_burst_enabled && !fragment_safety.latch,
+          decision_fields_deferred: !fragment_safety.latch,
           messageEvent: {
             id: inbound_message_event_id,
             provider_message_sid: extracted.message_id,
