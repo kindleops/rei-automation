@@ -159,6 +159,32 @@ const EXECUTION_BLOCK_PREFIX = 'automation_resume_blocked_execution_'
  * `constructor` would return the `Object` **function** typed as a string and render it into
  * the error surface. Same defect class as the alias lookup in the control vocabularies.
  */
+/**
+ * May a server-supplied string be shown to an operator verbatim?
+ *
+ * Conservative by construction: this is the fallback for text this codebase did NOT
+ * author, and the thing it must never leak is contact data. The previous version
+ * enumerated only `https?://` and a US `+1` E.164 number, so a non-US number
+ * (`+447700900123`), a bare thread key (`9015551234`) or a formatted US number
+ * (`+1 (901) 555-1234`) went straight through.
+ *
+ * Rejected: any URL or scheme-less host, the transport's `(body: …)` preview, a bare
+ * identifier, and ANY run of seven or more digits once phone separators are removed —
+ * seven because that is the length of a local subscriber number.
+ */
+const isOperatorSafeMessage = (message: string): boolean => {
+  if (!message) return false
+  // A bare snake_case / kebab-case token is an identifier, not a sentence.
+  if (/^[a-z0-9_-]+$/i.test(message)) return false
+  if (message.includes('://')) return false
+  if (message.includes('(body:')) return false
+  // Scheme-less host, e.g. `api.example.com/api/...`.
+  if (/\b[a-z0-9-]+(\.[a-z0-9-]+){1,}\.[a-z]{2,}\b/i.test(message)) return false
+  // Digit runs, ignoring the characters a phone number is normally punctuated with.
+  if (/\d{7,}/.test(message.replace(/[\s().+-]/g, ''))) return false
+  return true
+}
+
 export const describeControlFailure = (
   reasonCode: string | null | undefined,
   fallbackMessage?: string | null,
@@ -173,14 +199,11 @@ export const describeControlFailure = (
       return 'Automation cannot be resumed while this conversation is in a terminal execution state.'
     }
   }
-  // A message is only forwarded when it cannot be a transport diagnostic: those carry a
-  // URL, and the thread key in that URL is a phone number.
   const fallback = String(fallbackMessage ?? '').trim()
-  if (fallback && !/https?:\/\/|\+1\d{10}|\(body:/.test(fallback) && !/^[a-z0-9_]+$/.test(fallback)) {
-    return fallback
-  }
-  return DEFAULT_FAILURE_MESSAGE
+  return isOperatorSafeMessage(fallback) ? fallback : DEFAULT_FAILURE_MESSAGE
 }
+
+
 
 export function useCanonicalControlMutations<T extends CanonicalControlValue>(
   thread: ThreadIdentityInput,

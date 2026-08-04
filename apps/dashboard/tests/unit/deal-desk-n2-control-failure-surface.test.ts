@@ -75,6 +75,22 @@ test('a transport diagnostic is never forwarded to the operator', () => {
   assert.equal(rendered, 'The change could not be saved.')
 })
 
+test('a diagnostic carrying a NON-US or unformatted number is never forwarded', () => {
+  // The first version of this filter enumerated only `https?://` and a US `+1` E.164
+  // number, so each of these reached the operator.
+  const leaks = [
+    'Blocked for +447700900123',
+    'Blocked for 9015551234',
+    'Blocked for +1 (901) 555-1234',
+    'Blocked for 901-555-1234',
+    'Rejected by api.example.com/api/cockpit/lead-state/patch',
+    'no_allowed_patch_fields',
+  ]
+  for (const leak of leaks) {
+    assert.equal(describeControlFailure(undefined, leak), 'The change could not be saved.', leak)
+  }
+})
+
 test('a genuine operator-facing fallback is preserved', () => {
   const message = 'Automation cannot resume while this conversation is suppressed.'
   assert.equal(describeControlFailure(undefined, message), message)
