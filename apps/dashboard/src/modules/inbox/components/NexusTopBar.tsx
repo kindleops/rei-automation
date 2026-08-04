@@ -66,6 +66,11 @@ interface NexusTopBarProps {
   autonomyModel: AutonomousEngineModel
   activeWorkspaceKey?: string
   activeWorkspaceLabel?: string
+  /**
+   * @deprecated Accepted for call-site compatibility but no longer rendered.
+   * The shell rail (`modules/shell/ShellTopRail`) owns route identity and the
+   * breadcrumb on every route; this bar no longer renders an identity block.
+   */
   contextSubtitle?: string
   activeViewKey?: string
   activeViewKeys?: string[]
@@ -134,7 +139,6 @@ export const NexusTopBar = ({
   onCancelStaleFollowUps,
   activeWorkspaceKey,
   activeWorkspaceLabel = 'Deal Desk',
-  contextSubtitle,
   activeViewKey,
   activeViewKeys = [],
   activeViewChips = [],
@@ -546,18 +550,14 @@ export const NexusTopBar = ({
     <header className="nx-topbar nx-topbar--nexus-shell">
       {/* Zone 1: Workspace identity */}
       <div className="nx-topbar__left nx-topbar-shell-left nx-mobile-command-row">
-        {!isMobile ? (
-          <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
-            <div className="nx-topbar__logo">
-              <Icon name="spark" />
-            </div>
-            <div className="nx-topbar-identity">
-              <span>NEXUS</span>
-              <strong>{activeWorkspaceLabel}</strong>
-              {contextSubtitle ? <small>{contextSubtitle}</small> : null}
-            </div>
-          </div>
-        ) : null}
+        {/*
+          Lane A: the stacked four-label identity block that used to live here
+          ("NEXUS" / workspace / breadcrumb, plus the logo tile) has moved to the
+          shell-owned rail — `modules/shell/ShellTopRail`. It renders on all 15
+          routes instead of only `/inbox`, on ONE aligned line (§2/§4), and it is
+          no longer duplicated by the fixed `.nx-room-label` overlay.
+          Everything below stays inbox-owned: this bar is now a control toolbar.
+        */}
 
         {/* Zone 2: Operational controls */}
         <div className="nx-topbar-shell-zone nx-topbar-shell-zone--controls">
@@ -652,6 +652,7 @@ export const NexusTopBar = ({
               className="nx-liquid-popover nx-liquid-popover--processor"
               placement="bottom-start"
               width="min(380px, calc(100vw - 24px))"
+              label="Queue and system status"
             >
               <QueueCommandCenter
                 health={queueProcessorHealth}

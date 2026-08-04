@@ -39,6 +39,7 @@ export const ProfileMenu = ({
     className="nx-profile-menu-popover"
     placement="bottom-end"
     width={260}
+    label="Account menu"
   >
     <header className="nx-profile-menu__header">
       <span className="nx-profile-menu__avatar">{initials}</span>

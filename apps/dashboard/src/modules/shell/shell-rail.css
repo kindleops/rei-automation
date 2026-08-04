@@ -1,0 +1,428 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   shell-rail.css — the global top rail + appearance menu
+   Owner: Lane A. `--lc-*` only: no hex/rgb/hsl (R1.1), no raw --nx-* (R1.2),
+   no literal z-index (R11.1), no `!important` (R1.6), §2 type scale only,
+   §3 spacing grid only.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lc-rail {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-4);
+  align-items: center;
+  height: var(--lc-rail-height);
+  padding: 0 var(--lc-space-3);
+  font-family: var(--lc-font-ui);
+  color: var(--lc-text-secondary);
+  /* MAP COMMAND liquid-glass chrome, via the semantic layer (§1/§4.2). */
+  background: var(--lc-glass-bg);
+  border-bottom: 1px solid var(--lc-glass-border);
+  box-shadow: var(--lc-elev-2), var(--lc-glass-highlight);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+}
+
+/* ── Identity — ONE aligned line, not a four-label stack ─────────────── */
+
+.lc-rail__identity {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.lc-rail__brand {
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  height: var(--lc-tap-min);
+  padding: 0 var(--lc-space-1);
+  color: var(--lc-text-primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.lc-rail__brand:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+  border-radius: var(--lc-radius-sm);
+}
+
+.lc-rail__mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: var(--lc-space-5);
+  height: var(--lc-space-5);
+  color: var(--lc-accent);
+  background: var(--lc-accent-soft);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-sm);
+}
+
+.lc-rail__wordmark {
+  font-size: var(--lc-text-2xs);
+  font-weight: var(--lc-weight-heading);
+  letter-spacing: var(--lc-tracking-eyebrow);
+  line-height: var(--lc-leading-body);
+  text-transform: uppercase;
+  color: var(--lc-text-muted);
+}
+
+.lc-rail__sep {
+  font-size: var(--lc-text-sm);
+  color: var(--lc-text-muted);
+}
+
+.lc-rail__room {
+  overflow: hidden;
+  font-size: var(--lc-text-base);
+  font-weight: var(--lc-weight-heading);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Global navigation ───────────────────────────────────────────────── */
+
+.lc-rail__nav {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--lc-space-1);
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lc-rail__nav-item {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-2);
+  align-items: center;
+  height: var(--lc-tap-min);
+  padding: 0 var(--lc-space-3);
+  font-family: inherit;
+  font-size: var(--lc-text-sm);
+  font-weight: var(--lc-weight-emphasis);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-muted);
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: color var(--lc-dur-1) var(--lc-ease-move),
+    background var(--lc-dur-1) var(--lc-ease-move),
+    border-color var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-rail__nav-item:hover {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+}
+
+.lc-rail__nav-item:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+.lc-rail__nav-item.is-active {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+  border-color: var(--lc-line-strong);
+}
+
+.lc-rail__nav-icon {
+  display: inline-grid;
+  place-items: center;
+  color: currentcolor;
+}
+
+/* ── Right-hand actions ──────────────────────────────────────────────── */
+
+.lc-rail__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+.lc-rail__icon-btn {
+  display: grid;
+  place-items: center;
+  width: var(--lc-tap-min);
+  height: var(--lc-tap-min);
+  color: var(--lc-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: color var(--lc-dur-1) var(--lc-ease-move),
+    background var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-rail__icon-btn:hover,
+.lc-rail__icon-btn.is-active {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+  border-color: var(--lc-line);
+}
+
+.lc-rail__icon-btn:focus-visible,
+.lc-rail__avatar:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+.lc-rail__avatar {
+  display: grid;
+  place-items: center;
+  width: var(--lc-tap-min);
+  height: var(--lc-tap-min);
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-xs);
+  font-weight: var(--lc-weight-heading);
+  color: var(--lc-text-primary);
+  background: var(--lc-control-bg);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-pill);
+  cursor: pointer;
+  transition: border-color var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-rail__avatar:hover,
+.lc-rail__avatar.is-active {
+  border-color: var(--lc-accent);
+}
+
+.lc-rail__account-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-space-1);
+  padding: var(--lc-space-3);
+  border-bottom: 1px solid var(--lc-line);
+}
+
+.lc-rail__account-header strong {
+  overflow: hidden;
+  font-size: var(--lc-text-sm);
+  font-weight: var(--lc-weight-heading);
+  color: var(--lc-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-rail__account-header small {
+  font-size: var(--lc-text-2xs);
+  color: var(--lc-text-muted);
+}
+
+/* The global notification bell is a position:fixed overlay at the top-right
+   owned by the notification module. Reserve its footprint rather than let it
+   sit on top of the rail's own controls. */
+.lc-rail.has-global-bell {
+  padding-right: var(--lc-space-7);
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────── */
+
+.lc-rail.is-mobile {
+  gap: var(--lc-space-2);
+  padding: 0 var(--lc-space-2);
+}
+
+.lc-rail.is-mobile .lc-rail__room {
+  font-size: var(--lc-text-sm);
+}
+
+/* The mobile command dock is fixed at y=0 with its own z-layer; sit beneath it
+   instead of underneath it. */
+.lc-rail.is-below-dock {
+  margin-top: var(--nx-mobile-chrome-top, 0px);
+}
+
+/* ── Keyboard shortcuts modal body ───────────────────────────────────── */
+
+.lc-rail__keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--lc-space-1) var(--lc-space-5);
+  margin: 0;
+}
+
+.lc-rail__keys > div {
+  display: flex;
+  gap: var(--lc-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--lc-space-2) 0;
+  border-bottom: 1px solid var(--lc-line);
+}
+
+.lc-rail__keys dt {
+  font-size: var(--lc-text-sm);
+  color: var(--lc-text-secondary);
+}
+
+.lc-rail__keys dd {
+  display: flex;
+  gap: var(--lc-space-1);
+  margin: 0;
+}
+
+.lc-rail__keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--lc-space-5);
+  padding: 0 var(--lc-space-1);
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-2xs);
+  color: var(--lc-text-primary);
+  background: var(--lc-control-bg);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-xs);
+}
+
+/* ═══ Appearance menu ════════════════════════════════════════════════ */
+
+.lc-appearance__section {
+  padding: var(--lc-space-2) var(--lc-space-3) var(--lc-space-3);
+  border-bottom: 1px solid var(--lc-line);
+}
+
+.lc-appearance__section:last-child {
+  border-bottom: 0;
+}
+
+.lc-appearance__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--lc-space-1);
+}
+
+.lc-appearance__theme {
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  min-height: var(--lc-tap-min);
+  padding: var(--lc-space-1) var(--lc-space-2);
+  font-family: inherit;
+  font-size: var(--lc-text-xs);
+  color: var(--lc-text-secondary);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: border-color var(--lc-dur-1) var(--lc-ease-move),
+    background var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-appearance__theme:hover {
+  background: var(--lc-accent-soft);
+}
+
+.lc-appearance__theme.is-active {
+  color: var(--lc-text-primary);
+  border-color: var(--lc-accent);
+}
+
+.lc-appearance__theme:focus-visible,
+.lc-appearance__accent:focus-visible,
+.lc-appearance__toggle:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+/* The swatch carries `data-nexus-theme`, so lc-tokens.css re-maps the semantic
+   tokens inside it and the swatch paints that theme's REAL values. No colour
+   is duplicated in TS or in this file (R1.3). */
+.lc-appearance__swatch {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: var(--lc-space-5);
+  height: var(--lc-space-5);
+  overflow: hidden;
+  background: var(--lc-surface-base);
+  border: 1px solid var(--lc-line-strong);
+  border-radius: var(--lc-radius-xs);
+}
+
+.lc-appearance__swatch i {
+  display: block;
+  width: var(--lc-space-2);
+  height: var(--lc-space-2);
+  background: var(--lc-accent);
+  border-radius: var(--lc-radius-pill);
+}
+
+.lc-appearance__theme-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-appearance__accents {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--lc-space-1);
+}
+
+.lc-appearance__accent {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: var(--lc-space-6);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+}
+
+.lc-appearance__accent:hover {
+  background: var(--lc-accent-soft);
+}
+
+.lc-appearance__accent.is-active {
+  border-color: var(--lc-accent);
+}
+
+.lc-appearance__accent-dot {
+  display: block;
+  width: var(--lc-space-4);
+  height: var(--lc-space-4);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-pill);
+}
+
+.lc-appearance__row {
+  display: flex;
+  gap: var(--lc-space-1);
+}
+
+.lc-appearance__toggle {
+  flex: 1 1 0;
+  min-height: var(--lc-space-6);
+  padding: var(--lc-space-1) var(--lc-space-2);
+  font-family: inherit;
+  font-size: var(--lc-text-xs);
+  color: var(--lc-text-muted);
+  background: transparent;
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: color var(--lc-dur-1) var(--lc-ease-move),
+    background var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-appearance__toggle.is-active {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+  border-color: var(--lc-accent);
+}
