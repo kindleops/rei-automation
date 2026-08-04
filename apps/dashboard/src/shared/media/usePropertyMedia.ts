@@ -97,9 +97,15 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
     [propertyId, address, lat, lng, storedStreetUrl, storedAerialUrl],
   )
 
-  // Ask for coordinates only when the caller could not supply a location.
+  // Ask for coordinates whenever the caller could not supply real ones.
+  //
+  // Deliberately NOT gated on the address being absent: exact coordinates beat
+  // geocoding an address string every time, so a row that has an address but
+  // no coordinates still gets recovered rather than silently geocoded. Once the
+  // data layer emits real coordinates this branch stops firing entirely,
+  // because `seededIdentity.lat` will already be populated.
   const needsRecovery =
-    resolveMissingCoordinates && seededIdentity.lat == null && !seededIdentity.address && Boolean(propertyId)
+    resolveMissingCoordinates && seededIdentity.lat == null && Boolean(propertyId)
   useEffect(() => {
     if (needsRecovery) requestPropertyLocation(propertyId)
   }, [needsRecovery, propertyId])

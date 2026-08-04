@@ -1,8 +1,11 @@
 /* ==========================================================================
    Shared property media — Street View + aerial (constitution §13)
-   Theme-agnostic: every value derives from the live --nx-* theme primitives,
-   with a neutral literal only as the last-resort var() fallback so the module
-   is legible before a theme has been applied.
+
+   Visual language: MAP COMMAND. Dense tactical-messenger chrome over liquid
+   glass. Every value derives from the `--nx-glass-*` token family defined per
+   theme in nx-glass-system.css, so the viewer is correct in all 10 themes
+   (R13.10) without being art-directed per theme. Tuned against the operator's
+   working theme: dark + cyan accent.
    ========================================================================== */
 
 .lc-media {
@@ -10,52 +13,60 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-radius: 14px;
+  border-radius: var(--nx-glass-radius-panel, 14px);
   overflow: hidden;
-  background: var(--nx-bg-2, #12161d);
-  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
+  background: var(--nx-glass-bg);
+  border: 1px solid var(--nx-glass-border);
+  box-shadow: var(--nx-glass-shadow-sm);
+  color: var(--nx-glass-text);
   isolation: isolate;
 }
 
-/* ── tabs ───────────────────────────────────────────────────────────────── */
+/* ── tab rail — liquid tabs, dense ──────────────────────────────────────── */
 .lc-media__tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
-  background: var(--nx-surface, rgba(255, 255, 255, 0.03));
+  gap: 3px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--nx-glass-divider);
+  background: var(--nx-glass-bg-strong);
+  backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur)) saturate(var(--nx-glass-saturate));
   flex: 0 0 auto;
 }
 
 .lc-media__tab {
   position: relative;
-  min-height: 28px;
-  padding: 5px 12px;
+  height: 26px;
+  padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--nx-glass-radius-chip, 999px);
   background: transparent;
-  color: var(--nx-muted, #8f9aa4);
+  color: var(--nx-glass-muted);
+  font-family: inherit;
   font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
-  transition: color 120ms cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 110ms, color 110ms, border-color 110ms;
 }
 
 .lc-media__tab:hover {
-  color: var(--nx-text-strong, #f4f6f8);
+  background: var(--nx-glass-bg-hover);
+  color: var(--nx-glass-text);
 }
 
 .lc-media__tab.is-active {
-  color: var(--nx-text-strong, #f4f6f8);
-  background: var(--nx-accent-soft, rgba(120, 180, 255, 0.16));
-  border-color: var(--nx-border-strong, rgba(255, 255, 255, 0.14));
+  background: var(--nx-glass-accent-soft);
+  border-color: var(--nx-glass-accent-border);
+  color: var(--nx-glass-accent);
+  box-shadow: 0 0 8px rgba(var(--nx-glass-accent-rgb), 0.10);
 }
 
 .lc-media__tab:focus-visible {
-  outline: 2px solid var(--nx-accent, #5aa9ff);
+  outline: 2px solid var(--nx-glass-accent);
   outline-offset: 2px;
 }
 
@@ -65,15 +76,17 @@
   height: 5px;
   margin-left: 6px;
   border-radius: 50%;
-  background: var(--nx-warning, #efb65e);
+  background: var(--nx-glass-warning);
   vertical-align: middle;
 }
 
 .lc-media__meta {
   margin-left: auto;
-  padding-right: 4px;
+  padding-right: 2px;
   font-size: 11px;
-  color: var(--nx-muted, #8f9aa4);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-glass-faint);
   font-variant-numeric: tabular-nums;
 }
 
@@ -84,6 +97,9 @@
   min-height: 180px;
 }
 
+/* Both panes stay mounted; only visibility changes, so switching tabs never
+   re-mounts the live panorama (R13.2) and one failing never blanks the
+   other (R13.6). */
 .lc-media__pane {
   position: absolute;
   inset: 0;
@@ -105,8 +121,10 @@
   display: block;
 }
 
+/* Previously-valid frame kept on screen while the next property resolves,
+   marked stale rather than replaced by a skeleton (R8.5 / R13.3). */
 .lc-media-img.is-stale {
-  filter: saturate(0.65) brightness(0.8);
+  filter: saturate(0.55) brightness(0.72);
 }
 
 .lc-media-pano,
@@ -120,15 +138,20 @@
   inset: 0;
 }
 
-/* Branded pre-paint treatment. R13.4: a provider rectangle must never be the
-   thing an operator sees, so the container itself carries the treatment and
-   the provider paints on top of it. */
+/* Branded pre-paint treatment. R13.4: a raw provider rectangle must never be
+   what the operator sees, so the container carries the treatment and the
+   provider paints on top of it. Accent-tinted scanline over glass fill. */
 .lc-media-pano,
 .lc-media-loading,
 .lc-media-fallback {
   background:
-    radial-gradient(120% 90% at 12% 0%, var(--nx-accent-soft, rgba(120, 180, 255, 0.14)), transparent 58%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+    radial-gradient(120% 90% at 12% 0%, rgba(var(--nx-glass-accent-rgb), 0.14), transparent 58%),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(var(--nx-glass-accent-rgb), 0.035) 0 2px,
+      transparent 2px 9px
+    ),
+    var(--nx-glass-bg-strong);
 }
 
 /* ── localized progress (R13.5) ─────────────────────────────────────────── */
@@ -140,7 +163,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
 }
 
@@ -149,7 +172,7 @@
   display: block;
   height: 2px;
   border-radius: 999px;
-  background: var(--nx-border, rgba(255, 255, 255, 0.12));
+  background: var(--nx-glass-divider);
   overflow: hidden;
 }
 
@@ -159,15 +182,17 @@
   inset: 0;
   width: 38%;
   border-radius: inherit;
-  background: var(--nx-accent, #5aa9ff);
+  background: var(--nx-glass-accent);
+  box-shadow: 0 0 10px rgba(var(--nx-glass-accent-rgb), 0.45);
   animation: lc-media-indeterminate 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .lc-media-progress__label {
   font-size: 11px;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--nx-text, #c9d2d9);
+  color: var(--nx-glass-text);
 }
 
 @keyframes lc-media-indeterminate {
@@ -183,21 +208,21 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   padding: 16px;
   text-align: center;
 }
 
 .lc-media-fallback__mark {
-  color: var(--nx-muted, #8f9aa4);
-  opacity: 0.7;
+  color: var(--nx-glass-accent);
+  opacity: 0.55;
 }
 
 .lc-media-fallback__title {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--nx-text-strong, #f4f6f8);
+  color: var(--nx-glass-text-strong);
 }
 
 .lc-media-fallback__detail {
@@ -205,52 +230,64 @@
   max-width: 34ch;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--nx-muted, #8f9aa4);
+  color: var(--nx-glass-muted);
 }
 
 .lc-media-fallback__actions {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .lc-media-fallback__btn {
-  min-height: 28px;
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--nx-border-strong, rgba(255, 255, 255, 0.16));
-  background: var(--nx-accent-soft, rgba(120, 180, 255, 0.16));
-  color: var(--nx-text-strong, #f4f6f8);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  text-decoration: none;
   display: inline-flex;
   align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--nx-glass-radius-chip, 999px);
+  border: 1px solid var(--nx-glass-accent-border);
+  background: var(--nx-glass-accent-soft);
+  color: var(--nx-glass-accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 110ms, border-color 110ms;
+}
+
+.lc-media-fallback__btn:hover {
+  background: var(--nx-glass-bg-hover);
 }
 
 .lc-media-fallback__btn.is-ghost {
   background: transparent;
+  border-color: var(--nx-glass-border-strong);
+  color: var(--nx-glass-muted);
 }
 
 .lc-media-fallback__btn:focus-visible {
-  outline: 2px solid var(--nx-accent, #5aa9ff);
+  outline: 2px solid var(--nx-glass-accent);
   outline-offset: 2px;
 }
 
+/* The typed reason itself — the thing that makes the fallback honest. */
 .lc-media-fallback__code {
-  margin-top: 2px;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-glass-divider);
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--nx-muted, #8f9aa4);
-  opacity: 0.7;
+  letter-spacing: 0.06em;
+  color: var(--nx-glass-faint);
 }
 
 /* ── host adapters ──────────────────────────────────────────────────────
-   The viewer is embedded inside three existing layout shells that already own
-   their own radius, border and sizing. In those hosts the viewer contributes
-   behaviour only, never chrome. */
+   The viewer is embedded inside layout shells that already own their radius,
+   border and sizing. Inside those hosts it contributes behaviour, not chrome. */
 .nx-prop-media-panel__viewer,
 .nx-property-hero-cinematic__viewer,
 .nx-di25-media__viewer {
@@ -259,6 +296,7 @@
   border: 0;
   border-radius: inherit;
   background: transparent;
+  box-shadow: none;
 }
 
 .nx-prop-media-panel,
@@ -274,15 +312,15 @@
 }
 
 /* ── inbox row thumbnail states ─────────────────────────────────────────── */
-/* The container class `nx-inbox-sv-thumb` keeps its existing per-route
-   styling; these rules only add the states the old component never had. */
+/* The `nx-inbox-sv-thumb` container keeps its existing per-route styling;
+   these rules only add the states the old component never had. */
 .nx-inbox-sv-thumb__probing {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     100deg,
     transparent 20%,
-    rgba(255, 255, 255, 0.07) 42%,
+    rgba(var(--nx-glass-accent-rgb), 0.16) 42%,
     transparent 64%
   );
   background-size: 220% 100%;
@@ -301,10 +339,12 @@
   bottom: 0;
   padding: 2px 4px;
   font-size: 11px;
+  font-weight: 600;
   line-height: 1.2;
+  letter-spacing: 0.02em;
   text-align: center;
-  color: var(--nx-muted, #8f9aa4);
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
+  color: var(--nx-glass-muted, rgba(255, 255, 255, 0.62));
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.62));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

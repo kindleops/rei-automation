@@ -115,7 +115,13 @@ const InboxStreetViewThumbComponent = ({
             src={url}
             alt={media.identity.address ? `Street view of ${media.identity.address}` : ''}
             className="nx-inbox-sv-thumb__img"
-            loading="lazy"
+            /* The list is virtualised, so a mounted row is a visible row —
+               `loading="lazy"` bought nothing and made Chrome defer the
+               request entirely whenever the tab was backgrounded, so an
+               operator returning to the tab found empty slots. Low fetch
+               priority keeps these off the critical path instead. */
+            loading="eager"
+            fetchPriority="low"
             decoding="async"
             draggable={false}
             onLoad={onLoaded}
