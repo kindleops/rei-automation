@@ -80,7 +80,7 @@
   gap: 10px;
 }
 .civ4-control__label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--civ4-muted);
@@ -127,7 +127,7 @@
   box-shadow: inset 0 0 0 1px var(--civ4-accent-border);
 }
 .civ4-segment__count {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   background: rgba(127, 127, 127, 0.18);
   border-radius: 5px;
@@ -345,7 +345,7 @@
   flex-direction: column;
 }
 .civ4-fact__label {
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--civ4-faint);
@@ -429,7 +429,7 @@
   flex-direction: column;
 }
 .civ4-ribbon__label {
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--civ4-faint);
@@ -471,7 +471,7 @@
   line-height: 1;
 }
 .civ4-count__label {
-  font-size: 10.5px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--civ4-muted);
@@ -498,7 +498,7 @@
   gap: 2px;
 }
 .civ4-stat__label {
-  font-size: 9.5px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--civ4-faint);
@@ -588,7 +588,7 @@
   font-weight: 800;
 }
 .civ4-statebadge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -638,7 +638,7 @@
   flex-direction: column;
 }
 .civ4-cardfact__label {
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--civ4-faint);
@@ -655,7 +655,7 @@
   margin-top: 8px;
 }
 .civ4-tag {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--civ4-text-2);
   background: var(--civ4-panel-strong);
@@ -701,7 +701,7 @@
   padding: 5px 9px;
 }
 .civ4-pill {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   border-radius: 6px;
   padding: 2px 7px;
@@ -906,7 +906,7 @@
 }
 .civ4-matrix th {
   text-align: left;
-  font-size: 9.5px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--civ4-faint);
@@ -919,7 +919,7 @@
   color: var(--civ4-text-2);
 }
 .civ4-assess {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   border-radius: 5px;
   padding: 1px 6px;
@@ -947,7 +947,7 @@
   margin: 0;
 }
 .civ4-def dt {
-  font-size: 9.5px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--civ4-faint);
@@ -1019,7 +1019,7 @@
   position: absolute;
   bottom: 3px;
   right: 5px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
@@ -1102,7 +1102,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   border-radius: 6px;
   padding: 2px 7px;
@@ -1112,7 +1112,7 @@
   opacity: 0.7;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 9px;
+  font-size: 11px;
 }
 .civ4-chip2--exact {
   color: var(--civ4-qualified);

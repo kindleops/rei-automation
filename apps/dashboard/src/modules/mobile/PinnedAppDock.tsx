@@ -283,7 +283,13 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
         />
       ) : null}
 
-      <div className={cls('nx-pinned-app-dock', `is-${phase}`, draggingId && 'is-reordering')}>
+      {/* R16.6 — on phones this dock is the only global navigation rendered
+          (the shell top bar mounts on 7 of 16 routes), so it carries the
+          `navigation` landmark instead of leaving mobile routes without one. */}
+      <nav
+        className={cls('nx-pinned-app-dock', `is-${phase}`, draggingId && 'is-reordering')}
+        aria-label="App navigation"
+      >
         <div className="nx-pinned-app-dock__glass nx-liquid-surface">
           <span className="nx-pinned-app-dock__sheen" aria-hidden />
           <span className="nx-pinned-app-dock__rim" aria-hidden />
@@ -399,7 +405,7 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
             </section>
           </div>
         </div>
-      </div>
+      </nav>
     </>
   )
 

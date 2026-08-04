@@ -41,7 +41,7 @@
 }
 
 .nx-buyer-intel-hero__eyebrow {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: #7ee7ff;
@@ -249,7 +249,7 @@
 .nx-buyer-intel-detail__badge-stack span {
   border-radius: 999px;
   padding: 5px 10px;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border: 1px solid rgba(169, 190, 255, 0.16);
@@ -404,7 +404,7 @@
 .nx-icm-buyer-card__badges span,
 .nx-icm-buyer-card__metric span,
 .nx-icm-buyer-card__section-label {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: rgba(219, 229, 255, 0.58);
@@ -469,7 +469,7 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1439.98px) {
   .nx-buyer-intel-hero,
   .nx-buyer-intel-grid {
     grid-template-columns: 1fr;
@@ -480,7 +480,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023.98px) {
   .nx-buyer-entity-card__metric-grid,
   .nx-buyer-intel-detail__metrics,
   .nx-buyer-intel-detail__footprint,

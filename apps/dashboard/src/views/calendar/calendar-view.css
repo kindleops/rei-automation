@@ -202,7 +202,7 @@
   padding: 0 5px;
   border-radius: 999px;
   background: rgba(96, 165, 250, 0.25);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -319,7 +319,7 @@
 }
 
 .nx-cal__kpi-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -400,7 +400,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 9px;
+  font-size: 11px;
   margin-right: 4px;
   opacity: 0.7;
 }
@@ -462,7 +462,7 @@
 .nx-cal__section-head span,
 .nx-cal__timeline-label {
   color: rgba(156, 176, 206, 0.74);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -484,7 +484,7 @@
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -561,13 +561,13 @@
   background: rgba(255, 255, 255, 0.05);
   color: inherit;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   overflow: hidden;
 }
 
 .nx-cal__month-event strong {
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -582,7 +582,7 @@
 .nx-cal__month-event.is-amber { border-left: 2px solid #f59e0b; }
 
 .nx-cal__month-more {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.85;
   background: none;
   border: none;
@@ -593,7 +593,7 @@
 }
 
 .nx-cal__month-empty {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--cnx-text-muted);
   opacity: 0.5;
 }
@@ -629,7 +629,7 @@
 .nx-cal__week-all-day {
   display: grid;
   place-items: center;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -643,7 +643,7 @@
   justify-content: flex-end;
   padding: 4px 8px 0 0;
   height: 48px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--cnx-text-muted);
   border-bottom: 1px solid rgba(148, 163, 184, 0.06);
@@ -686,7 +686,7 @@
 }
 
 .nx-cal__week-col-head small {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--cnx-text-muted);
 }
 
@@ -723,7 +723,7 @@
   padding: 4px 6px;
   text-align: left;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   color: inherit;
   overflow: hidden;
   cursor: pointer;
@@ -750,7 +750,7 @@
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(255, 255, 255, 0.05);
-  font-size: 10px;
+  font-size: 11px;
   color: inherit;
   cursor: pointer;
 }
@@ -939,7 +939,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* ── Right Rail ── */
@@ -1093,7 +1093,7 @@
 
 .nx-cal__layers-category-label {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1169,7 +1169,7 @@
 
 .nx-cal__event-drawer-badges em {
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -1188,7 +1188,7 @@
 
 .nx-cal__event-drawer-grid label {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1239,7 +1239,7 @@
 }
 
 .nx-cal__drawer-dev {
-  font-size: 10px;
+  font-size: 11px;
   overflow: auto;
   max-height: 120px;
   padding: 8px;
@@ -1528,7 +1528,7 @@
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--cnx-text-muted);
 }
@@ -1642,7 +1642,7 @@ html[data-theme='red-ops'] .nx-cal__event-drawer-icon {
 }
 
 /* ── Responsive ── */
-@media (max-width: 1200px) {
+@media (max-width: 1439.98px) {
   .nx-cal__command-bar {
     grid-template-columns: auto 1fr;
     grid-template-rows: auto auto;
@@ -1659,7 +1659,7 @@ html[data-theme='red-ops'] .nx-cal__event-drawer-icon {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023.98px) {
   .nx-cal__workspace.has-rail {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1749,7 +1749,7 @@ html[data-theme='red-ops'] .nx-cal__event-drawer-icon {
 }
 
 .nx-cal__intel-stats span {
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--cnx-text-muted);
@@ -1788,7 +1788,7 @@ html[data-theme='red-ops'] .nx-cal__event-drawer-icon {
   gap: 6px;
 }
 .nx-cal__month-count {
-  font-size: 9px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(96, 165, 250, 0.15);
@@ -1810,7 +1810,7 @@ html[data-theme='red-ops'] .nx-cal__event-drawer-icon {
 .nx-cal__month-cell:hover .nx-cal__month-add,
 .nx-cal__month-cell.is-selected .nx-cal__month-add { opacity: 1; }
 .nx-cal__month-event em {
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   color: var(--cnx-text-muted);
   white-space: nowrap;
@@ -1945,12 +1945,12 @@ html[data-theme='dark'] .nx-cal {
 }
 .nx-cal__cmd-overflow-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
-@media (max-width: 1280px) {
+@media (max-width: 1439.98px) {
   .nx-cal__cmd-desktop-only { display: none !important; }
   .nx-cal__cmd-overflow { display: block; }
   .nx-cal__scope-entity-label { display: none; }
 }
-@media (max-width: 960px) {
+@media (max-width: 1023.98px) {
   .nx-cal__command-copy span { display: none; }
   .nx-cal__cmd-add-label { display: none; }
 }
@@ -2080,7 +2080,7 @@ html[data-theme='dark'] .nx-cal {
   max-width: 200px;
 }
 .nx-cal__seller-ribbon-chip {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--cnx-text-muted);
   flex-shrink: 0;
 }
@@ -2088,7 +2088,7 @@ html[data-theme='dark'] .nx-cal {
   font-style: normal;
   font-weight: 700;
   text-transform: uppercase;
-  font-size: 8px;
+  font-size: 11px;
   margin-right: 3px;
   opacity: 0.65;
 }
@@ -2135,7 +2135,7 @@ html[data-theme='dark'] .nx-cal {
 }
 .nx-cal__locked-hint {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   opacity: 0.7;
 }
 

@@ -9,6 +9,8 @@ import './modules/mobile/pinned-app-dock.css'
 import './styles/nx-glass-system.css'
 import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
+// Lane G — responsive + a11y final authority. Must stay the last global sheet.
+import './styles/lc-responsive.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

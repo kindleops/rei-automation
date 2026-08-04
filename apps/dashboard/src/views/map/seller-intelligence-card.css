@@ -125,7 +125,7 @@
   left: 12px;
   z-index: 1;
   color: rgba(244, 247, 255, 0.52);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -208,7 +208,7 @@
   background: var(--seller-surface);
   border: 1px solid rgba(255, 255, 255, 0.07);
   color: var(--seller-text);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -255,7 +255,7 @@
 .nx-seller-card__intel-score-head small,
 .nx-seller-card__message-head small {
   color: var(--seller-muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -338,7 +338,7 @@
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -448,7 +448,7 @@
   font-size: 12px;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767.98px) {
   .nx-seller-card,
   .nx-seller-card.is-selected {
     width: min(100vw - 20px, 100%);

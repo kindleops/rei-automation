@@ -1916,7 +1916,7 @@ export function InboxKpiDashboard({ layoutMode }: InboxKpiDashboardProps) {
   return (
     <div className="kpi kpi--warroom">
       {import.meta.env.DEV && (
-        <div style={{ position: 'absolute', top: 4, right: 8, zIndex: 9999, background: 'rgba(14,207,206,0.15)', border: '1px solid rgba(14,207,206,0.5)', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#0ecfce', pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', top: 4, right: 8, zIndex: 9999, background: 'rgba(14,207,206,0.15)', border: '1px solid rgba(14,207,206,0.5)', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#0ecfce', pointerEvents: 'none' }}>
           METRICS SOLO MODE ✓
         </div>
       )}

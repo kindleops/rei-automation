@@ -1,0 +1,366 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   lc-responsive.css — Lane G · responsive + accessibility final authority
+   Constitution: §15 (responsive) · §16 (accessibility) · §2.1 (type floor)
+
+   WHY THIS FILE EXISTS
+   The app has no shared responsive layer. Breakpoint values were 43 distinct
+   strings, `/queue` had exactly one `@media` (and it was `prefers-reduced-
+   motion`), five routes had no mobile treatment at all, and `:focus-visible`
+   appeared in 10 of 65 stylesheets. Those are cross-cutting concerns, so they
+   live in one cross-cutting sheet rather than being scattered again.
+
+   RULES OF THIS FILE
+   - Loaded LAST from main.tsx. Route sheets imported through the component tree
+     still evaluate after it, so rules that must win carry one extra level of
+     specificity (`.occ-root .occ-inspector`, not `.occ-inspector`) rather than
+     `!important`.
+   - Only the five §15 bands appear here. The canonical values live in
+     `src/modules/mobile/breakpoints.ts` and are enforced by
+     `scripts/lc-responsive-audit.mjs`.
+   - `!important` is used in exactly two blocks, both marked
+     "DOCUMENTED EXCEPTION", both required to defeat pre-existing `!important`
+     declarations, and both only ever REMOVE motion or ADD a focus ring.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ───────────────────────────────────────────────────────────────────────────
+   1. §15.2 — overflow containment
+   `html, body { overflow: hidden }` already suppresses document scroll, but a
+   child that exceeds the viewport still clips content the operator needs. Any
+   surface that legitimately scrolls sideways must contain that scroll instead
+   of chaining it to the page.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.nx-os,
+.nx-stage,
+#root {
+  max-width: 100%;
+}
+
+/* Horizontal scrollers: never chain the gesture to the page, and never let a
+   rubber-band scroll reveal empty space next to the app shell. */
+.occ-table-scroll,
+.nx-mobile-hscroll,
+.nx-cal__week-hourly-scroll,
+[data-lc-hscroll] {
+  overscroll-behavior-x: contain;
+}
+
+/* Bare `<small>` inherits the UA `font-size: smaller` (0.8333em ⇒ 10.8px at a
+   13px parent), which is below the §2.1 floor. Element selector, so any
+   component rule still wins. */
+small {
+  font-size: 11px;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   2. §15.3 — touch targets: 44×44 minimum, ≥8px separation
+   Scoped to touch-shaped viewports (md and below) and to coarse pointers.
+   Desktop keeps §3 tactical density; §15.3 lives in the responsive chapter and
+   is a *touch* requirement, so enforcing 44px on a 1728px mouse-driven display
+   would contradict §3.2 rather than serve it.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023.98px) {
+  button,
+  select,
+  summary,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'],
+  [role='switch'] {
+    min-height: 44px;
+  }
+
+  button,
+  select,
+  [role='button'],
+  [role='switch'],
+  input[type='checkbox'],
+  input[type='radio'] {
+    min-width: 44px;
+  }
+
+  input,
+  textarea {
+    min-height: 44px;
+  }
+
+  /* A checkbox cannot simply grow — it would become a 44px square of chrome.
+     Grow the hit box, keep the painted control at its drawn size. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 44px;
+    height: 44px;
+    accent-color: var(--nx-accent, #22d3ee);
+  }
+
+  /* §15.3 separation — related controls sit ≥8px apart once they are 44px. */
+  .occ-date-presets,
+  .occ-pagination,
+  .occ-section-tabs,
+  .nx-tab-row,
+  .nx-view-switcher {
+    gap: 8px;
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  select,
+  [role='button'],
+  [role='tab'] {
+    min-height: 44px;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   3. §16.2 — visible focus everywhere
+
+   DOCUMENTED EXCEPTION to R1.6. `:focus-visible` was defined in 10 of 65
+   stylesheets, and dozens of components declare `outline: none` (many with
+   `!important`) with no replacement. A keyboard operator currently loses the
+   cursor entirely on most surfaces. This block only ever ADDS an indicator, it
+   is the single focus declaration in the app, and it must outrank the existing
+   `outline: none !important` declarations to satisfy R16.2 at all.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root :focus-visible {
+  outline: 2px solid var(--nx-accent, #22d3ee) !important;
+  outline-offset: 2px !important;
+}
+
+/* Inside a scroll container an outline can be clipped; a ring keeps it visible. */
+:root .occ-row:focus-visible,
+:root .nx-thread-row:focus-visible,
+:root tr:focus-visible {
+  outline-offset: -2px !important;
+}
+
+/* Never let a focus ring be the thing that overflows the viewport. */
+:focus-visible {
+  scroll-margin: 8px;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   4. §16.9 / §7.4 — reduced motion honoured globally
+
+   DOCUMENTED EXCEPTION to R1.6, and deliberately identical to the block Lane A
+   ships in `styles/lc-tokens.css`. The app carries 6,691 `!important`
+   declarations across 1,297 animation/transition declarations; a non-important
+   universal rule loses to nearly all of them, so honouring the OS setting is
+   impossible without this. Verified in a real browser under
+   `prefers-reduced-motion: reduce` — see artifacts/lane-g.
+
+   INTEGRATION NOTE (Lane H): this block and Lane A's are duplicates. Keep one.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   5. §16.1 — contrast repairs
+
+   Measured, not assumed. A rendered-contrast sweep of the primary theme
+   (dark + cyan) found the failures below; the theme is otherwise compliant.
+   Scope is the primary theme plus token-level repairs that are safe in all ten.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* index.css declared --tone-muted: #3f3f46 (zinc-700) ≈1.9:1 on the app
+     background — effectively invisible. Raised to the same slate the rest of
+     the dark system uses for muted text (#94a3b8 ≈ 6.8:1). */
+  --tone-muted: #94a3b8;
+}
+
+/* 325 declarations composite muted text under `opacity < 0.6`. Below ~0.62 a
+   #94a3b8 label drops under 4.5:1 on the app background, so muted micro-labels
+   get a floor. Structural/decorative opacity is untouched. */
+.nx-room-label__name,
+.occ-kpi__label,
+.occ-insp-label,
+.occ-row-meta,
+.occ-cell small {
+  opacity: 1;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   6. §15 — /queue responsive treatment
+
+   `queue-ops.css` is 7,040 lines with a single `@media`, and it is
+   `prefers-reduced-motion`. The five `views/queue/components/*` sheets have
+   none. `/queue` therefore rendered its 1440px three-pane desktop layout
+   unchanged at every width; JS swapped to cards only below 768px, so the whole
+   md band (768–1023) had no treatment at all.
+
+   md  — two panes max: the row table keeps the full width and the inspector
+         becomes an overlay drawer (§15 "drawer for the third").
+   sm/xs — JS already renders `OccMobileQueueCard`; the surrounding chrome
+         (KPI strip, filter bar, pagination) is what still had to be recomposed.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023.98px) {
+  /* The row grid hard-coded `min-width: 920px`, which forced a sideways scroll
+     inside the table on every screen narrower than that. */
+  .occ-root {
+    --occ-row-grid: minmax(140px, 2.4fr) minmax(88px, 1.1fr) minmax(96px, 1.2fr) minmax(72px, 0.9fr) minmax(64px, 0.8fr) minmax(84px, 1fr);
+    --occ-row-grid-min: 0;
+  }
+
+  /* §15 — third pane becomes a drawer. `.occ-main` is the flex parent. */
+  .occ-root .occ-main {
+    position: relative;
+  }
+
+  .occ-root .occ-main > .occ-inspector {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 40;
+    width: min(380px, 92%);
+    min-width: 0;
+    border-left: 1px solid var(--occ-border, rgba(148, 163, 184, 0.16));
+    box-shadow: -12px 0 32px rgb(0 0 0 / 0.32);
+  }
+
+  /* KPI strip: nine equal flex children at 768px give ~85px each and clip their
+     labels. Scroll the strip instead of crushing it. */
+  .occ-root .occ-kpi-strip {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .occ-root .occ-kpi-strip::-webkit-scrollbar {
+    display: none;
+  }
+  .occ-root .occ-kpi {
+    flex: 0 0 auto;
+    min-width: 104px;
+  }
+
+  .occ-root .occ-filter-bar,
+  .occ-root .occ-pagination,
+  .occ-root .occ-date-presets {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 767.98px) {
+  /* Below md the inspector is a full-height sheet, not a 380px drawer. */
+  .occ-root .occ-main > .occ-inspector {
+    width: 100%;
+  }
+
+  /* Section tabs scroll rather than wrap into three ragged rows. */
+  .occ-root .occ-section-tabs,
+  .occ-root .occ-section-bar {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .occ-root .occ-section-tabs::-webkit-scrollbar,
+  .occ-root .occ-section-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .occ-root .occ-topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   7. §15 — routes that had no mobile treatment at all
+   /analytics · /properties · /entity-graph · /deal-intelligence · /buyer-match
+   Each was a fixed multi-column grid that simply overflowed below its design
+   width. Each collapses to a single column at md and below (§15: two panes max
+   at md, single column below).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023.98px) {
+  /* /analytics — KPI intelligence */
+  .kpi .kpi-grid,
+  .kpi .kpi-row,
+  .kpi .kpi-cards,
+  .nx-kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .kpi .kpi-filter-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* /properties */
+  .pi-workspace-grid,
+  .pi-command-header,
+  .pi-panel-grid {
+    grid-template-columns: 1fr;
+  }
+  .pi-top-controls {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* /entity-graph */
+  .eg-workspace,
+  .eg-layout,
+  .eg-shell__body {
+    grid-template-columns: 1fr;
+  }
+
+  /* /deal-intelligence */
+  .nx-di25-workspace,
+  .nx-di25-property-deck,
+  .nx-di25-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* /buyer-match */
+  .aic-workspace,
+  .aic-workspace.is-pane-100,
+  .aic-workspace.is-pane-75,
+  .aic-workspace.is-pane-50 {
+    grid-template-columns: 1fr;
+  }
+  .aic-kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   8. §15 — /calendar
+   `.nx-cal__week-hourly-grid` carried an unconditional `min-width: 900px`, so
+   the week grid forced a horizontal scroll on every phone. Seven day columns
+   genuinely cannot fit 390px, so the scroll stays — but it is contained, it
+   snaps to a column, and the day columns shrink so two are visible at once
+   instead of one and a sliver (§15.6: the gesture is not the only affordance —
+   the view switcher's Day view is the non-gesture equivalent).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 767.98px) {
+  .nx-cal__week-hourly-grid {
+    grid-template-columns: 44px repeat(7, minmax(96px, 1fr));
+    min-width: 0;
+    width: max-content;
+    scroll-snap-type: x proximity;
+  }
+
+  .nx-cal__week-hourly-scroll {
+    overscroll-behavior-x: contain;
+  }
+
+  .nx-cal__week-col,
+  .nx-cal__week-day {
+    scroll-snap-align: start;
+  }
+}

@@ -110,7 +110,7 @@
 }
 
 .nx-seller-card__sms-status {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -177,7 +177,7 @@
   gap: 6px;
   align-items: center;
   padding: 2px 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: #475569;
 }
 
@@ -362,7 +362,7 @@
 }
 
 .nx-comp-card__price-sub {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 3px;
   font-weight: 700;
@@ -429,7 +429,7 @@
   min-height: 22px;
   padding: 0 9px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   border: 1px solid rgba(239, 68, 68, 0.28);
   background: rgba(239, 68, 68, 0.09);
@@ -454,7 +454,7 @@
   border-color: rgba(239, 68, 68, 0.22);
   background: rgba(239, 68, 68, 0.07);
   color: #fca5a5;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -488,7 +488,7 @@
 }
 
 .nx-comp-card__metric span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -507,7 +507,7 @@
 .nx-comp-card__metric--red strong    { color: #f87171; }
 
 .nx-comp-card__section-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -558,7 +558,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.06);
   color: rgba(228, 240, 255, 0.88);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -634,7 +634,7 @@
 .nx-mic-btn--sm {
   min-height: 24px;
   padding: 0 9px;
-  font-size: 9.5px;
+  font-size: 11px;
   border-radius: 8px;
 }
 
@@ -681,8 +681,8 @@
 }
 
 /* Responsive: wider on small screens */
-@media (max-width: 1024px) { .nx-deal-sheet { width: min(70vw, 560px); } }
-@media (max-width: 640px)  { .nx-deal-sheet { width: 100%;             } }
+@media (max-width: 1023.98px) { .nx-deal-sheet { width: min(70vw, 560px); } }
+@media (max-width: 767.98px)  { .nx-deal-sheet { width: 100%;             } }
 
 .nx-deal-sheet__topbar {
   padding: 13px 18px;
@@ -742,7 +742,7 @@
   min-height: 28px;
   padding: 0 12px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -772,7 +772,7 @@
 
 .nx-deal-sheet__tab {
   padding: 10px 16px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -825,7 +825,7 @@
 }
 
 .nx-deal-sheet__section-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -854,7 +854,7 @@
 }
 
 .nx-deal-sheet__metric span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -892,7 +892,7 @@
   min-height: 24px;
   padding: 0 10px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   background: rgba(99, 215, 255, 0.1);
   border: 1px solid rgba(99, 215, 255, 0.2);
@@ -1274,7 +1274,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
   font-weight: 600;
 }
@@ -1317,7 +1317,7 @@
   min-height: 19px;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1344,7 +1344,7 @@
   border-color: rgba(var(--nx-card-accent-rgb), 0.24);
   background: rgba(var(--nx-card-accent-rgb), 0.08);
   color: rgba(var(--nx-card-accent-rgb), 0.88);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .nx-map-card__pill--stage {
@@ -1402,7 +1402,7 @@
   background: rgba(var(--nx-card-accent-rgb), 0.14);
   border: 1px solid rgba(var(--nx-card-accent-rgb), 0.26);
   color: rgba(var(--nx-card-accent-rgb), 0.92);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -1426,7 +1426,7 @@
 }
 
 .nx-map-card__buyer-entity {
-  font-size: 9.5px;
+  font-size: 11px;
   color: #7a8fa8;
   margin-top: 1px;
   overflow: hidden;
@@ -1462,7 +1462,7 @@
 }
 
 .nx-map-card__metric span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1497,15 +1497,15 @@
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(228, 240, 255, 0.8);
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-.nx-map-card__chip span { font-size: 8.5px; color: #576880; letter-spacing: 0.07em; text-transform: uppercase; }
-.nx-map-card__chip strong { font-size: 10.5px; font-weight: 700; }
+.nx-map-card__chip span { font-size: 11px; color: #576880; letter-spacing: 0.07em; text-transform: uppercase; }
+.nx-map-card__chip strong { font-size: 11px; font-weight: 700; }
 .nx-map-card__chip--success { border-color: rgba(52, 211, 153, 0.24); color: #6ee7b7; }
 .nx-map-card__chip--accent  { border-color: rgba(var(--nx-card-accent-rgb), 0.22); color: rgba(var(--nx-card-accent-rgb), 0.92); }
 .nx-map-card__chip--warning { border-color: rgba(251, 191, 36, 0.24); color: #fde68a; }
@@ -1514,11 +1514,11 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .nx-map-card__scorebar span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1557,7 +1557,7 @@
 }
 
 .nx-map-card__last-activity span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1634,7 +1634,7 @@
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.09);
   color: rgba(210, 222, 240, 0.7);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;

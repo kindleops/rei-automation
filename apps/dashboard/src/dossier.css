@@ -1165,7 +1165,7 @@
 }
 
 /* Responsive */
-@media (max-width: 1480px) {
+@media (max-width: 1439.98px) {
   .dossier-workspace {
     grid-template-columns: 290px minmax(0, 1fr) 310px;
   }
@@ -1175,7 +1175,7 @@
   }
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1439.98px) {
   .dossier-workspace {
     grid-template-columns: 260px minmax(0, 1fr);
   }
@@ -1189,7 +1189,7 @@
   }
 }
 
-@media (max-width: 920px) {
+@media (max-width: 1023.98px) {
   .dossier-column--left {
     display: none;
   }
