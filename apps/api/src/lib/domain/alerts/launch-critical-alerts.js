@@ -39,6 +39,7 @@ export const LAUNCH_CRITICAL_ALERT_CODES = Object.freeze({
   CANARY_SCOPE_VIOLATION: "canary_scope_violation",
   UNEXPECTED_OUTBOUND_WHILE_STOPPED: "unexpected_outbound_while_stopped",
   INBOUND_NO_DISPOSITION: "inbound_no_disposition",
+  BURST_LIVENESS_FAILURE: "burst_liveness_failure",
 });
 
 /**
@@ -73,6 +74,10 @@ const ALWAYS_CRITICAL = new Set([
   // An inbound without a terminal disposition inside the SLA is the silent
   // drop the launch invariant forbids — always a P0.
   LAUNCH_CRITICAL_ALERT_CODES.INBOUND_NO_DISPOSITION,
+  // An eligible burst left open past its own bound means the seller's reply is
+  // never processed and no reply is ever sent — the 2026-08-03 outage, which
+  // ran silently because nothing watched burst liveness. Always a P0.
+  LAUNCH_CRITICAL_ALERT_CODES.BURST_LIVENESS_FAILURE,
 ]);
 
 function clean(value) {
@@ -252,6 +257,16 @@ export const launchAlerts = Object.freeze({
         code: LAUNCH_CRITICAL_ALERT_CODES.INBOUND_NO_DISPOSITION,
         subsystem: "inbound",
         summary: "Inbound message has no terminal disposition within SLA",
+        metadata,
+      },
+      deps,
+    ),
+  burstLivenessFailure: (metadata, deps) =>
+    recordLaunchCriticalAlert(
+      {
+        code: LAUNCH_CRITICAL_ALERT_CODES.BURST_LIVENESS_FAILURE,
+        subsystem: "seller_inbound_burst",
+        summary: "Seller inbound burst breached a liveness invariant",
         metadata,
       },
       deps,

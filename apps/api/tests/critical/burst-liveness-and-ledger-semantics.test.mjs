@@ -129,7 +129,7 @@ test("a completed burst is clean", () => {
     status: "completed",
     attempt_count: 1,
     claimed_at: "2026-08-03T22:41:00.000Z",
-    closed_at: "2026-08-03T22:41:05.000Z",
+    completed_at: "2026-08-03T22:41:05.000Z",
   };
   const { violations, state } = evaluateBurstLiveness(burst, { now: OBSERVED_AT });
   assert.deepEqual(violations, []);
@@ -142,7 +142,7 @@ test("metrics expose every required bucket and the latency distributions", () =>
   const metrics = collectBurstMetrics(
     [
       INCIDENT_BURST,
-      { ...INCIDENT_BURST, id: "b2", burst_id: "b2", status: "completed", attempt_count: 1, claimed_at: "2026-08-03T22:41:00.000Z", closed_at: "2026-08-03T22:41:05.000Z" },
+      { ...INCIDENT_BURST, id: "b2", burst_id: "b2", status: "completed", attempt_count: 1, claimed_at: "2026-08-03T22:41:00.000Z", completed_at: "2026-08-03T22:41:05.000Z" },
       { ...INCIDENT_BURST, id: "b3", burst_id: "b3", status: "suppressed", attempt_count: 1 },
       { ...INCIDENT_BURST, id: "b4", burst_id: "b4", status: "claimed", claimed_at: "2026-08-03T22:41:00.000Z", attempt_count: 1 },
     ],

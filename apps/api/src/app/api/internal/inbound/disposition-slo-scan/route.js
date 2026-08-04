@@ -12,6 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
+import { scanBurstLiveness } from "@/lib/domain/seller-flow/seller-inbound-burst-liveness.js";
 import { findInboundLedgerSlaBreaches } from "@/lib/domain/inbound/inbound-processing-ledger.js";
 import { launchAlerts } from "@/lib/domain/alerts/launch-critical-alerts.js";
 import { info, warn } from "@/lib/logging/logger.js";
@@ -62,6 +63,55 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
     retry_horizon_minutes,
   });
 
+  // The ledger is only half the picture. The 2026-08-03 outage was invisible
+  // here because the stuck inbound had been (incorrectly) marked terminal in
+  // the ledger while its burst sat open forever. The scanner must inspect burst
+  // state too. Read-only: it never mutates or completes a burst.
+  const scan_burst_liveness = deps.scanBurstLiveness || scanBurstLiveness;
+  const burst_scan = await scan_burst_liveness({
+    supabase: deps.supabase || null,
+    now: deps.now ? deps.now() : undefined,
+  }).catch((error) => ({
+    ok: false,
+    reason: "burst_scan_failed",
+    message: error?.message || "unknown_error",
+    violation_count: 0,
+  }));
+
+  const alerts = deps.launchAlerts || launchAlerts;
+
+  if (!burst_scan.ok) {
+    // A failed burst scan must never read as "no burst problems".
+    warn("inbound_disposition_slo.burst_scan_failed", { reason: burst_scan.reason });
+    // Missing table / no supabase are configuration conditions, not stuck
+    // bursts — alerting on them would be noise, not signal.
+    if (
+      burst_scan.reason !== "burst_table_missing" &&
+      burst_scan.reason !== "supabase_unconfigured"
+    ) {
+      await alerts
+        .burstLivenessFailure({ scan_failed: true, scan_failure_reason: burst_scan.reason })
+        .catch(() => {});
+    }
+  } else if (burst_scan.violation_count > 0) {
+    await alerts
+      .burstLivenessFailure({
+        violation_count: burst_scan.violation_count,
+        p0_violation_count: burst_scan.p0_violation_count,
+        worker_liveness_failure_count: burst_scan.worker_liveness_failure_count,
+        tried_and_failed_count: burst_scan.tried_and_failed_count,
+        counts: burst_scan.counts,
+        sample: burst_scan.violations.slice(0, 5).map((v) => ({
+          code: v.code,
+          severity: v.severity,
+          burst_id: v.burst_id,
+        })),
+      })
+      .catch((error) => {
+        warn("inbound_disposition_slo.burst_alert_failed", { error: error?.message });
+      });
+  }
+
   if (!scan.ok) {
     // The scanner itself failing must be visible: a broken watchdog reads
     // exactly like a healthy system with zero breaches.
@@ -76,7 +126,7 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
         .catch(() => {});
     }
     return NextResponse.json(
-      { ok: false, reason: scan.reason, breach_count: 0 },
+      { ok: false, reason: scan.reason, breach_count: 0, burst_liveness: burst_scan },
       { status: scan.reason === "ledger_table_missing" ? 200 : 500 }
     );
   }
@@ -105,6 +155,9 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   }
 
   info("inbound_disposition_slo.scan_completed", {
+    burst_violation_count: burst_scan.violation_count,
+    burst_worker_liveness_failures: burst_scan.worker_liveness_failure_count ?? 0,
+    burst_counts: burst_scan.counts,
     breach_count: scan.breach_count,
     stuck_processing_count: scan.stuck_processing.length,
     exhausted_retry_count: scan.exhausted_retries.length,
@@ -113,6 +166,7 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   return NextResponse.json({
     ok: true,
     breach_count: scan.breach_count,
+    burst_liveness: burst_scan,
     stuck_processing: scan.stuck_processing,
     exhausted_retries: scan.exhausted_retries,
     sla_minutes,

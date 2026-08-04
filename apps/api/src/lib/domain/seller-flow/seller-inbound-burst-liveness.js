@@ -189,7 +189,9 @@ export function collectBurstMetrics(bursts = [], options = {}) {
 
     const eligible_at = ms(burst.eligible_at);
     const claimed_at = ms(burst.claimed_at);
-    const closed_at = ms(burst.closed_at || burst.completed_at);
+    // `completed_at` is the only terminal timestamp on seller_inbound_bursts —
+    // there is no `closed_at` column (20260726120000_seller_inbound_bursts.sql).
+    const closed_at = ms(burst.completed_at);
     if (eligible_at != null && claimed_at != null && claimed_at >= eligible_at) {
       time_to_claim.push(claimed_at - eligible_at);
     }
@@ -207,6 +209,83 @@ export function collectBurstMetrics(bursts = [], options = {}) {
     time_to_claim: summarizeDurations(time_to_claim),
     time_to_complete: summarizeDurations(time_to_complete),
     p0_violation_count: violations.filter((v) => v.severity === BURST_LIVENESS_SEVERITY.P0).length,
+  };
+}
+
+export const BURST_LIVENESS_TABLE = "seller_inbound_bursts";
+
+/**
+ * READ-ONLY liveness scan over burst rows. Selects, evaluates, returns — it
+ * never completes, retries, deletes, or otherwise mutates a burst, and it never
+ * sends anything.
+ *
+ * Deliberately does NOT reuse the store's listEligible(): that helper
+ * post-filters through isClaimableBurst, which hides exactly the stale rows a
+ * liveness scan exists to find.
+ *
+ * A query failure returns ok:false. It must never be reported as a healthy
+ * scan — a broken watchdog reads identically to a healthy system.
+ */
+export async function scanBurstLiveness({
+  supabase = null,
+  now = new Date().toISOString(),
+  limit = 200,
+  lookback_minutes = 1440,
+  claim_grace_ms = BURST_CLAIM_GRACE_MS,
+} = {}) {
+  if (!supabase) return { ok: false, reason: "supabase_unconfigured", violation_count: 0 };
+
+  const since = new Date(new Date(now).getTime() - lookback_minutes * 60_000).toISOString();
+  let rows;
+  try {
+    const { data, error } = await supabase
+      .from(BURST_LIVENESS_TABLE)
+      .select(
+        "id,burst_id,thread_key,status,eligible_at,hard_close_at,first_received_at,attempt_count,claimed_at,completed_at,updated_at,safety_latched"
+      )
+      .gte("first_received_at", since)
+      .order("eligible_at", { ascending: true })
+      .limit(limit);
+    if (error) {
+      const code = String(error.code ?? "");
+      if (code === "42P01" || code === "PGRST205") {
+        return { ok: false, reason: "burst_table_missing", violation_count: 0 };
+      }
+      return { ok: false, reason: "burst_scan_failed", message: error.message, violation_count: 0 };
+    }
+    rows = data || [];
+  } catch (scan_error) {
+    return {
+      ok: false,
+      reason: "burst_scan_failed",
+      message: scan_error?.message || "unknown_error",
+      violation_count: 0,
+    };
+  }
+
+  const metrics = collectBurstMetrics(rows, { now, claim_grace_ms });
+  const worker_liveness_failures = metrics.violations.filter(
+    (v) => v.code === BURST_LIVENESS_VIOLATIONS.WORKER_LIVENESS_FAILURE
+  );
+  // "never attempted" (the 2026-08-03 outage signature) must stay separable
+  // from "attempted and failed".
+  const tried_and_failed = metrics.violations.filter(
+    (v) =>
+      v.code === BURST_LIVENESS_VIOLATIONS.RETRIES_EXHAUSTED_NOT_TERMINAL ||
+      v.code === BURST_LIVENESS_VIOLATIONS.STALE_CLAIMED_PAST_LEASE
+  );
+
+  return {
+    ok: true,
+    scanned_count: rows.length,
+    counts: metrics.counts,
+    violations: metrics.violations,
+    violation_count: metrics.violations.length,
+    p0_violation_count: metrics.p0_violation_count,
+    worker_liveness_failure_count: worker_liveness_failures.length,
+    tried_and_failed_count: tried_and_failed.length,
+    time_to_claim: metrics.time_to_claim,
+    time_to_complete: metrics.time_to_complete,
   };
 }
 
