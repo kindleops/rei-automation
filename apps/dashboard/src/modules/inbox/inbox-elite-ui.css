@@ -1191,3 +1191,26 @@
     0 0 0 2px rgba(16, 185, 129, 0.16),
     0 0 8px rgba(16, 185, 129, 0.35);
 }
+/* ------------------------------------------------------------------
+   Lane C: sidebar toolbar accessibility floors.
+   These five controls sat below the 44px touch target (R15.3) and two of
+   them below the 11px type floor (R2.1). They are the controls that filter
+   and save the operator's working queue, so they are not "meta".
+   Kept visually compact: the hit area grows, the chrome does not.
+   ------------------------------------------------------------------ */
+.nx-premium-inbox .nx-inbox-header-shell .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 9px;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__search-input-wrap input {
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__secondary-controls > button {
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 12px;
+}
