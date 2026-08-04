@@ -19,6 +19,7 @@ import { useShellSurface } from '../../shell/useShellSurface'
 import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } from '../../shell/shell-types'
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { resolveSendingStatus, toLegacyBadgeStatus } from '../../operations/ops-status'
 import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
 import { MobileSearchOverlay } from '../../mobile/MobileSearchOverlay'
 import { MobileSheet } from '../../mobile/MobileSheet'
@@ -232,17 +233,24 @@ export const NexusTopBar = ({
     onOpenOverlay(overlay)
   }
 
-  const processorStatus = queueProcessorHealth?.status ?? 'unknown'
-  const processorHealthLabel =
-    processorStatus === 'healthy' ? 'Healthy'
-      : processorStatus === 'warning' ? 'Warning'
-        : processorStatus === 'critical' ? 'Critical'
-          : 'Unknown'
-  const queueStatusIcon =
-    processorStatus === 'healthy' ? 'check'
-      : processorStatus === 'warning' ? 'alert'
-        : processorStatus === 'critical' ? 'alert'
-          : 'activity'
+  /*
+   * LANE F — queue status now comes from the single resolver.
+   *
+   * This badge used to read `queueProcessorHealth.status` directly. That field
+   * has no concept of `queue_execution_mode`, and `getQueueProcessorHealth`
+   * defaults a missing status to 'healthy'. With the queue paused in
+   * production it rendered a green "Healthy" dot over a popover that said
+   * PAUSED. `resolveSendingStatus` consumes execution mode + health + control
+   * diagnostics and is the only derivation any queue surface reads.
+   */
+  const sendingStatus = resolveSendingStatus({
+    health: queueProcessorHealth,
+    control: queueControlDiagnostics,
+    loading: queueProcessorHealthLoading,
+  })
+  const processorStatus = toLegacyBadgeStatus(sendingStatus)
+  const processorHealthLabel = sendingStatus.label
+  const queueStatusIcon = sendingStatus.icon
 
   const { unreadCount: intelligenceUnreadCount } = useNotificationIntelligence()
   const unreadNotifications = intelligenceUnreadCount
@@ -293,6 +301,20 @@ export const NexusTopBar = ({
       else onOpenTasks()
     }
 
+    /*
+     * LANE F — the badge was inflated and two rows could never render.
+     *
+     *  - 'human-review' and 'decisions' were literal duplicates: same
+     *    `viewCounts.needs_review`, same `navigate('needs_review')`. Both were
+     *    summed into `actionCountTotal`, so needs_review was counted twice.
+     *    'decisions' is removed; 'human-review' is the one row.
+     *  - 'closing-tasks' and 'system-tasks' were fed hardcoded `null` from
+     *    InboxPage and were `hidden` whenever null, i.e. always. Two rows that
+     *    can never render are dead weight, not a feature — removed. The real
+     *    system-attention feed lives in the Operations Center.
+     *  - The remaining rows deep-link to a live count each, and blockers now
+     *    surface through the Operations Center instead of a static list.
+     */
     return [
       {
         id: 'human-review',
@@ -316,32 +338,21 @@ export const NexusTopBar = ({
         onSelect: () => onOpenQueueCommand?.() ?? onOpenTasks(),
       },
       {
-        id: 'decisions',
-        label: 'Decisions Required',
-        count: counts?.decisionsRequired ?? null,
-        loading: counts?.loading,
-        onSelect: () => navigate('needs_review'),
-      },
-      {
-        id: 'closing-tasks',
-        label: 'Closing Tasks',
-        count: counts?.closingTasks,
-        loading: counts?.loading,
-        hidden: counts?.closingTasks == null && !counts?.loading,
-        unavailableReason: counts?.closingTasks == null ? 'Closing desk not connected' : undefined,
-        onSelect: onOpenTasks,
-      },
-      {
-        id: 'system-tasks',
-        label: 'System Tasks',
-        count: counts?.systemTasks,
-        loading: counts?.loading,
-        hidden: counts?.systemTasks == null && !counts?.loading,
-        unavailableReason: counts?.systemTasks == null ? 'No system task feed' : undefined,
-        onSelect: onOpenTasks,
+        id: 'sending-blockers',
+        label: 'Sending Blockers',
+        count: sendingStatus.reasons.filter((reason) => reason.severity === 'blocker').length || null,
+        loading: queueProcessorHealthLoading,
+        onSelect: () => onOpenQueueCommand?.() ?? onOpenTasks(),
       },
     ]
-  }, [actionCenterCounts, onNavigateInboxView, onOpenQueueCommand, onOpenTasks])
+  }, [
+    actionCenterCounts,
+    onNavigateInboxView,
+    onOpenQueueCommand,
+    onOpenTasks,
+    sendingStatus.reasons,
+    queueProcessorHealthLoading,
+  ])
 
   const actionCountTotal = actionItems.reduce((sum, item) => {
     if (item.hidden || typeof item.count !== 'number') return sum

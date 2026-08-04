@@ -62,6 +62,16 @@ function subscribeNotifications(fn: NotifyListener): () => void {
   return () => { _listeners.delete(fn) }
 }
 
+/**
+ * Public subscription used by the Operations Center session-event bridge.
+ *
+ * The toast bus used to be a closed third notification system — nothing that
+ * fired here was recoverable once the 6s auto-dismiss ran. Exposing the bus
+ * lets the Operations Center retain the event for the session with its
+ * severity mapped onto the notification domain's enum.
+ */
+export const subscribeToasts = subscribeNotifications
+
 // ── Toast Stack Component ─────────────────────────────────────────────────
 
 const MAX_VISIBLE_TOASTS = 4

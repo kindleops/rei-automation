@@ -3,6 +3,9 @@ import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
 import { emitNotification } from '../../../shared/NotificationToast'
 import { pushRoutePath } from '../../../app/router'
 import { Icon } from '../../../shared/icons'
+import { resolveSendingStatus, type SendingStatus } from '../../operations/ops-status'
+import { humanizeBlockerCode } from '../../operations/ops-status'
+import { humanizeEntityName, humanizeQueueStatus } from '../../operations/ops-humanize'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -115,12 +118,19 @@ interface QueueCommandCenterProps {
   onWriteSuppressionFromFailures?: () => void
 }
 
-const toneFor = (health: QueueProcessorHealth | null): 'good' | 'warning' | 'critical' | 'neutral' => {
-  if (!health) return 'neutral'
-  if (health.status === 'healthy') return 'good'
-  if (health.status === 'warning') return 'warning'
-  if (health.status === 'critical') return 'critical'
-  return 'neutral'
+/**
+ * Panel tone is derived from the shared resolver, not from `health.status`.
+ * `health.status` has no concept of execution mode and defaults to 'healthy'
+ * when absent, which is what let the top bar show a green dot over a paused
+ * queue.
+ */
+const toneFor = (status: SendingStatus): 'good' | 'warning' | 'critical' | 'neutral' => {
+  switch (status.tone) {
+    case 'positive': return 'good'
+    case 'caution': return 'warning'
+    case 'critical': return 'critical'
+    default: return 'neutral'
+  }
 }
 
 const displayValue = (value: unknown, fallback = '—') => {
@@ -133,14 +143,36 @@ const displayNumber = (value: unknown, fallback = '0') => {
   return Number.isFinite(n) ? n.toLocaleString() : fallback
 }
 
-const compactDiagnostics = (value: unknown) => {
-  if (!value) return '—'
-  if (typeof value === 'string') return value.slice(0, 96)
-  try {
-    return JSON.stringify(value).slice(0, 96)
-  } catch {
-    return 'available'
+/**
+ * Last-run diagnostics used to render `JSON.stringify(value).slice(0, 96)`
+ * straight into the panel — a truncated object literal in the operator UI.
+ * Now we surface only the fields that mean something, and say so plainly
+ * when there is nothing to report.
+ */
+const compactDiagnostics = (value: unknown): string => {
+  if (!value) return 'No diagnostics reported'
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return 'No diagnostics reported'
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return compactDiagnostics(JSON.parse(trimmed))
+      } catch {
+        return 'Diagnostics could not be read'
+      }
+    }
+    return trimmed.slice(0, 140)
   }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const action = record.action ? humanizeBlockerCode(String(record.action)).label : null
+    const reason = record.reason ? String(record.reason) : null
+    const at = record.stopped_at ?? record.at
+    const parts = [action, reason, at ? `at ${new Date(String(at)).toLocaleString()}` : null]
+      .filter(Boolean)
+    return parts.length ? parts.join(' · ').slice(0, 200) : 'No diagnostics reported'
+  }
+  return String(value).slice(0, 140)
 }
 
 const cleanCampaignName = (name: unknown): string => {
@@ -152,41 +184,38 @@ const cleanCampaignName = (name: unknown): string => {
   return cleaned.replace(/\s+/g, ' ').replace(/\s*[-\s,]+$/, '').replace(/^[-\s,]+/, '').trim() || str
 }
 
-// ── Why Critical Panel ────────────────────────────────────────────────────
-interface WhyCriticalPanelProps {
-  health: QueueProcessorHealth
-}
+// ── Why is it in this state? ──────────────────────────────────────────────
+/**
+ * Reasons come from the shared resolver, which deduplicates them by key.
+ *
+ * The previous panel listed `health.failedTodayCount` twice — once as "Unknown
+ * failures" and again as "Failed today" — so a single failure inflated the
+ * reason count to two, and three of the seven rows were hardcoded to 0 and
+ * could never fire.
+ */
+function StatusReasonPanel({ status }: { status: SendingStatus }) {
+  const active = status.reasons.filter((reason) => reason.severity !== 'watch')
+  if (!active.length) return null
 
-function WhyCriticalPanel({ health }: WhyCriticalPanelProps) {
-  const reasons = [
-    { label: 'Unknown failures',          count: health.failedTodayCount,         tone: 'red'   as const },
-    { label: 'Failed today',              count: health.failedTodayCount,         tone: 'red'   as const },
-    { label: 'Missing message events',    count: health.activeBlankRowCount ?? 0, tone: 'amber' as const },
-    { label: 'Missing property hydration',count: 0,                               tone: 'amber' as const },
-    { label: 'Missing seller hydration',  count: 0,                               tone: 'amber' as const },
-    { label: 'Webhook issues',            count: health.webhookHealthy ? 0 : 1,  tone: 'red'   as const },
-    { label: 'Routing / template gaps',   count: health.routingBlockedCount,      tone: 'amber' as const },
-  ]
-  const active = reasons.filter(r => r.count > 0)
   return (
     <div className="qcc-why-critical-panel">
       <div className="qcc-why-critical-panel__head">
         <span className="qcc-why-critical-panel__dot" />
-        Why Critical? — {active.length} reason{active.length !== 1 ? 's' : ''}
+        Why {status.label.toLowerCase()}? — {active.length} reason{active.length !== 1 ? 's' : ''}
       </div>
       <div className="qcc-why-critical-panel__body">
-        {reasons.map(r => (
+        {active.map((reason) => (
           <div
-            key={r.label}
+            key={reason.key}
             className={cls(
               'qcc-why-critical-row',
-              r.count > 0 ? `is-active-${r.tone}` : '',
+              `is-active-${reason.tone === 'critical' ? 'red' : 'amber'}`,
             )}
           >
-            <span className={cls('qcc-why-critical-row__dot', `is-${r.count > 0 ? r.tone : 'muted'}`)} />
-            <span className="qcc-why-critical-row__label">{r.label}</span>
-            <span className={cls('qcc-why-critical-row__count', r.count > 0 ? `is-${r.tone}` : 'is-muted')}>
-              {r.count > 0 ? r.count : '—'}
+            <span className={cls('qcc-why-critical-row__dot', `is-${reason.tone === 'critical' ? 'red' : 'amber'}`)} />
+            <span className="qcc-why-critical-row__label" title={reason.detail}>{reason.label}</span>
+            <span className={cls('qcc-why-critical-row__count', `is-${reason.tone === 'critical' ? 'red' : 'amber'}`)}>
+              {reason.count != null ? reason.count.toLocaleString() : '—'}
             </span>
           </div>
         ))}
@@ -230,7 +259,11 @@ export function QueueCommandCenter({
   const rootRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  const tone = toneFor(health)
+  // THE single status derivation. Every queue surface reads this same
+  // resolver, so the top-bar badge, this popover, the mobile pip and the dock
+  // badge can no longer disagree.
+  const sendingStatus = resolveSendingStatus({ health, control, loading })
+  const tone = toneFor(sendingStatus)
   const busy = loading || actionLoading !== null
   const stats = control?.stats ?? {}
   const campaignMode = displayValue(control?.campaign_mode, mode === 'automatic' ? 'live_limited' : mode === 'assisted' ? 'dry_run' : 'paused')
@@ -301,32 +334,16 @@ export function QueueCommandCenter({
     ? new Date(health.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '—'
 
-  // Dynamic status badge inference
-  const getInferredStatus = () => {
-    const isEmergencyStop = exactBlockers.some(
-      (b) => b.toLowerCase().includes('emergency') || b.toLowerCase().includes('stop')
-    )
-    const hasHardBlocker = exactBlockers.length > 0 || (health?.blockedCount ?? 0) > 0
-    if (isEmergencyStop || hasHardBlocker) return 'BLOCKED'
-
-    const isPaused =
-      mode === 'paused' ||
-      queueProcessorMode === 'paused' ||
-      campaignMode === 'paused' ||
-      activeCampaign?.status === 'paused'
-    if (isPaused) return 'PAUSED'
-
-    const isDegraded =
-      !health?.processorHealthy ||
-      !health?.webhookHealthy ||
-      (health?.failedTodayCount ?? 0) > 0 ||
-      health?.status === 'warning' ||
-      health?.status === 'critical'
-    if (isDegraded) return 'DEGRADED'
-
-    return 'LIVE'
-  }
-  const inferredStatus = getInferredStatus()
+  /*
+   * REPLACED: the local `getInferredStatus()`.
+   *
+   * It was a seventh source of truth. It read `mode`, which InboxPage seeded
+   * from `localStorage['nx.queue.mode']` on mount, so first paint reflected
+   * whatever this browser last selected rather than server state. It also
+   * flipped to DEGRADED whenever `failedTodayCount > 0` — one failure out of
+   * thousands — and had no concept of `queue_execution_mode` at all.
+   */
+  const inferredStatus = sendingStatus.label.toUpperCase()
 
   // Format the send window text
   const getNextWindowString = () => {
@@ -356,7 +373,8 @@ export function QueueCommandCenter({
       <div className="nx-queue-status__header">
         <div className="nx-queue-status__header-left">
           <p className="nx-queue-status__title">QUEUE & SENDING STATUS</p>
-          <p className="nx-queue-status__subtitle">Operational status for campaigns, queue, and sends.</p>
+          {/* One operator sentence: what this is, is it good, what happens next. */}
+          <p className="nx-queue-status__subtitle">{sendingStatus.headline}</p>
         </div>
         <div className="nx-queue-status__header-right">
           <span className={cls('nx-queue-status__state', `state-${inferredStatus.toLowerCase()}`)}>
@@ -414,7 +432,11 @@ export function QueueCommandCenter({
           <div className="nx-queue-status__summary-card">
             <div className="nx-queue-status__card-title">SYSTEM HEALTH</div>
             <div className="nx-queue-status__card-value">
-              {health?.processorHealthy && health?.webhookHealthy ? 'Healthy' : 'Degraded'}
+              {/* "Unknown" is a real answer. Reporting an unreadable queue as
+                  "Degraded" (or worse, "Healthy") is what this rebuild fixes. */}
+              {!health ? 'Unknown'
+                : health.processorHealthy && health.webhookHealthy ? 'Healthy'
+                  : 'Degraded'}
             </div>
             <div className="nx-queue-status__health">
               <span className={cls('nx-queue-status__health-indicator', health?.processorHealthy ? 'is-good' : 'is-warning')}>Feeder</span>
@@ -503,19 +525,11 @@ export function QueueCommandCenter({
           <div className="nx-queue-status__attention">
             <p className="qcc-section-label">NEEDS ATTENTION</p>
             <div className="qcc-attention-list" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {/* 1. Exact blockers */}
+              {/* 1. Exact blockers — humanised, never raw snake_case (§0.2). */}
               {exactBlockers.map((blocker) => {
-                let label = blocker.replace(/_/g, ' ')
-                let explanation = 'Campaign automation blocker'
-                let severity: 'critical' | 'warning' = 'critical'
-                if (blocker === 'global_queue_emergency_stop_active' || blocker === 'global_emergency_stop_active') {
-                  label = 'Emergency stop active'
-                  explanation = 'Sending blocked'
-                } else if (blocker === 'auto_enqueue_disabled' || blocker === 'campaign_automation_paused') {
-                  label = 'Auto enqueue disabled'
-                  explanation = 'Campaign automation paused'
-                  severity = 'warning'
-                }
+                const { label, detail: explanation } = humanizeBlockerCode(blocker)
+                const severity: 'critical' | 'warning' =
+                  blocker.includes('emergency') || blocker.includes('stop') ? 'critical' : 'warning'
                 return (
                   <div key={blocker} className={cls('nx-queue-status__attention-row', `is-${severity}`)}>
                     <div className="nx-queue-status__attention-icon">
@@ -530,15 +544,15 @@ export function QueueCommandCenter({
                 )
               })}
 
-              {/* 2. Blocked reason rows */}
+              {/* 2. Blocked reason rows — humanised. */}
               {blockedReasonRows.map(([reason, count]) => (
                 <div key={reason} className="nx-queue-status__attention-row is-warning">
                   <div className="nx-queue-status__attention-icon">
                     <Icon name="alert" />
                   </div>
                   <div className="nx-queue-status__attention-info">
-                    <strong>{reason.replace(/_/g, ' ')}</strong>
-                    <span>Blocked reason count</span>
+                    <strong>{humanizeBlockerCode(reason).label}</strong>
+                    <span>{humanizeBlockerCode(reason).detail}</span>
                   </div>
                   <div className="nx-queue-status__attention-right">
                     <b>{count}</b>
@@ -593,8 +607,14 @@ export function QueueCommandCenter({
                 {health!.routingBlockedRows.map((row) => (
                   <div key={row.id} className="qcc-routing-detail">
                     <div className="qcc-routing-detail__info">
-                      <strong>{row.sellerName}</strong>
-                      <span>{row.market} · {row.reason}</span>
+                      {/*
+                        `inboxData.ts:806` sets sellerName from `master_owner_id`
+                        — a UUID where a name belongs. Rendering it verbatim put
+                        a UUID in the operator's face; the address is the useful
+                        identifier here. Reported to Lane C, who owns inboxData.
+                      */}
+                      <strong>{humanizeEntityName(row.sellerName, row.propertyAddress || 'Unidentified seller')}</strong>
+                      <span>{row.market} · {humanizeQueueStatus(row.queueStatus)}</span>
                     </div>
                     <button
                       type="button"
@@ -670,7 +690,7 @@ export function QueueCommandCenter({
 
           {showAdvanced && (
             <div className="nx-queue-status__advanced-content" style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {health?.status === 'critical' && <WhyCriticalPanel health={health} />}
+              <StatusReasonPanel status={sendingStatus} />
 
               {/* Advanced Actions */}
               <div className="qcc-advanced__actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -761,24 +781,28 @@ export function QueueCommandCenter({
                 <div className="qcc-status-item"><span>Diagnostics</span><strong title={lastRunDiagnostics}>{lastRunDiagnostics}</strong></div>
               </div>
 
-              {/* Diagnostics JSON */}
-              {control && (
-                <>
-                  <div className="qcc-section-label" style={{ marginTop: 4 }}>Diagnostics JSON</div>
+              {/*
+                The raw `JSON.stringify(control, null, 2)` dump was a developer
+                artifact in the operator interface (§0.2). It is now behind an
+                explicit disclosure and gated to dev builds only (R10.7).
+              */}
+              {control && import.meta.env.DEV && (
+                <details className="qcc-diagnostics-disclosure">
+                  <summary style={{ fontSize: 11, cursor: 'pointer', opacity: 0.6 }}>
+                    Raw control payload (dev only)
+                  </summary>
                   <pre className="qcc-diagnostics-json" style={{
-                    fontSize: 10,
-                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
                     padding: 8,
                     borderRadius: 6,
-                    background: 'rgba(0,0,0,0.3)',
-                    border: '1px solid rgba(255,255,255,0.08)',
                     maxHeight: 140,
-                    overflowY: 'auto',
-                    color: 'rgba(255,255,255,0.6)'
+                    overflow: 'auto',
+                    marginTop: 6,
                   }}>
                     {JSON.stringify(control, null, 2)}
                   </pre>
-                </>
+                </details>
               )}
 
               <p className="qcc-cmd-hint" style={{ textAlign: 'center', marginTop: 4 }}>Press <kbd>⌘K</kbd> for queue commands</p>

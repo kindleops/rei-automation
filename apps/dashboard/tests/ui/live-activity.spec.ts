@@ -20,7 +20,7 @@ const seedSettings = (displayMode: string) => ({
   activeChannel: 'live',
 })
 
-test.describe('Live Activity command rail', () => {
+test.describe('Map Activity command rail', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript((storageKey, settings) => {
       window.localStorage.setItem(storageKey, JSON.stringify(settings))
@@ -33,7 +33,7 @@ test.describe('Live Activity command rail', () => {
     const rail = page.locator('.nx-icm-activity.is-minimal')
     await expect(rail).toBeVisible({ timeout: 30000 })
 
-    await expect(rail.locator('.nx-icm-activity__heading strong')).toHaveText(/Live Activity/i)
+    await expect(rail.locator('.nx-icm-activity__heading strong')).toHaveText(/Map Activity/i)
     await expect(rail.locator('.nx-icm-activity__scope')).toHaveText(/VIEWPORT/i)
 
     const minimalEvent = rail.locator('.nx-icm-activity__minimal-event')

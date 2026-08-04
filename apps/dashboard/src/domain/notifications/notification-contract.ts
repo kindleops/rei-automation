@@ -5,6 +5,16 @@
  * notification intelligence endpoints.
  */
 
+import {
+  formatPhoneForDisplay,
+  humanizeActionType,
+  humanizeMetricKey,
+  humanizeNotificationTitle,
+  isPhoneLike,
+  isRenderableMetricKey,
+  isRenderableMetricValue,
+} from '../../modules/operations/ops-humanize'
+
 // ── Core enums ────────────────────────────────────────────────────────────
 
 export type NotificationDomain =
@@ -65,7 +75,17 @@ export interface NotificationEvent {
   domain: NotificationDomain
   severity: NotificationSeverity
   type: string
+  /**
+   * Operator-facing heading. Guaranteed free of raw phone numbers, UUIDs and
+   * snake_case event codes — see `humanizeNotificationTitle`. The backend
+   * catalog interpolates raw E.164 into titles (198/200 rows in the live feed);
+   * this field is the sanitised form.
+   */
   title: string
+  /** The identifier that used to be jammed into the title, formatted for display. */
+  subject?: string | null
+  /** The unmodified backend title, kept for search and the disclosure line only. */
+  rawTitle?: string
   body: string
   summary?: string
   status: NotificationStatus
@@ -87,6 +107,8 @@ export interface NotificationEvent {
   campaignId?: string | null
   groupedCount?: number
   groupKey?: string | null
+  /** Backend `deduplication_key`. Drives client-side collapse of twin rows. */
+  dedupKey?: string | null
 }
 
 export interface NotificationPreferences {
@@ -157,6 +179,7 @@ export interface ApiNotificationRow {
   grouped_count?: number
   grouping_key?: string | null
   group_key?: string | null
+  deduplication_key?: string | null
   recommendation?: Record<string, unknown> | null
 }
 
@@ -329,7 +352,9 @@ export function deriveNotificationStatus(row: ApiNotificationRow): NotificationS
     const until = new Date(row.snoozed_until)
     if (Number.isFinite(until.getTime()) && until > new Date()) return 'snoozed'
   }
-  if (row.status === 'dismissed' || row.dismissed_at) return 'dismissed'
+  // The backend writes status 'dismissed' and, for cleared items, 'resolved'.
+  // Both mean "the operator finished with this" and must never render again.
+  if (row.status === 'dismissed' || row.status === 'resolved' || row.dismissed_at) return 'dismissed'
   if (row.read_at) return 'read'
   return 'unread'
 }
@@ -377,7 +402,8 @@ function mapAvailableActions(row: ApiNotificationRow): NotificationAction[] {
     if (typeof entry === 'string') {
       return {
         type: entry,
-        label: ACTION_LABELS[entry] ?? entry.replace(/_/g, ' '),
+        // Never render `snake_case` in a button (§0.2).
+        label: ACTION_LABELS[entry] ?? humanizeActionType(entry),
         primary: index === 0,
       }
     }
@@ -396,9 +422,11 @@ function mapMetricsSnapshot(row: ApiNotificationRow): NotificationMetrics[] | un
 
   const metrics: NotificationMetrics[] = []
   for (const [key, value] of Object.entries(snapshot)) {
-    if (value == null || typeof value === 'object') continue
+    // Drop provider ids and other developer artifacts entirely; relabel the
+    // rest. Previously every snapshot key was rendered as a raw object key.
+    if (!isRenderableMetricKey(key) || !isRenderableMetricValue(value)) continue
     metrics.push({
-      label: key.replace(/_/g, ' '),
+      label: humanizeMetricKey(key),
       value: typeof value === 'number' ? value : String(value),
     })
   }
@@ -408,12 +436,21 @@ function mapMetricsSnapshot(row: ApiNotificationRow): NotificationMetrics[] | un
 export function mapApiNotification(row: ApiNotificationRow): NotificationEvent {
   const domain = normalizeNotificationDomain(row.domain)
   const severity = normalizeNotificationSeverity(row.severity)
+  const eventType = String(row.event_type ?? row.notification_type ?? row.type ?? 'notification')
+  // §0.2 — the backend catalog interpolates raw E.164 into titles. Sanitise
+  // once, here, so every consumer (bell, center, Operations Center) is safe.
+  const humanized = humanizeNotificationTitle(row.title, eventType)
   return {
     id: row.id,
     domain,
     severity,
-    type: String(row.event_type ?? row.notification_type ?? row.type ?? 'notification'),
-    title: row.title,
+    type: eventType,
+    title: humanized.title,
+    subject: humanized.subject
+      ?? (row.participant_id && isPhoneLike(row.participant_id)
+        ? formatPhoneForDisplay(row.participant_id)
+        : null),
+    rawTitle: row.title,
     body: row.description ?? row.body ?? row.summary ?? '',
     summary: row.summary,
     status: deriveNotificationStatus(row),
@@ -435,6 +472,7 @@ export function mapApiNotification(row: ApiNotificationRow): NotificationEvent {
     campaignId: row.campaign_id ?? null,
     groupedCount: row.group_count ?? row.grouped_count ?? undefined,
     groupKey: row.grouping_key ?? row.group_key ?? null,
+    dedupKey: row.deduplication_key ?? null,
   }
 }
 
@@ -499,13 +537,15 @@ export function serializePreferences(prefs: NotificationPreferences): ApiNotific
   }
 }
 
-export function groupNotificationsByTime(notifications: NotificationEvent[]): Record<NotificationTimeGroup, NotificationEvent[]> {
+export function groupNotificationsByTime<T extends NotificationEvent>(
+  notifications: T[],
+): Record<NotificationTimeGroup, T[]> {
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const startOfYesterday = new Date(startOfToday)
   startOfYesterday.setDate(startOfYesterday.getDate() - 1)
 
-  const groups: Record<NotificationTimeGroup, NotificationEvent[]> = {
+  const groups: Record<NotificationTimeGroup, T[]> = {
     today: [],
     yesterday: [],
     earlier: [],
@@ -527,6 +567,79 @@ export function groupNotificationsByTime(notifications: NotificationEvent[]): Re
   }
 
   return groups
+}
+
+/**
+ * Collapse duplicate rows into one card.
+ *
+ * The live feed emits the same event twice — once keyed by `+12529085640` and
+ * once by `2529085640`. Crucially the backend gives the two rows *different*
+ * `deduplication_key` values for exactly that reason
+ * (`inbox_message_received:12529085640:…` vs `inbox_message_received:2529085640:…`),
+ * so server-side dedup never merges them. To the operator they are one event
+ * rendered twice, and dismissing one left its twin behind — which reads as
+ * "dismiss does not work".
+ *
+ * So the primary key is a CONTENT signature, not the backend key: same event
+ * type, same subject (already normalised to a display phone, which erases the
+ * +1 difference), same title, same body. The backend keys are only a fallback
+ * for events whose content is genuinely empty.
+ *
+ * The surviving card carries `groupedCount` and `groupMemberIds` so an action
+ * on it applies to every row it stands for.
+ */
+export interface GroupedNotification extends NotificationEvent {
+  /** Every backend id this card stands for, including its own. */
+  groupMemberIds: string[]
+}
+
+const contentSignature = (event: NotificationEvent): string | null => {
+  const subject = (event.subject ?? event.threadKey ?? '').replace(/\D/g, '')
+  const body = event.body.trim().slice(0, 120)
+  if (!event.title && !body) return null
+  return `${event.type}|${subject}|${event.title}|${body}`
+}
+
+export function deduplicateNotifications(events: NotificationEvent[]): GroupedNotification[] {
+  const byKey = new Map<string, GroupedNotification>()
+
+  for (const event of events) {
+    const key = contentSignature(event)
+      || event.dedupKey
+      || event.groupKey
+      || event.id
+
+    const existing = byKey.get(key)
+    if (!existing) {
+      byKey.set(key, {
+        ...event,
+        groupMemberIds: [event.id],
+        groupedCount: Math.max(1, event.groupedCount ?? 1),
+      })
+      continue
+    }
+
+    existing.groupMemberIds.push(event.id)
+    existing.groupedCount = existing.groupMemberIds.length
+
+    // Keep the most actionable representative: unread beats read, newer beats
+    // older, and a card with actions beats one without.
+    const preferIncoming =
+      (event.status === 'unread' && existing.status !== 'unread')
+      || (event.status === existing.status && new Date(event.createdAt) > new Date(existing.createdAt))
+      || (existing.actions.length === 0 && event.actions.length > 0)
+
+    if (preferIncoming) {
+      const memberIds = existing.groupMemberIds
+      byKey.set(key, {
+        ...event,
+        groupMemberIds: memberIds,
+        groupedCount: memberIds.length,
+      })
+    }
+  }
+
+  return [...byKey.values()]
 }
 
 export const NOTIFICATION_DOMAINS: NotificationDomain[] = [

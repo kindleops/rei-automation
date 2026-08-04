@@ -36,7 +36,27 @@ function buildFilterQuery(filters: NotificationListFilters = {}): string {
   if (filters.search?.trim()) qs.set('search', filters.search.trim())
   if (filters.limit != null) qs.set('limit', String(filters.limit))
   if (filters.offset != null) qs.set('offset', String(filters.offset))
-  if (filters.status) qs.set('status', String(filters.status))
+
+  // `includeDismissed` / `includeSnoozed` existed on the filter type and were
+  // set by the hook, but were never written to the query string — the server
+  // was never told. They are serialised now.
+  //
+  // The current server (`/api/cockpit/notifications`) keys off a single
+  // `status` param and defaults to 'active'; it does not yet read the
+  // include_* flags. We therefore also translate the intent into `status`
+  // where the server can honour it, and send the flags for when it can.
+  // See artifacts/lane-f/report.md ("Backend handoffs").
+  if (filters.includeDismissed) qs.set('include_dismissed', 'true')
+  if (filters.includeSnoozed) qs.set('include_snoozed', 'true')
+
+  if (filters.status) {
+    qs.set('status', String(filters.status))
+  } else if (filters.includeDismissed) {
+    qs.set('status', 'dismissed')
+  } else {
+    // Be explicit rather than relying on the server default.
+    qs.set('status', 'active')
+  }
 
   const query = qs.toString()
   return query ? `?${query}` : ''

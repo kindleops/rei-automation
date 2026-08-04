@@ -9849,7 +9849,7 @@ export function InboxCommandMap({
                   </div>
                   <div className="nx-icm__controls-grid">
                     <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Live Activity</span>
+                      <span className="nx-icm__controls-label">Map Activity</span>
                       <div className="nx-icm__controls-segment">
                         {(['hidden', 'minimal', 'compact', 'expanded', 'docked'] as const).map((value) => (
                           <button
