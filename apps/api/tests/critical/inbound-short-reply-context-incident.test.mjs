@@ -31,22 +31,39 @@ const THREAD = "+16128072000";
 const OUTBOUND_AT = "2026-08-03T22:38:33.178Z";
 const INBOUND_AT = "2026-08-03T22:40:31.039Z";
 
-/** Minimal supabase double for the single send_queue lookup. */
-function supabaseWithLastOutbound(rows) {
+/**
+ * Table-aware supabase double: send_queue returns the last outbound, and
+ * message_events returns whatever intervening inbound evidence the scenario
+ * defines.
+ */
+function supabaseWith({ outbound = [], intervening_inbound = [] } = {}) {
+  const make = (rows) => {
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      in: () => builder,
+      not: () => builder,
+      lte: () => builder,
+      gt: () => builder,
+      lt: () => builder,
+      order: () => builder,
+      limit: async () => ({ data: rows, error: null }),
+    };
+    // `message_events` is awaited directly off .limit(); both shapes are used.
+    builder.then = undefined;
+    return builder;
+  };
   return {
-    from() {
-      const builder = {
-        select: () => builder,
-        eq: () => builder,
-        in: () => builder,
-        not: () => builder,
-        lte: () => builder,
-        order: () => builder,
-        limit: async () => ({ data: rows, error: null }),
-      };
-      return builder;
+    from(table) {
+      if (table === "message_events") return make(intervening_inbound);
+      return make(outbound);
     },
   };
+}
+
+/** Back-compat helper for the original single-outbound scenarios. */
+function supabaseWithLastOutbound(rows) {
+  return supabaseWith({ outbound: rows, intervening_inbound: [] });
 }
 
 const INCIDENT_ROW = {
@@ -266,4 +283,109 @@ test("a genuinely uncertain message is still suppressed", async () => {
   });
   assert.equal(verdict.suppress, true);
   assert.equal(verdict.reason, "confidence_too_low");
+});
+
+// ── A2: question status derived from intervening evidence ───────────────────
+
+test("no intervening inbound → question is unanswered and 'Yeah' binds", async () => {
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: INBOUND_AT,
+    supabase: supabaseWith({ outbound: [INCIDENT_ROW], intervening_inbound: [] }),
+  });
+  assert.equal(context.question_status, "unanswered");
+  assert.equal(context.unanswered_question, true);
+  const applied = applyContextualShortReply("Yeah", validateConversationContext(context));
+  assert.equal(applied.primary_intent, "ownership_confirmed");
+});
+
+test("an earlier substantive answer marks the question answered — a later 'Yeah' must not bind", async () => {
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: "2026-08-03T23:30:00.000Z",
+    supabase: supabaseWith({
+      outbound: [INCIDENT_ROW],
+      intervening_inbound: [
+        { id: "prior-answer", direction: "inbound", created_at: "2026-08-03T22:45:00.000Z" },
+      ],
+    }),
+  });
+  assert.equal(context.question_status, "answered");
+  assert.equal(context.unanswered_question, false);
+
+  const validated = validateConversationContext(context);
+  assert.equal(validated.context_status, "stale");
+  assert.deepEqual(validated.reasons, ["question_already_answered"]);
+
+  const applied = applyContextualShortReply("Yeah", validated);
+  assert.equal(applied.applied, false, "a settled question must not capture a later short reply");
+});
+
+test("a newer question supersedes the older one — 'Yeah' binds to the newest", async () => {
+  // buildConversationContext selects the newest outbound at-or-before the
+  // inbound, which is how supersession is expressed.
+  const newer_call_permission = {
+    ...INCIDENT_ROW,
+    id: "newer",
+    message_type: "general_followup",
+    provider_message_id: "SM-newer",
+    sent_at: "2026-08-03T22:39:00.000Z",
+    delivered_at: "2026-08-03T22:39:30.000Z",
+  };
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: INBOUND_AT,
+    supabase: supabaseWith({ outbound: [newer_call_permission, INCIDENT_ROW] }),
+  });
+  assert.equal(context.last_outbound_use_case, "general_followup");
+  assert.notEqual(
+    context.last_outbound_use_case,
+    "ownership_check",
+    "the superseded ownership question must not be the binding context"
+  );
+});
+
+test("a stale question yields no fabricated certainty", async () => {
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: "2026-09-30T00:00:00.000Z", // far beyond the 7-day window
+    supabase: supabaseWith({ outbound: [INCIDENT_ROW] }),
+  });
+  const validated = validateConversationContext(context);
+  assert.equal(validated.context_status, "stale");
+  assert.equal(
+    applyContextualShortReply("Yeah", validated).applied,
+    false,
+    "a stale question must not manufacture an ownership confirmation"
+  );
+});
+
+test("fragments of the same open burst do not mark each other as answers", async () => {
+  const fragment_id = "burst-fragment-1";
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: INBOUND_AT,
+    supabase: supabaseWith({
+      outbound: [INCIDENT_ROW],
+      intervening_inbound: [
+        { id: fragment_id, direction: "inbound", created_at: "2026-08-03T22:40:35.000Z" },
+      ],
+    }),
+    burst_event_ids: [fragment_id],
+  });
+  assert.equal(
+    context.question_status,
+    "unanswered",
+    "a sibling fragment in the same burst is one thought, not a prior answer"
+  );
+  assert.equal(context.intervening_inbound_count, 0);
+});
+
+test("dead typo tokens are gone and real contractions still fold", async () => {
+  const { isShortContextualReply } = await import(
+    "@/lib/domain/classification/conversation-context.js"
+  );
+  assert.equal(isShortContextualReply("dont own it"), true, "apostrophe-less contraction folds");
+  assert.equal(isShortContextualReply("don't own it"), true);
+  assert.equal(isShortContextualReply("don not own it"), false, "dead typo token must not match");
 });

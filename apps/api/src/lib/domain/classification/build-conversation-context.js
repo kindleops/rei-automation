@@ -78,6 +78,8 @@ export async function buildConversationContext({
   supabase,
   canonical_stage = null,
   language = null,
+  current_inbound_event_id = null,
+  burst_event_ids = [],
 } = {}) {
   if (!supabase || !isCanonicalE164(thread_key) || !inbound_received_at) return null;
 
@@ -107,6 +109,41 @@ export async function buildConversationContext({
   const delivered_at = last_outbound.delivered_at || last_outbound.sent_at;
   if (!delivered_at) return null;
 
+  // Has this question already been answered? Any inbound that arrived after the
+  // question and before the current message is an answer to it — so a later
+  // bare "Yeah" belongs to whatever is being discussed now, not to a settled
+  // question. Hard-coding unanswered_question=true would fabricate certainty.
+  //
+  // Fragments of the CURRENT still-open burst are excluded: two messages sent
+  // seconds apart are one thought, and the first must not mark the second's
+  // question as already answered.
+  const excluded = new Set(
+    [...(Array.isArray(burst_event_ids) ? burst_event_ids : []), current_inbound_event_id]
+      .filter(Boolean)
+      .map(String)
+  );
+
+  let intervening_inbound_count = 0;
+  let question_status = "unanswered";
+  try {
+    const { data, error } = await supabase
+      .from("message_events")
+      .select("id,created_at,direction")
+      .eq("thread_key", thread_key)
+      .eq("direction", "inbound")
+      .gt("created_at", new Date(delivered_at).toISOString())
+      .lt("created_at", new Date(inbound_received_at).toISOString())
+      .limit(50);
+    if (error) return null;
+    const prior_answers = (data || []).filter((row) => !excluded.has(String(row.id)));
+    intervening_inbound_count = prior_answers.length;
+    if (prior_answers.length > 0) question_status = "answered";
+  } catch {
+    // Evidence could not be read. Fail closed rather than assert the question
+    // is still open.
+    return null;
+  }
+
   return {
     context_version: CONTEXT_VERSION,
     canonical_thread: thread_key,
@@ -120,10 +157,12 @@ export async function buildConversationContext({
     last_outbound_delivered_at: new Date(delivered_at).toISOString(),
     current_inbound_received_at: new Date(inbound_received_at).toISOString(),
     // The query is bounded to outbounds at-or-before this inbound and ordered
-    // newest-first, so the head IS the question being answered: nothing newer
-    // can have superseded it.
+    // newest-first, so the head IS the live question: a newer question would
+    // have been selected instead, which is how supersession is expressed.
     intervening_outbound_count: 0,
-    unanswered_question: true,
+    intervening_inbound_count,
+    question_status,
+    unanswered_question: question_status === "unanswered",
     language: language || null,
   };
 }

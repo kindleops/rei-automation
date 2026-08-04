@@ -1,5 +1,7 @@
 // ─── handle-textgrid-inbound.js ──────────────────────────────────────────
 import crypto from "node:crypto";
+import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
+import { markInboundAwaitingBurst as markInboundAwaitingBurstImpl } from "@/lib/domain/inbound/inbound-processing-ledger.js";
 import { loadContext } from "@/lib/domain/context/load-context.js";
 import { loadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
 import { createBrain } from "@/lib/domain/context/resolve-brain.js";
@@ -84,6 +86,8 @@ const defaultDeps = {
   loadContextWithFallback,
   createBrain,
   classify,
+  buildConversationContext,
+  markInboundAwaitingBurst: markInboundAwaitingBurstImpl,
   resolveRoute,
   normalizeInboundTextgridPhone,
   logInboundMessageEvent,
@@ -1031,6 +1035,30 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
     });
     if (!ledger.duplicate_completed) {
       const resolved = resolveInboundTerminalDisposition(result);
+      if (resolved.pending) {
+        // The decision was handed to the burst layer — the inbound is NOT
+        // finished, so it must not be terminalized. `reply_deferred_burst` is
+        // rejected by both the ledger CHECK and complete_inbound_processing's
+        // allowlist; passing it through would fail the write and then raise a
+        // false inbound_no_disposition P0.
+        //
+        // The row stays status='processing' (already set by the claim) and
+        // carries its pendency in disposition_detail, which the SLO scanner
+        // recognises as intentionally awaiting burst finalization. Genuine
+        // burst failure is alarmed independently by the burst liveness scan, so
+        // nothing is unwatched. Constituent rows are finalized for real when
+        // the burst completes.
+        await runtimeDeps.markInboundAwaitingBurst({
+          idempotency_key,
+          burst_id: resolved.detail?.burst_id || null,
+          detail: resolved.detail,
+        });
+        if (result && typeof result === "object") {
+          result.terminal_disposition = null;
+          result.pending_disposition = resolved.disposition;
+        }
+        return result;
+      }
       await recordDispositionOrAlert({
         ledger_id: ledger.ledger_id || null,
         idempotency_key,
@@ -1661,7 +1689,43 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       // from real seller traffic. Low-confidence heuristic output still flows
       // through unchanged; the deterministic downstream resolver already
       // routes low-confidence/unclear intents to human review.
-      classification = await runtimeDeps.classify(message_body, brain_item, { heuristicOnly: true });
+      // Bind a short reply to the question it answers BEFORE the first
+      // authoritative classification. Production incident 2026-08-03: the
+      // ownership question was delivered and persisted, the seller replied
+      // "Yeah", but no caller ever constructed conversation_context_v1 — so
+      // classify() saw context_status:'unavailable', capped confidence at 0.72
+      // via short_reply_without_validated_context, failed the 0.82 automation
+      // gate and routed an unambiguous answer to human review. The context was
+      // in the database the whole time.
+      //
+      // This is the live webhook's own construction, not a fallback inside
+      // processSellerInboundMessage: that fallback is skipped precisely because
+      // this handler already supplies a classification.
+      let conversation_context = null;
+      try {
+        const context_supabase = runtimeDeps.getSupabaseClient?.();
+        if (context_supabase && inbound_from) {
+          // Deliberately NOT defaulting to now(): the scope-authorization
+          // semantics elsewhere in this handler treat a missing received_at as
+          // unknown, and buildConversationContext fails closed on a falsy value
+          // rather than binding a reply to a fabricated timestamp.
+          conversation_context = await runtimeDeps.buildConversationContext({
+            thread_key: inbound_from,
+            inbound_received_at: extracted?.received_at || payload?.http_received_at || null,
+            supabase: context_supabase,
+            canonical_stage: stage_before,
+          });
+        }
+      } catch {
+        // Context resolution is best-effort: classify() keeps its existing
+        // `unavailable` behaviour rather than failing the webhook.
+        conversation_context = null;
+      }
+
+      classification = await runtimeDeps.classify(message_body, brain_item, {
+        heuristicOnly: true,
+        conversation_context,
+      });
 
       try {
         // Burst-fragment write restriction: while burst mode defers the

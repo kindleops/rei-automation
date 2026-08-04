@@ -203,6 +203,13 @@ async function buildProductionCoordinator({ supabase, body, method }) {
     import("@/lib/system-control.js"),
   ]);
 
+  const [{ finalizeBurstConstituentLedger }, { completeInboundProcessingClaim }, { launchAlerts }] =
+    await Promise.all([
+      import("@/lib/domain/seller-flow/finalize-burst-constituent-ledger.js"),
+      import("@/lib/domain/inbound/inbound-processing-ledger.js"),
+      import("@/lib/domain/alerts/launch-critical-alerts.js"),
+    ]);
+
   async function processWithContext(args = {}) {
     let context = args.context || null;
     if (!context && args.threadKey) {
@@ -253,6 +260,9 @@ async function buildProductionCoordinator({ supabase, body, method }) {
       }),
     worker_id: body.worker_id || `flush-inbound-bursts-${String(method).toLowerCase()}`,
     enabled: true,
+    finalizeConstituentLedger: finalizeBurstConstituentLedger,
+    completeInboundProcessingClaim,
+    alertBurstFailure: launchAlerts.burstFlushFailure,
   });
 }
 

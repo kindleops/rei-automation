@@ -123,6 +123,9 @@ export function createSellerInboundBurstCoordinator({
   claim_lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
   max_attempts = SELLER_INBOUND_BURST_MAX_ATTEMPTS,
   enabled = null,
+  finalizeConstituentLedger = null,
+  completeInboundProcessingClaim = null,
+  alertBurstFailure = null,
 } = {}) {
   const burstStore =
     store ||
@@ -504,8 +507,38 @@ export function createSellerInboundBurstCoordinator({
       now: now(),
     });
 
+    // A completed burst may never leave its constituent inbound ledger rows
+    // parked at `awaiting_burst_finalization`. Finalize them with the real
+    // outcome; failures here are reported, never swallowed.
+    let ledger_finalization = null;
+    if (supabase && typeof finalizeConstituentLedger === "function") {
+      try {
+        ledger_finalization = await finalizeConstituentLedger({
+          supabase,
+          burst: completed.burst || burst,
+          result: {
+            ok: true,
+            suppressed: Boolean(post_safety),
+            queued: Boolean(orchestration?.queued || orchestration?.execution?.queued),
+            queue_row_id: orchestration?.queue_row_id || orchestration?.execution?.queue_row_id || null,
+            human_review_required: Boolean(orchestration?.human_review_required),
+            suppression_kind: burst?.safety_kind || null,
+          },
+          completeClaim: completeInboundProcessingClaim,
+          alert: alertBurstFailure,
+        });
+      } catch (finalize_error) {
+        ledger_finalization = {
+          ok: false,
+          reason: "ledger_finalization_threw",
+          message: finalize_error?.message || "unknown_error",
+        };
+      }
+    }
+
     return {
       ok: true,
+      ledger_finalization,
       suppressed: Boolean(post_safety),
       queued: Boolean(orchestration?.queued || orchestration?.execution?.queued),
       followup_scheduled: Boolean(
