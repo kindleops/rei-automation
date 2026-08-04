@@ -28,10 +28,18 @@ import { CONTEXT_VERSION } from "@/lib/domain/classification/conversation-contex
 const THREAD = "+15550100042";
 const RECEIVED_AT = "2026-08-03T22:40:31.039Z";
 
+let orchestrationCalls = [];
+
 function baseDeps() {
+  orchestrationCalls = [];
   const ledger = createInMemoryIdempotencyLedger();
   return {
     ...makeInboundWebhookBaseDeps({ getSupabaseClient: () => makeInboundLifecycleSupabase() }),
+    // Capture what orchestration actually receives.
+    processSellerInboundMessage: async (args) => {
+      orchestrationCalls.push(args);
+      return { ok: true, queued: false, effective_action: "none" };
+    },
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -83,62 +91,91 @@ function inboundPayload(body = "Yeah") {
   };
 }
 
-test("the live webhook passes conversation_context into classify()", async (t) => {
+test("the live webhook passes conversation_context into the classify() whose result reaches orchestration", async (t) => {
   const classify_calls = [];
   const context_calls = [];
+  const CONTEXT = {
+    context_version: CONTEXT_VERSION,
+    canonical_thread: THREAD,
+    inbound_thread: THREAD,
+    last_outbound_message_id: "SM-outbound-1",
+    last_outbound_use_case: "ownership_check",
+    last_outbound_question_type: "ownership",
+    last_outbound_delivered_at: "2026-08-03T22:38:33.178Z",
+    current_inbound_received_at: RECEIVED_AT,
+    intervening_outbound_count: 0,
+    intervening_inbound_count: 0,
+    question_status: "unanswered",
+    unanswered_question: true,
+  };
+  const CLASSIFICATION = {
+    primary_intent: "ownership_confirmed",
+    confidence: 0.88,
+    version: "ctx-test",
+    source: "contextual_short_reply",
+  };
 
   __setTextgridInboundTestDeps({
     ...baseDeps(),
     buildConversationContext: async (args) => {
       context_calls.push(args);
-      return {
-        context_version: CONTEXT_VERSION,
-        canonical_thread: THREAD,
-        inbound_thread: THREAD,
-        last_outbound_message_id: "SM-outbound-1",
-        last_outbound_use_case: "ownership_check",
-        last_outbound_question_type: "ownership",
-        last_outbound_delivered_at: "2026-08-03T22:38:33.178Z",
-        current_inbound_received_at: RECEIVED_AT,
-        intervening_outbound_count: 0,
-        intervening_inbound_count: 0,
-        question_status: "unanswered",
-        unanswered_question: true,
-      };
+      return CONTEXT;
     },
     classify: async (message, brain, options) => {
       classify_calls.push({ message, brain, options });
-      return {
-        primary_intent: "ownership_confirmed",
-        confidence: 0.88,
-        version: "test",
-      };
+      return CLASSIFICATION;
     },
   });
   t.after(() => __resetTextgridInboundTestDeps());
 
-  await handleTextgridInboundWebhook(inboundPayload()).catch(() => {});
+  // No .catch(): a webhook failure must fail this test, not be swallowed.
+  const result = await handleTextgridInboundWebhook(inboundPayload());
+  assert.notEqual(result?.ok, false, `webhook must not fail: ${JSON.stringify(result?.reason ?? null)}`);
 
-  assert.ok(context_calls.length >= 1, "the webhook must build conversation context itself");
-  assert.equal(context_calls[0].thread_key, THREAD, "context is built for the canonical thread");
-  assert.equal(
-    context_calls[0].inbound_received_at,
-    RECEIVED_AT,
-    "the real inbound timestamp is used, never a fabricated now()"
-  );
+  // Context was built by the LIVE handler, from the real inbound timestamp.
+  assert.equal(context_calls.length >= 1, true, "the webhook must build context itself");
+  assert.equal(context_calls[0].thread_key, THREAD);
+  assert.equal(context_calls[0].inbound_received_at, RECEIVED_AT, "no fabricated now()");
 
-  assert.ok(classify_calls.length >= 1, "classify must run");
+  // It reached classify, with the no-AI guarantee intact.
+  assert.equal(classify_calls.length >= 1, true);
   const options = classify_calls[0].options || {};
-  assert.equal(options.heuristicOnly, true, "the no-AI guarantee must survive this change");
-  assert.ok(
-    options.conversation_context,
-    "classify() must receive conversation_context — this is the incident"
-  );
-  assert.equal(options.conversation_context.last_outbound_use_case, "ownership_check");
-  assert.equal(options.conversation_context.unanswered_question, true);
+  assert.equal(options.heuristicOnly, true);
+  assert.equal(options.conversation_context?.last_outbound_use_case, "ownership_check");
+  assert.equal(options.conversation_context?.unanswered_question, true);
+
+  // The context-derived classification is the one orchestration consumes —
+  // not a second classify, and not the inbound_review_fallback.
+  assert.equal(orchestrationCalls.length, 1, "orchestration must run exactly once");
+  const handed = orchestrationCalls[0].classification;
+  assert.equal(handed.source, "contextual_short_reply", "context-derived result must survive");
+  assert.notEqual(handed.source, "inbound_review_fallback");
+  assert.equal(handed.primary_intent, "ownership_confirmed");
+  assert.equal(handed.confidence, 0.88);
+  assert.equal(handed, CLASSIFICATION, "the exact object, not a re-derived one");
 });
 
-test("a context-resolution failure degrades to the prior behaviour, never a 500", async (t) => {
+test("processSellerInboundMessage's own fallback is NOT production coverage", async (t) => {
+  // The webhook always supplies a classification, so the `if (!classification)`
+  // branch inside the orchestrator never executes for live traffic. If it ever
+  // did, the context wiring in the webhook would be pointless.
+  __setTextgridInboundTestDeps({
+    ...baseDeps(),
+    buildConversationContext: async () => null,
+    classify: async () => ({ primary_intent: "unclear", confidence: 0.4, version: "t" }),
+  });
+  t.after(() => __resetTextgridInboundTestDeps());
+
+  const result = await handleTextgridInboundWebhook(inboundPayload());
+  assert.notEqual(result?.ok, false);
+  assert.equal(orchestrationCalls.length, 1);
+  assert.ok(
+    orchestrationCalls[0].classification,
+    "the webhook always supplies a classification, so the orchestrator fallback is dead for live traffic"
+  );
+});
+
+test("a context lookup failure completes without a 500", async (t) => {
   const classify_calls = [];
   __setTextgridInboundTestDeps({
     ...baseDeps(),
@@ -147,34 +184,53 @@ test("a context-resolution failure degrades to the prior behaviour, never a 500"
     },
     classify: async (message, brain, options) => {
       classify_calls.push(options);
-      return { primary_intent: "unclear", confidence: 0.4, version: "test" };
+      return { primary_intent: "unclear", confidence: 0.4, version: "t" };
     },
   });
   t.after(() => __resetTextgridInboundTestDeps());
 
-  await handleTextgridInboundWebhook(inboundPayload()).catch(() => {});
-
-  assert.ok(classify_calls.length >= 1, "classification must still happen");
-  assert.equal(
-    classify_calls[0].conversation_context,
-    null,
-    "a failed lookup yields null context, not a thrown webhook"
-  );
+  const result = await handleTextgridInboundWebhook(inboundPayload());
+  assert.notEqual(result?.ok, false, "a context failure must not fail the webhook");
+  assert.equal(classify_calls.length >= 1, true, "classification still runs");
+  assert.equal(classify_calls[0].conversation_context, null, "degrades to null context");
   assert.equal(classify_calls[0].heuristicOnly, true);
 });
 
-test("no outbound history means no fabricated context", async (t) => {
+test("no outbound history completes without a 500 and fabricates nothing", async (t) => {
   const classify_calls = [];
   __setTextgridInboundTestDeps({
     ...baseDeps(),
     buildConversationContext: async () => null,
     classify: async (message, brain, options) => {
       classify_calls.push(options);
-      return { primary_intent: "unclear", confidence: 0.4, version: "test" };
+      return { primary_intent: "unclear", confidence: 0.4, version: "t" };
     },
   });
   t.after(() => __resetTextgridInboundTestDeps());
 
-  await handleTextgridInboundWebhook(inboundPayload()).catch(() => {});
+  const result = await handleTextgridInboundWebhook(inboundPayload());
+  assert.notEqual(result?.ok, false);
   assert.equal(classify_calls[0].conversation_context, null);
+});
+
+test("a downstream orchestration failure now FAILS this test instead of being swallowed", async (t) => {
+  // Guards the guard: proves the assertions above would catch a real break.
+  __setTextgridInboundTestDeps({
+    ...baseDeps(),
+    buildConversationContext: async () => null,
+    classify: async () => ({ primary_intent: "unclear", confidence: 0.4, version: "t" }),
+    processSellerInboundMessage: async () => {
+      throw new Error("orchestration exploded");
+    },
+  });
+  t.after(() => __resetTextgridInboundTestDeps());
+
+  let threw = false;
+  try {
+    const result = await handleTextgridInboundWebhook(inboundPayload());
+    if (result?.ok === false) threw = true;
+  } catch {
+    threw = true;
+  }
+  assert.equal(threw, true, "a real downstream failure must surface, not be swallowed");
 });

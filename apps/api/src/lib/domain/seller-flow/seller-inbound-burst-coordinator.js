@@ -300,6 +300,41 @@ export function createSellerInboundBurstCoordinator({
   /**
    * Claim + run one V2 orchestration for an eligible burst.
    */
+
+  /**
+   * Settles the constituent inbound ledger rows for a burst that has reached a
+   * terminal status. Called after EVERY successful terminal completeClaimed —
+   * completed, suppressed and failed alike. A terminal burst that leaves rows
+   * marked awaiting_burst_finalization is the 2026-08-03 failure shape again:
+   * a decision nobody ever recorded.
+   *
+   * Uses the STORE'S returned burst record so the exact burst_id/generation is
+   * settled and one generation can never settle another. Reports honestly —
+   * a failed burst is never handed { ok: true }.
+   */
+  async function settleConstituentLedger({ completion, fallbackBurst, result }) {
+    if (!supabase || typeof finalizeConstituentLedger !== "function") return null;
+    // Only settle behind a genuinely successful terminal write.
+    if (completion && completion.ok === false) return null;
+    const finalBurst = completion?.burst || fallbackBurst || null;
+    if (!finalBurst?.burst_id) return null;
+    try {
+      return await finalizeConstituentLedger({
+        supabase,
+        burst: finalBurst,
+        result,
+        completeClaim: completeInboundProcessingClaim,
+        alert: alertBurstFailure,
+      });
+    } catch (settle_error) {
+      return {
+        ok: false,
+        reason: "ledger_finalization_threw",
+        message: settle_error?.message || "unknown_error",
+      };
+    }
+  }
+
   async function finalizeBurst({
     thread_key = null,
     burst_id = null,
@@ -341,9 +376,17 @@ export function createSellerInboundBurstCoordinator({
         },
         now: now(),
       });
+      const failed_ledger = await settleConstituentLedger({
+        completion: failed,
+        fallbackBurst: burst,
+        // Honest mapping: the burst FAILED. Attempts are spent, so this is
+        // terminal rather than retriable.
+        result: { ok: false, retriable: false },
+      });
       return {
         ok: false,
         reason: "attempts_exhausted",
+        ledger_finalization: failed_ledger,
         burst: failed.burst || burst,
         aggregated,
         decision_idempotency_key: decision_key,
@@ -378,11 +421,21 @@ export function createSellerInboundBurstCoordinator({
         },
         now: now(),
       });
+      const suppressed_ledger = await settleConstituentLedger({
+        completion: completed,
+        fallbackBurst: burst,
+        result: {
+          ok: true,
+          suppressed: true,
+          suppression_kind: burst.safety_kind || null,
+        },
+      });
       return {
         ok: true,
         suppressed: true,
         queued: false,
         followup_scheduled: false,
+        ledger_finalization: suppressed_ledger,
         burst: completed.burst || burst,
         aggregated,
         orchestration: null,
@@ -507,34 +560,19 @@ export function createSellerInboundBurstCoordinator({
       now: now(),
     });
 
-    // A completed burst may never leave its constituent inbound ledger rows
-    // parked at `awaiting_burst_finalization`. Finalize them with the real
-    // outcome; failures here are reported, never swallowed.
-    let ledger_finalization = null;
-    if (supabase && typeof finalizeConstituentLedger === "function") {
-      try {
-        ledger_finalization = await finalizeConstituentLedger({
-          supabase,
-          burst: completed.burst || burst,
-          result: {
-            ok: true,
-            suppressed: Boolean(post_safety),
-            queued: Boolean(orchestration?.queued || orchestration?.execution?.queued),
-            queue_row_id: orchestration?.queue_row_id || orchestration?.execution?.queue_row_id || null,
-            human_review_required: Boolean(orchestration?.human_review_required),
-            suppression_kind: burst?.safety_kind || null,
-          },
-          completeClaim: completeInboundProcessingClaim,
-          alert: alertBurstFailure,
-        });
-      } catch (finalize_error) {
-        ledger_finalization = {
-          ok: false,
-          reason: "ledger_finalization_threw",
-          message: finalize_error?.message || "unknown_error",
-        };
-      }
-    }
+    const ledger_finalization = await settleConstituentLedger({
+      completion: completed,
+      fallbackBurst: burst,
+      result: {
+        ok: true,
+        suppressed: Boolean(post_safety),
+        queued: Boolean(orchestration?.queued || orchestration?.execution?.queued),
+        queue_row_id:
+          orchestration?.queue_row_id || orchestration?.execution?.queue_row_id || null,
+        human_review_required: Boolean(orchestration?.human_review_required),
+        suppression_kind: post_safety ? burst?.safety_kind || null : null,
+      },
+    });
 
     return {
       ok: true,
