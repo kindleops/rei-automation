@@ -133,6 +133,33 @@ function parseNumberWords(tokens, startIdx) {
   return { value, length: consumed };
 }
 
+/** Street-type words that mark the preceding number as an address. */
+const STREET_TYPE_TOKENS = new Set([
+  "st", "street", "ave", "avenue", "rd", "road", "dr", "drive", "ln", "lane",
+  "blvd", "boulevard", "ct", "court", "cir", "circle", "way", "pl", "place",
+  "ter", "terrace", "hwy", "highway", "pkwy", "parkway", "trl", "trail",
+  "unit", "apt", "suite", "ste",
+]);
+
+/**
+ * True when a bare number is positioned like a street number: immediately
+ * followed by a street type ("4157 Pillsbury Ave") or by a capitalized proper
+ * noun ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
+ * numbers carrying no monetary evidence at all.
+ */
+function isAddressAdjacent(text, match) {
+  const after = text.slice(match.index + match[0].length);
+  const next = /^\s*([A-Za-zÀ-ÿ']+)\.?\s*([A-Za-zÀ-ÿ']+)?/.exec(after);
+  if (!next) return false;
+  const first = String(next[1] || "");
+  const second = String(next[2] || "");
+  if (STREET_TYPE_TOKENS.has(first.toLowerCase())) return true;
+  if (STREET_TYPE_TOKENS.has(second.toLowerCase())) return true;
+  // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.
+  if (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first) && !SCALE_WORDS[first.toLowerCase()]) return true;
+  return false;
+}
+
 /** Extract every numeric token (digits or words) with its position + suffix scale. */
 function tokenizeAmounts(text) {
   const amounts = [];
@@ -153,6 +180,15 @@ function tokenizeAmounts(text) {
     const trailing = /^\s*([a-zà-ÿ']+)/i.exec(after);
     const trailingWord = trailing ? trailing[1].toLowerCase() : "";
     if (!suffix && (TIME_UNIT_TOKENS.has(trailingWord) || AREA_UNIT_TOKENS.has(trailingWord))) continue;
+    // A street number is not money. "For 327 Pennsylvania alone 130,000" and
+    // "(331 Pennsylvania)" both put a bare 3-digit number immediately before a
+    // street name; production read 331 as the asking price for a $130,000
+    // property. A number with no currency symbol, no thousands separator and no
+    // scale suffix that is directly followed by a capitalized word or a street
+    // type is an address, not a price.
+    if (!suffix && !hasCurrency && !hadThousandsSeparator && isAddressAdjacent(text, match)) {
+      continue;
+    }
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
 

@@ -1,9 +1,8 @@
 import {
-import {
   authorizeSuppressionMutation,
-  patchAssertsBindingSuppression,
   BINDING_SUPPRESSION_FIELDS,
 } from "@/lib/domain/lead-state/suppression-evidence.js";
+import {
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
