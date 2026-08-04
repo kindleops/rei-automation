@@ -26,6 +26,8 @@ import { createMemorySellerInboundBurstStore } from "@/lib/domain/seller-flow/se
 const T0 = "2026-08-03T22:40:31.039Z";
 const THREAD = "+16128072000";
 const CRON_SECRET = "cron-secret-for-flush-test";
+// Pinned so the suite never depends on ambient environment values.
+const INTERNAL_SECRET = "internal-secret-for-flush-test";
 
 function ms(iso) {
   return new Date(iso).getTime();
@@ -102,13 +104,17 @@ async function seedEligibleBurst({ processResult } = {}) {
 
 function withCronSecret(fn) {
   return async (...args) => {
-    const saved = process.env.CRON_SECRET;
+    const saved_cron = process.env.CRON_SECRET;
+    const saved_internal = process.env.INTERNAL_API_SECRET;
     process.env.CRON_SECRET = CRON_SECRET;
+    process.env.INTERNAL_API_SECRET = INTERNAL_SECRET;
     try {
       return await fn(...args);
     } finally {
-      if (saved === undefined) delete process.env.CRON_SECRET;
-      else process.env.CRON_SECRET = saved;
+      if (saved_cron === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = saved_cron;
+      if (saved_internal === undefined) delete process.env.INTERNAL_API_SECRET;
+      else process.env.INTERNAL_API_SECRET = saved_internal;
     }
   };
 }
@@ -223,12 +229,12 @@ test(
   })
 );
 
-test("POST keeps the pre-existing internal-secret contract", async () => {
+test("POST keeps the pre-existing internal-secret contract", withCronSecret(async () => {
   const { coordinator } = await seedEligibleBurst();
   const response = await handleFlushInboundBurstsRequest(
     makeRequest({
       method: "POST",
-      headers: { "x-internal-api-secret": process.env.INTERNAL_API_SECRET || "test" },
+      headers: { "x-internal-api-secret": INTERNAL_SECRET },
       body: {},
     }),
     {
@@ -243,7 +249,7 @@ test("POST keeps the pre-existing internal-secret contract", async () => {
   const body = await response.json();
   assert.equal(body.caller_type, "internal_secret");
   assert.equal(body.completed_count, 1);
-});
+}));
 
 // ── failure is alerted, never silent ────────────────────────────────────────
 
@@ -313,12 +319,13 @@ test("summarizeFlushResults derives counters from the coordinator's real shape",
     { ok: false, reason: "attempts_exhausted" },
     { ok: false, reason: "no_eligible_burst" },
   ]);
-  assert.equal(counts.eligible_count, 5);
-  assert.equal(counts.claimed_count, 4, "a failed claim is not a claim");
+  assert.equal(counts.eligible_count, 4, "no_eligible_burst is not an eligible burst");
+  assert.equal(counts.claimed_count, 3, "a failed claim is not a claim");
   assert.equal(counts.completed_count, 1);
   assert.equal(counts.suppressed_count, 1);
   assert.equal(counts.queued_count, 1);
   assert.equal(counts.failed_count, 1, "no_eligible_burst is not a failure");
+  assert.equal(counts.no_eligible_burst_count, 1);
 });
 
 // ── the route wires both methods to the shared handler ──────────────────────

@@ -55,14 +55,16 @@ export function authorizeFlushRequest(request, { requireCronAuth, requireInterna
  * claim is the only shape that carries `claim` alongside ok:false.
  */
 export function summarizeFlushResults(results = []) {
-  const list = Array.isArray(results) ? results.filter(Boolean) : [];
+  const all = Array.isArray(results) ? results.filter(Boolean) : [];
+  // "no eligible burst" means there was nothing to work. It is not an eligible
+  // burst, not a claim, and not a failure — counting it inflated eligible_count
+  // and claimed_count on every idle scheduler tick.
+  const list = all.filter((r) => r.reason !== "no_eligible_burst");
   // A failed claim means another worker won the race (or the burst stopped being
   // eligible). That is benign contention, not an operational failure — counting
   // it would alert on normal concurrency.
   const claim_failures = list.filter((r) => r.ok === false && r.claim);
-  const failures = list.filter(
-    (r) => r.ok === false && !r.claim && r.reason !== "no_eligible_burst"
-  );
+  const failures = list.filter((r) => r.ok === false && !r.claim);
   return {
     eligible_count: list.length,
     claimed_count: list.length - claim_failures.length,
@@ -71,6 +73,7 @@ export function summarizeFlushResults(results = []) {
     suppressed_count: list.filter((r) => r.suppressed).length,
     failed_count: failures.length,
     failed_reasons: failures.map((r) => r.reason).slice(0, 10),
+    no_eligible_burst_count: all.length - list.length,
   };
 }
 

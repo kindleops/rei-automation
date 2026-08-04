@@ -239,3 +239,100 @@ test("burst liveness failure is registered as an always-critical P0 code", async
   assert.equal(LAUNCH_CRITICAL_ALERT_CODES.BURST_LIVENESS_FAILURE, "burst_liveness_failure");
   assert.equal(typeof launchAlerts.burstLivenessFailure, "function");
 });
+
+// ── the production entry point must obtain a real client ────────────────────
+
+test("with NO injected supabase the handler resolves the canonical client and scans", async () => {
+  // CodeRabbit finding: GET/POST call the handler with no deps, so passing
+  // `supabase: null` meant every deployed invocation returned
+  // supabase_unconfigured and queried nothing. The production path must resolve
+  // the canonical service-role client itself.
+  const { client, calls } = readOnlySupabase([STUCK_BURST]);
+  let resolver_called = 0;
+  const alerts = [];
+
+  const response = await handleDispositionSloScanRequest(authedRequest(), {
+    findInboundLedgerSlaBreaches: healthyLedgerScan,
+    // deliberately NO `supabase` — mimics the real GET/POST call sites.
+    resolveSupabase: async () => { resolver_called += 1; return client; },
+    now: () => OBSERVED_AT,
+    launchAlerts: {
+      burstLivenessFailure: async (m) => { alerts.push(m); },
+      inboundNoDisposition: async () => {},
+    },
+  });
+
+  const body = await response.json();
+  assert.equal(resolver_called, 1, "the handler must resolve a client when none is injected");
+  assert.equal(body.burst_liveness.ok, true);
+  assert.ok(calls.selects > 0, "the scan must actually query the burst table");
+  assert.ok(body.burst_liveness.violation_count > 0, "the stale burst must be detected");
+  assert.equal(alerts.length, 1, "a stale burst must alert");
+  assert.deepEqual(calls.mutations, [], "the scan must stay read-only");
+});
+
+test("the real GET/POST exports go through the canonical resolver", async () => {
+  const route = await import("@/app/api/internal/inbound/disposition-slo-scan/route.js");
+  assert.equal(typeof route.resolveCanonicalSupabase, "function");
+  // In an environment with no Supabase configuration it must return null rather
+  // than throw — and that null is then treated as an alertable failure.
+  assert.equal(await route.resolveCanonicalSupabase(), null);
+});
+
+test("an unconfigured client is an alertable failure, never a quiet pass", async () => {
+  const alerts = [];
+  const response = await handleDispositionSloScanRequest(authedRequest(), {
+    findInboundLedgerSlaBreaches: healthyLedgerScan,
+    scanBurstLiveness: async () => ({
+      ok: false, reason: "supabase_unconfigured", violation_count: 0,
+    }),
+    launchAlerts: {
+      burstLivenessFailure: async (m) => { alerts.push(m); },
+      inboundNoDisposition: async () => {},
+    },
+  });
+  const body = await response.json();
+  assert.equal(body.burst_liveness.ok, false);
+  assert.equal(alerts.length, 1, "a scan that looked at nothing must alert");
+  assert.equal(alerts[0].scan_failed, true);
+});
+
+test("an open burst older than the lookback window still triggers a violation", async () => {
+  // Non-terminal bursts are never aged out: a burst stuck for days is more
+  // urgent than one stuck for minutes, not less.
+  const ancient = {
+    ...STUCK_BURST,
+    id: "ancient",
+    burst_id: "sib:+15550100009:g1:ancient",
+    first_received_at: "2026-07-01T00:00:00.000Z",
+    eligible_at: "2026-07-01T00:00:20.000Z",
+    hard_close_at: "2026-07-01T00:01:30.000Z",
+  };
+  const { client } = readOnlySupabase([ancient]);
+  const response = await handleDispositionSloScanRequest(authedRequest(), {
+    findInboundLedgerSlaBreaches: healthyLedgerScan,
+    supabase: client,
+    now: () => OBSERVED_AT,
+    launchAlerts: { burstLivenessFailure: async () => {}, inboundNoDisposition: async () => {} },
+  });
+  const body = await response.json();
+  assert.ok(
+    body.burst_liveness.violation_count > 0,
+    "a month-old open burst must remain visible to monitoring"
+  );
+  assert.equal(body.burst_liveness.counts.stale_open, 1);
+});
+
+test("cancelled bursts are terminal, not open_not_eligible", async () => {
+  const { client } = readOnlySupabase([{ ...STUCK_BURST, status: "cancelled", attempt_count: 9 }]);
+  const response = await handleDispositionSloScanRequest(authedRequest(), {
+    findInboundLedgerSlaBreaches: healthyLedgerScan,
+    supabase: client,
+    now: () => OBSERVED_AT,
+    launchAlerts: { burstLivenessFailure: async () => {}, inboundNoDisposition: async () => {} },
+  });
+  const body = await response.json();
+  assert.equal(body.burst_liveness.counts.cancelled, 1);
+  assert.equal(body.burst_liveness.counts.open_not_eligible, 0);
+  assert.equal(body.burst_liveness.violation_count, 0, "a cancelled burst is not a liveness failure");
+});

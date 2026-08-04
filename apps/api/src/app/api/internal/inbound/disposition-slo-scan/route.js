@@ -68,8 +68,16 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   // the ledger while its burst sat open forever. The scanner must inspect burst
   // state too. Read-only: it never mutates or completes a burst.
   const scan_burst_liveness = deps.scanBurstLiveness || scanBurstLiveness;
+  // Production must use the canonical service-role client. Passing null here
+  // made every deployed invocation return supabase_unconfigured and scan
+  // nothing — the watchdog existed but never looked at anything.
+  const resolve_supabase = deps.resolveSupabase || resolveCanonicalSupabase;
+  let burst_supabase = deps.supabase || null;
+  if (!burst_supabase) {
+    burst_supabase = await resolve_supabase();
+  }
   const burst_scan = await scan_burst_liveness({
-    supabase: deps.supabase || null,
+    supabase: burst_supabase,
     now: deps.now ? deps.now() : undefined,
   }).catch((error) => ({
     ok: false,
@@ -83,12 +91,10 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   if (!burst_scan.ok) {
     // A failed burst scan must never read as "no burst problems".
     warn("inbound_disposition_slo.burst_scan_failed", { reason: burst_scan.reason });
-    // Missing table / no supabase are configuration conditions, not stuck
-    // bursts — alerting on them would be noise, not signal.
-    if (
-      burst_scan.reason !== "burst_table_missing" &&
-      burst_scan.reason !== "supabase_unconfigured"
-    ) {
+    // Only a genuinely absent table degrades quietly. An unconfigured client in
+    // production means the scan looked at nothing, which must never be mistaken
+    // for a healthy result.
+    if (burst_scan.reason !== "burst_table_missing") {
       await alerts
         .burstLivenessFailure({ scan_failed: true, scan_failure_reason: burst_scan.reason })
         .catch(() => {});
@@ -117,7 +123,7 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
     // exactly like a healthy system with zero breaches.
     warn("inbound_disposition_slo.scan_failed", { reason: scan.reason });
     if (scan.reason !== "ledger_table_missing") {
-      await launchAlerts
+      await alerts
         .inboundNoDisposition({
           scan_failed: true,
           scan_failure_reason: scan.reason,
@@ -132,7 +138,7 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   }
 
   if (scan.breach_count > 0) {
-    await launchAlerts
+    await alerts
       .inboundNoDisposition({
         breach_count: scan.breach_count,
         stuck_processing_count: scan.stuck_processing.length,
@@ -172,6 +178,22 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
     sla_minutes,
     retry_horizon_minutes,
   });
+}
+
+/**
+ * Canonical server-side service-role client for the production scan path.
+ * Injectable via deps.resolveSupabase so the wiring is testable in an
+ * environment that intentionally has no Supabase configuration.
+ */
+export async function resolveCanonicalSupabase() {
+  try {
+    const { hasSupabaseConfig } = await import("@/lib/supabase/client.js");
+    if (!hasSupabaseConfig()) return null;
+    const { getDefaultSupabaseClient } = await import("@/lib/supabase/default-client.js");
+    return getDefaultSupabaseClient() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(request) {

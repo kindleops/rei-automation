@@ -118,7 +118,8 @@ export function evaluateBurstLiveness(burst, {
     attempt_count >= max_attempts &&
     status !== "failed" &&
     status !== "completed" &&
-    status !== "suppressed"
+    status !== "suppressed" &&
+    status !== "cancelled"
   ) {
     // Retries are spent but the row never reached an explicit terminal state.
     push(BURST_LIVENESS_VIOLATIONS.RETRIES_EXHAUSTED_NOT_TERMINAL, BURST_LIVENESS_SEVERITY.P0, {
@@ -143,6 +144,10 @@ export function classifyBurstState(burst, {
   if (status === "completed") return "completed";
   if (status === "suppressed") return "suppressed";
   if (status === "failed") return "failed";
+  // `cancelled` is a terminal status in the table CHECK constraint. Falling
+  // through to the default bucket would have mislabelled it open_not_eligible
+  // and hidden it from both the metrics and the invariants.
+  if (status === "cancelled") return "cancelled";
 
   if (status === "claimed") {
     const lease_base = ms(burst?.claimed_at) ?? ms(burst?.updated_at);
@@ -168,6 +173,7 @@ export const BURST_METRIC_BUCKETS = Object.freeze([
   "failed",
   "stale_open",
   "stale_claimed",
+  "cancelled",
 ]);
 
 /**
@@ -214,6 +220,9 @@ export function collectBurstMetrics(bursts = [], options = {}) {
 
 export const BURST_LIVENESS_TABLE = "seller_inbound_bursts";
 
+/** Statuses that are still in flight — these are never aged out of monitoring. */
+export const NON_TERMINAL_STATUSES = Object.freeze(["open", "claimed"]);
+
 /**
  * READ-ONLY liveness scan over burst rows. Selects, evaluates, returns — it
  * never completes, retries, deletes, or otherwise mutates a burst, and it never
@@ -236,14 +245,18 @@ export async function scanBurstLiveness({
   if (!supabase) return { ok: false, reason: "supabase_unconfigured", violation_count: 0 };
 
   const since = new Date(new Date(now).getTime() - lookback_minutes * 60_000).toISOString();
+  const COLUMNS =
+    "id,burst_id,thread_key,status,eligible_at,hard_close_at,first_received_at,attempt_count,claimed_at,completed_at,updated_at,safety_latched";
   let rows;
   try {
+    // Unfinished bursts are NEVER aged out: a burst stuck for three days is
+    // more urgent than one stuck for three minutes, and a lookback ceiling
+    // would silently retire the worst cases from monitoring. The lookback
+    // applies only to terminal rows, which are kept solely for metrics.
     const { data, error } = await supabase
       .from(BURST_LIVENESS_TABLE)
-      .select(
-        "id,burst_id,thread_key,status,eligible_at,hard_close_at,first_received_at,attempt_count,claimed_at,completed_at,updated_at,safety_latched"
-      )
-      .gte("first_received_at", since)
+      .select(COLUMNS)
+      .or(`status.in.(${NON_TERMINAL_STATUSES.join(",")}),first_received_at.gte.${since}`)
       .order("eligible_at", { ascending: true })
       .limit(limit);
     if (error) {
