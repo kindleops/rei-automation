@@ -39,6 +39,34 @@
   --lc-accent-rgb: var(--nx-accent-rgb);
   --lc-accent-contrast: var(--nx-bg);
 
+  /* ── §16.1 INTERACTIVE boundaries — 3:1, all 10 themes ────────────────
+     Round 1 measured `--lc-line` at 1.14–1.29:1 and `--lc-line-strong` at
+     1.40–1.88:1 against `--lc-surface-raised` in every theme, i.e. every
+     boundary in the app failed the 3:1 rule. Raising ALL of them would break
+     the locked MAP COMMAND glass language, which depends on near-invisible
+     hairlines.
+
+     Operator decision (round 2): only boundaries the operator has to *act on*
+     are raised — focus rings, selected rows, form fields and pane dividers.
+     Decorative card/panel hairlines keep `--lc-line` / `--lc-glass-border`;
+     that is a recorded, accepted deviation from §16.1.
+
+     `--lc-line-interactive` is derived from `--lc-text-muted` (measured
+     5.36–7.88:1 on every surface in every theme) mixed back toward the surface
+     until it lands just above 3:1. It defines no colour of its own, so all 10
+     themes and 12 accents keep working (R1.2). */
+  --lc-line-interactive: color-mix(in srgb, var(--lc-text-muted) 78%, var(--lc-surface-raised));
+
+  /* Selection and focus share one accent-derived colour so "this is the thing
+     you are on" reads identically everywhere (§6.2). */
+  --lc-line-selected: var(--lc-focus-ring);
+
+  /* §16.2 focus ring colour. Defaults to the accent — but in the `light` theme
+     the raw accent measures 2.43:1 against every surface, so the ring itself
+     failed 3:1. The light override below darkens it toward the text colour,
+     keeping the accent hue while clearing the threshold. */
+  --lc-focus-ring: var(--lc-accent);
+
   /* ── §1 Status — semantic, never raw hex at call sites ─────────────── */
   --lc-positive: var(--nx-success);
   --lc-caution: var(--nx-warning);
@@ -178,6 +206,9 @@
   --lc-accent-soft: var(--nx-accent-soft);
   --lc-accent-rgb: var(--nx-accent-rgb);
   --lc-accent-contrast: var(--nx-bg);
+  --lc-line-interactive: color-mix(in srgb, var(--lc-text-muted) 78%, var(--lc-surface-raised));
+  --lc-line-selected: var(--lc-focus-ring);
+  --lc-focus-ring: var(--lc-accent);
   --lc-positive: var(--nx-success);
   --lc-caution: var(--nx-warning);
   --lc-critical: var(--nx-danger);
@@ -197,6 +228,14 @@
   --lc-glass-blur: var(--nx-shell-glass-blur, 28px);
   --lc-glass-saturate: var(--nx-shell-glass-saturate, 1.6);
   --lc-glass-highlight: var(--nx-glass-inner-highlight, inset 0 1px 0 transparent);
+}
+
+/* §16.1 — `light` is the one theme whose accent fails as a boundary colour
+   (2.43:1 on base, raised and popover, measured round 1). Darken it toward the
+   primary text colour: same hue, ≥3:1. Every other theme keeps the raw accent. */
+:root[data-nexus-theme='light'],
+[data-nexus-theme='light'] {
+  --lc-focus-ring: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-text-primary));
 }
 
 /* ── §3.2 Density modes — set on <html data-lc-density> ────────────────
@@ -254,14 +293,44 @@
 }
 
 /* ── §16.2 Focus visibility ────────────────────────────────────────────
-   Every interactive element gets a visible focus ring: 2px, accent, 2px offset.
+   Every interactive element gets a visible focus ring: 2px, 2px offset, and a
+   colour that clears 3:1 in all 10 themes (see --lc-focus-ring above).
    Scoped to `.lc-*` owned surfaces plus a global baseline for elements that do
    not already opt out. */
 .lc-ui :focus-visible,
 .lc-focus-ring:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus-ring);
   outline-offset: 2px;
   border-radius: var(--lc-radius-sm);
+}
+
+/* ── §16.1 Interactive boundaries — the 3:1 set ────────────────────────
+   Four categories only, per the round-2 operator decision:
+     1. focus rings          — above
+     2. form fields          — anything the operator types or picks into
+     3. selected rows        — the row/option currently acted on
+     4. pane dividers        — §12.4 draggable separators, which are controls
+   Everything else keeps the decorative hairline. */
+.lc-ui input:not([type='checkbox']):not([type='radio']),
+.lc-ui select,
+.lc-ui textarea,
+.lc-field {
+  border-color: var(--lc-line-interactive);
+}
+
+/* §12.1/§12.4 — a split-pane divider is an interactive control with
+   `role="separator"`, not decoration. Any lane's divider inherits 3:1 here. */
+[role='separator'][tabindex],
+[role='separator'][aria-valuenow],
+.lc-pane-divider {
+  background-color: var(--lc-line-interactive);
+}
+
+[role='separator'][tabindex]:focus-visible,
+[role='separator'][aria-valuenow]:focus-visible,
+.lc-pane-divider:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 1px;
 }
 
 /* ── Skip link (§16.6 landmarks / keyboard entry) ─────────────────────── */

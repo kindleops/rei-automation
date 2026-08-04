@@ -103,7 +103,6 @@ import { IntelligencePanel } from './components/IntelligencePanel'
 import { QueuePage } from '../../views/queue/QueuePage'
 import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import type { TemplateActionPayload } from './components/TemplatePopover'
-import { InboxActivityPanel } from './components/InboxActivityPanel'
 import type { MapStyleMode } from '../../views/map/InboxCommandMap'
 import { MAP_VISUAL_PRESET_STORAGE_KEY, normalizeMapVisualPresetId } from '../../views/map/map-visual-presets'
 import {
@@ -267,9 +266,8 @@ import './conversation-header-timeline.css'
 import './conversation-live.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
 import '../../styles/nx-ui-foundation-final.css'
-import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
-import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
-import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
+import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
+import { SHELL_PANEL_OPEN_EVENT } from '../shell/shell-panels'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
@@ -725,7 +723,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarListScrollOffset, setSidebarListScrollOffset] = useState(0)
-  const [topSearchQuery, setTopSearchQuery] = useState('')
   const [buyerFilters, setBuyerFilters] = useState<BuyerMapFilters>(defaultBuyerMapFilters)
   const [selectedBuyerKey, setSelectedBuyerKey] = useState<string | null>(null)
   /**
@@ -1499,22 +1496,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => selectedWorkspaceViews.map((view) => view === 'metrics' ? 'analytics' : view),
     [selectedWorkspaceViews],
   )
-  const topSearchContext = useMemo(() => ({
-    routePath: '/inbox',
-    currentView: activeWorkspaceView,
-    selectedMarket: commandMapMarket || advancedFilters.market || selected?.market || null,
-    activeMapTheme: commandMapTheme,
-    activeFilters: {
-      market: advancedFilters.market || commandMapMarket || '',
-      sourceMode,
-      stageFilter,
-      viewFilter,
-    },
-  }), [activeWorkspaceView, advancedFilters.market, commandMapMarket, commandMapTheme, selected?.market, sourceMode, stageFilter, viewFilter])
-  const {
-    loading: topSearchLoading,
-    groupedResults: topSearchGroups,
-  } = useInboxTopSearch(topSearchQuery, topSearchContext)
+  /* The inbox no longer runs a second, narrower search of its own. The rail's
+     ⌘K palette covers the same providers plus app/filter/map actions, and this
+     component already publishes GLOBAL_COMMAND_CONTEXT_EVENT (below) so the
+     palette gets the inbox's market, view and filter context. */
 
   const autonomyModel = useMemo(
     () => buildAutonomousEngineModel({
@@ -1907,30 +1892,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const openGlobalCommand = useCallback((initialQuery = '') => {
     window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: { initialQuery } }))
-  }, [])
-
-  const handleExecuteTopSearchResult = useCallback((result: CommandResult) => {
-    if (result.route && result.route !== window.location.pathname) {
-      pushRoutePath(result.route)
-    }
-
-    if (result.location) {
-      saveRecentCommandLocation(result.location)
-    }
-
-    const eventName = result.action?.eventName || GLOBAL_COMMAND_ACTION_EVENT
-    if (result.payload || result.action?.eventName) {
-      window.dispatchEvent(new CustomEvent(eventName, {
-        detail: {
-          ...result.payload,
-          route: result.route,
-          resultId: result.id,
-          resultType: result.type,
-        },
-      }))
-    }
-
-    setTopSearchQuery('')
   }, [])
 
   useEffect(() => {
@@ -3206,15 +3167,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const tag = target?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        openGlobalCommand()
-        return
-      }
+      /* ⌘K is NOT bound here. It was — and `app/CommandCenterApp` bound it too,
+         both calling preventDefault(), so on inbox-shell routes one keypress ran
+         two handlers: the shell toggled the palette closed and this one
+         immediately reopened it, making the shortcut unable to dismiss. The
+         shell is the single owner (constitution §18: one owner per behaviour).
 
+         ⌘⇧F used to focus the inbox search input. That input is gone — search
+         is the palette now — so the shortcut opens the palette instead of
+         dispatching `nexus:focus-search` at a field that no longer exists. */
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
-        window.dispatchEvent(new CustomEvent('nexus:focus-search'))
+        openGlobalCommand()
         return
       }
 
@@ -4022,6 +3986,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         handleSelect(threadId)
         return
       }
+      /* The shell's Live Activity panel identifies rows by thread KEY and has no
+         way to resolve one to a thread id — only the inbox holds the list. */
+      if (kind === 'focus_thread_key') {
+        const threadKey = typeof detail.threadKey === 'string' ? detail.threadKey : ''
+        if (!threadKey) return
+        const match = threads.find((thread) => thread.threadKey === threadKey)
+        if (!match) return
+        handleFocusWorkspaceView('thread')
+        handleSelect(match.id)
+        return
+      }
       if (kind === 'set_inbox_source_mode' && sourceModeFromEvent) {
         setSourceMode(sourceModeFromEvent)
         return
@@ -4069,7 +4044,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
     return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
-  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, requestBucket, searchQuery, setActiveContext, setSourceMode, stageFilter])
+  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, requestBucket, searchQuery, setActiveContext, setSourceMode, stageFilter, threads])
 
   const handleMapSellerContext = useCallback((context: {
     propertyId?: string
@@ -4418,17 +4393,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const commands: InboxCmd[] = [
       {
         id: 'focus-search',
-        label: 'Focus Search',
+        label: 'Search sellers, buyers, addresses and conversations',
         category: 'Navigation',
-        shortcut: 'Cmd+Shift+F',
-        keywords: ['find', 'search', 'seller', 'address'],
-        action: () => window.dispatchEvent(new CustomEvent('nexus:focus-search')),
+        shortcut: 'Cmd+K',
+        keywords: ['find', 'search', 'seller', 'address', 'command', 'palette'],
+        action: () => openGlobalCommand(),
       },
       {
         id: 'open-ai',
         label: 'Open AI Assist',
         category: 'AI',
-        shortcut: 'Cmd+K',
+        /* Was labelled Cmd+K, which ⌘K has never done — ⌘K opens the command
+           palette. The hint is removed rather than left lying (§0.1). */
         keywords: ['copilot', 'assistant', 'draft'],
         action: () => setActiveOverlay('ai'),
       },
@@ -4480,10 +4456,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       },
       {
         id: 'activity-feed',
-        label: 'Open Activity Feed',
+        label: 'Open Live Activity',
         category: 'Navigation',
-        keywords: ['activity', 'timeline', 'audit'],
-        action: () => setActiveOverlay('activity'),
+        keywords: ['activity', 'timeline', 'audit', 'heartbeat'],
+        /* Live Activity is a shell panel now — one owner, reachable from all
+           15 routes. The inbox asks for it, it does not mount it. */
+        action: () => window.dispatchEvent(
+          new CustomEvent(SHELL_PANEL_OPEN_EVENT, { detail: { id: 'live-activity' } }),
+        ),
       },
       {
         id: 'queue-hot-leads',
@@ -4608,6 +4588,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     handleStatusChange,
     handleToggleStar,
     insertAiSuggestion,
+    openGlobalCommand,
     selected,
     setActiveOverlay,
     updateAutonomyControl,
@@ -5241,11 +5222,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     >
       <NexusTopBar
         onSelectSearchResult={handleSelect}
-        topSearchQuery={topSearchQuery}
-        onTopSearchQueryChange={setTopSearchQuery}
-        topSearchGroups={topSearchGroups}
-        topSearchLoading={topSearchLoading}
-        onExecuteTopSearchResult={handleExecuteTopSearchResult}
         selectedThread={workspaceThread}
         isSuppressed={selectedSuppressed}
         notificationCount={data.unreadCount}
@@ -5327,7 +5303,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onOpenAi={() => setActiveOverlay('ai')}
         onOpenKeys={() => setActiveOverlay('keys')}
         onOpenKpis={() => pushRoutePath('/analytics')}
-        onOpenActivity={() => setActiveOverlay('activity')}
         onOpenTasks={() => handleNavigateInboxView('needs_review')}
         onResetLayout={handleResetWorkspaceLayout}
         dryRun={autonomyControls.dryRun}
@@ -5551,17 +5526,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onApply={handleApplyAdvancedFilters}
       />
 
-      {activeOverlay === 'activity' && (
-        <InboxActivityPanel
-          threadKey={selected?.threadKey}
-          onClose={() => setActiveOverlay(null)}
-          onViewThread={(key) => {
-            const t = threads.find((thread) => thread.threadKey === key)
-            if (t) handleSelect(t.id)
-            setActiveOverlay(null)
-          }}
-        />
-      )}
+      {/* Live Activity moved to the shell rail — modules/shell/shell-panels.ts.
+          It is one panel with one owner, reachable from every route instead of
+          only this one. */}
 
       {aiOpen
         ? createPortal(

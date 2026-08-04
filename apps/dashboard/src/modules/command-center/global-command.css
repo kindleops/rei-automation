@@ -361,3 +361,25 @@
     display: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Lane A round 2 — §16.1 interactive boundaries.
+   The palette is now the app's ONE search surface, so its field divider, its
+   selected row and its focus ring carry the 3:1 boundary set. Everything else
+   in this file is left as-is; only the four functional categories move.
+   Tokens only — no hex, no !important.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gcc-search {
+  border-bottom-color: var(--lc-line-interactive);
+}
+
+.gcc-item.is-active {
+  border-color: var(--lc-line-selected);
+}
+
+.gcc-search__input:focus-visible,
+.gcc-item:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 2px;
+}

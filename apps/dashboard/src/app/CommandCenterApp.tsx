@@ -435,7 +435,13 @@ export const CommandCenterApp = () => {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+      /* THE single ⌘K owner. `modules/inbox/InboxPage` used to bind it as well,
+         both handlers calling preventDefault(), so on inbox-shell routes one
+         keypress ran two: this one toggled the palette shut and the inbox one
+         immediately reopened it. That binding is gone; anything that wants the
+         palette dispatches GLOBAL_COMMAND_OPEN_EVENT, which this component is
+         the only listener for. */
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         if (cmdOpen) closeCmd()
         else openCmd()

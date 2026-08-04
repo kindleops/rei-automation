@@ -1,12 +1,19 @@
-import { useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { pushRoutePath, useRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
-import { Dropdown, Modal, Tooltip, type DropdownItem } from '../../shared/ui'
+import { Dropdown, Drawer, Modal, Skeleton, Tooltip, type DropdownItem } from '../../shared/ui'
 import { useAuth } from '../../components/auth/AuthProvider'
+import { ErrorBoundary } from '../../shared/ErrorBoundary'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import { AppearanceMenu } from './AppearanceMenu'
 import { SHELL_NAV_ITEMS, findShellNavItem } from './shell-nav'
+import {
+  SHELL_PANELS,
+  SHELL_PANEL_OPEN_EVENT,
+  type ShellPanelId,
+  type ShellPanelOpenDetail,
+} from './shell-panels'
 import './shell-rail.css'
 
 /**
@@ -34,12 +41,79 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
   const navRef = useRef<HTMLButtonElement | null>(null)
   const appearanceRef = useRef<HTMLButtonElement | null>(null)
   const accountRef = useRef<HTMLButtonElement | null>(null)
+  const opsIntelRef = useRef<HTMLButtonElement | null>(null)
+  const activityRef = useRef<HTMLButtonElement | null>(null)
+  const panelTriggerRefs = useMemo(
+    () => ({ 'operational-intelligence': opsIntelRef, 'live-activity': activityRef }) as const,
+    [],
+  )
 
   const [openSurface, setOpenSurface] = useState<'more' | 'nav' | 'appearance' | 'account' | null>(null)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const close = () => setOpenSurface(null)
   const toggle = (surface: 'more' | 'nav' | 'appearance' | 'account') =>
     setOpenSurface((current) => (current === surface ? null : surface))
+
+  /* ── Shell panels (§11.8: one at a time) ───────────────────────────────
+     The rail is the ONE owner of this state. Anything else that wants a panel
+     dispatches SHELL_PANEL_OPEN_EVENT — see modules/shell/shell-panels.ts. */
+  const [openPanel, setOpenPanel] = useState<ShellPanelId | null>(null)
+  const closePanel = useCallback(() => setOpenPanel(null), [])
+
+  const togglePanel = useCallback((id: ShellPanelId) => {
+    setOpenSurface(null)
+    setOpenPanel((current) => (current === id ? null : id))
+  }, [])
+
+  useEffect(() => {
+    const handle = (event: Event) => {
+      const detail = (event as CustomEvent<ShellPanelOpenDetail>).detail
+      if (!detail?.id) return
+      setOpenSurface(null)
+      setOpenPanel(detail.open === false ? null : detail.id)
+    }
+    window.addEventListener(SHELL_PANEL_OPEN_EVENT, handle as EventListener)
+    return () => window.removeEventListener(SHELL_PANEL_OPEN_EVENT, handle as EventListener)
+  }, [])
+
+  /** §11.10 — overlays close on route change. */
+  useEffect(() => {
+    setOpenPanel(null)
+    setOpenSurface(null)
+  }, [routePath])
+
+  /** Focus returns to the trigger the panel was opened from (§16.3). Panels
+   *  rendered with `surface: 'self'` cannot do this themselves. */
+  const restorePanelFocus = useCallback(
+    (id: ShellPanelId) => {
+      closePanel()
+      // On mobile the panels are opened from the account menu, so fall back to
+      // the control that is actually on screen. Focus must never land on <body>.
+      const trigger = panelTriggerRefs[id]?.current ?? accountRef.current
+      if (trigger && document.contains(trigger)) {
+        requestAnimationFrame(() => trigger.focus())
+      }
+    },
+    [closePanel, panelTriggerRefs],
+  )
+
+  const openCommandPalette = useCallback((initialQuery = '') => {
+    window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: { initialQuery } }))
+  }, [])
+
+  /** §11.10 — Esc closes the open panel and returns focus to its trigger. The
+   *  shell does this for BOTH surface modes so a `surface: 'self'` body, which
+   *  paints its own chrome, never has to reimplement dismissal. */
+  useEffect(() => {
+    if (!openPanel) return
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      restorePanelFocus(openPanel)
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [openPanel, restorePanelFocus])
 
   const active = findShellNavItem(routePath)
   const roomLabel = active?.room ?? routeTitle?.replace(/^NEXUS \| /, '') ?? 'Command Center'
@@ -72,6 +146,19 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
 
   const accountItems = useMemo<DropdownItem[]>(
     () => [
+      /* §15.4 — mobile is a recomposition, not a hidden desktop. At 390px the
+         rail cannot hold five 44px controls next to the room name without
+         clipping them, so the two panel triggers fold into this menu. They stay
+         reachable on all 15 routes; they are one tap deeper, not gone. */
+      ...(isMobile
+        ? SHELL_PANELS.map((panel) => ({
+            id: panel.id,
+            label: panel.label,
+            group: 'Panels',
+            active: openPanel === panel.id,
+            onSelect: () => togglePanel(panel.id),
+          }))
+        : []),
       {
         id: 'shortcuts',
         label: 'Keyboard shortcuts',
@@ -79,9 +166,9 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
       },
       {
         id: 'command',
-        label: 'Command palette',
+        label: 'Search and commands',
         meta: '⌘K',
-        onSelect: () => window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT)),
+        onSelect: () => openCommandPalette(),
       },
       {
         id: 'sign-out',
@@ -90,7 +177,7 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
         onSelect: () => void auth.signOut(),
       },
     ],
-    [auth],
+    [auth, openCommandPalette, isMobile, openPanel, togglePanel],
   )
 
   const operatorEmail = auth.user?.email ?? null
@@ -213,6 +300,60 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
       </nav>
 
       <div className="lc-rail__actions">
+        {/* §0.1 truthful labels — this control opens the command palette, which
+            is where search now lives. It replaces the always-visible inbox
+            search input whose <kbd>CMD+K</kbd> hint pointed at a shortcut that
+            never focused it. There is one search entry point and it says so. */}
+        {!isMobile ? (
+          <button
+            type="button"
+            className="lc-rail__search"
+            onClick={() => openCommandPalette()}
+            aria-keyshortcuts="Meta+K Control+K"
+            aria-label="Search sellers, buyers, addresses, locations and conversations, or run a command"
+          >
+            <span className="lc-rail__search-icon" aria-hidden>
+              <Icon name="search" size={14} />
+            </span>
+            <span className="lc-rail__search-label">Search or run a command</span>
+            <span className="lc-rail__search-keys" aria-hidden>
+              <kbd>⌘</kbd>
+              <kbd>K</kbd>
+            </span>
+          </button>
+        ) : (
+          <Tooltip label="Search or run a command">
+            <button
+              type="button"
+              className="lc-rail__icon-btn"
+              onClick={() => openCommandPalette()}
+              aria-keyshortcuts="Meta+K Control+K"
+              aria-label="Search sellers, buyers, addresses, locations and conversations, or run a command"
+            >
+              <Icon name="search" size={15} />
+            </button>
+          </Tooltip>
+        )}
+
+        {/* Shell panel slots — Lane F fills the bodies, the rail owns these
+            triggers and the open state. See modules/shell/shell-panels.ts.
+            Below `md` they move into the account menu (see accountItems). */}
+        {(isMobile ? [] : SHELL_PANELS).map((panel) => (
+          <Tooltip key={panel.id} label={`${panel.label} — ${panel.description}`}>
+            <button
+              ref={panelTriggerRefs[panel.id]}
+              type="button"
+              className={cls('lc-rail__icon-btn', openPanel === panel.id && 'is-active')}
+              aria-label={panel.label}
+              aria-haspopup="dialog"
+              aria-expanded={openPanel === panel.id}
+              onClick={() => togglePanel(panel.id)}
+            >
+              <Icon name={panel.icon} size={15} />
+            </button>
+          </Tooltip>
+        ))}
+
         <Tooltip label="Appearance — theme, accent, density">
           <button
             ref={appearanceRef}
@@ -299,6 +440,56 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
             </div>
           </dl>
         </Modal>
+
+        {/* ── Shell panel mount points ──────────────────────────────────────
+            Two render paths, both live, so Lane F can move a slot from
+            `surface: 'self'` to `surface: 'drawer'` by changing one word in
+            shell-panels.ts and deleting its own chrome. */}
+        {SHELL_PANELS.map((panel) => {
+          const isOpen = openPanel === panel.id
+          const Body = panel.Component
+          const props = {
+            open: isOpen,
+            onClose: () => restorePanelFocus(panel.id),
+            routePath,
+            isMobile,
+            anchorRef: panelTriggerRefs[panel.id],
+            titleId: `lc-shell-panel-${panel.id}`,
+          }
+
+          if (panel.surface === 'drawer') {
+            return (
+              <Drawer
+                key={panel.id}
+                open={isOpen}
+                onClose={() => restorePanelFocus(panel.id)}
+                title={panel.label}
+                description={panel.description}
+                side={isMobile ? 'bottom' : 'right'}
+                restoreFocusRef={panelTriggerRefs[panel.id]}
+              >
+                <ErrorBoundary label={panel.label} resetKey={`${panel.id}:${routePath}`}>
+                  <Suspense fallback={<Skeleton rows={6} rowHeight={28} label={panel.label} />}>
+                    <Body {...props} />
+                  </Suspense>
+                </ErrorBoundary>
+              </Drawer>
+            )
+          }
+
+          if (!isOpen) return null
+
+          return (
+            /* §10.2 — a panel failure is scoped to the panel. Without this a
+               throw inside a lazily-loaded body unmounts the whole rail and the
+               operator loses navigation, Appearance and the palette trigger. */
+            <ErrorBoundary key={panel.id} label={panel.label} resetKey={`${panel.id}:${routePath}`}>
+              <Suspense fallback={null}>
+                <Body {...props} />
+              </Suspense>
+            </ErrorBoundary>
+          )
+        })}
       </div>
     </header>
   )

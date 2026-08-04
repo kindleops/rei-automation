@@ -21,7 +21,9 @@ export type DockSurface =
 export interface MobileCommandDockProps {
   activeSurface: DockSurface
   onSurfaceChange: (surface: DockSurface) => void
-  kpiControl: ReactNode
+  /** Optional glanceable control. Operational Intelligence itself is a SHELL
+   *  panel now (modules/shell/shell-panels.ts) with one trigger in the rail. */
+  kpiControl?: ReactNode
   workspaceActive?: boolean
   queueStatus?: 'healthy' | 'warning' | 'critical' | 'unknown'
   searchActive?: boolean
@@ -69,9 +71,11 @@ export const MobileCommandDock = ({
       <div className="nx-mobile-command-dock__inner nx-liquid-surface">
         <span className="nx-mobile-command-dock__sheen" aria-hidden="true" />
         <span className="nx-mobile-command-dock__rim" aria-hidden="true" />
-        <div className="nx-mobile-command-dock__slot nx-mobile-command-dock__slot--kpi">
-          {kpiControl}
-        </div>
+        {kpiControl ? (
+          <div className="nx-mobile-command-dock__slot nx-mobile-command-dock__slot--kpi">
+            {kpiControl}
+          </div>
+        ) : null}
 
         <button
           type="button"

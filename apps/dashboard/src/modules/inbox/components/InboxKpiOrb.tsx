@@ -550,7 +550,23 @@ function PipelineSection({ kpis }: { kpis: KpiData }) {
 
 const HOVER_CLOSE_MS = 140
 
-export const InboxKpiOrb = () => {
+/**
+ * Optional CONTROLLED mode, added by Lane A so the shell can own the entry
+ * point to Operational Intelligence on all 15 routes without this 945-line
+ * component being rebuilt or duplicated. Passing `hideTrigger` suppresses the
+ * orb and hands open/close to the caller; `anchorRef` is what the desktop
+ * popover positions against. Omit all of them and the component behaves exactly
+ * as before (the inbox toolbar and the mobile dock still use it that way).
+ */
+export interface InboxKpiOrbProps {
+  hideTrigger?: boolean
+  open?: boolean
+  onClose?: () => void
+  anchorRef?: React.RefObject<HTMLElement | null>
+}
+
+export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: InboxKpiOrbProps = {}) => {
+  const isControlled = typeof open === 'boolean'
   const { isMobile } = useBreakpoint()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dashboardRef = useRef<HTMLDivElement | null>(null)
@@ -573,7 +589,7 @@ export const InboxKpiOrb = () => {
     return () => media.removeEventListener('change', apply)
   }, [])
 
-  const kpiPanelActive = isOpen || isPinned
+  const kpiPanelActive = isControlled ? Boolean(open) : isOpen || isPinned
   const useDrawerPanel = isMobile || isTouchUi
   const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
   const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
@@ -615,7 +631,8 @@ export const InboxKpiOrb = () => {
   }, [isPinned])
 
   const updateDashboardPosition = useCallback(() => {
-    const anchor = containerRef.current?.getBoundingClientRect()
+    const anchorEl = anchorRef?.current ?? containerRef.current
+    const anchor = anchorEl?.getBoundingClientRect()
     const panel = dashboardRef.current
     if (!anchor) return
 
@@ -631,7 +648,7 @@ export const InboxKpiOrb = () => {
       top: anchor.bottom + gap,
       left,
     })
-  }, [])
+  }, [anchorRef])
 
   useLayoutEffect(() => {
     if (!kpiPanelActive || useDrawerPanel) {
@@ -656,13 +673,20 @@ export const InboxKpiOrb = () => {
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current)
   }, [])
 
+  /* Uncontrolled desktop closes on hover-out. Everything else — touch, and the
+     shell-controlled mode where there is no orb to hover off — closes on an
+     outside pointer press (§11.10). */
   useEffect(() => {
-    if (!useDrawerPanel || !kpiPanelActive || isPinned) return
+    if (!kpiPanelActive) return
+    if (!useDrawerPanel && !isControlled) return
+    if (isPinned && !isControlled) return
     const handlePointer = (event: Event) => {
       const target = event.target as Node
       if (containerRef.current?.contains(target)) return
       if (dashboardRef.current?.contains(target)) return
-      setIsOpen(false)
+      if (anchorRef?.current?.contains(target)) return
+      if (isControlled) onClose?.()
+      else setIsOpen(false)
     }
     window.addEventListener('mousedown', handlePointer)
     window.addEventListener('touchstart', handlePointer, { passive: true })
@@ -670,12 +694,13 @@ export const InboxKpiOrb = () => {
       window.removeEventListener('mousedown', handlePointer)
       window.removeEventListener('touchstart', handlePointer)
     }
-  }, [useDrawerPanel, kpiPanelActive, isPinned])
+  }, [useDrawerPanel, kpiPanelActive, isPinned, isControlled, onClose, anchorRef])
 
   const closePanel = useCallback(() => {
     setIsOpen(false)
     setIsPinned(false)
-  }, [])
+    onClose?.()
+  }, [onClose])
 
   const handleOrbClick = useCallback(() => {
     if (useDrawerPanel) {
@@ -881,12 +906,34 @@ export const InboxKpiOrb = () => {
         flexDirection: 'column',
         overflow: 'hidden',
       }}
-      onMouseEnter={openPanel}
-      onMouseLeave={scheduleClose}
+      onMouseEnter={isControlled ? undefined : openPanel}
+      onMouseLeave={isControlled ? undefined : scheduleClose}
     >
       {dashboardBody}
     </div>
   ) : null
+
+  /* Shell-controlled, trigger-less: render the panel only. The rail owns the
+     button, so no orb and no hover container is emitted here. */
+  const surface = useDrawerPanel ? (
+    isMobile ? (
+      <MobileSheet open={kpiPanelActive} title="Operational Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
+        <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+          {dashboardBody}
+        </div>
+      </MobileSheet>
+    ) : (
+      <CommandDrawer open={kpiPanelActive} title="Operational Intelligence" onClose={closePanel} fullWidth>
+        <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+          {dashboardBody}
+        </div>
+      </CommandDrawer>
+    )
+  ) : typeof document !== 'undefined' && dashboardPopover ? (
+    createPortal(dashboardPopover, document.body)
+  ) : null
+
+  if (hideTrigger) return surface
 
   return (
     <div
@@ -901,7 +948,7 @@ export const InboxKpiOrb = () => {
         role="button"
         tabIndex={0}
         aria-expanded={kpiPanelActive}
-        aria-label="KPI Intelligence"
+        aria-label="Operational Intelligence"
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
@@ -921,25 +968,7 @@ export const InboxKpiOrb = () => {
         </div>
       </div>
 
-      {useDrawerPanel ? (
-        isMobile ? (
-          <MobileSheet open={kpiPanelActive} title="KPI Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
-            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-              {dashboardBody}
-            </div>
-          </MobileSheet>
-        ) : (
-          <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
-            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-              {dashboardBody}
-            </div>
-          </CommandDrawer>
-        )
-      ) : (
-        typeof document !== 'undefined' && dashboardPopover
-          ? createPortal(dashboardPopover, document.body)
-          : null
-      )}
+      {surface}
     </div>
   )
 }

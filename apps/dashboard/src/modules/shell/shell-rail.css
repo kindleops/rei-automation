@@ -24,9 +24,11 @@
 
 /* ── Identity — ONE aligned line, not a four-label stack ─────────────── */
 
+/* The room name is the only elastic thing in the rail: it must give way so the
+   right-hand controls are never clipped off-screen (§15.2 zero overflow). */
 .lc-rail__identity {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   gap: var(--lc-space-2);
   align-items: center;
   min-width: 0;
@@ -45,7 +47,7 @@
 }
 
 .lc-rail__brand:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus-ring);
   outline-offset: 2px;
   border-radius: var(--lc-radius-sm);
 }
@@ -77,6 +79,8 @@
 }
 
 .lc-rail__room {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: var(--lc-text-base);
   font-weight: var(--lc-weight-heading);
@@ -125,14 +129,16 @@
 }
 
 .lc-rail__nav-item:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus-ring);
   outline-offset: 2px;
 }
 
+/* §16.1 — the active workspace is a selected row: 3:1 boundary, not the
+   1.4–1.88:1 decorative `--lc-line-strong` it used to carry. */
 .lc-rail__nav-item.is-active {
   color: var(--lc-text-primary);
   background: var(--lc-accent-soft);
-  border-color: var(--lc-line-strong);
+  border-color: var(--lc-line-selected);
 }
 
 .lc-rail__nav-icon {
@@ -149,6 +155,90 @@
   gap: var(--lc-space-2);
   align-items: center;
   margin-left: auto;
+}
+
+/* ── Command palette trigger ──────────────────────────────────────────
+   Replaces the always-visible inbox search input. It is a BUTTON, not a field:
+   the palette is where typing happens, so nothing here may imply otherwise. */
+
+.lc-rail__search {
+  display: inline-flex;
+  flex: 0 1 auto;
+  gap: var(--lc-space-2);
+  align-items: center;
+  height: var(--lc-space-6);
+  min-width: 0;
+  padding: 0 var(--lc-space-2);
+  font-family: inherit;
+  font-size: var(--lc-text-xs);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-muted);
+  white-space: nowrap;
+  background: var(--lc-field-bg);
+  /* §16.1 — it reads as a field, so it carries the 3:1 field boundary. */
+  border: 1px solid var(--lc-line-interactive);
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: color var(--lc-dur-1) var(--lc-ease-move),
+    border-color var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-rail__search:hover {
+  color: var(--lc-text-primary);
+  border-color: var(--lc-line-selected);
+}
+
+.lc-rail__search:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 2px;
+}
+
+.lc-rail__search-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.lc-rail__search-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lc-rail__search-keys {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-1);
+  align-items: center;
+  margin-left: var(--lc-space-2);
+}
+
+.lc-rail__search-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--lc-space-4);
+  height: var(--lc-space-4);
+  padding: 0 var(--lc-space-1);
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-2xs);
+  color: var(--lc-text-muted);
+  background: var(--lc-control-bg);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-xs);
+}
+
+/* The label goes first when the rail runs out of room; the icon and the
+   shortcut keep the control identifiable (§15.4 — recompose, do not hide). */
+@media (max-width: 1279px) {
+  .lc-rail__search-label,
+  .lc-rail__search-keys {
+    display: none;
+  }
+
+  .lc-rail__search {
+    justify-content: center;
+    width: var(--lc-space-6);
+    padding: 0;
+  }
 }
 
 .lc-rail__icon-btn {
@@ -174,7 +264,7 @@
 
 .lc-rail__icon-btn:focus-visible,
 .lc-rail__avatar:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus-ring);
   outline-offset: 2px;
 }
 
@@ -196,7 +286,7 @@
 
 .lc-rail__avatar:hover,
 .lc-rail__avatar.is-active {
-  border-color: var(--lc-accent);
+  border-color: var(--lc-line-selected);
 }
 
 .lc-rail__account-header {
@@ -237,6 +327,21 @@
 
 .lc-rail.is-mobile .lc-rail__room {
   font-size: var(--lc-text-sm);
+}
+
+/* Mobile: the workspace switcher is icon-only so identity keeps a readable
+   width. Its accessible name comes from the button, not the visible text. */
+.lc-rail.is-mobile .lc-rail__more .lc-rail__nav-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.lc-rail.is-mobile .lc-rail__more {
+  padding: 0 var(--lc-space-2);
 }
 
 /* The mobile command dock is fixed at y=0 with its own z-layer; sit beneath it
@@ -328,13 +433,13 @@
 
 .lc-appearance__theme.is-active {
   color: var(--lc-text-primary);
-  border-color: var(--lc-accent);
+  border-color: var(--lc-line-selected);
 }
 
 .lc-appearance__theme:focus-visible,
 .lc-appearance__accent:focus-visible,
 .lc-appearance__toggle:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus-ring);
   outline-offset: 2px;
 }
 
@@ -390,7 +495,7 @@
 }
 
 .lc-appearance__accent.is-active {
-  border-color: var(--lc-accent);
+  border-color: var(--lc-line-selected);
 }
 
 .lc-appearance__accent-dot {
@@ -414,7 +519,8 @@
   font-size: var(--lc-text-xs);
   color: var(--lc-text-muted);
   background: transparent;
-  border: 1px solid var(--lc-line);
+  /* §16.1 — a segmented control is a form field: 3:1. */
+  border: 1px solid var(--lc-line-interactive);
   border-radius: var(--lc-radius-sm);
   cursor: pointer;
   transition: color var(--lc-dur-1) var(--lc-ease-move),
@@ -424,5 +530,5 @@
 .lc-appearance__toggle.is-active {
   color: var(--lc-text-primary);
   background: var(--lc-accent-soft);
-  border-color: var(--lc-accent);
+  border-color: var(--lc-line-selected);
 }
