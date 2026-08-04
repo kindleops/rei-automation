@@ -1048,11 +1048,28 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         // burst failure is alarmed independently by the burst liveness scan, so
         // nothing is unwatched. Constituent rows are finalized for real when
         // the burst completes.
-        await runtimeDeps.markInboundAwaitingBurst({
+        const marked = await runtimeDeps.markInboundAwaitingBurst({
           idempotency_key,
           burst_id: resolved.detail?.burst_id || null,
           detail: resolved.detail,
+          processing_run_id: claim?.processing_run_id || null,
         });
+        if (marked?.ok === false) {
+          // The row would sit at status='processing' with no marker: invisible
+          // to burst finalization AND indistinguishable from a silent drop.
+          // Record the failure loudly rather than returning success.
+          await recordDispositionOrAlert({
+            ledger_id: ledger.ledger_id || null,
+            idempotency_key,
+            disposition: TERMINAL_DISPOSITIONS.FAILED_RETRIABLE,
+            detail: { awaiting_burst_marker_failed: true, reason: marked.reason || null },
+            latency_ms: Date.now() - started_at_ms,
+          });
+          if (result && typeof result === "object") {
+            result.terminal_disposition = TERMINAL_DISPOSITIONS.FAILED_RETRIABLE;
+          }
+          return result;
+        }
         if (result && typeof result === "object") {
           result.terminal_disposition = null;
           result.pending_disposition = resolved.disposition;

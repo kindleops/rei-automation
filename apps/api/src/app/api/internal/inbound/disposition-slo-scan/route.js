@@ -170,7 +170,10 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   });
 
   return NextResponse.json({
-    ok: true,
+    // A burst scan that did not run means half the watchdog is blind; the
+    // response must not claim an unqualified healthy result.
+    ok: burst_scan.ok !== false,
+    burst_scan_ok: burst_scan.ok !== false,
     breach_count: scan.breach_count,
     burst_liveness: burst_scan,
     stuck_processing: scan.stuck_processing,

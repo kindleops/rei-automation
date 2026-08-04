@@ -474,7 +474,7 @@ export const AWAITING_BURST_DETAIL_KEY = "awaiting_burst_finalization";
  * Never stores the seller's message body.
  */
 export async function markInboundAwaitingBurst(
-  { idempotency_key, burst_id = null, detail = {} } = {},
+  { idempotency_key, burst_id = null, detail = {}, processing_run_id = null } = {},
   deps = {}
 ) {
   const key = String(idempotency_key ?? "").trim();
@@ -502,7 +502,10 @@ export async function markInboundAwaitingBurst(
         updated_at: new Date().toISOString(),
       })
       .eq("idempotency_key", key)
-      .eq("status", "processing");
+      .eq("status", "processing")
+      // Fence to the claim that is actually processing this attempt, so a
+      // stale worker cannot stamp pendency onto a reclaimed row.
+      .eq("processing_run_id", processing_run_id);
     if (error) {
       if (tableMissing(error)) return { ok: false, reason: "ledger_table_missing" };
       warn("inbound_ledger.awaiting_burst_write_failed", { error: error.message });
@@ -533,6 +536,12 @@ export async function findInboundLedgerSlaBreaches(
       )
       .eq("status", "processing")
       .lt("received_at", processing_cutoff)
+      // Exclude parked rows in the QUERY: post-filtering after .limit() lets a
+      // backlog of awaiting-burst rows consume the whole page and starve the
+      // genuinely stuck ones out of the scan.
+      .or(
+        `disposition_detail->>${AWAITING_BURST_DETAIL_KEY}.is.null,disposition_detail->>${AWAITING_BURST_DETAIL_KEY}.neq.true`
+      )
       .order("received_at", { ascending: true })
       .limit(limit);
     if (stuck_error) throw stuck_error;

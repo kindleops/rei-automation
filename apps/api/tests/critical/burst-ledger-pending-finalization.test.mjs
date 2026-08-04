@@ -42,6 +42,7 @@ function ledgerSupabase(rows, { updateError = null, selectError = null } = {}) {
           select: () => node,
           eq: (k, v) => { filters[k] = v; return node; },
           lt: () => node,
+          or: () => node,
           order: () => node,
           limit: async () => resolveRead(),
           update: (patch) => { state.updates.push(patch); return writeNode(); },
@@ -72,7 +73,7 @@ function ledgerSupabase(rows, { updateError = null, selectError = null } = {}) {
 test("burst pendency is recorded without terminalizing the row", async () => {
   const { client, state } = ledgerSupabase([]);
   const outcome = await markInboundAwaitingBurst(
-    { idempotency_key: "textgrid_inbound:SM1", burst_id: BURST_ID, detail: { burst_id: BURST_ID } },
+    { idempotency_key: "textgrid_inbound:SM1", burst_id: BURST_ID, detail: { burst_id: BURST_ID }, processing_run_id: "run-1" },
     { supabase: client }
   );
   assert.equal(outcome.ok, true);
@@ -94,6 +95,7 @@ test("the seller's message body is never written to the ledger", async () => {
       idempotency_key: "textgrid_inbound:SM2",
       burst_id: BURST_ID,
       detail: { burst_id: BURST_ID, message_body: "Yeah", raw_text: "Yeah", body_sha256: "x" },
+      processing_run_id: "run-2",
     },
     { supabase: client }
   );
@@ -226,4 +228,37 @@ test("opt-out beats a queued reply in the same burst result", () => {
     TERMINAL_DISPOSITIONS.SUPPRESSED_OPT_OUT,
     "safety outcomes keep precedence over response generation"
   );
+});
+
+test("a row marked for a DIFFERENT burst is never adopted", async () => {
+  const rows = [
+    { id: "r9", idempotency_key: "k9", processing_run_id: "run9", status: "processing", thread_key: THREAD,
+      disposition_detail: { [AWAITING_BURST_DETAIL_KEY]: true, burst_id: "sib:other:g1:zzz" } },
+  ];
+  const { client } = ledgerSupabase(rows);
+  const completed = [];
+  const outcome = await finalizeBurstConstituentLedger({
+    supabase: client,
+    burst: { burst_id: BURST_ID, thread_key: THREAD, status: "completed" },
+    result: { ok: true, queued: true },
+    completeClaim: async (a) => { completed.push(a); return { ok: true }; },
+  });
+  assert.equal(outcome.finalized, 0);
+  assert.deepEqual(completed, [], "one burst must never finalize another burst's rows");
+});
+
+test("an unmarked processing row is never adopted", async () => {
+  const rows = [
+    { id: "r8", idempotency_key: "k8", processing_run_id: "run8", status: "processing", thread_key: THREAD,
+      disposition_detail: {} },
+  ];
+  const { client } = ledgerSupabase(rows);
+  const completed = [];
+  await finalizeBurstConstituentLedger({
+    supabase: client,
+    burst: { burst_id: BURST_ID, thread_key: THREAD, status: "completed" },
+    result: { ok: true, queued: true },
+    completeClaim: async (a) => { completed.push(a); return { ok: true }; },
+  });
+  assert.deepEqual(completed, [], "a row with no pendency marker is not a constituent");
 });

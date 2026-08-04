@@ -83,9 +83,12 @@ export async function finalizeBurstConstituentLedger({
     if (error) {
       return { ok: false, reason: "ledger_lookup_failed", message: error.message, finalized: 0, pending: 0 };
     }
+    // Exact match only. Adopting rows with a missing/other burst_id would let
+    // one burst finalize another burst's constituents with the wrong outcome.
     rows = (data || []).filter(
-      (row) => row?.disposition_detail?.awaiting_burst_finalization === true &&
-        (!row.disposition_detail.burst_id || row.disposition_detail.burst_id === burst_id)
+      (row) =>
+        row?.disposition_detail?.awaiting_burst_finalization === true &&
+        row.disposition_detail.burst_id === burst_id
     );
   } catch (lookup_error) {
     return {
