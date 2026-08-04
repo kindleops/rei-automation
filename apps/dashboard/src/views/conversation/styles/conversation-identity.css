@@ -1,0 +1,599 @@
+/**
+ * Lane D — conversation identity, delivery receipts, mobile composer.
+ *
+ * Deliberately uses an all-new `nx-idv-*` / `nx-conv-owner-record` namespace so
+ * it never has to fight the 6,691 existing `!important` declarations, and so no
+ * other lane inherits a rule from it by accident. No `!important` is used here
+ * (constitution R1.6) and nothing renders below 11px (R2.1).
+ */
+
+/* ── Active contact identity card ─────────────────────────────────────── */
+
+.nx-idv {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 8px 12px 0;
+}
+
+.nx-idv__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: var(--nx-surface, rgba(255, 255, 255, 0.03));
+}
+
+.nx-idv__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nx-idv__identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nx-idv__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.55));
+}
+
+.nx-idv__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--nx-text-strong, #fff);
+  min-width: 0;
+}
+
+.nx-idv__name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-idv__name svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.nx-idv__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.6));
+}
+
+.nx-idv__phone {
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-idv__rank {
+  font-weight: 500;
+}
+
+.nx-idv__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.12));
+  background: transparent;
+  color: var(--nx-text, rgba(255, 255, 255, 0.82));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--lc-dur-1, 120ms) ease, color var(--lc-dur-1, 120ms) ease;
+}
+
+.nx-idv__switch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.nx-idv__switch:not(:disabled):hover,
+.nx-idv__switch.is-open {
+  border-color: var(--nx-accent, #60a5fa);
+  color: var(--nx-text-strong, #fff);
+}
+
+.nx-idv__switch svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ── Ownership verification — badge and evidence are one unit ──────────── */
+
+.nx-idv__verify-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.nx-idv__verify-row.is-downgraded {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.nx-idv-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.nx-idv-verify svg {
+  width: 12px;
+  height: 12px;
+}
+
+.nx-idv-verify.is-confirmed {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.nx-idv-verify.is-inferred {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.nx-idv-verify.is-unverified {
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.nx-idv-verify.is-denied {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.nx-idv-verify__confidence {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.nx-idv__evidence {
+  flex: 1 1 220px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-text, rgba(255, 255, 255, 0.78));
+}
+
+/* ── Match flags ───────────────────────────────────────────────────────── */
+
+.nx-idv__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.nx-idv__flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.nx-idv__flag.is-positive {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.22);
+}
+
+/* Heuristic signals never borrow the confirmed (green) tone. */
+.nx-idv__flag.is-heuristic {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.nx-idv__flag.is-negative {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
+.nx-idv__flag.is-neutral {
+  color: var(--nx-muted, rgba(255, 255, 255, 0.6));
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Owner record: entity / multiple parties ───────────────────────────── */
+
+.nx-idv__record {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  border-left-width: 3px;
+}
+
+.nx-idv__record.is-entity {
+  border-left-color: #a78bfa;
+}
+
+.nx-idv__record.is-multiple {
+  border-left-color: #60a5fa;
+}
+
+.nx-idv__record-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nx-idv__record-head svg {
+  width: 13px;
+  height: 13px;
+  opacity: 0.8;
+}
+
+.nx-idv__record-type {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-text-strong, #fff);
+}
+
+.nx-idv__parties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nx-idv__party {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--nx-text-strong, #fff);
+}
+
+.nx-idv__record-evidence,
+.nx-idv__record-note,
+.nx-idv__conflict,
+.nx-idv__derived {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.62));
+}
+
+.nx-idv__record-note {
+  color: #fbbf24;
+}
+
+.nx-idv__conflict,
+.nx-idv__derived {
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ── Multi-owner disclosure — always visible, never behind a closed menu ── */
+
+.nx-idv__owners {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nx-idv__owners-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.6));
+}
+
+.nx-idv__owners-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nx-idv__owner-chip {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--nx-text, rgba(255, 255, 255, 0.82));
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nx-idv__owner-chip.is-active {
+  border-color: var(--nx-accent, #60a5fa);
+  color: var(--nx-text-strong, #fff);
+}
+
+/* ── Next eligible ─────────────────────────────────────────────────────── */
+
+.nx-idv__next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nx-idv__next-btn {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-accent, #60a5fa);
+  background: transparent;
+  color: var(--nx-accent, #60a5fa);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nx-idv__next-name {
+  font-size: 12px;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.6));
+}
+
+/* ── Contact switcher popover ──────────────────────────────────────────── */
+
+.nx-idv__menu {
+  position: absolute;
+  right: 12px;
+  left: 12px;
+  z-index: 60;
+  max-height: 340px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding: 5px;
+  list-style: none;
+  border-radius: 10px;
+  border: 1px solid var(--nx-border-strong, rgba(255, 255, 255, 0.18));
+  background: var(--nx-surface-elevated, #16181d);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.22);
+}
+
+.nx-idv__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nx-idv__option:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nx-idv__option.is-selected {
+  border-color: var(--nx-accent, #60a5fa);
+}
+
+.nx-idv__option.is-excluded,
+.nx-idv__option.is-unsafe {
+  opacity: 0.72;
+}
+
+.nx-idv__option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nx-idv__option-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nx-text-strong, #fff);
+}
+
+.nx-idv__option-active {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nx-accent, #60a5fa);
+}
+
+.nx-idv__option-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.6));
+}
+
+.nx-idv__option-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.nx-idv__option-pill {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.62));
+}
+
+.nx-idv__option-pill.is-blocked {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.24);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.nx-idv__dot {
+  opacity: 0.5;
+}
+
+/* ── Skeleton — mirrors the resolved geometry (R8.2) ───────────────────── */
+
+.nx-idv__skeleton {
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+  background-size: 200% 100%;
+  animation: nx-idv-shimmer 1.4s ease-in-out infinite;
+}
+
+.nx-idv__skeleton--name {
+  height: 18px;
+  width: 58%;
+}
+
+.nx-idv__skeleton--line {
+  width: 82%;
+}
+
+.nx-idv__skeleton--line.is-short {
+  width: 44%;
+}
+
+@keyframes nx-idv-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Conversation header: owner record replaces the "household" claim ──── */
+
+.nx-conv-owner-record {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-muted, rgba(255, 255, 255, 0.62));
+}
+
+.nx-conv-owner-record svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.nx-conv-owner-record__line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-conv-owner-record__type {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nx-conv-owner-record.is-entity .nx-conv-owner-record__type {
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.14);
+}
+
+.nx-conv-owner-record.is-multiple .nx-conv-owner-record__type {
+  color: #93c5fd;
+  background: rgba(96, 165, 250, 0.14);
+}
+
+/* ── Delivery receipts (RC-9) ──────────────────────────────────────────── */
+
+.nx-msg__receipt[data-delivery='sent'] {
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.nx-msg__receipt[data-delivery='unconfirmed'] {
+  color: var(--nx-muted, rgba(255, 255, 255, 0.55));
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Mobile composer: sticky above the keyboard, clear of the home bar ─── */
+
+.nx-composer--mobile-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding-bottom: calc(var(--nx-kb-inset, 0px) + env(safe-area-inset-bottom, 0px));
+  background: var(--nx-bg, #0b0d11);
+}
+
+.nx-composer--mobile-sticky.is-keyboard-open {
+  /* Once the keyboard is up it already covers the home indicator, so the
+     safe-area inset would double-pad the dock. */
+  padding-bottom: var(--nx-kb-inset, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-idv__skeleton {
+    animation-duration: 1ms;
+  }
+}
