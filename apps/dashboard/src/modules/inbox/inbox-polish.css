@@ -544,15 +544,12 @@
   display: flex;
   gap: 8px;
 }
-.nx-workspace-split-grid {
-  display: flex;
-  gap: 14px;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-  align-items: stretch;
-  overflow: hidden;
-}
+/* RC-15 — `.nx-workspace-split-grid` used to be defined here.
+ * Map imports this entire file (`views/map/components/MapAdvancedFiltersModal.tsx`)
+ * and CSS has no module scoping, so the Deal Desk's flex container was silently
+ * reshapeable from Map and vice versa. It now lives in `inbox-workspace-layout.css`,
+ * which only `InboxPage.tsx` imports.
+ * Do not re-add workspace geometry rules to this file. */
 .nx-deal-intelligence-fullscreen {
   min-height: calc(100vh - 88px);
   display: flex;
@@ -570,19 +567,8 @@
 .nx-deal-intelligence-fullscreen .nx-intel-scroll-body {
   padding-inline: 24px !important;
 }
-.nx-workspace-pane {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.nx-workspace-pane > * {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
+/* RC-15 — `.nx-workspace-pane` and `.nx-workspace-pane > *` moved to
+ * `inbox-workspace-layout.css` for the same reason as the split grid above. */
 .nx-workspace-pane-surface {
   min-width: 0;
   min-height: 0;
