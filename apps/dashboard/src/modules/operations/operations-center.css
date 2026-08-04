@@ -592,10 +592,39 @@
 
   .opsc-body { padding: 12px 12px 24px; }
 
+  /*
+   * At 390px five labels cannot share a row without truncating, and a
+   * truncated section name is not a label. The strip scrolls horizontally
+   * instead, with every name rendered in full.
+   */
+  .opsc-tabs {
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 2px;
+  }
+
+  .opsc-tabs::-webkit-scrollbar { display: none; }
+
+  .opsc-tab {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+  }
+
+  .opsc-tab > span { overflow: visible; text-overflow: clip; }
+
+  .opsc-header.is-compact { padding: 10px 12px 8px; }
+  .opsc-header.is-compact .opsc-subtitle { max-width: none; }
+
   /* R15.3 — touch targets. */
   .opsc-icon-btn { width: 44px; height: 44px; }
   .opsc-tab { min-height: 44px; }
   .opsc-btn { min-height: 44px; }
+  .opsc-disclosure summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
   .opsc-status-card__facts { grid-template-columns: repeat(2, 1fr); }
 }
 

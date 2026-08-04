@@ -634,12 +634,18 @@ export function OperationsCenter({
         : section === 'notifications' ? renderNotifications()
           : renderSystem()
 
+  // In a sheet, MobileSheet already supplies the title and close control —
+  // rendering our own produced a duplicated header and two close buttons.
   const content = (
     <>
-      <header className="opsc-header">
+      <header className={cls('opsc-header', mode === 'sheet' && 'is-compact')}>
         <div className="opsc-header__identity">
-          <span className="opsc-eyebrow">Operations</span>
-          <strong className="opsc-title">Operational Intelligence</strong>
+          {mode !== 'sheet' ? (
+            <>
+              <span className="opsc-eyebrow">Operations</span>
+              <strong className="opsc-title">Operational Intelligence</strong>
+            </>
+          ) : null}
           <p className="opsc-subtitle">{summary.status.headline}</p>
         </div>
         <div className="opsc-header__actions">
@@ -650,9 +656,11 @@ export function OperationsCenter({
           <button type="button" className="opsc-icon-btn" onClick={summary.refresh} aria-label="Refresh operations data">
             <Icon name="refresh-cw" size={13} />
           </button>
-          <button type="button" className="opsc-icon-btn" onClick={onClose} aria-label="Close operations center">
-            <Icon name="close" size={13} />
-          </button>
+          {mode !== 'sheet' ? (
+            <button type="button" className="opsc-icon-btn" onClick={onClose} aria-label="Close operations center">
+              <Icon name="close" size={13} />
+            </button>
+          ) : null}
         </div>
       </header>
 
