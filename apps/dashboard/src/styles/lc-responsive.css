@@ -64,11 +64,13 @@ small {
   button,
   select,
   summary,
+  a[href],
   [role='button'],
   [role='tab'],
   [role='menuitem'],
   [role='option'],
-  [role='switch'] {
+  [role='switch'],
+  [tabindex]:not([tabindex='-1']) {
     min-height: 44px;
   }
 
@@ -76,6 +78,7 @@ small {
   select,
   [role='button'],
   [role='switch'],
+  [tabindex]:not([tabindex='-1']),
   input[type='checkbox'],
   input[type='radio'] {
     min-width: 44px;
