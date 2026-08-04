@@ -1,0 +1,319 @@
+/* ==========================================================================
+   Shared property media — Street View + aerial (constitution §13)
+   Theme-agnostic: every value derives from the live --nx-* theme primitives,
+   with a neutral literal only as the last-resort var() fallback so the module
+   is legible before a theme has been applied.
+   ========================================================================== */
+
+.lc-media {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--nx-bg-2, #12161d);
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
+  isolation: isolate;
+}
+
+/* ── tabs ───────────────────────────────────────────────────────────────── */
+.lc-media__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
+  background: var(--nx-surface, rgba(255, 255, 255, 0.03));
+  flex: 0 0 auto;
+}
+
+.lc-media__tab {
+  position: relative;
+  min-height: 28px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--nx-muted, #8f9aa4);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.lc-media__tab:hover {
+  color: var(--nx-text-strong, #f4f6f8);
+}
+
+.lc-media__tab.is-active {
+  color: var(--nx-text-strong, #f4f6f8);
+  background: var(--nx-accent-soft, rgba(120, 180, 255, 0.16));
+  border-color: var(--nx-border-strong, rgba(255, 255, 255, 0.14));
+}
+
+.lc-media__tab:focus-visible {
+  outline: 2px solid var(--nx-accent, #5aa9ff);
+  outline-offset: 2px;
+}
+
+.lc-media__tab-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--nx-warning, #efb65e);
+  vertical-align: middle;
+}
+
+.lc-media__meta {
+  margin-left: auto;
+  padding-right: 4px;
+  font-size: 11px;
+  color: var(--nx-muted, #8f9aa4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── stage ──────────────────────────────────────────────────────────────── */
+.lc-media__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
+.lc-media__pane {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.lc-media__pane.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.lc-media-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lc-media-img.is-stale {
+  filter: saturate(0.65) brightness(0.8);
+}
+
+.lc-media-pano,
+.lc-media-loading {
+  position: absolute;
+  inset: 0;
+}
+
+.lc-media-pano__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* Branded pre-paint treatment. R13.4: a provider rectangle must never be the
+   thing an operator sees, so the container itself carries the treatment and
+   the provider paints on top of it. */
+.lc-media-pano,
+.lc-media-loading,
+.lc-media-fallback {
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--nx-accent-soft, rgba(120, 180, 255, 0.14)), transparent 58%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+}
+
+/* ── localized progress (R13.5) ─────────────────────────────────────────── */
+.lc-media-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
+}
+
+.lc-media-progress__bar {
+  position: relative;
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--nx-border, rgba(255, 255, 255, 0.12));
+  overflow: hidden;
+}
+
+.lc-media-progress__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--nx-accent, #5aa9ff);
+  animation: lc-media-indeterminate 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.lc-media-progress__label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-text, #c9d2d9);
+}
+
+@keyframes lc-media-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* ── typed failure state (R13.7) ────────────────────────────────────────── */
+.lc-media-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+}
+
+.lc-media-fallback__mark {
+  color: var(--nx-muted, #8f9aa4);
+  opacity: 0.7;
+}
+
+.lc-media-fallback__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nx-text-strong, #f4f6f8);
+}
+
+.lc-media-fallback__detail {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-muted, #8f9aa4);
+}
+
+.lc-media-fallback__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.lc-media-fallback__btn {
+  min-height: 28px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-border-strong, rgba(255, 255, 255, 0.16));
+  background: var(--nx-accent-soft, rgba(120, 180, 255, 0.16));
+  color: var(--nx-text-strong, #f4f6f8);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.lc-media-fallback__btn.is-ghost {
+  background: transparent;
+}
+
+.lc-media-fallback__btn:focus-visible {
+  outline: 2px solid var(--nx-accent, #5aa9ff);
+  outline-offset: 2px;
+}
+
+.lc-media-fallback__code {
+  margin-top: 2px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--nx-muted, #8f9aa4);
+  opacity: 0.7;
+}
+
+/* ── host adapters ──────────────────────────────────────────────────────
+   The viewer is embedded inside three existing layout shells that already own
+   their own radius, border and sizing. In those hosts the viewer contributes
+   behaviour only, never chrome. */
+.nx-prop-media-panel__viewer,
+.nx-property-hero-cinematic__viewer,
+.nx-di25-media__viewer {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.nx-prop-media-panel,
+.nx-property-hero-cinematic,
+.nx-di25-media__surface {
+  position: relative;
+}
+
+.nx-prop-media-panel__viewer .lc-media__stage,
+.nx-property-hero-cinematic__viewer .lc-media__stage,
+.nx-di25-media__viewer .lc-media__stage {
+  min-height: 0;
+}
+
+/* ── inbox row thumbnail states ─────────────────────────────────────────── */
+/* The container class `nx-inbox-sv-thumb` keeps its existing per-route
+   styling; these rules only add the states the old component never had. */
+.nx-inbox-sv-thumb__probing {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.07) 42%,
+    transparent 64%
+  );
+  background-size: 220% 100%;
+  animation: lc-thumb-shimmer 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes lc-thumb-shimmer {
+  0% { background-position: 140% 0; }
+  100% { background-position: -40% 0; }
+}
+
+.nx-inbox-sv-thumb__reason {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--nx-muted, #8f9aa4);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-media-progress__bar::after,
+  .nx-inbox-sv-thumb__probing {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}

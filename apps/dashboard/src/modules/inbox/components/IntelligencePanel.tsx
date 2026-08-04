@@ -9,9 +9,11 @@ import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
   buildAerialViewUrl,
-  buildStreetViewUrl,
 } from '../../../domain/inbox/inbox-normalization'
 import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
+import { buildMediaIdentity } from '../../../shared/media/identity'
+import { getMapsApiKey } from '../../../shared/media/urls'
+import { PropertyMediaViewer } from '../../../shared/media/PropertyMediaViewer'
 import { Icon, type IconName } from '../../../shared/icons'
 import { 
   formatCurrency, 
@@ -38,7 +40,6 @@ import type { Phase3Intelligence } from '../../../lib/data/inboxIntelligencePhas
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
-const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
 
 import { detectPropertyCategory } from '../helpers/propertyHelpers'
 import { WatchBell } from '../../../shared/WatchBell'
@@ -61,32 +62,12 @@ const fmtMoneyU = (v: unknown): string => { const n = Number(String(v ?? '').rep
 const fmtPctU = (v: unknown, round = true): string => { const n = Number(v); return n > 0 ? `${round ? Math.round(n) : n}%` : 'Unavailable' }
 const isUnavail = (s: string) => s === 'Unavailable'
 
-const buildInteractiveStreetViewUrl = ({
-  address,
-  lat,
-  lng,
-}: {
-  address?: string | null
-  lat?: number | null
-  lng?: number | null
-}) => {
-  if (!GOOGLE_MAPS_API_KEY) return undefined
-
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const location = hasCoords ? `${lat},${lng}` : address
-  if (!location) return undefined
-
-  const params = new URLSearchParams({
-    key: GOOGLE_MAPS_API_KEY,
-    location,
-    heading: '210',
-    pitch: '2',
-    fov: '85',
-  })
-
-  return `https://www.google.com/maps/embed/v1/streetview?${params.toString()}`
-}
-
+/**
+ * Interactive aerial embed URL. Delegated to `shared/media` for the key lookup
+ * and coordinate validation, with no hardcoded key (constitution R13.12).
+ * The street embed is no longer built here — the shared PropertyMediaViewer
+ * mounts a real, pannable Street View panorama instead of an iframe.
+ */
 const buildInteractiveAerialViewUrl = ({
   address,
   lat,
@@ -96,19 +77,18 @@ const buildInteractiveAerialViewUrl = ({
   lat?: number | null
   lng?: number | null
 }) => {
-  if (!GOOGLE_MAPS_API_KEY) return undefined
-
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const center = hasCoords ? `${lat},${lng}` : address
+  const key = getMapsApiKey()
+  if (!key) return undefined
+  const identity = buildMediaIdentity({ address, lat, lng })
+  const hasCoords = identity.lat != null && identity.lng != null
+  const center = hasCoords ? `${identity.lat},${identity.lng}` : identity.address
   if (!center) return undefined
-
   const params = new URLSearchParams({
-    key: GOOGLE_MAPS_API_KEY,
+    key,
     center,
     zoom: hasCoords ? '19' : '17',
     maptype: 'satellite',
   })
-
   return `https://www.google.com/maps/embed/v1/view?${params.toString()}`
 }
 
@@ -661,47 +641,19 @@ const SectionEmptyState = ({ text }: { text: string }) => (
   </div>
 )
 
-const DealContextPayloadCard = ({
-  thread,
-  intelligence,
-}: {
-  thread: WorkflowThread
-  intelligence: ThreadIntelligenceRecord | null
-}) => {
-  const records = [
-    ['property_data', (intelligence as any)?.property_data ?? (thread as any).property_data],
-    ['master_owner_data', (intelligence as any)?.master_owner_data ?? (thread as any).master_owner_data],
-    ['prospect_data', (intelligence as any)?.prospect_data ?? (thread as any).prospect_data],
-    ['phone_data', (intelligence as any)?.phone_data ?? (thread as any).phone_data],
-    ['email_data', (intelligence as any)?.email_data ?? (thread as any).email_data],
-    ['thread_state_data', (intelligence as any)?.thread_state_data ?? (thread as any).thread_state_data],
-    ['queue_data', (intelligence as any)?.queue_data ?? (thread as any).queue_data],
-    ['latest_message_event_data', (intelligence as any)?.latest_message_event_data ?? (thread as any).latest_message_event_data],
-    ['valuation_data', (intelligence as any)?.valuation_data ?? (thread as any).valuation_data],
-    ['buyer_match_data', (intelligence as any)?.buyer_match_data ?? (thread as any).buyer_match_data],
-  ].filter(([, value]) => value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0)
-
-  if (records.length === 0) return null
-
-  return (
-    <DossierCard className="nx-deal-context-payload">
-      <div className="nx-dossier-section__title">
-        <Icon name="database" />
-        <span>DEALCONTEXT PAYLOAD</span>
-      </div>
-      <div style={{ display: 'grid', gap: 12 }}>
-        {records.map(([label, value]) => (
-          <details key={label} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{label}</summary>
-            <pre style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: 12, lineHeight: 1.45 }}>
-              {JSON.stringify(value, null, 2)}
-            </pre>
-          </details>
-        ))}
-      </div>
-    </DossierCard>
-  )
-}
+/*
+ * REMOVED — `DealContextPayloadCard` ("DEALCONTEXT PAYLOAD").
+ *
+ * It rendered up to ten <details>/<pre> blocks of `JSON.stringify(value, null, 2)`
+ * over property_data, master_owner_data, prospect_data, phone_data, email_data,
+ * thread_state_data, queue_data, latest_message_event_data, valuation_data and
+ * buyer_match_data — raw PII-bearing payloads — and was mounted unconditionally
+ * in the full-screen dossier with no DEV guard and no feature flag.
+ *
+ * Constitution §0.2 prohibits developer artifacts in the operator interface.
+ * Field-level values that operators genuinely need are already surfaced by the
+ * typed cards above; a payload dump is not an operator surface at any flag.
+ */
 
 const ScoreRing = ({
   label,
@@ -975,7 +927,7 @@ const getNextBestAction = (thread: WorkflowThread): NextActionResult => {
   }
 
   if (inboxStatus === 'ai_draft_ready') {
-    return { title: 'Review AI draft reply', reason: 'AI has prepared a response. Review and approve before sending.', suggestedReply: thread.aiDraft ? `Draft: "${thread.aiDraft.slice(0, 100)}${thread.aiDraft.length > 100 ? '...' : ''}"` : undefined, urgency: 'high' }
+    return { title: 'Review pending draft reply', reason: 'A draft reply is stored on this thread. Review and approve before sending.', suggestedReply: thread.aiDraft ? `Draft: "${thread.aiDraft.slice(0, 100)}${thread.aiDraft.length > 100 ? '...' : ''}"` : undefined, urgency: 'high' }
   }
 
   if (!hasArv && (stage === 'price_discovery' || stage === 'offer_reveal' || stage === 'negotiation')) {
@@ -1249,7 +1201,7 @@ export const AIActionCard = ({ thread, isSuppressed }: { thread: WorkflowThread;
     <DossierCard className={cls('nx-next-action', `is-${action.urgency}`, 'nx-ai-action-card')}>
       <div className="nx-next-action__header">
         <Icon name="spark" />
-        <span>AI Recommended Action</span>
+        <span>Recommended Next Action</span>
         <QuietBadge
           label={action.urgency === 'high' ? 'Needs operator' : action.urgency === 'medium' ? 'Recommended' : 'Monitor'}
           tone={action.urgency === 'high' ? 'warning' : action.urgency === 'medium' ? 'accent' : 'default'}
@@ -1907,7 +1859,7 @@ export const OverviewPanel = ({ thread, messages, onOpenComps, dealContext }: { 
       {/* Deal Intelligence Card */}
       <DealIntelligenceCard thread={thread} dealContext={dealContext} onOpenComps={onOpenComps} />
 
-      <PanelSection title="AI Recommendation" icon="spark">
+      <PanelSection title="Recommended Action" icon="spark">
         <div className="nx-intel-copy-card">
           <strong>{action.title}</strong>
           <p>{action.reason}</p>
@@ -2442,21 +2394,11 @@ export const PropertyHeroCard = ({
     ? rawMarket
     : (snapshot.city && snapshot.state ? `${snapshot.city}, ${snapshot.state}` : (rawMarket || 'Unknown market'))
 
-  const streetViewUrl = snapshot.streetViewUrl || snapshot.streetviewImage || thread.streetview_image || buildStreetViewUrl(address)
+  const mediaPropertyId = (thread as any).propertyId ?? (thread as any).property_id ?? null
   const aerialUrl = snapshot.aerialViewUrl || thread.satellite_image || buildAerialViewUrl(address)
-  const interactiveStreetViewUrl = useMemo(
-    () => buildInteractiveStreetViewUrl({ address, lat: propertyLat, lng: propertyLng }),
-    [address, propertyLat, propertyLng],
-  )
-  const interactiveAerialViewUrl = useMemo(
-    () => buildInteractiveAerialViewUrl({ address, lat: propertyLat, lng: propertyLng }),
-    [address, propertyLat, propertyLng],
-  )
-  const [imageFailed, setImageFailed] = useState(false)
   const [mediaMode, setMediaMode] = useState<'split' | 'street' | 'aerial'>('split')
   const links = buildPropertyExternalLinks(address)
 
-  useEffect(() => { setImageFailed(false) }, [streetViewUrl, address])
   useEffect(() => { setMediaMode('split') }, [address])
 
   const [copied, setCopied] = useState(false)
@@ -2470,18 +2412,17 @@ export const PropertyHeroCard = ({
   if (layoutMode === 'compact') {
     return (
       <div className="nx-property-hero-cinematic">
-        {streetViewUrl && !imageFailed ? (
-          <img src={streetViewUrl} alt={address} onError={() => setImageFailed(true)} />
-        ) : (
-          <div className="nx-property-hero-cinematic__fallback">
-            <div className="nx-hero-fallback-bg" />
-            <div className="nx-hero-fallback-inner">
-              <Icon name={"navigation" as any} />
-              {address && <span className="nx-hero-fallback-address">{address}</span>}
-              <span className="nx-hero-fallback-hint">Street View</span>
-            </div>
-          </div>
-        )}
+        <PropertyMediaViewer
+          className="nx-property-hero-cinematic__viewer"
+          propertyId={mediaPropertyId}
+          address={address}
+          lat={propertyLat}
+          lng={propertyLng}
+          storedStreetUrl={snapshot.streetviewImage || thread.streetview_image || null}
+          activeTab="street"
+          showTabs={false}
+          staticOnly
+        />
         <div className="nx-property-hero-cinematic__gradient" />
         <div className="nx-property-hero-cinematic__hover-actions">
           {links.streetView && <LinkedRecordButton label="Street View" url={links.streetView} icon="map" />}
@@ -2500,43 +2441,39 @@ export const PropertyHeroCard = ({
 
   // ── Unified media + intel console for medium / expanded / full ───────────
 
+  // Both panes are the single shared viewer. Keyed on stable property identity,
+  // so switching media mode or resizing the workspace resizes the live
+  // panorama instead of rebuilding it (R13.2), and a missing panorama renders
+  // the typed reason rather than a grey provider rectangle (R13.4 / R13.7).
   const renderStreetPanel = (label: string) => (
     <div className="nx-prop-media-panel is-street">
       <div className="nx-panel-label">{label}</div>
-      {interactiveStreetViewUrl ? (
-        <iframe
-          src={interactiveStreetViewUrl}
-          title={`Street view for ${address}`}
-          className="nx-property-panel__iframe"
-          loading="eager"
-          allowFullScreen
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      ) : streetViewUrl && !imageFailed ? (
-        <img src={streetViewUrl} alt="Street view" onError={() => setImageFailed(true)} />
-      ) : (
-        <div className="nx-panel-fallback"><Icon name="eye" /></div>
-      )}
+      <PropertyMediaViewer
+        className="nx-prop-media-panel__viewer"
+        propertyId={mediaPropertyId}
+        address={address}
+        lat={propertyLat}
+        lng={propertyLng}
+        storedStreetUrl={snapshot.streetviewImage || thread.streetview_image || null}
+        activeTab="street"
+        showTabs={false}
+      />
     </div>
   )
 
   const renderAerialPanel = (label: string) => (
     <div className="nx-prop-media-panel is-aerial">
       <div className="nx-panel-label">{label}</div>
-      {interactiveAerialViewUrl ? (
-        <iframe
-          src={interactiveAerialViewUrl}
-          title={`Aerial view for ${address}`}
-          className="nx-property-panel__iframe"
-          loading="eager"
-          allowFullScreen
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      ) : aerialUrl ? (
-        <img src={aerialUrl as string | undefined} alt="Aerial view" />
-      ) : (
-        <div className="nx-panel-fallback"><Icon name="map" /><span>Unavailable</span></div>
-      )}
+      <PropertyMediaViewer
+        className="nx-prop-media-panel__viewer"
+        propertyId={mediaPropertyId}
+        address={address}
+        lat={propertyLat}
+        lng={propertyLng}
+        storedAerialUrl={thread.satellite_image || null}
+        activeTab="aerial"
+        showTabs={false}
+      />
     </div>
   )
 
@@ -3673,6 +3610,14 @@ const BuyerMatchingModule = ({ thread, snapshot, dealContext }: { thread: Workfl
   )
 }
 
+/**
+ * Conversation Signals.
+ *
+ * Renamed from "SELLER / AI CONVERSATION BRAIN". Everything this module renders
+ * is a field read or a deterministic threshold — there is no model call on this
+ * path. Constitution §0.1: a control named for AI must be backed by a model
+ * call, and deterministic logic uses truthful names.
+ */
 const ConversationBrainModule = ({
   thread,
   messages,
@@ -3685,7 +3630,7 @@ const ConversationBrainModule = ({
 
   const latestInbound = messages.find((message) => message.direction === 'inbound') || null
   const latestOutbound = messages.find((message) => message.direction === 'outbound') || null
-  const summary = phase3?.latestSnapshot?.capture_reason || thread.aiSummary || thread.aiDraft || 'Conversation intelligence will summarize seller signals here.'
+  const summary = phase3?.latestSnapshot?.capture_reason || thread.aiSummary || thread.aiDraft || null
   const intent = thread.uiIntent || thread.detected_intent || 'Intent Pending'
   const sentiment = thread.sentiment || 'Neutral'
   const urgency = percentFromScore(thread.urgency_score || thread.priorityScore, thread.priority === 'urgent' ? 82 : 44)
@@ -3699,10 +3644,12 @@ const ConversationBrainModule = ({
     <DossierCard className="nx-command-module nx-conversation-brain-module">
       <div className="nx-command-module__head">
         <div>
-          <span>SELLER / AI CONVERSATION BRAIN</span>
+          <span>SELLER · CONVERSATION SIGNALS</span>
           <strong>What the seller is saying and what we do next</strong>
         </div>
-        <button type="button" className="nx-command-module__cta">Draft Reply</button>
+        {/* The "Draft Reply" button that sat here had no onClick and no
+            handler anywhere in the tree. A dead control is a defect (§10 /
+            RC-10); replying is done from the composer. */}
       </div>
       <div className="nx-conversation-brain-module__top">
         <div className="nx-conversation-brain-module__message">
@@ -3726,19 +3673,20 @@ const ConversationBrainModule = ({
       <div className="nx-conversation-brain-module__summary">
         <div>
           <label>Conversation Summary</label>
-          <p>{summary}</p>
+          {/* No literal filler: when nothing was captured, say so (§9.1). */}
+          <p>{summary || 'No conversation summary has been captured for this thread yet.'}</p>
         </div>
         <div className="nx-conversation-brain-module__next">
           <MeterBar label="Urgency" value={urgency} tone={urgency >= 70 ? 'red' : 'amber'} />
-          <div className="nx-conversation-brain-module__reply-chips">
-            {[
-              thread.aiDraft || 'Acknowledge seller and advance discovery',
-              'Ask condition follow-up',
-              'Move toward offer timing',
-            ].map((reply) => (
-              <button type="button" key={reply}>{reply}</button>
-            ))}
-          </div>
+          {/* The three "reply chips" here were two hardcoded strings plus a
+              field read, and none of them were wired to the composer. Removed
+              rather than shipped as suggestions the operator cannot act on. */}
+          {thread.aiDraft ? (
+            <div className="nx-conversation-brain-module__draft">
+              <label>Pending draft</label>
+              <p>{thread.aiDraft}</p>
+            </div>
+          ) : null}
         </div>
       </div>
     </DossierCard>
@@ -4635,7 +4583,8 @@ const MediumDealWorkspace = ({
   const prospectTags = autoProspectTags
 
   // ── CONVERSATION BRAIN ───────────────────────────────────
-  const summary = dossier.summary || 'AI is analyzing seller conversation patterns and market signals.'
+  // No fabricated "AI is analyzing…" filler. When nothing was captured we say so.
+  const summary = dossier.summary || 'No conversation summary captured yet. Signals below are derived from record fields.'
   const intent = dossier.intent || 'Pending'
   const sentiment = dossier.sentiment || 'Neutral'
 
@@ -4653,20 +4602,21 @@ const MediumDealWorkspace = ({
   const latestOutbound = messages.find((m) => m.direction === 'outbound') || null
   const stageFlow = ['Ownership', 'Interest', 'Price', 'Condition', 'Offer', 'Negotiation', 'Contract']
   const currentStageIndex = Math.max(0, sellerStageOptions.findIndex((o) => o.value === thread.conversationStage))
-  const aiInsights: string[] = []
-  if (urgency >= 75) aiInsights.push('Seller response timing indicates elevated engagement.')
-  if (financialPressureScore >= 65) aiInsights.push('Motivation appears financial rather than emotional.')
-  if (demand >= 70) aiInsights.push('Buyer pressure supports stronger acquisition confidence.')
-  if (dossier.isOutOfState) aiInsights.push('Absentee out-of-state owner — possible management fatigue.')
+  // Deterministic threshold readouts, not model output. Named accordingly.
+  const signalInsights: string[] = []
+  if (urgency >= 75) signalInsights.push('Seller response timing indicates elevated engagement.')
+  if (financialPressureScore >= 65) signalInsights.push('Motivation appears financial rather than emotional.')
+  if (demand >= 70) signalInsights.push('Buyer pressure supports stronger acquisition confidence.')
+  if (dossier.isOutOfState) signalInsights.push('Absentee out-of-state owner — possible management fatigue.')
 
-  if (equity >= 70) aiInsights.push('Strong equity position creates flexible offer room.')
-  if (isTaxDelinquent) aiInsights.push('Tax delinquency suggests urgency — timing leverage elevated.')
-  if (!aiInsights.length) aiInsights.push('Analyzing seller signals and market conditions.')
+  if (equity >= 70) signalInsights.push('Strong equity position creates flexible offer room.')
+  if (isTaxDelinquent) signalInsights.push('Tax delinquency suggests urgency — timing leverage elevated.')
+  if (!signalInsights.length) signalInsights.push('No threshold signals are currently triggered for this record.')
 
   // ── DERIVED INTELLIGENCE SIGNALS ─────────────────────────
   const marketTemp = demand >= 70 ? 'Hot' : demand >= 45 ? 'Warm' : demand > 0 ? 'Cool' : null
   const marketTempTone = demand >= 70 ? 'red' : demand >= 45 ? 'amber' : 'blue'
-  const aiConfidence = Math.round(clamp(confidence * 0.7 + (motivationScore > 0 ? motivationScore * 0.3 : 21), 20, 95))
+  const signalConfidence = Math.round(clamp(confidence * 0.7 + (motivationScore > 0 ? motivationScore * 0.3 : 21), 20, 95))
   const acqScore = Math.round(clamp(
     acquisitionScoreRaw > 0
       ? acquisitionScoreRaw
@@ -4771,7 +4721,7 @@ const MediumDealWorkspace = ({
                 URG {Math.round(urgency)}%
               </span>
               <span className="nx-mh-intel-pill is-ai">
-                AI CONF {aiConfidence}%
+                SCORE CONF {signalConfidence}%
               </span>
               {thread.automationState === 'active' && (
                 <span className="nx-mh-intel-pill is-green">AUTO ON</span>
@@ -5558,7 +5508,7 @@ const MediumDealWorkspace = ({
               <div className="nx-medium-prow-list" style={{ marginTop: 8 }}>
                 {(thread.uiIntent || thread.detected_intent) && <div className="nx-medium-prow"><span>Intent</span><strong>{humanizeIntent(thread.uiIntent || thread.detected_intent || '')}</strong></div>}
                 {equity > 0 && <div className="nx-medium-prow"><span>Equity Position</span><strong>{Math.round(equity)}%</strong></div>}
-                {nextAction?.title && <div className="nx-medium-prow"><span>AI Next Move</span><strong style={{ color: '#0a84ff' }}>{nextAction.title}</strong></div>}
+                {nextAction?.title && <div className="nx-medium-prow"><span>Next Move</span><strong style={{ color: '#0a84ff' }}>{nextAction.title}</strong></div>}
                 {thread.isSuppressed && <div className="nx-medium-prow is-danger"><span>DNC</span><strong>Suppressed</strong></div>}
               </div>
             </div>
@@ -5696,11 +5646,10 @@ const MediumDealWorkspace = ({
         </div>
       </div>
 
-      {/* ── 7. AI CONVERSATION BRAIN ────────────────────── */}
+      {/* ── 7. CONVERSATION SIGNALS (deterministic) ─────── */}
       <div className="nx-medium-section nx-medium-section--brain">
         <div className="nx-medium-section__title">
-          AI CONVERSATION BRAIN
-          <span className="nx-medium-live-badge">AI LIVE</span>
+          CONVERSATION SIGNALS
         </div>
         {/* Stage flow progression */}
         <div className="nx-medium-stage-flow">
@@ -5748,13 +5697,13 @@ const MediumDealWorkspace = ({
         <div className="nx-medium-brain-intel">
           <div className="nx-mbi-summary">
             <div className="nx-mbi-summary__head">
-              <span className="nx-mm-label">AI ANALYSIS</span>
-              <span className="nx-mbi-conf-badge">CONF {aiConfidence}%</span>
+              <span className="nx-mm-label">SIGNAL READOUT</span>
+              <span className="nx-mbi-conf-badge">SCORE CONF {signalConfidence}%</span>
             </div>
             <p>{summary}</p>
           </div>
           <div className="nx-mbi-insights">
-            {aiInsights.map((insight, i) => (
+            {signalInsights.map((insight, i) => (
               <div key={i} className="nx-mbi-insight">
                 <span className="nx-mbi-dot" />
                 <span>{insight}</span>
@@ -5938,7 +5887,6 @@ const DealCommandDossier = ({
         </div>
       </div>
 
-      <DealContextPayloadCard thread={thread} intelligence={intelligence} />
       <CommandActionDock
         layoutMode={layoutMode}
         onOpenMap={onOpenMap}

@@ -1713,6 +1713,7 @@ export const DealIntelligence25Panel = ({
         </div>
         <DealIntelligenceMedia
           activeTab={mediaTab}
+          propertyId={property?.property_id}
           address={address}
           lat={property?.latitude}
           lng={property?.longitude}
