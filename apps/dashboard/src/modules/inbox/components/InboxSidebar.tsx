@@ -1,15 +1,22 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
-import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone } from '../../../shared/formatters'
+import { formatInboxThreadTimestamp } from '../../../shared/formatters'
 import {
   resolveThreadAddressLine,
   resolveThreadMarketBadge,
   resolveThreadPrimaryName,
+  resolveThreadPersonName,
+  formatThreadPhone,
   type InboxSavedFilterPreset,
   type InboxViewSelectValue,
 } from '../inbox-ui-helpers'
-import type { InboxSourceMode } from '../../../lib/data/inboxData'
+import {
+  archiveThread,
+  markThreadRead,
+  markThreadUnread,
+  type InboxSourceMode,
+} from '../../../lib/data/inboxData'
 import {
   buildConversationDecision,
   sortThreadsByDecision,
@@ -99,13 +106,35 @@ const BUCKETS: BucketConfig[] = [
   { bucket: 'all_messages', view: 'all_conversations', label: 'All Threads', shortLabel: 'All', icon: '📦', description: 'Canonical thread universe', accentClass: 'is-neutral', countKey: 'all_messages' },
 ]
 
-const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
-  BUCKETS[0],
-  BUCKETS[1],
-  BUCKETS[2],
-  BUCKETS[3],
-  BUCKETS[8],
+/**
+ * Default category chips. Previously this was the *only* set that could ever render,
+ * so `follow_up`, `cold`, `dead` and `suppressed` were defined but permanently
+ * unreachable — four buckets of real threads with no route to them. It is now just a
+ * default; every bucket in BUCKETS can be switched on per operator (persisted below).
+ */
+const DEFAULT_VISIBLE_BUCKETS: CanonicalBucket[] = [
+  'priority', 'new_replies', 'needs_review', 'waiting', 'all_messages',
 ]
+const VISIBLE_CATEGORIES_KEY = 'nx.inbox.visible-categories.v1'
+
+const readVisibleBuckets = (): CanonicalBucket[] => {
+  try {
+    const raw = window.localStorage.getItem(VISIBLE_CATEGORIES_KEY)
+    if (!raw) return DEFAULT_VISIBLE_BUCKETS
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_BUCKETS
+    const valid = parsed.filter((b): b is CanonicalBucket =>
+      BUCKETS.some((cfg) => cfg.bucket === b))
+    // Never persist an empty rail — that would strand the operator with no navigation.
+    return valid.length > 0 ? valid : DEFAULT_VISIBLE_BUCKETS
+  } catch {
+    return DEFAULT_VISIBLE_BUCKETS
+  }
+}
+
+const VISIBLE_INBOX_CHIPS: BucketConfig[] = DEFAULT_VISIBLE_BUCKETS
+  .map((bucket) => BUCKETS.find((cfg) => cfg.bucket === bucket))
+  .filter((cfg): cfg is BucketConfig => Boolean(cfg))
 
 type LocalSavedFilter = {
   id: string
@@ -202,10 +231,6 @@ const resolveContactMatchFlags = (thread: InboxWorkflowThread): string[] => {
     .filter((flag) => flag && !/^contact$/i.test(flag))
     .slice(0, 4)
 }
-
-const formatMoneyCompact = (value: number | null) => (value && value > 0 ? formatCurrency(value) : '—')
-
-const formatPercentCompact = (value: number | null) => (value && value > 0 ? formatPercent(value) : '—')
 
 const formatCompactMoney = (value: number | null): string => {
   if (value == null || value <= 0) return '—'
@@ -522,10 +547,6 @@ const resolveStatusChipClass = (thread: InboxWorkflowThread): string => {
   return 'is-all_messages'
 }
 
-const renderBadge = (label: string, key: string) => (
-  <span key={key} className="nx-ops75-badge">{label}</span>
-)
-
 const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }: {
   flags: string[]
   maxVisible?: number
@@ -600,10 +621,33 @@ const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBuc
 }
 
 const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecision) => {
-  const name = resolveThreadPrimaryName(thread) || readString(thread, 'best_phone', 'canonical_e164', 'phone') || 'Unknown Contact'
-  const address = resolveThreadAddressLine(thread) || readString(thread, 'property_address_full', 'propertyAddressFull') || 'Property Unknown'
-  const market = resolveThreadMarketBadge(thread) || 'Unknown Market'
-  const propertyType = readString(thread, 'propertyType', 'property_type') || 'Unknown Type'
+  // A phone number is metadata, not a name. The old code used `best_phone` as the
+  // title fallback, which is why every row was titled with a raw phone number.
+  // Identity now degrades honestly: person -> property -> "Unnamed contact", and the
+  // phone is always carried separately as secondary metadata.
+  const resolvedName = resolveThreadPersonName(thread)
+  const market = resolveThreadMarketBadge(thread)
+  const resolvedAddressRaw = resolveThreadAddressLine(thread)
+    || readString(thread, 'property_address_full', 'propertyAddressFull')
+  // The address resolver returns the literal 'No Address' when it finds nothing.
+  // That string must never reach the operator — absent is absent.
+  const addressCandidate = resolvedAddressRaw && resolvedAddressRaw.toLowerCase() !== 'no address'
+    ? resolvedAddressRaw.trim()
+    : ''
+  // A "City, ST" value is the market, not a property. Promoting it to the title would
+  // duplicate the meta line and imply we know a location we do not (R5.5).
+  const address = addressCandidate && addressCandidate.toLowerCase() !== market.trim().toLowerCase()
+    ? addressCandidate
+    : ''
+
+  // Operator-locked hierarchy: the PROPERTY leads. These operators underwrite
+  // properties, not people, so the address is what makes a row scannable. The contact
+  // name is secondary; the phone is quiet metadata and is never a title.
+  const titleSource: 'property' | 'person' | 'unknown' = address
+    ? 'property'
+    : resolvedName ? 'person' : 'unknown'
+  const name = address || resolvedName || 'Unresolved property'
+  const propertyType = readString(thread, 'propertyType', 'property_type')
   const sellerPhone = readString(thread, 'sellerPhone', 'seller_phone', 'displayPhone', 'best_phone', 'canonical_e164', 'phone')
   const latestMessageBody = readString(thread, 'latestMessageBody', 'latest_message_body', 'lastMessageBody', 'preview') || 'No latest message'
   const latestDirection = String(
@@ -677,16 +721,35 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : null)
 
   const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection)
-  const marketLine = market && market !== 'Unknown Market' ? market : '—'
+  // RC-3: `market` is '' when unknown. Never substitute a fabricated label like
+  // 'Unknown'/'Unknown Market' — an absent market is simply not rendered.
+  const marketLine = market || ''
   const metaParts: string[] = []
   if (propertyTypeLabel) metaParts.push(propertyTypeLabel)
   if (unitCount != null && unitCount > 1) metaParts.push(`${unitCount} Units`)
-  const metaLine = metaParts.join(' · ') || '—'
+  const metaLine = metaParts.join(' · ')
+  // The title now carries the street address, which usually already contains the
+  // city/state. Repeating the market underneath it is noise, so it is only shown
+  // when the title does not already say it (R5.5).
+  const titleLower = name.toLowerCase()
+  const marketIsRedundant = Boolean(marketLine) && marketLine
+    .split(',')
+    .every((part) => titleLower.includes(part.trim().toLowerCase()))
   const contextParts: string[] = []
-  if (marketLine !== '—') contextParts.push(marketLine)
+  if (marketLine && !marketIsRedundant) contextParts.push(marketLine)
   if (propertyTypeLabel) contextParts.push(propertyTypeLabel)
   if (unitCount != null && unitCount > 1) contextParts.push(`${unitCount} Units`)
-  const contextLine = contextParts.join(' · ') || '—'
+  const contextLine = contextParts.join(' · ')
+
+  // Secondary identity. With the property leading, this is the person we are talking
+  // to — the phone only stands in when no name is known. It never repeats the title.
+  const phoneLabel = formatThreadPhone(sellerPhone)
+  const subtitle = titleSource === 'property'
+    ? (resolvedName || phoneLabel)
+    : phoneLabel
+  const subtitleKind: 'person' | 'phone' | 'none' = !subtitle
+    ? 'none'
+    : (titleSource === 'property' && resolvedName) ? 'person' : 'phone'
 
   // 2. Visual Category Logic (Inbound ONLY)
   let visualCategory: 'positive' | 'negative' | 'autopilot' | 'review' | 'none' = 'none'
@@ -739,6 +802,10 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     contextLine,
     marketLine,
     metaLine,
+    titleSource,
+    subtitle,
+    subtitleKind,
+    phoneLabel,
     intelTags,
     propertyFlags,
     contactMatchFlags,
@@ -756,236 +823,27 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
   }
 }
 
-const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
-  <div className="nx-thread-card-rebuilt__hover-actions">
-    <div className="nx-thread-card-rebuilt__checkbox-wrap" onClick={(e) => { e.stopPropagation(); onToggleBulk(threadId); }}>
-      <input type="checkbox" checked={selectedForBulk} onChange={() => {}} aria-label="Select" />
-    </div>
-    <button type="button" className="nx-thread-card-rebuilt__action-btn"><Icon name="bell" /></button>
-    <button type="button" className="nx-thread-card-rebuilt__action-btn"><Icon name="star" /></button>
-    <button type="button" className="nx-thread-card-rebuilt__action-btn"><Icon name="pin" /></button>
-  </div>
-)
-
-const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
-  const {
-    name,
-    address,
-    market,
-    pTypeShort,
-    sellerPhone,
-    latestMessageBody,
-    latestDirection,
-    statusLabel,
-    stageLabel,
-    bucketLabel,
-    cashOffer,
-    estimatedValue,
-    equityAmount,
-    equityPercent,
-    estimatedRepairCost,
-    finalAcquisitionScore,
-    propertyTags,
-    sellerTags,
-    contactStatus,
-    contactFlags,
-    timestamp,
-    isHot,
-    stageNum,
-    intelTags,
-    deliveryStatus,
-    visualCategory,
-    propertyId,
-    latitude,
-    longitude,
-    streetviewImage,
-  } = getThreadVars(thread, decision)
-  const isInbound = latestDirection === 'inbound'
-  const isOutbound = latestDirection === 'outbound'
-  const badges = [
-    renderBadge(latestDirection || 'unknown', 'direction'),
-    renderBadge(statusLabel, 'status'),
-    renderBadge(stageLabel, 'stage'),
-    renderBadge(bucketLabel, 'bucket'),
-  ]
-  const tagSummary = [...propertyTags, ...sellerTags].slice(0, 3)
-
-  return (
-    <div role="button" tabIndex={0}
-      className={cls(
-        'nx-thread-card-rebuilt',
-        selected && 'is-selected',
-        decision.unread && 'is-unread',
-        isInbound && 'is-inbound',
-        isOutbound && 'is-outbound',
-        `is-category-${visualCategory}`
-      )}
-      data-thread-id={thread.id}
-      data-property-id={propertyId || undefined}
-      onClick={() => onSelect(thread.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect(thread.id)
-        }
-      }}
-    >
-      <div className="nx-thread-card-rebuilt__media" aria-hidden>
-        <InboxStreetViewThumb
-          address={address}
-          lat={latitude}
-          lng={longitude}
-          cachedImageUrl={streetviewImage}
-        />
-        <div className="nx-thread-card-rebuilt__media-veil" />
-        <div className="nx-thread-card-rebuilt__media-actions">
-          <HoverActions selectedForBulk={selectedForBulk} onToggleBulk={onToggleBulk} threadId={thread.id} />
-        </div>
-      </div>
-      <div className="nx-thread-card-rebuilt__main">
-        <div className="nx-thread-card-rebuilt__header">
-          <div className="nx-thread-card-rebuilt__identity">
-            <span className="nx-thread-card-rebuilt__name">{name}</span>
-            <span className="nx-thread-card-rebuilt__address">{address}</span>
-          </div>
-          <div className="nx-thread-card-rebuilt__right">
-            <time className="nx-thread-card-rebuilt__time">{timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel}</time>
-            {decision.unread && <span className="nx-thread-card-rebuilt__unread-dot" />}
-            {isHot && <span className="nx-thread-card-rebuilt__hot-icon">🔥</span>}
-          </div>
-        </div>
-        <div className="nx-thread-card-rebuilt__metadata">
-          {stageNum && <><span>{stageNum}</span><span className="nx-thread-card-rebuilt__dot">•</span></>}
-          <span>{market}</span><span className="nx-thread-card-rebuilt__dot">•</span>
-          <span>{pTypeShort}</span>
-          {sellerPhone && <><span className="nx-thread-card-rebuilt__dot">•</span><span>{formatPhone(sellerPhone)}</span></>}
-          {isHot && <><span className="nx-thread-card-rebuilt__dot">•</span><span>⚡ Fast</span></>}
-          {intelTags.length > 0 && <><span className="nx-thread-card-rebuilt__dot">•</span><span style={{color: '#a1a1aa'}}>{intelTags[0]}</span></>}
-        </div>
-        <div className="nx-thread-card-rebuilt__preview">{latestMessageBody}</div>
-        <div className="nx-thread-card-rebuilt__metadata">{badges}</div>
-        <div className="nx-thread-card-rebuilt__metadata">
-          <span>Offer {formatMoneyCompact(cashOffer)}</span>
-          <span className="nx-thread-card-rebuilt__dot">•</span>
-          <span>Value {formatMoneyCompact(estimatedValue)}</span>
-          <span className="nx-thread-card-rebuilt__dot">•</span>
-          <span>Equity {formatMoneyCompact(equityAmount)} / {formatPercentCompact(equityPercent)}</span>
-        </div>
-        <div className="nx-thread-card-rebuilt__metadata">
-          <span>Repairs {formatMoneyCompact(estimatedRepairCost)}</span>
-          <span className="nx-thread-card-rebuilt__dot">•</span>
-          <span>Score {finalAcquisitionScore ?? '—'}</span>
-          <span className="nx-thread-card-rebuilt__dot">•</span>
-          <span>Contact {contactStatus}</span>
-        </div>
-        <div className="nx-thread-card-rebuilt__metadata">
-          <span>Tags {tagSummary.length > 0 ? tagSummary.join(', ') : '—'}</span>
-        </div>
-        {contactFlags.length > 0 && (
-          <div className="nx-thread-card-rebuilt__metadata">
-            {contactFlags.map((flag) => renderBadge(flag, `flag-${flag}`))}
-          </div>
-        )}
-
-        {/* Delivery Status Icon */}
-        {deliveryStatus && (
-          <div className={cls('nx-thread-card-rebuilt__delivery-status', `is-${deliveryStatus}`)}>
-            {deliveryStatus === 'delivered' ? <Icon name="check-double" style={{ width: 14, height: 14 }} /> : 
-             deliveryStatus === 'failed' ? <Icon name="close" style={{ width: 14, height: 14 }} /> : 
-             <Icon name="check" style={{ width: 14, height: 14 }} />}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-})
-ConversationRow.displayName = 'ConversationRow'
-
-const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
-  const {
-    name,
-    address,
-    market,
-    pTypeShort,
-    sellerPhone,
-    latestMessageBody,
-    latestDirection,
-    statusLabel,
-    stageLabel,
-    bucketLabel,
-    cashOffer,
-    estimatedValue,
-    equityAmount,
-    equityPercent,
-    finalAcquisitionScore,
-    propertyTags,
-    sellerTags,
-    contactStatus,
-    contactFlags,
-    timestamp,
-    isHot,
-    stageNum,
-    intelTags,
-  } = getThreadVars(thread, decision)
-  const tagSummary = [...propertyTags, ...sellerTags].slice(0, 3)
-  return (
-    <div role="button" tabIndex={0}
-      className={cls('nx-thread-table-row-ops75', selected && 'is-selected', decision.unread && 'is-unread')}
-      data-thread-id={thread.id} onClick={() => onSelect(thread.id)}
-    >
-      <div className="nx-ops75-col nx-ops75-col--check" onClick={(e) => { e.stopPropagation(); onToggleBulk(thread.id); }}>
-        <input type="checkbox" checked={selectedForBulk} onChange={() => {}} />
-      </div>
-      <div className="nx-ops75-col nx-ops75-col--seller">
-        <span className="nx-ops75-name">{name}</span>
-        <span className="nx-ops75-address">{address}</span>
-        <span className="nx-ops75-address">{market}{sellerPhone ? ` • ${formatPhone(sellerPhone)}` : ''}</span>
-      </div>
-      <div className="nx-ops75-col nx-ops75-col--msg">
-        <span className="nx-ops75-preview">{latestMessageBody}</span>
-        <time className="nx-ops75-time">{timestamp.timeLabel}</time>
-        <span className="nx-ops75-time">{normalizeLabel(latestDirection || 'unknown')}</span>
-      </div>
-      <div className="nx-ops75-col nx-ops75-col--meta">
-        {stageNum && <span className="nx-ops75-badge">{stageNum}</span>}
-        <span className="nx-ops75-badge">{market}</span>
-        <span className="nx-ops75-badge">{pTypeShort}</span>
-        {isHot && <span className="nx-ops75-badge nx-ops75-badge--hot">🔥</span>}
-        {intelTags.map(t => <span key={t} className="nx-ops75-badge">{t}</span>)}
-        <span className="nx-ops75-badge">Offer {formatMoneyCompact(cashOffer)}</span>
-        <span className="nx-ops75-badge">Value {formatMoneyCompact(estimatedValue)}</span>
-        <span className="nx-ops75-badge">Equity {formatMoneyCompact(equityAmount)} / {formatPercentCompact(equityPercent)}</span>
-        <span className="nx-ops75-badge">Score {finalAcquisitionScore ?? '—'}</span>
-        {tagSummary.map((tag) => <span key={tag} className="nx-ops75-badge">{tag}</span>)}
-      </div>
-      <div className="nx-ops75-col nx-ops75-col--status">
-        <span className={cls("nx-ops75-status", decision.unread && "is-unread")}>{statusLabel}</span>
-        <span className="nx-ops75-badge">{stageLabel}</span>
-        <span className="nx-ops75-badge">{bucketLabel}</span>
-        <span className="nx-ops75-badge">{contactStatus}</span>
-        {contactFlags.map((flag) => <span key={flag} className="nx-ops75-badge">{flag}</span>)}
-      </div>
-      <div className="nx-ops75-col nx-ops75-col--actions">
-        <button type="button" className="nx-ops75-action-btn"><Icon name="message" /></button>
-      </div>
-    </div>
-  )
-})
-ConversationRowOps75.displayName = 'ConversationRowOps75'
 
 // Elite inbox row — rail25 / review50 / ops75 / full100 (one component, mode CSS)
-const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = 'review50' }: {
+const CompactRow25 = memo(({
+  thread, selected, decision, onSelect, inboxMode = 'review50',
+  index = 0, bulkSelected = false, selectionActive = false, onToggleBulk,
+}: {
   thread: InboxWorkflowThread
   selected: boolean
   decision: ConversationDecision
   onSelect: (id: string) => void
   inboxMode?: 'rail25' | 'review50' | 'ops75' | 'full100'
+  index?: number
+  bulkSelected?: boolean
+  selectionActive?: boolean
+  onToggleBulk?: (id: string, index: number, shiftKey: boolean) => void
 }) => {
-  const showPropertyFlags = true
   const showSideMetrics = inboxMode !== 'rail25'
   const vars = getThreadVars(thread, decision)
   const {
-    name, address, contextLine, latestMessageBody, latestDirection,
+    name, address, titleSource, subtitle, subtitleKind, contextLine,
+    latestMessageBody, latestDirection,
     estimatedValue, equityAmount, equityPercent,
     finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
     rowDisplayFlags, propertyId, latitude, longitude, streetviewImage,
@@ -997,19 +855,26 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
   const conditionDisplay = buildingCondition || '—'
-  const showMetadata = contextLine && contextLine !== '—'
-  const flagMaxVisible = 3
+  // R5.4 caps a list row at 3 pills. The receipt and the meta line are text, so the
+  // only pill-class elements in the row are the property flags — hold them at 2.
+  const flagMaxVisible = 2
   const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
+  // Street View is keyed by the property, not by the row, so a recycled virtual row
+  // cannot inherit the previous thread's failed/loaded state (RC-1e).
+  const mediaKey = propertyId || `${latitude ?? 'na'},${longitude ?? 'na'}` || thread.id
 
   return (
     <div
       role="button"
       tabIndex={0}
+      aria-label={`${name}${subtitle ? `, ${subtitle}` : ''}`}
       className={cls(
         'nx-row25',
         `is-mode-${inboxMode}`,
         bucketAccentClass,
         selected && 'is-selected',
+        bulkSelected && 'is-bulk-selected',
+        selectionActive && 'is-selection-mode',
         decision.unread && 'is-unread',
         latestDirection === 'inbound' && 'is-inbound',
         latestDirection === 'outbound' && 'is-outbound',
@@ -1019,8 +884,26 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
+      {onToggleBulk && (
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={bulkSelected}
+          aria-label={`Select conversation with ${name}`}
+          className="nx-row25__select"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleBulk(thread.id, index, e.shiftKey)
+          }}
+        >
+          <span className="nx-row25__select-box" aria-hidden="true">
+            {bulkSelected && <Icon name="check" />}
+          </span>
+        </button>
+      )}
       <div className="nx-row25__zone nx-row25__zone--media" aria-hidden>
         <InboxStreetViewThumb
+          key={mediaKey}
           address={address}
           lat={latitude}
           lng={longitude}
@@ -1033,28 +916,29 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
         <div className="nx-row25__head">
           <span className="nx-row25__name-wrap">
             {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
-            <span className="nx-row25__name">{name}</span>
+            <span className={cls('nx-row25__name', titleSource === 'unknown' && 'is-unnamed')}>{name}</span>
           </span>
           <time className="nx-row25__time">{ageLabel}</time>
         </div>
-        <span className="nx-row25__addr">{address}</span>
+        {/* Secondary identity. Never repeats the title: when the property is already
+            the title this falls through to the phone (R5.5). Omitted entirely when
+            there is nothing true to say — no "No Address" placeholder. */}
+        {subtitle && (
+          <span className={cls('nx-row25__addr', `is-${subtitleKind}`)}>{subtitle}</span>
+        )}
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
-          {deliveryReceipt ? (
+          {deliveryReceipt && (
             <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={deliveryReceipt.label}>
               <Icon name={deliveryReceipt.icon} />
               <span className="nx-row25__receipt-label">{deliveryReceipt.label}</span>
             </span>
-          ) : (
-            <span className="nx-row25__receipt is-muted" aria-hidden="true" />
+          )}
+          {contextLine && (
+            <span className="nx-row25__context-line">{contextLine}</span>
           )}
         </div>
-        {showMetadata && (
-          <div className="nx-row25__context">
-            <span className="nx-row25__context-line">{contextLine}</span>
-          </div>
-        )}
-        {showPropertyFlags && rowDisplayFlags.length > 0 && (
+        {rowDisplayFlags.length > 0 && (
           <PropertyFlagBadges flags={rowDisplayFlags} maxVisible={flagMaxVisible} density={flagDensity} />
         )}
       </div>
@@ -1264,7 +1148,31 @@ export const InboxSidebar = ({
       ?? VISIBLE_INBOX_CHIPS[VISIBLE_INBOX_CHIPS.length - 1],
     [canonicalActiveView],
   )
+  // Category visibility is operator-configurable and persisted (item 7).
+  const [visibleBuckets, setVisibleBuckets] = useState<CanonicalBucket[]>(() => readVisibleBuckets())
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
+  const toggleBucketVisibility = useCallback((bucket: CanonicalBucket) => {
+    setVisibleBuckets((current) => {
+      const next = current.includes(bucket)
+        ? current.filter((b) => b !== bucket)
+        : [...current, bucket]
+      // Keep at least one chip so the rail can never become unusable.
+      const safe = next.length > 0 ? next : current
+      // Preserve the canonical BUCKETS order rather than click order.
+      const ordered = BUCKETS.filter((cfg) => safe.includes(cfg.bucket)).map((cfg) => cfg.bucket)
+      try { window.localStorage.setItem(VISIBLE_CATEGORIES_KEY, JSON.stringify(ordered)) } catch {}
+      return ordered
+    })
+  }, [])
+
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
+  // The active bucket always appears, even if hidden, so the operator can always see
+  // (and leave) the view they are actually in.
+  const renderedCategoryChips = useMemo(() => {
+    const keys = new Set<CanonicalBucket>(visibleBuckets)
+    keys.add(activeBucketConfig.bucket)
+    return BUCKETS.filter((cfg) => keys.has(cfg.bucket))
+  }, [visibleBuckets, activeBucketConfig.bucket])
   const [savedFilters, setSavedFilters] = useState<LocalSavedFilter[]>([])
   const [showManageLists, setShowManageLists] = useState(false)
   // Cold follow-up stale-age sub-filter (null = all cold, number = min days since last outbound)
@@ -1316,20 +1224,77 @@ export const InboxSidebar = ({
     })
   }, [searchableThreads, decisionMap, visibleThreadCount, activeBucketConfig.bucket, coldStaleDays, threads.length])
 
-  const _handleToggleBulk = (id: string) => {
+  // RC-13. Selection used to be structurally impossible: the only checkbox lived in a
+  // component that was never mounted, and the toggle was explicitly voided. The
+  // checkbox now lives on the row that actually renders, so this is reachable state.
+  const lastBulkIndexRef = useRef<number | null>(null)
+  const handleToggleBulk = useCallback((id: string, index: number, shiftKey: boolean) => {
     setBulkSelectedIds((current) => {
       const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      const anchor = lastBulkIndexRef.current
+      // Shift-click extends from the previous anchor across the rendered order.
+      if (shiftKey && anchor !== null && anchor !== index) {
+        const [from, to] = anchor < index ? [anchor, index] : [index, anchor]
+        const shouldSelect = !next.has(id)
+        for (let i = from; i <= to; i += 1) {
+          const row = displayedActiveThreads[i]
+          if (!row) continue
+          if (shouldSelect) next.add(row.id)
+          else next.delete(row.id)
+        }
+      } else if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
-  }
-  void _handleToggleBulk
+    lastBulkIndexRef.current = index
+  }, [displayedActiveThreads])
 
-  const handleBulkAction = (action: string) => {
-    if (bulkSelectedIds.size === 0) return
-    console.warn('BACKEND_ENDPOINT_NOT_READY', { action, selected: Array.from(bulkSelectedIds) })
-  }
+  const clearBulkSelection = useCallback(() => {
+    setBulkSelectedIds(new Set())
+    lastBulkIndexRef.current = null
+  }, [])
+
+  const [bulkBusy, setBulkBusy] = useState<null | 'archive' | 'read' | 'unread'>(null)
+  const [bulkError, setBulkError] = useState<string | null>(null)
+
+  /**
+   * Only actions backed by a real mutation are offered. `archiveThread`,
+   * `markThreadRead` and `markThreadUnread` all persist through
+   * backendClient.patchUniversalLeadState. Anything without a backend is not
+   * rendered at all — a control that cannot do its job must not exist.
+   */
+  const handleBulkAction = useCallback(async (action: 'archive' | 'read' | 'unread') => {
+    const ids = Array.from(bulkSelectedIds)
+    if (ids.length === 0 || bulkBusy) return
+    const threadsById = new Map(displayedActiveThreads.map((t) => [t.id, t]))
+    const mutate = action === 'archive' ? archiveThread
+      : action === 'read' ? markThreadRead
+      : markThreadUnread
+
+    setBulkBusy(action)
+    setBulkError(null)
+    const results = await Promise.all(ids.map(async (id) => {
+      const key = threadsById.get(id)?.threadKey || id
+      try {
+        return await mutate(key)
+      } catch (err) {
+        return { ok: false, threadKey: key, errorMessage: err instanceof Error ? err.message : String(err) }
+      }
+    }))
+    const failed = results.filter((r) => !r.ok)
+    setBulkBusy(null)
+    if (failed.length === 0) {
+      clearBulkSelection()
+      onRetryLoad?.()
+      return
+    }
+    // R10.4: partial success is reported honestly rather than swallowed.
+    setBulkError(`${failed.length} of ${ids.length} could not be updated. ${failed[0]?.errorMessage ?? ''}`.trim())
+    if (failed.length < ids.length) onRetryLoad?.()
+  }, [bulkSelectedIds, bulkBusy, displayedActiveThreads, clearBulkSelection, onRetryLoad])
 
   const handleClearFilters = useCallback(() => {
     setColdStaleDays(null)
@@ -1451,7 +1416,7 @@ export const InboxSidebar = ({
         </div>
       )}
       <div className="nx-cat-nav" ref={catNavRef} role="tablist" aria-label="Inbox categories">
-        {VISIBLE_INBOX_CHIPS.map((item) => {
+        {renderedCategoryChips.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
           const showUnread = item.bucket === 'new_replies' && Number(countValue ?? 0) > 0
@@ -1478,7 +1443,39 @@ export const InboxSidebar = ({
             </button>
           )
         })}
+        <button
+          type="button"
+          className={cls('nx-cat-nav__item', 'nx-cat-nav__item--config', showCategoryPicker && 'is-active')}
+          aria-expanded={showCategoryPicker}
+          aria-label="Choose which categories to show"
+          title="Choose which categories to show"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCategoryPicker((v) => !v) }}
+        >
+          <span className="nx-cat-nav__icon" aria-hidden="true">⋯</span>
+          <span className="nx-cat-nav__label">Categories</span>
+        </button>
       </div>
+      {showCategoryPicker && (
+        <div className="nx-cat-config" role="group" aria-label="Category visibility">
+          <p className="nx-cat-config__hint">Show these categories in the rail</p>
+          {BUCKETS.map((cfg) => {
+            const checked = visibleBuckets.includes(cfg.bucket)
+            const count = numberOrNull(viewCounts[cfg.countKey])
+            return (
+              <label key={cfg.bucket} className="nx-cat-config__row">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleBucketVisibility(cfg.bucket)}
+                />
+                <span className="nx-cat-config__icon" aria-hidden="true">{cfg.icon}</span>
+                <span className="nx-cat-config__label">{cfg.label}</span>
+                <span className="nx-cat-config__count">{formatCount(count)}</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
       {activeBucketConfig.bucket === 'cold' && (
         <div className="nx-cold-stale-chips" role="group" aria-label="Cold follow-up age filter">
           {([
@@ -1539,15 +1536,36 @@ export const InboxSidebar = ({
     </>
   )
 
+  /**
+   * Only the three actions that have a real mutation behind them are offered.
+   * The previous bar advertised six ("Mark Reviewed", "Change Status", "Schedule",
+   * "Flag Hot", "Suppress") that all called console.warn('BACKEND_ENDPOINT_NOT_READY')
+   * and carried that string as their tooltip. Controls that cannot act are removed,
+   * not disabled with an excuse.
+   */
   const renderMultiSelectBar = () => (
     bulkSelectedIds.size > 0 && (
-      <div className="nx-inbox-rebuilt-floating-bar">
-        <div className="nx-inbox-rebuilt-floating-bar__count"><strong>{bulkSelectedIds.size}</strong> selected</div>
-        <div className="nx-inbox-rebuilt-floating-bar__actions">
-          {['Mark Reviewed', 'Change Status', 'Schedule', 'Archive', 'Flag Hot', 'Suppress'].map((action) => (
-            <button key={action} type="button" onClick={() => handleBulkAction(action)} title="BACKEND_ENDPOINT_NOT_READY">{action}</button>
-          ))}
+      <div className="nx-inbox-rebuilt-floating-bar" role="region" aria-label="Bulk actions">
+        <div className="nx-inbox-rebuilt-floating-bar__count">
+          <strong>{bulkSelectedIds.size}</strong> selected
         </div>
+        <div className="nx-inbox-rebuilt-floating-bar__actions">
+          <button type="button" onClick={() => void handleBulkAction('read')} disabled={bulkBusy !== null}>
+            {bulkBusy === 'read' ? 'Marking…' : 'Mark read'}
+          </button>
+          <button type="button" onClick={() => void handleBulkAction('unread')} disabled={bulkBusy !== null}>
+            {bulkBusy === 'unread' ? 'Marking…' : 'Mark unread'}
+          </button>
+          <button type="button" onClick={() => void handleBulkAction('archive')} disabled={bulkBusy !== null}>
+            {bulkBusy === 'archive' ? 'Archiving…' : 'Archive'}
+          </button>
+          <button type="button" className="is-ghost" onClick={clearBulkSelection} disabled={bulkBusy !== null}>
+            Clear
+          </button>
+        </div>
+        {bulkError && (
+          <p className="nx-inbox-rebuilt-floating-bar__error" role="alert">{bulkError}</p>
+        )}
       </div>
     )
   )
@@ -1560,7 +1578,7 @@ export const InboxSidebar = ({
     : 108
   const shouldVirtualizeList = !isMobile && displayedActiveThreads.length >= 12
 
-  const renderThreadRow = useCallback((thread: InboxWorkflowThread) => {
+  const renderThreadRow = useCallback((thread: InboxWorkflowThread, index = 0) => {
     const decision = decisionMap.get(thread.id)
     if (!decision) return null
     const onThreadSelect = (id: string) => {
@@ -1584,9 +1602,13 @@ export const InboxSidebar = ({
         decision={decision}
         inboxMode={inboxMode}
         onSelect={onThreadSelect}
+        index={index}
+        bulkSelected={bulkSelectedIds.has(thread.id)}
+        selectionActive={bulkSelectedIds.size > 0}
+        onToggleBulk={handleToggleBulk}
       />
     )
-  }, [activeViewFilter, decisionMap, inboxMode, onSelect, onThreadAction, selectedId])
+  }, [activeViewFilter, decisionMap, inboxMode, onSelect, onThreadAction, selectedId, bulkSelectedIds, handleToggleBulk])
 
   const renderListContent = () => (
     <>
@@ -1625,10 +1647,10 @@ export const InboxSidebar = ({
                 className="nx-sidebar-rebuilt__virtual-list"
                 initialScrollOffset={listScrollOffset}
                 onScrollOffsetChange={onListScrollOffsetChange}
-                renderRow={(thread) => renderThreadRow(thread)}
+                renderRow={(thread, index) => renderThreadRow(thread, index)}
               />
-            ) : displayedActiveThreads.map((thread) => (
-              <div key={thread.threadKey || thread.id}>{renderThreadRow(thread)}</div>
+            ) : displayedActiveThreads.map((thread, index) => (
+              <div key={thread.threadKey || thread.id}>{renderThreadRow(thread, index)}</div>
             ))
           ) : (
             <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>

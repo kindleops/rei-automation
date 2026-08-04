@@ -38,8 +38,10 @@
 }
 
 .nx-sidebar--mode-rail25 .nx-load-more-btn {
-  height: 26px;
-  font-size: 10.5px;
+  /* Was 26px tall at 10.5px type — below both the 44px touch target (R15.3) and the
+     type floor (R2.1), on the control that pages the operator's entire queue. */
+  min-height: 44px;
+  font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
