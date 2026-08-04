@@ -11,7 +11,7 @@
  *  - R13.9 verdicts cached by stable key with an explicit TTL
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { buildMediaIdentity, type IdentityInput } from './identity'
+import { buildMediaIdentity, hasResolvableLocation, type IdentityInput } from './identity'
 import {
   forgetAvailability,
   peekAvailability,
@@ -168,6 +168,10 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
     if (key === 'none') return
     if (identity.storedStreetUrl) return
     if (availability) return
+    // Nothing to ask the provider about yet — a coordinate/address lookup is
+    // still outstanding. Asking now would produce a NO_COORDINATES verdict that
+    // is about our data pipeline, not about the imagery.
+    if (!hasResolvableLocation(identity)) return
 
     let cancelled = false
     void probeStreetAvailability(identity).then((status) => {
@@ -178,7 +182,17 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
     }
   }, [enabled, key, identity, availability, retryTick])
 
+  // A record whose location is still being recovered is *probing*, not failed.
+  // Only once recovery has settled with nothing do we assert NO_COORDINATES.
+  const locationPending =
+    !hasResolvableLocation(identity) &&
+    resolveMissingCoordinates &&
+    Boolean(propertyId) &&
+    peekPropertyLocation(propertyId) === undefined
+
   const streetStatus: 'probing' | 'ready' | 'failed' = (() => {
+    if (locationPending) return 'probing'
+    if (!hasResolvableLocation(identity) && !identity.storedStreetUrl) return 'failed'
     if (!availability) return enabled ? 'probing' : 'failed'
     if (availability.state === 'unavailable') return 'failed'
     if (streetImageFailed) return 'failed'
@@ -187,6 +201,8 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
 
   const streetReason: MediaFailureReason | null = (() => {
     if (streetStatus !== 'failed') return null
+    if (!getMapsApiKey()) return 'KEY_MISSING'
+    if (!hasResolvableLocation(identity) && !identity.storedStreetUrl) return 'NO_COORDINATES'
     if (!availability) return 'NO_COORDINATES'
     if (availability.state === 'unavailable') return availability.reason
     if (streetImageFailed) return 'NO_PANORAMA_AT_LOCATION'

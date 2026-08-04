@@ -86,10 +86,18 @@ export function buildMediaIdentity(input: IdentityInput): PropertyMediaIdentity 
   const address = normalizeAddress(input.address)
   const propertyId = input.propertyId == null ? null : String(input.propertyId).trim() || null
 
+  // Key on what we will actually ask the provider for, so the key changes the
+  // moment the resolvable location changes.
+  //
+  // `pid:` deliberately ranks BELOW `addr:`. Ranking it above meant a record
+  // whose address arrived a tick after its id kept the same key forever: the
+  // per-key state never re-synced, so the "nothing to ask about yet" verdict
+  // stuck permanently — and got cached for the full TTL. A bare `pid:` key now
+  // means exactly one thing: we hold an identity but no location for it yet.
   let key: string
   if (coords) key = `geo:${coordKey(coords.lat, coords.lng)}`
-  else if (propertyId) key = `pid:${propertyId}`
   else if (address) key = `addr:${address.toLowerCase()}`
+  else if (propertyId) key = `pid:${propertyId}`
   else key = 'none'
 
   return {
@@ -113,4 +121,12 @@ function normalizeStoredUrl(value: unknown): string | null {
 /** True when the identity carries something Google can actually resolve. */
 export function hasResolvableLocation(identity: PropertyMediaIdentity): boolean {
   return identity.lat != null || Boolean(identity.address)
+}
+
+/**
+ * True when we hold an identity but no location for it — i.e. a lookup is
+ * still possible and "no coordinates" is not yet a settled answer.
+ */
+export function isAwaitingLocation(identity: PropertyMediaIdentity): boolean {
+  return identity.key.startsWith('pid:')
 }

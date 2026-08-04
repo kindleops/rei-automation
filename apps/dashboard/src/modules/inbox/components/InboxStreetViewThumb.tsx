@@ -121,7 +121,9 @@ const InboxStreetViewThumbComponent = ({
                operator returning to the tab found empty slots. Low fetch
                priority keeps these off the critical path instead. */
             loading="eager"
-            fetchPriority="low"
+            /* Lowercase: React 18 does not know the camelCase `fetchPriority`
+               prop and warns rather than forwarding it. */
+            {...{ fetchpriority: 'low' }}
             decoding="async"
             draggable={false}
             onLoad={onLoaded}

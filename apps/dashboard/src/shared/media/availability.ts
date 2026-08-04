@@ -134,10 +134,14 @@ export function probeStreetAvailability(
     }
   })()
     .then((status) => {
-      // A transient network failure must not be cached for 12 hours.
-      if (!(status.state === 'unavailable' && status.reason === 'NETWORK')) {
-        rememberAvailability(identity.key, status)
-      }
+      // Only provider verdicts are cacheable. A transient network failure and a
+      // record that simply has no location yet are both states that can change
+      // without the provider changing its answer, so caching them for the full
+      // TTL would freeze a wrong verdict onto the surface.
+      const transient =
+        status.state === 'unavailable' &&
+        (status.reason === 'NETWORK' || status.reason === 'NO_COORDINATES')
+      if (!transient) rememberAvailability(identity.key, status)
       return status
     })
     .finally(() => {
