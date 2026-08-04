@@ -6,6 +6,7 @@ import {
   deriveOwnerMatchFlags,
   formatParticipantRelationship,
   isEntityRelationship,
+  looksLikePhoneNumber,
   ownerMatchFlagTone,
   resolveOwnershipVerification,
   selectOwnerCandidates,
@@ -123,9 +124,16 @@ const ActiveProspectCardComponent = ({
   }
 
   const phone = String(selected?.canonical_e164 ?? '').trim()
-  const canonicalName = selected?.display_name?.trim() || ''
-  const threadName = selected?.thread_display_name?.trim() || ''
-  const headlineName = canonicalName || prospectName || formatPhone(phone) || 'Contact not identified'
+  // §0.2 — a raw phone number is not a name and must not be a heading. Verified
+  // in a real browser: the thread name resolver returns the phone number when
+  // the inbox row was hydrated without linked context.
+  const nameOrEmpty = (value: string | null | undefined) => {
+    const text = String(value ?? '').trim()
+    return text && !looksLikePhoneNumber(text) ? text : ''
+  }
+  const canonicalName = nameOrEmpty(selected?.display_name)
+  const threadName = nameOrEmpty(selected?.thread_display_name)
+  const headlineName = canonicalName || nameOrEmpty(prospectName) || 'Contact name not on record'
   const relationship = formatParticipantRelationship(
     selected?.relationship_to_property || selected?.identity_class,
   )
@@ -242,7 +250,7 @@ const ActiveProspectCardComponent = ({
                     )}
                     onClick={() => onSelectParticipant(candidate)}
                   >
-                    {candidate.display_name || formatPhone(String(candidate.canonical_e164 ?? '')) || 'Unnamed contact'}
+                    {nameOrEmpty(candidate.display_name) || formatPhone(String(candidate.canonical_e164 ?? '')) || 'Unnamed contact'}
                   </button>
                 </li>
               ))}
@@ -279,9 +287,7 @@ const ActiveProspectCardComponent = ({
           {ordered.map((participant) => {
             const participantPhone = String(participant.canonical_e164 ?? '').trim()
             const isSelected = Boolean(phone && participantPhone === phone)
-            const name = participant.display_name
-              || formatPhone(participantPhone)
-              || 'Unnamed contact'
+            const name = nameOrEmpty(participant.display_name) || 'Name not on record'
             const participantVerification = resolveOwnershipVerification(participant)
             return (
               <li key={participant.participant_id || participantPhone} role="presentation">

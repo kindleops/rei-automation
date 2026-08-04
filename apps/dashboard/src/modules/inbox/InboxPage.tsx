@@ -3750,6 +3750,24 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     const threadProspectName = selected ? resolveThreadPrimaryName(selected) : null
 
+    // Lane D: seed the card from the newly selected thread IMMEDIATELY.
+    //
+    // Caught in a real browser, not in review: the participants request for this
+    // property takes ~17s (and is often aborted), and `selectedParticipant` kept
+    // the PREVIOUS thread's contact for that whole window. The card therefore
+    // rendered one thread's contact name above another thread's owner record —
+    // "Janmar Holdings LLC" over "2 named owners: Heyward L Zimmerman ·
+    // Geraldine Whiters". Mixing two identities is exactly what this lane must
+    // not do.
+    //
+    // The seed is derived from the selected row, so it is always the right
+    // thread, and it is flagged `is_client_derived` with `ownership_status:
+    // 'unconfirmed'` — it can never be mistaken for a confirmation.
+    setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+    setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
+    setMasterOwnerHouseholdLabel(null)
+    setNextEligibleContact(null)
+
     const loadParticipants = () => {
       if (cancelled) return
       void fetchPropertyParticipants(propertyId, selectedPhone || null, controller.signal)

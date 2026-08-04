@@ -343,7 +343,7 @@
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__label {
-  font-size: 9px !important;
+  font-size: 11px !important;
   font-weight: 600 !important;
   letter-spacing: 0.06em !important;
   text-transform: uppercase !important;
@@ -454,7 +454,7 @@
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-glass-btn__caret {
-  font-size: 10px !important;
+  font-size: 11px !important;
   opacity: 0.72 !important;
   margin-left: 1px !important;
   transition: transform 0.16s !important;
@@ -599,7 +599,7 @@
 }
 
 .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__time {
-  font-size: 10.5px !important;
+  font-size: 11px !important;
   font-weight: 500 !important;
   color: var(--nx-live-text-muted) !important;
 }
@@ -611,7 +611,7 @@
   padding: 2px 8px !important;
   border-radius: 999px !important;
   border: 1px solid transparent !important;
-  font-size: 10px !important;
+  font-size: 11px !important;
   font-weight: 600 !important;
   backdrop-filter: blur(8px) !important;
 }
@@ -676,8 +676,8 @@
   border: 1px solid var(--nx-live-glass-border) !important;
   background: color-mix(in srgb, var(--nx-live-glass-bg) 82%, transparent) !important;
   backdrop-filter: blur(10px) !important;
-  font-size: 10px !important;
-  font-weight: 650 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
   letter-spacing: 0.05em !important;
   text-transform: uppercase !important;
   color: var(--nx-live-text-muted) !important;

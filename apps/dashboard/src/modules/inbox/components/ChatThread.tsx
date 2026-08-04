@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
-import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
+import { formatCurrency, formatMessageDateTime, formatPercent, formatPhone } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
 import { buildPropertyExternalLinks, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
-import { describeOwnerRecord, type PropertyParticipant } from '../utils/participantLabels'
+import { describeOwnerRecord, looksLikePhoneNumber, type PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
@@ -578,15 +578,25 @@ export const ChatThread = ({
     </div>
   )
 
-  const prospectName = selectedParticipant?.display_name || resolveThreadPrimaryName(thread)
+  // §0.2 — never render a raw phone number as the conversation title. Confirmed
+  // in a real browser: `resolveThreadPrimaryName` returns the phone number when
+  // the inbox row was hydrated without linked context, so the header read
+  // "+1 (404) 936-3531" and the line below it read "+1 (404) 936-3531 household".
+  const namedProspect = [selectedParticipant?.display_name, resolveThreadPrimaryName(thread)]
+    .map((value) => String(value ?? '').trim())
+    .find((value) => value && !looksLikePhoneNumber(value))
+  const prospectName = namedProspect || 'Seller name not on record'
   // RC-8: `"<Name> household"` asserted a relationship the record never carried —
   // it rendered "Janmar Holdings LLC household" for an LLC. The owner record is
   // now described, not characterised.
   const ownerRecord = describeOwnerRecord(resolveThreadOwnerName(thread), masterOwnerHouseholdLabel)
-  const phoneNumber = fallback(
+  // Format the number for reading. A raw E.164 string is a developer artifact
+  // (constitution §0.2) — it was rendering as "+14049363531" in the header.
+  const rawPhoneNumber = fallback(
     selectedParticipant?.canonical_e164 || thread.phoneNumber || thread.canonicalE164,
     '',
   )
+  const phoneNumber = rawPhoneNumber ? formatPhone(rawPhoneNumber) : ''
   const propertyAddress = resolveThreadAddressLine(thread)
   const market = resolveThreadMarketBadge(thread)
   const matchedKeywords = getThreadMatchedKeywords(thread, searchQuery)

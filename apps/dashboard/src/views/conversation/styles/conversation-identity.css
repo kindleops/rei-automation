@@ -12,14 +12,16 @@
 .nx-idv {
   position: relative;
   flex: 0 0 auto;
-  padding: 8px 12px 0;
+  padding: 6px 12px 0;
 }
 
 .nx-idv__card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 10px;
+  max-height: 34vh;
+  overflow-y: auto;
   border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.1));
   border-radius: 10px;
   background: var(--nx-surface, rgba(255, 255, 255, 0.03));
@@ -130,7 +132,7 @@
   align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 7px 9px;
+  padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.08));
   background: rgba(255, 255, 255, 0.02);

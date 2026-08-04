@@ -357,20 +357,35 @@ const ENTITY_PATTERNS: Array<{ re: RegExp; kind: EntityKind; label: string }> = 
   { re: /\b(church|ministries|housing authority|city of|county of|state of|bank|credit union|hoa|homeowners association)\b/i, kind: 'institution', label: 'Institution' },
 ]
 
-const MULTI_PARTY_SPLIT = /\s*(?:&|\/|\+|\band\b)\s*/i
+const MULTI_PARTY_SPLIT = /\s*(?:&|\/|\band\b)\s*/i
 
 const cleanName = (value: unknown): string => String(value ?? '').replace(/\s+/g, ' ').trim()
 
+/**
+ * Found in a real browser, not in the source: when the inbox row is hydrated in
+ * `initial_boot` mode the owner name arrives NULL and the thread resolver falls
+ * back to the phone number — which then rendered as
+ * `"+1 (404) 936-3531 household"`. A phone number is never a name
+ * (constitution §0.2 — no raw phone number as a title).
+ */
+export function looksLikePhoneNumber(value: string | null | undefined): boolean {
+  const raw = cleanName(value)
+  if (!raw) return false
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 7) return false
+  return /^[+()\-.\s\d]+$/.test(raw)
+}
+
 export function classifyOwnerName(name: string | null | undefined): OwnerNameIdentity {
   const value = cleanName(name)
-  if (!value) {
+  if (!value || looksLikePhoneNumber(value)) {
     return {
       kind: 'person',
       entityKind: null,
-      typeLabel: 'Unnamed record',
+      typeLabel: 'Owner name not loaded',
       parties: [],
       matchedToken: null,
-      evidence: 'No owner name on record.',
+      evidence: 'No owner name on record for this property.',
     }
   }
 
@@ -431,8 +446,10 @@ export function describeOwnerRecord(
   // The server label is the only evidenced household statement available.
   const serverLabel = cleanName(serverHouseholdLabel)
   if (serverLabel) return { line: serverLabel, identity }
+  // The caller renders `typeLabel` as its own badge — repeating it here produced
+  // "Janmar Holdings LLC · LLC  LLC" (constitution R5.5).
   if (identity.kind === 'entity') {
-    return { line: `Owner of record: ${identity.parties[0]} · ${identity.typeLabel}`, identity }
+    return { line: `Owner of record: ${identity.parties[0]}`, identity }
   }
   if (identity.kind === 'multiple') {
     return { line: `Owner of record: ${identity.parties.join(' · ')}`, identity }
