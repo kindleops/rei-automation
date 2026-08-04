@@ -97,15 +97,23 @@ const rollbackValueOf = <T extends CanonicalControlValue>(
 }
 
 /**
- * A rollback target only stands in for an authoritative row that has not caught up yet.
- * The moment that row CHANGES — whether it catches up or moves on to something else — the
- * row is newer information and wins, so the target can never mask a later server-side
- * change to the field.
+ * A rollback target stands in for an authoritative row that has not caught up yet, and
+ * retires the moment the row DOES catch up.
+ *
+ * It deliberately does not retire on any other change to the row. `onRefetch` re-reads the
+ * inbox list through `backendClient`'s GET cache, so a refresh issued right after a
+ * confirmed write can be served a pre-write body — the row flips back to its old value
+ * while the database holds the new one. Retiring on "the row changed at all" let that
+ * stale read win and the control displayed a value the server no longer held.
+ *
+ * The target came from the server's own authoritative response, so while it disagrees with
+ * the row it is the better information. The read-path caching that makes this necessary is
+ * an N.3 concern.
  */
 const rollbackStillApplies = <T extends CanonicalControlValue>(
   overlay: Extract<Overlay<T>, { kind: 'failed' }>,
   serverValue: T,
-): boolean => overlay.rollbackValue !== undefined && overlay.serverValueAtStart === serverValue
+): boolean => overlay.rollbackValue !== undefined && overlay.rollbackValue !== serverValue
 
 const UNSUPPORTED_MESSAGE =
   'This conversation has no writable canonical phone route, so its state cannot be saved.'

@@ -128,10 +128,10 @@ test('the rollback baseline is scoped to one conversation', () => {
   assert.match(HOOK_SOURCE, /const overlayKey = \(scope: string, field: string\): string => `\$\{scope\}::\$\{field\}`/)
 })
 
-test('a rollback target retires as soon as the authoritative row changes', () => {
-  assert.match(HOOK_SOURCE, /rollbackStillApplies/,
-    'without this the target would mask every later server-side change to the field')
-  assert.match(HOOK_SOURCE, /overlay\.serverValueAtStart === serverValue/)
+test('a rollback target retires once the authoritative row carries the same value', () => {
+  assert.match(HOOK_SOURCE, /rollbackStillApplies/)
+  assert.match(HOOK_SOURCE, /overlay\.rollbackValue !== serverValue/,
+    'the target must survive a STALE row read and retire only when the row genuinely agrees')
 })
 
 // ── 4. the portal dropdown survives a real mouse ─────────────────────────────
