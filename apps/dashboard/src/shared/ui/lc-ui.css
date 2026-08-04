@@ -1,0 +1,511 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   lc-ui.css — the ONE style sheet for the shared primitive library
+   Owner: Lane A. Consumes `--lc-*` only (R1.1 / R1.2): no hex, no rgb(),
+   no hsl(), no literal z-index (R11.1), no `!important` (R1.6), no font-size
+   outside the §2 scale, no spacing off the §3 grid.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Scrim shared by modal + drawer (levels 3) ─────────────────────────── */
+.lc-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--lc-scrim);
+  animation: lc-fade-in var(--lc-dur-2) var(--lc-ease-out);
+}
+
+.lc-scrim--modal {
+  z-index: var(--lc-z-modal);
+}
+
+.lc-scrim--drawer {
+  z-index: var(--lc-z-drawer);
+}
+
+.lc-scrim--transparent {
+  background: transparent;
+}
+
+@keyframes lc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lc-rise-in {
+  from { opacity: 0; transform: translateY(var(--lc-space-2)) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes lc-slide-in-right {
+  from { opacity: 0; transform: translateX(var(--lc-space-5)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes lc-slide-in-bottom {
+  from { opacity: 0; transform: translateY(var(--lc-space-6)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lc-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+/* ═══ Modal — §11.2–§11.5 ═════════════════════════════════════════════ */
+
+.lc-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: var(--lc-z-modal);
+  display: flex;
+  flex-direction: column;
+  width: calc(100vw - var(--lc-space-6));
+  max-height: calc(100dvh - var(--lc-space-7));
+  transform: translate(-50%, -50%);
+  font-family: var(--lc-font-ui);
+  color: var(--lc-text-secondary);
+  /* Level 3 — MAP COMMAND liquid glass. */
+  background: var(--lc-glass-bg), var(--lc-surface-overlay);
+  border: 1px solid var(--lc-glass-border);
+  border-radius: var(--lc-radius-xl);
+  box-shadow: var(--lc-elev-3), var(--lc-glass-highlight);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  animation: lc-rise-in var(--lc-dur-3) var(--lc-ease-out);
+}
+
+.lc-modal--confirm { max-width: 560px; }
+.lc-modal--content { max-width: 880px; }
+
+.lc-modal__header,
+.lc-drawer__header {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-3);
+  align-items: flex-start;
+  padding: var(--lc-space-4) var(--lc-space-5);
+  border-bottom: 1px solid var(--lc-line);
+}
+
+.lc-modal__titles,
+.lc-drawer__titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-space-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.lc-modal__title,
+.lc-drawer__title {
+  margin: 0;
+  font-size: var(--lc-text-md);
+  font-weight: var(--lc-weight-heading);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-modal__description,
+.lc-drawer__description {
+  margin: 0;
+  font-size: var(--lc-text-sm);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-muted);
+}
+
+.lc-modal__body,
+.lc-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--lc-space-5);
+  overflow-y: auto;
+  font-size: var(--lc-text-base);
+  line-height: var(--lc-leading-body);
+}
+
+.lc-modal__footer,
+.lc-drawer__footer {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--lc-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--lc-space-3) var(--lc-space-5);
+  border-top: 1px solid var(--lc-line);
+}
+
+/* ═══ Drawer — §11.6–§11.8 ════════════════════════════════════════════ */
+
+.lc-drawer {
+  position: fixed;
+  z-index: var(--lc-z-drawer);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--lc-font-ui);
+  color: var(--lc-text-secondary);
+  /* Level 3 — MAP COMMAND liquid glass. */
+  background: var(--lc-glass-bg), var(--lc-surface-overlay);
+  border: 1px solid var(--lc-glass-border);
+  box-shadow: var(--lc-elev-3), var(--lc-glass-highlight);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+}
+
+.lc-drawer--right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, calc(100vw - var(--lc-space-6)));
+  border-radius: var(--lc-radius-lg) 0 0 var(--lc-radius-lg);
+  animation: lc-slide-in-right var(--lc-dur-3) var(--lc-ease-out);
+}
+
+.lc-drawer--left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(480px, calc(100vw - var(--lc-space-6)));
+  border-radius: 0 var(--lc-radius-lg) var(--lc-radius-lg) 0;
+  animation: lc-slide-in-right var(--lc-dur-3) var(--lc-ease-out);
+}
+
+.lc-drawer--bottom {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 88dvh;
+  border-radius: var(--lc-radius-xl) var(--lc-radius-xl) 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: lc-slide-in-bottom var(--lc-dur-3) var(--lc-ease-out);
+}
+
+/* §11.6 mobile bottom sheet drag handle (visible affordance, §15.6) */
+.lc-drawer__handle {
+  display: block;
+  width: var(--lc-space-6);
+  height: var(--lc-space-1);
+  margin: var(--lc-space-2) auto 0;
+  background: var(--lc-line-strong);
+  border-radius: var(--lc-radius-pill);
+}
+
+/* ═══ Popover / Dropdown — §11.9–§11.12 (surface level 4) ═════════════ */
+
+.lc-popover {
+  position: fixed;
+  z-index: var(--lc-z-popover);
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  overflow: hidden auto;
+  font-family: var(--lc-font-ui);
+  font-size: var(--lc-text-sm);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-secondary);
+  /* Level 4 — MAP COMMAND liquid glass (§4.2 permits blur at levels 3–4). */
+  background: var(--lc-glass-bg), var(--lc-surface-popover);
+  border: 1px solid var(--lc-glass-border);
+  border-radius: var(--lc-radius-md);
+  box-shadow: var(--lc-elev-2), var(--lc-glass-highlight);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  animation: lc-rise-in var(--lc-dur-2) var(--lc-ease-out);
+}
+
+.lc-popover__search {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  padding: var(--lc-space-2) var(--lc-space-3);
+  background: var(--lc-surface-popover);
+  border-bottom: 1px solid var(--lc-line);
+}
+
+.lc-popover__search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--lc-space-1) 0;
+  font-family: inherit;
+  font-size: var(--lc-text-sm);
+  color: var(--lc-text-primary);
+  background: transparent;
+  border: 0;
+}
+
+.lc-popover__search input:focus {
+  outline: none;
+}
+
+.lc-menu {
+  display: flex;
+  flex-direction: column;
+  padding: var(--lc-space-1);
+}
+
+.lc-menu__label {
+  padding: var(--lc-space-2) var(--lc-space-2) var(--lc-space-1);
+  font-size: var(--lc-text-2xs);
+  font-weight: var(--lc-weight-heading);
+  letter-spacing: var(--lc-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--lc-text-muted);
+}
+
+.lc-menu__item {
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  min-height: var(--lc-tap-min);
+  padding: var(--lc-space-2) var(--lc-space-3);
+  font-family: inherit;
+  font-size: var(--lc-text-sm);
+  font-weight: var(--lc-weight-body);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-secondary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: background var(--lc-dur-1) var(--lc-ease-move),
+    color var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-menu__item:hover:not(:disabled),
+.lc-menu__item.is-highlighted {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+}
+
+.lc-menu__item.is-active {
+  color: var(--lc-text-primary);
+  background: var(--lc-accent-soft);
+}
+
+.lc-menu__item:disabled {
+  color: var(--lc-text-muted);
+  cursor: not-allowed;
+}
+
+.lc-menu__item:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: -2px;
+}
+
+.lc-menu__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-menu__item-meta {
+  flex: 0 0 auto;
+  font-size: var(--lc-text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--lc-text-muted);
+}
+
+.lc-menu__separator {
+  height: 1px;
+  margin: var(--lc-space-1) 0;
+  background: var(--lc-line);
+  border: 0;
+}
+
+/* ═══ Tooltip — §11.13–§11.16 (surface level 4) ═══════════════════════ */
+
+.lc-tooltip {
+  position: fixed;
+  z-index: var(--lc-z-tooltip);
+  max-width: 280px;
+  padding: var(--lc-space-1) var(--lc-space-2);
+  font-family: var(--lc-font-ui);
+  font-size: var(--lc-text-xs);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-primary);
+  pointer-events: none;
+  background: var(--lc-surface-popover);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-sm);
+  box-shadow: var(--lc-elev-2);
+  animation: lc-fade-in var(--lc-dur-1) var(--lc-ease-out);
+}
+
+/* ═══ Skeleton — §8 ═══════════════════════════════════════════════════ */
+
+.lc-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-space-2);
+}
+
+.lc-skeleton__line {
+  position: relative;
+  overflow: hidden;
+  background: var(--lc-surface-sunken);
+  border-radius: var(--lc-radius-xs);
+}
+
+.lc-skeleton__line::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: linear-gradient(90deg, transparent, var(--lc-accent-soft), transparent);
+  animation: lc-shimmer 1.4s var(--lc-ease-move) infinite;
+}
+
+.lc-skeleton__progress {
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  padding-top: var(--lc-space-1);
+  font-size: var(--lc-text-xs);
+  color: var(--lc-text-muted);
+}
+
+.lc-skeleton__retry {
+  padding: var(--lc-space-1) var(--lc-space-2);
+  font: inherit;
+  color: var(--lc-accent);
+  background: transparent;
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+}
+
+/* ═══ Empty + Error states — §9 / §10 ═════════════════════════════════ */
+
+.lc-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-space-3);
+  align-items: flex-start;
+  padding: var(--lc-space-5);
+  font-family: var(--lc-font-ui);
+  background: var(--lc-surface-raised);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-md);
+}
+
+.lc-state__eyebrow {
+  display: flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  font-size: var(--lc-text-2xs);
+  font-weight: var(--lc-weight-heading);
+  letter-spacing: var(--lc-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--lc-text-muted);
+}
+
+.lc-state--positive .lc-state__eyebrow { color: var(--lc-positive); }
+.lc-state--caution .lc-state__eyebrow { color: var(--lc-caution); }
+.lc-state--critical .lc-state__eyebrow { color: var(--lc-critical); }
+
+.lc-state__title {
+  margin: 0;
+  font-size: var(--lc-text-md);
+  font-weight: var(--lc-weight-heading);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-primary);
+}
+
+.lc-state__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-space-1);
+  margin: 0;
+  font-size: var(--lc-text-sm);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-secondary);
+}
+
+.lc-state__meta {
+  font-size: var(--lc-text-xs);
+  color: var(--lc-text-muted);
+}
+
+.lc-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lc-space-2);
+  align-items: center;
+}
+
+.lc-state__detail {
+  width: 100%;
+  font-size: var(--lc-text-xs);
+  color: var(--lc-text-muted);
+}
+
+.lc-state__detail pre {
+  max-height: 160px;
+  margin: var(--lc-space-2) 0 0;
+  padding: var(--lc-space-2);
+  overflow: auto;
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-2xs);
+  background: var(--lc-surface-sunken);
+  border-radius: var(--lc-radius-sm);
+}
+
+/* ═══ Buttons used by the primitives ══════════════════════════════════ */
+
+.lc-ui-btn {
+  display: inline-flex;
+  gap: var(--lc-space-2);
+  align-items: center;
+  justify-content: center;
+  min-height: var(--lc-tap-min);
+  padding: var(--lc-space-2) var(--lc-space-4);
+  font-family: var(--lc-font-ui);
+  font-size: var(--lc-text-sm);
+  font-weight: var(--lc-weight-emphasis);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-secondary);
+  background: var(--lc-control-bg);
+  border: 1px solid var(--lc-line);
+  border-radius: var(--lc-radius-sm);
+  cursor: pointer;
+  transition: background var(--lc-dur-1) var(--lc-ease-move),
+    border-color var(--lc-dur-1) var(--lc-ease-move),
+    color var(--lc-dur-1) var(--lc-ease-move);
+}
+
+.lc-ui-btn:hover:not(:disabled) {
+  color: var(--lc-text-primary);
+  border-color: var(--lc-line-strong);
+}
+
+.lc-ui-btn:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+.lc-ui-btn:disabled {
+  color: var(--lc-text-muted);
+  cursor: not-allowed;
+}
+
+.lc-ui-btn--primary {
+  color: var(--lc-accent-contrast);
+  background: var(--lc-accent);
+  border-color: var(--lc-accent);
+}
+
+.lc-ui-btn--quiet {
+  background: transparent;
+  border-color: transparent;
+}
+
+.lc-ui-btn--icon {
+  min-width: var(--lc-tap-min);
+  padding: var(--lc-space-2);
+}

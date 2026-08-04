@@ -576,6 +576,13 @@ export function applyThemeToDOM(): void {
   root.setAttribute('data-nexus-theme', resolveDataThemeAttr(settings.nexusTheme))
   root.setAttribute('data-nexus-accent', accentId)
 
+  // Semantic-layer attributes (Lane A — styles/lc-tokens.css).
+  // `data-lc-density` drives the §3.2 density modes.
+  // `data-lc-motion` finally gives `animationsEnabled` an effect; it was a dead
+  // kill-switch that nothing read (R7.5).
+  root.setAttribute('data-lc-density', settings.densityMode === 'compact' ? 'compact' : 'comfortable')
+  root.setAttribute('data-lc-motion', settings.animationsEnabled === false ? 'off' : 'on')
+
   // Clear stale inline accent overrides so palette picker updates cascade everywhere.
   for (const prop of INLINE_ACCENT_PROPS) {
     root.style.removeProperty(prop)
