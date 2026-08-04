@@ -467,7 +467,9 @@ export const buildAdaptiveSuggestions = (thread: InboxWorkflowThread, isSuppress
   return [
     { id: 'ownership_check', label: 'Ownership Check', text: isSpanish ? 'Hola, ¿sigue siendo propietario de esta propiedad?' : "Hi, are you still the owner of this property?", tone: 'soft' },
     { id: 'soft_intro', label: 'Local Investor Intro', text: isSpanish ? 'Soy inversor local y me interesa hacer una oferta por su propiedad.' : "I'm a local investor interested in making you an offer on your property.", tone: 'soft' },
-    { id: 'ai_assist', label: 'AI Assist', text: '', tone: 'internal' },
+    // §0.1 — "AI Assist" claimed a model call this chip does not make; it only
+    // opens the copilot overlay. Named for what it does.
+    { id: 'ai_assist', label: 'Open Copilot', text: '', tone: 'internal' },
   ]
 }
 
