@@ -180,10 +180,24 @@ async function chooseStage(page: Page, option: string) {
   await page.getByRole('button', { name: 'Change Stage Only' }).click()
 }
 
+/**
+ * Select a fixture conversation by its seller name.
+ *
+ * NOT positionally: the list is ordered by latest message, so index 0 is whichever fixture
+ * has the newest timestamp — which is `n2-unwritable`. Every assertion in this spec was
+ * therefore being driven against the deliberately-unwritable thread, and the first stage
+ * write failed with "no writable canonical phone route" before a request was ever emitted.
+ * `data-thread-id` carries the canonical SELECTION key, not the fixture `id`, so the
+ * visible seller name is the stable handle.
+ */
+const ROW_LABELS = ['Normal', 'Suppressed', 'Terminal', 'Unwritable'] as const
+
 async function selectRow(page: Page, index: number) {
-  const rowsUi = rowsLocator(page)
-  await expect(rowsUi.nth(index)).toBeVisible()
-  await rowsUi.nth(index).click()
+  const label = ROW_LABELS[index]
+  if (!label) throw new Error(`no fixture row at index ${index}`)
+  const row = rowsLocator(page).filter({ hasText: `Fixture Seller ${label}` }).first()
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  await row.click()
   await expect(bar(page)).toBeVisible()
 }
 
@@ -259,7 +273,7 @@ test.describe('N.2 canonical Deal Desk controls (isolated fixture)', () => {
     // Pause, resume, and human control all write automation_state only.
     await choose(page, 'automation_state', 'Paused')
     await expect(controlButton(page, 'automation_state')).toContainText('Paused')
-    await choose(page, 'automation_state', 'Active')
+    await choose(page, 'automation_state', 'Autopilot On')
     await expect(controlButton(page, 'automation_state')).toContainText('Active')
     await choose(page, 'automation_state', 'Human Controlled')
     await expect(controlButton(page, 'automation_state')).toContainText('Human Controlled')
@@ -327,7 +341,7 @@ test.describe('N.2 canonical Deal Desk controls (isolated fixture)', () => {
     // Suppressed row: Active is available as an operator intent but explicitly rejected.
     await selectRow(page, 1)
     const beforeSuppressed = scenario.patchLog.length
-    await choose(page, 'automation_state', 'Active')
+    await choose(page, 'automation_state', 'Autopilot On')
     await expect(bar(page).getByRole('alert')).toContainText(/cannot resume/i)
     expect(scenario.patchLog.length).toBe(beforeSuppressed)
     await expect(controlButton(page, 'automation_state')).toContainText('Paused')
@@ -335,7 +349,7 @@ test.describe('N.2 canonical Deal Desk controls (isolated fixture)', () => {
     // Terminal execution row: same explicit rejection, no success and no request.
     await selectRow(page, 2)
     const beforeTerminal = scenario.patchLog.length
-    await choose(page, 'automation_state', 'Active')
+    await choose(page, 'automation_state', 'Autopilot On')
     await expect(bar(page).getByRole('alert')).toContainText(/completed/i)
     expect(scenario.patchLog.length).toBe(beforeTerminal)
     await expect(controlButton(page, 'automation_state')).toContainText('Paused')

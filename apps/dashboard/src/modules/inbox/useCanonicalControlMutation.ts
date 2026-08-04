@@ -7,7 +7,7 @@
  * fallback truth and cannot overwrite a pending overlay.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   resolveDealDeskThreadReference,
   resolveDealDeskWritableThreadKey,
@@ -63,14 +63,116 @@ export interface CanonicalControlMutationOptions {
 }
 
 type Overlay<T extends CanonicalControlValue> =
-  | { kind: 'pending'; optimisticValue: T; mutationId: string }
+  | { kind: 'pending'; optimisticValue: T; mutationId: string; rollbackValue?: T; serverValueAtStart: T }
   | { kind: 'confirmed'; persistedValue: T }
-  | { kind: 'failed'; error: { kind: MutationErrorKind; message: string; code?: string } }
+  | {
+      kind: 'failed'
+      error: { kind: MutationErrorKind; message: string; code?: string }
+      rollbackValue?: T
+      serverValueAtStart?: T
+    }
+
+/**
+ * The value a rollback restores.
+ *
+ * The last value the SERVER confirmed, when this control has confirmed one that the
+ * caller's row has not caught up to yet; otherwise the authoritative row itself.
+ *
+ * Without the first branch, a successful write followed by a failed one displayed the
+ * PRE-SUCCESS row value — the operator saw a value the database no longer held, because
+ * the confirmed overlay was discarded along with the failed attempt. A rollback must undo
+ * the failed write, not the successful one before it.
+ */
+const rollbackValueOf = <T extends CanonicalControlValue>(
+  existing: Overlay<T> | undefined,
+  lastConfirmed: T | undefined,
+): T | undefined => {
+  if (existing?.kind === 'confirmed') return existing.persistedValue
+  if (existing?.rollbackValue !== undefined) return existing.rollbackValue
+  // The confirmed overlay retires as soon as the authoritative row agrees with it, so by
+  // the time a LATER write fails it may be gone — and a stale list read can then flip the
+  // row back to its pre-write value. Remembering the last confirmed value per field keeps
+  // the rollback target correct across that window.
+  return lastConfirmed
+}
+
+/**
+ * A rollback target only stands in for an authoritative row that has not caught up yet.
+ * The moment that row CHANGES — whether it catches up or moves on to something else — the
+ * row is newer information and wins, so the target can never mask a later server-side
+ * change to the field.
+ */
+const rollbackStillApplies = <T extends CanonicalControlValue>(
+  overlay: Extract<Overlay<T>, { kind: 'failed' }>,
+  serverValue: T,
+): boolean => overlay.rollbackValue !== undefined && overlay.serverValueAtStart === serverValue
 
 const UNSUPPORTED_MESSAGE =
   'This conversation has no writable canonical phone route, so its state cannot be saved.'
 
 const overlayKey = (scope: string, field: string): string => `${scope}::${field}`
+
+const DEFAULT_FAILURE_MESSAGE = 'The change could not be saved.'
+
+/**
+ * Server reason code → operator-facing message.
+ *
+ * Two things must never reach the operator, and both used to:
+ *   - the raw reason CODE (`automation_resume_blocked_suppressed`), an internal identifier;
+ *   - `BackendClientError.message`, which embeds the request URL — and the thread key in
+ *     that URL is the seller's phone number.
+ * Only the code crosses this boundary, and only as a lookup key.
+ */
+const SERVER_REASON_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  automation_resume_blocked_suppressed:
+    'This conversation is suppressed. Automation cannot be resumed until suppression is lifted.',
+  automation_resume_blocked_archived:
+    'This conversation is archived. Restore it before resuming automation.',
+  automation_resume_blocked_closed:
+    'This lead is closed. Move it out of the closed stage before resuming automation.',
+  automation_resume_blocked_contactability:
+    'This contact is not reachable. Automation cannot be resumed until contactability is restored.',
+  manual_stage_lock_blocked_stage_write:
+    'A manual stage lock is active on this lead, so the stage was not changed.',
+  invalid_canonical_thread_key:
+    'This conversation has no writable canonical phone route, so its state cannot be saved.',
+  no_allowed_patch_fields:
+    'The server did not accept this value, so nothing was saved.',
+})
+
+/** Execution-status refusals are generated per status, so they are matched by prefix. */
+const EXECUTION_BLOCK_PREFIX = 'automation_resume_blocked_execution_'
+
+/**
+ * Localised, identifier-free explanation for a control failure.
+ *
+ * The table lookup is an own-property check, not `MAP[key]`. A bare index reaches the
+ * prototype chain — `Object.freeze` does not detach `Object.prototype` — so a code of
+ * `constructor` would return the `Object` **function** typed as a string and render it into
+ * the error surface. Same defect class as the alias lookup in the control vocabularies.
+ */
+export const describeControlFailure = (
+  reasonCode: string | null | undefined,
+  fallbackMessage?: string | null,
+): string => {
+  const key = String(reasonCode ?? '').trim().toLowerCase()
+  if (key) {
+    if (Object.prototype.hasOwnProperty.call(SERVER_REASON_MESSAGES, key)) {
+      const message = SERVER_REASON_MESSAGES[key]
+      if (typeof message === 'string') return message
+    }
+    if (key.startsWith(EXECUTION_BLOCK_PREFIX)) {
+      return 'Automation cannot be resumed while this conversation is in a terminal execution state.'
+    }
+  }
+  // A message is only forwarded when it cannot be a transport diagnostic: those carry a
+  // URL, and the thread key in that URL is a phone number.
+  const fallback = String(fallbackMessage ?? '').trim()
+  if (fallback && !/https?:\/\/|\+1\d{10}|\(body:/.test(fallback) && !/^[a-z0-9_]+$/.test(fallback)) {
+    return fallback
+  }
+  return DEFAULT_FAILURE_MESSAGE
+}
 
 export function useCanonicalControlMutations<T extends CanonicalControlValue>(
   thread: ThreadIdentityInput,
@@ -85,6 +187,24 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
 
   const [tracker] = useState(() => createFieldMutationTracker())
   const [overlays, setOverlays] = useState<Record<string, Overlay<T> | undefined>>({})
+
+  /**
+   * Last value the server confirmed for each field, per conversation.
+   *
+   * A ref, not state: it never affects rendering on its own — it only supplies the
+   * rollback target when a failure happens after the confirmed overlay has retired.
+   * Keyed by the same scoped overlay key, so it cannot leak across conversations.
+   */
+  const lastConfirmedRef = useRef<Record<string, T | undefined>>({})
+
+  /** Set an overlay from the one currently in place, so the rollback target survives a
+   *  transition. */
+  const updateOverlay = useCallback(
+    (key: string, next: (existing: Overlay<T> | undefined) => Overlay<T>) => {
+      setOverlays((current) => ({ ...current, [key]: next(current[key]) }))
+    },
+    [],
+  )
 
   const setOverlay = useCallback((key: string, next: Overlay<T> | undefined) => {
     setOverlays((current) => {
@@ -130,7 +250,13 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
     }
 
     const mutationId = tracker.begin(key)
-    setOverlay(key, { kind: 'pending', optimisticValue: resolution.value, mutationId })
+    updateOverlay(key, (existing) => ({
+      kind: 'pending',
+      optimisticValue: resolution.value,
+      mutationId,
+      rollbackValue: rollbackValueOf(existing, lastConfirmedRef.current[key]),
+      serverValueAtStart: spec.serverValue,
+    }))
 
     let result: CanonicalControlMutationResult
     let transportFailed = false
@@ -145,14 +271,16 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
 
     if (!result.ok) {
       const code = result.errorCode ?? undefined
-      setOverlay(key, {
+      updateOverlay(key, (existing) => ({
         kind: 'failed',
         error: {
           kind: transportFailed ? 'network' : 'server_error',
-          message: result.errorMessage || 'The change could not be saved.',
+          message: describeControlFailure(code, result.errorMessage),
           code,
         },
-      })
+        rollbackValue: rollbackValueOf(existing, lastConfirmedRef.current[key]),
+        serverValueAtStart: existing?.kind === 'pending' ? existing.serverValueAtStart : undefined,
+      }))
       options.onTelemetry?.({
         event: 'control_mutation_failed',
         field,
@@ -165,18 +293,21 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
 
     const persisted = spec.readBack(result.row)
     if (persisted == null) {
-      setOverlay(key, {
+      updateOverlay(key, (existing) => ({
         kind: 'failed',
         error: {
           kind: 'malformed_response',
           message: 'Saved, but the server did not confirm the new value. Reload to see the current state.',
         },
-      })
+        rollbackValue: rollbackValueOf(existing, lastConfirmedRef.current[key]),
+        serverValueAtStart: existing?.kind === 'pending' ? existing.serverValueAtStart : undefined,
+      }))
       return
     }
 
+    lastConfirmedRef.current[key] = persisted
     setOverlay(key, { kind: 'confirmed', persistedValue: persisted })
-  }, [options, reference?.source, scope, setOverlay, tracker, unsupported, writable])
+  }, [options, reference?.source, scope, setOverlay, tracker, unsupported, updateOverlay, writable])
 
   useEffect(() => {
     const caughtUp: string[] = []
@@ -206,13 +337,20 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
     const out: Record<string, CanonicalControlHandle<T>> = {}
     for (const spec of specs) {
       const key = overlayKey(scope, spec.field)
-      const overlay = overlays[key]
+      let overlay = overlays[key]
+      // A rollback target retires as soon as the authoritative row changes, so it can
+      // never mask a later server-side change.
+      if (overlay?.kind === 'failed' && !rollbackStillApplies(overlay, spec.serverValue)) {
+        overlay = { kind: 'failed', error: overlay.error }
+      }
       out[spec.field] = {
         value: overlay?.kind === 'pending'
           ? overlay.optimisticValue
           : overlay?.kind === 'confirmed'
             ? overlay.persistedValue
-            : spec.serverValue,
+            : overlay?.kind === 'failed'
+              ? overlay.rollbackValue ?? spec.serverValue
+              : spec.serverValue,
         pending: overlay?.kind === 'pending',
         failed: overlay?.kind === 'failed',
         errorMessage: overlay?.kind === 'failed' ? overlay.error.message : null,

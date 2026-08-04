@@ -82,6 +82,7 @@ function GlassControl<T extends string>({
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const current = options.find((option) => option.value === value) ?? options[0]
 
   useLayoutEffect(() => {
@@ -108,6 +109,12 @@ function GlassControl<T extends string>({
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
     const onDown = (event: MouseEvent) => {
       if (btnRef.current?.contains(event.target as Node)) return
+      // The menu is a PORTAL into document.body, so it is outside `btnRef`. Without this
+      // check, mousedown on an option closed the menu and unmounted the option before its
+      // click could fire — every option in every dropdown was unselectable with a real
+      // mouse, and the stage confirm dialog never opened. That is what the browser job was
+      // failing on ("getByRole('dialog', { name: /Confirm Stage Change/i }) not found").
+      if (menuRef.current?.contains(event.target as Node)) return
       setOpen(false)
     }
     document.addEventListener('keydown', onKey)
@@ -136,6 +143,7 @@ function GlassControl<T extends string>({
   const menu = open && menuPos && typeof document !== 'undefined'
     ? createPortal(
       <div
+        ref={menuRef}
         className="nx-conv-dropdown-portal"
         role="listbox"
         aria-label={label}

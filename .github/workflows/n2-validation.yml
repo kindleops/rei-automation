@@ -48,6 +48,7 @@ jobs:
           npx tsx --test \
             tests/unit/deal-desk-mutation-vocabularies.test.ts \
             tests/unit/deal-desk-n2-control-contract.test.ts \
+            tests/unit/deal-desk-n2-control-failure-surface.test.ts \
             tests/unit/deal-desk-selection-continuity.test.ts \
             tests/unit/deal-desk-selection.test.ts \
             tests/unit/deal-desk-hydration.test.ts \
@@ -75,6 +76,7 @@ jobs:
             src/modules/inbox/canonical-thread-control-focus.ts \
             src/modules/inbox/useCanonicalControlMutation.ts \
             tests/unit/deal-desk-n2-control-contract.test.ts \
+            tests/unit/deal-desk-n2-control-failure-surface.test.ts \
             tests/ui/deal-desk-n2-controls.spec.ts \
             2>&1 | tee ../../proof/deal-desk-n2/commands/dashboard-lint.log
       - name: API lint
