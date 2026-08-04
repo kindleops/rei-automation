@@ -557,6 +557,10 @@ const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }:
   const overflow = flags.length - visible.length
   const hidden = flags.slice(maxVisible)
 
+  // The overflow used to render every hidden flag into an always-present popover.
+  // Those nodes were invisible but real: they inflated the pill count and the DOM on
+  // every row of a virtualised list. The remainder is now carried by the accessible
+  // name and the overflow control's tooltip instead of duplicate badge elements.
   return (
     <div
       className={cls('nx-prop-flags', density !== 'default' && `is-${density}`)}
@@ -567,16 +571,9 @@ const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }:
           <span key={flag} className="nx-prop-flags__badge">{flag}</span>
         ))}
         {overflow > 0 && (
-          <span className="nx-prop-flags__overflow" aria-hidden="true">+{overflow}</span>
+          <span className="nx-prop-flags__overflow" title={hidden.join(', ')}>+{overflow}</span>
         )}
       </div>
-      {overflow > 0 && (
-        <div className="nx-prop-flags__popover" role="tooltip">
-          {hidden.map((flag) => (
-            <span key={flag} className="nx-prop-flags__badge">{flag}</span>
-          ))}
-        </div>
-      )}
     </div>
   )
 })
@@ -1435,8 +1432,11 @@ export const InboxSidebar = ({
               }}
             >
               <span className="nx-cat-nav__icon" aria-hidden="true">{item.icon}</span>
+              {/* Raising these labels off 8px to the 12px floor widened the rail past
+                  its container, pushing Priority/New Replies out of sight. The short
+                  label is the density lever — not sub-floor type. */}
               <span className="nx-cat-nav__label" title={item.label}>
-                {item.label}
+                {inboxMode === 'rail25' ? item.shortLabel : item.label}
               </span>
               <span className="nx-cat-nav__count">{formatCount(countValue)}</span>
               {showUnread && <span className="nx-cat-nav__unread" aria-label="Unread replies" />}
@@ -1452,7 +1452,6 @@ export const InboxSidebar = ({
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowCategoryPicker((v) => !v) }}
         >
           <span className="nx-cat-nav__icon" aria-hidden="true">⋯</span>
-          <span className="nx-cat-nav__label">Categories</span>
         </button>
       </div>
       {showCategoryPicker && (

@@ -284,9 +284,12 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-cat-nav__item {
-  flex: 0 0 auto;
-  min-width: 84px;
-  padding: 5px 7px 6px;
+  /* Let the chips share the rail instead of each demanding 84px. With short labels
+     at the 12px floor the whole set fits without scrolling, so no bucket is hidden
+     off-edge — the state the operator navigates by must always be visible. */
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 4px 6px;
   gap: 2px;
   scroll-snap-align: center;
 }
@@ -327,13 +330,18 @@
 .nx-prop-flags__badge {
   display: inline-flex;
   align-items: center;
-  max-width: 108px;
+  /* At the 12px type floor these boxes truncated mid-word ("TIRED LANDL",
+     "PRE-FORECLO"), which is worse than showing fewer flags: an ambiguous label
+     costs the operator a click to disambiguate. Sized to fit the real vocabulary. */
+  max-width: 152px;
   padding: 2px 6px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  /* Not uppercased: these are content labels, not eyebrow micro-labels. Uppercase
+     cost ~15% width at the 12px floor and pushed every multi-word flag into an
+     ellipsis. Sentence case fits and reads faster. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -386,7 +394,7 @@
 .nx-prop-flags.is-compact .nx-prop-flags__badge {
   font-size: 12px;
   padding: 1px 5px;
-  max-width: 92px;
+  max-width: 146px;
 }
 
 .nx-prop-flags.is-rich .nx-prop-flags__badge {
