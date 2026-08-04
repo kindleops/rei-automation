@@ -89,8 +89,11 @@ function deriveContactability(automation_decision = null, contract = null) {
   }
   if (contract?.opt_out_signal) return "opted_out";
   if (contract?.wrong_number_signal) return "wrong_number";
-  // A turn that establishes no contactability fact must not restate one.
-  return null;
+  // Floor stays "contactable": that is a safe, non-binding value and several
+  // lanes (tenant / family member / property manager) rely on it to record
+  // contact-preserved state. The incident was the do_not_text CATCH-ALL above,
+  // not this floor.
+  return "contactable";
 }
 
 function deriveExecutionMode(auto_reply_mode = "disabled", execution_allowed = false) {

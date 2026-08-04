@@ -277,6 +277,24 @@ function precedingWindow(text, amount, radius = 40) {
  * cue and the amount was discarded — the seller's $130,000 vanished. The same
  * trap sits in "net" (cabinet, network), "clear" (clearly) and "fix" (fixture).
  */
+const CUE_BOUNDARY_CACHE = new Map();
+
+/** Boundary-aware matcher per cue, compiled once. */
+function cueBoundaryRegex(cue) {
+  let re = CUE_BOUNDARY_CACHE.get(cue);
+  if (!re) {
+    const escaped = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const left = /[a-z0-9\u00e0-\u00ff]/i.test(cue[0]) ? "(?<![a-z0-9\u00e0-\u00ff])" : "";
+    const right = /[a-z0-9\u00e0-\u00ff]/i.test(cue[cue.length - 1])
+      ? "(?![a-z0-9\u00e0-\u00ff])"
+      : "";
+    re = new RegExp(`${left}${escaped}${right}`, "gi");
+    CUE_BOUNDARY_CACHE.set(cue, re);
+  }
+  re.lastIndex = 0;
+  return re;
+}
+
 function cueAtWordBoundary(text, cue, idx) {
   const before = idx === 0 ? "" : text[idx - 1];
   const afterIdx = idx + cue.length;
@@ -290,14 +308,7 @@ function cueAtWordBoundary(text, cue, idx) {
 }
 
 function includesCue(window, cues) {
-  return cues.some((cue) => {
-    let idx = window.indexOf(cue);
-    while (idx !== -1) {
-      if (cueAtWordBoundary(window, cue, idx)) return true;
-      idx = window.indexOf(cue, idx + 1);
-    }
-    return false;
-  });
+  return cues.some((cue) => cueBoundaryRegex(cue).test(window));
 }
 
 /**
@@ -314,14 +325,12 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
 
   let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
   const consider = (kind, cue) => {
-    let idx = window.indexOf(cue);
-    while (idx !== -1) {
-      if (cueAtWordBoundary(window, cue, idx)) {
-        const cueMid = windowStart + idx + cue.length / 2;
-        const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
-        if (dist < best.dist) best = { kind, dist };
-      }
-      idx = window.indexOf(cue, idx + 1);
+    const re = cueBoundaryRegex(cue);
+    let m;
+    while ((m = re.exec(window)) !== null) {
+      const cueMid = windowStart + m.index + cue.length / 2;
+      const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
+      if (dist < best.dist) best = { kind, dist };
     }
   };
 

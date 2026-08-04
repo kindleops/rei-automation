@@ -59,16 +59,34 @@ test("an ownership confirmation cannot set do_not_text", () => {
   );
 });
 
-test("every binding field is recognised as a suppression assertion", () => {
+test("manufactured binding fields require evidence", () => {
   for (const patch of [
     { is_suppressed: true },
     { disposition: "suppressed" },
     { contactability_status: "do_not_text" },
-    { contactability_status: "opted_out" },
-    { contactability_status: "wrong_number" },
     { inbox_bucket: "suppressed" },
   ]) {
     assert.equal(patchAssertsBindingSuppression(patch), true, JSON.stringify(patch));
+  }
+});
+
+test("opted_out and wrong_number are self-evidencing and must NOT be gated", () => {
+  // These values can only be produced by an explicit opt-out or a confirmed
+  // wrong number, and they name their own reason. Demanding a separately
+  // supplied evidence object for them broke STOP: a real opt-out was rejected
+  // by the gate. `do_not_text` stays gated — that is the manufactured catch-all
+  // the incident was made of.
+  for (const patch of [
+    { contactability_status: "opted_out" },
+    { contactability_status: "wrong_number" },
+    { contactability_status: "opted_out", is_suppressed: true },
+  ]) {
+    assert.equal(patchAssertsBindingSuppression(patch), false, JSON.stringify(patch));
+    assert.equal(
+      authorizeSuppressionMutation({ patch, evidence: null }).allowed,
+      true,
+      "a genuine opt-out must never be blocked by the evidence gate"
+    );
   }
 });
 

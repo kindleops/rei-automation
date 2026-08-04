@@ -47,9 +47,22 @@ export const NON_EVIDENCE_REASONS = Object.freeze([
   "temperature",
 ]);
 
+/**
+ * Contactability values that ARE their own evidence: they can only be produced
+ * by an explicit opt-out or a confirmed wrong number, and they name the reason
+ * in the value itself. `do_not_text` is deliberately NOT here — that is the
+ * manufactured catch-all the 2026-08-03/04 incident was made of.
+ */
+export const SELF_EVIDENCING_CONTACTABILITY = Object.freeze(["opted_out", "wrong_number"]);
+
 /** True when a patch attempts to establish a binding suppression state. */
 export function patchAssertsBindingSuppression(patch = {}) {
   if (!patch || typeof patch !== "object") return false;
+  // A compliance-terminal contactability carries its own reason, so it does not
+  // require a separately supplied evidence object.
+  if (SELF_EVIDENCING_CONTACTABILITY.includes(String(patch.contactability_status ?? "").trim())) {
+    return false;
+  }
   if (patch.is_suppressed === true) return true;
   if (String(patch.disposition ?? "").trim().toLowerCase() === "suppressed") return true;
   if (BLOCKING_CONTACTABILITY_VALUES.includes(String(patch.contactability_status ?? "").trim())) {
