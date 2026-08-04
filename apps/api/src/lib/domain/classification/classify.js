@@ -4550,6 +4550,17 @@ function resolveIntents(
     "call me", "phone me", "talk on phone", "give me a call",
     "text me", "send me a text", "message me", "whatsapp",
     "my number is", "call at", "reach me at",
+    // Scheduling / mutual-availability forms. "We can schedule a call and talk"
+    // classified as `unclear` (0.6) and went to review — an explicit
+    // willingness to talk is call readiness, not ambiguity. Each form requires
+    // an explicit call/scheduling token, so a bare "we can talk later" stays
+    // out and keeps its own need_time meaning.
+    "schedule a call", "schedule a time", "set up a call", "set up a time",
+    "setup a call", "we can schedule", "lets schedule", "let's schedule",
+    "hop on a call", "jump on a call", "get on a call", "have a call",
+    "call whenever", "call anytime", "call any time",
+    "when can you call", "when can we talk", "good time to call",
+    "programar una llamada", "agendar una llamada",
     "en qué te puedo ayudar", "en que te puedo ayudar",
   ])) {
     intents.push("callback_requested");
