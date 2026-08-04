@@ -150,6 +150,17 @@ test('a rollback target retires once the authoritative row carries the same valu
     'the target must survive a STALE row read and retire only when the row genuinely agrees')
 })
 
+test('a retired rollback target cannot revive when the row moves again', () => {
+  // Stripping the target for the current render only left it in state: when the row later
+  // moved to a THIRD value the guard passed again and the retired target came back,
+  // masking a genuine server-side change. It must be retired in STATE.
+  assert.match(HOOK_SOURCE, /const retireRollback: string\[\] = \[\]/)
+  assert.match(HOOK_SOURCE, /next\[key\] = \{ kind: 'failed', error: overlay\.error \}/,
+    'the stored overlay must lose its rollbackValue, not just the rendered copy')
+  assert.match(HOOK_SOURCE, /delete lastConfirmedRef\.current\[key\]/,
+    'the remembered last-confirmed value must retire at the same moment')
+})
+
 // ── 4. the portal dropdown survives a real mouse ─────────────────────────────
 
 test('the outside-click handler ignores mousedown inside the portal menu', () => {

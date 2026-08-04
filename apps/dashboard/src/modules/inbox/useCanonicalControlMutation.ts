@@ -340,21 +340,50 @@ export function useCanonicalControlMutations<T extends CanonicalControlValue>(
     setOverlay(key, { kind: 'confirmed', persistedValue: persisted })
   }, [options, reference?.source, scope, setOverlay, tracker, unsupported, updateOverlay, writable])
 
+  /**
+   * Retire overlays whose purpose the authoritative row has taken over.
+   *
+   * Two cases, and both must be retired IN STATE rather than only for a render:
+   *   - a `confirmed` overlay once the row carries the value it confirmed;
+   *   - a failed overlay's `rollbackValue` once the row carries that value.
+   *
+   * Stripping the rollback target for the current render only left it in state, so when
+   * the row later moved to a THIRD value the guard passed again and the retired target
+   * revived — masking a genuine server-side change with a stale value. The remembered
+   * last-confirmed value is dropped at the same moment, for the same reason.
+   */
   useEffect(() => {
-    const caughtUp: string[] = []
+    const retireConfirmed: string[] = []
+    const retireRollback: string[] = []
     for (const spec of specs) {
       const key = overlayKey(scope, spec.field)
       const overlay = overlays[key]
-      if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) caughtUp.push(key)
+      if (overlay?.kind === 'confirmed' && overlay.persistedValue === spec.serverValue) {
+        retireConfirmed.push(key)
+      }
+      if (overlay?.kind === 'failed' && overlay.rollbackValue !== undefined
+        && overlay.rollbackValue === spec.serverValue) {
+        retireRollback.push(key)
+      }
+      if (lastConfirmedRef.current[key] !== undefined && lastConfirmedRef.current[key] === spec.serverValue) {
+        delete lastConfirmedRef.current[key]
+      }
     }
-    if (!caughtUp.length) return
+    if (!retireConfirmed.length && !retireRollback.length) return
     const timer = window.setTimeout(() => {
       setOverlays((current) => {
         const next = { ...current }
         let changed = false
-        for (const key of caughtUp) {
+        for (const key of retireConfirmed) {
           if (next[key]?.kind === 'confirmed') {
             delete next[key]
+            changed = true
+          }
+        }
+        for (const key of retireRollback) {
+          const overlay = next[key]
+          if (overlay?.kind === 'failed' && overlay.rollbackValue !== undefined) {
+            next[key] = { kind: 'failed', error: overlay.error }
             changed = true
           }
         }
