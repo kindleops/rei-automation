@@ -47,16 +47,50 @@ function deriveOperationalStatus({
   return OPERATIONAL_STATUS_CODES.ACTIVE_COMMUNICATION;
 }
 
+/**
+ * Reasons that genuinely establish a blocking contactability state. Anything
+ * else — lifecycle progress, condition disclosure, pricing, uncertainty, human
+ * review, negative sentiment — is NOT evidence of a do-not-contact instruction.
+ */
+const BINDING_SUPPRESSION_REASONS = new Set([
+  "opt_out",
+  "wrong_number",
+  "wrong_person",
+  "legal",
+  "legal_prohibition",
+  "compliance",
+  "compliance_prohibition",
+  "manual_operator_suppression",
+  "suppression_list",
+]);
+
+/**
+ * Returns a contactability value ONLY when the decision genuinely establishes
+ * one. Returns null for "no change".
+ *
+ * Production incident 2026-08-03/04: this function used `do_not_text` as a
+ * catch-all for every suppression reason that was not exactly opt_out or
+ * wrong_number, and it never returned null — its floor was "contactable". So a
+ * stage transition that correctly abstained (contactability_patch: null) had a
+ * contactability opinion re-injected on every turn, and any execution-layer
+ * reason like "suppressed" or "hostile_or_legal_intent" silently became
+ * do_not_text — which the state writer then escalated to is_suppressed=true,
+ * with no opt-out anywhere. 292 production threads carry that contradiction.
+ */
 function deriveContactability(automation_decision = null, contract = null) {
   if (automation_decision?.should_suppress_contact) {
     const reason = lower(automation_decision.suppression_reason);
     if (reason === "opt_out") return "opted_out";
     if (reason === "wrong_number") return "wrong_number";
-    return "do_not_text";
+    if (BINDING_SUPPRESSION_REASONS.has(reason)) return "do_not_text";
+    // Unsupported / unknown / non-binding reason: assert nothing. The thread
+    // keeps whatever contactability it already had.
+    return null;
   }
   if (contract?.opt_out_signal) return "opted_out";
   if (contract?.wrong_number_signal) return "wrong_number";
-  return "contactable";
+  // A turn that establishes no contactability fact must not restate one.
+  return null;
 }
 
 function deriveExecutionMode(auto_reply_mode = "disabled", execution_allowed = false) {

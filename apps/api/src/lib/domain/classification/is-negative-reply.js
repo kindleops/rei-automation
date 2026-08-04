@@ -40,6 +40,7 @@ const EXACT_NEGATIVE_PHRASES = new Set([
   "do not text",
   "do not text me",
   "leave me alone",
+  "leave us alone",
   "go away",
   "please stop",
   "please remove me",
@@ -65,7 +66,10 @@ const NEGATIVE_PATTERNS = [
   /\bnot\s+interested\s+in\s+selling\b/i,
   /\bopt[\s-]?out\b/i,
   /\bremove\s+(me|my\s+number)\b/i,
-  /\bleave\s+me\s+alone\b/i,
+  // Phrase-level only. The bare token "alone" is NOT an opt-out — "For 327
+  // Pennsylvania alone 130,000" is a price quote from a motivated seller, and
+  // a substring rule on "alone" would silence them.
+  /\bleave\s+(me|us|my\s+family|my\s+wife|my\s+husband)\s+alone\b/i,
   /\bgo\s+away\b/i,
   /\bno\s+longer\s+(own|interested|available)\b/i,
   /\bi\s+said\s+no\b/i,

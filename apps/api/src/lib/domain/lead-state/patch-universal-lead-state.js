@@ -1,4 +1,9 @@
 import {
+import {
+  authorizeSuppressionMutation,
+  patchAssertsBindingSuppression,
+  BINDING_SUPPRESSION_FIELDS,
+} from "@/lib/domain/lead-state/suppression-evidence.js";
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
@@ -259,6 +264,57 @@ export async function patchUniversalLeadState({
   const canonicalPatch = normalizePatchToCanonical(patch);
   if (!Object.keys(canonicalPatch).length) {
     return { ok: false, blocked: true, reason: 'no_allowed_patch_fields', thread_key: key };
+  }
+
+  // ── suppression evidence gate ──────────────────────────────────────────────
+  // This is the ONLY writer of contactability/suppression, so enforcing here
+  // defends against every caller rather than one repaired path. Binding
+  // suppression is a claim about what the seller told us; a lifecycle
+  // milestone, a condition disclosure, low confidence, or a human-review flag
+  // is not evidence of it. Production audit 2026-08-04 found 114 suppressed
+  // threads with no durable evidence and 292 in contradictory states, sourced
+  // from stage transitions writing a compliance field they do not own.
+  const suppression_authorization = authorizeSuppressionMutation({
+    patch: canonicalPatch,
+    evidence: meta.suppression_evidence || null,
+  });
+  if (!suppression_authorization.allowed) {
+    // Reject the ENTIRE binding portion — never write a half-suppressed,
+    // self-contradicting row. Non-binding fields in the same patch still apply.
+    for (const field of BINDING_SUPPRESSION_FIELDS) delete canonicalPatch[field];
+    if (String(canonicalPatch.disposition ?? '').toLowerCase() === 'suppressed') {
+      delete canonicalPatch.disposition;
+    }
+    if (String(canonicalPatch.inbox_bucket ?? '').toLowerCase() === 'suppressed') {
+      delete canonicalPatch.inbox_bucket;
+    }
+
+    try {
+      const { launchAlerts } = await import('@/lib/domain/alerts/launch-critical-alerts.js');
+      await launchAlerts
+        .suppressionInvariantFailure({
+          thread_key: key,
+          rejected_reason: suppression_authorization.reason,
+          change_source: meta.change_source || null,
+          change_reason: meta.reason || null,
+          attempted_contactability: patch?.contactability_status || null,
+          attempted_is_suppressed: patch?.is_suppressed ?? null,
+          attempted_disposition: patch?.disposition || null,
+        })
+        .catch(() => {});
+    } catch {
+      /* alerting must never break the write path */
+    }
+
+    if (!Object.keys(canonicalPatch).length) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: 'unsupported_suppression_rejected',
+        rejected_reason: suppression_authorization.reason,
+        thread_key: key,
+      };
+    }
   }
 
   const previous = await fetchCurrentLeadState(supabase, key);
