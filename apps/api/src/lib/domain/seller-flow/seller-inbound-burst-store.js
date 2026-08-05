@@ -8,7 +8,6 @@
 // Memory store is for unit/critical tests only — never production authority.
 
 import crypto from "node:crypto";
-import { isBurstWithinFlushScope } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
 import {
   BURST_STATUSES,
   buildBurstDecisionIdempotencyKey,
@@ -75,20 +74,12 @@ function clone(value) {
 // are what stands between a proof session and a 36-hour-old burst on the same
 // thread. "Open the session, then text" is a runbook precondition.
 //
-// The row-level admission RULE is NOT implemented here. It lives in
-// burst-flush-activation-policy.isBurstWithinFlushScope ("one export, three
-// importers — do not reimplement it locally") and matchesBurstScope below
-// delegates to it. What this function owns is the SQL-shaped projection of the
-// same scope: the bounds the PostgREST filter needs so that selection happens
-// before `.limit(n)` rather than after it. Query and verdict therefore cannot
-// disagree — the verdict is the shared predicate.
-//
-// NOTE — this import closes a module cycle: store → policy → coordinator →
-// store (the policy needs resolveSellerInboundBurstMode). It resolves cleanly
-// because every binding across the cycle is a hoisted `export function`, so it
-// is initialized before any call. Verified from both entry orders (store-first
-// and coordinator-first). If any of those exports is ever converted to a
-// `const` arrow, the cycle breaks at TDZ — keep them function declarations.
+// This function owns the SQL-shaped projection of the scope: the bounds the
+// PostgREST filter needs so that selection happens before `.limit(n)` rather
+// than after it. The row-level verdict lives in matchesBurstScope below, which
+// mirrors the activation policy's isBurstWithinFlushScope — see the note there
+// for why the store cannot import that predicate on the production path, and
+// what holds the two copies together instead.
 export function resolveBurstScopeFilter(scope) {
   if (scope == null) return { deny: true, reason: "burst_scope_required" };
   if (typeof scope !== "object" || Array.isArray(scope)) {
@@ -146,21 +137,46 @@ export function resolveBurstScopeFilter(scope) {
 }
 
 /**
- * Row-level verdict. Delegates to the activation policy's shared predicate —
- * the query filter above and this check are then two projections of ONE rule,
- * so they cannot disagree about a row.
+ * Row-level verdict, applied by both stores to every candidate BEFORE any
+ * claim or mutation — so a mis-parsed PostgREST filter degrades to "touches
+ * nothing" instead of "touches anything".
  *
- * Both stores run this on every candidate BEFORE any claim or mutation, so a
- * mis-parsed PostgREST filter degrades to "touches nothing" instead of
- * "touches anything".
+ * This is the SECOND implementation of the activation policy's
+ * isBurstWithinFlushScope, and that is deliberate rather than accidental: the
+ * policy imports the coordinator and the coordinator imports this store, so
+ * importing the predicate here closes a module cycle on the production path.
+ * (The cycle does resolve — every binding across it is a hoisted
+ * `export function` — but it would leave the whole burst subsystem one
+ * `const`-arrow refactor away from dying at import time.)
+ *
+ * The copies are held together by test, not by convention:
+ * burst-eligible-scope.test.mjs imports BOTH (test-only, no production cycle)
+ * and asserts a one-directional invariant across 15 row shapes — anything this
+ * store admits, the policy admits. Stricter here is safe; looser is caught.
  */
 export function matchesBurstScope(burst, resolved) {
   if (!burst || !resolved || resolved.deny) return false;
   // A global activation is the COORDINATOR's assertion (enabled mode), not a
-  // policy scope verdict, so it is answered here rather than delegated —
-  // `{authorized: true, global: true}` carries no bounds for the policy to read.
+  // policy scope verdict — `{authorized: true, global: true}` carries no bounds.
   if (resolved.global) return true;
-  return isBurstWithinFlushScope({ burst, scope: resolved.source }) === true;
+  if (!resolved.thread_keys.includes(clean(burst.thread_key))) return false;
+
+  // A row that cannot prove when it opened, or when it was inserted, cannot
+  // prove it belongs to the session. Unprovable membership is denied membership.
+  const first_ms = parseIsoMs(burst.first_received_at, null);
+  if (!Number.isFinite(first_ms)) return false;
+  if (first_ms < parseIsoMs(resolved.min_first)) return false;
+  if (first_ms > parseIsoMs(resolved.max_first)) return false;
+
+  // Anti-backdating: created_at is now() at INSERT and is not attacker-
+  // influenced, so an in-window first_received_at cannot carry an old row in.
+  if (burst.created_at == null || clean(burst.created_at) === "") return false;
+  const created_ms = parseIsoMs(burst.created_at, null);
+  if (!Number.isFinite(created_ms)) return false;
+  if (created_ms < parseIsoMs(resolved.min_created)) return false;
+  if (created_ms > parseIsoMs(resolved.max_created)) return false;
+
+  return true;
 }
 
 /**
