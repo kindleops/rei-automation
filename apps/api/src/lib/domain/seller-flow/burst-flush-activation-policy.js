@@ -102,8 +102,7 @@ export const BURST_FLUSH_ACTIVATION_SCOPES = Object.freeze({
  */
 export const BURST_FLUSH_ACTIVATION_REASONS = Object.freeze({
   // Policy resolution
-  MODE_DISABLED: "mode_disabled",
-  SESSION_LOOKUP_FAILED: "session_lookup_failed",
+  DISABLED_NOOP: "disabled_noop",
   GLOBAL_ACTIVATION: "global_activation",
   INTERNAL_PROOF_SESSION_ACTIVE: "internal_proof_session_active",
   SESSION_CLOSED: "session_closed",
@@ -155,9 +154,9 @@ function normalizeE164(value) {
 /**
  * FATAL vs QUIET.
  *
- * The rule is: `fatal` means THE RESOLVER COULD NOT DETERMINE THE ANSWER —
+ * The rule is: `alertable` means THE RESOLVER COULD NOT DETERMINE THE ANSWER —
  * the session lookup threw, the parser threw, or mode resolution threw.
- * `fatal:false` means the resolver DID determine the answer and the answer is
+ * `alertable:false` means the resolver DID determine the answer and the answer is
  * "no": mode_disabled, session_not_configured, session_expired,
  * session_recipient_not_pinned, session_closed, and every other parse
  * rejection. Those are legitimate quiet states.
@@ -166,13 +165,13 @@ function normalizeE164(value) {
  * rendered as "the operator hasn't started a session" would produce a cron
  * reporting a clean idle tick forever while the subsystem was down — the exact
  * signature of the 2026-08-03 incident, where a worker that never ran also
- * reported nothing. fatal:true callers must return 503 and alert once;
- * fatal:false callers return 200 and stay silent.
+ * reported nothing. alertable:true callers must return 503 and alert once;
+ * alertable:false callers return 200 and stay silent.
  *
  * Stating it as "could the resolver answer?" rather than enumerating strings
  * means reasons nobody has written yet classify correctly by construction.
  */
-function deniedPolicy(mode, reason, { fatal = false } = {}) {
+function deniedPolicy(mode, reason, { alertable = false } = {}) {
   return {
     mode,
     may_scan: false,
@@ -182,8 +181,9 @@ function deniedPolicy(mode, reason, { fatal = false } = {}) {
     proof_session_id: null,
     received_not_before: null,
     received_not_after: null,
+    created_not_before: null,
     reason,
-    fatal,
+    alertable,
   };
 }
 
@@ -219,7 +219,7 @@ function rawSessionObject(session_raw) {
  *   mode: string, may_scan: boolean, may_claim: boolean, scope: string,
  *   allowed_thread_key: string|null, proof_session_id: string|null,
  *   received_not_before: string|null, received_not_after: string|null,
- *   reason: string, fatal: boolean
+ *   reason: string, alertable: boolean
  * }}
  *
  * CONTRACT: allowed_thread_key !== null ⇒ the scan MUST be scoped to that
@@ -238,7 +238,7 @@ export function resolveBurstFlushActivationPolicy({
     resolved_mode = clean(mode) || resolveMode({ env });
   } catch (error) {
     return deniedPolicy(MODES.DISABLED, `${REASONS.RESOLUTION_FAILED}:${error?.message || "mode_resolution_failed"}`, {
-      fatal: true,
+      alertable: true,
     });
   }
 
@@ -254,13 +254,14 @@ export function resolveBurstFlushActivationPolicy({
       proof_session_id: null,
       received_not_before: null,
       received_not_after: null,
+      created_not_before: null,
       reason: REASONS.GLOBAL_ACTIVATION,
-      fatal: false,
+      alertable: false,
     };
   }
 
   if (resolved_mode !== MODES.INTERNAL_PROOF) {
-    return deniedPolicy(MODES.DISABLED, REASONS.MODE_DISABLED);
+    return deniedPolicy(MODES.DISABLED, REASONS.DISABLED_NOOP);
   }
 
   try {
@@ -293,14 +294,18 @@ export function resolveBurstFlushActivationPolicy({
       proof_session_id: session.session_id,
       received_not_before: session.created_at,
       received_not_after: session.expires_at,
+      // Separate floor for the ROW's insert instant. Flooring on
+      // first_received_at alone lets a backfilled row carry an in-window
+      // message time while the row itself predates the session.
+      created_not_before: session.created_at,
       reason: REASONS.INTERNAL_PROOF_SESSION_ACTIVE,
-      fatal: false,
+      alertable: false,
     };
   } catch (error) {
     return deniedPolicy(
       MODES.INTERNAL_PROOF,
       `${REASONS.RESOLUTION_FAILED}:${error?.message || "unknown_error"}`,
-      { fatal: true }
+      { alertable: true }
     );
   }
 }
@@ -308,7 +313,7 @@ export function resolveBurstFlushActivationPolicy({
 /**
  * Project a resolved policy into the ratified scope descriptor.
  *
- * `ok`      — the resolver reached an answer (i.e. !fatal).
+ * `ok`      — the resolver reached an answer (i.e. !alertable).
  * `allowed` — activation was granted (may_scan && may_claim).
  *
  * `max_created_at` is a deliberate SUPERSET field beyond the ratified shape.
@@ -325,18 +330,29 @@ export function toBurstFlushScopeDescriptor(policy = null) {
   const thread_keys =
     kind === SCOPES.THREAD && p?.allowed_thread_key ? [p.allowed_thread_key] : [];
   return {
-    ok: p ? p.fatal !== true : false,
+    // ONE SOURCE, ONE ALIAS. `alertable` is the resolver's field and the
+    // source of truth; the descriptor re-exposes it under the name `fatal`
+    // because that reads better at the consumer. There is deliberately no
+    // second flag on the policy itself — two booleans meaning the same thing
+    // is exactly how a 503 path goes quietly dead.
+    //
+    // Read this pair together: if `fatal` ever stops tracking `alertable`, a
+    // resolution failure renders as {ok:true, fatal:false} and the handler
+    // returns a silent 200 on a subsystem outage. Pinned by test.
+    ok: p ? p.alertable !== true : false,
     mode: p?.mode || MODES.DISABLED,
     allowed: Boolean(p?.may_scan && p?.may_claim),
-    fatal: Boolean(p?.fatal),
-    reason: p?.reason || REASONS.MODE_DISABLED,
+    fatal: Boolean(p?.alertable),
+    reason: p?.reason || REASONS.DISABLED_NOOP,
     scope: {
       kind,
       thread_keys,
       // No grace window: the floor is the session's own created_at.
       min_first_received_at: p?.received_not_before ?? null,
       max_first_received_at: p?.received_not_after ?? null,
-      min_created_at: p?.received_not_before ?? null,
+      // Row-insert floor, distinct from the message-time floor. Falls back to
+      // received_not_before when a caller predates the field.
+      min_created_at: p?.created_not_before ?? p?.received_not_before ?? null,
       max_created_at: p?.received_not_after ?? null,
       session_id: p?.proof_session_id ?? null,
       session_created_at: p?.received_not_before ?? null,
@@ -492,7 +508,7 @@ async function readRawProofSession({ getSystemValue = null, supabase = null } = 
  * actually needs it, then delegate to the pure resolver.
  *
  * Any throw — mode resolution, session lookup, parse — yields a disabled-shaped
- * result with fatal:true. NEVER a global fallback.
+ * result with alertable:true. NEVER a global fallback.
  */
 export async function loadBurstFlushActivationPolicy({
   env = process.env,
@@ -509,7 +525,7 @@ export async function loadBurstFlushActivationPolicy({
     return deniedPolicy(
       MODES.DISABLED,
       `${REASONS.RESOLUTION_FAILED}:${error?.message || "mode_resolution_failed"}`,
-      { fatal: true }
+      { alertable: true }
     );
   }
 
@@ -526,7 +542,11 @@ export async function loadBurstFlushActivationPolicy({
     // produce a cron reporting clean idle ticks forever while the subsystem was
     // down — the 2026-08-03 signature. Caller returns 503 + one alert.
     return {
-      ...deniedPolicy(MODES.INTERNAL_PROOF, REASONS.SESSION_LOOKUP_FAILED, { fatal: true }),
+      ...deniedPolicy(
+        MODES.INTERNAL_PROOF,
+        `${REASONS.RESOLUTION_FAILED}:${error?.message || "session_lookup_failed"}`,
+        { alertable: true }
+      ),
       error_message: error?.message || "session_lookup_failed",
     };
   }

@@ -105,7 +105,7 @@ test("mode: unset env resolves to disabled with a hard no-op", () => {
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
   assert.equal(policy.scope, BURST_FLUSH_ACTIVATION_SCOPES.NONE);
-  assert.equal(policy.reason, R.MODE_DISABLED);
+  assert.equal(policy.reason, R.DISABLED_NOOP);
   assert.equal(policy.allowed_thread_key, null);
   assert.equal(policy.received_not_before, null);
   assert.equal(policy.received_not_after, null);
@@ -158,7 +158,7 @@ test("disabled: even a perfectly matching internal burst is denied", () => {
   const verdict = isBurstAdmittedByActivationPolicy({ policy, burst: burst() });
   assert.equal(verdict.admitted, false);
   assert.equal(verdict.reason, R.NOT_ACTIVATED);
-  assert.equal(verdict.policy_reason, R.MODE_DISABLED);
+  assert.equal(verdict.policy_reason, R.DISABLED_NOOP);
 });
 
 // ── internal_proof: session resolution ──────────────────────────────────────
@@ -253,7 +253,7 @@ test("internal_proof: a throwing session parser is fatal, not permissive", () =>
   });
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.fatal, true);
+  assert.equal(policy.alertable, true);
   assert.match(policy.reason, /^activation_policy_resolution_failed:boom$/);
 });
 
@@ -266,7 +266,7 @@ test("mode resolution that throws is fatal and disabled", () => {
   });
   assert.equal(policy.mode, BURST_FLUSH_ACTIVATION_MODES.DISABLED);
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.fatal, true);
+  assert.equal(policy.alertable, true);
 });
 
 // ── THE INCIDENT: the preserved 2026-08-03 burst ────────────────────────────
@@ -493,8 +493,8 @@ test("loader: a failing session lookup is fatal and never global", async () => {
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
   assert.equal(policy.scope, BURST_FLUSH_ACTIVATION_SCOPES.NONE);
-  assert.equal(policy.fatal, true);
-  assert.equal(policy.reason, R.SESSION_LOOKUP_FAILED);
+  assert.equal(policy.alertable, true);
+  assert.ok(policy.reason.startsWith(R.RESOLUTION_FAILED), policy.reason);
   assert.equal(policy.error_message, "supabase_down");
 });
 
@@ -504,8 +504,8 @@ test("loader: no session source supplied fails closed rather than reading a stal
     now: NOW,
   });
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.fatal, true);
-  assert.equal(policy.reason, R.SESSION_LOOKUP_FAILED);
+  assert.equal(policy.alertable, true);
+  assert.ok(policy.reason.startsWith(R.RESOLUTION_FAILED), policy.reason);
   assert.equal(policy.error_message, "session_source_unavailable");
 });
 
@@ -549,8 +549,8 @@ test("fatal: a lookup failure is fatal and NEVER collapses to session_not_config
       throw new Error("ECONNRESET");
     },
   }).then(async (broken) => {
-    assert.equal(broken.fatal, lookup_failed.fatal);
-    assert.equal(broken.reason, R.SESSION_LOOKUP_FAILED);
+    assert.equal(broken.alertable, lookup_failed.fatal);
+    assert.ok(broken.reason.startsWith(R.RESOLUTION_FAILED), broken.reason);
     assert.equal(broken.error_message, "ECONNRESET");
     assert.equal(broken.may_scan, false);
 
@@ -559,13 +559,13 @@ test("fatal: a lookup failure is fatal and NEVER collapses to session_not_config
       now: NOW,
       getSystemValue: async () => null,
     });
-    assert.equal(quiet.fatal, false);
+    assert.equal(quiet.alertable, false);
     assert.equal(quiet.reason, "session_not_configured");
     assert.equal(quiet.may_scan, false);
 
     // Same denial, different operational meaning — that is the whole point.
     assert.notEqual(broken.reason, quiet.reason);
-    assert.notEqual(broken.fatal, quiet.fatal);
+    assert.notEqual(broken.alertable, quiet.alertable);
   });
 });
 
@@ -588,7 +588,7 @@ test("fatal: classification matrix — quiet states are quiet, thrown states are
     ["session_closed", policyFor(activeSession({ closed_at: "2026-08-05T11:58:00.000Z" }))],
   ];
   for (const [label, policy] of quiet) {
-    assert.equal(policy.fatal, false, `${label} must be quiet`);
+    assert.equal(policy.alertable, false, `${label} must be quiet`);
     assert.equal(policy.may_scan, false, label);
   }
 
@@ -615,12 +615,86 @@ test("fatal: classification matrix — quiet states are quiet, thrown states are
     ],
   ];
   for (const [label, policy] of fatal) {
-    assert.equal(policy.fatal, true, `${label} must be fatal`);
+    assert.equal(policy.alertable, true, `${label} must be fatal`);
     assert.equal(policy.may_scan, false, label);
   }
 });
 
 // ── shared scope predicate ──────────────────────────────────────────────────
+
+test("REGRESSION: a RESOLUTION_FAILED policy projects to {ok:false, fatal:true}", () => {
+  // The descriptor exposes `fatal` but the resolver's field is `alertable`.
+  // If that alias ever stops tracking its source — e.g. the descriptor reads a
+  // `fatal` key the policy does not have — every resolution failure renders as
+  // {ok:true, fatal:false} and the handler returns a SILENT 200 on a subsystem
+  // outage. This assertion is the only thing standing between us and that.
+  const sources = [
+    resolveBurstFlushActivationPolicy({
+      now: NOW,
+      resolveMode: () => {
+        throw new Error("mode_boom");
+      },
+    }),
+    resolveBurstFlushActivationPolicy({
+      mode: BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF,
+      session_raw: JSON.stringify(activeSession()),
+      now: NOW,
+      parseSession: () => {
+        throw new Error("parse_boom");
+      },
+    }),
+  ];
+  for (const policy of sources) {
+    assert.equal(policy.alertable, true, "resolver marks it alertable");
+    const d = toBurstFlushScopeDescriptor(policy);
+    assert.equal(d.fatal, true, "descriptor alias must track alertable");
+    assert.equal(d.ok, false, "ok must be false so the 503 path fires");
+    assert.equal(d.allowed, false);
+  }
+
+  // And the converse: a QUIET denial must not trip the 503 path.
+  const quiet = toBurstFlushScopeDescriptor(
+    resolveBurstFlushActivationPolicy({
+      mode: BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF,
+      session_raw: null,
+      now: NOW,
+    })
+  );
+  assert.equal(quiet.fatal, false);
+  assert.equal(quiet.ok, true);
+  assert.equal(quiet.allowed, false);
+});
+
+test("REGRESSION: created_not_before floors the ROW insert instant independently", () => {
+  // Flooring on first_received_at alone lets a backfilled row carry an
+  // in-window message time while the row itself predates the session.
+  const session = activeSession();
+  const policy = policyFor(session);
+  assert.equal(policy.created_not_before, session.created_at);
+
+  const d = toBurstFlushScopeDescriptor(policy);
+  assert.equal(d.scope.min_created_at, session.created_at);
+
+  const backfilled = burst({
+    first_received_at: "2026-08-05T12:10:00.000Z", // in window
+    created_at: "2026-08-05T11:00:00.000Z", // row predates the session
+  });
+  assert.equal(
+    isBurstAdmittedByActivationPolicy({ policy, burst: backfilled }).reason,
+    R.BURST_CREATED_BEFORE_SESSION
+  );
+  assert.equal(isBurstWithinFlushScope({ burst: backfilled, scope: d.scope }), false);
+
+  // Back-compat: a policy predating the field falls back to received_not_before
+  // rather than becoming unbounded.
+  const legacy = { ...policy };
+  delete legacy.created_not_before;
+  assert.equal(
+    toBurstFlushScopeDescriptor(legacy).scope.min_created_at,
+    session.created_at,
+    "absent created_not_before must fall back, never go unbounded"
+  );
+});
 
 test("scope descriptor: ratified shape, with the session's own window and no grace", () => {
   const session = activeSession();
@@ -666,6 +740,7 @@ test("scope descriptor: disabled and fatal policies project to a closed scope", 
   );
   assert.equal(broken.ok, false);
   assert.equal(broken.allowed, false);
+  // Descriptor exposes `fatal`; the policy it came from exposes `alertable`.
   assert.equal(broken.fatal, true);
 
   // A null/garbage policy must never project to an open scope.
