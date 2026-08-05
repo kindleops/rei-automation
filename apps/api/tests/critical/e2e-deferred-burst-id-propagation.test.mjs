@@ -465,23 +465,36 @@ test("PRE-EXISTING: an unscaled bare number is not money, with or without a dire
   }
 });
 
-test("a price ending in a capitalized compass direction is preserved", () => {
-  // The fifth regression family from the direction-skip work, now fixed.
-  // Measured with a reference supplied, the form the negotiation path uses:
-  //   "I want 300 East"       eeee5bd8 300000 -> regressed null -> fixed 300000
-  //   "I want 300 South"      eeee5bd8 300000 -> regressed null -> fixed 300000
-  //   "I'd take 250 North"    eeee5bd8 250000 -> regressed null -> fixed 250000
-  //   "my price is 300 East"  eeee5bd8 300000 -> regressed null -> fixed 300000
+test("a price ending in ANY capitalized token is preserved, across all five vocabulary groups", () => {
+  // The fifth regression family, now fixed. It was never really about compass
+  // directions: the capitalized-proper-noun branch of isAddressAdjacent
+  // (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/) deleted the price after ANY capitalized
+  // multi-letter trailing token — 45 of 53 tested, across five vocabulary
+  // groups. "I want 300 Please" and "I want 300 Thanks" were losing the
+  // seller's number just as surely as "I want 300 East".
   //
-  // Root cause was the capitalized-proper-noun branch of isAddressAdjacent
-  // (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/), the same branch behind the "Net" family: a
-  // capitalized full-word direction at the END of a message looks like a street
-  // name because nothing follows it to disambiguate.
+  // Measured WITH a reference, the form the negotiation path uses:
+  //   every string below   eeee5bd8 300000/250000 -> 41edd220 null -> HEAD restored
   for (const [message, expected] of [
+    // compass
     ["I want 300 East", 300000],
     ["I want 300 South", 300000],
-    ["I'd take 250 North", 250000],
+    ["Id take 250 North", 250000],
     ["my price is 300 East", 300000],
+    // politeness
+    ["I want 300 Please", 300000],
+    ["I want 300 Thanks", 300000],
+    ["I want 300 Sorry", 300000],
+    ["I want 300 Sure", 300000],
+    // time
+    ["I want 300 Tomorrow", 300000],
+    ["I want 300 Tonight", 300000],
+    // confirmation
+    ["I want 300 Yes", 300000],
+    ["I want 300 Nope", 300000],
+    // street-ish words used as ordinary trailing tokens
+    ["I want 300 Pennsylvania", 300000],
+    ["I want 300 Broadway", 300000],
   ]) {
     assert.equal(
       resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
@@ -490,12 +503,12 @@ test("a price ending in a capitalized compass direction is preserved", () => {
     );
   }
 
-  // Cases that were NEVER regressed — they isolate the original trigger to a
-  // capitalized, multi-letter, trailing direction and must keep working.
+  // Never regressed — these isolate the original trigger to a capitalized,
+  // MULTI-LETTER, trailing token.
   for (const [message, expected] of [
-    ["I want 300 west", 300000],
-    ["I want 300 E", 300000],
-    ["I want 300 South of the river", 300000],
+    ["I want 300 west", 300000], // lowercase
+    ["I want 300 E", 300000], // single letter
+    ["I want 300 South of the river", 300000], // not trailing
     ["I want 300 East side", 300000],
   ]) {
     assert.equal(
@@ -505,14 +518,67 @@ test("a price ending in a capitalized compass direction is preserved", () => {
     );
   }
 
-  // And the fix must not have over-corrected: real addresses are still not money.
-  for (const message of ["4157 S Main St", "327 Pennsylvania Ave", "331 Oak Street"]) {
+  // The fix must not have over-corrected: real addresses stay suppressed, in
+  // every shape the guard's other three branches handle.
+  for (const message of [
+    "4157 S Main St",
+    "1200 N Broadway",
+    "its 8612 Oak Leaf Rd",
+    "4157 Pillsbury Ave S Unit B",
+    "327 E Pennsylvania Ave",
+    "1200 W 42nd St",
+    "2500 W. Lake St",
+    "327 Pennsylvania Ave",
+    "331 Oak Street",
+  ]) {
     assert.equal(
       resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price ?? null,
       null,
       `${JSON.stringify(message)} is an address, not a price`
     );
   }
+});
+
+test("ACCEPTED TRADEOFF: a bare 'NNN Streetname' returns to baseline behaviour, including its cost", () => {
+  // Recorded so the tradeoff is not rediscovered as a bug.
+  //
+  // The capitalization branch that deleted 45 real prices is the same branch
+  // that made us STRICTER than production on "327 Pennsylvania". Both could not
+  // be kept. Protecting the seller's actual number was judged worth more than
+  // suppressing a mention, so these return to exactly eeee5bd8 behaviour.
+  //
+  // THE COST IS OPTIONS-DEPENDENT, and both halves are pinned because only one
+  // of them is benign:
+  //   NO reference   -> asking_price null, needs_clarification TRUE   (safe: we ask)
+  //   WITH reference -> asking_price 327000, needs_clarification false (the real cost:
+  //                     the street number becomes a scaled price, exactly as
+  //                     production does today)
+  // Three-way verified: 327000 on eeee5bd8, null at 41edd220, 327000 now — a
+  // restoration of production behaviour, not a new regression.
+  for (const [message, scaled] of [
+    ["327 Pennsylvania", 327000],
+    ["I own 331 Pennsylvania", 331000],
+    ["how about 331 Pennsylvania", 331000],
+  ]) {
+    const without = resolveAskingPriceSignal(message, {});
+    assert.equal(without?.asking_price ?? null, null, "no reference: no price is asserted");
+    assert.equal(without?.needs_clarification, true, "no reference: we ask instead of guessing");
+
+    const with_reference = resolveAskingPriceSignal(message, { reference: 200000 });
+    assert.equal(
+      with_reference?.asking_price?.value ?? null,
+      scaled,
+      "ACCEPTED COST: with a reference in scope the street number scales into a price"
+    );
+  }
+
+  // What the PR still buys over baseline, in the same options form: the
+  // direction-prefixed address that production reads as $4,157 stays suppressed.
+  assert.equal(
+    resolveAskingPriceSignal("4157 S Main St", { reference: 200000 })?.asking_price ?? null,
+    null,
+    "eeee5bd8 returned 4157 here; that improvement is kept"
+  );
 });
 
 test("a direction-prefixed street number is still not money", () => {

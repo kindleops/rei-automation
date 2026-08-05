@@ -279,25 +279,40 @@ test("KNOWN GAP: Spanish million forms are not extracted at all", () => {
   }
 });
 
-test("DOCUMENTED RESIDUAL: '150,000 mil' inflates 1000x — accepted, not an open defect", () => {
-  // This is a DECISION, not a bug awaiting a fix. "150,000 mil" is a redundant
-  // form (thousands separator AND the scale word) meaning 150 thousand; the mil
-  // multiplier is applied to a base that already carries thousands magnitude.
-  // Reviewed and accepted as a residual after the 9feba185 'mil' fix, which
-  // deliberately does not cover it.
-  //
-  // Pinned so the decision is visible and any change to it is deliberate.
-  assert.equal(askingPrice("150,000 mil"), 150000000, "ACCEPTED RESIDUAL");
+test("a redundant 'NNN,NNN mil' resolves to the magnitude actually stated", () => {
+  // "150,000 mil" carries BOTH a thousands separator and the scale word — a
+  // redundant form meaning 150 thousand. It was briefly an accepted residual at
+  // 150,000,000 (the mil multiplier applied to a base already at thousands
+  // magnitude), then closed in 21f8a395 rather than shipped.
+  assert.equal(askingPrice("150,000 mil"), 150000);
 });
 
-// NOTE — A DIVERGENCE GUARD FOR THE ACCEPTED RESIDUAL IS DELIBERATELY NOT
-// ASSERTED HERE YET. At committed HEAD both extractors return 150,000,000 for
-// "150,000 mil" and agree. An uncommitted in-flight change to classify.js moves
-// it to 150,000 while monetary-understanding stays at 150,000,000, which would
-// reintroduce the exact extractor divergence that caused the original Spanish
-// launch blocker — on the one string that was reviewed and accepted as a
-// residual. Raised with the lead; the guard lands once the tree settles and the
-// intended value is ruled on, so this file does not pin a moving target.
+test("the two extractors never diverge on 'mil'", () => {
+  // The original Spanish launch blocker WAS an extractor divergence: classify
+  // scaled "mil" by 1_000_000 while monetary-understanding used 1_000, so the
+  // two disagreed by three orders of magnitude and the defect hid until a
+  // targeted probe found it.
+  //
+  // While "150,000 mil" was an accepted residual this guard could not be
+  // asserted — the two extractors were briefly 1000x apart on exactly that
+  // string, which is the more dangerous state than the residual itself because
+  // the string looked handled. Both now agree, so the invariant is pinned: any
+  // future fix to one extractor must move the other with it.
+  for (const message of [
+    "150,000 mil",
+    "quiero 150 mil",
+    "150 mil",
+    "pido 200 mil",
+    "1.2 million",
+    "150k",
+  ]) {
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      askingPrice(message),
+      `classify and monetary-understanding must agree on ${JSON.stringify(message)}`
+    );
+  }
+});
 
 test("legitimate money survives the clock-time and 'mil' narrowing", () => {
   // Controls for both fixes at once: narrowing the "m" suffix and gating bare
