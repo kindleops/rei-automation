@@ -17,9 +17,16 @@
    - Only the five §15 bands appear here. The canonical values live in
      `src/modules/mobile/breakpoints.ts` and are enforced by
      `scripts/lc-responsive-audit.mjs`.
-   - `!important` is used in exactly two blocks, both marked
-     "DOCUMENTED EXCEPTION", both required to defeat pre-existing `!important`
-     declarations, and both only ever REMOVE motion or ADD a focus ring.
+   - `!important` appears in five blocks and nowhere else. Every one of them is
+     matching an `!important` that already exists at the source — there is no
+     way to correct such a declaration without equal weight — and every one only
+     ever makes something MORE perceivable:
+       1. §16.2 focus ring        vs `outline: none !important`
+       2. §16.9 reduced motion    vs 1,297 animation/transition declarations
+       3. .plv-lane__stat.is-muted   vs pipeline-view.css:30
+       4. .nx-notification-button span  vs the chip painted at :373
+       5. .text-red               vs its own source declaration
+     Every other rule in this file wins on specificity instead (R1.6).
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ───────────────────────────────────────────────────────────────────────────
