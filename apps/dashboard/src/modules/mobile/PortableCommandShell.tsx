@@ -175,6 +175,14 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       <MobileCommandDock
         activeSurface={resolveDockSurface()}
         onSurfaceChange={handleDockSurfaceChange}
+        // Restored by Lane H. Lane F passes the KPI orb into the mobile dock
+        // (PortableCommandShell.tsx:178 on ui/lane-f-operations). The `ort` merge kept
+        // Lane F's import but dropped this prop, because the surrounding JSX was edited
+        // on the other side too. MobileCommandDock still declares `kpiControl`
+        // (MobileCommandDock.tsx:26) and renders it (:74-76), so the mobile dock had
+        // silently lost its KPI orb with nothing but an unused import to show for it.
+        // `tsc --noEmit` did not catch this; the production build (`tsc -b`) did.
+        kpiControl={<InboxKpiOrb />}
         workspaceActive={activeSurface === 'workspace'}
         queueStatus={processorStatus}
         notificationCount={unreadCount}

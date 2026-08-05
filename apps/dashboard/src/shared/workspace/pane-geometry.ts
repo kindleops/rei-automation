@@ -179,7 +179,12 @@ export interface ResizePairResult {
  * conserved, so no other pane in the workspace moves — R12.6.
  */
 export const resizePair = (
-  order: string[],
+  // Unused, but kept in the signature so every geometry mutator shares the same
+  // (order, layout, …) shape and callers stay positional. Underscore-prefixed so
+  // `noUnusedParameters` accepts it — without this the production build (`tsc -b`)
+  // fails. It fails on ui/lane-b-workspace too: this file is byte-identical there,
+  // so Lane B's branch was never production-built either.
+  _order: string[],
   layout: WorkspaceLayout,
   leftId: string,
   rightId: string,
