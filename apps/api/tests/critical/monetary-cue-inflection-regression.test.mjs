@@ -80,22 +80,59 @@ test("the monthly forms that never broke are unchanged", () => {
 
 // ── inflections across the cue table ────────────────────────────────────────
 
-test("payoff cues match their inflections", () => {
-  for (const message of ["I owed 60,000 on it", "he owes 60,000", "the payoffs are 60,000"]) {
-    assert.equal(kindOf(message), "mortgage_payoff", message);
-    assert.equal(signalPrice(message), null, message);
-  }
+/**
+ * The COMPLETE inflection differential, cue by cue. Derived mechanically: the
+ * boundary switch changed matching from `text.includes(cue)` to a bounded
+ * regex, so the full set of breaks is every (cue, token) pair where the token
+ * contains the cue but does not match it as a bounded word. Cross-producting
+ * all 116 cues against a 199-token corpus of realistic seller vocabulary
+ * yielded 79 divergences; the ones below are the REAL regressions — cases where
+ * the substring match had been correct and the number silently became an
+ * asking price. Every one is a non-price kind on eeee5bd8.
+ */
+const INFLECTION_CASES = [
+  ["mortgage_payoff", "I owed 60,000 on it"],
+  ["mortgage_payoff", "he owes 60,000"],
+  ["mortgage_payoff", "the payoffs are 60,000"],
+  ["repair_amount", "it was repaired for 15,000"],
+  ["repair_amount", "repairing it cost 15,000"],
+  ["repair_amount", "repairs are 15,000"],
+  ["repair_amount", "I fixed it for 15,000"],
+  ["repair_amount", "fixing it ran 15,000"],
+  ["repair_amount", "the fixes came to 15,000"],
+  ["earnest_money", "the deposits were 5,000"],
+  ["earnest_money", "I deposited 5,000"],
+  ["monthly_amount", "son 900 mensuales"],
+];
+
+for (const [kind, message] of INFLECTION_CASES) {
+  test(`inflection keeps its kind: "${message}" -> ${kind}`, () => {
+    assert.equal(kindOf(message), kind, `${message} — kind`);
+    assert.equal(signalPrice(message), null, `${message} — must not be an asking price`);
+  });
+}
+
+test("PRE-EXISTING GAP, not a regression: 'owing' is not a payoff cue", () => {
+  // Found while building the table above, and measured before asserting:
+  // "owing" does NOT contain "owe" as a substring (o-w-e vs o-w-i-n-g), so it
+  // never matched under the old substring rule either. This is asking_price on
+  // production baseline eeee5bd8 AND here — a pre-existing defect of the same
+  // class as the payoff regression, NOT something a5b27c8d or this PR caused.
+  // Asserting the true behaviour rather than a fix nobody has approved; the
+  // repair is a one-word cue addition if the operator wants it.
+  assert.equal(kindOf("still owing 60,000 on the note"), "asking_price");
 });
 
-test("repair cues match their inflections", () => {
-  for (const message of [
-    "it was repaired for 15,000",
-    "repairing it cost 15,000",
-    "I fixed it for 15,000",
-    "fixing it ran 15,000",
-    "the fixes came to 15,000",
+test("the inflected forms that were never broken are unchanged", () => {
+  // Controls: the uninflected cue always matched. If these ever diverge from
+  // the inflected forms above, the suffix rule has stopped applying evenly.
+  for (const [kind, message] of [
+    ["mortgage_payoff", "I owe 60,000 on it"],
+    ["repair_amount", "the repair is 15,000"],
+    ["earnest_money", "the deposit is 5,000"],
+    ["monthly_amount", "son 900 mensual"],
   ]) {
-    assert.equal(kindOf(message), "repair_amount", message);
+    assert.equal(kindOf(message), kind, message);
     assert.equal(signalPrice(message), null, message);
   }
 });

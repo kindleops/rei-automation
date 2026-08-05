@@ -179,8 +179,6 @@ function isAddressAdjacent(text, match) {
   if (!next) return false;
   const all = [next[1], next[2], next[3], next[4]].filter(Boolean).map(String);
   if (!all.length) return false;
-  // "300 per unit" is money, not 300 Unit Street.
-  if (NON_STREET_LEAD_TOKENS.has(all[0].toLowerCase())) return false;
   // Skip exactly one leading compass direction, then look one word further —
   // the direction is itself strong address evidence. Every other message keeps
   // the original two-word window.
@@ -188,6 +186,12 @@ function isAddressAdjacent(text, match) {
     all.length > 1 && DIRECTION_TOKENS.has(all[0].toLowerCase())
       ? all.slice(1, 4)
       : all.slice(0, 2);
+  if (!words.length) return false;
+  // "300 per unit" is money, not 300 Unit Street. Applied to the word that
+  // actually leads the street name, which is NOT all[0] once a direction has
+  // been skipped: "300 East of the drive" left "of the drive" unguarded, and
+  // the street type three words later suppressed a real price.
+  if (NON_STREET_LEAD_TOKENS.has(words[0].toLowerCase())) return false;
   if (words.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
   const first = String(words[0] || "");
   // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.

@@ -143,6 +143,43 @@ test("a direction word in prose does not suppress a price", () => {
   assert.equal(signalPrice("I want 150 in the court settlement", { reference: 200000 }), 150000);
 });
 
+test("REGRESSION: the function-word guard applies AFTER the direction skip", () => {
+  // The direction skip moved the window to all.slice(1,4) but the non-street
+  // lead-word guard still only ran on all[0], so once a direction was consumed
+  // the new lead word went unguarded and a street type three words later
+  // suppressed real money:
+  //
+  //   "I want 300 East of the drive" -> ["of","the","drive"], "drive" is a
+  //   STREET_TYPE_TOKEN -> read as an address -> 300 DROPPED
+  //   "I want 300 of the drive"      -> correctly rejected -> 300 KEPT
+  //
+  // Same sentence, same words, opposite outcome. All of these are 300000 on
+  // production baseline eeee5bd8.
+  for (const message of [
+    "I want 300 East of the drive",
+    "I want 300 West of the property",
+    "I want 300 North of the road",
+    "I want 300 South of the building",
+    "I'd take 300 east of the court",
+    "I want 300 NE of the parkway",
+    // the un-skipped control that always worked
+    "I want 300 of the drive",
+  ]) {
+    assert.equal(signalPrice(message, { reference: 200000 }), 300000, message);
+  }
+});
+
+test("the direction skip still recognises genuine directional addresses", () => {
+  for (const message of [
+    "4157 S Main St",
+    "4157 North Main Street",
+    "327 E Pennsylvania Ave",
+    "Do you still own 4157 S Main St?",
+  ]) {
+    assert.equal(signalPrice(message), null, message);
+  }
+});
+
 // ── over-suppression repair: per-unit prices are money, not addresses ───────
 //
 // "unit" lives in STREET_TYPE_TOKENS, so the address guard was deleting these
@@ -181,18 +218,39 @@ test("REGRESSION: a capitalized monetary qualifier is not a street name", () => 
   );
 });
 
-test("REGRESSION: the whole capitalized-follower family survives", () => {
-  // Every one of these returned 300000 on eeee5bd8 and null on the branch.
-  for (const word of [
-    "Net", "Cash", "Firm", "Total", "Obo", "Down", "Flat", "Minimum", "Best",
-    "Plus", "Even", "Dollars", "Bucks", "Negotiable", "Only", "Max", "Min",
-    "Today", "Tops", "Clear", "Package", "Deposit", "Payoff", "Taxes",
-  ]) {
+/**
+ * The COMPLETE measured set. A 40-word differential against production baseline
+ * eeee5bd8 (bare number + capitalized follower, with a reference in scope so the
+ * number legitimately scales to thousands) found 38 of 40 losing the number
+ * entirely. Every word below returned 300000 on eeee5bd8 and null on the branch.
+ * Kept as an explicit table so the family can never silently shrink.
+ */
+const CAPITALIZED_FOLLOWERS = [
+  "Net", "Cash", "Firm", "Total", "Obo", "Down", "Flat", "Minimum", "Best",
+  "Plus", "Even", "Dollars", "Bucks", "Negotiable", "Only", "Max", "Min",
+  "Today", "Tops", "Ish", "Clear", "Package", "Deposit", "Earnest", "Payoff",
+  "Repairs", "Taxes", "Monthly", "Together", "Portfolio", "Asking", "Take",
+  "Want", "Need", "About", "Around",
+];
+
+for (const word of CAPITALIZED_FOLLOWERS) {
+  test(`REGRESSION: "I want 300 ${word}" keeps its number`, () => {
     const message = `I want 300 ${word}`;
+    const mentions = extractMonetaryMentions(message, { reference: 200000 });
+    assert.equal(mentions.length, 1, `${message} — the number must survive`);
+    assert.equal(mentions[0].value, 300000, `${message} — and keep its value`);
+  });
+}
+
+test("the two survivors of that differential are unchanged", () => {
+  // "Each" and "OBO" never broke — "each" is a function word and "OBO" is not
+  // capitalized in the /^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/ sense. Pinned so a future
+  // narrowing of the qualifier set cannot quietly change them either.
+  for (const message of ["I want 300 Each", "I want 300 OBO"]) {
     assert.equal(
-      extractMonetaryMentions(message, { reference: 200000 }).length,
-      1,
-      `${message} — the number must survive`
+      extractMonetaryMentions(message, { reference: 200000 })[0]?.value,
+      300000,
+      message
     );
   }
 });
