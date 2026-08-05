@@ -228,13 +228,34 @@ test("without a delivered question the classifier degrades honestly, it does not
 
 // ── the two-fragment case: THE ACTUAL INCIDENT SHAPE ─────────────────────────
 
-test("a two-fragment burst answering the question still clears the automation gate", async (t) => {
+test("KNOWN LIMITATION: a multi-fragment burst answering the question routes to human review (cause two deferred, PR #66 — needs a disengagement model, not a phrase list)", async (t) => {
   t.after(() => __resetSellerInboundOrchestratorDeps());
 
-  // The seller answers the ownership question and immediately adds a detail —
-  // two SMS seconds apart, which is precisely what the burst layer exists to
-  // group. The first fragment has been recorded as an inbound message_event by
-  // the time the burst flushes.
+  // Characterizes CURRENT behaviour. A contextual rescue for multi-fragment
+  // bursts was built and then DELIBERATELY REVERTED; this test exists so the
+  // day someone re-attempts it, they inherit the evidence instead of repeating
+  // it, and this assertion fails loudly to tell them the shape changed.
+  //
+  // WHY IT WAS REVERTED — structurally unsafe, not merely under-hardened:
+  //   * Two rounds of vocabulary hardening each leaked ~70% of unseen phrasings
+  //     (30 of 45, then 26 of 36).
+  //   * Explicit stop requests were among the leaks. "Yeah\nthis number is on
+  //     dnc", "Yeah\nno me contacten mas" and "Yeah\nim blocking this number"
+  //     were all promoted to ownership_confirmed 0.88 with auto-reply allowed —
+  //     a literal DNC assertion answered by an automated text.
+  //   * The rescue only fires when the extra fragment is UNCLASSIFIABLE: 0 of 11
+  //     firings had a confidently-classified fragment, 7 of 7 had an unclear one.
+  //     Its entire domain is the set the classifier does not understand, and
+  //     inside that set "its a 3br" and "please quit bothering me" are both
+  //     `unclear 0.6` — indistinguishable. A blocklist would have to enumerate an
+  //     open set; an allowlist only fires where the classifier already succeeded,
+  //     which is exactly where the rescue is never invoked.
+  // Separating them needs a model of disengagement, not more vocabulary.
+  //
+  // SEVERITY: missed automation, not a correctness or compliance defect. The
+  // seller is routed to a human, which is the conservative direction. Contrast
+  // the 2026-08-03 incident, where a lone "Yeah" ALSO went to review — that half
+  // is fixed and asserted live above.
   const { aggregated, classification } = await classifyThroughBurstFallback({
     fragments: [
       fragment("e1", "Yeah", FIRST_INBOUND_AT),
@@ -247,24 +268,22 @@ test("a two-fragment burst answering the question still clears the automation ga
 
   assert.equal(aggregated.message_count, 2, "both fragments are in the burst");
 
-  // A seller who answers AND volunteers more detail has given us strictly MORE
-  // information than the lone "Yeah". Routing that to human review is the same
-  // business failure as the original incident.
-  assert.equal(
-    classification.context_status,
-    "valid",
-    "fragments of the burst being classified must not invalidate their own context"
-  );
-  assert.equal(
-    classification.primary_intent,
-    "ownership_confirmed",
-    "the seller confirmed ownership; the extra detail does not erase the answer"
-  );
+  // Cause one IS fixed and stays fixed: the burst's own fragments no longer
+  // invalidate their own context. The context is available and valid — the
+  // limitation is only that the short-reply override cannot apply to a joined
+  // aggregate.
+  assert.equal(classification.context_status, "valid", "cause one remains fixed");
+
+  // CURRENT BEHAVIOUR — the deferred half.
+  assert.equal(classification.primary_intent, "unclear", "CURRENT BEHAVIOUR");
+  assert.equal(classification.confidence, 0.64, "CURRENT BEHAVIOUR");
+  assert.equal(classification.precedence_result, "intent_priority", "CURRENT BEHAVIOUR: no contextual override");
   assert.ok(
-    classification.confidence >= AUTOMATION_CONFIDENCE_GATE,
-    `a two-fragment answer must clear the ${AUTOMATION_CONFIDENCE_GATE} gate, got ${classification.confidence}`
+    classification.confidence < AUTOMATION_CONFIDENCE_GATE,
+    "CURRENT BEHAVIOUR: below the automation gate"
   );
-  assert.equal(classification.automation_decision.human_review_required, false);
+  assert.equal(classification.automation_decision.auto_reply_allowed, false, "CURRENT BEHAVIOUR");
+  assert.equal(classification.automation_decision.human_review_required, true, "CURRENT BEHAVIOUR: conservative, not harmful");
 });
 
 test("the burst's own fragments are not counted as answers to the burst's question", async (t) => {
