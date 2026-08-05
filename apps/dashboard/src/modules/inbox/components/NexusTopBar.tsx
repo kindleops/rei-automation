@@ -3,14 +3,14 @@ import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import type { AccentPalette } from '../../../shared/settings'
-import type { CommandResult } from '../../../domain/command-center/command.types'
+import { GLOBAL_COMMAND_OPEN_EVENT } from '../../../domain/command-center/command.types'
+import { SHELL_PANEL_OPEN_EVENT } from '../../shell/shell-panels'
 import type { ActiveOverlay } from '../../../domain/inbox/inbox-layout-state'
 import type { NexusGlobalThemeId } from '../../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import { useNotificationIntelligence } from '../../../domain/notifications/useNotificationIntelligence'
 import { LeadCommandNotificationBell, LeadCommandNotificationCenter } from '../../notifications/LeadCommandNotificationCenter'
 import type { AutonomousEngineModel } from '../autonomy-engine'
-import { InboxKpiOrb } from './InboxKpiOrb'
 import { QueueCommandCenter, type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
 import { ActionCenter } from '../../shell/ActionCenter'
 import { ProfileMenu } from '../../shell/ProfileMenu'
@@ -20,7 +20,6 @@ import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } f
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
-import { MobileSearchOverlay } from '../../mobile/MobileSearchOverlay'
 import { MobileSheet } from '../../mobile/MobileSheet'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -38,11 +37,6 @@ export interface ActionCenterCounts {
 
 interface NexusTopBarProps {
   onSelectSearchResult: (id: string) => void
-  topSearchQuery: string
-  onTopSearchQueryChange: (value: string) => void
-  topSearchGroups: Array<{ key: string; label: string; items: CommandResult[] }>
-  topSearchLoading: boolean
-  onExecuteTopSearchResult: (result: CommandResult) => void
   selectedThread: InboxWorkflowThread | null
   isSuppressed: boolean
   notificationCount: number
@@ -66,6 +60,11 @@ interface NexusTopBarProps {
   autonomyModel: AutonomousEngineModel
   activeWorkspaceKey?: string
   activeWorkspaceLabel?: string
+  /**
+   * @deprecated Accepted for call-site compatibility but no longer rendered.
+   * The shell rail (`modules/shell/ShellTopRail`) owns route identity and the
+   * breadcrumb on every route; this bar no longer renders an identity block.
+   */
   contextSubtitle?: string
   activeViewKey?: string
   activeViewKeys?: string[]
@@ -91,7 +90,6 @@ interface NexusTopBarProps {
   onOpenAi: () => void
   onOpenKeys: () => void
   onOpenKpis: () => void
-  onOpenActivity: () => void
   onOpenTasks: () => void
   onOpenSettings?: () => void
   onResetLayout: () => void
@@ -134,7 +132,6 @@ export const NexusTopBar = ({
   onCancelStaleFollowUps,
   activeWorkspaceKey,
   activeWorkspaceLabel = 'Deal Desk',
-  contextSubtitle,
   activeViewKey,
   activeViewKeys = [],
   activeViewChips = [],
@@ -158,15 +155,9 @@ export const NexusTopBar = ({
   onOpenAi,
   onOpenKeys,
   onOpenKpis,
-  onOpenActivity,
   onOpenTasks,
   onOpenSettings,
   onResetLayout,
-  topSearchQuery,
-  onTopSearchQueryChange,
-  topSearchGroups,
-  topSearchLoading,
-  onExecuteTopSearchResult,
   actionCenterCounts,
   onNavigateInboxView,
   onOpenQueueCommand,
@@ -179,7 +170,6 @@ export const NexusTopBar = ({
   const DEBUG_INBOX = DEV && String(import.meta.env.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
   const { isMobile } = useBreakpoint()
 
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
   const queueTriggerRef = useRef<HTMLButtonElement | null>(null)
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -187,8 +177,6 @@ export const NexusTopBar = ({
   const workspaceControlRef = useRef<HTMLDivElement | null>(null)
 
   const { activeSurface, toggleSurface, closeAndRestoreFocus, setActiveSurface, registerTrigger } = useShellSurface()
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [isCompactMenu, setIsCompactMenu] = useState(false)
 
   useEffect(() => {
@@ -212,23 +200,13 @@ export const NexusTopBar = ({
     }
   }, [activeOverlay, DEBUG_INBOX])
 
-  useEffect(() => {
-    const focusSearch = () => {
-      searchInputRef.current?.focus()
-    }
-    window.addEventListener('nexus:focus-search', focusSearch as EventListener)
-    return () => window.removeEventListener('nexus:focus-search', focusSearch as EventListener)
-  }, [])
-
   const openExclusiveSurface = (surface: Exclude<typeof activeSurface, null>) => {
     onCloseOverlay()
-    setSearchOpen(false)
     toggleSurface(surface)
   }
 
   const openOverlayExclusive = (overlay: ActiveOverlay) => {
     setActiveSurface(null)
-    setSearchOpen(false)
     onOpenOverlay(overlay)
   }
 
@@ -246,23 +224,6 @@ export const NexusTopBar = ({
 
   const { unreadCount: intelligenceUnreadCount } = useNotificationIntelligence()
   const unreadNotifications = intelligenceUnreadCount
-  const topSearchItems = useMemo(
-    () => topSearchGroups.flatMap((group) => group.items),
-    [topSearchGroups],
-  )
-
-  useEffect(() => {
-    setSearchActiveIndex(0)
-  }, [topSearchQuery, topSearchGroups])
-
-  const showSearchPopover = searchOpen && (topSearchLoading || topSearchItems.length > 0 || topSearchQuery.trim().length >= 2)
-
-  const handleSearchSubmit = (result: CommandResult | undefined) => {
-    if (!result) return
-    onExecuteTopSearchResult(result)
-    setSearchOpen(false)
-  }
-
   const launcherWorkspaces: WorkspaceLauncherItem[] = useMemo(
     () => workspaceOptions.map((workspace) => ({
       key: workspace.key,
@@ -349,26 +310,25 @@ export const NexusTopBar = ({
   }, 0)
 
   const resolveDockSurface = (): DockSurface => {
-    if (searchOpen) return 'search'
     if (activeSurface === 'workspace') return 'workspace'
     if (activeSurface === 'queue') return 'queue'
     if (activeSurface === 'action-center') return 'tasks'
-    if (activeOverlay === 'activity') return 'activity'
     if (activeOverlay === 'notifications') return 'notifications'
     return null
   }
 
   const handleDockSurfaceChange = (surface: DockSurface) => {
     if (surface === null) {
-      setSearchOpen(false)
       setActiveSurface(null)
       onCloseOverlay()
       return
     }
+    /* Search is the global ⌘K palette now — one search surface for the whole
+       app, on every route, instead of a second mobile-only implementation. */
     if (surface === 'search') {
       onCloseOverlay()
       setActiveSurface(null)
-      setSearchOpen(true)
+      window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: {} }))
       return
     }
     if (surface === 'workspace') {
@@ -383,9 +343,11 @@ export const NexusTopBar = ({
       openExclusiveSurface('action-center')
       return
     }
+    /* Same single owner as the desktop rail button. */
     if (surface === 'activity') {
-      if (activeOverlay === 'activity') onCloseOverlay()
-      else openOverlayExclusive('activity')
+      setActiveSurface(null)
+      onCloseOverlay()
+      window.dispatchEvent(new CustomEvent(SHELL_PANEL_OPEN_EVENT, { detail: { id: 'live-activity' } }))
       return
     }
     if (surface === 'notifications') {
@@ -465,30 +427,14 @@ export const NexusTopBar = ({
         <span ref={queueTriggerRef} className="nx-sr-only" aria-hidden />
         <span ref={actionTriggerRef} className="nx-sr-only" aria-hidden />
 
-        <MobileSearchOverlay
-          open={searchOpen}
-          query={topSearchQuery}
-          loading={topSearchLoading}
-          groups={topSearchGroups}
-          activeIndex={searchActiveIndex}
-          onQueryChange={onTopSearchQueryChange}
-          onActiveIndexChange={setSearchActiveIndex}
-          onSubmit={handleSearchSubmit}
-          onClose={() => {
-            setSearchOpen(false)
-            onTopSearchQueryChange('')
-          }}
-        />
-
         <MobileCommandDock
           activeSurface={resolveDockSurface()}
           onSurfaceChange={handleDockSurfaceChange}
-          kpiControl={<InboxKpiOrb />}
           workspaceActive={activeSurface === 'workspace'}
           queueStatus={processorStatus}
-          searchActive={searchOpen}
+          searchActive={false}
           tasksCount={actionCountTotal}
-          activityActive={activeOverlay === 'activity'}
+          activityActive={false}
           notificationCount={unreadNotifications}
           notificationsActive={activeOverlay === 'notifications'}
         />
@@ -546,24 +492,20 @@ export const NexusTopBar = ({
     <header className="nx-topbar nx-topbar--nexus-shell">
       {/* Zone 1: Workspace identity */}
       <div className="nx-topbar__left nx-topbar-shell-left nx-mobile-command-row">
-        {!isMobile ? (
-          <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
-            <div className="nx-topbar__logo">
-              <Icon name="spark" />
-            </div>
-            <div className="nx-topbar-identity">
-              <span>NEXUS</span>
-              <strong>{activeWorkspaceLabel}</strong>
-              {contextSubtitle ? <small>{contextSubtitle}</small> : null}
-            </div>
-          </div>
-        ) : null}
+        {/*
+          Lane A: the stacked four-label identity block that used to live here
+          ("NEXUS" / workspace / breadcrumb, plus the logo tile) has moved to the
+          shell-owned rail — `modules/shell/ShellTopRail`. It renders on all 15
+          routes instead of only `/inbox`, on ONE aligned line (§2/§4), and it is
+          no longer duplicated by the fixed `.nx-room-label` overlay.
+          Everything below stays inbox-owned: this bar is now a control toolbar.
+        */}
 
         {/* Zone 2: Operational controls */}
         <div className="nx-topbar-shell-zone nx-topbar-shell-zone--controls">
-          <div className="nx-topbar-orb-slot">
-            <InboxKpiOrb />
-          </div>
+          {/* Operational Intelligence lives in the shell rail now — one
+              trigger, one open state, all 15 routes. A second orb here would
+              give the same panel two owners. */}
 
           <div className="nx-topbar-view-control" ref={workspaceControlRef}>
             <button
@@ -652,6 +594,7 @@ export const NexusTopBar = ({
               className="nx-liquid-popover nx-liquid-popover--processor"
               placement="bottom-start"
               width="min(380px, calc(100vw - 24px))"
+              label="Queue and system status"
             >
               <QueueCommandCenter
                 health={queueProcessorHealth}
@@ -678,123 +621,12 @@ export const NexusTopBar = ({
         </div>
       </div>
 
-      {/* Zone 3: Global search */}
-      <div className={cls('nx-topbar__center nx-topbar-shell-center', isMobile && 'nx-mobile-action-row')}>
-        {isMobile && !searchOpen ? (
-          <button
-            type="button"
-            className="nx-notification-button nx-mobile-search-toggle"
-            title="Universal search"
-            onClick={() => {
-              setSearchOpen(true)
-              window.requestAnimationFrame(() => searchInputRef.current?.focus())
-            }}
-          >
-            <Icon name="search" />
-          </button>
-        ) : null}
-        <div className={cls('nx-global-search', isMobile && !searchOpen && 'is-collapsed')}>
-          {!(isMobile && !searchOpen) ? <Icon name="search" /> : null}
-          <input
-            ref={searchInputRef}
-            aria-label="Search sellers, owners, properties, conversations, buyers, campaigns, and entities"
-            value={topSearchQuery}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => {
-              onTopSearchQueryChange(event.target.value)
-              setSearchOpen(true)
-              setActiveSurface(null)
-              onCloseOverlay()
-            }}
-            onFocus={(event) => {
-              event.currentTarget.select()
-              setSearchOpen(true)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setSearchOpen(true)
-                setSearchActiveIndex((current) => Math.min(current + 1, Math.max(topSearchItems.length - 1, 0)))
-                return
-              }
-              if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setSearchActiveIndex((current) => Math.max(current - 1, 0))
-                return
-              }
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                handleSearchSubmit(topSearchItems[searchActiveIndex])
-                return
-              }
-              if (event.key === 'Escape') {
-                setSearchOpen(false)
-              }
-            }}
-            onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
-            placeholder="Search sellers, buyers, addresses, locations, conversations..."
-          />
-          {!isMobile ? <kbd>CMD+K</kbd> : null}
-          {isMobile && searchOpen ? (
-            <button
-              type="button"
-              className="nx-mobile-search-close"
-              aria-label="Close search"
-              onClick={() => {
-                setSearchOpen(false)
-                onTopSearchQueryChange('')
-              }}
-            >
-              <Icon name="close" />
-            </button>
-          ) : null}
-          {showSearchPopover ? (
-            <div className="nx-search-results-popover nx-liquid-surface" role="listbox" aria-label="Universal search suggestions">
-              <div className="nx-search-results-popover__header">
-                <span>Universal Search</span>
-                <b>{topSearchLoading ? 'Searching…' : `${topSearchItems.length} matches`}</b>
-              </div>
-              <div className="nx-search-results-list">
-                {topSearchGroups.map((group) => (
-                  <section key={group.key} className="nx-search-result-group">
-                    <header className="nx-search-result-group__label">{group.label}</header>
-                    {group.items.map((result) => {
-                      const runningIndex = topSearchItems.findIndex((item) => item.id === result.id)
-                      const isActive = runningIndex === searchActiveIndex
-                      return (
-                        <button
-                          key={result.id}
-                          type="button"
-                          className={cls('nx-search-result-item', isActive && 'is-active')}
-                          onMouseEnter={() => setSearchActiveIndex(runningIndex)}
-                          onMouseDown={(event) => {
-                            event.preventDefault()
-                            handleSearchSubmit(result)
-                          }}
-                        >
-                          <span className="nx-search-result-item__row">
-                            <strong>{result.title}</strong>
-                            {result.badge ? <em>{result.badge}</em> : null}
-                          </span>
-                          <small>{result.subtitle}</small>
-                          {result.description ? <p>{result.description}</p> : null}
-                        </button>
-                      )
-                    })}
-                  </section>
-                ))}
-                {!topSearchLoading && topSearchItems.length === 0 ? (
-                  <div className="nx-search-results-empty">
-                    <strong>No matches</strong>
-                    <span>Try a seller, buyer, address, market, phone, or queue status.</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
+      {/* Zone 3 (global search) is gone. The always-visible input carried a
+          <kbd>CMD+K</kbd> hint that was untrue — ⌘K opens the command palette,
+          it never focused this field. Search is now the palette, reached from
+          the shell rail on all 15 routes (modules/shell/ShellTopRail).
+          The palette runs the same providers plus app/filter/map actions, so
+          nothing searchable was lost. */}
 
       {/* Zone 4: Operator controls */}
       <div className={cls('nx-topbar__actions nx-topbar-shell-zone nx-topbar-shell-zone--operators', isMobile && 'nx-mobile-action-row')}>
@@ -823,26 +655,9 @@ export const NexusTopBar = ({
           />
         </div>
 
-        <div className="nx-notification-control">
-          <button
-            type="button"
-            className={cls('nx-notification-button', activeOverlay === 'activity' && 'is-active')}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              if (activeOverlay === 'activity') onCloseOverlay()
-              else {
-                setActiveSurface(null)
-                setSearchOpen(false)
-                onOpenActivity()
-              }
-            }}
-            aria-expanded={activeOverlay === 'activity'}
-            title="Live Activity"
-          >
-            <Icon name="activity" />
-          </button>
-        </div>
+        {/* Live Activity moved to the shell rail: one control, all 15 routes.
+            Keeping a second trigger here would put two openers on one panel —
+            the same duplicate-owner defect as the old double ⌘K binding. */}
 
         <LeadCommandNotificationBell
           unreadCount={unreadNotifications}

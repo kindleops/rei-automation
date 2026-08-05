@@ -237,7 +237,8 @@
   --nexus-map-pin:       var(--nx-accent);
 }
 /* ── satellite ──────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="satellite"] {
+:root[data-nexus-theme="satellite"],
+[data-nexus-theme="satellite"] {
   --nx-bg:              #0a0d11;
   --nx-bg-soft:         #0e1316;
   --nx-panel-bg:        rgba(14, 16, 18, 0.92);
@@ -263,7 +264,8 @@
   --nx-badge-border:    rgba(229, 237, 248, 0.22);
 }
 /* ── terrain ────────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="terrain"] {
+:root[data-nexus-theme="terrain"],
+[data-nexus-theme="terrain"] {
   --nx-bg:              #0d1009;
   --nx-bg-soft:         #131709;
   --nx-panel-bg:        rgba(14, 17, 14, 0.95);
@@ -366,7 +368,8 @@
   --nexus-map-pin:       var(--nx-accent);
 }
 /* ── matrix ─────────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="matrix"] {
+:root[data-nexus-theme="matrix"],
+[data-nexus-theme="matrix"] {
   --nx-bg:              #020805;
   --nx-bg-soft:         #040e09;
   --nx-panel-bg:        rgba(2, 8, 5, 0.97);
@@ -392,7 +395,8 @@
   --nx-badge-border:    rgba(0, 255, 136, 0.26);
 }
 /* ── blueprint ──────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="blueprint"] {
+:root[data-nexus-theme="blueprint"],
+[data-nexus-theme="blueprint"] {
   --nx-bg:              #061420;
   --nx-bg-soft:         #091e2e;
   --nx-panel-bg:        rgba(6, 20, 30, 0.97);
@@ -418,7 +422,8 @@
   --nx-badge-border:    rgba(105, 215, 255, 0.26);
 }
 /* ── executive ──────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="executive"] {
+:root[data-nexus-theme="executive"],
+[data-nexus-theme="executive"] {
   --nx-bg:              #0a0a06;
   --nx-bg-soft:         #121009;
   --nx-panel-bg:        rgba(10, 10, 8, 0.97);
@@ -444,7 +449,8 @@
   --nx-badge-border:    rgba(216, 180, 80, 0.24);
 }
 /* ── night_vision ───────────────────────────────────────────────────────── */
-:root[data-nexus-theme="night_vision"] {
+:root[data-nexus-theme="night_vision"],
+[data-nexus-theme="night_vision"] {
   --nx-bg:              #06130f;
   --nx-bg-soft:         #0a1c17;
   --nx-panel-bg:        rgba(6, 19, 15, 0.97);
@@ -470,7 +476,8 @@
   --nx-badge-border:    rgba(114, 255, 178, 0.24);
 }
 /* ── monochrome ─────────────────────────────────────────────────────────── */
-:root[data-nexus-theme="monochrome"] {
+:root[data-nexus-theme="monochrome"],
+[data-nexus-theme="monochrome"] {
   --nx-bg:              #060708;
   --nx-bg-soft:         #0c0d0f;
   --nx-panel-bg:        rgba(8, 10, 12, 0.97);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
+import { useFocusTrap } from '../../shared/ui'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useGlobalCommandSearch } from './useGlobalCommandSearch'
 import './global-command.css'
@@ -30,13 +31,22 @@ export const GlobalCommandOverlay = ({
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
   const { results, loading, groupedResults } = useGlobalCommandSearch(query, context)
+
+  /* §11.3 / §16.3 — the palette had no focus trap and lost focus to <body> on
+     close. It now uses the one shared hook, so Esc closes it and focus returns
+     to whatever opened it: the rail trigger, or the row the operator was on
+     when they pressed ⌘K. `autoFocus: false` because the search input below is
+     focused explicitly — typing must start immediately. */
+  useFocusTrap(shellRef, { open, onClose, trap: true, autoFocus: false })
 
   useEffect(() => {
     if (!open) return
     setQuery(initialQuery)
     setActiveIndex(0)
-    window.setTimeout(() => inputRef.current?.focus(), 32)
+    const raf = requestAnimationFrame(() => inputRef.current?.focus())
+    return () => cancelAnimationFrame(raf)
   }, [initialQuery, open])
 
   useEffect(() => {
@@ -76,6 +86,16 @@ export const GlobalCommandOverlay = ({
       setActiveIndex((current) => Math.max(current - 1, 0))
       return
     }
+    if (event.key === 'Home' && orderedResults.length > 0) {
+      event.preventDefault()
+      setActiveIndex(0)
+      return
+    }
+    if (event.key === 'End' && orderedResults.length > 0) {
+      event.preventDefault()
+      setActiveIndex(orderedResults.length - 1)
+      return
+    }
     if (event.key === 'Enter') {
       event.preventDefault()
       const next = orderedResults[activeIndex]
@@ -92,22 +112,29 @@ export const GlobalCommandOverlay = ({
 
   return (
     <div className={cls('gcc-overlay', themeClassFor(context.activeMapTheme))} onClick={onClose}>
-      <div className="gcc-shell" role="dialog" aria-modal aria-label="Global command center" onClick={(event) => event.stopPropagation()}>
+      <div ref={shellRef} className="gcc-shell" role="dialog" aria-modal aria-label="Search and commands" onClick={(event) => event.stopPropagation()}>
         <div className="gcc-shell__chrome" />
         <div className="gcc-search">
           <div className="gcc-search__icon"><Icon name="command" /></div>
           <div className="gcc-search__copy">
-            <span className="gcc-search__label">Inbox Command</span>
+            {/* §0.1 — this palette is global. It was labelled "Inbox Command"
+                on all 15 routes, which was untrue on 14 of them. */}
+            <span className="gcc-search__label">Search &amp; Commands</span>
             <input
               ref={inputRef}
               className="gcc-search__input"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search sellers, buyers, addresses, locations, markets, actions…"
+              placeholder="Search sellers, buyers, addresses, locations, conversations…"
               autoComplete="off"
               spellCheck={false}
-              aria-label="Search inbox sellers, buyers, properties, markets, filters, actions"
+              role="combobox"
+              aria-expanded
+              aria-controls="gcc-results"
+              aria-autocomplete="list"
+              aria-activedescendant={orderedResults[activeIndex] ? `gcc-option-${orderedResults[activeIndex].id}` : undefined}
+              aria-label="Search sellers, buyers, addresses, locations and conversations, or run a command"
             />
           </div>
           <div className="gcc-search__meta">
@@ -117,7 +144,7 @@ export const GlobalCommandOverlay = ({
         </div>
 
         <div className="gcc-layout">
-          <div className="gcc-results" ref={listRef}>
+          <div className="gcc-results" id="gcc-results" role="listbox" aria-label="Results" ref={listRef}>
             {groupedResults.bestMatches.length > 0 ? (
               <section className="gcc-group">
                 <header className="gcc-group__header">Best Matches</header>
@@ -128,7 +155,11 @@ export const GlobalCommandOverlay = ({
                     return (
                       <button
                         key={result.id}
+                        id={`gcc-option-${result.id}`}
                         type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        tabIndex={-1}
                         className={cls('gcc-item', isActive && 'is-active', result.meta?.disabled && 'is-disabled')}
                         data-command-index={runningIndex}
                         onMouseEnter={() => setActiveIndex(runningIndex)}
@@ -160,7 +191,11 @@ export const GlobalCommandOverlay = ({
                     return (
                       <button
                         key={result.id}
+                        id={`gcc-option-${result.id}`}
                         type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        tabIndex={-1}
                         className={cls('gcc-item', isActive && 'is-active', result.meta?.disabled && 'is-disabled')}
                         data-command-index={runningIndex}
                         onMouseEnter={() => setActiveIndex(runningIndex)}
@@ -192,8 +227,8 @@ export const GlobalCommandOverlay = ({
 
           <aside className="gcc-preview">
             <div className="gcc-preview__eyebrow">{activeResult?.preview?.eyebrow || 'Preview'}</div>
-            <h3>{activeResult?.preview?.title || 'Command Center'}</h3>
-            <p>{activeResult?.preview?.summary || 'Search Inbox and its associated workspaces for sellers, buyers, markets, properties, queue context, and safe actions.'}</p>
+            <h3>{activeResult?.preview?.title || 'Search & Commands'}</h3>
+            <p>{activeResult?.preview?.summary || 'Search sellers, buyers, addresses, locations, markets, properties, queue context and conversations — or run a command. Available on every route.'}</p>
             <div className="gcc-preview__details">
               {(activeResult?.preview?.details ?? []).map((detail) => (
                 <div key={`${detail.label}-${detail.value}`} className="gcc-preview__detail">

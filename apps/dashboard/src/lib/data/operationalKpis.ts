@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import { getSupabaseClient } from '../supabaseClient'
 import { fetchOperationalKpis, type OperationalKpis, type OperationalKpi } from './inboxKpis'
 
@@ -14,6 +14,15 @@ export const useOperationalKpis = (
   
   const lastFetchRef = useRef<number>(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /* supabase-js keys realtime channels by topic. Both subscriptions below used
+     fixed names, so a second consumer of this hook on the same page threw
+     "cannot add `postgres_changes` callbacks for realtime:kpi-messages after
+     `subscribe()`" and took the subtree down with it. That was latent while
+     Operational Intelligence was reachable only from /inbox; it fires the
+     moment the panel can open on /analytics, which already renders
+     KpiIntelligencePage against the same hook. One topic per instance. */
+  const channelScope = useId().replace(/:/g, '')
 
 
   const load = useCallback(async (isInitial = false) => {
@@ -67,7 +76,7 @@ export const useOperationalKpis = (
     
     // Subscribe to message events for real-time messaging updates
     const messageSub = supabase
-      .channel('kpi-messages')
+      .channel(`kpi-messages-${channelScope}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, () => {
         setIsLive(true)
         debouncedLoad()
@@ -77,7 +86,7 @@ export const useOperationalKpis = (
 
     // Subscribe to send_queue for real-time automation updates
     const queueSub = supabase
-      .channel('kpi-queue')
+      .channel(`kpi-queue-${channelScope}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, () => {
         setIsLive(true)
         debouncedLoad()
@@ -92,7 +101,7 @@ export const useOperationalKpis = (
       supabase.removeChannel(queueSub)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
-  }, [enabled, timeWindow, debouncedLoad, load])
+  }, [enabled, timeWindow, debouncedLoad, load, channelScope])
 
   // Rule-based recommendations
   const recommendations = useCallback(() => {

@@ -9,6 +9,10 @@ import './modules/mobile/pinned-app-dock.css'
 import './styles/nx-glass-system.css'
 import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
+// Semantic layer (Lane A). Must load AFTER nexus-theme.css so the --nx-*
+// primitives it maps are already declared, and before any --lc-* consumer.
+import './styles/lc-tokens.css'
+import './shared/ui/lc-ui.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

@@ -44,6 +44,7 @@ export const ActionCenter = ({
       className="nx-action-center-popover"
       placement="bottom-end"
       width={300}
+      label="Action Center"
     >
       <header className="nx-action-center__header">
         <strong>Action Center</strong>

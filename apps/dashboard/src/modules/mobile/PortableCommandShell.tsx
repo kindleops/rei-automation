@@ -5,7 +5,6 @@ import { applyThemeToDOM, loadSettings, updateSetting, type AccentPalette } from
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
 import { getQueueProcessorHealth, type QueueProcessorHealth } from '../../lib/data/inboxData'
-import { InboxKpiOrb } from '../inbox/components/InboxKpiOrb'
 import { QueueCommandCenter, type QueueCommandMode, type QueueCommandCaps } from '../inbox/components/QueueCommandCenter'
 import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
@@ -151,7 +150,6 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       <MobileCommandDock
         activeSurface={resolveDockSurface()}
         onSurfaceChange={handleDockSurfaceChange}
-        kpiControl={<InboxKpiOrb />}
         workspaceActive={activeSurface === 'workspace'}
         queueStatus={processorStatus}
         notificationCount={unreadCount}
