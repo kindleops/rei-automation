@@ -8,8 +8,6 @@ import {
 import {
   validateConversationContext,
   applyContextualShortReply,
-  resolveAggregateShortReplyFragment,
-  aggregateCarriesStopRequest,
   CONTEXT_VERSION,
 } from "@/lib/domain/classification/conversation-context.js";
 
@@ -5094,66 +5092,23 @@ function resolveIntents(
   ) {
     primary = "ownership_confirmed";
   }
-  // ── Burst-aggregate rescue for context-bound short replies ───────────────
-  // A multi-fragment burst is newline-joined, so the override at the top of
-  // this function is unreachable for it: isShortContextualReply tests the whole
-  // body. "Yeah" alone bound to the delivered ownership question at 0.88, but
-  // "Yeah\nits a 3br" — strictly MORE information — fell to unclear/0.64 and
-  // was routed to human review.
+  // NOTE — a burst-aggregate rescue was built here and deliberately removed.
+  // A multi-fragment burst is newline-joined, so isShortContextualReply (which
+  // tests the whole body) is false for all of them and the contextual override
+  // above is unreachable: "Yeah" binds at 0.88 but "Yeah\nits a 3br" falls to
+  // unclear/0.64 and goes to human review. Two attempts to rescue that were
+  // measured and reverted; see burst-aggregate-short-reply.test.mjs for the
+  // evidence, and do not re-add one without reading it.
   //
-  // This runs LAST, and only when `primary === "unclear"` — the classifier's
-  // own statement that no rule matched.
-  //
-  // `unclear` ALONE IS NOT SUFFICIENT, and the first version of this rescue was
-  // wrong to treat it as such. It proves no rule matched; it does NOT prove no
-  // stop request is present. The opt-out detector does not cover every
-  // phrasing, so an uncovered one ("please quit bothering me", "no more texts")
-  // lands in unclear — and unclear was the licence to promote. Those were
-  // measured promoting to ownership_confirmed 0.88 with auto-reply allowed: a
-  // seller asking us to stop, answered with another text.
-  //
-  // So promotion now also requires that NO fragment carries a stop-like signal,
-  // scanned by a deliberately over-broad, fail-closed predicate. Refusing costs
-  // one automated reply and routes to a human; promoting wrongly texts someone
-  // who asked us to stop. Those are not symmetric.
-  if (
-    primary === "unclear" &&
-    ctxValidation.context_status === "valid" &&
-    !aggregateCarriesStopRequest(rawMessage)
-  ) {
-    const fragment = resolveAggregateShortReplyFragment(rawMessage);
-    const fragmentCtx = fragment
-      ? applyContextualShortReply(fragment, ctxValidation)
-      : { applied: false };
-    if (fragmentCtx.applied && !fragmentCtx.force_unclear) {
-      const fragmentPrimary =
-        fragmentCtx.primary_intent === "interested"
-          ? "seller_interested"
-          : fragmentCtx.primary_intent;
-      matched_rule_ids.push(fragmentCtx.rule_id);
-      return finalizeIntentResult({
-        primary_intent: fragmentPrimary,
-        secondary_intent: null,
-        secondary_intents: fragmentCtx.labels || [],
-        matched_intents: [fragmentPrimary],
-        matched_rule_ids,
-        suppressed_rule_ids: [...suppressed_rule_ids, "unclear_aggregate_fallback"],
-        precedence_result: "contextual_short_reply_override",
-        // The bound fragment, not the whole aggregate — the evidence is the
-        // answer itself.
-        evidence_spans: [fragment],
-        context_status: ctxValidation.context_status,
-        context_source_id: fragmentCtx.context_message_id || null,
-        context_use_case: fragmentCtx.context_use_case || null,
-        context_age_ms: fragmentCtx.context_age_ms ?? null,
-        calibrated_rule_family_id: fragmentCtx.rule_id,
-        confidence_rationale: fragmentCtx.rationale,
-        contextual_override: fragmentCtx,
-        contextual_confidence: fragmentCtx.confidence,
-        price_parse,
-      });
-    }
-  }
+  // The short version: any such rescue can only fire when the extra fragment is
+  // UNCLASSIFIABLE, because a fragment the classifier understands makes the
+  // whole aggregate resolve and the rescue is never reached. Inside that set,
+  // "its a 3br" and "im blocking this number" are the same to this classifier —
+  // both unclear at 0.6. So the rescue's entire domain is exactly the region
+  // where benign detail cannot be told from a demand to stop, and no phrase
+  // list closes that: a blocklist must enumerate an open set, and an allowlist
+  // fires only where the classifier already succeeded. Closing this properly
+  // needs a disengagement model, not more vocabulary.
 
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
