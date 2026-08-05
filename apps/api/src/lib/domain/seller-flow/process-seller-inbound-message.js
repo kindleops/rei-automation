@@ -51,6 +51,7 @@ import {
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
@@ -1394,6 +1395,26 @@ export async function processSellerInboundMessage({
               transition && Number(transition.stage_after_number) >= 7
                 ? { type: "persisted_deal_state", source: "loadSellerDealState" }
                 : null,
+            // Server-derived suppression evidence, keyed off the classified
+            // INTENT and never off the contactability value — so a stage
+            // transition still cannot manufacture a suppression claim. Returns
+            // null for every intent outside the durable set and for any inbound
+            // that cannot cite the message event that produced it, in which
+            // case the writer's gate correctly rejects the binding fields.
+            //
+            // Without this the gate strips do_not_text writes from the inbound
+            // path: a hostile_or_legal or wrong_person suppression is dropped
+            // and we keep texting. (The opt-out lane never depended on this —
+            // `opted_out` is self-evidencing.)
+            //
+            // NOT the unrelated shadow-telemetry key of the same name further
+            // down this file; these two must never be wired together.
+            suppression_evidence: buildInboundSuppressionEvidence({
+              intent: classification?.primary_intent || null,
+              source_event_id: inboundEventId || providerMessageId || null,
+              rule_version: `${CLASSIFY_VERSION}:${classification?.source || "heuristic"}`,
+              matched_phrase: classification?.matched_phrase || null,
+            }),
             temperature_reason_codes: temperature_signal?.reason_codes || null,
             temperature_reason: (temperature_signal?.reason_codes || []).join(",") || null,
             metadata: decision.reasoning_code
