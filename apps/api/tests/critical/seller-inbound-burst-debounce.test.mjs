@@ -62,6 +62,13 @@ const T0 = "2026-07-26T12:00:00.000Z";
 const ms = (iso) => Date.parse(iso);
 const plus = (iso, addMs) => new Date(ms(iso) + addMs).toISOString();
 
+// Burst work selection is deny-by-default: the store claims nothing without an
+// explicit activation scope. These tests exercise lease/claim/rollover
+// semantics, not scoping, so they assert the unrestricted (`enabled`-mode)
+// scope the coordinator supplies in global activation. Scoped selection is
+// covered in burst-eligible-scope.test.mjs.
+const UNRESTRICTED_SCOPE = Object.freeze({ authorized: true, global: true });
+
 // ── Policy basics ──────────────────────────────────────────────────────────
 
 test("policy: debounce is fixed 20s trailing-edge; hard cap 90s (no seeded random)", () => {
@@ -204,10 +211,15 @@ test("S1: three-part thought → one burst, interest+price+condition retained, o
   assert.equal(open.constituents.length, 3);
   assert.equal(processCalls.length, 0, "no process until flush");
 
-  // Before quiet window — not eligible
+  // Before quiet window — not eligible. A thread_key without a burst_id is now
+  // a FILTER over the scoped eligible list rather than a bare thread-scoped
+  // claim, so "nothing to do" is an empty result set instead of one refused
+  // claim attempt. Both say no work happened; this one says it without asking
+  // the database to pick a row first.
   clock = ms(T0) + 2000 + 10_000;
   let flush = await coordinator.flushEligible({ thread_key: "+15551110001" });
-  assert.equal(flush.results[0].ok, false);
+  assert.equal(flush.results.length, 0, "nothing eligible → no claim attempted");
+  assert.equal(processCalls.length, 0);
 
   // After quiet window from last message
   clock = ms(T0) + 2000 + 20_000;
@@ -611,11 +623,12 @@ test("S10: two flush workers → one winner", async () => {
     body: "yes I own it",
     received_at: now(),
   });
+  const bid_s10 = (await store.getOpen("+15551110010")).burst_id;
   clock = ms(T0) + 25_000;
 
   const [r1, r2] = await Promise.all([
-    mk("w1").finalizeBurst({ thread_key: "+15551110010" }),
-    mk("w2").finalizeBurst({ thread_key: "+15551110010" }),
+    mk("w1").finalizeBurst({ thread_key: "+15551110010", burst_id: bid_s10 }),
+    mk("w2").finalizeBurst({ thread_key: "+15551110010", burst_id: bid_s10 }),
   ]);
   const wins = [r1, r2].filter((r) => r.ok);
   const losses = [r1, r2].filter((r) => !r.ok);
@@ -715,6 +728,7 @@ test("claim boundary: message after claim opens generation N+1", async () => {
     thread_key: "+1555111CLM",
     now: now(),
     worker_id: "w",
+    scope: UNRESTRICTED_SCOPE,
   });
   assert.equal(claim.ok, true);
 
@@ -951,7 +965,7 @@ test("lease: fresh claim cannot be stolen; stale claim reclaims deterministicall
   });
 
   clock = ms(T0) + 25_000;
-  const claimA = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "A" });
+  const claimA = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "A", scope: UNRESTRICTED_SCOPE });
   assert.equal(claimA.ok, true);
   assert.equal(claimA.burst.status, BURST_STATUSES.CLAIMED);
   assert.equal(claimA.burst.attempt_count, 1);
@@ -959,14 +973,14 @@ test("lease: fresh claim cannot be stolen; stale claim reclaims deterministicall
 
   // Invariant A: before lease expiry the claim cannot be stolen.
   clock = ms(T0) + 25_000 + 60_000;
-  const steal = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "B" });
+  const steal = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "B", scope: UNRESTRICTED_SCOPE });
   assert.equal(steal.ok, false);
   assert.equal(steal.reason, "claim_lease_active");
 
   // Invariant B+C+D: after lease expiry, atomic reclaim with same generation,
   // same constituents, same decision_idempotency_key, rotated token.
   clock = ms(T0) + 25_000 + SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 1000;
-  const claimB = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "B" });
+  const claimB = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "B", scope: UNRESTRICTED_SCOPE });
   assert.equal(claimB.ok, true);
   assert.equal(claimB.burst.generation, claimA.burst.generation);
   assert.deepEqual(
@@ -999,7 +1013,7 @@ test("lease: fresh claim cannot be stolen; stale claim reclaims deterministicall
   });
   assert.equal(done.ok, true);
   clock += SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 10_000;
-  const afterDone = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "C" });
+  const afterDone = await store.claimEligible({ thread_key: "+1555111LEASE", now: now(), worker_id: "C", scope: UNRESTRICTED_SCOPE });
   assert.equal(afterDone.ok, false);
   assert.notEqual(afterDone.reason, undefined);
   assert.equal(
@@ -1034,20 +1048,21 @@ test("lease: crash after claim → worker B reclaims via coordinator, exactly on
     received_at: now(),
   });
 
+  const bid_crsh = (await store.getOpen("+1555111CRSH")).burst_id;
   // Worker A claims directly and dies before running V2 / completing.
   clock = ms(T0) + 25_000;
-  const claimA = await store.claimEligible({ thread_key: "+1555111CRSH", now: now(), worker_id: "A" });
+  const claimA = await store.claimEligible({ thread_key: "+1555111CRSH", now: now(), worker_id: "A", scope: UNRESTRICTED_SCOPE });
   assert.equal(claimA.ok, true);
 
   // Before lease expiry: worker B's finalize gets no claim, V2 never runs.
   clock = ms(T0) + 25_000 + 120_000;
-  const early = await mk("B").finalizeBurst({ thread_key: "+1555111CRSH" });
+  const early = await mk("B").finalizeBurst({ thread_key: "+1555111CRSH", burst_id: bid_crsh });
   assert.equal(early.ok, false);
   assert.equal(processCalls.length, 0);
 
   // After lease expiry: worker B atomically reclaims and finalizes.
   clock = ms(T0) + 25_000 + SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 1000;
-  const recovered = await mk("B").finalizeBurst({ thread_key: "+1555111CRSH" });
+  const recovered = await mk("B").finalizeBurst({ thread_key: "+1555111CRSH", burst_id: bid_crsh });
   assert.equal(recovered.ok, true);
   assert.equal(processCalls.length, 1, "exactly one observable V2 decision");
   assert.equal(recovered.burst.status, BURST_STATUSES.COMPLETED);
@@ -1064,7 +1079,7 @@ test("lease: crash after claim → worker B reclaims via coordinator, exactly on
 
   // Nothing left to reclaim afterwards.
   clock += SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 10_000;
-  const after = await mk("C").finalizeBurst({ thread_key: "+1555111CRSH" });
+  const after = await mk("C").finalizeBurst({ thread_key: "+1555111CRSH", burst_id: bid_crsh });
   assert.equal(after.ok, false);
 });
 
@@ -1115,8 +1130,9 @@ test("lease: reply queued then crash before completion → reclaim produces no d
     received_at: now(),
   });
 
+  const bid_dupq = (await store.getOpen("+1555111DUPQ")).burst_id;
   clock = ms(T0) + 25_000;
-  const attemptA = await mk("A").finalizeBurst({ thread_key: "+1555111DUPQ" });
+  const attemptA = await mk("A").finalizeBurst({ thread_key: "+1555111DUPQ", burst_id: bid_dupq });
   assert.equal(attemptA.ok, false, "worker A dies after queueing");
   assert.equal(attemptA.retry_after_lease, true);
   assert.equal(queued_rows.size, 1, "reply row exists from the dead attempt");
@@ -1129,14 +1145,14 @@ test("lease: reply queued then crash before completion → reclaim produces no d
 
   // Before lease: no reclaim.
   clock = ms(T0) + 25_000 + 60_000;
-  const early = await mk("B").finalizeBurst({ thread_key: "+1555111DUPQ" });
+  const early = await mk("B").finalizeBurst({ thread_key: "+1555111DUPQ", burst_id: bid_dupq });
   assert.equal(early.ok, false);
   assert.equal(v2_calls.length, 1);
 
   // After lease: reclaim re-runs V2; source-event dedupe suppresses the
   // second reply; the burst completes.
   clock = ms(T0) + 25_000 + SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 1000;
-  const attemptB = await mk("B").finalizeBurst({ thread_key: "+1555111DUPQ" });
+  const attemptB = await mk("B").finalizeBurst({ thread_key: "+1555111DUPQ", burst_id: bid_dupq });
   assert.equal(attemptB.ok, true);
   assert.equal(v2_calls.length, 2);
   assert.equal(queued_rows.size, 1, "exactly one queued reply across retries");
@@ -1176,9 +1192,10 @@ test("lease: attempts exhausted finalizes burst as FAILED, never infinite retry"
     received_at: now(),
   });
 
+  const bid_fail = (await store.getOpen("+1555111FAIL")).burst_id;
   clock = ms(T0) + 25_000;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await coordinator.finalizeBurst({ thread_key: "+1555111FAIL" });
+    await coordinator.finalizeBurst({ thread_key: "+1555111FAIL", burst_id: bid_fail });
     clock += SELLER_INBOUND_BURST_CLAIM_LEASE_MS + 1000;
   }
   const row = store._debug.listAll()[0];
@@ -1221,7 +1238,7 @@ test("lease: suppressed finalized burst can never re-enter the reply path", asyn
   clock = ms(T0) + SELLER_INBOUND_BURST_CLAIM_LEASE_MS * 3;
   const flush = await coordinator.flushEligible({});
   assert.equal(flush.results.length, 0);
-  const claim = await store.claimEligible({ thread_key: "+1555111SUPP", now: now() });
+  const claim = await store.claimEligible({ thread_key: "+1555111SUPP", now: now(), scope: UNRESTRICTED_SCOPE });
   assert.equal(claim.ok, false);
   assert.equal(processCalls.length, 0);
 });
@@ -1324,7 +1341,7 @@ test("rollover: memory store mirrors production flush_required contract — neve
   assert.equal(openCount(), 1, "old generation remains the only OPEN row");
 
   // Old generation must leave OPEN (claim → complete) before N+1 can open.
-  const claim = await store.claimEligible({ thread_key: K, now: late });
+  const claim = await store.claimEligible({ thread_key: K, now: late, scope: UNRESTRICTED_SCOPE });
   assert.equal(claim.ok, true);
   assert.equal(openCount(), 0);
   const done = await store.completeClaimed({
@@ -1489,7 +1506,7 @@ test("crash recovery: complete is idempotent on claim_token", async () => {
     now: T0,
   });
   clock = ms(T0) + 25_000;
-  const claim = await store.claimEligible({ thread_key: "+1555111CR", now: now() });
+  const claim = await store.claimEligible({ thread_key: "+1555111CR", now: now(), scope: UNRESTRICTED_SCOPE });
   const c1 = await store.completeClaimed({
     burst_id: claim.burst.burst_id,
     claim_token: claim.claim_token,
