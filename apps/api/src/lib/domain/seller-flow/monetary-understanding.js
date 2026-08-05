@@ -182,25 +182,47 @@ function isAddressAdjacent(text, match) {
   // Skip exactly one leading compass direction, then look one word further —
   // the direction is itself strong address evidence. Every other message keeps
   // the original two-word window.
-  const words =
-    all.length > 1 && DIRECTION_TOKENS.has(all[0].toLowerCase())
-      ? all.slice(1, 4)
-      : all.slice(0, 2);
+  const direction_skipped =
+    all.length > 1 && DIRECTION_TOKENS.has(all[0].toLowerCase());
+  const words = direction_skipped ? all.slice(1, 4) : all.slice(0, 2);
   if (!words.length) return false;
   // "300 per unit" is money, not 300 Unit Street. Applied to the word that
   // actually leads the street name, which is NOT all[0] once a direction has
   // been skipped: "300 East of the drive" left "of the drive" unguarded, and
   // the street type three words later suppressed a real price.
   if (NON_STREET_LEAD_TOKENS.has(words[0].toLowerCase())) return false;
-  if (words.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
   const first = String(words[0] || "");
+  // Monetary vocabulary leading the phrase settles it before any street-type
+  // scan: "300 Total Court Costs" is money, not an address on Court.
+  if (MONETARY_QUALIFIER_WORDS.has(first.toLowerCase())) return false;
+  // A street type anywhere in the captured run is unambiguous address evidence,
+  // wherever it sits: "8612 Oak Leaf Rd" puts it third. Safe to scan the whole
+  // run because the function-word and qualifier guards have already run.
+  if (all.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
   // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.
   // This branch has no evidence beyond capitalization, so it must yield to any
   // monetary reading: "I want 300 Cash" and "I need 300 Net" are prices.
   if (!/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first)) return false;
   if (SCALE_WORDS[first.toLowerCase()]) return false;
-  if (MONETARY_QUALIFIER_WORDS.has(first.toLowerCase())) return false;
+  // Last line of defence, and the weakest: capitalization alone. A trailing
+  // capitalized word is not evidence of anything on its own — "I want 300 East"
+  // and "I want 300 Pennsylvania" are prices, and no vocabulary can separate
+  // them from "327 Pennsylvania" because the WORD is identical. Only context
+  // can. This branch was written for one situation: a street number competing
+  // with a real price in the same message ("For 327 Pennsylvania alone
+  // 130,000"). Fire it only when that situation actually holds — a skipped
+  // compass direction (real address evidence) or other money in the message to
+  // protect. Otherwise the seller's only number is deleted.
+  if (!direction_skipped && !hasCompetingMonetaryEvidence(text, match)) return false;
   return true;
+}
+
+/** Currency symbol, thousands separator or scale suffix ELSEWHERE in the text. */
+const COMPETING_MONEY_RE = /\$|\d{1,3}(?:,\d{3})+|\d\s*(?:k|m|mil|grand|thousand|million|hundred)\b/i;
+
+function hasCompetingMonetaryEvidence(text, match) {
+  const rest = text.slice(0, match.index) + " " + text.slice(match.index + match[0].length);
+  return COMPETING_MONEY_RE.test(rest);
 }
 
 // ─── postal codes and calendar years are not money ──────────────────────────

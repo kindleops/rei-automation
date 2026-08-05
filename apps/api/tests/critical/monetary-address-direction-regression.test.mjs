@@ -264,12 +264,17 @@ test("a capitalized street name is STILL an address after that narrowing", () =>
 });
 
 test("a monetary cue before a street number does not make it a price", () => {
-  // The narrowing is by VOCABULARY, not by "a monetary cue precedes the
-  // number". The cue-based rule was implemented, measured, and rejected: an
-  // address follows those cues too, so it re-opened the incident — a seller
-  // saying "how about 331 Pennsylvania" about the neighbouring property had its
-  // street number read as a price again. These are the cases that proved it.
-  // (Production baseline eeee5bd8 extracts 327/331 here; this is stricter.)
+  // A cue-based narrowing was implemented, measured and REJECTED: an address
+  // follows those cues too, so "how about 331 Pennsylvania" would have read the
+  // neighbouring property's street number as a price. These cases pin that.
+  //
+  // None of them yields an asking price — which is the protection that matters.
+  // The bare number does survive as a 0.3-confidence mention, exactly as it
+  // does on production baseline eeee5bd8, so the caller routes to clarification
+  // instead of acting. An earlier revision of this file suppressed the mention
+  // outright; that was stricter than baseline and was given up when the
+  // trailing-token family showed that capitalization alone cannot tell
+  // "327 Pennsylvania" from "I want 300 Pennsylvania" — the word is identical.
   for (const message of [
     "what about 327 Pennsylvania",
     "how about 331 Pennsylvania",
@@ -277,9 +282,69 @@ test("a monetary cue before a street number does not make it a price", () => {
     "about 327 Pennsylvania",
     "take 327 Pennsylvania",
     "want 327 Pennsylvania",
-    "need 4157 Oak Drive",
+  ]) {
+    assert.equal(signalPrice(message), null, `${message} — must not yield a price`);
+    const mentions = extractMonetaryMentions(message);
+    assert.ok(
+      mentions.every((m) => m.confidence <= 0.3),
+      `${message} — any surviving mention must stay below the acceptance gate`
+    );
+  }
+  // A street type is still unambiguous address evidence, cue or no cue.
+  assert.equal(signalPrice("need 4157 Oak Drive"), null);
+  assert.deepEqual(extractMonetaryMentions("need 4157 Oak Drive"), []);
+});
+
+/**
+ * FAMILY 5 — a trailing capitalized token is not a street name.
+ *
+ * With a reference in scope, EVERY capitalized multi-letter word trailing a
+ * bare number was read as a street name and the number deleted. Measured
+ * against production baseline eeee5bd8: 45 of 53 tokens across five vocabulary
+ * groups, all 300000 -> null. Not a direction problem — a whole-class problem.
+ *
+ * It cannot be fixed by vocabulary: "I want 300 Pennsylvania" and
+ * "327 Pennsylvania" contain the SAME word and need opposite answers. Only
+ * context separates them, so the capitalization branch now requires either a
+ * skipped compass direction or other money in the message to protect.
+ */
+const TRAILING_TOKENS = [
+  // compass directions, the form CodeRabbit reported
+  "East", "West", "North", "South", "Northeast", "Northwest", "Southeast", "Southwest",
+  // politeness and closers
+  "Please", "Thanks", "Thank", "Sorry", "Sure", "Okay", "Maybe", "Right",
+  "Correct", "Deal", "Done", "Agreed", "Fine", "Good", "Great", "Perfect",
+  // time and availability
+  "Tomorrow", "Tonight", "Anytime", "Whenever", "Soon", "Later", "Now",
+  // confirmations
+  "Yes", "Yeah", "Yep", "Nope", "Absolutely", "Definitely",
+  // words that are genuinely street names in other contexts
+  "Pennsylvania", "Broadway", "Lincoln", "Oak", "Maple", "Jefferson", "Madison", "Franklin",
+];
+
+for (const word of TRAILING_TOKENS) {
+  test(`REGRESSION: a trailing "${word}" does not delete the price`, () => {
+    const message = `I want 300 ${word}`;
+    assert.equal(signalPrice(message, { reference: 200000 }), 300000, message);
+  });
+}
+
+test("the trailing-token fix does not re-open the incident", () => {
+  // Same words, address context, other money present to protect.
+  assert.equal(factPrice("For 327 Pennsylvania alone 130,000"), 130000);
+  assert.equal(factPrice("331 Pennsylvania is worth 200k"), 200000);
+  const incident =
+    "For 327 Pennsylvania alone 130,000...however i have a newly renovated property " +
+    "next door (331 Pennsylvania) that i could through in as a package and make you a combo deal.";
+  assert.equal(factPrice(incident), 130000);
+  // And no street number survives where a street type or a direction says address.
+  for (const message of [
+    "4157 S Main St",
+    "1200 N Broadway",
+    "its 8612 Oak Leaf Rd",
+    "Do you still own 4157 Pillsbury Ave S Unit B?",
+    "4157 North Main Street",
   ]) {
     assert.equal(signalPrice(message), null, message);
-    assert.deepEqual(extractMonetaryMentions(message), [], message);
   }
 });
