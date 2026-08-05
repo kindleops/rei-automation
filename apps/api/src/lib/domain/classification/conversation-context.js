@@ -257,6 +257,38 @@ export function isShortContextualReply(text) {
 }
 
 /**
+ * Burst aggregates arrive as newline-joined fragments (aggregateBurstMessage),
+ * so a seller who answers the live question in one message and volunteers a
+ * detail in the next produces "Yeah\nits a 3br". isShortContextualReply tests
+ * the WHOLE joined body, so it is false for every multi-fragment aggregate and
+ * the contextual binding becomes unreachable — the seller who tells us MORE
+ * than a bare "Yeah" is the one who gets routed to human review.
+ *
+ * Returns the single qualifying fragment, or null.
+ *
+ * Deliberately fail-closed. Null when the aggregate carries no qualifying
+ * fragment, and null when it carries more than one: "Yeah" and "no" in the
+ * same turn is a contradiction, and picking a winner would fabricate a
+ * certainty the seller never expressed.
+ *
+ * This does NOT widen isShortContextualReply. The single-fragment path keeps
+ * its exact current behaviour, and this fragment is only ever offered to
+ * applyContextualShortReply by a caller that has already established there is
+ * no competing intent anywhere in the aggregate.
+ */
+export function resolveAggregateShortReplyFragment(text) {
+  const raw = String(text ?? '');
+  if (!raw.includes('\n')) return null;
+  const fragments = raw
+    .split('\n')
+    .map((fragment) => fragment.trim())
+    .filter(Boolean);
+  if (fragments.length < 2) return null;
+  const qualifying = fragments.filter((fragment) => isShortContextualReply(fragment));
+  return qualifying.length === 1 ? qualifying[0] : null;
+}
+
+/**
  * Apply validated context to short yes/no (and similar) replies.
  * @returns {{ applied: boolean, primary_intent?: string, labels?: string[], rule_id?: string, force_unclear?: boolean, confidence?: number, rationale?: string }}
  */

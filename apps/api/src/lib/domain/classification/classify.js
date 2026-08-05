@@ -8,6 +8,7 @@ import {
 import {
   validateConversationContext,
   applyContextualShortReply,
+  resolveAggregateShortReplyFragment,
   CONTEXT_VERSION,
 } from "@/lib/domain/classification/conversation-context.js";
 
@@ -5092,6 +5093,55 @@ function resolveIntents(
   ) {
     primary = "ownership_confirmed";
   }
+  // ── Burst-aggregate rescue for context-bound short replies ───────────────
+  // A multi-fragment burst is newline-joined, so the override at the top of
+  // this function is unreachable for it: isShortContextualReply tests the whole
+  // body. "Yeah" alone bound to the delivered ownership question at 0.88, but
+  // "Yeah\nits a 3br" — strictly MORE information — fell to unclear/0.64 and
+  // was routed to human review.
+  //
+  // This runs LAST, and only when `primary === "unclear"`. That guard is the
+  // whole safety argument: unclear is the classifier's own statement that no
+  // fragment carried a competing intent. A burst containing STOP, "not
+  // interested", or "I already sold it" resolves to opt_out / not_interested /
+  // wrong_number here and never reaches this branch — so unlike binding the
+  // first fragment eagerly, this can never discard a terminal signal. It can
+  // only ever upgrade a message we were otherwise going to give up on.
+  if (primary === "unclear" && ctxValidation.context_status === "valid") {
+    const fragment = resolveAggregateShortReplyFragment(rawMessage);
+    const fragmentCtx = fragment
+      ? applyContextualShortReply(fragment, ctxValidation)
+      : { applied: false };
+    if (fragmentCtx.applied && !fragmentCtx.force_unclear) {
+      const fragmentPrimary =
+        fragmentCtx.primary_intent === "interested"
+          ? "seller_interested"
+          : fragmentCtx.primary_intent;
+      matched_rule_ids.push(fragmentCtx.rule_id);
+      return finalizeIntentResult({
+        primary_intent: fragmentPrimary,
+        secondary_intent: null,
+        secondary_intents: fragmentCtx.labels || [],
+        matched_intents: [fragmentPrimary],
+        matched_rule_ids,
+        suppressed_rule_ids: [...suppressed_rule_ids, "unclear_aggregate_fallback"],
+        precedence_result: "contextual_short_reply_override",
+        // The bound fragment, not the whole aggregate — the evidence is the
+        // answer itself.
+        evidence_spans: [fragment],
+        context_status: ctxValidation.context_status,
+        context_source_id: fragmentCtx.context_message_id || null,
+        context_use_case: fragmentCtx.context_use_case || null,
+        context_age_ms: fragmentCtx.context_age_ms ?? null,
+        calibrated_rule_family_id: fragmentCtx.rule_id,
+        confidence_rationale: fragmentCtx.rationale,
+        contextual_override: fragmentCtx,
+        contextual_confidence: fragmentCtx.confidence,
+        price_parse,
+      });
+    }
+  }
+
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
   const secondary_intents = unique_intents.filter((intent) => intent !== primary);
