@@ -2,7 +2,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './shared/fullscreen-app-shell.css'
 import './styles/nexus-theme.css'
-import './dossier.css'
+// dossier.css removed — 1,216 lines / 24 KB of fully orphaned rules. Zero bare
+// `.dossier-*` classes appear in any .tsx; every match in the tree is a
+// different, prefixed family (`nx-`, `occ-`, `aic-`, `cd-`) defined elsewhere.
 import './styles/mobile-responsive.css'
 import './modules/mobile/mobile-operating-shell.css'
 import './modules/mobile/pinned-app-dock.css'
