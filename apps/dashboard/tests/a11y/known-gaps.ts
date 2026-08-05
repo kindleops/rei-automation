@@ -12,6 +12,12 @@
 export type KnownGap = {
   /** Substring match against the audit's `selector` field. */
   selector: string
+  /**
+   * Optional substring match against the rendered TEXT. Needed when the offending
+   * element carries no class — an inline `style={{ fontSize: 10 }}` on a bare
+   * <span> is indistinguishable from any other span by selector alone.
+   */
+  text?: string
   lane: string
   reason: string
 }
@@ -53,6 +59,22 @@ export const KNOWN_GAPS: KnownGap[] = [
       + 'scripts/lc-responsive-audit.mjs, so the runtime gate must agree with the static one.',
   },
   {
+    selector: 'span',
+    text: 'INVESTOR OPPORTUNITY SCORE',
+    lane: 'E',
+    reason:
+      'IntelligencePanel.tsx renders this and its "/100" sibling with an inline '
+      + 'style={{ fontSize: \'10px\' }} (e.g. :1386). Inline styles outrank every '
+      + 'stylesheet, so only the owning lane can raise them. Already DEFERRED by '
+      + 'scripts/lc-responsive-audit.mjs, which lists IntelligencePanel.tsx.',
+  },
+  {
+    selector: 'span',
+    text: '/100',
+    lane: 'E',
+    reason: 'Same inline 10px declaration as the score label above (IntelligencePanel.tsx:1386).',
+  },
+  {
     selector: 'nx-pic-',
     lane: 'E',
     reason:
@@ -71,8 +93,10 @@ export const KNOWN_GAPS: KnownGap[] = [
   },
 ]
 
-export function isKnownGap(selector: string): KnownGap | undefined {
-  return KNOWN_GAPS.find((g) => selector.includes(g.selector))
+export function isKnownGap(selector: string, text = ''): KnownGap | undefined {
+  return KNOWN_GAPS.find(
+    (g) => selector.includes(g.selector) && (!g.text || text.includes(g.text)),
+  )
 }
 
 export const STRICT = process.env.LC_GATE_STRICT === '1'
@@ -97,7 +121,7 @@ export const SHELL_PROBE = () => ({
 
 export type ShellProbe = ReturnType<typeof SHELL_PROBE>
 
-export function partitionGaps<T extends { selector: string }>(rows: T[]): {
+export function partitionGaps<T extends { selector: string; text?: string }>(rows: T[]): {
   failures: T[]
   deferred: (T & { lane: string })[]
 } {
@@ -105,7 +129,7 @@ export function partitionGaps<T extends { selector: string }>(rows: T[]): {
   const failures: T[] = []
   const deferred: (T & { lane: string })[] = []
   for (const row of rows) {
-    const gap = isKnownGap(row.selector)
+    const gap = isKnownGap(row.selector, row.text ?? '')
     if (gap) deferred.push({ ...row, lane: gap.lane })
     else failures.push(row)
   }

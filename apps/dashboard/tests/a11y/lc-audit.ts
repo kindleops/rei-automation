@@ -51,11 +51,21 @@ export type LcAuditResult = {
 }
 
 /**
- * Dev-only overlays (`DevApiBanner`, `DevRuntimeDiagnostics`) are tagged
- * `data-lc-dev-overlay` and never ship; they are excluded from every count.
+ * Two exclusions, both structural rather than convenient:
+ *
+ * 1. Dev-only overlays (`DevApiBanner`, `DevRuntimeDiagnostics`) are tagged
+ *    `data-lc-dev-overlay` and never ship.
+ *
+ * 2. Google Maps / Street View chrome. The SDK injects its own attribution
+ *    ("© 2026 Google", "Terms", "Report a problem") at 10px into `.gm-style`
+ *    containers. Google's terms require the attribution to be displayed as
+ *    served, we do not author it, and restyling it is not something ANY lane
+ *    can do — so it is excluded here rather than parked in known-gaps.ts, which
+ *    is for defects somebody eventually fixes. Caught on
+ *    /deal-intelligence @mobile once Street View had resolved.
  */
 export function runLcAudit(): LcAuditResult {
-  const IGNORE = '[data-lc-dev-overlay]'
+  const IGNORE = '[data-lc-dev-overlay], .gm-style, .gmnoprint, .gm-style-cc, .gm-iv-address'
   const de = document.documentElement
   const vw = window.innerWidth
 
@@ -135,7 +145,29 @@ export function runLcAudit(): LcAuditResult {
   ).filter((el) => {
     if (skip(el)) return false
     const r = el.getBoundingClientRect()
-    return r.width > 0 && r.height > 0
+    if (r.width === 0 || r.height === 0) return false
+
+    /**
+     * SVG geometry is never the touch target. A `<path>` inside a chart link
+     * measures 6x2 because it is a stroke; the thing the operator taps is the
+     * `<a>`/`<button>` around it, which IS measured. Requiring a 44x44 chart
+     * stroke is meaningless, and it made /deal-intelligence fail intermittently
+     * depending on whether the chart had rendered.
+     */
+    const svgOwner = (el as unknown as SVGElement).ownerSVGElement
+    if (svgOwner && el.tagName.toLowerCase() !== 'a') return false
+
+    /**
+     * WCAG 2.5.8 exempts a link whose target is INLINE in a sentence — you
+     * cannot give a word in a paragraph a 44px hit box without destroying the
+     * paragraph. The exception is display-based and therefore precise: a link
+     * STYLED as a control (inline-flex, flex, inline-block, block) is not
+     * inline text and is still held to 44px. `.nx-di25-action-btn` is
+     * `display: flex`, so it is measured — and it was, and it was fixed.
+     */
+    if (el.tagName.toLowerCase() === 'a' && getComputedStyle(el).display === 'inline') return false
+
+    return true
   })
 
   const smallTargets: LcSmallTarget[] = []

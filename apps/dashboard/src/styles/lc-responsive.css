@@ -153,6 +153,21 @@ small {
     accent-color: var(--nx-accent, #22d3ee);
   }
 
+  /* /deal-intelligence external-lookup links (Zillow / Realtor / Search) are
+     button-SHAPED links, not inline links in prose, so WCAG 2.5.8's inline
+     exception does not cover them. Measured 75×26 at 390px.
+
+     deal-intelligence-25.css:4619 pins them at 26px specifically ON MOBILE:
+       .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-di25-action-btn
+     That is (0,4,0) — an exact tie with the `:root:root :is(…)` rule above, and
+     it evaluates later, so the tie goes to it. A phone-only rule that makes a
+     control SMALLER than 44px is the exact inversion of §15.3, so this one is
+     answered at (0,5,0) rather than left as a known gap. */
+  :root:root .nx-inbox-shell.is-mobile-inbox .nx-di25-action-btn,
+  :root:root .nx-di25-property-deck__action-rail .nx-di25-action-btn {
+    min-height: 44px;
+  }
+
   /* §15.3 separation — related controls sit ≥8px apart once they are 44px. */
   .occ-date-presets,
   .occ-pagination,
@@ -311,6 +326,18 @@ small {
    `opacity: 1` running step and clears 4.5:1. */
 :root:root .nx-di25-engine-theater__step.is-pending {
   opacity: 0.7;
+}
+
+/* Same pattern, same reasoning, different component: inbox-premium.css:10379
+   draws every `.nx-timeline-item` at `opacity: 0.4` and lifts only `.is-done`
+   and `.is-active` back to 1. The not-yet-reached steps are the ones telling
+   the operator what happens NEXT, and they measured 3.32:1 (label) and 2.17:1
+   (timestamp, which is muted before the opacity is applied) across 49 nodes on
+   /deal-intelligence. 0.8 preserves the three-state read — pending, active,
+   done — while clearing 4.5:1. (0.72 was measured first and left the muted
+   TIMESTAMP at 4.3:1; the label passed. Re-measured at 0.8.) */
+:root:root .nx-timeline-item {
+  opacity: 0.8;
 }
 
 /* /pipeline — pipeline-view.css builds an ENTIRE muted scale out of one hue at
