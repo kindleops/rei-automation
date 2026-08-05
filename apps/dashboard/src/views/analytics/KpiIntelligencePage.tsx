@@ -174,7 +174,14 @@ export const KpiIntelligencePage = () => {
             <option value="all_time">All Time</option>
           </select>
 
-          <button className="nx-kpi-btn" onClick={loadData}>
+          {/* R16.4 — icon-only control. The <svg> is aria-hidden, so without an
+              explicit name this button is announced as just "button". */}
+          <button
+            className="nx-kpi-btn"
+            onClick={loadData}
+            aria-label="Refresh metrics"
+            title="Refresh metrics"
+          >
             <Icon name="refresh-cw" />
           </button>
         </div>
