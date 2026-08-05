@@ -11,17 +11,65 @@
 //
 // Binding suppression is a claim about what the SELLER told us. It must be
 // backed by evidence, and a lifecycle milestone is not evidence.
+//
+// This module owns FOUR things, and they must stay consistent with each other:
+//   1. what counts as "binding suppression"      (ONE predicate, used everywhere)
+//   2. what counts as evidence for it            (validate + server-side builders)
+//   3. what a complete suppression tuple is      (resolveSuppressionWrite)
+//   4. which states can never coexist            (detectSuppressionContradictions)
 
-/** Contactability values that block sending. */
+import {
+  BLOCKING_CONTACTABILITY,
+  CONTACTABILITY_CODES,
+} from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+
+function lower(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+/**
+ * Values a caller may pass BEFORE registry normalization that mean a blocking
+ * contactability, mapped to the canonical code they stand for.
+ *
+ * `wrong_number` is the important one: it is NOT a canonical contactability
+ * code, so `normalizeContactability("wrong_number")` returns **contactable**.
+ * Left unmapped, a confirmed wrong number is written as contactable.
+ */
+const PRE_CANONICAL_BLOCKING_ALIASES = Object.freeze({
+  wrong_number: CONTACTABILITY_CODES.INVALID_NUMBER,
+  do_not_contact: CONTACTABILITY_CODES.DNC,
+  suppressed: CONTACTABILITY_CODES.OPTED_OUT,
+});
+
+/**
+ * Contactability values that block sending.
+ *
+ * Derived from the registry (`CONTACTABILITY_META[*].blocksSend`) so there is
+ * ONE source of truth. Before this was a hand-maintained list that omitted
+ * `dnc`, `provider_blacklisted` and `invalid_number` — all three of which
+ * `buildRowPatch` escalates to `is_suppressed=true`. The gate never saw them,
+ * so they wrote binding suppression with zero evidence.
+ */
 export const BLOCKING_CONTACTABILITY_VALUES = Object.freeze([
-  "do_not_text",
-  "opted_out",
-  "wrong_number",
+  ...BLOCKING_CONTACTABILITY,
+  ...Object.keys(PRE_CANONICAL_BLOCKING_ALIASES),
 ]);
+
+/** The canonical blocking code for a value, or null when it does not block. */
+export function canonicalBlockingContactability(value) {
+  const key = lower(value);
+  if (!key) return null;
+  if (BLOCKING_CONTACTABILITY.has(key)) return key;
+  return PRE_CANONICAL_BLOCKING_ALIASES[key] || null;
+}
 
 export const SUPPRESSION_EVIDENCE_TYPES = Object.freeze({
   EXPLICIT_OPT_OUT: "explicit_opt_out",
   CONFIRMED_WRONG_NUMBER: "confirmed_wrong_number",
+  // The seller says they are not that person / do not own that property. That
+  // is durable seller-sourced evidence in its own right; folding it under
+  // "legal_prohibition" would be a lie in the audit trail.
+  CONFIRMED_WRONG_PARTY: "confirmed_wrong_party",
   LEGAL_PROHIBITION: "legal_prohibition",
   MANUAL_OPERATOR: "manual_operator_suppression",
   SUPPRESSION_RECORD: "active_suppression_record",
@@ -51,25 +99,54 @@ export const NON_EVIDENCE_REASONS = Object.freeze([
  * Contactability values that ARE their own evidence: they can only be produced
  * by an explicit opt-out or a confirmed wrong number, and they name the reason
  * in the value itself. `do_not_text` is deliberately NOT here — that is the
- * manufactured catch-all the 2026-08-03/04 incident was made of.
+ * manufactured catch-all the 2026-08-03/04 incident was made of, and neither
+ * are `dnc` / `provider_blacklisted`.
+ *
+ * `invalid_number` is the CANONICAL code the transition resolver emits for a
+ * confirmed wrong number (resolve-seller-stage-transition.js BLOCKING_INTENTS
+ * .wrong_number); `wrong_number` is retained as its pre-canonical alias.
  */
-export const SELF_EVIDENCING_CONTACTABILITY = Object.freeze(["opted_out", "wrong_number"]);
+export const SELF_EVIDENCING_CONTACTABILITY = Object.freeze([
+  CONTACTABILITY_CODES.OPTED_OUT,
+  CONTACTABILITY_CODES.INVALID_NUMBER,
+  "wrong_number",
+]);
+
+/**
+ * The ONE normalized view of the suppression-bearing fields. Authorization and
+ * contradiction detection both read this, so they can never drift apart.
+ */
+export function normalizeSuppressionShape(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    is_suppressed:
+      source.is_suppressed === true ? true : source.is_suppressed === false ? false : null,
+    disposition: lower(source.disposition),
+    contactability: lower(source.contactability_status),
+    inbox_bucket: lower(source.inbox_bucket),
+    automation: lower(source.automation_state ?? source.automation_status),
+  };
+}
+
+/** The ONE binding-suppression predicate. Takes a normalized shape. */
+export function isBindingSuppressionShape(shape = {}) {
+  if (!shape || typeof shape !== "object") return false;
+  return (
+    shape.is_suppressed === true ||
+    shape.disposition === "suppressed" ||
+    BLOCKING_CONTACTABILITY_VALUES.includes(shape.contactability) ||
+    shape.inbox_bucket === "suppressed"
+  );
+}
 
 /** True when a patch attempts to establish a binding suppression state. */
 export function patchAssertsBindingSuppression(patch = {}) {
   if (!patch || typeof patch !== "object") return false;
+  const shape = normalizeSuppressionShape(patch);
   // A compliance-terminal contactability carries its own reason, so it does not
   // require a separately supplied evidence object.
-  if (SELF_EVIDENCING_CONTACTABILITY.includes(String(patch.contactability_status ?? "").trim())) {
-    return false;
-  }
-  if (patch.is_suppressed === true) return true;
-  if (String(patch.disposition ?? "").trim().toLowerCase() === "suppressed") return true;
-  if (BLOCKING_CONTACTABILITY_VALUES.includes(String(patch.contactability_status ?? "").trim())) {
-    return true;
-  }
-  if (String(patch.inbox_bucket ?? "").trim().toLowerCase() === "suppressed") return true;
-  return false;
+  if (SELF_EVIDENCING_CONTACTABILITY.includes(shape.contactability)) return false;
+  return isBindingSuppressionShape(shape);
 }
 
 /**
@@ -131,6 +208,88 @@ function normalizeMatchedPhrase(value) {
   return phrase.length > 64 ? `${phrase.slice(0, 64)}…` : phrase;
 }
 
+export const OPERATOR_SUPPRESSION_RULE_VERSION = "operator_suppression_v1";
+export const INBOUND_SUPPRESSION_RULE_VERSION = "inbound_suppression_v1";
+
+/**
+ * SERVER-SIDE evidence for an operator-initiated suppression.
+ *
+ * The actor MUST come from the server's own auth context. A request body can
+ * never supply evidence — that would let any caller mint its own authority.
+ * Returns null when no server-verified actor exists, which makes the gate
+ * reject the write (fail closed).
+ */
+export function buildOperatorSuppressionEvidence({
+  actor = null,
+  reason = null,
+  source_authority = null,
+} = {}) {
+  const trimmedActor = String(actor ?? "").trim();
+  if (!trimmedActor) return null;
+  const validated = validateSuppressionEvidence({
+    type: SUPPRESSION_EVIDENCE_TYPES.MANUAL_OPERATOR,
+    actor: trimmedActor,
+    source_authority: source_authority || "operator_console",
+    matched_phrase: reason,
+    rule_version: OPERATOR_SUPPRESSION_RULE_VERSION,
+    recorded_at: new Date().toISOString(),
+    binding: true,
+  });
+  return validated.ok ? validated.evidence : null;
+}
+
+/**
+ * The CLOSED set of inbound intents that constitute durable suppression
+ * evidence, mapped to the evidence type each produces.
+ *
+ * This map is keyed on the classified INTENT, never on the contactability
+ * value being written. That is the whole safety property: a caller cannot get
+ * evidence minted for it just because it asked for `do_not_text`. A stage
+ * transition (`condition_disclosed`, `ownership_confirmed`, …) is absent here,
+ * so it still gets null and is still rejected — the 2026-08-04 incident fix
+ * survives by construction.
+ */
+const INBOUND_EVIDENCE_BY_INTENT = Object.freeze({
+  opt_out: SUPPRESSION_EVIDENCE_TYPES.EXPLICIT_OPT_OUT,
+  stop: SUPPRESSION_EVIDENCE_TYPES.EXPLICIT_OPT_OUT,
+  unsubscribe: SUPPRESSION_EVIDENCE_TYPES.EXPLICIT_OPT_OUT,
+  do_not_contact: SUPPRESSION_EVIDENCE_TYPES.EXPLICIT_OPT_OUT,
+  wrong_number: SUPPRESSION_EVIDENCE_TYPES.CONFIRMED_WRONG_NUMBER,
+  invalid_number: SUPPRESSION_EVIDENCE_TYPES.CONFIRMED_WRONG_NUMBER,
+  hostile_or_legal: SUPPRESSION_EVIDENCE_TYPES.LEGAL_PROHIBITION,
+  legal_threat: SUPPRESSION_EVIDENCE_TYPES.LEGAL_PROHIBITION,
+  wrong_person: SUPPRESSION_EVIDENCE_TYPES.CONFIRMED_WRONG_PARTY,
+  property_specific_non_owner: SUPPRESSION_EVIDENCE_TYPES.CONFIRMED_WRONG_PARTY,
+  former_owner_respondent: SUPPRESSION_EVIDENCE_TYPES.CONFIRMED_WRONG_PARTY,
+});
+
+/**
+ * SERVER-SIDE evidence for a classifier-derived inbound suppression.
+ * Returns null for every intent outside the durable set, and for any inbound
+ * that cannot cite the message event that produced it.
+ */
+export function buildInboundSuppressionEvidence({
+  intent = null,
+  source_event_id = null,
+  rule_version = null,
+  matched_phrase = null,
+  source_authority = null,
+} = {}) {
+  const type = INBOUND_EVIDENCE_BY_INTENT[lower(intent)];
+  if (!type) return null;
+  if (!String(source_event_id ?? "").trim()) return null;
+  const validated = validateSuppressionEvidence({
+    type,
+    source_event_id,
+    source_authority: source_authority || "seller_inbound_classifier",
+    matched_phrase,
+    rule_version: rule_version || INBOUND_SUPPRESSION_RULE_VERSION,
+    recorded_at: new Date().toISOString(),
+    binding: true,
+  });
+  return validated.ok ? validated.evidence : null;
+}
+
 /**
  * Gate: may this patch establish binding suppression?
  * @returns {{allowed: boolean, reason?: string, evidence?: object}}
@@ -151,24 +310,155 @@ export const BINDING_SUPPRESSION_FIELDS = Object.freeze([
   "suppressed_at",
 ]);
 
+const CLEARANCE_TYPES = Object.freeze(["operator_release", "soft_suppression_release"]);
+
+/**
+ * Validates an explicit clearance token. Only an operator (or a named release
+ * process) may lift a binding suppression — never an automated turn.
+ */
+export function validateSuppressionClearance(clearance) {
+  if (!clearance || typeof clearance !== "object") {
+    return { ok: false, reason: "missing_suppression_clearance" };
+  }
+  if (!CLEARANCE_TYPES.includes(lower(clearance.type))) {
+    return { ok: false, reason: "unrecognized_suppression_clearance_type" };
+  }
+  const actor = String(clearance.actor ?? "").trim();
+  const sourceEvent = String(clearance.source_event_id ?? "").trim();
+  if (!actor && !sourceEvent) {
+    return { ok: false, reason: "suppression_clearance_requires_provenance" };
+  }
+  return { ok: true, clearance: { type: lower(clearance.type), actor: actor || null, source_event_id: sourceEvent || null } };
+}
+
+/**
+ * Contradictions the WRITER is responsible for and must refuse. The automation
+ * contradiction is advisory only: `automation_state` is not a field this
+ * writer owns or patches, so refusing a lawful opt-out because the thread's
+ * automation column still reads "running" would be a compliance regression.
+ */
+export const TUPLE_INVARIANT_CONTRADICTIONS = Object.freeze([
+  "contactable_while_binding_suppressed",
+  "blocking_contactability_without_suppression",
+]);
+
+/**
+ * Decide what the suppression tuple must look like after this patch.
+ *
+ * You cannot half-suppress and you cannot half-unsuppress:
+ *   * a suppression writes is_suppressed + a blocking contactability +
+ *     suppressed_at together, or not at all;
+ *   * a clear writes is_suppressed=false + contactable + suppressed_at=null
+ *     together, and only with operator authority;
+ *   * a patch that touches neither leaves the row exactly as it is. Rows that
+ *     are ALREADY contradictory are not repaired here — that is a data
+ *     migration, not a write-path decision.
+ *
+ * @returns {{action:'suppress'|'clear'|'hold'|'none', fields:object, strip:string[], guards:string[]}}
+ */
+export function resolveSuppressionWrite({
+  previous = null,
+  patch = {},
+  change_source = null,
+  operator = null,
+  clearance = null,
+  now = new Date().toISOString(),
+} = {}) {
+  const none = { action: "none", fields: {}, strip: [], guards: [] };
+  if (!patch || typeof patch !== "object") return none;
+
+  const previousShape = normalizeSuppressionShape(previous || {});
+  const patchShape = normalizeSuppressionShape(patch);
+  const previousBinding = isBindingSuppressionShape(previousShape);
+  const patchBinding = isBindingSuppressionShape(patchShape);
+  const touchesContactability = Object.prototype.hasOwnProperty.call(patch, "contactability_status");
+
+  // ── establishing suppression ───────────────────────────────────────────────
+  if (patchBinding) {
+    const contactability =
+      canonicalBlockingContactability(patchShape.contactability) ||
+      canonicalBlockingContactability(previousShape.contactability) ||
+      CONTACTABILITY_CODES.DO_NOT_TEXT;
+    return {
+      action: "suppress",
+      fields: {
+        contactability_status: contactability,
+        is_suppressed: true,
+        suppressed_at: previousShape.is_suppressed === true && previous?.suppressed_at
+          ? previous.suppressed_at
+          : now,
+      },
+      strip: [],
+      guards: [],
+    };
+  }
+
+  // ── clearing suppression ───────────────────────────────────────────────────
+  // The only clearing gesture the canonical patch surface allows is writing a
+  // non-blocking contactability. `is_suppressed` is not a patchable field.
+  if (previousBinding && touchesContactability) {
+    const guards = [];
+    let allowed = true;
+
+    const manualOperator =
+      lower(change_source) === "manual" && Boolean(String(operator ?? "").trim());
+    const clearanceCheck = clearance ? validateSuppressionClearance(clearance) : { ok: false };
+    if (!manualOperator && !clearanceCheck.ok) {
+      guards.push("suppression_clear_requires_operator_authority");
+      allowed = false;
+    }
+
+    // Would the row still be binding after a complete clear? Then this patch
+    // cannot express the clear (e.g. a legacy disposition='suppressed' remains)
+    // and half-clearing it would produce exactly the contradiction we are here
+    // to prevent.
+    const projectedAfterClear = normalizeSuppressionShape({
+      ...(previous || {}),
+      ...patch,
+      is_suppressed: false,
+    });
+    if (isBindingSuppressionShape(projectedAfterClear)) {
+      guards.push("partial_suppression_clear_blocked");
+      allowed = false;
+    }
+
+    if (!allowed) {
+      return { action: "hold", fields: {}, strip: ["contactability_status"], guards };
+    }
+
+    return {
+      action: "clear",
+      fields: {
+        contactability_status: patchShape.contactability || CONTACTABILITY_CODES.CONTACTABLE,
+        is_suppressed: false,
+        suppressed_at: null,
+      },
+      strip: [],
+      guards,
+    };
+  }
+
+  return none;
+}
+
 /**
  * Detects states that cannot both be true. Returns [] when consistent.
+ * Uses the SAME binding predicate as the authorization gate.
  */
 export function detectSuppressionContradictions(row = {}) {
   const contradictions = [];
-  const contactability = String(row.contactability_status ?? "").trim();
-  const binding =
-    row.is_suppressed === true ||
-    String(row.disposition ?? "").trim().toLowerCase() === "suppressed";
+  const shape = normalizeSuppressionShape(row);
+  const binding = isBindingSuppressionShape(shape);
 
-  if (binding && contactability === "contactable") {
+  if (binding && shape.contactability === CONTACTABILITY_CODES.CONTACTABLE) {
     contradictions.push("contactable_while_binding_suppressed");
   }
-  if (BLOCKING_CONTACTABILITY_VALUES.includes(contactability) && row.is_suppressed === false) {
+  // `!== true` and not `=== false`: an absent/null is_suppressed alongside a
+  // blocking contactability is the same unfinished write.
+  if (BLOCKING_CONTACTABILITY_VALUES.includes(shape.contactability) && shape.is_suppressed !== true) {
     contradictions.push("blocking_contactability_without_suppression");
   }
-  const automation = String(row.automation_state ?? row.automation_status ?? "").trim().toLowerCase();
-  if (binding && (automation === "running" || automation === "active")) {
+  if (binding && (shape.automation === "running" || shape.automation === "active")) {
     contradictions.push("automation_running_while_binding_suppressed");
   }
   return contradictions;

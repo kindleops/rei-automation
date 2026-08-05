@@ -28,6 +28,11 @@ export const SOFT_SUPPRESSION_REASONS = Object.freeze(
 );
 
 // Suppression reasons that only an operator may ever clear.
+//
+// THE canonical set. seller-flow-decision-contract.js imports this rather than
+// keeping its own copy: the two lists had drifted apart in BOTH directions, so
+// a reason could be binding for release purposes but produce no contactability
+// at all when the decision was built (or the reverse).
 export const BINDING_SUPPRESSION_REASONS = Object.freeze(
   new Set([
     "opt_out",
@@ -43,6 +48,14 @@ export const BINDING_SUPPRESSION_REASONS = Object.freeze(
     "hostile_or_legal",
     "legal_threat",
     "compliance",
+    // Merged in from the decision contract's former private duplicate. These
+    // are execution-layer synonyms for the same binding conditions; treating
+    // them as binding only ever makes a release MORE conservative.
+    "legal",
+    "legal_prohibition",
+    "compliance_prohibition",
+    "manual_operator_suppression",
+    "suppression_list",
   ])
 );
 

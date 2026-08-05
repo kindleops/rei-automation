@@ -200,6 +200,73 @@ test("a consistent contactable thread reports nothing", () => {
   );
 });
 
+// ── one binding predicate for authorization AND contradiction detection ─────
+
+test("inbox_bucket=suppressed with contactable is a contradiction", () => {
+  // Regression: patchAssertsBindingSuppression treated inbox_bucket as binding
+  // while detectSuppressionContradictions did not, so this exact row reported
+  // nothing at all.
+  assert.ok(
+    detectSuppressionContradictions({
+      inbox_bucket: "suppressed",
+      contactability_status: "contactable",
+    }).includes("contactable_while_binding_suppressed")
+  );
+});
+
+test("a blocking contactability alone makes the row binding for the detector", () => {
+  // Same divergence, second half: without is_suppressed the detector reported
+  // no running-automation contradiction.
+  assert.ok(
+    detectSuppressionContradictions({
+      contactability_status: "do_not_text",
+      automation_state: "running",
+    }).includes("automation_running_while_binding_suppressed")
+  );
+});
+
+test("an absent is_suppressed beside a blocking contactability is an unfinished write", () => {
+  // The guard used a strict `=== false`, so null/undefined never tripped it.
+  for (const row of [
+    { contactability_status: "do_not_text" },
+    { contactability_status: "do_not_text", is_suppressed: null },
+    { contactability_status: "opted_out", is_suppressed: undefined },
+  ]) {
+    assert.ok(
+      detectSuppressionContradictions(row).includes("blocking_contactability_without_suppression"),
+      JSON.stringify(row)
+    );
+  }
+});
+
+test("every registry-blocking contactability is gated or self-evidencing — none slip through", () => {
+  // dnc / provider_blacklisted / invalid_number all make buildRowPatch write
+  // is_suppressed=true, but the gate's value list omitted them, so they wrote
+  // binding suppression with zero evidence.
+  for (const value of ["dnc", "provider_blacklisted"]) {
+    assert.equal(
+      patchAssertsBindingSuppression({ contactability_status: value }),
+      true,
+      `${value} must require evidence`
+    );
+    assert.equal(
+      authorizeSuppressionMutation({ patch: { contactability_status: value }, evidence: null })
+        .allowed,
+      false,
+      `${value} must be rejected without evidence`
+    );
+  }
+  // invalid_number is the canonical code the resolver emits for a confirmed
+  // wrong number — self-evidencing, exactly like opted_out.
+  for (const value of ["invalid_number", "opted_out", "wrong_number"]) {
+    assert.equal(
+      patchAssertsBindingSuppression({ contactability_status: value }),
+      false,
+      `${value} is self-evidencing`
+    );
+  }
+});
+
 // ── the "alone" matrix ──────────────────────────────────────────────────────
 
 const OPT_OUT_PHRASES = [

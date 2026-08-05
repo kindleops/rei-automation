@@ -1,6 +1,9 @@
 import {
   authorizeSuppressionMutation,
+  detectSuppressionContradictions,
+  resolveSuppressionWrite,
   BINDING_SUPPRESSION_FIELDS,
+  TUPLE_INVARIANT_CONTRADICTIONS,
 } from "@/lib/domain/lead-state/suppression-evidence.js";
 import {
   BLOCKING_CONTACTABILITY,
@@ -248,6 +251,16 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   return rowPatch;
 }
 
+/** Alerting must never break the write path. */
+async function emitSuppressionAlert(payload) {
+  try {
+    const { launchAlerts } = await import('@/lib/domain/alerts/launch-critical-alerts.js');
+    await launchAlerts.suppressionInvariantFailure(payload).catch(() => {});
+  } catch {
+    /* intentionally swallowed */
+  }
+}
+
 export async function patchUniversalLeadState({
   threadKey,
   patch = {},
@@ -288,22 +301,15 @@ export async function patchUniversalLeadState({
       delete canonicalPatch.inbox_bucket;
     }
 
-    try {
-      const { launchAlerts } = await import('@/lib/domain/alerts/launch-critical-alerts.js');
-      await launchAlerts
-        .suppressionInvariantFailure({
-          thread_key: key,
-          rejected_reason: suppression_authorization.reason,
-          change_source: meta.change_source || null,
-          change_reason: meta.reason || null,
-          attempted_contactability: patch?.contactability_status || null,
-          attempted_is_suppressed: patch?.is_suppressed ?? null,
-          attempted_disposition: patch?.disposition || null,
-        })
-        .catch(() => {});
-    } catch {
-      /* alerting must never break the write path */
-    }
+    await emitSuppressionAlert({
+      thread_key: key,
+      rejected_reason: suppression_authorization.reason,
+      change_source: meta.change_source || null,
+      change_reason: meta.reason || null,
+      attempted_contactability: patch?.contactability_status || null,
+      attempted_is_suppressed: patch?.is_suppressed ?? null,
+      attempted_disposition: patch?.disposition || null,
+    });
 
     if (!Object.keys(canonicalPatch).length) {
       return {
@@ -358,8 +364,115 @@ export async function patchUniversalLeadState({
     ...buildRowPatch(canonicalPatch, meta),
   };
 
+  // ── suppression tuple + merged-row invariant ───────────────────────────────
+  // The evidence gate above answers "may this caller assert suppression at
+  // all"; it necessarily runs before `previous` exists. THIS stage answers
+  // "what must the row look like afterwards", which needs prior state:
+  //
+  //   * a suppression writes is_suppressed + a blocking contactability +
+  //     suppressed_at together, or not at all (no partial suppression);
+  //   * a clear writes all three back together, and only with operator
+  //     authority (no partial clear, and no automated un-suppression — the
+  //     decision contract's `contactable` floor previously reset a binding
+  //     suppression on every inbound turn, which is how 292 production threads
+  //     ended up is_suppressed=true AND contactability_status=contactable);
+  //   * a patch touching neither leaves the row alone. Already-contradictory
+  //     rows are NOT repaired here — that is a data migration, not a write.
+  const suppressionGuards = [];
+  const suppressionWrite = resolveSuppressionWrite({
+    previous,
+    patch: canonicalPatch,
+    change_source: changeSource,
+    operator: meta.operator_id || meta.updated_by || null,
+    clearance: meta.suppression_clearance || null,
+  });
+  suppressionGuards.push(...suppressionWrite.guards);
+  for (const field of suppressionWrite.strip) {
+    delete rowPatch[field];
+    delete canonicalPatch[field];
+    if (field === 'contactability_status') {
+      // buildRowPatch pairs these with the contactability write.
+      delete rowPatch.contactability_source;
+      delete rowPatch.is_suppressed;
+    }
+  }
+  Object.assign(rowPatch, suppressionWrite.fields);
+
+  // If the suppression guard removed everything the caller actually asked for,
+  // say so rather than reporting a successful no-op write.
+  if (suppressionWrite.strip.length) {
+    const meaningful = Object.keys(rowPatch).filter(
+      (field) => !['thread_key', 'updated_at', 'updated_by'].includes(field),
+    );
+    if (!meaningful.length) {
+      return {
+        ok: true,
+        blocked: true,
+        reason: suppressionGuards[0] || 'suppression_write_blocked',
+        suppression_guards: suppressionGuards,
+        stage_guards: stageGuards,
+        thread_key: key,
+        previous,
+      };
+    }
+  }
+
+  // Final invariant, evaluated on the MERGED post-write row. Only the
+  // contradictions this patch would INTRODUCE can block it: a pre-existing
+  // contradictory row must not make every unrelated write to that thread fail.
+  const contradictionsBefore = new Set(detectSuppressionContradictions(previous || {}));
+  const introducedContradictions = detectSuppressionContradictions({
+    ...(previous || {}),
+    ...rowPatch,
+  }).filter((code) => !contradictionsBefore.has(code));
+  const blockingContradictions = introducedContradictions.filter((code) =>
+    TUPLE_INVARIANT_CONTRADICTIONS.includes(code),
+  );
+  if (introducedContradictions.length) suppressionGuards.push(...introducedContradictions);
+  if (blockingContradictions.length) {
+    // Fail closed: after tuple resolution a surviving contradiction means an
+    // input this model does not cover. Refuse the binding portion outright —
+    // valid evidence must never buy a self-contradicting row.
+    for (const field of BINDING_SUPPRESSION_FIELDS) delete rowPatch[field];
+    delete rowPatch.contactability_source;
+    suppressionGuards.push('suppression_contradiction_blocked');
+    await emitSuppressionAlert({
+      thread_key: key,
+      rejected_reason: 'suppression_contradiction_blocked',
+      contradictions: blockingContradictions,
+      change_source: meta.change_source || null,
+      change_reason: meta.reason || null,
+      attempted_contactability: patch?.contactability_status || null,
+      attempted_is_suppressed: patch?.is_suppressed ?? null,
+      attempted_disposition: patch?.disposition || null,
+    });
+    const remaining = Object.keys(rowPatch).filter(
+      (field) => field !== 'thread_key' && field !== 'updated_at',
+    );
+    if (!remaining.length) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: 'suppression_contradiction_blocked',
+        contradictions: blockingContradictions,
+        suppression_guards: suppressionGuards,
+        stage_guards: stageGuards,
+        thread_key: key,
+        previous,
+      };
+    }
+  }
+
   if (dryRun) {
-    return { ok: true, dry_run: true, thread_key: key, patch: rowPatch, previous, stage_guards: stageGuards };
+    return {
+      ok: true,
+      dry_run: true,
+      thread_key: key,
+      patch: rowPatch,
+      previous,
+      stage_guards: stageGuards,
+      suppression_guards: suppressionGuards,
+    };
   }
 
   const { data, error } = await supabase
@@ -389,6 +502,7 @@ export async function patchUniversalLeadState({
     thread_key: key,
     row: data,
     stage_guards: stageGuards,
+    suppression_guards: suppressionGuards,
     audit_event_ids: auditRows.map((row) => row.id),
     user_preferences: userPrefs,
     realtime_event: {
