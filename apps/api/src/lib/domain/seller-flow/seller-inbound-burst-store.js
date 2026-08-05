@@ -40,6 +40,126 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// ── Work scope: activation authority for burst selection ─────────────────────
+//
+// Burst work selection is DENY BY DEFAULT. A caller that passes no scope gets
+// nothing. The 2026-08-03 incident was a permissive default — one hard-coded
+// `enabled: true` at a single call site silently disarmed every gate below it —
+// and a store that read "no scope" as "all production work" would rebuild that
+// same failure one layer down, where the next caller who forgets is invisible.
+//
+// The scope is the `.scope` descriptor produced by
+// burst-flush-activation-policy.toBurstFlushScopeDescriptor(), with the
+// coordinator's `authorized`/`global` assertions attached. This module invents
+// no bound, widens nothing, and NEVER degrades a malformed scope to global:
+// every missing or unparseable field denies.
+//
+//   {
+//     authorized: boolean,          // must be exactly true
+//     global: boolean,              // enabled-mode assertion
+//     kind: "global"|"thread"|"none",
+//     thread_keys: string[],        // exact-equality allowlist
+//     min_first_received_at, max_first_received_at,  // message-time window
+//     min_created_at, max_created_at,                // row-insert window
+//     session_expires_at,           // max_created_at fallback
+//     reason: string|null           // denial reason, echoed for observability
+//   }
+//
+// TWO durable windows, not one. `first_received_at` derives from provider
+// ingress data; `created_at` is now() at INSERT and is not attacker-influenced.
+// Bounding both is the anti-backdating leg: a replayed or backdated
+// first_received_at cannot drag an old row into the session window on its own.
+// There is deliberately NO grace on either floor — a grace window is exactly
+// the temporal ambiguity that lets an old artifact qualify, and these bounds
+// are what stands between a proof session and a 36-hour-old burst on the same
+// thread. "Open the session, then text" is a runbook precondition.
+//
+// The admission RULE lives in burst-flush-activation-policy.isBurstWithinFlushScope
+// and this module does not import it: the policy imports the coordinator, the
+// coordinator imports this store, so importing back would close a module cycle
+// through the production path. Instead the resolved bounds below are applied
+// identically in SQL and in JS, and their equivalence to the policy's predicate
+// is pinned by test (burst-eligible-scope.test.mjs) — which CAN import both
+// without a production cycle. The invariant the test enforces is one-directional
+// and deliberately so: anything this store admits, the policy admits too.
+export function resolveBurstScopeFilter(scope) {
+  if (scope == null) return { deny: true, reason: "burst_scope_absent" };
+  if (typeof scope !== "object" || Array.isArray(scope)) {
+    return { deny: true, reason: "burst_scope_invalid" };
+  }
+  // Explicit denial carries the policy's own reason so the flush log says WHY
+  // (session expired vs never opened vs revoked), not just "zero rows".
+  if (scope.authorized === false) {
+    return { deny: true, reason: clean(scope.reason) || "burst_scope_denied" };
+  }
+  // Authorization must be asserted, never inferred: `{}` and `{global: true}`
+  // alone are denials, so a half-built scope object cannot open the door.
+  if (scope.authorized !== true) return { deny: true, reason: "burst_scope_not_authorized" };
+
+  if (scope.global === true || scope.kind === "global") {
+    return { deny: false, global: true, thread_keys: [] };
+  }
+  // Any scope kind other than the thread-bounded one — including "none" and an
+  // absent kind — is not an activation.
+  if (scope.kind !== "thread") return { deny: true, reason: "burst_scope_not_activated" };
+
+  const thread_keys = [
+    ...new Set((Array.isArray(scope.thread_keys) ? scope.thread_keys : []).map(clean).filter(Boolean)),
+  ];
+  if (!thread_keys.length) return { deny: true, reason: "burst_scope_thread_keys_required" };
+
+  const min_first = parseIsoMs(scope.min_first_received_at, null);
+  const max_first = parseIsoMs(scope.max_first_received_at, null);
+  const min_created = parseIsoMs(scope.min_created_at, null);
+  // Absent upper insert bound falls back to session expiry — never unbounded.
+  const max_created = parseIsoMs(scope.max_created_at ?? scope.session_expires_at, null);
+  if (
+    !Number.isFinite(min_first) ||
+    !Number.isFinite(max_first) ||
+    !Number.isFinite(min_created) ||
+    !Number.isFinite(max_created) ||
+    max_first < min_first
+  ) {
+    return { deny: true, reason: "burst_scope_bounds_invalid" };
+  }
+
+  return {
+    deny: false,
+    global: false,
+    thread_keys,
+    min_first: new Date(min_first).toISOString(),
+    max_first: new Date(max_first).toISOString(),
+    min_created: new Date(min_created).toISOString(),
+    max_created: new Date(max_created).toISOString(),
+  };
+}
+
+/**
+ * In-process re-assert of the same predicate the query applies. Both stores
+ * run it on every candidate BEFORE any claim, so a mis-parsed PostgREST filter
+ * degrades to "claims nothing" instead of "claims anything".
+ */
+export function matchesBurstScope(burst, resolved) {
+  if (!burst || !resolved || resolved.deny) return false;
+  if (resolved.global) return true;
+  if (!resolved.thread_keys.includes(clean(burst.thread_key))) return false;
+
+  // A row that cannot prove when it opened, or when it was inserted, cannot
+  // prove it belongs to the session. Unprovable membership is denied membership.
+  const first_ms = parseIsoMs(burst.first_received_at, null);
+  if (!Number.isFinite(first_ms)) return false;
+  if (first_ms < parseIsoMs(resolved.min_first)) return false;
+  if (first_ms > parseIsoMs(resolved.max_first)) return false;
+
+  if (burst.created_at == null || clean(burst.created_at) === "") return false;
+  const created_ms = parseIsoMs(burst.created_at, null);
+  if (!Number.isFinite(created_ms)) return false;
+  if (created_ms < parseIsoMs(resolved.min_created)) return false;
+  if (created_ms > parseIsoMs(resolved.max_created)) return false;
+
+  return true;
+}
+
 // ── Memory store (tests) ─────────────────────────────────────────────────────
 
 export function createMemorySellerInboundBurstStore({ now = () => new Date().toISOString() } = {}) {
@@ -214,11 +334,17 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
     now: nowArg = null,
     worker_id = "worker",
     lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
+    scope = null,
   } = {}) {
+    const scoped = resolveBurstScopeFilter(scope);
+    if (scoped.deny) return { ok: false, reason: scoped.reason, burst: null };
     const nowIso = nowArg || now();
     const claimable = (b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms });
     const byEligible = (a, b) => String(a.eligible_at).localeCompare(String(b.eligible_at));
-    const rows = [...byId.values()];
+    // Scope is applied to the candidate SET, before any branch picks a winner —
+    // so it constrains the burst_id, thread_key and global branches identically
+    // and an out-of-scope row is never a candidate for any of them.
+    const rows = [...byId.values()].filter((b) => matchesBurstScope(b, scoped));
     let candidate = null;
     if (burst_id) {
       const match = rows.find((b) => b.burst_id === clean(burst_id));
@@ -349,9 +475,16 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
     now: nowArg = null,
     limit = 20,
     lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
+    scope = null,
   } = {}) {
+    const scoped = resolveBurstScopeFilter(scope);
+    if (scoped.deny) return [];
     const nowIso = nowArg || now();
+    // Scope filters BEFORE the sort+slice: an out-of-scope row must not occupy
+    // a page slot. `eligible_at ASC` means the oldest row wins the page, so a
+    // post-slice filter would let one stale burst starve every live one.
     return listAll()
+      .filter((b) => matchesBurstScope(b, scoped))
       .filter((b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms }))
       .sort((a, b) => String(a.eligible_at).localeCompare(String(b.eligible_at)))
       .slice(0, limit);
@@ -624,40 +757,23 @@ export function createSupabaseSellerInboundBurstStore({
     };
   }
 
-  async function claimEligible({
+  /**
+   * The ONE eligible-selection query, shared by both doors into production
+   * work (listEligible and claimEligible). They are kept on a single builder
+   * deliberately: a scoped list path next to an unscoped claim path is exactly
+   * how an authority gate gets bypassed without anybody editing the gate.
+   *
+   * Filter order reproduces the pre-existing chain exactly, so a global scope
+   * issues the identical PostgREST request it issued before scoping existed.
+   */
+  function buildEligibleQuery({
+    nowIso,
+    staleIso,
+    scoped,
     thread_key = null,
     burst_id = null,
-    now: nowArg = null,
-    worker_id = "worker",
-    lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
-  } = {}) {
-    const nowIso = nowArg || now();
-    const token = crypto.randomBytes(16).toString("hex");
-
-    // Prefer RPC if present (atomic SKIP LOCKED claim + stale-lease reclaim)
-    if (typeof supabase.rpc === "function") {
-      try {
-        const { data, error } = await supabase.rpc("claim_seller_inbound_burst", {
-          p_thread_key: thread_key || null,
-          p_burst_id: burst_id || null,
-          p_now: nowIso,
-          p_worker_id: clean(worker_id) || "worker",
-          p_claim_token: token,
-          p_lease_ms: Number(lease_ms) || SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
-        });
-        if (!error && data) {
-          const row = Array.isArray(data) ? data[0] : data;
-          if (row) return { ok: true, claim_token: row.claim_token || token, burst: rowToBurst(row) };
-        }
-      } catch {
-        // fall through to CAS
-      }
-    }
-
-    // CAS fallback mirrors the RPC predicate exactly (see isClaimableBurst):
-    // never a completed row; open/suppressed only when eligible AND no live
-    // claim lease; claimed only when the lease expired (crash recovery).
-    const staleIso = new Date(parseIsoMs(nowIso) - (Number(lease_ms) || 0)).toISOString();
+    limit = 1,
+  }) {
     let query = supabase
       .from(TABLE)
       .select("*")
@@ -669,15 +785,127 @@ export function createSupabaseSellerInboundBurstStore({
         ].join(",")
       )
       .order("eligible_at", { ascending: true })
-      .limit(1);
+      .limit(limit);
     if (burst_id) query = query.eq("burst_id", clean(burst_id));
     if (thread_key) query = query.eq("thread_key", clean(thread_key));
+    // Scope lives in the WHERE clause, never in a post-filter: `eligible_at
+    // ASC … LIMIT n` gives the page to the OLDEST rows, so an out-of-scope
+    // burst that reaches the result set has already starved the live work it
+    // outranks — filtering it afterwards returns an empty page, not the right
+    // one.
+    if (!scoped.global) {
+      query = query
+        .in("thread_key", scoped.thread_keys)
+        // Message-time window: which conversation moment this burst belongs to.
+        .gte("first_received_at", scoped.min_first)
+        .lte("first_received_at", scoped.max_first)
+        // Row-insert window: the anti-backdating leg. created_at is now() at
+        // INSERT, so a replayed or backdated first_received_at cannot carry an
+        // old row into the session on its own.
+        .gte("created_at", scoped.min_created)
+        .lte("created_at", scoped.max_created);
+    }
+    return query;
+  }
 
-    const { data: rows, error } = await query;
+  async function claimEligible({
+    thread_key = null,
+    burst_id = null,
+    now: nowArg = null,
+    worker_id = "worker",
+    lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
+    scope = null,
+  } = {}) {
+    // Authorization first — an unauthorized caller issues no query, no RPC and
+    // no update. There is no code path here that claims and then authorizes.
+    const scoped = resolveBurstScopeFilter(scope);
+    if (scoped.deny) return { ok: false, reason: scoped.reason, burst: null };
+    const nowIso = nowArg || now();
+    const token = crypto.randomBytes(16).toString("hex");
+    // CAS/pre-select predicate mirrors the RPC exactly (see isClaimableBurst):
+    // never a completed row; open/suppressed only when eligible AND no live
+    // claim lease; claimed only when the lease expired (crash recovery).
+    const staleIso = new Date(parseIsoMs(nowIso) - (Number(lease_ms) || 0)).toISOString();
+
+    // A scoped claim resolves its target BEFORE claiming. claim_seller_inbound_burst
+    // selects `ORDER BY b.eligible_at ASC … FOR UPDATE SKIP LOCKED LIMIT 1`
+    // over every row matching p_thread_key when p_burst_id is null (migration
+    // 20260726120000_seller_inbound_bursts.sql:102-124) — so handing it a bare
+    // thread key claims the OLDEST burst on that thread, which is precisely how
+    // a 36-hour-old artifact outranks the live burst beside it. Pinning
+    // p_burst_id to a row the scope already authorized takes that choice away
+    // from the database without giving up SKIP LOCKED atomicity, stale-lease
+    // reclaim, attempt_count or the version bump.
+    let pinned = null;
+    if (!scoped.global) {
+      const { data: candidates, error: candidate_error } = await buildEligibleQuery({
+        nowIso,
+        staleIso,
+        scoped,
+        thread_key,
+        burst_id,
+        limit: 1,
+      });
+      if (candidate_error) throw candidate_error;
+      const candidate_row = candidates?.[0];
+      if (!candidate_row) return { ok: false, reason: "no_eligible_burst", burst: null };
+      const candidate_burst = rowToBurst(candidate_row);
+      if (
+        !isClaimableBurst({ burst: candidate_burst, now: nowIso, lease_ms }) ||
+        !matchesBurstScope(candidate_burst, scoped)
+      ) {
+        return { ok: false, reason: "no_eligible_burst", burst: null };
+      }
+      pinned = candidate_burst;
+    }
+
+    // Prefer RPC if present (atomic SKIP LOCKED claim + stale-lease reclaim)
+    if (typeof supabase.rpc === "function") {
+      try {
+        const { data, error } = await supabase.rpc("claim_seller_inbound_burst", {
+          p_thread_key: (pinned ? pinned.thread_key : thread_key) || null,
+          p_burst_id: (pinned ? pinned.burst_id : burst_id) || null,
+          p_now: nowIso,
+          p_worker_id: clean(worker_id) || "worker",
+          p_claim_token: token,
+          p_lease_ms: Number(lease_ms) || SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
+        });
+        if (!error && data) {
+          const row = Array.isArray(data) ? data[0] : data;
+          if (row) {
+            const claimed = rowToBurst(row);
+            // Unreachable while p_burst_id pins the authorized row. Kept because
+            // the only outcome worse than a failed claim is handing an
+            // out-of-scope burst to the reply path: refusing it leaves a lease
+            // that expires on its own, so nothing is stranded permanently.
+            if (!matchesBurstScope(claimed, scoped)) {
+              return { ok: false, reason: "burst_scope_violation_after_claim", burst: null };
+            }
+            return { ok: true, claim_token: row.claim_token || token, burst: claimed };
+          }
+        }
+      } catch {
+        // fall through to CAS
+      }
+    }
+
+    // CAS fallback — same builder, so it carries the same scope.
+    const { data: rows, error } = await buildEligibleQuery({
+      nowIso,
+      staleIso,
+      scoped,
+      thread_key: pinned ? pinned.thread_key : thread_key,
+      burst_id: pinned ? pinned.burst_id : burst_id,
+      limit: 1,
+    });
     if (error) throw error;
     const candidate = rows?.[0];
     if (!candidate) return { ok: false, reason: "no_eligible_burst", burst: null };
     if (!isClaimableBurst({ burst: rowToBurst(candidate), now: nowIso, lease_ms })) {
+      return { ok: false, reason: "no_eligible_burst", burst: null };
+    }
+    // Last gate before the only mutation in this function.
+    if (!matchesBurstScope(rowToBurst(candidate), scoped)) {
       return { ok: false, reason: "no_eligible_burst", burst: null };
     }
 
@@ -788,25 +1016,23 @@ export function createSupabaseSellerInboundBurstStore({
     now: nowArg = null,
     limit = 20,
     lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
+    scope = null,
   } = {}) {
+    const scoped = resolveBurstScopeFilter(scope);
+    // Denied callers never reach Supabase at all — no page is fetched, so no
+    // out-of-scope burst is ever even observed, let alone handed to a claim.
+    if (scoped.deny) return [];
     const nowIso = nowArg || now();
     const staleIso = new Date(parseIsoMs(nowIso) - (Number(lease_ms) || 0)).toISOString();
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select("*")
-      .is("completed_at", null)
-      .or(
-        [
-          `and(status.in.(${BURST_STATUSES.OPEN},${BURST_STATUSES.SUPPRESSED}),eligible_at.lte.${nowIso},or(claimed_at.is.null,claimed_at.lte.${staleIso}))`,
-          `and(status.eq.${BURST_STATUSES.CLAIMED},claimed_at.lte.${staleIso})`,
-        ].join(",")
-      )
-      .order("eligible_at", { ascending: true })
-      .limit(limit);
+    const { data, error } = await buildEligibleQuery({ nowIso, staleIso, scoped, limit });
     if (error) throw error;
     return (data || [])
       .map(rowToBurst)
-      .filter((b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms }));
+      .filter((b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms }))
+      // Defence in depth: re-assert the scope the query already applied, so a
+      // mis-parsed PostgREST filter degrades to "returns nothing" rather than
+      // "returns everything".
+      .filter((b) => matchesBurstScope(b, scoped));
   }
 
   return {
@@ -823,4 +1049,6 @@ export function createSupabaseSellerInboundBurstStore({
 export default {
   createMemorySellerInboundBurstStore,
   createSupabaseSellerInboundBurstStore,
+  resolveBurstScopeFilter,
+  matchesBurstScope,
 };
