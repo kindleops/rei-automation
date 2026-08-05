@@ -1093,7 +1093,12 @@ export const OfferMemoCard = ({
         <div className="nx-metric-value">{formatMoney(Number(thread.estimatedValue || 0))}</div>
       </div>
       <div className="nx-offer-metric-card is-highlight">
-        <label>AI Offer</label>
+        {/* Two different sources share this tile. With `underwritingData` the
+            number descends from a real Gemini research call (see
+            handleUnderwrite -> /api/internal/offers/underwrite); without it the
+            number is a plain read of thread.ai_recommended_opening_offer. Only
+            the model-backed branch may name the model's work. */}
+        <label>{underwritingData ? 'Underwritten Offer' : 'Recommended Offer'}</label>
         <div className="nx-metric-value">
           {underwritingData ? formatMoney(underwritingData.valuation.mao) : (aiOffer > 0 ? formatMoney(aiOffer) : 'PENDING')}
         </div>
@@ -1136,7 +1141,8 @@ export const OfferMemoCard = ({
               <div className="nx-metric-value">{formatMoney(cashOffer)}</div>
             </div>
             <div className="nx-offer-metric-card is-highlight">
-              <label>AI RECOMMENDED</label>
+              {/* Same dual source as the summary tile above. */}
+              <label>{underwritingData ? 'UNDERWRITTEN OFFER' : 'RECOMMENDED OFFER'}</label>
               <div className="nx-metric-value">
                 {underwritingData ? formatMoney(underwritingData.valuation.mao) : (aiOffer > 0 ? formatMoney(aiOffer) : 'PENDING')}
               </div>
@@ -1157,6 +1163,12 @@ export const OfferMemoCard = ({
           
           {underwritingData && (
             <div className="nx-research-snapshot nx-glass-surface">
+              {/* KEPT deliberately. This block only renders when
+                  `underwritingData` exists, which can only happen after
+                  fetchUnderwritingResearch() has actually called
+                  gemini-2.5-flash. The ARV, repair estimate and comp links
+                  shown here are the model's own output, so naming it as such
+                  is true. */}
               <div className="nx-snapshot-header">AI RESEARCH TELEMETRY</div>
               <div className="nx-snapshot-grid">
                 <div className="nx-snapshot-item">
@@ -1706,6 +1718,12 @@ export const ActionRailCard = ({
   <div className="nx-intel-action-rail nx-intel-action-rail--premium">
     <button type="button" className="nx-intel-action-btn" onClick={onOpenMap}><Icon name="map" /> Map</button>
     <button type="button" className="nx-intel-action-btn" onClick={onOpenDossier}><Icon name="briefing" /> Dossier</button>
+    {/* KEPT. onOpenAi opens LiveCopilotChat, whose underwrite branch calls
+        /api/internal/offers/underwrite -> gemini-2.5-flash. A real model call
+        sits behind this control. Caveat for whoever owns copilot.adapter.ts:
+        the non-underwrite replies there are hardcoded template strings played
+        back through a simulated typing delay, which over-promises what the
+        surface does. */}
     <button type="button" className="nx-ai-assist-card" onClick={onOpenAi}>
       <div className="nx-ai-assist-icon">
         <Icon name="spark" />
@@ -1781,7 +1799,7 @@ const MiniTimeline = ({ thread, messages, limit = 8 }: { thread: WorkflowThread;
   }))
   const syntheticItems = [
     { label: 'First touch', time: thread.updatedAt, detail: 'Initial contact sequence opened.', done: true },
-    { label: 'AI classified', time: thread.lastMessageAt, detail: thread.uiIntent || getSellerStageVisual(thread.conversationStage).label, done: true },
+    { label: 'Intent classified', time: thread.lastMessageAt, detail: thread.uiIntent || getSellerStageVisual(thread.conversationStage).label, done: true },
     { label: 'Auto-reply prepared', time: thread.aiDraft ? thread.updatedAt : null, detail: thread.aiDraft || 'No draft prepared.', done: Boolean(thread.aiDraft) },
     { label: 'Delivered', time: thread.lastOutboundAt, detail: (thread as any).deliveryStatus || 'Outbound delivery recorded.', done: Boolean(thread.lastOutboundAt) },
     { label: 'Escalation triggered', time: thread.inboxStatus === 'needs_review' ? thread.updatedAt : null, detail: 'Operator review required.', done: thread.inboxStatus === 'needs_review', active: thread.inboxStatus === 'needs_review' },
@@ -1997,7 +2015,13 @@ export const ConversationPanel = ({ thread, messages }: { thread: WorkflowThread
         <FieldGrid>
           <FieldTile label="Latest Inbound" value={inbound?.body || thread.latestMessageBody || thread.lastMessageBody} tone="accent" />
           <FieldTile label="Latest Outbound" value={outbound?.body} />
-          <FieldTile label="AI Classification" value={thread.uiIntent || thread.detected_intent} />
+          {/* `detected_intent` is emitted by classify() in the API. Its
+              primary_intent always comes from the deterministic resolveIntents()
+              rule engine, and the whole model-assist branch is skipped whenever
+              the heuristic clears 0.82 confidence. The UI is never told which
+              path ran (no `source` field is carried on the thread), so it cannot
+              honestly claim the model produced this. Name the field, not a model. */}
+          <FieldTile label="Seller Intent" value={thread.uiIntent || thread.detected_intent} />
           <FieldTile label="Seller Sentiment" value={thread.sentiment} />
           <FieldTile label="Timeline" value={thread.lastMessageAt ? formatRelativeTime(thread.lastMessageAt) : null} />
           <FieldTile label="Thread State" value={getStatusVisual(thread.inboxStatus).label} />
@@ -2097,7 +2121,7 @@ const TimelineEvent = ({
               <button type="button" className="nx-timeline-details-toggle" onClick={() => setShowDetails(!showDetails)}
               >
                 <Icon name={showDetails ? 'chevron-down' : 'chevron-right'} />
-                <span>{showDetails ? 'Hide Details' : 'View AI Decision Detail'}</span>
+                <span>{showDetails ? 'Hide Details' : 'View Decision Detail'}</span>
               </button>
               {showDetails && <div className="nx-timeline-details-content">{details}</div>}
             </div>
@@ -2223,8 +2247,11 @@ export const TimelinePanel = ({ thread, messages, phase3 }: { thread: WorkflowTh
     })
 
     if (thread.estimatedValue) {
-      rawEvents.push({ 
-        label: 'AI Underwrite Complete', 
+      // Gated purely on thread.estimatedValue being non-null. No underwriting
+      // run is implied by that field and no model is consulted here, so the
+      // event reports what actually happened: a valuation exists.
+      rawEvents.push({
+        label: 'Valuation Recorded',
         time: thread.updatedAt, 
         state: 'positive',
         subtext: `ARV: ${formatMoney(thread.estimatedValue)}`,
@@ -2257,7 +2284,10 @@ export const TimelinePanel = ({ thread, messages, phase3 }: { thread: WorkflowTh
 
       phase3?.routingDecisions?.forEach(rd => {
         rawEvents.push({
-          label: `AI Routing: ${rd.decision_type.replace(/_/g, ' ')}`,
+          // routing_decisions rows are written by queueAutoReply.js with
+          // rules_triggered = the template match reasons. Rule evaluation, not
+          // a model.
+          label: `Routing: ${rd.decision_type.replace(/_/g, ' ')}`,
           time: rd.created_at,
           state: 'active',
           subtext: `Routed to ${rd.routed_to}`,
@@ -3368,7 +3398,10 @@ const DealDecisionStrip = ({ thread, dealContext }: { thread: WorkflowThread; de
     { label: 'Repair Estimate', value: repairs, tone: 'amber' },
     { label: 'Target Spread', value: spread, tone: 'red' },
     { label: 'MAO', value: mao, tone: 'blue' },
-    { label: 'AI Recommended Offer', value: offer, tone: 'green' },
+    // `offer` above is acq.suggested_offer || thread.ai_recommended_opening_offer
+    // || thread.ai_offer || thread.cashOffer || thread.mao, falling back to
+    // arv - repairs - spread. Every branch is a field read or arithmetic.
+    { label: 'Recommended Offer', value: offer, tone: 'green' },
   ]
 
   if (!arv) {
@@ -3401,7 +3434,7 @@ const DealDecisionStrip = ({ thread, dealContext }: { thread: WorkflowThread; de
       </div>
       <div className="nx-deal-decision-strip__grid">
         <div className="nx-deal-decision-strip__hero">
-          <span>AI Recommended Offer</span>
+          <span>Recommended Offer</span>
           <strong>{formatMoney(offer)}</strong>
           <p>{formatMoney(offerFloor)} - {formatMoney(offerCeiling)}</p>
           <div className="nx-deal-decision-strip__microcopy">
@@ -3733,6 +3766,8 @@ const CommandActionDock = ({
         {onOpenSellerAutomation ? (
           <button type="button" onClick={onOpenSellerAutomation}>Workflow Studio — Live</button>
         ) : null}
+        {/* KEPT — same justification as ActionRailCard: the copilot this opens
+            reaches a genuine gemini-2.5-flash underwriting call. */}
         <button type="button" onClick={onOpenAi}>AI Assist</button>
       </div>
     </div>
@@ -4384,7 +4419,9 @@ const MediumDealWorkspace = ({
     { label: 'Repair Load', value: repairs, tone: 'amber' },
     { label: 'Target Spread', value: spread, tone: 'red' },
     { label: 'MAO', value: mao, tone: 'blue' },
-    { label: 'AI Offer', value: offer, tone: 'green' },
+    // Same deterministic chain as DealDecisionStrip: field reads with an
+    // arv - repairs - spread fallback. No model on this path.
+    { label: 'Recommended Offer', value: offer, tone: 'green' },
   ].filter((item) => item.value > 0)
 
   // ── BUYER INTELLIGENCE ───────────────────────────────────
@@ -4651,7 +4688,7 @@ const MediumDealWorkspace = ({
     if (isTaxDelinquent) parts.push('Tax delinquency signals financial pressure — timing leverage elevated.')
     if (financialPressureScore >= 65) parts.push(`Financial pressure score (${Math.round(financialPressureScore)}) indicates seller is motivated by necessity, not preference.`)
     if (isFullRehab && demand >= 60) parts.push('Heavy rehab risk offset by strong investor demand in this market.')
-    if (!parts.length && offer > 0) parts.push(`AI offer of ${formatMoney(offer)} reflects ${Math.round(confidence)}% confidence on available comps and seller signals.`)
+    if (!parts.length && offer > 0) parts.push(`Recommended offer of ${formatMoney(offer)} reflects ${Math.round(confidence)}% confidence on available comps and seller signals.`)
     return parts[0] || null
   })()
   const leveragePoints: { text: string; tone: string }[] = ([
@@ -4792,13 +4829,13 @@ const MediumDealWorkspace = ({
       {/* ── 3. ACQUISITION METRICS ──────────────────────── */}
       <div className="nx-medium-section">
         <div className="nx-medium-section__title">ACQUISITION METRICS</div>
-        {/* Dominant AI Offer card */}
+        {/* Dominant recommended-offer card */}
         {offer > 0 && (() => {
           const CONF_R = 22, CONF_C = 2 * Math.PI * CONF_R
           const confFill = CONF_C * (confidence / 100)
           return (
             <div className="nx-acq-offer-card">
-              <div className="nx-acq-offer-card__eyebrow">AI RECOMMENDED ACQUISITION OFFER</div>
+              <div className="nx-acq-offer-card__eyebrow">RECOMMENDED ACQUISITION OFFER</div>
               <div className="nx-acq-offer-card__main">
                 <div className="nx-acq-offer-card__left">
                   <div className="nx-acq-offer-card__value">{formatMoney(offer)}</div>
@@ -4909,7 +4946,7 @@ const MediumDealWorkspace = ({
         {arv > 0 ? (
           <div className="nx-medium-deal-decision">
             <div className="nx-mdd-hero">
-              <span className="nx-mm-label">AI RECOMMENDED OFFER</span>
+              <span className="nx-mm-label">RECOMMENDED OFFER</span>
               <strong className="nx-mdd-offer">{formatMoney(offer)}</strong>
               <p className="nx-mdd-range">{formatMoney(Math.round(offer * 0.94))} — {formatMoney(Math.round(offer * 1.03))}</p>
               {/* Confidence arc + signal */}
