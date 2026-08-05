@@ -100,6 +100,17 @@ test("repair cues match their inflections", () => {
   }
 });
 
+test("written forms that are not regular inflections are listed explicitly", () => {
+  // Found by the exhaustive a5b27c8d surface sweep, not by a probe. None of
+  // these is a regular inflection, so the suffix rule cannot reach them; each
+  // was a non-price figure becoming an asking price.
+  assert.equal(kindOf("the repairman quoted 15,000"), "repair_amount");
+  assert.equal(signalPrice("the repairman quoted 15,000"), null);
+  assert.equal(kindOf("la mensualidad es 900"), "monthly_amount");
+  assert.equal(kindOf("bimonthly it is 1,200"), "monthly_amount");
+  assert.equal(signalPrice("bimonthly it is 1,200"), null);
+});
+
 test("earnest, package, minimum and net cues match their inflections", () => {
   assert.equal(kindOf("the deposits were 5,000"), "earnest_money");
   assert.equal(kindOf("I deposited 5,000"), "earnest_money");

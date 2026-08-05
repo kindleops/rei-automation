@@ -344,9 +344,14 @@ const KIND_CUES = Object.freeze([
   // "/month" is listed alongside "/mo": the word-boundary matcher will not find
   // "/mo" inside "/month", and a seller's monthly rent misread as an asking
   // price makes a rental look like a $1,450 house.
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual"] },
+  // "bimonthly" and "mensualidad" are likewise not inflections of "monthly" /
+  // "mensual" — both are recurring payments, never an asking price.
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
-  { kind: MONETARY_KINDS.REPAIR_AMOUNT, cues: ["repair", "repairs", "fix", "roof cost", "quote for", "estimate for", "to fix", "in work", "reparar", "arreglar"] },
+  // "repairman" is listed explicitly: it is not a regular inflection of
+  // "repair", so the boundary matcher misses it and "the repairman quoted
+  // 15,000" became a $15,000 asking price.
+  { kind: MONETARY_KINDS.REPAIR_AMOUNT, cues: ["repair", "repairs", "repairman", "fix", "roof cost", "quote for", "estimate for", "to fix", "in work", "reparar", "arreglar"] },
   { kind: MONETARY_KINDS.EARNEST_MONEY, cues: ["earnest", "deposit", "down payment", "depósito"] },
   { kind: MONETARY_KINDS.PER_UNIT_PRICE, cues: ["per unit", "a unit", "each unit", "per door", "a door", "por unidad"] },
   { kind: MONETARY_KINDS.PACKAGE_PRICE, cues: ["for both", "for all", "the pair", "package", "portfolio", "together", "for the two", "for the three", "por los dos", "por todas"] },
