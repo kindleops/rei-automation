@@ -317,7 +317,17 @@ function tokenizeAmounts(text) {
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
 
-    if (suffix && SCALE_WORDS[suffix]) value *= SCALE_WORDS[suffix];
+    if (suffix && SCALE_WORDS[suffix]) {
+      // Spanish "mil" after a number that ALREADY carries thousands magnitude
+      // is redundant, not multiplicative: "150,000 mil" is a seller writing
+      // 150 thousand twice, and multiplying produced $150,000,000. Declining to
+      // multiply needs no guess about which magnitude was meant, so it stays a
+      // rule rather than a disambiguation. Matches the identical guard in
+      // classify.js scalePriceToken so the two parsers cannot disagree by three
+      // orders of magnitude on the same string.
+      const redundant_mil = suffix === "mil" && (hadThousandsSeparator || value >= 1000);
+      if (!redundant_mil) value *= SCALE_WORDS[suffix];
+    }
 
     amounts.push({
       value: Math.round(value),

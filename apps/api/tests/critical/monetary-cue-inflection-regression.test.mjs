@@ -123,6 +123,27 @@ test("PRE-EXISTING GAP, not a regression: 'owing' is not a payoff cue", () => {
   assert.equal(kindOf("still owing 60,000 on the note"), "asking_price");
 });
 
+test("Spanish 'mil' after an already-thousands number is redundant, not multiplicative", () => {
+  // "150,000 mil" is a seller writing 150 thousand TWICE. Multiplying gave
+  // $150,000,000 — the same magnitude error as the original Spanish blocker.
+  // The identical guard lives in classify.js scalePriceToken; the two parsers
+  // must not disagree by three orders of magnitude on the same string, because
+  // a silent disagreement looks handled from whichever side you inspect.
+  const value = (message) => extractMonetaryMentions(message)[0]?.value ?? null;
+  assert.equal(value("150,000 mil"), 150000);
+  assert.equal(value("quiero 150000 mil"), 150000);
+  assert.equal(value("$150,000 mil"), 150000);
+  // The ordinary forms must not move.
+  assert.equal(value("150 mil"), 150000);
+  assert.equal(value("200 mil"), 200000);
+  assert.equal(value("300 mil"), 300000);
+  assert.equal(value("quiero 150 mil"), 150000);
+  assert.equal(value("2 mil"), 2000);
+  // And no other scale suffix is touched by the guard.
+  assert.equal(value("1.2 million"), 1200000);
+  assert.equal(value("150k"), 150000);
+});
+
 test("the inflected forms that were never broken are unchanged", () => {
   // Controls: the uninflected cue always matched. If these ever diverge from
   // the inflected forms above, the suffix rule has stopped applying evenly.
