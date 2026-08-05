@@ -156,7 +156,14 @@ const NotificationRow = ({
   const isUnread = item.status === 'unread'
   const count = item.groupMemberIds.length
   return (
-    <article className={cls('opsc-notif', `is-${item.severity}`, isUnread && 'is-unread')}>
+    <article
+      className={cls('opsc-notif', `is-${item.severity}`, isUnread && 'is-unread')}
+      /* Titles repeat across rows ("New message" x21), so identity — not text —
+       * is what proves a dismissal removed *this* card and that it stayed gone
+       * across a reload. */
+      data-notification-id={item.id}
+      data-notification-status={item.status}
+    >
       <ToneDot tone={item.severity === 'positive' ? 'positive' : item.severity === 'neutral' ? 'neutral' : item.severity} />
       <button type="button" className="opsc-notif__main" onClick={onOpen}>
         <span className="opsc-notif__head">
