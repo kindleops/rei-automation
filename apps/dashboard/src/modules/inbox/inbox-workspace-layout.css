@@ -960,7 +960,8 @@
 .nx-cc-row__receipt.is-pending { color: #fbbf24; }
 
 .nx-cc-row__meta-line {
-  font-size: 10.5px;
+  /* LANE H — R2.1 floor and R2.2 (no sub-pixel sizes). */
+  font-size: 11px;
   font-weight: 600;
   color: rgba(148, 176, 210, 0.86);
   white-space: nowrap;

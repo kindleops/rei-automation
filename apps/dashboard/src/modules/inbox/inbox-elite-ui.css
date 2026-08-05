@@ -401,7 +401,8 @@
 }
 
 .nx-cat-nav__label {
-  font-size: 9.5px;
+  /* LANE H — R2.1 floor; this is a navigation label the operator reads to act. */
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -410,13 +411,15 @@
 }
 
 .nx-cat-nav__count {
-  font-size: 10px;
+  /* LANE H — R2.1 floor. */
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  color: rgba(214, 228, 248, 0.78);
+  /* LANE H — was 4.22:1 against the chip fill, under the 4.5:1 body floor. */
+  color: rgba(226, 238, 255, 0.96);
   line-height: 1.2;
   transition: background 0.2s ease, color 0.2s ease;
 }

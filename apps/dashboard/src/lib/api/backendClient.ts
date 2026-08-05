@@ -210,6 +210,30 @@ const getBodyCount = (body: unknown): { bodyCount: number | null; bodyCountPath:
   return { bodyCount: null, bodyCountPath: null }
 }
 
+/**
+ * LANE H (Constitution §8.3, R17 "Loading indicators after 8s settle: 0").
+ *
+ * Every backend request now carries a deadline. Before this, `executeBackendRequest`
+ * awaited `fetch()` with no `AbortSignal`, no timeout race and no deadline, so a
+ * backend that accepted a connection and then stalled left the promise pending
+ * forever. Four lanes independently traced a permanently-loading surface to that
+ * one `await` — "Loading deal intelligence…", the ACTIVE PROSPECT card, Live
+ * Activity and Operational Intelligence — and three of them worked around it with
+ * a bespoke panel-local timer.
+ *
+ * 15s is deliberately well above the slowest healthy endpoint measured in this
+ * program (`/api/cockpit/deal-intelligence/thread`, whose 45s cache TTL concedes
+ * it is the heaviest read) and well below the point at which an operator has
+ * already given up. Callers that know better pass `timeoutMs`; `timeoutMs: 0`
+ * opts out entirely for genuinely unbounded work.
+ */
+export const DEFAULT_BACKEND_TIMEOUT_MS = 15_000
+
+export interface BackendRequestInit extends RequestInit {
+  /** Request deadline in ms. Defaults to {@link DEFAULT_BACKEND_TIMEOUT_MS}; `0` disables. */
+  timeoutMs?: number
+}
+
 const GET_CACHE_TTL_MS: Record<string, number> = {
   '/api/cockpit/health': 15_000,
   '/api/cockpit/ops/metrics': 12_000,
@@ -273,8 +297,9 @@ async function resolveSessionToken(): Promise<string | null> {
 
 async function executeBackendRequest<T>(
   path: string,
-  options: RequestInit = {},
+  options: BackendRequestInit = {},
 ): Promise<BackendResult<T>> {
+  const { timeoutMs, signal: callerSignal, ...fetchInit } = options
   const base = getBackendBaseUrl()
   const isBrowser = typeof window !== 'undefined'
   
@@ -314,13 +339,62 @@ async function executeBackendRequest<T>(
     path,
     method: options.method ?? 'GET',
   })
+  // Deadline plumbing. The composed controller aborts on whichever comes first:
+  // the caller's own signal (thread-select supersession) or our timeout. We keep
+  // our own controller rather than `AbortSignal.timeout()` so the timer can be
+  // cleared the moment the response body lands — otherwise every request would
+  // hold a live 15s timer, and a burst of inbox reads would pin hundreds of them.
+  const deadlineMs = timeoutMs ?? DEFAULT_BACKEND_TIMEOUT_MS
+  const controller = new AbortController()
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (deadlineMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, deadlineMs)
+  }
+  const forwardAbort = () => controller.abort()
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort()
+    else callerSignal.addEventListener('abort', forwardAbort, { once: true })
+  }
+  const releaseDeadline = () => {
+    if (timer !== undefined) clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', forwardAbort)
+  }
+
   let response: Response
   try {
+    // `headers` must come AFTER the spread. It already folds in `options.headers`
+    // (above) and then appends the auth secret, so spreading `options` last would
+    // let a caller's plain `headers: { 'Content-Type': … }` clobber both
+    // `x-ops-dashboard-secret` and `Authorization`. Four calendar mutations in
+    // `lib/calendar/calendar-api.ts` do exactly that and were shipping unauthenticated.
     response = await fetch(url, {
+      ...fetchInit,
       headers,
-      ...options,
+      signal: controller.signal,
     })
   } catch (err) {
+    releaseDeadline()
+    if (timedOut) {
+      const durationMs = Math.round(performance.now() - startedAt)
+      console.warn('[BACKEND_API_RESPONSE]', {
+        status: null, ok: false, bodyCount: null, bodyCountPath: null,
+        durationMs, url, path, error: 'BACKEND_TIMEOUT', networkReason: 'BACKEND_TIMEOUT',
+      })
+      logDataLayerQueryDone(path, dataLayerStartedAt, {
+        transport: 'backend', status: null, ok: false,
+        bodyCount: null, bodyCountPath: null, error: 'BACKEND_TIMEOUT',
+      })
+      return {
+        ok: false,
+        status: 504,
+        error: 'BACKEND_TIMEOUT',
+        message: `Request to ${path} did not respond within ${Math.round(deadlineMs / 1000)}s. The backend may be slow or stalled — the data shown may be out of date.`,
+      }
+    }
     const errMsg = err instanceof Error ? err.message : String(err)
     const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown'
     const sameOriginProxy = !base || base === origin
@@ -366,11 +440,23 @@ async function executeBackendRequest<T>(
   let bodyText = ''
   let parseError = false
   try {
+    // The deadline still covers body streaming — a backend that sends headers and
+    // then stalls mid-body is the same defect as one that never answers.
     bodyText = await response.text()
     body = JSON.parse(bodyText)
   } catch {
     body = null
     parseError = true
+  } finally {
+    releaseDeadline()
+  }
+  if (timedOut) {
+    return {
+      ok: false,
+      status: 504,
+      error: 'BACKEND_TIMEOUT',
+      message: `Request to ${path} did not finish streaming within ${Math.round(deadlineMs / 1000)}s.`,
+    }
   }
   const { bodyCount, bodyCountPath } = getBodyCount(body)
   console.log('[BACKEND_API_RESPONSE]', {
@@ -455,7 +541,7 @@ async function executeBackendRequest<T>(
 
 export async function callBackend<T = unknown>(
   path: string,
-  options: RequestInit = {},
+  options: BackendRequestInit = {},
 ): Promise<BackendResult<T>> {
   const method = (options.method || 'GET').toUpperCase()
   const bodyKey = typeof options.body === 'string' ? options.body : ''
@@ -632,7 +718,10 @@ export interface CockpitOpsMetrics {
 
 export function getCockpitOpsMetrics(window: 'today' | '24h' | '7d' | '30d' = 'today'): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: CockpitOpsMetrics }>> {
   const qs = new URLSearchParams({ window }).toString()
-  return callBackend(`/api/cockpit/ops/metrics?${qs}`)
+  // Lane F bounded this surface at 12s with a panel-local `withTimeout` wrapper
+  // because the client had no deadline of its own. The wrapper is gone; the bound
+  // it proved is preserved here as an explicit override.
+  return callBackend(`/api/cockpit/ops/metrics?${qs}`, { timeoutMs: 12_000 })
 }
 
 export function fetchQueuePage(params: Record<string, string | number | undefined> = {}): Promise<BackendResult<Record<string, unknown>>> {

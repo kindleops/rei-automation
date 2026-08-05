@@ -19688,12 +19688,13 @@ center+right hidden */
   font-weight: 800;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(91, 182, 255, 0.68);
+  /* LANE H — was 0.68 alpha; the eyebrow names what the whole header is about. */
+  color: rgba(129, 200, 255, 0.95);
   margin-bottom: 1px;
 }
 
 .dch-root.is-hot .dch-eyebrow {
-  color: rgba(255, 140, 90, 0.72);
+  color: rgba(255, 163, 122, 0.96);
 }
 
 .dch-address {
@@ -19724,14 +19725,17 @@ center+right hidden */
   align-items: center;
   gap: 4px 0;
   font-size: 12px;
-  font-weight: 450;
-  color: rgba(175, 198, 228, 0.62);
+  /* LANE H — R2.4 allows 400/500/600 only; 450 was off-scale. */
+  font-weight: 500;
+  /* LANE H — was 0.62 alpha => under the 4.5:1 body floor. */
+  color: rgba(198, 216, 240, 0.94);
   line-height: 1;
 }
 
 .dch-meta-sep {
   margin: 0 7px;
-  opacity: 0.36;
+  /* LANE H — separator only, but 0.36 rendered it as noise. */
+  opacity: 0.55;
   font-size: 11px;
   user-select: none;
 }

@@ -69,6 +69,18 @@ export interface BaseThread {
   queue_id: string | null
 }
 
+/**
+ * Postgres numerics arrive as strings through PostgREST often enough that a bare
+ * cast would put `"420000"` into a field typed `number` and silently break every
+ * arithmetic consumer. Reject anything non-finite rather than propagate NaN —
+ * the constitution bans `NaN` reaching the DOM (§0.2).
+ */
+const numericOrUndefined = (value: unknown): number | undefined => {
+  if (value == null || value === '') return undefined
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : undefined
+}
+
 export interface ThreadEnrichment {
   ownerName?: string
   propertyAddress?: string
@@ -78,6 +90,23 @@ export interface ThreadEnrichment {
   acquisitionScore?: number
   propertyType?: string
   queueStage?: string
+  /**
+   * LANE H — hydration gap closed.
+   *
+   * `hydrateEnrichments` has always SELECTed `estimated_value` and
+   * `equity_percent` from `properties`, but `ThreadEnrichment` carried no field
+   * for either, so both were fetched over the wire and then dropped on the floor.
+   * `InboxThread` already declares `estimatedValue` and `equityPercent`
+   * (`domain/inbox/inbox-model-types.ts:120,124`), so three Deal Intelligence
+   * surfaces that read them were structurally unreachable on this hydration path.
+   *
+   * This is additive and frontend-only: no new query, no new column, no change to
+   * what is requested — only the mapping that was missing. Note this does NOT fix
+   * the separate backend gap where `v_deal_context_cards.max_allowable_offer`
+   * returns null; that remains on the handoff list.
+   */
+  estimatedValue?: number
+  equityPercent?: number
 }
 
 // ── B. Normalize Direction ─────────────────────────────────────────────────
@@ -211,6 +240,8 @@ export function baseThreadToInboxThread(t: BaseThread, enrichment?: ThreadEnrich
     ownerDisplayName: enrichment?.ownerName,
     finalAcquisitionScore: enrichment?.acquisitionScore,
     propertyType: enrichment?.propertyType,
+    estimatedValue: enrichment?.estimatedValue,
+    equityPercent: enrichment?.equityPercent,
     inboxCategory: inboxCat,
     inbox_category: inboxCat,
     // Set uiIntent so resolveInboxThreadState doesn't catch inbound threads
@@ -288,6 +319,8 @@ export async function hydrateEnrichments(
       acquisitionScore:    o?.final_acquisition_score                        ?? undefined,
       propertyType:        p?.property_type                                  ?? undefined,
       queueStage:          q?.current_stage        ?? q?.pipeline_stage      ?? undefined,
+      estimatedValue:      numericOrUndefined(p?.estimated_value),
+      equityPercent:       numericOrUndefined(p?.equity_percent),
     })
   }
 

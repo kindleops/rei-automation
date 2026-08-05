@@ -1347,10 +1347,13 @@ const CensusPropertyPanel = ({ thread, dealContext }: { thread: WorkflowThread; 
         <div className="nx-property-census-intel__hero-score" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div className="nx-property-census-intel__score-dial" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '64px', height: '64px', borderRadius: '50%', border: `3px solid ${gradeColor[grade]}`, color: '#fff' }}>
             <strong style={{ fontSize: '20px', fontWeight: 700 }}>{score}</strong>
-            <span style={{ fontSize: '10px', opacity: 0.5 }}>/100</span>
+            {/* LANE H — R2.1: 11px floor. Inline styles outrank every stylesheet,
+                so Lane G could not reach this from lc-responsive.css. */}
+            <span style={{ fontSize: '11px', opacity: 0.7 }}>/100</span>
           </div>
           <div className="nx-property-census-intel__hero-meta" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontSize: '10px', letterSpacing: '0.05em', color: '#94a3b8' }}>INVESTOR OPPORTUNITY SCORE</span>
+            {/* LANE H — R2.1 floor; #94a3b8 on this hero fill measured under 4.5:1. */}
+            <span style={{ fontSize: '11px', letterSpacing: '0.05em', color: '#b8c7dc' }}>INVESTOR OPPORTUNITY SCORE</span>
             <span style={{ fontSize: '16px', fontWeight: 700, color: gradeColor[grade] }}>GRADE {grade}</span>
           </div>
         </div>

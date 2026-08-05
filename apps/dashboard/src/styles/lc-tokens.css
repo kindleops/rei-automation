@@ -268,18 +268,19 @@
    introduces, and it only ever *removes* motion.
    `data-lc-motion="off"` is driven by settings.animationsEnabled (R7.5), which
    was previously a dead setting that nothing read. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 1ms !important;
-    animation-delay: 0ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 1ms !important;
-    transition-delay: 0ms !important;
-    scroll-behavior: auto !important;
-  }
-}
+/* LANE H — the `prefers-reduced-motion` block that used to live here has been
+   removed, NOT weakened. It selected on a bare `*`, which scores (0,0,0), so every
+   class-scoped `transition: … !important` in the 6,691 existing declarations still
+   outranked it; Lane G measured `.nx-send-button` (inbox-polish.css:4418) still
+   transitioning under `prefers-reduced-motion: reduce` with this rule active.
+   The surviving rule is Lane G's `:root:root *` form in `lc-responsive.css`, which
+   scores (0,2,0), beats a single-class `!important`, and re-measured to 0 animating
+   and 0 transitioning elements. Keeping both would have violated R7.4's "in ONE
+   place" while leaving the ineffective copy to imply coverage it never had.
+
+   The `data-lc-motion='off'` rule below stays here: it is Lane A's wiring of
+   settings.animationsEnabled (R7.5, previously a dead setting), and its
+   `:root[data-lc-motion='off'] *` selector already scores (0,2,0). */
 
 :root[data-lc-motion='off'] *,
 :root[data-lc-motion='off'] *::before,

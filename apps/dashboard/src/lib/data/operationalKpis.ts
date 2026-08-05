@@ -8,23 +8,19 @@ import { fetchOperationalKpis, type OperationalKpis, type OperationalKpi } from 
  * rendered "Loading…" forever, indistinguishable from a slow network.
  *
  * `SLOW_AFTER_MS` lets the panel say *why* it is still waiting instead of
- * showing a bare spinner; `LOAD_TIMEOUT_MS` guarantees the wait ends.
+ * showing a bare spinner.
+ *
+ * LANE H: the local `withTimeout(…, 12s)` wrapper that used to guarantee the wait
+ * ends has been removed. It was a stand-in for a missing deadline in the HTTP
+ * client — `fetchOperationalKpis` is a single `callBackend` hop
+ * (`inboxKpis.ts:50` → `getCockpitOpsMetrics`) followed by pure synchronous
+ * mapping, so there was nothing else for it to bound. `backendClient` now enforces
+ * the deadline for every caller, and `getCockpitOpsMetrics` pins this endpoint to
+ * the same 12s Lane F measured. The failure path is unchanged: a timeout returns
+ * `ok: false`, `fetchOperationalKpis` throws on it, and the `catch` below still
+ * sets the typed error state.
  */
 const SLOW_AFTER_MS = 2_000
-const LOAD_TIMEOUT_MS = 12_000
-
-/** Rejects if `promise` has not settled within `ms`. */
-const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`Operational telemetry timed out after ${Math.round(ms / 1000)}s`)),
-      ms,
-    )
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value) },
-      (err) => { clearTimeout(timer); reject(err) },
-    )
-  })
 
 export const useOperationalKpis = (
   timeWindow: OperationalKpi['timeWindow'] = '24h',
@@ -60,7 +56,7 @@ export const useOperationalKpis = (
     slowTimerRef.current = setTimeout(() => setIsSlow(true), SLOW_AFTER_MS)
 
     try {
-      const data = await withTimeout(fetchOperationalKpis(timeWindow), LOAD_TIMEOUT_MS)
+      const data = await fetchOperationalKpis(timeWindow)
       setKpis(data)
       setError(null)
       lastFetchRef.current = Date.now()
