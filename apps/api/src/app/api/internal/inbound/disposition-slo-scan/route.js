@@ -88,13 +88,22 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
 
   const alerts = deps.launchAlerts || launchAlerts;
 
+  // ONE definition of "a missing burst table degrades quietly", used by both the
+  // alerting decision below and the response contract at the end. They
+  // previously disagreed: this branch exempted burst_table_missing from paging
+  // while the response still reported ok:false for it.
+  const burst_scan_degraded = burst_scan.ok === false && burst_scan.reason === "burst_table_missing";
+  // Anything else that stopped the burst scan is alertable: the watchdog looked
+  // at nothing, which must not read as "no burst problems".
+  const burst_scan_alertable = burst_scan.ok === false && !burst_scan_degraded;
+
   if (!burst_scan.ok) {
     // A failed burst scan must never read as "no burst problems".
     warn("inbound_disposition_slo.burst_scan_failed", { reason: burst_scan.reason });
     // Only a genuinely absent table degrades quietly. An unconfigured client in
     // production means the scan looked at nothing, which must never be mistaken
     // for a healthy result.
-    if (burst_scan.reason !== "burst_table_missing") {
+    if (burst_scan_alertable) {
       await alerts
         .burstLivenessFailure({ scan_failed: true, scan_failure_reason: burst_scan.reason })
         .catch(() => {});
@@ -107,6 +116,9 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
         worker_liveness_failure_count: burst_scan.worker_liveness_failure_count,
         tried_and_failed_count: burst_scan.tried_and_failed_count,
         counts: burst_scan.counts,
+        // A capped scan means these counts are a floor; the pager must say so.
+        truncated: burst_scan.truncated === true,
+        row_limit: burst_scan.row_limit,
         sample: burst_scan.violations.slice(0, 5).map((v) => ({
           code: v.code,
           severity: v.severity,
@@ -164,23 +176,37 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
     burst_violation_count: burst_scan.violation_count,
     burst_worker_liveness_failures: burst_scan.worker_liveness_failure_count ?? 0,
     burst_counts: burst_scan.counts,
+    burst_scan_truncated: burst_scan.truncated === true,
     breach_count: scan.breach_count,
     stuck_processing_count: scan.stuck_processing.length,
     exhausted_retry_count: scan.exhausted_retries.length,
   });
 
-  return NextResponse.json({
-    // A burst scan that did not run means half the watchdog is blind; the
-    // response must not claim an unqualified healthy result.
-    ok: burst_scan.ok !== false,
-    burst_scan_ok: burst_scan.ok !== false,
-    breach_count: scan.breach_count,
-    burst_liveness: burst_scan,
-    stuck_processing: scan.stuck_processing,
-    exhausted_retries: scan.exhausted_retries,
-    sla_minutes,
-    retry_horizon_minutes,
-  });
+  return NextResponse.json(
+    {
+      // A burst scan that did not run means half the watchdog is blind; the
+      // response must not claim an unqualified healthy result. A missing burst
+      // table is the one exception, and it is the SAME exception the alerting
+      // branch above applies.
+      ok: burst_scan.ok !== false || burst_scan_degraded,
+      burst_scan_ok: burst_scan.ok !== false,
+      burst_scan_degraded,
+      // Surfaced at the top level so a monitor reading only the envelope can
+      // still tell a capped scan from a complete one.
+      burst_scan_truncated: burst_scan.truncated === true,
+      breach_count: scan.breach_count,
+      burst_liveness: burst_scan,
+      stuck_processing: scan.stuck_processing,
+      exhausted_retries: scan.exhausted_retries,
+      sla_minutes,
+      retry_horizon_minutes,
+    },
+    // Cron and uptime monitors key on the status code. An alertable burst-scan
+    // failure previously returned 200, so a scan that looked at nothing was
+    // recorded as a successful run — the same condition returns 500 on the
+    // ledger path at the branch above.
+    { status: burst_scan_alertable ? 500 : 200 }
+  );
 }
 
 /**

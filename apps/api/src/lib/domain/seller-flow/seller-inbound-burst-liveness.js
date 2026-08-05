@@ -248,17 +248,22 @@ export async function scanBurstLiveness({
   const COLUMNS =
     "id,burst_id,thread_key,status,eligible_at,hard_close_at,first_received_at,attempt_count,claimed_at,completed_at,updated_at,safety_latched";
   let rows;
+  let truncated = false;
   try {
     // Unfinished bursts are NEVER aged out: a burst stuck for three days is
     // more urgent than one stuck for three minutes, and a lookback ceiling
     // would silently retire the worst cases from monitoring. The lookback
     // applies only to terminal rows, which are kept solely for metrics.
+    // Ask for one row beyond the cap. If it comes back, the backlog is larger
+    // than this scan can see and `violation_count` is a FLOOR, not a total —
+    // reporting it as a complete result would let a growing backlog look
+    // bounded. The probe row is discarded; only `limit` rows are evaluated.
     const { data, error } = await supabase
       .from(BURST_LIVENESS_TABLE)
       .select(COLUMNS)
       .or(`status.in.(${NON_TERMINAL_STATUSES.join(",")}),first_received_at.gte.${since}`)
       .order("eligible_at", { ascending: true })
-      .limit(limit);
+      .limit(limit + 1);
     if (error) {
       const code = String(error.code ?? "");
       if (code === "42P01" || code === "PGRST205") {
@@ -266,7 +271,9 @@ export async function scanBurstLiveness({
       }
       return { ok: false, reason: "burst_scan_failed", message: error.message, violation_count: 0 };
     }
-    rows = data || [];
+    const fetched = data || [];
+    truncated = fetched.length > limit;
+    rows = truncated ? fetched.slice(0, limit) : fetched;
   } catch (scan_error) {
     return {
       ok: false,
@@ -290,6 +297,11 @@ export async function scanBurstLiveness({
 
   return {
     ok: true,
+    // A capped scan must never masquerade as a complete one. When `truncated`
+    // is true every count below is a LOWER BOUND on the real backlog.
+    truncated,
+    row_limit: limit,
+    scan_complete: !truncated,
     scanned_count: rows.length,
     counts: metrics.counts,
     violations: metrics.violations,
