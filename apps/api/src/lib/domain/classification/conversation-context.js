@@ -139,9 +139,15 @@ export function validateConversationContext(raw) {
     };
   }
 
-  if (raw.unanswered_question === false && interveningOut === 0) {
-    // Allowed if still binding short reply to last question; flag only
-    reasons.push('unanswered_question_false');
+  if (raw.unanswered_question === false) {
+    // The question already got its answer. A later bare "Yeah" belongs to
+    // whatever is being discussed now, not to a settled question — binding it
+    // would fabricate certainty about something the seller already addressed.
+    return {
+      context_status: 'stale',
+      context: null,
+      reasons: ['question_already_answered'],
+    };
   }
 
   const stage = raw.canonical_stage != null ? String(raw.canonical_stage).toLowerCase() : '';
@@ -212,11 +218,42 @@ function inferQuestionType(useCase) {
 /**
  * True if message is a short affirmative/negative token suitable for context binding.
  */
+// Affirmative and negative short-reply vocabularies. A short answer carries the
+// full certainty of the question it answers, so these must cover how sellers
+// actually reply — not just the canonical dictionary form. Kept as explicit
+// alternations (not a fuzzy matcher) so every accepted token is auditable.
+const AFFIRMATIVE_TOKENS =
+  '(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅)';
+const NEGATIVE_TOKENS =
+  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|i do not|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌)';
+
+/** Normalizes punctuation, contractions and spacing before token matching. */
+function normalizeShortReply(text) {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/\bcan't\b/g, 'can not')
+    .replace(/\bdon't\b/g, 'do not')
+    .replace(/\bdont\b/g, 'do not')
+    .replace(/\bdoesnt\b/g, 'does not')
+    .replace(/\bdidnt\b/g, 'did not')
+    .replace(/\bdoesn't\b/g, 'does not')
+    .replace(/\bdidn't\b/g, 'did not')
+    .replace(/\bit's\b/g, 'it is')
+    .replace(/\bthat's\b/g, 'that is')
+    .replace(/[.!,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function isShortContextualReply(text) {
-  const t = String(text || '').trim().toLowerCase();
+  const t = normalizeShortReply(text);
   if (!t || t.length > 48) return false;
-  return /^(yes|yep|yeah|yup|yea|si|sí|correct|correcto|affirmative|no|nope|nah|nel)\.?!?$/.test(t)
-    || /^(yes|yep|yeah|no|nope)\s*[.!]?$/.test(t);
+  return (
+    new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t) ||
+    new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t)
+  );
 }
 
 /**
@@ -231,9 +268,9 @@ export function applyContextualShortReply(messageText, validated) {
     return { applied: false };
   }
 
-  const t = String(messageText || '').trim().toLowerCase().replace(/[.!]+$/, '');
-  const isYes = /^(yes|yep|yeah|yup|yea|si|sí|correct|correcto|affirmative)$/.test(t);
-  const isNo = /^(no|nope|nah|nel)$/.test(t);
+  const t = normalizeShortReply(messageText);
+  const isYes = new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t);
+  const isNo = new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t);
   if (!isYes && !isNo) return { applied: false };
 
   const useCase = validated.context.last_outbound_use_case;

@@ -544,7 +544,11 @@ const THREAD_STATE_FORBIDDEN_FIELDS = new Set([
 ])
 
 export async function patchThreadStateSafe({ payload = {}, supabase = defaultSupabase } = {}) {
+  // Kept as a dynamic import on purpose: patch-universal-lead-state.js imports
+  // isCanonicalThreadKey from THIS module, so a top-level import here would
+  // close the cycle.
   const { patchUniversalLeadState } = await import('@/lib/domain/lead-state/patch-universal-lead-state.js')
+  const { buildOperatorSuppressionEvidence } = await import('@/lib/domain/lead-state/suppression-evidence.js')
   const dryRun = asBoolean(payload.dry_run, false)
   const threadKey = clean(payload.thread_key)
   if (!isCanonicalThreadKey(threadKey)) {
@@ -559,6 +563,18 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     return blockedResponse('thread-state', `forbidden_patch_field:${forbiddenAttempt}`, { thread_key: threadKey, dry_run: dryRun })
   }
 
+  // Suppression evidence is built HERE, server-side, from this route's own
+  // operator context — never read from the caller's payload. A request body
+  // must not be able to mint the authority to silence a seller.
+  const changeSource = payload.change_source || 'manual'
+  const suppressionActor =
+    clean(payload.operator_id) || clean(payload.updated_by) || 'cockpit_thread_state_patch'
+  const suppressionEvidence = buildOperatorSuppressionEvidence({
+    actor: suppressionActor,
+    reason: payload.reason || null,
+    source_authority: 'cockpit_thread_state_patch',
+  })
+
   const result = await patchUniversalLeadState({
     threadKey,
     patch,
@@ -567,11 +583,18 @@ export async function patchThreadStateSafe({ payload = {}, supabase = defaultSup
     meta: {
       source_view: payload.source_view || payload.sourceView || 'inbox_thread_patch',
       reason: payload.reason || null,
-      change_source: payload.change_source || 'manual',
+      change_source: changeSource,
       updated_by: payload.updated_by || payload.operator_id || null,
       operator_id: payload.operator_id || payload.updated_by || null,
       executed_next_action: payload.execute_next_action === true,
       resume_automatic_scoring: payload.resume_automatic_scoring === true,
+      suppression_evidence: suppressionEvidence,
+      // Lifting a binding suppression is operator-only, and only under a
+      // manual change_source.
+      suppression_clearance:
+        clean(changeSource).toLowerCase() === 'manual'
+          ? { type: 'operator_release', actor: suppressionActor }
+          : null,
     },
   })
 

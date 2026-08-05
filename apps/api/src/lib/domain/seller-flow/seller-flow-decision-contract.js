@@ -1,8 +1,10 @@
 import {
+  CONTACTABILITY_CODES,
   LIFECYCLE_STAGE_CODES,
   OPERATIONAL_STATUS_CODES,
   STATE_SOURCE_CODES,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import { BINDING_SUPPRESSION_REASONS } from "@/lib/domain/seller-flow/latest-intent-precedence.js";
 import { normalizeStageLabel } from "@/lib/domain/seller-flow/shadow-stage-transition.js";
 
 function clean(value) {
@@ -47,16 +49,58 @@ function deriveOperationalStatus({
   return OPERATIONAL_STATUS_CODES.ACTIVE_COMMUNICATION;
 }
 
+// Reasons that genuinely establish a blocking contactability state come from
+// ONE canonical set (latest-intent-precedence.js). Anything else — lifecycle
+// progress, condition disclosure, pricing, uncertainty, human review, negative
+// sentiment — is NOT evidence of a do-not-contact instruction.
+//
+// This module used to keep a private copy that had drifted from the canonical
+// one in both directions, so reasons like `stop`, `unsubscribe`, `dnc` and
+// `hostile_or_legal` were binding for release purposes yet produced NO
+// contactability here — the decision omitted the field and the thread kept a
+// stale contactable value while automation considered it blocked.
+
+/**
+ * Returns a contactability value ONLY when the decision genuinely establishes
+ * one. Returns null for "no change".
+ *
+ * Production incident 2026-08-03/04: this function used `do_not_text` as a
+ * catch-all for every suppression reason that was not exactly opt_out or
+ * wrong_number, and it never returned null — its floor was "contactable". So a
+ * stage transition that correctly abstained (contactability_patch: null) had a
+ * contactability opinion re-injected on every turn, and any execution-layer
+ * reason like "suppressed" or "hostile_or_legal_intent" silently became
+ * do_not_text — which the state writer then escalated to is_suppressed=true,
+ * with no opt-out anywhere. 292 production threads carry that contradiction.
+ */
 function deriveContactability(automation_decision = null, contract = null) {
   if (automation_decision?.should_suppress_contact) {
     const reason = lower(automation_decision.suppression_reason);
-    if (reason === "opt_out") return "opted_out";
-    if (reason === "wrong_number") return "wrong_number";
-    return "do_not_text";
+    if (reason === "opt_out" || reason === "stop" || reason === "unsubscribe") {
+      return CONTACTABILITY_CODES.OPTED_OUT;
+    }
+    // `wrong_number` is NOT a canonical contactability code — it normalizes to
+    // **contactable**, so returning it wrote a confirmed wrong number back as
+    // reachable. `invalid_number` is the canonical value, and it is what the
+    // transition resolver already emits for this intent.
+    if (reason === "wrong_number") return CONTACTABILITY_CODES.INVALID_NUMBER;
+    if (BINDING_SUPPRESSION_REASONS.has(reason)) return CONTACTABILITY_CODES.DO_NOT_TEXT;
+    // Unsupported / unknown / non-binding reason: assert nothing. The thread
+    // keeps whatever contactability it already had.
+    return null;
   }
-  if (contract?.opt_out_signal) return "opted_out";
-  if (contract?.wrong_number_signal) return "wrong_number";
-  return "contactable";
+  if (contract?.opt_out_signal) return CONTACTABILITY_CODES.OPTED_OUT;
+  if (contract?.wrong_number_signal) return CONTACTABILITY_CODES.INVALID_NUMBER;
+  // Floor stays "contactable": that is a safe, non-binding value and several
+  // lanes (tenant / family member / property manager) rely on it to record
+  // contact-preserved state. The incident was the do_not_text CATCH-ALL above,
+  // not this floor.
+  //
+  // NOTE: this floor is asserted on EVERY non-suppressing turn, including turns
+  // on an already-suppressed thread — this module cannot see prior state. It is
+  // patch-universal-lead-state.js that refuses to let an automated writer clear
+  // a binding suppression; do not try to fix that here.
+  return CONTACTABILITY_CODES.CONTACTABLE;
 }
 
 function deriveExecutionMode(auto_reply_mode = "disabled", execution_allowed = false) {

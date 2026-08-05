@@ -1,4 +1,5 @@
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
+import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import {
@@ -50,6 +51,7 @@ import {
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
@@ -64,6 +66,9 @@ import { info, warn } from "@/lib/logging/logger.js";
 
 const defaultDeps = {
   classify,
+  // Injectable for the same reason classify is: without it the burst leg's
+  // context construction cannot be doubled, and nothing can pin it.
+  buildConversationContext,
   runInboundIntelligencePhase,
   executeInboundAutomationDecision,
   persistInboundIntelligenceSnapshot,
@@ -574,7 +579,59 @@ export async function processSellerInboundMessage({
     // `classification`, but any other/future caller landing here must stay
     // off the AI-assist branch too — see the matching heuristicOnly call in
     // handle-textgrid-inbound.js.
-    classification = await runtimeDeps.classify(message, conversationBrain, { heuristicOnly: true });
+    //
+    // conversation_context binds a short reply ("Yeah") to the question it
+    // answers. Without it classify caps confidence at 0.72 and a plain
+    // ownership confirmation is routed to human review — the 2026-08-03
+    // incident. Resolution failure is non-fatal: classify falls back to its
+    // existing `context_status: unavailable` behaviour.
+    //
+    // The burst constituents MUST be excluded from the answered-question scan.
+    // This is the live path for a burst flush, and the aggregate's
+    // inbound_received_at is the LAST fragment's timestamp — so without the
+    // exclusion every earlier fragment of this same burst falls inside the
+    // "did anyone already answer?" window, question_status flips to "answered",
+    // and validateConversationContext discards the context as stale. A seller
+    // who replies "Yeah" as two messages would then reproduce the very
+    // incident this wiring exists to prevent.
+    // try/catch around an `await`, NOT `.catch()` on the returned value. The
+    // comment above promises that resolution failure is non-fatal, and
+    // `.catch()` only kept that promise for a rejected Promise — it assumed the
+    // dep both returns a value and returns a thenable one. Measured, three of
+    // four failure modes escaped and would have 500'd the webhook:
+    //   rejected Promise   -> caught (the only case that worked)
+    //   synchronous throw  -> escaped: the throw happens before .catch attaches
+    //   null return        -> escaped: TypeError reading 'catch' of null
+    //   non-Promise return -> escaped: TypeError, .catch is not a function
+    // `await` in a try block handles all four, and also unwraps a plain
+    // (non-Promise) return so an injected double that answers synchronously is
+    // used rather than discarded.
+    let conversation_context = null;
+    try {
+      conversation_context =
+        (await runtimeDeps.buildConversationContext({
+          thread_key: threadKey || inboundFrom,
+          inbound_received_at: inboundReceivedAt || new Date().toISOString(),
+          supabase,
+          canonical_stage: stageBefore,
+          // The `lt` bound on created_at is exclusive, so the current inbound is
+          // usually outside the window already — but "usually" is not a guarantee
+          // when created_at is an insert timestamp, hence the explicit exclusion.
+          current_inbound_event_id: inboundEventId || providerMessageId || null,
+          burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
+            ? burstContext.constituent_event_ids
+            : [],
+        })) ?? null;
+    } catch {
+      // Non-fatal by contract: classify keeps its existing
+      // `context_status: unavailable` behaviour rather than failing the turn.
+      conversation_context = null;
+    }
+
+    classification = await runtimeDeps.classify(message, conversationBrain, {
+      heuristicOnly: true,
+      conversation_context,
+    });
   }
 
   const contractResult = normalizeClassificationContract({
@@ -1358,6 +1415,26 @@ export async function processSellerInboundMessage({
               transition && Number(transition.stage_after_number) >= 7
                 ? { type: "persisted_deal_state", source: "loadSellerDealState" }
                 : null,
+            // Server-derived suppression evidence, keyed off the classified
+            // INTENT and never off the contactability value — so a stage
+            // transition still cannot manufacture a suppression claim. Returns
+            // null for every intent outside the durable set and for any inbound
+            // that cannot cite the message event that produced it, in which
+            // case the writer's gate correctly rejects the binding fields.
+            //
+            // Without this the gate strips do_not_text writes from the inbound
+            // path: a hostile_or_legal or wrong_person suppression is dropped
+            // and we keep texting. (The opt-out lane never depended on this —
+            // `opted_out` is self-evidencing.)
+            //
+            // NOT the unrelated shadow-telemetry key of the same name further
+            // down this file; these two must never be wired together.
+            suppression_evidence: buildInboundSuppressionEvidence({
+              intent: classification?.primary_intent || null,
+              source_event_id: inboundEventId || providerMessageId || null,
+              rule_version: `${CLASSIFY_VERSION}:${classification?.source || "heuristic"}`,
+              matched_phrase: classification?.matched_phrase || null,
+            }),
             temperature_reason_codes: temperature_signal?.reason_codes || null,
             temperature_reason: (temperature_signal?.reason_codes || []).join(",") || null,
             metadata: decision.reasoning_code

@@ -76,7 +76,7 @@ test("scan route rejects anonymous callers before touching the ledger", async ()
   const calls = [];
   const response = await handleDispositionSloScanRequest(
     { url: ROUTE_URL, headers: { get: () => null } },
-    { findInboundLedgerSlaBreaches: stubScanner(calls) }
+    { findInboundLedgerSlaBreaches: stubScanner(calls), scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }) }
   );
   assert.equal(response.status, 401);
   const body = await response.json();
@@ -88,6 +88,7 @@ test("scan route uses the defaults when parameters are absent", async () => {
   const calls = [];
   const response = await handleDispositionSloScanRequest(buildRequest(), {
     findInboundLedgerSlaBreaches: stubScanner(calls),
+    scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }),
   });
   assert.equal(response.status, 200);
   const body = await response.json();
@@ -101,7 +102,7 @@ test("scan route rejects negative windows: the cutoff must never move into the f
   const calls = [];
   const response = await handleDispositionSloScanRequest(
     buildRequest("?sla_minutes=-5&retry_horizon_minutes=-60"),
-    { findInboundLedgerSlaBreaches: stubScanner(calls) }
+    { findInboundLedgerSlaBreaches: stubScanner(calls), scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }) }
   );
   assert.equal(response.status, 200);
   const body = await response.json();
@@ -114,7 +115,7 @@ test("scan route falls back on NaN and zero parameters", async () => {
   const calls = [];
   await handleDispositionSloScanRequest(
     buildRequest("?sla_minutes=abc&retry_horizon_minutes=0"),
-    { findInboundLedgerSlaBreaches: stubScanner(calls) }
+    { findInboundLedgerSlaBreaches: stubScanner(calls), scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }) }
   );
   assert.deepEqual(calls, [{ sla_minutes: 10, retry_horizon_minutes: 60 }]);
 });
@@ -123,7 +124,7 @@ test("scan route clamps excessive windows so real breaches stay visible", async 
   const calls = [];
   const response = await handleDispositionSloScanRequest(
     buildRequest("?sla_minutes=999999&retry_horizon_minutes=999999"),
-    { findInboundLedgerSlaBreaches: stubScanner(calls) }
+    { findInboundLedgerSlaBreaches: stubScanner(calls), scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }) }
   );
   const body = await response.json();
   assert.equal(body.sla_minutes, 1440);
@@ -135,7 +136,7 @@ test("scan route passes bounded valid parameters through unchanged", async () =>
   const calls = [];
   const response = await handleDispositionSloScanRequest(
     buildRequest("?sla_minutes=30&retry_horizon_minutes=120"),
-    { findInboundLedgerSlaBreaches: stubScanner(calls) }
+    { findInboundLedgerSlaBreaches: stubScanner(calls), scanBurstLiveness: async () => ({ ok: true, violation_count: 0, counts: {} }) }
   );
   const body = await response.json();
   assert.equal(body.ok, true);

@@ -458,6 +458,66 @@ export async function recordInboundTerminalDisposition(
  * route; failed_retriable rows past the retry horizon are also surfaced so a
  * permanently-retrying message cannot hide.
  */
+/** jsonb marker recording that an inbound is parked awaiting burst finalization. */
+export const AWAITING_BURST_DETAIL_KEY = "awaiting_burst_finalization";
+
+/**
+ * Records that an inbound's decision was handed to the burst layer.
+ *
+ * The row deliberately STAYS status='processing': it is not finished, and
+ * `reply_deferred_burst` is illegal in both the status and terminal_disposition
+ * CHECK constraints. Pendency lives in disposition_detail (unconstrained jsonb),
+ * so no migration is required. The SLO scanner reads this marker to tell an
+ * intentional wait apart from a silent drop; genuine burst failure is alarmed
+ * separately by the burst liveness scan.
+ *
+ * Never stores the seller's message body.
+ */
+export async function markInboundAwaitingBurst(
+  { idempotency_key, burst_id = null, detail = {}, processing_run_id = null } = {},
+  deps = {}
+) {
+  const key = String(idempotency_key ?? "").trim();
+  if (!key) return { ok: false, reason: "missing_idempotency_key" };
+  const supabase = getSupabase(deps);
+  if (!supabase) return { ok: false, reason: "supabase_unconfigured" };
+
+  const safe_detail = {};
+  for (const [k, v] of Object.entries(detail || {})) {
+    // Structural facts only — never the raw body.
+    if (/body|text|message|raw/i.test(k)) continue;
+    safe_detail[k] = v;
+  }
+
+  try {
+    const { error } = await supabase
+      .from(LEDGER_TABLE)
+      .update({
+        disposition_detail: {
+          ...safe_detail,
+          [AWAITING_BURST_DETAIL_KEY]: true,
+          burst_id: burst_id || safe_detail.burst_id || null,
+          pending_disposition: "reply_deferred_burst",
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("idempotency_key", key)
+      .eq("status", "processing")
+      // Fence to the claim that is actually processing this attempt, so a
+      // stale worker cannot stamp pendency onto a reclaimed row.
+      .eq("processing_run_id", processing_run_id);
+    if (error) {
+      if (tableMissing(error)) return { ok: false, reason: "ledger_table_missing" };
+      warn("inbound_ledger.awaiting_burst_write_failed", { error: error.message });
+      return { ok: false, reason: "awaiting_burst_write_failed" };
+    }
+    return { ok: true, awaiting_burst: true, burst_id: burst_id || null };
+  } catch (error) {
+    warn("inbound_ledger.awaiting_burst_threw", { error: error?.message });
+    return { ok: false, reason: "awaiting_burst_write_failed" };
+  }
+}
+
 export async function findInboundLedgerSlaBreaches(
   { sla_minutes = 10, retry_horizon_minutes = 60, limit = 50 } = {},
   deps = {}
@@ -471,9 +531,17 @@ export async function findInboundLedgerSlaBreaches(
   try {
     const { data: stuck, error: stuck_error } = await supabase
       .from(LEDGER_TABLE)
-      .select("id,idempotency_key,provider_message_sid,thread_key,received_at,status,attempt_count")
+      .select(
+        "id,idempotency_key,provider_message_sid,thread_key,received_at,status,attempt_count,disposition_detail"
+      )
       .eq("status", "processing")
       .lt("received_at", processing_cutoff)
+      // Exclude parked rows in the QUERY: post-filtering after .limit() lets a
+      // backlog of awaiting-burst rows consume the whole page and starve the
+      // genuinely stuck ones out of the scan.
+      .or(
+        `disposition_detail->>${AWAITING_BURST_DETAIL_KEY}.is.null,disposition_detail->>${AWAITING_BURST_DETAIL_KEY}.neq.true`
+      )
       .order("received_at", { ascending: true })
       .limit(limit);
     if (stuck_error) throw stuck_error;
@@ -488,11 +556,26 @@ export async function findInboundLedgerSlaBreaches(
       .limit(limit);
     if (retry_error) throw retry_error;
 
+    // A row parked awaiting burst finalization is intentionally unfinished, not
+    // a silent drop, so it must not page as a stuck inbound. It is still fully
+    // watched: the burst liveness scan alarms an open/claimed burst that
+    // breaches its own bounds, and the constituent row is finalized for real
+    // when the burst completes. Reported separately so it stays visible.
+    const all_processing = stuck || [];
+    const awaiting_burst = all_processing.filter(
+      (row) => row?.disposition_detail?.[AWAITING_BURST_DETAIL_KEY] === true
+    );
+    const stuck_processing = all_processing.filter(
+      (row) => row?.disposition_detail?.[AWAITING_BURST_DETAIL_KEY] !== true
+    );
+
     return {
       ok: true,
-      stuck_processing: stuck || [],
+      stuck_processing,
+      awaiting_burst,
+      awaiting_burst_count: awaiting_burst.length,
       exhausted_retries: retrying || [],
-      breach_count: (stuck?.length || 0) + (retrying?.length || 0),
+      breach_count: stuck_processing.length + (retrying?.length || 0),
     };
   } catch (error) {
     if (tableMissing(error)) {

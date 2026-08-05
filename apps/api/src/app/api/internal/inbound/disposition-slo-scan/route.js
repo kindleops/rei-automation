@@ -12,6 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
+import { scanBurstLiveness } from "@/lib/domain/seller-flow/seller-inbound-burst-liveness.js";
 import { findInboundLedgerSlaBreaches } from "@/lib/domain/inbound/inbound-processing-ledger.js";
 import { launchAlerts } from "@/lib/domain/alerts/launch-critical-alerts.js";
 import { info, warn } from "@/lib/logging/logger.js";
@@ -62,12 +63,79 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
     retry_horizon_minutes,
   });
 
+  // The ledger is only half the picture. The 2026-08-03 outage was invisible
+  // here because the stuck inbound had been (incorrectly) marked terminal in
+  // the ledger while its burst sat open forever. The scanner must inspect burst
+  // state too. Read-only: it never mutates or completes a burst.
+  const scan_burst_liveness = deps.scanBurstLiveness || scanBurstLiveness;
+  // Production must use the canonical service-role client. Passing null here
+  // made every deployed invocation return supabase_unconfigured and scan
+  // nothing — the watchdog existed but never looked at anything.
+  const resolve_supabase = deps.resolveSupabase || resolveCanonicalSupabase;
+  let burst_supabase = deps.supabase || null;
+  if (!burst_supabase) {
+    burst_supabase = await resolve_supabase();
+  }
+  const burst_scan = await scan_burst_liveness({
+    supabase: burst_supabase,
+    now: deps.now ? deps.now() : undefined,
+  }).catch((error) => ({
+    ok: false,
+    reason: "burst_scan_failed",
+    message: error?.message || "unknown_error",
+    violation_count: 0,
+  }));
+
+  const alerts = deps.launchAlerts || launchAlerts;
+
+  // ONE definition of "a missing burst table degrades quietly", used by both the
+  // alerting decision below and the response contract at the end. They
+  // previously disagreed: this branch exempted burst_table_missing from paging
+  // while the response still reported ok:false for it.
+  const burst_scan_degraded = burst_scan.ok === false && burst_scan.reason === "burst_table_missing";
+  // Anything else that stopped the burst scan is alertable: the watchdog looked
+  // at nothing, which must not read as "no burst problems".
+  const burst_scan_alertable = burst_scan.ok === false && !burst_scan_degraded;
+
+  if (!burst_scan.ok) {
+    // A failed burst scan must never read as "no burst problems".
+    warn("inbound_disposition_slo.burst_scan_failed", { reason: burst_scan.reason });
+    // Only a genuinely absent table degrades quietly. An unconfigured client in
+    // production means the scan looked at nothing, which must never be mistaken
+    // for a healthy result.
+    if (burst_scan_alertable) {
+      await alerts
+        .burstLivenessFailure({ scan_failed: true, scan_failure_reason: burst_scan.reason })
+        .catch(() => {});
+    }
+  } else if (burst_scan.violation_count > 0) {
+    await alerts
+      .burstLivenessFailure({
+        violation_count: burst_scan.violation_count,
+        p0_violation_count: burst_scan.p0_violation_count,
+        worker_liveness_failure_count: burst_scan.worker_liveness_failure_count,
+        tried_and_failed_count: burst_scan.tried_and_failed_count,
+        counts: burst_scan.counts,
+        // A capped scan means these counts are a floor; the pager must say so.
+        truncated: burst_scan.truncated === true,
+        row_limit: burst_scan.row_limit,
+        sample: burst_scan.violations.slice(0, 5).map((v) => ({
+          code: v.code,
+          severity: v.severity,
+          burst_id: v.burst_id,
+        })),
+      })
+      .catch((error) => {
+        warn("inbound_disposition_slo.burst_alert_failed", { error: error?.message });
+      });
+  }
+
   if (!scan.ok) {
     // The scanner itself failing must be visible: a broken watchdog reads
     // exactly like a healthy system with zero breaches.
     warn("inbound_disposition_slo.scan_failed", { reason: scan.reason });
     if (scan.reason !== "ledger_table_missing") {
-      await launchAlerts
+      await alerts
         .inboundNoDisposition({
           scan_failed: true,
           scan_failure_reason: scan.reason,
@@ -76,13 +144,13 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
         .catch(() => {});
     }
     return NextResponse.json(
-      { ok: false, reason: scan.reason, breach_count: 0 },
+      { ok: false, reason: scan.reason, breach_count: 0, burst_liveness: burst_scan },
       { status: scan.reason === "ledger_table_missing" ? 200 : 500 }
     );
   }
 
   if (scan.breach_count > 0) {
-    await launchAlerts
+    await alerts
       .inboundNoDisposition({
         breach_count: scan.breach_count,
         stuck_processing_count: scan.stuck_processing.length,
@@ -105,19 +173,56 @@ export async function handleDispositionSloScanRequest(request, deps = {}) {
   }
 
   info("inbound_disposition_slo.scan_completed", {
+    burst_violation_count: burst_scan.violation_count,
+    burst_worker_liveness_failures: burst_scan.worker_liveness_failure_count ?? 0,
+    burst_counts: burst_scan.counts,
+    burst_scan_truncated: burst_scan.truncated === true,
     breach_count: scan.breach_count,
     stuck_processing_count: scan.stuck_processing.length,
     exhausted_retry_count: scan.exhausted_retries.length,
   });
 
-  return NextResponse.json({
-    ok: true,
-    breach_count: scan.breach_count,
-    stuck_processing: scan.stuck_processing,
-    exhausted_retries: scan.exhausted_retries,
-    sla_minutes,
-    retry_horizon_minutes,
-  });
+  return NextResponse.json(
+    {
+      // A burst scan that did not run means half the watchdog is blind; the
+      // response must not claim an unqualified healthy result. A missing burst
+      // table is the one exception, and it is the SAME exception the alerting
+      // branch above applies.
+      ok: burst_scan.ok !== false || burst_scan_degraded,
+      burst_scan_ok: burst_scan.ok !== false,
+      burst_scan_degraded,
+      // Surfaced at the top level so a monitor reading only the envelope can
+      // still tell a capped scan from a complete one.
+      burst_scan_truncated: burst_scan.truncated === true,
+      breach_count: scan.breach_count,
+      burst_liveness: burst_scan,
+      stuck_processing: scan.stuck_processing,
+      exhausted_retries: scan.exhausted_retries,
+      sla_minutes,
+      retry_horizon_minutes,
+    },
+    // Cron and uptime monitors key on the status code. An alertable burst-scan
+    // failure previously returned 200, so a scan that looked at nothing was
+    // recorded as a successful run — the same condition returns 500 on the
+    // ledger path at the branch above.
+    { status: burst_scan_alertable ? 500 : 200 }
+  );
+}
+
+/**
+ * Canonical server-side service-role client for the production scan path.
+ * Injectable via deps.resolveSupabase so the wiring is testable in an
+ * environment that intentionally has no Supabase configuration.
+ */
+export async function resolveCanonicalSupabase() {
+  try {
+    const { hasSupabaseConfig } = await import("@/lib/supabase/client.js");
+    if (!hasSupabaseConfig()) return null;
+    const { getDefaultSupabaseClient } = await import("@/lib/supabase/default-client.js");
+    return getDefaultSupabaseClient() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(request) {

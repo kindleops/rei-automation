@@ -67,6 +67,11 @@ export const TERMINAL_DISPOSITION_HINTS = Object.freeze([
   "failed_terminal",
 ]);
 
+// Non-terminal: the inbound is parked awaiting burst finalization. Kept
+// separate from TERMINAL_DISPOSITION_HINTS so nothing treats a scheduling
+// handoff as a finished outcome (see domain/inbound/terminal-disposition.js).
+export const PENDING_DISPOSITION_HINTS = Object.freeze(["reply_deferred_burst"]);
+
 const AUTOMATION_MODES = new Set(["continue", "pause", "stop"]);
 
 const NO_COMPLIANCE = { legally_binding_opt_out: false, blocks_all_future_contact: false };

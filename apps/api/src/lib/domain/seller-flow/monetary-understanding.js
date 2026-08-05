@@ -133,6 +133,152 @@ function parseNumberWords(tokens, startIdx) {
   return { value, length: consumed };
 }
 
+/** Street-type words that mark the preceding number as an address. */
+const STREET_TYPE_TOKENS = new Set([
+  "st", "street", "ave", "avenue", "rd", "road", "dr", "drive", "ln", "lane",
+  "blvd", "boulevard", "ct", "court", "cir", "circle", "way", "pl", "place",
+  "ter", "terrace", "hwy", "highway", "pkwy", "parkway", "trl", "trail",
+  "unit", "apt", "suite", "ste",
+]);
+
+/**
+ * Compass directions sit between the street number and the street name
+ * ("4157 S Main St"), pushing the street type outside a two-word window.
+ */
+const DIRECTION_TOKENS = new Set([
+  "n", "s", "e", "w", "ne", "nw", "se", "sw",
+  "north", "south", "east", "west",
+  "northeast", "northwest", "southeast", "southwest",
+]);
+
+/**
+ * A street number is never followed by a function word. "300 per unit" and
+ * "250 for the unit" are PRICES — but "unit" is a street-type token, so without
+ * this the address guard silently deletes real per-unit money.
+ */
+const NON_STREET_LEAD_TOKENS = new Set([
+  "per", "a", "an", "the", "each", "every", "for", "of", "in", "on", "at",
+  "to", "and", "or", "with", "por", "de", "del", "la", "el", "los", "las",
+  "un", "una", "cada", "y",
+]);
+
+/** Up to four following words; an ordinal ("3rd", "42nd") is a street name. */
+const ADDRESS_WORD_RE =
+  /^\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?/i;
+
+/**
+ * True when a bare number is positioned like a street number: immediately
+ * followed by a street type ("4157 Pillsbury Ave"), by a compass direction and
+ * then a street type ("4157 S Main St"), or by a capitalized proper noun
+ * ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
+ * numbers carrying no monetary evidence at all.
+ */
+function isAddressAdjacent(text, match) {
+  const after = text.slice(match.index + match[0].length);
+  const next = ADDRESS_WORD_RE.exec(after);
+  if (!next) return false;
+  const all = [next[1], next[2], next[3], next[4]].filter(Boolean).map(String);
+  if (!all.length) return false;
+  // Skip exactly one leading compass direction, then look one word further —
+  // the direction is itself strong address evidence. Every other message keeps
+  // the original two-word window.
+  const direction_skipped =
+    all.length > 1 && DIRECTION_TOKENS.has(all[0].toLowerCase());
+  const words = direction_skipped ? all.slice(1, 4) : all.slice(0, 2);
+  if (!words.length) return false;
+  // "300 per unit" is money, not 300 Unit Street. Applied to the word that
+  // actually leads the street name, which is NOT all[0] once a direction has
+  // been skipped: "300 East of the drive" left "of the drive" unguarded, and
+  // the street type three words later suppressed a real price.
+  if (NON_STREET_LEAD_TOKENS.has(words[0].toLowerCase())) return false;
+  const first = String(words[0] || "");
+  // Monetary vocabulary leading the phrase settles it before any street-type
+  // scan: "300 Total Court Costs" is money, not an address on Court.
+  if (MONETARY_QUALIFIER_WORDS.has(first.toLowerCase())) return false;
+  // A street type anywhere in the captured run is unambiguous address evidence,
+  // wherever it sits: "8612 Oak Leaf Rd" puts it third. Safe to scan the whole
+  // run because the function-word and qualifier guards have already run.
+  if (all.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
+  // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.
+  // This branch has no evidence beyond capitalization, so it must yield to any
+  // monetary reading: "I want 300 Cash" and "I need 300 Net" are prices.
+  if (!/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first)) return false;
+  if (SCALE_WORDS[first.toLowerCase()]) return false;
+  // Last line of defence, and the weakest: capitalization alone. A trailing
+  // capitalized word is not evidence of anything on its own — "I want 300 East"
+  // and "I want 300 Pennsylvania" are prices, and no vocabulary can separate
+  // them from "327 Pennsylvania" because the WORD is identical. Only context
+  // can. This branch was written for one situation: a street number competing
+  // with a real price in the same message ("For 327 Pennsylvania alone
+  // 130,000"). Fire it only when that situation actually holds — a skipped
+  // compass direction (real address evidence) or other money in the message to
+  // protect. Otherwise the seller's only number is deleted.
+  if (!direction_skipped && !hasCompetingMonetaryEvidence(text, match)) return false;
+  return true;
+}
+
+/** Currency symbol, thousands separator or scale suffix ELSEWHERE in the text. */
+const COMPETING_MONEY_RE = /\$|\d{1,3}(?:,\d{3})+|\d\s*(?:k|m|mil|grand|thousand|million|hundred)\b/i;
+
+function hasCompetingMonetaryEvidence(text, match) {
+  const rest = text.slice(0, match.index) + " " + text.slice(match.index + match[0].length);
+  return COMPETING_MONEY_RE.test(rest);
+}
+
+// ─── postal codes and calendar years are not money ──────────────────────────
+// Both are suppressed ONLY on a textual cue. "55407" and a $55,407 asking price
+// are structurally identical, as are "1998" and $1,998 — a rule based on digit
+// count alone would silently eat real seller money, so the cue does the work.
+
+/** US state abbreviations that are never ordinary English words. */
+const UNAMBIGUOUS_STATE_ABBREVIATIONS = new Set([
+  "ak", "az", "ar", "ca", "ct", "dc", "fl", "ga", "il", "ia", "ks", "ky", "md",
+  "mi", "mn", "ms", "mo", "mt", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "ri",
+  "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
+]);
+
+const ZIP_CUE_RE =
+  /(?:^|[^a-z0-9])(?:zip|zipcode|postal|postcode|codigo postal|código postal)\s*(?:code)?\s*(?:is|are|=|:|es)?\s*$/i;
+/** "Minneapolis, MN 55407" — a comma makes any state abbreviation safe. */
+const COMMA_STATE_RE = /,\s*[A-Za-z]{2}\.?\s*$/;
+/** "Minneapolis MN 55407" — no comma, so require an UPPERCASE unambiguous state. */
+const BARE_STATE_RE = /(?:^|[^A-Za-z])([A-Z]{2})\.?\s*$/;
+
+/**
+ * True when a bare 5-digit number is cued as a postal code. Deliberately does
+ * NOT treat a bare preposition as a cue: "I'm interested in 95000" and "would
+ * be interested in 95k" are price statements, so "in 55407" stays money.
+ */
+function isPostalCode(text, match, digits) {
+  if (!/^\d{5}$/.test(String(digits))) return false;
+  const before = text.slice(0, match.index);
+  if (ZIP_CUE_RE.test(before)) return true;
+  if (COMMA_STATE_RE.test(before)) return true;
+  const bare = BARE_STATE_RE.exec(before);
+  return Boolean(bare && UNAMBIGUOUS_STATE_ABBREVIATIONS.has(bare[1].toLowerCase()));
+}
+
+const YEAR_DIRECT_CUE_RE =
+  /(?:^|[^a-z0-9])(?:since|circa|est|established|year|built|build|rebuilt|bought|purchased|acquired|remodeled|renovated|rehabbed|updated|replaced|constructed|inherited|desde)\.?\s*(?:in|of|en)?\s*$/i;
+/** A preposition alone is not a year cue — it needs a temporal subject nearby. */
+const YEAR_PREP_RE = /(?:^|[^a-z0-9])(?:in|of|en|de|del)\s*$/i;
+const YEAR_SUBJECT_RE =
+  /(?:built|build|rebuilt|bought|buy|purchas|acquir|remodel|renovat|rehab|updat|replac|redone|construct|inherit|moved|lived|owned|roof)/i;
+
+/**
+ * True when a bare 4-digit number is cued as a calendar year ("built in 1987",
+ * "since 1998"). The 1900-2099 bound is only a precondition; the cue decides.
+ * A bare preposition is NOT sufficient on its own — "I put in 2000 for repairs"
+ * is a real repair figure and must survive.
+ */
+function isCalendarYear(text, match, digits, value) {
+  if (!/^\d{4}$/.test(String(digits))) return false;
+  if (!(value >= 1900 && value <= 2099)) return false;
+  const before = text.slice(0, match.index);
+  if (YEAR_DIRECT_CUE_RE.test(before)) return true;
+  return YEAR_PREP_RE.test(before) && YEAR_SUBJECT_RE.test(before.slice(-40));
+}
+
 /** Extract every numeric token (digits or words) with its position + suffix scale. */
 function tokenizeAmounts(text) {
   const amounts = [];
@@ -153,10 +299,35 @@ function tokenizeAmounts(text) {
     const trailing = /^\s*([a-zà-ÿ']+)/i.exec(after);
     const trailingWord = trailing ? trailing[1].toLowerCase() : "";
     if (!suffix && (TIME_UNIT_TOKENS.has(trailingWord) || AREA_UNIT_TOKENS.has(trailingWord))) continue;
+    // A street number is not money. "For 327 Pennsylvania alone 130,000" and
+    // "(331 Pennsylvania)" both put a bare 3-digit number immediately before a
+    // street name; production read 331 as the asking price for a $130,000
+    // property. A number with no currency symbol, no thousands separator and no
+    // scale suffix that is directly followed by a capitalized word or a street
+    // type is an address, not a price.
+    if (!suffix && !hasCurrency && !hadThousandsSeparator && isAddressAdjacent(text, match)) {
+      continue;
+    }
+    // A postal code ("zip is 55407", "Minneapolis, MN 55407") and a calendar
+    // year ("built in 1987") are not money either.
+    if (!suffix && !hasCurrency && !hadThousandsSeparator) {
+      if (isPostalCode(text, match, match[1])) continue;
+      if (isCalendarYear(text, match, match[1], value)) continue;
+    }
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
 
-    if (suffix && SCALE_WORDS[suffix]) value *= SCALE_WORDS[suffix];
+    if (suffix && SCALE_WORDS[suffix]) {
+      // Spanish "mil" after a number that ALREADY carries thousands magnitude
+      // is redundant, not multiplicative: "150,000 mil" is a seller writing
+      // 150 thousand twice, and multiplying produced $150,000,000. Declining to
+      // multiply needs no guess about which magnitude was meant, so it stays a
+      // rule rather than a disambiguation. Matches the identical guard in
+      // classify.js scalePriceToken so the two parsers cannot disagree by three
+      // orders of magnitude on the same string.
+      const redundant_mil = suffix === "mil" && (hadThousandsSeparator || value >= 1000);
+      if (!redundant_mil) value *= SCALE_WORDS[suffix];
+    }
 
     amounts.push({
       value: Math.round(value),
@@ -206,9 +377,17 @@ function tokenizeAmounts(text) {
 const KIND_CUES = Object.freeze([
   // Most specific first; a window is the ±60 chars of text around the amount.
   { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "debo"] },
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "/mo", "each month", "al mes", "mensual"] },
+  // "/month" is listed alongside "/mo": the word-boundary matcher will not find
+  // "/mo" inside "/month", and a seller's monthly rent misread as an asking
+  // price makes a rental look like a $1,450 house.
+  // "bimonthly" and "mensualidad" are likewise not inflections of "monthly" /
+  // "mensual" — both are recurring payments, never an asking price.
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
-  { kind: MONETARY_KINDS.REPAIR_AMOUNT, cues: ["repair", "repairs", "fix", "roof cost", "quote for", "estimate for", "to fix", "in work", "reparar", "arreglar"] },
+  // "repairman" is listed explicitly: it is not a regular inflection of
+  // "repair", so the boundary matcher misses it and "the repairman quoted
+  // 15,000" became a $15,000 asking price.
+  { kind: MONETARY_KINDS.REPAIR_AMOUNT, cues: ["repair", "repairs", "repairman", "fix", "roof cost", "quote for", "estimate for", "to fix", "in work", "reparar", "arreglar"] },
   { kind: MONETARY_KINDS.EARNEST_MONEY, cues: ["earnest", "deposit", "down payment", "depósito"] },
   { kind: MONETARY_KINDS.PER_UNIT_PRICE, cues: ["per unit", "a unit", "each unit", "per door", "a door", "por unidad"] },
   { kind: MONETARY_KINDS.PACKAGE_PRICE, cues: ["for both", "for all", "the pair", "package", "portfolio", "together", "for the two", "for the three", "por los dos", "por todas"] },
@@ -221,6 +400,40 @@ const ASK_CUES = ["want", "asking", "ask", "take", "sell for", "let it go", "loo
 const FIRM_CUES = ["firm", "non negotiable", "non-negotiable", "not negotiable", "take it or leave it", "won't budge", "wont budge", "precio firme", "no negociable", "best and final"];
 const APPROX_CUES = ["around", "about", "roughly", "approximately", "somewhere", "ish", "close to", "más o menos", "mas o menos", "como"];
 
+// ─── monetary vocabulary reused by the address guard ────────────────────────
+// The proper-noun branch of isAddressAdjacent fires on ANY capitalized word, so
+// "I want 300 Cash" and "I need 300 Net" read as addresses and the seller's
+// number was deleted outright. This narrows that branch by vocabulary, DERIVED
+// from the cue tables above rather than duplicated — a second hand-maintained
+// list would drift out of sync with the classifier.
+//
+// Vocabulary, deliberately, and NOT "a monetary cue sits before the number":
+// an address follows those cues too, so that rule re-opened the original
+// incident — "how about 331 Pennsylvania" read the neighbouring property's
+// street number as a price again. Measured, then rejected.
+//
+// Declared after the cue tables and referenced from the hoisted
+// isAddressAdjacent, which only ever runs after module initialization.
+
+/** Single capitalized words that are monetary vocabulary, never street names. */
+const MONETARY_QUALIFIER_WORDS = (() => {
+  const words = new Set([
+    // qualifier vocabulary that is not itself a classification cue
+    "cash", "obo", "total", "down", "flat", "plus", "even", "dollars", "bucks",
+    "negotiable", "only", "max", "min", "tops", "today", "best", "apiece",
+    "otd", "usd", "each", "firm",
+  ]);
+  const add = (cue) => {
+    const token = String(cue).trim().toLowerCase();
+    if (token && !/[^a-zà-ÿ']/.test(token)) words.add(token);
+  };
+  for (const entry of KIND_CUES) entry.cues.forEach(add);
+  ASK_CUES.forEach(add);
+  FIRM_CUES.forEach(add);
+  APPROX_CUES.forEach(add);
+  return words;
+})();
+
 function windowFor(text, amount, radius = 60) {
   const start = Math.max(0, amount.index - radius);
   const end = Math.min(text.length, amount.end + radius);
@@ -232,8 +445,56 @@ function precedingWindow(text, amount, radius = 40) {
   return lower(text.slice(start, amount.index));
 }
 
+/**
+ * True when `cue` occurs at `idx` as a whole word/phrase rather than inside a
+ * longer word.
+ *
+ * Substring matching silently reclassified real prices: "however" contains
+ * "owe", so "130,000...however" bound the asking price to the MORTGAGE_PAYOFF
+ * cue and the amount was discarded — the seller's $130,000 vanished. The same
+ * trap sits in "net" (cabinet, network), "clear" (clearly) and "fix" (fixture).
+ *
+ * A strict right boundary then went too far the other way: it also stopped
+ * matching ordinary INFLECTIONS, so "I owed 60,000 on it" stopped being a
+ * payoff and "I fixed it for 15,000" stopped being a repair — both silently
+ * became asking prices. Regular verb/noun endings are therefore still part of
+ * the cue. "ly" and "er" are deliberately NOT included: they are exactly what
+ * make "clearly" and "fixer" the traps the boundary rule exists to close.
+ */
+const CUE_INFLECTION_SUFFIX = "(?:s|es|d|ed|ing)?";
+
+const CUE_BOUNDARY_CACHE = new Map();
+
+/** Boundary-aware matcher per cue, compiled once. */
+function cueBoundaryRegex(cue) {
+  let re = CUE_BOUNDARY_CACHE.get(cue);
+  if (!re) {
+    const escaped = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const left = /[a-z0-9\u00e0-\u00ff]/i.test(cue[0]) ? "(?<![a-z0-9\u00e0-\u00ff])" : "";
+    const right = /[a-z0-9\u00e0-\u00ff]/i.test(cue[cue.length - 1])
+      ? `${CUE_INFLECTION_SUFFIX}(?![a-z0-9\u00e0-\u00ff])`
+      : "";
+    re = new RegExp(`${left}${escaped}${right}`, "gi");
+    CUE_BOUNDARY_CACHE.set(cue, re);
+  }
+  re.lastIndex = 0;
+  return re;
+}
+
+function cueAtWordBoundary(text, cue, idx) {
+  const before = idx === 0 ? "" : text[idx - 1];
+  const afterIdx = idx + cue.length;
+  const after = afterIdx >= text.length ? "" : text[afterIdx];
+  const isWordChar = (ch) => ch !== "" && /[a-z0-9\u00e0-\u00ff]/i.test(ch);
+  const startsWord = /[a-z0-9\u00e0-\u00ff]/i.test(cue[0]);
+  const endsWord = /[a-z0-9\u00e0-\u00ff]/i.test(cue[cue.length - 1]);
+  if (startsWord && isWordChar(before)) return false;
+  if (endsWord && isWordChar(after)) return false;
+  return true;
+}
+
 function includesCue(window, cues) {
-  return cues.some((cue) => window.includes(cue));
+  return cues.some((cue) => cueBoundaryRegex(cue).test(window));
 }
 
 /**
@@ -250,12 +511,12 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
 
   let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
   const consider = (kind, cue) => {
-    let idx = window.indexOf(cue);
-    while (idx !== -1) {
-      const cueMid = windowStart + idx + cue.length / 2;
+    const re = cueBoundaryRegex(cue);
+    let m;
+    while ((m = re.exec(window)) !== null) {
+      const cueMid = windowStart + m.index + cue.length / 2;
       const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
       if (dist < best.dist) best = { kind, dist };
-      idx = window.indexOf(cue, idx + 1);
     }
   };
 

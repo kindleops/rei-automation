@@ -5,6 +5,26 @@
 // of handleTextgridInboundWebhook (every exit path returns an object; thrown
 // errors are handled by the recorder) onto this contract.
 
+// `reply_deferred_burst` is deliberately NOT in TERMINAL_DISPOSITIONS: an
+// inbound whose decision was handed to the burst layer has not finished. The
+// 2026-08-03 incident recorded exactly this event as
+// `reply_deferred_compliance` — a *terminal* disposition meaning "policy said
+// stay silent" — while its burst sat open forever and nobody replied. A
+// scheduling handoff is not a compliance outcome, and marking it terminal made
+// the stuck burst invisible to the disposition SLO scanner.
+export const PENDING_DISPOSITIONS = Object.freeze({
+  REPLY_DEFERRED_BURST: "reply_deferred_burst",
+});
+
+export const PENDING_DISPOSITION_SET = Object.freeze(
+  new Set(Object.values(PENDING_DISPOSITIONS))
+);
+
+/** True when the inbound is parked awaiting burst finalization, not finished. */
+export function isPendingDisposition(value) {
+  return PENDING_DISPOSITION_SET.has(String(value ?? "").trim());
+}
+
 export const TERMINAL_DISPOSITIONS = Object.freeze({
   REPLY_SENT: "reply_sent",
   REPLY_DEFERRED_COMPLIANCE: "reply_deferred_compliance",
@@ -117,6 +137,26 @@ export function resolveInboundTerminalDisposition(result, context = {}) {
     // The reply is durably queued; transport (and any contact-window deferral)
     // is tracked on the send_queue row itself.
     return { disposition: TERMINAL_DISPOSITIONS.REPLY_SENT, detail };
+  }
+
+  // Burst handoff is a scheduling state, not a compliance outcome. It must be
+  // checked BEFORE the generic `deferred` match below, which previously
+  // swallowed `deferred_to_burst_flush` into REPLY_DEFERRED_COMPLIANCE and
+  // declared a still-unfinished inbound successfully terminalized.
+  if (
+    result.deferred_burst === true ||
+    reply_reason.includes("burst_flush") ||
+    reply_reason.includes("deferred_to_burst")
+  ) {
+    return {
+      disposition: PENDING_DISPOSITIONS.REPLY_DEFERRED_BURST,
+      pending: true,
+      detail: {
+        ...detail,
+        burst_id: clean(result.burst_id) || null,
+        awaiting_burst_finalization: true,
+      },
+    };
   }
 
   if (reply_reason.includes("contact_window") || reply_reason.includes("deferred")) {

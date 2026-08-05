@@ -1,4 +1,11 @@
 import {
+  authorizeSuppressionMutation,
+  detectSuppressionContradictions,
+  resolveSuppressionWrite,
+  BINDING_SUPPRESSION_FIELDS,
+  TUPLE_INVARIANT_CONTRADICTIONS,
+} from "@/lib/domain/lead-state/suppression-evidence.js";
+import {
   BLOCKING_CONTACTABILITY,
   STATE_SOURCE_CODES,
   normalizePatchToCanonical,
@@ -244,6 +251,28 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   return rowPatch;
 }
 
+/**
+ * Bookkeeping columns that do not constitute a state write. If a guard strips
+ * everything else, what is left is not a patch — upserting it would mint an
+ * empty row on a thread that had none. Both refusal paths MUST use this same
+ * list; when they diverged, one of them counted `updated_by` as substance.
+ */
+const NON_SUBSTANTIVE_ROW_FIELDS = Object.freeze(['thread_key', 'updated_at', 'updated_by']);
+
+function substantiveFields(rowPatch) {
+  return Object.keys(rowPatch).filter((field) => !NON_SUBSTANTIVE_ROW_FIELDS.includes(field));
+}
+
+/** Alerting must never break the write path. */
+async function emitSuppressionAlert(payload) {
+  try {
+    const { launchAlerts } = await import('@/lib/domain/alerts/launch-critical-alerts.js');
+    await launchAlerts.suppressionInvariantFailure(payload).catch(() => {});
+  } catch {
+    /* intentionally swallowed */
+  }
+}
+
 export async function patchUniversalLeadState({
   threadKey,
   patch = {},
@@ -259,6 +288,50 @@ export async function patchUniversalLeadState({
   const canonicalPatch = normalizePatchToCanonical(patch);
   if (!Object.keys(canonicalPatch).length) {
     return { ok: false, blocked: true, reason: 'no_allowed_patch_fields', thread_key: key };
+  }
+
+  // ── suppression evidence gate ──────────────────────────────────────────────
+  // This is the ONLY writer of contactability/suppression, so enforcing here
+  // defends against every caller rather than one repaired path. Binding
+  // suppression is a claim about what the seller told us; a lifecycle
+  // milestone, a condition disclosure, low confidence, or a human-review flag
+  // is not evidence of it. Production audit 2026-08-04 found 114 suppressed
+  // threads with no durable evidence and 292 in contradictory states, sourced
+  // from stage transitions writing a compliance field they do not own.
+  const suppression_authorization = authorizeSuppressionMutation({
+    patch: canonicalPatch,
+    evidence: meta.suppression_evidence || null,
+  });
+  if (!suppression_authorization.allowed) {
+    // Reject the ENTIRE binding portion — never write a half-suppressed,
+    // self-contradicting row. Non-binding fields in the same patch still apply.
+    for (const field of BINDING_SUPPRESSION_FIELDS) delete canonicalPatch[field];
+    if (String(canonicalPatch.disposition ?? '').toLowerCase() === 'suppressed') {
+      delete canonicalPatch.disposition;
+    }
+    if (String(canonicalPatch.inbox_bucket ?? '').toLowerCase() === 'suppressed') {
+      delete canonicalPatch.inbox_bucket;
+    }
+
+    await emitSuppressionAlert({
+      thread_key: key,
+      rejected_reason: suppression_authorization.reason,
+      change_source: meta.change_source || null,
+      change_reason: meta.reason || null,
+      attempted_contactability: patch?.contactability_status || null,
+      attempted_is_suppressed: patch?.is_suppressed ?? null,
+      attempted_disposition: patch?.disposition || null,
+    });
+
+    if (!Object.keys(canonicalPatch).length) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: 'unsupported_suppression_rejected',
+        rejected_reason: suppression_authorization.reason,
+        thread_key: key,
+      };
+    }
   }
 
   const previous = await fetchCurrentLeadState(supabase, key);
@@ -303,8 +376,109 @@ export async function patchUniversalLeadState({
     ...buildRowPatch(canonicalPatch, meta),
   };
 
+  // ── suppression tuple + merged-row invariant ───────────────────────────────
+  // The evidence gate above answers "may this caller assert suppression at
+  // all"; it necessarily runs before `previous` exists. THIS stage answers
+  // "what must the row look like afterwards", which needs prior state:
+  //
+  //   * a suppression writes is_suppressed + a blocking contactability +
+  //     suppressed_at together, or not at all (no partial suppression);
+  //   * a clear writes all three back together, and only with operator
+  //     authority (no partial clear, and no automated un-suppression — the
+  //     decision contract's `contactable` floor previously reset a binding
+  //     suppression on every inbound turn, which is how 292 production threads
+  //     ended up is_suppressed=true AND contactability_status=contactable);
+  //   * a patch touching neither leaves the row alone. Already-contradictory
+  //     rows are NOT repaired here — that is a data migration, not a write.
+  const suppressionGuards = [];
+  const suppressionWrite = resolveSuppressionWrite({
+    previous,
+    patch: canonicalPatch,
+    change_source: changeSource,
+    operator: meta.operator_id || meta.updated_by || null,
+    clearance: meta.suppression_clearance || null,
+  });
+  suppressionGuards.push(...suppressionWrite.guards);
+  for (const field of suppressionWrite.strip) {
+    delete rowPatch[field];
+    delete canonicalPatch[field];
+    if (field === 'contactability_status') {
+      // buildRowPatch pairs these with the contactability write.
+      delete rowPatch.contactability_source;
+      delete rowPatch.is_suppressed;
+    }
+  }
+  Object.assign(rowPatch, suppressionWrite.fields);
+
+  // If the suppression guard removed everything the caller actually asked for,
+  // say so rather than reporting a successful no-op write.
+  if (suppressionWrite.strip.length) {
+    if (!substantiveFields(rowPatch).length) {
+      return {
+        ok: true,
+        blocked: true,
+        reason: suppressionGuards[0] || 'suppression_write_blocked',
+        suppression_guards: suppressionGuards,
+        stage_guards: stageGuards,
+        thread_key: key,
+        previous,
+      };
+    }
+  }
+
+  // Final invariant, evaluated on the MERGED post-write row. Only the
+  // contradictions this patch would INTRODUCE can block it: a pre-existing
+  // contradictory row must not make every unrelated write to that thread fail.
+  const contradictionsBefore = new Set(detectSuppressionContradictions(previous || {}));
+  const introducedContradictions = detectSuppressionContradictions({
+    ...(previous || {}),
+    ...rowPatch,
+  }).filter((code) => !contradictionsBefore.has(code));
+  const blockingContradictions = introducedContradictions.filter((code) =>
+    TUPLE_INVARIANT_CONTRADICTIONS.includes(code),
+  );
+  if (introducedContradictions.length) suppressionGuards.push(...introducedContradictions);
+  if (blockingContradictions.length) {
+    // Fail closed: after tuple resolution a surviving contradiction means an
+    // input this model does not cover. Refuse the binding portion outright —
+    // valid evidence must never buy a self-contradicting row.
+    for (const field of BINDING_SUPPRESSION_FIELDS) delete rowPatch[field];
+    delete rowPatch.contactability_source;
+    suppressionGuards.push('suppression_contradiction_blocked');
+    await emitSuppressionAlert({
+      thread_key: key,
+      rejected_reason: 'suppression_contradiction_blocked',
+      contradictions: blockingContradictions,
+      change_source: meta.change_source || null,
+      change_reason: meta.reason || null,
+      attempted_contactability: patch?.contactability_status || null,
+      attempted_is_suppressed: patch?.is_suppressed ?? null,
+      attempted_disposition: patch?.disposition || null,
+    });
+    if (!substantiveFields(rowPatch).length) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: 'suppression_contradiction_blocked',
+        contradictions: blockingContradictions,
+        suppression_guards: suppressionGuards,
+        stage_guards: stageGuards,
+        thread_key: key,
+        previous,
+      };
+    }
+  }
+
   if (dryRun) {
-    return { ok: true, dry_run: true, thread_key: key, patch: rowPatch, previous, stage_guards: stageGuards };
+    return {
+      ok: true,
+      dry_run: true,
+      thread_key: key,
+      patch: rowPatch,
+      previous,
+      stage_guards: stageGuards,
+      suppression_guards: suppressionGuards,
+    };
   }
 
   const { data, error } = await supabase
@@ -334,6 +508,7 @@ export async function patchUniversalLeadState({
     thread_key: key,
     row: data,
     stage_guards: stageGuards,
+    suppression_guards: suppressionGuards,
     audit_event_ids: auditRows.map((row) => row.id),
     user_preferences: userPrefs,
     realtime_event: {

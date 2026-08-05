@@ -3292,7 +3292,15 @@ function detectPositiveSignals(message) {
 // ══════════════════════════════════════════════════════════════════════════
 
 const ASKING_PRICE_PATTERNS = [
-  /\b(?:i\s+want|want|asking|ask(?:ing)?\s+for|around|about|at|least|min|minimum)\s+\$?\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\b/i,
+  // Split from the cue list below: "at", "around" and "about" are also the way
+  // a seller states a TIME ("call at 3"), so a bare digit after them was read
+  // as an asking price — "Please call at 3" became an offer to sell for $3,
+  // with auto-reply allowed. Those three cues now require the number to look
+  // like money: an explicit $, a scale suffix, thousands separators, or 4+
+  // digits. The intent cues ("i want", "asking", "least"...) are unambiguous on
+  // their own and keep accepting a bare number.
+  /\b(?:i\s+want|want|asking|ask(?:ing)?\s+for|least|min|minimum)\s+\$?\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\b/i,
+  /\b(?:at|around|about)\s+(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,})/i,
   /^\s*(?:\$?\s*)?\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\s*(?:as\s+is|as-is|firm|obo|neg|negotiable)?\s*\$?\s*$/i,
   /\b\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million)\b/i,
   /\b\d{2,3}k\b/i,
@@ -3304,7 +3312,11 @@ const ASKING_PRICE_PATTERNS = [
   // Negation-guarded: "not worth 200k" / "isn't worth 50k" are refusals, not
   // asking prices.
   /\b(?<!\b(?:not|isn't|isnt|ain't|aint|never|wasn't|wasnt)\s)worth\s+\$?\s*\d[\d,.]*/i,
-  /\bbetween\s+\$?\s*\d[\d,.]*\s+and\s+\$?\s*\d[\d,.]*/i,
+  // At least one side must be more than a bare one-or-two-digit number, so
+  // "between 3 and 4" (a time window) is not a price while
+  // "between $90,000 and $100,000", "between 90k and 100k" and
+  // "between 240 and 260" (REI shorthand for 240k-260k) all still are.
+  /\bbetween\s+(?:\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,})\s+and\s+\$?\s*[\d,.]+|\$?\s*[\d,.]+\s+and\s+\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,}))/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
   /\bmi\s+precio\s+es\b/i,
@@ -3456,7 +3468,26 @@ export function parseSellerAskingPrice(message) {
   let evidence = null;
 
   const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
-  if (between) {
+  // This parser is a THIRD, independent consumer of the price signal: it sets
+  // price_parse without consulting ASKING_PRICE_PATTERNS, so "between 3 and 4"
+  // — a time window — was still read as a $3 asking price after that gate was
+  // repaired.
+  //
+  // The test is what makes a range a CLOCK, not what makes it money. Requiring
+  // a money shape was too strict and rejected "Between 240 and 260", which in
+  // REI SMS is a 240k-260k range — the same convention the bare-"250" comment
+  // in scalePriceToken notes. A range is a clock only when BOTH sides are bare
+  // one-or-two-digit numbers with no currency marker, suffix or separator;
+  // anything larger or qualified is a price.
+  const looks_like_clock_side = (num, suffix) =>
+    !suffix && !/[.,]/.test(String(num)) && String(num).replace(/\D/g, "").length <= 2;
+  const between_is_clock_range = Boolean(
+    between &&
+      !/\$/.test(between[0]) &&
+      looks_like_clock_side(between[1], between[2]) &&
+      looks_like_clock_side(between[3], between[4])
+  );
+  if (between && !between_is_clock_range) {
     const lo = scalePriceToken(between[1], between[2]);
     const hi = scalePriceToken(between[3], between[4]);
     if (lo != null && hi != null) {
@@ -3560,7 +3591,22 @@ function scalePriceToken(numStr, suffix) {
   if (Number.isNaN(val)) return null;
   const s = (suffix || "").toLowerCase();
   if (s.startsWith("k") || s.startsWith("thou")) val *= 1000;
-  if (s.startsWith("m")) val *= 1000000;
+  // Spanish "mil" is a THOUSAND, not a million: "150 mil" is $150,000, and
+  // scaling it as a million produced a $150,000,000 asking price on the single
+  // most common way a Spanish-speaking seller states a price. The exact token
+  // must be checked BEFORE the generic million branch, which it prefixes.
+  // monetary-understanding.js already had this right (mil: 1_000).
+  else if (s === "mil") {
+    // "150,000 mil" is a Spanish speaker writing the magnitude twice — it means
+    // 150 thousand, and multiplying gave $150,000,000. The arithmetic was right
+    // on a redundant input; the reading was wrong. Declining to multiply when
+    // the base ALREADY carries thousands magnitude needs no guess about which
+    // magnitude was meant, so it stays a rule rather than a disambiguation:
+    // "mil" after a thousands-scale number is redundant, not multiplicative.
+    const base_is_already_thousands = /[.,]\d{3}\b/.test(String(numStr)) || val >= 1000;
+    if (!base_is_already_thousands) val *= 1000;
+  }
+  else if (s.startsWith("m")) val *= 1000000;
   // bare "250" in "no less than 250" often means 250k in REI SMS — leave as-is if < 1000 without suffix
   return val;
 }
@@ -4546,12 +4592,76 @@ function resolveIntents(
   }
 
   // 9. CALLBACK / TEXT REQUESTS
-  if (includesAny(text, [
-    "call me", "phone me", "talk on phone", "give me a call",
-    "text me", "send me a text", "message me", "whatsapp",
-    "my number is", "call at", "reach me at",
-    "en qué te puedo ayudar", "en que te puedo ayudar",
-  ])) {
+  //
+  // Two classes of trigger. The phrase list below is unconditional: each entry
+  // is a request on its own terms. Two former entries were NOT — the bare
+  // "have a call" and the bare "call at" both matched
+  // "I have a call at 3pm today", which reports an existing appointment and
+  // does not request contact. Both now require a request or
+  // mutual-availability subject, so the noun phrase ("a call at 3") is
+  // distinguished from the verb ("call at 3").
+  //
+  // Removing "have a call" alone was not sufficient: the same message still
+  // matched "call at", so the false positive survived. Both had to be gated.
+  //
+  // "have a call" preceded by a request / mutual-availability subject:
+  // "can we have a call", "could we have a short call", "lets have a call",
+  // "we can have a call", "I would like to have a call". The bounded word gap
+  // admits an adjective ("a quick call"), which plain substring matching could
+  // not span — those forms previously fell through to `unclear`. Negation
+  // words are excluded from the gap so "can not have a call" does not qualify.
+  const have_a_call_request_re =
+    /\b(?:can|could|should|shall|may|might|let'?s|lets|let\s+us|want(?:ed)?\s+to|wanna|would\s+like\s+to|like\s+to|love\s+to|happy\s+to|glad\s+to|willing\s+to|down\s+to|ready\s+to|able\s+to|need\s+to|we\s+(?:can|could|should)|i\s+(?:can|could|should))\s+(?:(?!not\b|never\b|don'?t\b|doesn'?t\b|won'?t\b|cannot\b)\w+\s+){0,3}?have\s+(?:a|an|another)\s+(?:\w+\s+){0,2}call\b/i;
+  // "call at" as a VERB ("call at 5pm", "call at 2145551212"), never as the
+  // object of a noun phrase ("a call at 3", "my call at 4") — that is the
+  // seller describing an appointment they already have.
+  //
+  // This REQUIRES a positive subject rather than excluding determiners. The
+  // earlier determiner lookbehind was defeated by any adjective sitting between
+  // the determiner and the noun: in "I have a scheduled call at 3pm" the token
+  // immediately before "call" is "scheduled", so the lookbehind did not apply
+  // and an appointment report classified as a request for contact. Enumerating
+  // the ways a noun phrase can be padded is open-ended; enumerating the ways a
+  // request is introduced is not.
+  const call_at_request_re = new RegExp(
+    [
+      // Imperative, at the start of the message or after a clause boundary:
+      // "call at 2145551212", "Sure, call at 3", "I'm busy. Please call at 5".
+      String.raw`(?:^|[.!?;,]\s*|\b(?:and|so|then|but|ok|okay|sure|yes|yeah|yep)\s*,?\s+)(?:please\s+|pls\s+|kindly\s+|just\s+)*call\s+at\b`,
+      // Request: "can you call at 3", "could we call at 3".
+      String.raw`\b(?:can|could|may|would|will|should|shall)\s+(?:you|we|u|i)\s+(?:please\s+|just\s+)*call\s+at\b`,
+      // Permission / invitation: "you can call at 3", "we could call at 3".
+      String.raw`\b(?:you|u|we)\s+(?:can|could|may|might|should)\s+(?:please\s+|just\s+)*call\s+at\b`,
+      // Politeness-led imperative anywhere: "…, please call at 3".
+      String.raw`\bplease\s+call\s+at\b`,
+      // Availability / invitation frames: "feel free to call at", "best to call at 5".
+      String.raw`\b(?:feel\s+free\s+to|free\s+to|ok(?:ay)?\s+to|fine\s+to|welcome\s+to|try\s+to|best\s+to|better\s+to|good\s+to|happy\s+to)\s+call\s+at\b`,
+      String.raw`\b(?:best|good|great|fine)\s+time\s+to\s+call\s+at\b`,
+    ].join("|"),
+    "i"
+  );
+
+  if (
+    includesAny(text, [
+      "call me", "phone me", "talk on phone", "give me a call",
+      "text me", "send me a text", "message me", "whatsapp",
+      "my number is", "reach me at",
+      // Scheduling / mutual-availability forms. "We can schedule a call and talk"
+      // classified as `unclear` (0.6) and went to review — an explicit
+      // willingness to talk is call readiness, not ambiguity. Each form requires
+      // an explicit call/scheduling token, so a bare "we can talk later" stays
+      // out and keeps its own need_time meaning.
+      "schedule a call", "schedule a time", "set up a call", "set up a time",
+      "setup a call", "we can schedule", "lets schedule", "let's schedule",
+      "hop on a call", "jump on a call", "get on a call",
+      "call whenever", "call anytime", "call any time",
+      "when can you call", "when can we talk", "good time to call",
+      "programar una llamada", "agendar una llamada",
+      "en qué te puedo ayudar", "en que te puedo ayudar",
+    ]) ||
+    have_a_call_request_re.test(text) ||
+    call_at_request_re.test(text)
+  ) {
     intents.push("callback_requested");
   }
 
@@ -5051,6 +5161,24 @@ function resolveIntents(
   ) {
     primary = "ownership_confirmed";
   }
+  // NOTE — a burst-aggregate rescue was built here and deliberately removed.
+  // A multi-fragment burst is newline-joined, so isShortContextualReply (which
+  // tests the whole body) is false for all of them and the contextual override
+  // above is unreachable: "Yeah" binds at 0.88 but "Yeah\nits a 3br" falls to
+  // unclear/0.64 and goes to human review. Two attempts to rescue that were
+  // measured and reverted; see burst-aggregate-short-reply.test.mjs for the
+  // evidence, and do not re-add one without reading it.
+  //
+  // The short version: any such rescue can only fire when the extra fragment is
+  // UNCLASSIFIABLE, because a fragment the classifier understands makes the
+  // whole aggregate resolve and the rescue is never reached. Inside that set,
+  // "its a 3br" and "im blocking this number" are the same to this classifier —
+  // both unclear at 0.6. So the rescue's entire domain is exactly the region
+  // where benign detail cannot be told from a demand to stop, and no phrase
+  // list closes that: a blocklist must enumerate an open set, and an allowlist
+  // fires only where the classifier already succeeded. Closing this properly
+  // needs a disengagement model, not more vocabulary.
+
   const secondary =
     unique_intents.find((intent) => intent !== primary) ?? null;
   const secondary_intents = unique_intents.filter((intent) => intent !== primary);
