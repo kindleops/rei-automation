@@ -379,6 +379,17 @@ small {
   color: #05070d !important;
 }
 
+/* The chip follows the accent on some surfaces, and two accents are dark enough
+   that near-black FAILS on them. Measured across all five accents with
+   #05070d: cyan 8.0:1 · emerald 8.6:1 · amber 10.4:1 · violet 3.2:1 ✗ ·
+   rose 3.4:1 ✗. White on those two: violet 5.8:1 · rose 5.2:1. */
+:root:root[data-nexus-accent='violet'] .nx-notification-button span,
+:root:root[data-nexus-accent='rose'] .nx-notification-button span,
+:root:root [data-nexus-accent='violet'] .nx-notification-button span,
+:root:root [data-nexus-accent='rose'] .nx-notification-button span {
+  color: #ffffff !important;
+}
+
 /* #64748b — the `--text-muted` slate the lane brief flagged — measures 4.03:1
    as a section heading. */
 :root:root .nx-card-section__body h4 {
