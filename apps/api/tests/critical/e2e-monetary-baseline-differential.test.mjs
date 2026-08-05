@@ -283,8 +283,43 @@ test("a redundant 'NNN,NNN mil' resolves to the magnitude actually stated", () =
   // "150,000 mil" carries BOTH a thousands separator and the scale word — a
   // redundant form meaning 150 thousand. It was briefly an accepted residual at
   // 150,000,000 (the mil multiplier applied to a base already at thousands
-  // magnitude), then closed in 21f8a395 rather than shipped.
+  // magnitude), then closed in 21f8a395 / dae3a945 rather than shipped.
   assert.equal(askingPrice("150,000 mil"), 150000);
+});
+
+test("DOCUMENTED RESIDUAL: 'mil' after a thousands-scale number is read as redundant, not multiplicative", () => {
+  // A DECISION, not a defect awaiting a fix. Treating "mil" as redundant after a
+  // number that already carries thousands magnitude is what closed the
+  // 150,000,000 inflation — and the same rule means "1,200 mil" resolves to
+  // 1,200 rather than 1,200,000, which is what eeee5bd8 returned.
+  //
+  // Accepted for four reasons, recorded so this is not rediscovered as a bug:
+  //  1. It is CONSISTENT across both parsers — no divergence, which is the
+  //     condition that let the original Spanish blocker hide.
+  //  2. It fails in the SAFE direction. The original defect OVER-stated by 1000x
+  //     and could authorize an absurd offer; this UNDER-states, and an
+  //     under-stated price is caught by a human rather than acted on.
+  //  3. The natural Spanish forms for that magnitude are "1.2 millones" and
+  //     "un millón", not "1,200 mil".
+  //  4. Fixing it requires a magnitude threshold — i.e. guessing which of two
+  //     stated magnitudes the seller meant. That class of disambiguation
+  //     heuristic is exactly how regression families 2-5 were introduced.
+  for (const [message, expected, baseline] of [
+    ["1,200 mil", 1200, 1200000],
+    ["9,000 mil", 9000, 9000000],
+  ]) {
+    assert.equal(askingPrice(message), expected, `ACCEPTED RESIDUAL (eeee5bd8 gave ${baseline})`);
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      expected,
+      "and both parsers must agree on the residual"
+    );
+  }
+
+  // The forms the rule exists to protect are unaffected.
+  assert.equal(askingPrice("150 mil"), 150000);
+  assert.equal(askingPrice("2 mil"), 2000);
+  assert.equal(askingPrice("1.2 million"), 1200000);
 });
 
 test("the two extractors never diverge on 'mil'", () => {
@@ -300,9 +335,12 @@ test("the two extractors never diverge on 'mil'", () => {
   // future fix to one extractor must move the other with it.
   for (const message of [
     "150,000 mil",
+    "1,200 mil",
+    "9,000 mil",
     "quiero 150 mil",
     "150 mil",
     "pido 200 mil",
+    "2 mil",
     "1.2 million",
     "150k",
   ]) {
