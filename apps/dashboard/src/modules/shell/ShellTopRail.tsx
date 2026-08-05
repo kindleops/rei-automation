@@ -76,11 +76,16 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
     return () => window.removeEventListener(SHELL_PANEL_OPEN_EVENT, handle as EventListener)
   }, [])
 
-  /** §11.10 — overlays close on route change. */
-  useEffect(() => {
+  /** §11.10 — overlays close on route change. Adjusted during render rather
+   *  than in an effect: an effect would paint the previous route's panel for a
+   *  frame before closing it, and `react-hooks/set-state-in-effect` rejects it.
+   *  This is React's documented "adjust state when a prop changes" pattern. */
+  const [lastRoutePath, setLastRoutePath] = useState(routePath)
+  if (lastRoutePath !== routePath) {
+    setLastRoutePath(routePath)
     setOpenPanel(null)
     setOpenSurface(null)
-  }, [routePath])
+  }
 
   /** Focus returns to the trigger the panel was opened from (§16.3). Panels
    *  rendered with `surface: 'self'` cannot do this themselves. */

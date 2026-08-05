@@ -27,6 +27,13 @@ export const getFocusable = (root: HTMLElement | null): HTMLElement[] => {
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => {
     if (el.hasAttribute('disabled')) return false
     if (el.getAttribute('aria-hidden') === 'true') return false
+    /* `tabindex="-1"` is focusable programmatically but NOT tabbable. The
+       `button:not([disabled])` clause above matched such elements anyway, so
+       the computed "last" element was one the browser never lands on: Tab
+       walked straight past the wrap point and out of the overlay. Caught in a
+       real browser — Tab from the command palette reached the copilot orb
+       behind it. DOM order is preserved, so `first` stays correct. */
+    if (el.getAttribute('tabindex') === '-1') return false
     const rect = el.getBoundingClientRect()
     return rect.width > 0 || rect.height > 0
   })
