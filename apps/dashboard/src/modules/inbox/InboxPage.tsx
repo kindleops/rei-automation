@@ -202,6 +202,7 @@ import {
   getInboxViewCounts,
   getSavedPresetConfig,
   isSuppressedThread,
+  resolveThreadOwnerName,
   resolveThreadPrimaryName,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
@@ -266,6 +267,9 @@ import './conversation-redesign.css'
 import './conversation-composer-premium.css'
 import './conversation-header-timeline.css'
 import './conversation-live.css'
+// Lane D — conversation identity / receipts / mobile composer. All-new
+// `nx-idv-*` namespace, so its position here does not contend with any lane.
+import '../../views/conversation/styles/conversation-identity.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
 import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
@@ -3737,11 +3741,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         likely_renting: selectedRecord.likely_renter === true
           || selectedRecord.likelyRenter === true
           || identityClass === 'renter_occupant',
-        ownership_status: identityClass === 'confirmed_owner'
-          ? 'confirmed'
-          : identityClass === 'probable_owner'
-            ? 'inferred'
-            : 'unconfirmed',
+        // RC-7 (Lane D): this seed is synthesised on the client when the
+        // participants API fails or returns nothing. It has no confirmation
+        // record behind it, so it must not manufacture one. `contact_identity_class`
+        // is a heuristic string — measured live at 'probable_owner' for 200/200
+        // threads — and previously became `ownership_status: 'confirmed' | 'inferred'`,
+        // which rendered as "Verified owner ✓".
+        ownership_status: 'unconfirmed',
+        ownership_confidence: null,
+        ownership_source: null,
+        ownership_inference_reason: `client_seed_from_contact_identity_class:${identityClass}`,
+        is_client_derived: true,
       } satisfies PropertyParticipant
     })() : null
     const fallbackParticipant = fallbackSeed
@@ -3752,6 +3762,24 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       : null
 
     const threadProspectName = selected ? resolveThreadPrimaryName(selected) : null
+
+    // Lane D: seed the card from the newly selected thread IMMEDIATELY.
+    //
+    // Caught in a real browser, not in review: the participants request for this
+    // property takes ~17s (and is often aborted), and `selectedParticipant` kept
+    // the PREVIOUS thread's contact for that whole window. The card therefore
+    // rendered one thread's contact name above another thread's owner record —
+    // "Janmar Holdings LLC" over "2 named owners: Heyward L Zimmerman ·
+    // Geraldine Whiters". Mixing two identities is exactly what this lane must
+    // not do.
+    //
+    // The seed is derived from the selected row, so it is always the right
+    // thread, and it is flagged `is_client_derived` with `ownership_status:
+    // 'unconfirmed'` — it can never be mistaken for a confirmation.
+    setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+    setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
+    setMasterOwnerHouseholdLabel(null)
+    setNextEligibleContact(null)
 
     const loadParticipants = () => {
       if (cancelled) return
@@ -3787,7 +3815,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
         })
         .finally(() => {
-          if (stillCurrent()) setPropertyParticipantsLoading(false)
+          // RC-4b (Lane D): `stillCurrent()` can never pass for a superseded
+          // request — `selection-request-guard.ts:170-176` `abortResource` bumps
+          // `generation` AND nulls `slot.identity`, so `accept()` is structurally
+          // forbidden from returning true once the request is aborted. Gating the
+          // clear on it meant an aborted request left `propertyParticipantsLoading`
+          // stuck true and ActiveProspectCard showed "Loading…" forever.
+          //
+          // Ownership of the *data* still belongs to the current request only
+          // (that gate stays on `.then`/`.catch`); ownership of the *flag* is
+          // released by whichever request settles last, current or not. This is
+          // the same guard the team already applied to the sibling early-return
+          // path at the top of this effect.
+          setPropertyParticipantsLoading(false)
         })
     }
 
@@ -4193,9 +4233,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       case 'open_dossier':
         handleOpenDealIntelligence(thread.id)
         break
-      case 'add_note':
-        handleOpenDealIntelligence(thread.id)
-        break
+      // RC-10 (Lane D): `add_note` had no note editor behind it — it only opened
+      // the intelligence panel. Every caller has been removed; the case goes with
+      // them so nothing can route to it again by accident.
       case 'mark_reviewed':
         await handleThreadAction(thread, 'read')
         break
@@ -4814,6 +4854,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         participants={propertyParticipants}
         selectedParticipant={selectedParticipant}
         prospectName={selected ? resolveThreadPrimaryName(selected) : null}
+        ownerRecordName={selected ? resolveThreadOwnerName(selected) : null}
         loading={propertyParticipantsLoading}
         onSelectParticipant={handleParticipantSelect}
         onTryNextEligible={handleTryNextEligible}

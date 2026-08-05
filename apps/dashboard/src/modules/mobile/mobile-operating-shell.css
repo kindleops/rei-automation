@@ -1398,7 +1398,8 @@ html.is-mobile-layout {
   .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-conv-command-strip.is-compact .nx-conv-glass-btn {
     min-height: 26px !important;
     padding: 3px 7px 3px 6px !important;
-    font-size: 10px !important;
+    /* Lane D — constitution R2.1: 11px is the floor. */
+    font-size: 11px !important;
     gap: 4px !important;
     border-radius: 7px !important;
   }
@@ -1409,7 +1410,8 @@ html.is-mobile-layout {
   }
 
   .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-conv-command-strip.is-compact .nx-conv-glass-btn__caret {
-    font-size: 8px !important;
+    /* Lane D — constitution R2.1: 11px is the floor. */
+    font-size: 11px !important;
     margin-left: 0 !important;
   }
 
