@@ -29,14 +29,18 @@ const THREAD = "+15550100042";
 const RECEIVED_AT = "2026-08-03T22:40:31.039Z";
 
 let orchestrationCalls = [];
+/** Ordered record of the calls under test, so ordering is provable, not assumed. */
+let callOrder = [];
 
 function baseDeps() {
   orchestrationCalls = [];
+  callOrder = [];
   const ledger = createInMemoryIdempotencyLedger();
   return {
     ...makeInboundWebhookBaseDeps({ getSupabaseClient: () => makeInboundLifecycleSupabase() }),
     // Capture what orchestration actually receives.
     processSellerInboundMessage: async (args) => {
+      callOrder.push("orchestration");
       orchestrationCalls.push(args);
       return { ok: true, queued: false, effective_action: "none" };
     },
@@ -118,10 +122,12 @@ test("the live webhook passes conversation_context into the classify() whose res
   __setTextgridInboundTestDeps({
     ...baseDeps(),
     buildConversationContext: async (args) => {
+      callOrder.push("buildConversationContext");
       context_calls.push(args);
       return CONTEXT;
     },
     classify: async (message, brain, options) => {
+      callOrder.push("classify");
       classify_calls.push({ message, brain, options });
       return CLASSIFICATION;
     },
@@ -133,16 +139,37 @@ test("the live webhook passes conversation_context into the classify() whose res
   assert.notEqual(result?.ok, false, `webhook must not fail: ${JSON.stringify(result?.reason ?? null)}`);
 
   // Context was built by the LIVE handler, from the real inbound timestamp.
-  assert.equal(context_calls.length >= 1, true, "the webhook must build context itself");
+  assert.equal(context_calls.length, 1, "the webhook must build context itself, exactly once");
   assert.equal(context_calls[0].thread_key, THREAD);
   assert.equal(context_calls[0].inbound_received_at, RECEIVED_AT, "no fabricated now()");
 
-  // It reached classify, with the no-AI guarantee intact.
-  assert.equal(classify_calls.length >= 1, true);
+  // Ordering is the whole point: context that arrives after classification
+  // cannot bind the reply. Pinned rather than inferred.
+  assert.deepEqual(
+    callOrder,
+    ["buildConversationContext", "classify", "orchestration"],
+    "context must be built BEFORE the authoritative classification"
+  );
+
+  // Exactly one classification PER WEBHOOK INVOCATION. This is deliberately
+  // not a claim about the message's whole lifetime: when burst mode is on, a
+  // fragment is classified here and the AGGREGATED body is classified again at
+  // flush time inside processSellerInboundMessage. Two calls, two different
+  // inputs, both correct. What must never happen is this handler classifying
+  // twice — the mock returns the same object every time, so a duplicate call
+  // would otherwise slip past the identity assertion below.
+  assert.equal(classify_calls.length, 1, "classify must run exactly once");
   const options = classify_calls[0].options || {};
   assert.equal(options.heuristicOnly, true);
   assert.equal(options.conversation_context?.last_outbound_use_case, "ownership_check");
   assert.equal(options.conversation_context?.unanswered_question, true);
+  // Identity, not shape: the context handed to classify must be the object the
+  // webhook built, never a separately-derived look-alike.
+  assert.equal(
+    options.conversation_context,
+    CONTEXT,
+    "the exact context object the webhook built, not a re-derived one"
+  );
 
   // The context-derived classification is the one orchestration consumes —
   // not a second classify, and not the inbound_review_fallback.
@@ -155,10 +182,17 @@ test("the live webhook passes conversation_context into the classify() whose res
   assert.equal(handed, CLASSIFICATION, "the exact object, not a re-derived one");
 });
 
-test("processSellerInboundMessage's own fallback is NOT production coverage", async (t) => {
-  // The webhook always supplies a classification, so the `if (!classification)`
-  // branch inside the orchestrator never executes for live traffic. If it ever
-  // did, the context wiring in the webhook would be pointless.
+test("the immediate webhook leg always supplies its own classification", async (t) => {
+  // On the immediate (burst-disabled) leg the webhook always supplies a
+  // classification, so the `if (!classification)` branch inside the
+  // orchestrator does not execute — which is exactly why the webhook has to
+  // build the context itself.
+  //
+  // That branch is NOT dead code, though: with burst mode enabled the webhook
+  // defers to the burst coordinator, which passes `classification: null` on
+  // purpose so the AGGREGATED body is re-classified at flush time. The
+  // orchestrator fallback is the live classification path for that leg, and it
+  // builds its own conversation_context there.
   __setTextgridInboundTestDeps({
     ...baseDeps(),
     buildConversationContext: async () => null,
@@ -171,7 +205,7 @@ test("processSellerInboundMessage's own fallback is NOT production coverage", as
   assert.equal(orchestrationCalls.length, 1);
   assert.ok(
     orchestrationCalls[0].classification,
-    "the webhook always supplies a classification, so the orchestrator fallback is dead for live traffic"
+    "the immediate leg always supplies a classification, so the orchestrator fallback is skipped here"
   );
 });
 

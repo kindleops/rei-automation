@@ -4546,23 +4546,53 @@ function resolveIntents(
   }
 
   // 9. CALLBACK / TEXT REQUESTS
-  if (includesAny(text, [
-    "call me", "phone me", "talk on phone", "give me a call",
-    "text me", "send me a text", "message me", "whatsapp",
-    "my number is", "call at", "reach me at",
-    // Scheduling / mutual-availability forms. "We can schedule a call and talk"
-    // classified as `unclear` (0.6) and went to review — an explicit
-    // willingness to talk is call readiness, not ambiguity. Each form requires
-    // an explicit call/scheduling token, so a bare "we can talk later" stays
-    // out and keeps its own need_time meaning.
-    "schedule a call", "schedule a time", "set up a call", "set up a time",
-    "setup a call", "we can schedule", "lets schedule", "let's schedule",
-    "hop on a call", "jump on a call", "get on a call", "have a call",
-    "call whenever", "call anytime", "call any time",
-    "when can you call", "when can we talk", "good time to call",
-    "programar una llamada", "agendar una llamada",
-    "en qué te puedo ayudar", "en que te puedo ayudar",
-  ])) {
+  //
+  // Two classes of trigger. The phrase list below is unconditional: each entry
+  // is a request on its own terms. Two former entries were NOT — the bare
+  // "have a call" and the bare "call at" both matched
+  // "I have a call at 3pm today", which reports an existing appointment and
+  // does not request contact. Both now require a request or
+  // mutual-availability subject, so the noun phrase ("a call at 3") is
+  // distinguished from the verb ("call at 3").
+  //
+  // Removing "have a call" alone was not sufficient: the same message still
+  // matched "call at", so the false positive survived. Both had to be gated.
+  //
+  // "have a call" preceded by a request / mutual-availability subject:
+  // "can we have a call", "could we have a short call", "lets have a call",
+  // "we can have a call", "I would like to have a call". The bounded word gap
+  // admits an adjective ("a quick call"), which plain substring matching could
+  // not span — those forms previously fell through to `unclear`. Negation
+  // words are excluded from the gap so "can not have a call" does not qualify.
+  const have_a_call_request_re =
+    /\b(?:can|could|should|shall|may|might|let'?s|lets|let\s+us|want(?:ed)?\s+to|wanna|would\s+like\s+to|like\s+to|love\s+to|happy\s+to|glad\s+to|willing\s+to|down\s+to|ready\s+to|able\s+to|need\s+to|we\s+(?:can|could|should)|i\s+(?:can|could|should))\s+(?:(?!not\b|never\b|don'?t\b|doesn'?t\b|won'?t\b|cannot\b)\w+\s+){0,3}?have\s+(?:a|an|another)\s+(?:\w+\s+){0,2}call\b/i;
+  // "call at" as a VERB ("call at 5pm", "call at 2145551212"), never as the
+  // object of a determiner ("a call at 3", "my call at 4") — that is the
+  // seller describing an appointment they already have.
+  const call_at_request_re =
+    /(?<!\b(?:a|an|another|the|this|that|my|your|his|her|their|our)\s)\bcall\s+at\b/i;
+
+  if (
+    includesAny(text, [
+      "call me", "phone me", "talk on phone", "give me a call",
+      "text me", "send me a text", "message me", "whatsapp",
+      "my number is", "reach me at",
+      // Scheduling / mutual-availability forms. "We can schedule a call and talk"
+      // classified as `unclear` (0.6) and went to review — an explicit
+      // willingness to talk is call readiness, not ambiguity. Each form requires
+      // an explicit call/scheduling token, so a bare "we can talk later" stays
+      // out and keeps its own need_time meaning.
+      "schedule a call", "schedule a time", "set up a call", "set up a time",
+      "setup a call", "we can schedule", "lets schedule", "let's schedule",
+      "hop on a call", "jump on a call", "get on a call",
+      "call whenever", "call anytime", "call any time",
+      "when can you call", "when can we talk", "good time to call",
+      "programar una llamada", "agendar una llamada",
+      "en qué te puedo ayudar", "en que te puedo ayudar",
+    ]) ||
+    have_a_call_request_re.test(text) ||
+    call_at_request_re.test(text)
+  ) {
     intents.push("callback_requested");
   }
 
