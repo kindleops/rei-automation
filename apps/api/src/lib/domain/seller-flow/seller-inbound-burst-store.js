@@ -280,6 +280,18 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
         }
 
         if (!open) {
+          // Mirrors the Supabase insert-new guard exactly (see the comment
+          // there): an authorized thread can still carry a message outside the
+          // session window, and that row would be born OPEN, unflushable, and
+          // blocking every later append on the thread.
+          const prospective = {
+            thread_key: group,
+            first_received_at: message?.received_at || nowIso,
+            created_at: nowIso,
+          };
+          if (!matchesBurstScope(prospective, scoped)) {
+            return { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false };
+          }
           // Next generation = max existing + 1
           const gens = listAll()
             .filter((b) => b.thread_key === group)
@@ -726,6 +738,32 @@ export function createSupabaseSellerInboundBurstStore({
     }
 
     if (!open) {
+      // Opening a NEW generation. The thread allowlist was already applied
+      // before fetchOpen, but that is only half the scope: an AUTHORIZED
+      // thread can still carry a message whose time falls outside the session
+      // window (provider clock skew, a replayed timestamp, or simply a message
+      // arriving after the session expired).
+      //
+      // Inserting that row is not a harmless no-op. It is created OPEN and
+      // out-of-scope, so nothing can ever flush it (listEligible and
+      // claimEligible both exclude it) AND it becomes the thread's one open
+      // generation — which then trips the out-of-scope guard above for every
+      // subsequent message. One skewed timestamp would swallow its own message
+      // and wedge the proof thread behind an unflushable row.
+      //
+      // Test the row we are ABOUT to write, with the same predicate that
+      // guards every other door. Refuse before the generation read, so an
+      // unauthorized append still issues no write and no further query.
+      const prospective = {
+        thread_key: group,
+        first_received_at: message?.received_at || nowIso,
+        created_at: nowIso,
+      };
+      if (!matchesBurstScope(prospective, scoped)) {
+        return {
+          value: { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false },
+        };
+      }
       const { data: lastRows } = await supabase
         .from(TABLE)
         .select("generation")

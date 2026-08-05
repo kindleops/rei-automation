@@ -930,3 +930,99 @@ test("append under GLOBAL scope: rollover behaviour is preserved exactly", async
   assert.equal(log.updates.length, 1, "the force-eligible write still happens under global scope");
   assert.equal(log.updates[0].patch.eligible_at, "2026-08-05T10:30:00.000Z");
 });
+
+// ── 11. The insert-new door: the row we are ABOUT to write ───────────────────
+//
+// The thread allowlist alone is not the whole scope. An AUTHORIZED thread can
+// still carry a message whose time falls outside the session window — provider
+// clock skew, a replayed timestamp, or a message that simply arrives after the
+// session expired. Inserting that row is not a harmless no-op:
+//
+//   * it is born OPEN and out-of-scope, so NOTHING can ever flush it — both
+//     listEligible and claimEligible exclude it by the same predicate; and
+//   * it becomes the thread's one OPEN generation, so it then trips the
+//     out-of-scope guard for every subsequent message on that thread.
+//
+// One skewed timestamp would swallow its own message and wedge the proof thread
+// behind a row that can never be worked. So the prospective row is tested with
+// the same predicate that guards every other door, before it is written.
+
+const LATE = "2026-08-05T16:00:00.000Z"; // after SESSION_END
+
+test("append: an authorized thread with an out-of-window message inserts NOTHING", async () => {
+  const store = createMemorySellerInboundBurstStore({ now: () => LATE });
+  const result = await store.appendMessage({
+    thread_key: THREAD, // in the allowlist
+    message: { event_id: "e-late", provider_message_id: "p-late", body: "late", received_at: LATE },
+    now: LATE,
+    scope: PROOF_SCOPE,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "thread_out_of_scope");
+  assert.equal(result.burst, null);
+  assert.equal(store._debug.listAll().length, 0, "no orphan generation was opened");
+});
+
+test("append: the orphan row this prevents could never have been flushed", async () => {
+  // Demonstrates the cost of the row we now refuse: seed exactly what the
+  // unguarded insert would have produced and show it is unworkable.
+  const orphan = {
+    ...PROOF,
+    id: "row-orphan",
+    burst_id: "sib:+16128072000:g9:e-late",
+    first_received_at: LATE,
+    last_received_at: LATE,
+    eligible_at: "2026-08-05T16:00:20.000Z",
+  };
+  const store = seedMemoryStore([orphan]);
+  store._debug.openByThread.set(THREAD, orphan.id);
+
+  const eligible = await store.listEligible({ now: "2026-08-05T16:01:00.000Z", scope: PROOF_SCOPE });
+  assert.deepEqual(eligible, [], "unflushable: the same scope that admitted the write excludes the row");
+
+  const claim = await store.claimEligible({ thread_key: THREAD, now: "2026-08-05T16:01:00.000Z", scope: PROOF_SCOPE });
+  assert.equal(claim.ok, false, "unclaimable too");
+
+  // And it wedges the thread: the next in-window message is refused because
+  // this row is now the thread's out-of-scope OPEN generation.
+  const next = await store.appendMessage({
+    thread_key: THREAD,
+    message: { event_id: "e-next", provider_message_id: "p-next", body: "hello", received_at: "2026-08-05T13:00:00.000Z" },
+    now: "2026-08-05T13:00:00.000Z",
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(next.reason, "open_generation_out_of_scope", "the thread is wedged behind it");
+  assert.equal(next.blocking_burst_id, orphan.burst_id);
+});
+
+test("append: a foreign thread is still refused before any query, and inserts nothing", async () => {
+  const { supabase, log } = makeNoWriteBurstSupabase({ rows: [] });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+  const result = await store.appendMessage({
+    thread_key: OTHER_THREAD,
+    message: { event_id: "e-seller", provider_message_id: "p-seller", body: "yeah I might sell", received_at: NOW },
+    now: NOW,
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "thread_out_of_scope");
+  assert.deepEqual(log.selects, [], "no query");
+  assert.deepEqual(log.writes, [], "no insert");
+});
+
+test("append under GLOBAL scope: a brand-new generation still opens normally", async () => {
+  // The insert-new guard must not touch enabled mode: matchesBurstScope
+  // short-circuits on a global activation, so no bounds are consulted.
+  const store = createMemorySellerInboundBurstStore({ now: () => LATE });
+  const result = await store.appendMessage({
+    thread_key: OTHER_THREAD,
+    message: { event_id: "e-ok", provider_message_id: "p-ok", body: "ordinary seller", received_at: LATE },
+    now: LATE,
+    scope: GLOBAL_SCOPE,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.created, true);
+  assert.equal(result.burst.generation, 1);
+  assert.equal(store._debug.listAll().length, 1);
+});
