@@ -31,6 +31,7 @@ import {
   resolveBurstScopeFilter,
   matchesBurstScope,
   matchesBurstScopeThread,
+  resolveThreadConstraint,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
 import {
   BURST_STATUSES,
@@ -617,10 +618,20 @@ test("supabase CAS fallback (no rpc available) carries the same scope and pins t
   assert.equal(log.updates.length, 1, "exactly one row mutated");
   assert.deepEqual(log.updates[0].matched_ids, [PROOF.id], "the update targeted the authorized row only");
   for (const chain of log.selects) {
-    assert.ok(
-      chain.some((c) => c.op === "in" && c.args[0] === "thread_key"),
-      "every select on the claim path carries the scope"
+    // The thread constraint is the INTERSECTION of the scope allowlist and the
+    // caller's thread, so a named thread narrows `in.(…)` to a single `eq.…`.
+    // Either shape carries the scope; two predicates on the column would not.
+    const thread_predicates = chain.filter(
+      (c) => (c.op === "eq" || c.op === "in") && c.args[0] === "thread_key"
     );
+    assert.equal(thread_predicates.length, 1, "exactly one thread predicate");
+    assert.deepEqual(thread_predicates[0].args, ["thread_key", THREAD]);
+    // And the temporal half of the scope is unconditionally present.
+    assert.ok(
+      chain.some((c) => c.op === "gte" && c.args[0] === "first_received_at"),
+      "every select on the claim path carries the scope window"
+    );
+    assert.ok(chain.some((c) => c.op === "gte" && c.args[0] === "created_at"));
   }
 });
 
@@ -1098,4 +1109,162 @@ test("append: provider clock skew below the floor declines — nobody did anythi
   assert.equal(result.reason, "message_outside_scope_window");
   assert.equal(result.rollover, false, "must decline, never re-enter the rollover loop");
   assert.equal(store._debug.listAll().length, 0, "no row is stranded below the floor");
+});
+
+// ── 13. The thread filter must be IN the query, not after LIMIT ──────────────
+//
+// A caller that names a thread and then filters the returned page in JS gets a
+// page selected by `eligible_at ASC LIMIT n` across ALL threads. Other threads'
+// older bursts fill the page, the named thread's eligible burst never appears,
+// and the targeted flush reports "no work" while work exists — quiet and wrong.
+//
+// Reachable in `enabled` mode specifically: the flush handler sets
+// thread_key = policy.allowed_thread_key || requested_thread_key, and
+// allowed_thread_key is null under global activation, so an operator POST
+// supplies a thread key while the scope stays global. internal_proof is immune
+// because its scope already bounds the list to one thread.
+
+/** Two older bursts on other threads, plus the one the operator asked about. */
+const CROWDING = [
+  { ...OTHER, id: "crowd-1", burst_id: "sib:+15125550143:g1:c1", thread_key: "+15125550143",
+    first_received_at: "2026-08-05T10:00:10.000Z", eligible_at: "2026-08-05T10:00:30.000Z" },
+  { ...OTHER, id: "crowd-2", burst_id: "sib:+15125550199:g1:c2", thread_key: "+15125550199",
+    first_received_at: "2026-08-05T10:00:20.000Z", eligible_at: "2026-08-05T10:00:40.000Z" },
+  // The operator's thread — newest, so it sorts LAST under eligible_at ASC.
+  { ...PROOF, id: "wanted", burst_id: "sib:+16128072000:g5:w1",
+    first_received_at: "2026-08-05T10:01:00.000Z", eligible_at: "2026-08-05T10:01:20.000Z" },
+];
+
+test("global scope + thread_key: the named thread is NOT starved by older bursts on other threads", async () => {
+  const store = seedMemoryStore(CROWDING);
+
+  // The bug: without the thread filter, a limit-2 page is entirely other threads.
+  const unfiltered = await store.listEligible({ now: NOW, limit: 2, scope: GLOBAL_SCOPE });
+  assert.deepEqual(
+    unfiltered.map((b) => b.thread_key),
+    ["+15125550143", "+15125550199"],
+    "precondition: eligible_at ASC fills the page with other threads"
+  );
+  assert.ok(
+    !unfiltered.some((b) => b.thread_key === THREAD),
+    "precondition: a JS post-filter on this page yields [] — the reported-no-work bug"
+  );
+
+  // The fix: the constraint is applied before the page is cut.
+  const filtered = await store.listEligible({
+    now: NOW, limit: 2, scope: GLOBAL_SCOPE, thread_key: THREAD,
+  });
+  assert.deepEqual(filtered.map((b) => b.burst_id), ["sib:+16128072000:g5:w1"]);
+});
+
+test("supabase: thread_key is applied in-query, and survives a limit of 1", async () => {
+  const { supabase, log } = makeRecordingBurstSupabase({ rows: CROWDING.map(dbRow) });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+
+  const rows = await store.listEligible({
+    now: NOW, limit: 1, scope: GLOBAL_SCOPE, thread_key: THREAD,
+  });
+  assert.deepEqual(rows.map((b) => b.burst_id), ["sib:+16128072000:g5:w1"]);
+
+  const chain = log.selects[0];
+  const eq = chain.find((c) => c.op === "eq" && c.args[0] === "thread_key");
+  assert.ok(eq, "the thread constraint must reach the query");
+  assert.deepEqual(eq.args, ["thread_key", THREAD]);
+});
+
+test("thread_key composes with scope by CONJUNCTION — it can never widen one", async () => {
+  const store = seedMemoryStore(ALL);
+  // A thread the scope never authorized, named explicitly by the caller.
+  const outside = await store.listEligible({
+    now: NOW, limit: 20, scope: PROOF_SCOPE, thread_key: OTHER_THREAD,
+  });
+  assert.deepEqual(outside, [], "naming a thread cannot escape the scope allowlist");
+
+  // And the in-scope thread still resolves normally through both filters.
+  const inside = await store.listEligible({
+    now: NOW, limit: 20, scope: PROOF_SCOPE, thread_key: THREAD,
+  });
+  assert.deepEqual(inside.map((b) => b.burst_id), [PROOF.burst_id]);
+});
+
+test("thread_key absent or blank is no constraint at all — existing callers unaffected", async () => {
+  const store = seedMemoryStore(CROWDING);
+  const baseline = await store.listEligible({ now: NOW, limit: 20, scope: GLOBAL_SCOPE });
+  for (const thread_key of [undefined, null, "", "   "]) {
+    const same = await store.listEligible({ now: NOW, limit: 20, scope: GLOBAL_SCOPE, thread_key });
+    assert.deepEqual(
+      same.map((b) => b.burst_id),
+      baseline.map((b) => b.burst_id),
+      `thread_key=${JSON.stringify(thread_key)} must not constrain`
+    );
+  }
+});
+
+test("memory and supabase agree on the thread filter, including the starvation case", async () => {
+  for (const thread_key of [THREAD, OTHER_THREAD, null]) {
+    for (const limit of [1, 2, 20]) {
+      const memory = seedMemoryStore(CROWDING);
+      const { supabase } = makeRecordingBurstSupabase({ rows: CROWDING.map(dbRow) });
+      const remote = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+      const a = (await memory.listEligible({ now: NOW, limit, scope: GLOBAL_SCOPE, thread_key })).map((b) => b.burst_id);
+      const b = (await remote.listEligible({ now: NOW, limit, scope: GLOBAL_SCOPE, thread_key })).map((x) => x.burst_id);
+      assert.deepEqual(a, b, `drift at thread_key=${thread_key} limit=${limit}`);
+    }
+  }
+});
+
+test("thread constraint resolves to ONE predicate — never two on the same column", () => {
+  const global_resolved = resolveBurstScopeFilter(GLOBAL_SCOPE);
+  const scoped_resolved = resolveBurstScopeFilter(PROOF_SCOPE);
+
+  // Global + a thread → a single equality.
+  assert.deepEqual(resolveThreadConstraint(global_resolved, THREAD), {
+    impossible: false, eq: THREAD, in: null,
+  });
+  // Global, no thread → no constraint at all.
+  assert.deepEqual(resolveThreadConstraint(global_resolved, null), {
+    impossible: false, eq: null, in: null,
+  });
+  // Scoped, no thread → the allowlist.
+  assert.deepEqual(resolveThreadConstraint(scoped_resolved, null), {
+    impossible: false, eq: null, in: [THREAD],
+  });
+  // Scoped + an allowed thread → the intersection is that thread. One equality,
+  // NOT `in.(…)` plus `eq.…` left for PostgREST to conjoin.
+  assert.deepEqual(resolveThreadConstraint(scoped_resolved, THREAD), {
+    impossible: false, eq: THREAD, in: null,
+  });
+  // Scoped + a thread outside the allowlist → nothing can match.
+  assert.equal(resolveThreadConstraint(scoped_resolved, OTHER_THREAD).impossible, true);
+  assert.equal(resolveThreadConstraint({ deny: true, reason: "x" }, THREAD).impossible, true);
+});
+
+test("an out-of-scope thread costs ZERO queries on both doors", async () => {
+  const { supabase, log } = makeRecordingBurstSupabase({ rows: ALL.map(dbRow), rpc: sqlClaimRpc });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+
+  assert.deepEqual(
+    await store.listEligible({ now: NOW, scope: PROOF_SCOPE, thread_key: OTHER_THREAD }),
+    []
+  );
+  const claim = await store.claimEligible({ now: NOW, scope: PROOF_SCOPE, thread_key: OTHER_THREAD });
+  assert.equal(claim.ok, false);
+  assert.equal(claim.reason, "no_eligible_burst");
+
+  assert.deepEqual(log.selects, [], "no query");
+  assert.deepEqual(log.rpcs, [], "no rpc");
+  assert.deepEqual(log.updates, [], "no mutation");
+});
+
+test("scoped list emits the intersected equality, not a second thread predicate", async () => {
+  const { supabase, log } = makeRecordingBurstSupabase({ rows: ALL.map(dbRow) });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+  await store.listEligible({ now: NOW, scope: PROOF_SCOPE, thread_key: THREAD });
+
+  const chain = log.selects[0];
+  const thread_predicates = chain.filter(
+    (c) => (c.op === "eq" || c.op === "in") && c.args[0] === "thread_key"
+  );
+  assert.equal(thread_predicates.length, 1, "exactly one predicate constrains thread_key");
+  assert.deepEqual(thread_predicates[0].args, ["thread_key", THREAD]);
 });

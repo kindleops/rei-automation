@@ -180,6 +180,25 @@ export function matchesBurstScope(burst, resolved) {
 }
 
 /**
+ * Intersect the scope's thread allowlist with a caller's requested thread into
+ * ONE predicate.
+ *
+ * `impossible: true` means the request cannot match anything — the caller named
+ * a thread the scope never authorized. Callers return empty WITHOUT querying,
+ * so naming a foreign thread costs nothing and can never widen the scope.
+ */
+export function resolveThreadConstraint(resolved, thread_key) {
+  const group = clean(thread_key);
+  if (!resolved || resolved.deny) return { impossible: true };
+  if (resolved.global) return { impossible: false, eq: group || null, in: null };
+  if (!group) return { impossible: false, eq: null, in: resolved.thread_keys };
+  if (!resolved.thread_keys.includes(group)) return { impossible: true };
+  // Both constrain the same column and the caller's is narrower, so the
+  // intersection IS the caller's thread — one equality, no ambiguity.
+  return { impossible: false, eq: group, in: null };
+}
+
+/**
  * Thread-level verdict for a message that has NO durable row yet (opening a new
  * generation). There is nothing to date, so only the thread allowlist can be
  * applied — deliberately narrower than matchesBurstScope, never wider: a thread
@@ -550,15 +569,19 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
     limit = 20,
     lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
     scope = null,
+    thread_key = null,
   } = {}) {
     const scoped = resolveBurstScopeFilter(scope);
     if (scoped.deny) return [];
     const nowIso = nowArg || now();
-    // Scope filters BEFORE the sort+slice: an out-of-scope row must not occupy
-    // a page slot. `eligible_at ASC` means the oldest row wins the page, so a
-    // post-slice filter would let one stale burst starve every live one.
+    const group = clean(thread_key);
+    // Scope AND thread filter BEFORE the sort+slice: neither an out-of-scope row
+    // nor another thread's row may occupy a page slot. `eligible_at ASC` means
+    // the oldest rows win the page, so a post-slice filter lets stale or
+    // unrelated bursts starve the live one the caller actually asked for.
     return listAll()
       .filter((b) => matchesBurstScope(b, scoped))
+      .filter((b) => !group || clean(b.thread_key) === group)
       .filter((b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms }))
       .sort((a, b) => String(a.eligible_at).localeCompare(String(b.eligible_at)))
       .slice(0, limit);
@@ -945,7 +968,15 @@ export function createSupabaseSellerInboundBurstStore({
       .order("eligible_at", { ascending: true })
       .limit(limit);
     if (burst_id) query = query.eq("burst_id", clean(burst_id));
-    if (thread_key) query = query.eq("thread_key", clean(thread_key));
+    // ONE predicate on thread_key, never two. The scope allowlist and a
+    // caller's thread are intersected in JS (resolveThreadConstraint) rather
+    // than emitted as both `in.(…)` and `eq.…` and left to PostgREST to
+    // conjoin — that would make correctness depend on how repeated predicates
+    // on a column are combined server-side, which is not something this
+    // module can prove locally.
+    const thread = resolveThreadConstraint(scoped, thread_key);
+    if (thread.eq) query = query.eq("thread_key", thread.eq);
+    else if (thread.in) query = query.in("thread_key", thread.in);
     // Scope lives in the WHERE clause, never in a post-filter: `eligible_at
     // ASC … LIMIT n` gives the page to the OLDEST rows, so an out-of-scope
     // burst that reaches the result set has already starved the live work it
@@ -953,7 +984,6 @@ export function createSupabaseSellerInboundBurstStore({
     // one.
     if (!scoped.global) {
       query = query
-        .in("thread_key", scoped.thread_keys)
         // Message-time window: which conversation moment this burst belongs to.
         .gte("first_received_at", scoped.min_first)
         .lte("first_received_at", scoped.max_first)
@@ -978,6 +1008,11 @@ export function createSupabaseSellerInboundBurstStore({
     // no update. There is no code path here that claims and then authorizes.
     const scoped = resolveBurstScopeFilter(scope);
     if (scoped.deny) return { ok: false, reason: scoped.reason, burst: null };
+    // Same intersection as listEligible: naming a thread the scope never
+    // authorized resolves to nothing, before any query and before any claim.
+    if (resolveThreadConstraint(scoped, thread_key).impossible) {
+      return { ok: false, reason: "no_eligible_burst", burst: null };
+    }
     const nowIso = nowArg || now();
     const token = crypto.randomBytes(16).toString("hex");
     // CAS/pre-select predicate mirrors the RPC exactly (see isClaimableBurst):
@@ -1175,22 +1210,45 @@ export function createSupabaseSellerInboundBurstStore({
     limit = 20,
     lease_ms = SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
     scope = null,
+    // Optional thread constraint, applied IN-QUERY. A caller that names a
+    // thread and then filters the page in JS gets a page selected by
+    // `eligible_at ASC LIMIT n` across ALL threads — so `limit` rows belonging
+    // to other threads can fill it and the named thread's eligible burst never
+    // appears. The targeted flush then reports "no work" while work exists.
+    // Same defect as filtering scope after LIMIT; same fix.
+    //
+    // Null/absent = no constraint. Composes with `scope` by conjunction: PostgREST
+    // ANDs repeated predicates on a column, so a thread outside a non-global
+    // scope's allowlist yields nothing rather than widening it.
+    thread_key = null,
   } = {}) {
     const scoped = resolveBurstScopeFilter(scope);
     // Denied callers never reach Supabase at all — no page is fetched, so no
     // out-of-scope burst is ever even observed, let alone handed to a claim.
     if (scoped.deny) return [];
+    const group = clean(thread_key);
+    // A thread the scope never authorized cannot match anything — say so
+    // without a round trip, and without emitting a query that could be read as
+    // widening the scope.
+    if (resolveThreadConstraint(scoped, group).impossible) return [];
     const nowIso = nowArg || now();
     const staleIso = new Date(parseIsoMs(nowIso) - (Number(lease_ms) || 0)).toISOString();
-    const { data, error } = await buildEligibleQuery({ nowIso, staleIso, scoped, limit });
+    const { data, error } = await buildEligibleQuery({
+      nowIso,
+      staleIso,
+      scoped,
+      thread_key: group || null,
+      limit,
+    });
     if (error) throw error;
     return (data || [])
       .map(rowToBurst)
       .filter((b) => isClaimableBurst({ burst: b, now: nowIso, lease_ms }))
-      // Defence in depth: re-assert the scope the query already applied, so a
+      // Defence in depth: re-assert what the query already applied, so a
       // mis-parsed PostgREST filter degrades to "returns nothing" rather than
-      // "returns everything".
-      .filter((b) => matchesBurstScope(b, scoped));
+      // "returns everything". Post-condition, never the enforcement.
+      .filter((b) => matchesBurstScope(b, scoped))
+      .filter((b) => !group || clean(b.thread_key) === group);
   }
 
   return {
@@ -1210,4 +1268,5 @@ export default {
   resolveBurstScopeFilter,
   matchesBurstScope,
   matchesBurstScopeThread,
+  resolveThreadConstraint,
 };
