@@ -1331,7 +1331,23 @@ test("CONTAINMENT: a model returning non-JSON cannot leak seller text through it
   // in prose that echoes the seller.
   const non_json_content = `${CANARY} — sure, I'd take $150k for it`;
 
-  // Sanity-check the premise: this really does throw with the payload inside.
+  // Parsing prose throws on every runtime — that part is the premise.
+  //
+  // What it throws is NOT: the message format is V8-version-specific. On the
+  // Node this repo currently runs (23.x) it echoes the first ten characters of
+  // the input — `Unexpected token 'C', "CANARY_SEL"... is not valid JSON` —
+  // which is precisely how seller-derived text reaches an exception message
+  // with no exotic throw site. Other supported versions report position, line
+  // and column with no snippet at all.
+  //
+  // So the leak is version-dependent and the containment must not be. Asserting
+  // the message's shape would make this test fail on a runtime where the
+  // containment is working perfectly — a test that fails without its property
+  // being broken, which is the same defect as one that passes without checking
+  // its property. The assertions below are therefore all containment claims:
+  // the fixed-token check guards the catch block on every runtime (it fails if
+  // `err.message` is propagated, regardless of phrasing), and the canary checks
+  // add a direct content assertion on the runtimes that can actually leak.
   let v8_message = null;
   try {
     JSON.parse(non_json_content);
@@ -1339,10 +1355,6 @@ test("CONTAINMENT: a model returning non-JSON cannot leak seller text through it
     v8_message = error.message;
   }
   assert.ok(v8_message, "premise: parsing prose throws");
-  assert.ok(
-    v8_message.includes(CANARY.slice(0, 10)),
-    `premise: V8 echoes the input into the message — got: ${v8_message}`
-  );
 
   // Counted, because `model_error` is also what a fetch failure produces. Without
   // proving the request completed and delivered this content, the test would pass
@@ -1385,9 +1397,10 @@ test("CONTAINMENT: a model returning non-JSON cannot leak seller text through it
     !surfaces.includes(CANARY),
     "the model's echoed seller text must not survive in any returned field"
   );
+  // Phrase-independent: no runtime's parse message survives, whatever it says.
   assert.ok(
-    !surfaces.includes("Unexpected token"),
-    "nor the raw V8 parse message that carries it"
+    !surfaces.includes("Unexpected token") && !surfaces.includes("not valid JSON"),
+    "nor the raw parse message that carries it"
   );
 });
 
