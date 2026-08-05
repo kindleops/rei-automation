@@ -20,6 +20,23 @@
 //   3. Flush-path auto-reply mode gating resolved by the flush caller before
 //      live queueing; the default flush context stays non-live.
 //
+// INVARIANT — EVERY selection predicate goes IN THE QUERY, never in JS after
+// the store has applied `limit`.
+//
+// Eligible selection is ordered `eligible_at ASC`, so the page always goes to
+// the OLDEST rows. A filter applied afterwards in JS therefore cannot narrow a
+// page — it can only discard rows that already won it, while the rows the
+// caller actually wanted sit just past the boundary. The call then returns an
+// empty result and reports "no work" while work exists. It is quiet, it is
+// wrong, and it looks exactly like a healthy idle tick.
+//
+// This defect has now appeared TWICE in this subsystem — once on the scope
+// filter, once on the thread filter — which makes it a missing invariant rather
+// than two mistakes. If you are adding a new way to select bursts, it belongs
+// in the store's query builder alongside scope and thread_key. A JS check is
+// permitted only as a POST-CONDITION on rows the query already narrowed, so a
+// store that ignores the parameter cannot widen the caller.
+//
 // Crash recovery: a claim carries claimed_at + claim_token + attempt_count.
 // A worker that dies mid-finalize leaves the row CLAIMED; after
 // SELLER_INBOUND_BURST_CLAIM_LEASE_MS any worker atomically reclaims it with
