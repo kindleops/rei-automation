@@ -15,6 +15,8 @@ import './styles/nexus-theme-contract.css'
 // primitives it maps are already declared, and before any --lc-* consumer.
 import './styles/lc-tokens.css'
 import './shared/ui/lc-ui.css'
+// Lane G — responsive + a11y final authority. Must stay the last global sheet.
+import './styles/lc-responsive.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

@@ -232,7 +232,7 @@ h3 { font-size: 0.8125rem; }
 }
 /* Eyebrow — the signature micro label */
 .cc-eyebrow {
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -250,7 +250,7 @@ purposeful */
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -272,7 +272,7 @@ purposeful */
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   color: var(--text-2);
@@ -332,7 +332,7 @@ purposeful */
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   padding: 0 8px;
   white-space: nowrap;
@@ -386,7 +386,7 @@ purposeful */
   background: rgba(255, 255, 255, 0.02);
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast);
 }
@@ -406,7 +406,7 @@ purposeful */
   border: 1px solid var(--border-0);
   background: var(--surface-0);
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   letter-spacing: 0.04em;
 }
@@ -439,7 +439,7 @@ purposeful */
   border-radius: var(--radius-xs);
   border: 1px solid var(--border-0);
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   color: var(--text-2);
   background: transparent;
@@ -549,7 +549,7 @@ purposeful */
   margin-top: 2px;
 }
 .cc-rail__badge {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-2);
@@ -591,7 +591,7 @@ purposeful */
   margin-top: 2px;
 }
 .cc-panel__eyebrow {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -602,7 +602,7 @@ purposeful */
    ══════════════════════════════════════════════════════════════════════════ */
 
 .cc-inline-button {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--text-2);
   padding: 3px 8px;
@@ -622,7 +622,7 @@ purposeful */
 
 /* Status chip — operational status indicator */
 .cc-status-chip {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -637,7 +637,7 @@ purposeful */
 /* Sentiment pill — bold background,
 clear signal */
 .cc-sentiment-pill {
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -650,7 +650,7 @@ clear signal */
 .cc-sentiment-pill.is-cold { background: rgba(78, 90, 108, 0.14); color: var(--text-2); }
 .cc-chip {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.04em;
   color: var(--text-2);
@@ -675,7 +675,7 @@ clear signal */
 }
 .cc-filter-group__label {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -687,7 +687,7 @@ clear signal */
   gap: 4px;
 }
 .cc-filter-chip {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
@@ -729,7 +729,7 @@ clear signal */
 .cc-metric-readout span {
   display: block;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -795,7 +795,7 @@ clear signal */
 }
 .cc-market-card__status {
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -807,7 +807,7 @@ clear signal */
 .cc-market-card__status.is-paused { color: var(--text-2); background: var(--surface-0); }
 .cc-market-card__subtitle {
   display: block;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   margin-top: 2px;
 }
@@ -815,7 +815,7 @@ clear signal */
   display: flex;
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   color: var(--text-2);
 }
@@ -827,7 +827,7 @@ clear signal */
   justify-content: space-between;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   padding-top: 8px;
   border-top: 1px solid var(--border-0);
@@ -878,7 +878,7 @@ clear signal */
   display: block;
 }
 .cc-agent-card__specialty {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   display: block;
   margin-top: 2px;
@@ -893,7 +893,7 @@ clear signal */
   display: flex;
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.02em;
   color: var(--text-2);
 }
@@ -947,7 +947,7 @@ clear signal */
 }
 .cc-map-mode-pill {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 4px 8px;
@@ -1020,7 +1020,7 @@ not top */
 .cc-kpi-card.is-muted::before { background: var(--tone-muted); opacity: 0.4; }
 .cc-kpi-card__label {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1034,7 +1034,7 @@ not top */
   line-height: 1.1;
 }
 .cc-kpi-card__detail {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   margin-top: 2px;
 }
@@ -1116,7 +1116,7 @@ not top */
   gap: 8px;
 }
 .cc-map__lead-card-intent {
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   font-style: italic;
 }
@@ -1134,7 +1134,7 @@ not top */
   display: flex;
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   padding-top: 6px;
   border-top: 1px solid var(--border-0);
@@ -1183,7 +1183,7 @@ not top */
   line-height: 1;
 }
 .cc-spotlight-card__urg-label {
-  font-size: 0.5rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.1em;
   color: var(--text-2);
   font-weight: 500;
@@ -1194,11 +1194,11 @@ not top */
   color: var(--text-0);
 }
 .cc-spotlight-card span {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .cc-spotlight-card__signal {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--tone-warning);
   font-style: italic;
   line-height: 1.35;
@@ -1214,7 +1214,7 @@ not top */
   display: flex;
   gap: 12px;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   margin-top: 4px;
 }
@@ -1294,7 +1294,7 @@ not top */
 }
 .cc-alert-card__market {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .cc-alert-card strong {
@@ -1312,7 +1312,7 @@ not top */
   display: flex;
   gap: 10px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   padding-top: 6px;
   border-top: 1px solid var(--border-0);
@@ -1322,7 +1322,7 @@ not top */
   display: inline-flex;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1341,7 +1341,7 @@ not top */
   display: inline-flex;
   align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1405,13 +1405,13 @@ not top */
 }
 .cc-timeline__header span {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   white-space: nowrap;
 }
 .cc-timeline__market {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .cc-timeline__content p {
@@ -1590,7 +1590,7 @@ not top */
   margin: 8px 0 0;
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
 }
 .cc-drawer-section {
   display: flex;
@@ -1628,7 +1628,7 @@ not top */
 .cc-drawer-stat span {
   display: block;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1653,7 +1653,7 @@ not top */
 .cc-inline-stat span {
   display: block;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-2);
@@ -1715,7 +1715,7 @@ not top */
 }
 .cc-table-card th {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1754,7 +1754,7 @@ not top */
   gap: 6px;
   color: var(--tone-primary);
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1798,7 +1798,7 @@ not top */
   display: flex;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 /* Tag cloud */
@@ -1846,7 +1846,7 @@ not top */
   margin-top: 6px;
   color: var(--text-1);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
 }
 /* Draft card */
 .cc-draft-card {
@@ -2008,7 +2008,7 @@ not top */
   border-radius: 2px;
   border: 1px solid var(--border-0);
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   background: rgba(255, 255, 255, 0.02);
   letter-spacing: 0.06em;
@@ -2029,7 +2029,7 @@ not top */
   display: block;
   padding: 8px 14px 3px;
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2067,7 +2067,7 @@ not top */
 }
 .cc-cmd__hint {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   white-space: nowrap;
   opacity: 0.6;
@@ -2122,7 +2122,7 @@ not top */
   padding: 10px 14px;
   text-align: left;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2177,7 +2177,7 @@ not top */
 }
 .cc-battlefield__count {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   letter-spacing: 0.06em;
 }
@@ -2232,12 +2232,12 @@ proportional to heat */
   color: var(--text-0);
 }
 .cc-battlefield-card__address {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   font-family: var(--font-mono);
 }
 .cc-battlefield-card__why {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--tone-warning);
   font-style: italic;
   line-height: 1.35;
@@ -2246,7 +2246,7 @@ proportional to heat */
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   padding-top: 6px;
   border-top: 1px solid var(--border-0);
@@ -2271,7 +2271,7 @@ proportional to heat */
 }
 .cc-urgency-bar__label {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2350,7 +2350,7 @@ proportional to heat */
 }
 .cc-nba-badge {
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   padding: 2px 6px;
@@ -2448,7 +2448,7 @@ proportional to heat */
   opacity: 1;
 }
 .cc-timeline-rail__label {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--text-1);
   white-space: nowrap;
@@ -2458,7 +2458,7 @@ proportional to heat */
 }
 .cc-timeline-rail__time {
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   opacity: 0.5;
   white-space: nowrap;
@@ -2506,14 +2506,14 @@ proportional to heat */
 }
 .cc-replay-bar__label {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   color: var(--tone-danger);
 }
 .cc-replay-bar__time {
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   opacity: 0.7;
 }
@@ -2545,7 +2545,7 @@ proportional to heat */
 }
 .cc-replay-bar__exit {
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-0);
@@ -2589,7 +2589,7 @@ proportional to heat */
 }
 .cc-autopilot-trail__label {
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2597,7 +2597,7 @@ proportional to heat */
 }
 .cc-autopilot-trail__count {
   font-family: var(--font-mono);
-  font-size: 0.50rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   opacity: 0.6;
 }
@@ -2613,7 +2613,7 @@ proportional to heat */
 .cc-empty-state--ok {
   color: var(--tone-success);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   opacity: 0.65;
@@ -2753,7 +2753,7 @@ proportional to heat */
   right: 12px;
   z-index: var(--z-map-overlay);
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   letter-spacing: 0.04em;
   opacity: 0.5;
@@ -2775,7 +2775,7 @@ proportional to heat */
   right: 14px;
   z-index: var(--z-map-overlay);
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   color: var(--text-2);
   background: rgba(5, 6, 8, 0.6);
@@ -2795,7 +2795,7 @@ proportional to heat */
   justify-content: center;
   gap: 10px;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   color: var(--text-2);
   background: rgba(5, 6, 8, 0.7);
@@ -2816,7 +2816,7 @@ proportional to heat */
   gap: 10px;
   padding: 5px 20px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.06em;
   line-height: 1;
   border-bottom: 1px solid transparent;
@@ -2878,7 +2878,7 @@ proportional to heat */
   background: rgba(5, 6, 8, 0.75) !important;
   color: var(--text-2) !important;
   font-family: var(--font-mono) !important;
-  font-size: 0.54rem !important;
+  font-size: 0.6875rem !important;
   border-radius: var(--radius-sm) !important;
   border: 1px solid var(--border-0) !important;
 }
@@ -2923,7 +2923,7 @@ proportional to heat */
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-1);
 }
 .cc-map-dossier__top strong {
@@ -2931,7 +2931,7 @@ proportional to heat */
   color: var(--text-0);
 }
 .cc-map-dossier__address {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
@@ -2941,7 +2941,7 @@ proportional to heat */
   display: flex;
   gap: 7px;
   flex-wrap: wrap;
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-2);
@@ -2960,7 +2960,7 @@ proportional to heat */
   background: rgba(255, 255, 255, 0.045);
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.04em;
   padding: 0 8px;
   transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 160ms var(--ease-out-quart);
@@ -3003,7 +3003,7 @@ proportional to heat */
 .cc-map-street-view span {
   color: rgba(185, 235, 255, 0.72);
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -3065,7 +3065,7 @@ proportional to heat */
   background: rgba(56, 189, 248, 0.1);
   color: #c4f2ff;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.08em;
   padding: 0 10px;
   text-decoration: none;
@@ -3092,11 +3092,11 @@ proportional to heat */
   gap: 2px;
 }
 .cc-map-tooltip strong {
-  font-size: 0.63rem;
+  font-size: 0.6875rem;
   color: var(--text-0);
 }
 .cc-map-tooltip span {
-  font-size: 0.55rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   font-family: var(--font-mono);
 }
@@ -3118,7 +3118,7 @@ proportional to heat */
    RESPONSIVE BREAKPOINTS
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 1380px) {
+@media (max-width: 1439.98px) {
   .cc-header {
     grid-template-columns: auto minmax(200px, 1fr) auto;
   }
@@ -3150,7 +3150,7 @@ proportional to heat */
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1439.98px) {
 .cc-header {
     grid-template-columns: 1fr;
     gap: 12px;
@@ -3195,7 +3195,7 @@ proportional to heat */
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023.98px) {
 .cc-shell {
     padding: 10px;
   }
@@ -3230,7 +3230,7 @@ proportional to heat */
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767.98px) {
 .cc-header__actions {
     width: 100%;
   }
@@ -3388,7 +3388,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-room-label__name {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -3460,7 +3460,7 @@ non‑Home surfaces only ──────────────────�
   border-radius: 2px;
   border: 1px solid rgba(255, 255, 255, 0.05);
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   background: rgba(255, 255, 255, 0.02);
   letter-spacing: 0.06em;
@@ -3478,7 +3478,7 @@ non‑Home surfaces only ──────────────────�
   display: block;
   padding: 7px 12px 2px;
   font-family: var(--font-mono);
-  font-size: 0.48rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -3516,7 +3516,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-cmd__item-hint {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   white-space: nowrap;
   opacity: 0.5;
@@ -3612,7 +3612,7 @@ non‑Home surfaces only ──────────────────�
 
 .nx-filter-pill {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3641,7 +3641,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3675,7 +3675,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3686,7 +3686,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-sentiment-pill {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3704,7 +3704,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-priority-pill {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3713,7 +3713,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-severity-badge {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3725,7 +3725,7 @@ non‑Home surfaces only ──────────────────�
 .nx-severity-badge.is-info { color: var(--tone-primary); background: rgba(var(--nexus-accent-rgb), 0.08); }
 .nx-intent-badge {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3736,7 +3736,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-heat-badge {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3745,7 +3745,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-impact-badge {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3757,7 +3757,7 @@ non‑Home surfaces only ──────────────────�
 /* ── Tags ──────────────────────────────────────────────────────────────── */
 
 .nx-tag {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   padding: 2px 7px;
   border-radius: 3px;
@@ -3766,7 +3766,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-tag--mono {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
 }
 .nx-tag-row {
   display: flex;
@@ -3775,14 +3775,14 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-micro-tag {
   font-family: var(--font-mono);
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   padding: 1px 5px;
   border-radius: 3px;
   color: var(--text-2);
   background: var(--surface-0);
 }
 .nx-label-chip {
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   padding: 3px 8px;
   border-radius: var(--radius-xs);
@@ -3799,7 +3799,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-kpi-card__label {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -3817,7 +3817,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 3px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   margin-top: 4px;
 }
@@ -3834,7 +3834,7 @@ non‑Home surfaces only ──────────────────�
   background: var(--surface-0);
 }
 .nx-kpi-mini .nx-kpi-card__label {
-  font-size: 0.54rem;
+  font-size: 0.6875rem;
   margin-bottom: 2px;
 }
 .nx-kpi-mini .nx-kpi-card__value {
@@ -3848,7 +3848,7 @@ non‑Home surfaces only ──────────────────�
   font-size: 0.92rem;
 }
 .nx-kpi-micro .nx-kpi-card__label {
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   margin-bottom: 2px;
 }
 /* ── Table Card ────────────────────────────────────────────────────────── */
@@ -3872,7 +3872,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-table th {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3904,7 +3904,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   padding: 7px 14px;
@@ -3927,7 +3927,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   padding: 7px 14px;
@@ -3945,7 +3945,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-inline-button {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   color: var(--text-2);
@@ -3964,7 +3964,7 @@ non‑Home surfaces only ──────────────────�
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--tone-primary);
   padding: 4px 8px;
@@ -4021,7 +4021,7 @@ non‑Home surfaces only ──────────────────�
 
 .nx-shortcut {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--text-2);
   padding: 2px 6px;
@@ -4045,7 +4045,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-capacity-label {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 /* ── Risk Indicator ────────────────────────────────────────────────────── */
@@ -4055,7 +4055,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4085,13 +4085,13 @@ non‑Home surfaces only ──────────────────�
   color: var(--text-0);
 }
 .nx-match-card__meta {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-1);
   margin-top: 4px;
 }
 .nx-match-score {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   color: var(--tone-primary);
   padding: 2px 6px;
@@ -4127,7 +4127,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 4px;
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4247,7 +4247,7 @@ non‑Home surfaces only ──────────────────�
 .nx-inbox-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 4px;
@@ -4300,7 +4300,7 @@ non‑Home surfaces only ──────────────────�
 .nx-inbox__hdr-search-mode {
   position: absolute;
   right: 40px;
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--ix-accent);
@@ -4314,7 +4314,7 @@ non‑Home surfaces only ──────────────────�
 .nx-inbox__hdr-search-kbd {
   position: absolute;
   right: 9px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--ix-text-meta);
   background: var(--ix-bg-panel-2);
@@ -4340,7 +4340,7 @@ non‑Home surfaces only ──────────────────�
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 2px 8px;
@@ -4394,7 +4394,7 @@ non‑Home surfaces only ──────────────────�
   border-radius: 4px;
   background: none;
   color: var(--ix-text-meta);
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 500;
   cursor: pointer;
@@ -4443,7 +4443,7 @@ non‑Home surfaces only ──────────────────�
   border-radius: 100px;
   background: #c43a44;
   color: #fff;
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -4573,7 +4573,7 @@ non‑Home surfaces only ──────────────────�
   letter-spacing: -0.01em;
 }
 .nx-inbox__stat-label {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ix-text-meta);
@@ -4798,14 +4798,14 @@ non‑Home surfaces only ──────────────────�
   border-radius: 100px;
   background: var(--ix-accent);
   color: #04090f;
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .nx-thread-card__priority {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
   font-family: var(--font-mono);
@@ -4816,7 +4816,7 @@ non‑Home surfaces only ──────────────────�
 .nx-thread-card__priority.is-low { color: var(--ix-text-dim); }
 .nx-thread-card__time {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ix-text-dim);
   white-space: nowrap;
 }
@@ -4849,7 +4849,7 @@ non‑Home surfaces only ──────────────────�
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 1px 7px;
   border-radius: 4px;
@@ -4860,7 +4860,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-thread-card__chip-icon { width: 8px; height: 8px; }
 .nx-thread-card__label-chip {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
   border: 1px solid var(--ix-border);
@@ -4868,7 +4868,7 @@ non‑Home surfaces only ──────────────────�
   background: transparent;
 }
 .nx-thread-card__count {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ix-text-dim);
   margin-left: auto;
   font-family: var(--font-mono);
@@ -4878,7 +4878,7 @@ non‑Home surfaces only ──────────────────�
 .nx-sent-pill {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4893,7 +4893,7 @@ non‑Home surfaces only ──────────────────�
 .nx-pri-pill {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5060,14 +5060,14 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--ix-text-meta);
   font-family: var(--font-mono);
 }
 .nx-msg-card__channel-icon { width: 10px; height: 10px; }
 .nx-msg-card__time {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--ix-text-meta);
 }
 .nx-msg-card__body {
@@ -5079,7 +5079,7 @@ non‑Home surfaces only ──────────────────�
   margin-top: 8px;
   padding-top: 7px;
   border-top: 1px solid var(--ix-border);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--ix-text-dim);
   font-family: var(--font-mono);
 }
@@ -5102,7 +5102,7 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5110,7 +5110,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-ai-draft-card__icon { width: 12px; height: 12px; color: var(--ix-accent); }
 .nx-ai-draft-card__status {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -5141,7 +5141,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-conf-label {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--ix-text-body);
   font-weight: 500;
 }
@@ -5292,7 +5292,7 @@ non‑Home surfaces only ──────────────────�
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
 }
 .nx-dossier__section-title {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -5353,7 +5353,7 @@ non‑Home surfaces only ──────────────────�
   margin-top: 6px;
 }
 .nx-dossier__tag {
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid var(--ix-border);
@@ -5384,7 +5384,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-dossier__reco-urgency,
 .nx-dossier__reco-confidence {
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--ix-text-body);
 }
@@ -5460,7 +5460,7 @@ non‑Home surfaces only ──────────────────�
   font-weight: 600;
 }
 .nx-dossier__tab-badge {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--ix-accent);
   opacity: 0.75;
 }
@@ -5529,7 +5529,7 @@ non‑Home surfaces only ──────────────────�
   pointer-events: auto;
 }
 .nx-icm__header-badge span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -5571,7 +5571,7 @@ non‑Home surfaces only ──────────────────�
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 .nx-icm__controls-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -5607,7 +5607,7 @@ non‑Home surfaces only ──────────────────�
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(8, 10, 15, 0.88);
   color: rgba(236, 242, 251, 0.82);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -5646,7 +5646,7 @@ non‑Home surfaces only ──────────────────�
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -5762,7 +5762,7 @@ non‑Home surfaces only ──────────────────�
 .nx-icm--mini .nx-icm__mode-tab {
   min-height: 28px;
   padding: 0 8px;
-  font-size: 9px;
+  font-size: 11px;
 }
 .nx-icm--compact .nx-icm__toolbar {
   right: 10px;
@@ -5812,7 +5812,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icm__overlay-kpi span,
 .nx-icm__kpi-chip span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -5826,7 +5826,7 @@ non‑Home surfaces only ──────────────────�
   line-height: 1;
 }
 .nx-icm__legend-title {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.55);
   letter-spacing: 0.06em;
@@ -5846,7 +5846,7 @@ non‑Home surfaces only ──────────────────�
   box-shadow: 0 0 4px currentColor;
 }
 .nx-icm__legend-label {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.52);
   font-weight: 500;
 }
@@ -5892,7 +5892,7 @@ non‑Home surfaces only ──────────────────�
   backdrop-filter: blur(18px);
 }
 .nx-icm__ticker-compact span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -5970,7 +5970,7 @@ non‑Home surfaces only ──────────────────�
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
   color: rgba(207, 219, 236, 0.62);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6081,7 +6081,7 @@ non‑Home surfaces only ──────────────────�
   border-radius: 999px;
   background: rgba(var(--nx-card-accent-rgb, 99, 215, 255), 0.1);
   border: 1px solid rgba(var(--nx-card-accent-rgb, 99, 215, 255), 0.14);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6115,7 +6115,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icm__ticker-preview {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.42;
   color: rgba(222, 231, 242, 0.74);
   display: -webkit-box;
@@ -6128,7 +6128,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icm__ticker-locale,
 .nx-icm__ticker-meta {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(183, 198, 221, 0.58);
 }
 .nx-icm__ticker-reveal {
@@ -6151,7 +6151,7 @@ non‑Home surfaces only ──────────────────�
   gap: 4px;
 }
 .nx-icm__ticker-detail-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6160,7 +6160,7 @@ non‑Home surfaces only ──────────────────�
 .nx-icm__ticker-detail,
 .nx-icm__ticker-address {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.48;
   color: rgba(220, 228, 240, 0.78);
 }
@@ -6178,7 +6178,7 @@ non‑Home surfaces only ──────────────────�
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(236, 242, 251, 0.8);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -6197,7 +6197,7 @@ non‑Home surfaces only ──────────────────�
   border: 1px solid rgba(var(--nx-card-accent-rgb, 99, 215, 255), 0.18);
   background: rgba(var(--nx-card-accent-rgb, 99, 215, 255), 0.1);
   color: #ffffff;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6322,7 +6322,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icm-hover__eyebrow {
   margin: 0 0 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -6340,7 +6340,7 @@ non‑Home surfaces only ──────────────────�
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(232, 239, 250, 0.78);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6366,7 +6366,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icm-hover__metric span,
 .nx-icm-hover__message span {
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -6392,7 +6392,7 @@ non‑Home surfaces only ──────────────────�
   color: rgba(236, 242, 251, 0.84);
 }
 .nx-icm__ticker-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -6407,7 +6407,7 @@ non‑Home surfaces only ──────────────────�
   text-overflow: ellipsis;
 }
 .nx-icm__ticker-meta {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(228, 236, 247, 0.56);
 }
 /* ── Pulse marker (injected as DOM element by MapLibre) ─────────────────── */
@@ -6510,7 +6510,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icp__input::placeholder { color: rgba(255, 255, 255, 0.26); }
 .nx-icp__esc-hint {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.24);
   background: rgba(255, 255, 255, 0.05);
@@ -6538,7 +6538,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icp__group { margin-bottom: 2px; }
 .nx-icp__group-label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -6575,7 +6575,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-icp__item-label { flex: 1; }
 .nx-icp__shortcut {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.05);
@@ -6631,7 +6631,7 @@ non‑Home surfaces only ──────────────────�
   font-family: var(--font-sans, Inter, sans-serif);
 }
 .nx-sp__esc {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.24);
   background: rgba(255, 255, 255, 0.05);
@@ -6808,12 +6808,12 @@ non‑Home surfaces only ──────────────────�
 .nx-inbox .nx-split-thread__icon { color: var(--tone-primary); }
 /* ── Responsive: narrow viewports ───────────────────────────────────────── */
 
-@media (max-width: 1200px) {
+@media (max-width: 1439.98px) {
   .nx-inbox__dossier { display: none; }
   .nx-inbox__workspace { border-right: none; }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1023.98px) {
 .nx-inbox__queue { width: 300px; }
 .nx-inbox__conv-head {
     flex-direction: column;
@@ -6858,12 +6858,12 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--text-1);
 }
 .nx-alert-card__time {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-alert-card__detail {
@@ -6873,7 +6873,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-alert-card__metric {
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--text-0);
   padding: 4px 8px;
@@ -6881,7 +6881,7 @@ non‑Home surfaces only ──────────────────�
   background: var(--surface-1);
 }
 .nx-alert-card__market {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-alert-card__footer {
@@ -6904,7 +6904,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   color: var(--text-1);
   padding: 4px 0;
 }
@@ -6935,7 +6935,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-nba-item__urgency {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -6946,7 +6946,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-nba-item__confidence {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   margin-top: 4px;
 }
@@ -6988,7 +6988,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 /* ── Market Detail ─────────────────────────────────────────────────────── */
@@ -7099,7 +7099,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 /* ── Buyer Detail ──────────────────────────────────────────────────────── */
@@ -7150,7 +7150,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-buyer-detail__activity {
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-setting-row {
@@ -7177,7 +7177,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-setting-row__info p,
 .nx-setting-row__info span:last-child {
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
   margin: 0;
 }
@@ -7229,7 +7229,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-notif-card__time {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-notif-card__actions {
@@ -7272,7 +7272,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-watch-card__type {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -7288,7 +7288,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.6875rem;
   color: var(--tone-warning);
 }
 .nx-watch-alert-icon {
@@ -7329,7 +7329,7 @@ non‑Home surfaces only ──────────────────�
   flex-direction: column;
   gap: 0.15rem;
   color: var(--ix-text-soft);
-  font-size: 0.67rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -7377,7 +7377,7 @@ non‑Home surfaces only ──────────────────�
   box-shadow: 0 0 8px rgba(125, 248, 255, 0.85);
 }
 .nx-thread-row__pin {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   color: #ffc975;
 }
 .nx-thread-row__subject {
@@ -7406,7 +7406,7 @@ non‑Home surfaces only ──────────────────�
   background: color-mix(in srgb, var(--ix-surface-3) 88%, transparent);
   color: var(--ix-text-soft);
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   padding: 0.1rem 0.4rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -7428,7 +7428,7 @@ non‑Home surfaces only ──────────────────�
   flex-direction: column;
   gap: 0.12rem;
   color: var(--ix-text-soft);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
 }
 .nx-inbox-workflow-field select {
@@ -7484,7 +7484,7 @@ non‑Home surfaces only ──────────────────�
   border: 1px solid color-mix(in srgb, var(--ix-border) 80%, transparent);
   border-radius: 999px;
   padding: 0.15rem 0.5rem;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   color: var(--ix-text-soft);
   text-transform: uppercase;
 }
@@ -7582,7 +7582,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-template-use-case small {
   color: var(--ix-text-meta);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
 }
 .nx-template-use-case.is-active,
 .nx-template-tab.is-active {
@@ -7600,7 +7600,7 @@ non‑Home surfaces only ──────────────────�
   display: grid;
   gap: 0.14rem;
   color: var(--ix-text-soft);
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -7663,7 +7663,7 @@ non‑Home surfaces only ──────────────────�
   border: 1px solid color-mix(in srgb, var(--ix-border) 80%, transparent);
   border-radius: 999px;
   padding: 0.1rem 0.42rem;
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   color: var(--ix-text-soft);
   background: color-mix(in srgb, var(--ix-surface-2) 82%, transparent);
   text-transform: uppercase;
@@ -7704,7 +7704,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-template-preview__translation span {
   color: var(--ix-text-meta);
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -7729,7 +7729,7 @@ non‑Home surfaces only ──────────────────�
 .nx-template-variable-editor label {
   display: grid;
   gap: 0.16rem;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
   color: var(--ix-text-soft);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -7759,7 +7759,7 @@ non‑Home surfaces only ──────────────────�
   border-color: rgba(122, 241, 255, 0.55);
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1023.98px) {
 .nx-template-drawer {
     top: 60px;
     right: 10px;
@@ -7775,7 +7775,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-watch-card__added {
   font-family: var(--font-mono);
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 /* ══════════════════════════════════════════════════════════════════════════
@@ -7821,7 +7821,7 @@ non‑Home surfaces only ──────────────────�
 .nx-segmented__btn {
   padding: 5px 10px;
   font-family: var(--font-sans);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--text-2);
   background: transparent;
@@ -7911,7 +7911,7 @@ non‑Home surfaces only ──────────────────�
 .nx-ai-action {
   padding: 4px 10px;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   color: var(--tone-primary);
   background: rgba(var(--nexus-accent-rgb), 0.06);
@@ -7928,7 +7928,7 @@ non‑Home surfaces only ──────────────────�
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.66rem;
+  font-size: 0.6875rem;
 }
 .nx-info-row span {
   color: var(--text-2);
@@ -7970,7 +7970,7 @@ non‑Home surfaces only ──────────────────�
   opacity: 0.8;
 }
 .nx-alert-card__metric-label {
-  font-size: 0.56rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-alert-card__metric-value {
@@ -8026,7 +8026,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-market-row__strain {
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-capacity-bar__fill.is-danger {
@@ -8043,7 +8043,7 @@ non‑Home surfaces only ──────────────────�
   margin-top: 4px;
 }
 .nx-heat-badge--lg {
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
   padding: 3px 8px;
 }
 .nx-kpi-hot {
@@ -8078,7 +8078,7 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.64rem;
+  font-size: 0.6875rem;
   color: var(--text-2);
 }
 .nx-footer-icon {
@@ -8166,7 +8166,7 @@ non‑Home surfaces only ──────────────────�
 }
 .nx-notif-card__kind {
   font-family: var(--font-mono);
-  font-size: 0.48rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--text-2);
@@ -8219,7 +8219,7 @@ non‑Home surfaces only ──────────────────�
    RESPONSIVE — NEW SURFACES
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 960px) {
+@media (max-width: 1023.98px) {
   .nx-inbox__body,
   .nx-buyer__body {
     grid-template-columns: 1fr;
@@ -8666,7 +8666,7 @@ components removed from render tree */
   gap: 8px;
 }
 .co-reason__field dt {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.25);
   text-transform: uppercase;
@@ -8692,7 +8692,7 @@ components removed from render tree */
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.28);
 }
 .co-reason__evt-label { color: rgba(255, 255, 255, 0.42); }
@@ -8749,7 +8749,7 @@ components removed from render tree */
 }
 .co-activity__sug:hover { border-color: rgba(255, 255, 255, 0.10); background: rgba(255, 255, 255, 0.03); }
 .co-activity__sug-title { font-size: 12px; font-weight: 500; color: rgba(255, 255, 255, 0.78); }
-.co-activity__sug-sub { font-size: 10px; color: rgba(255, 255, 255, 0.30); }
+.co-activity__sug-sub { font-size: 11px; color: rgba(255, 255, 255, 0.30); }
 /* Messages */
 .co-activity__msg {
   padding: 8px 12px;
@@ -8773,7 +8773,7 @@ components removed from render tree */
   max-width: 100%;
 }
 .co-activity__author {
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: rgba(255, 255, 255, 0.22);
@@ -8792,7 +8792,7 @@ components removed from render tree */
 }
 .co-activity__msg--operator .co-activity__text { color: rgba(255, 255, 255, 0.85); }
 .co-activity__msg--system .co-activity__text {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.28);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
@@ -8834,7 +8834,7 @@ components removed from render tree */
   align-items: center;
   gap: 8px;
   padding: 3px 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(160, 120, 255, 0.50);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
@@ -8854,14 +8854,14 @@ components removed from render tree */
   margin-bottom: 8px;
 }
 .co-activity__approval-tag {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: rgba(232, 168, 56, 0.80);
 }
 .co-activity__approval-conf {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.24);
 }
@@ -8880,7 +8880,7 @@ components removed from render tree */
   margin: 0;
 }
 .co-activity__approval-target {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.22);
   display: block;
@@ -8932,7 +8932,7 @@ components removed from render tree */
   align-items: center;
   gap: 8px;
   padding: 0 2px 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.28);
 }
@@ -9090,20 +9090,20 @@ components removed from render tree */
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
 .co-cmd__slash-desc {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.25);
 }
 /* ── Responsive ────────────────────────────────────────────────────────── */
 
-@media (max-width: 840px) {
-  .co-rail { width: 100vw; }
-  .co-deck { width: 100vw; }
+@media (max-width: 1023.98px) {
+  .co-rail { width: 100%; }
+  .co-deck { width: 100%; }
   .co-deck__trace { display: none; }
   .co-presence:not(.co-presence--compact) { padding: 16px 14px 8px; }
   .co-presence__orb { width: 52px; height: 52px; }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 767.98px) {
 .co-rail__meta { display: none; }
 .co-cmd__chips { flex-wrap: nowrap; overflow-x: auto; }
 }
@@ -9173,7 +9173,7 @@ components removed from render tree */
 .nx-briefing__close:hover { background: rgba(255, 255, 255, 0.08); color: #e8eaf0; }
 .nx-briefing__close-icon { width: 14px; height: 14px; }
 .nx-briefing__close kbd {
-  font-size: 10px;
+  font-size: 11px;
   padding: 2px 5px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
@@ -9204,7 +9204,7 @@ components removed from render tree */
 .nx-briefing-section__icon { width: 16px; height: 16px; color: rgba(255, 255, 255, 0.50); }
 .nx-briefing-section__label { font-size: 13px; font-weight: 600; color: #e8eaf0; flex: 1; margin: 0; }
 .nx-briefing-section__tone {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 3px 8px;
@@ -9255,7 +9255,7 @@ components removed from render tree */
   padding: 2px 5px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
 .nx-briefing__action {
@@ -9406,7 +9406,7 @@ components removed from render tree */
 .nx-notif-item__body { min-width: 0; flex: 1; }
 .nx-notif-item__title { font-size: 12px; font-weight: 600; color: #e8eaf0; display: block; }
 .nx-notif-item__detail { font-size: 11px; color: rgba(255, 255, 255, 0.40); margin-top: 2px; display: block; }
-.nx-notif-item__time { font-size: 10px; color: rgba(255, 255, 255, 0.25); margin-top: 4px; display: block; font-family: var(--font-mono, 'IBM Plex Mono', monospace); }
+.nx-notif-item__time { font-size: 11px; color: rgba(255, 255, 255, 0.25); margin-top: 4px; display: block; font-family: var(--font-mono, 'IBM Plex Mono', monospace); }
 /* ── Dock badge ────────────────────────────────────────────────────────── */
 
 .nx-dock__badge {
@@ -9419,7 +9419,7 @@ components removed from render tree */
   place-items: center;
   background: #d4404c;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: #fff;
   padding: 0 4px;
@@ -9457,7 +9457,7 @@ components removed from render tree */
 }
 .nx-split-thread__message strong { font-size: 13px; color: #e8eaf0; display: block; margin-bottom: 6px; }
 .nx-split-thread__message p { font-size: 12px; color: rgba(255, 255, 255, 0.55); line-height: 1.55; margin: 0; }
-.nx-split-thread__time { font-size: 10px; color: rgba(255, 255, 255, 0.28); margin-top: 8px; display: block; }
+.nx-split-thread__time { font-size: 11px; color: rgba(255, 255, 255, 0.28); margin-top: 8px; display: block; }
 .nx-split-thread__draft {
   padding: 14px;
   background: rgba(var(--nexus-accent-rgb), 0.04);
@@ -9497,7 +9497,7 @@ components removed from render tree */
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 .nx-split-lead__urgency-label {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.35);
@@ -9562,7 +9562,7 @@ components removed from render tree */
   border-radius: 10px;
 }
 .nx-split-lead__nba-label {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #2cb87a;
@@ -9689,7 +9689,7 @@ Motion
   border-radius: 2px;
 }
 .nx-theme-swatch__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--nx-text-secondary, rgba(255,255,255,0.55));
   text-align: center;
@@ -9813,7 +9813,7 @@ Motion
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 9px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.25);
   white-space: nowrap;
@@ -9932,14 +9932,14 @@ Motion
   margin-bottom: 8px;
 }
 .nx-trace__title {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.25);
   font-weight: 600;
 }
 .nx-trace__count {
-  font-size: 9px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.20);
   background: rgba(255, 255, 255, 0.04);
@@ -9948,7 +9948,7 @@ Motion
 }
 .nx-trace__toggle {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
   background: none;
   border: none;
@@ -9962,7 +9962,7 @@ Motion
   gap: 4px;
 }
 .nx-trace__filter {
-  font-size: 9px;
+  font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.10);
@@ -9996,7 +9996,7 @@ Motion
 .nx-trace__severity-dot[data-severity='info'] { background: rgba(var(--nexus-accent-rgb), 0.92); }
 .nx-trace__severity-dot[data-severity='trace'] { background: rgba(255, 255, 255, 0.28); }
 .nx-trace__pin {
-  font-size: 10px;
+  font-size: 11px;
   border: none;
   background: none;
   color: rgba(255, 255, 255, 0.25);
@@ -10009,7 +10009,7 @@ Motion
 .nx-trace__room-tag {
   display: inline-block;
   margin-top: 3px;
-  font-size: 9px;
+  font-size: 11px;
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.05);
@@ -10042,7 +10042,7 @@ Motion
   to   { opacity: 1; transform: translateX(0); }
 }
 .nx-trace__icon {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.25);
   flex-shrink: 0;
   width: 14px;
@@ -10059,7 +10059,7 @@ Motion
   display: block;
 }
 .nx-trace__detail {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.30);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   display: block;
@@ -10068,7 +10068,7 @@ Motion
   text-overflow: ellipsis;
 }
 .nx-trace__ts {
-  font-size: 9px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   color: rgba(255, 255, 255, 0.18);
   flex-shrink: 0;
@@ -10102,22 +10102,22 @@ Motion
 }
 .nx-model-picker__trigger:hover { background: rgba(255, 255, 255, 0.04); }
 .nx-model-picker__model-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.50);
 }
 .nx-model-picker__divider {
   color: rgba(255, 255, 255, 0.15);
-  font-size: 10px;
+  font-size: 11px;
 }
 .nx-model-picker__perm-label {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
 .nx-model-picker__chevron {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.25);
 }
 .nx-model-picker__panel {
@@ -10142,7 +10142,7 @@ Motion
   to   { opacity: 1; transform: translateY(0); }
 }
 .nx-model-picker__section-label {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.25);
@@ -10179,12 +10179,12 @@ Motion
   color: var(--nx-text-primary, #e8eaf0);
 }
 .nx-model-picker__opt-desc {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
   flex: 1;
 }
 .nx-model-picker__speed {
-  font-size: 9px;
+  font-size: 11px;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   padding: 1px 6px;
   border-radius: 3px;
@@ -10199,7 +10199,7 @@ Motion
   gap: 6px;
 }
 .nx-model-picker__tab {
-  font-size: 10px;
+  font-size: 11px;
   padding: 6px 8px;
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.10);
@@ -10232,7 +10232,7 @@ Motion
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.68);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 .nx-model-picker__toggle.is-active {
@@ -10241,7 +10241,7 @@ Motion
 }
 /* ── Copilot Orb Responsive ─────────────────────────────────────────────── */
 
-@media (max-width: 840px) {
+@media (max-width: 1023.98px) {
   .nx-copilot-orb--floating,
   .nx-copilot-orb--corner {
     bottom: 18px;
@@ -10533,7 +10533,7 @@ Motion
 
 .queue-capacity-card__title {
   margin: 0 0 10px 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -10572,7 +10572,7 @@ Motion
 
 .queue-buckets__title {
   margin: 0 0 10px 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -10634,7 +10634,7 @@ Motion
 
 .queue-filters__title {
   margin: 8px 0 10px 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -10648,7 +10648,7 @@ Motion
 }
 
 .queue-filter-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-2);
   text-transform: uppercase;
@@ -10796,7 +10796,7 @@ Motion
   align-items: center;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -10857,7 +10857,7 @@ Motion
   display: flex;
   gap: 6px;
   margin-bottom: 6px;
-  font-size: 10px;
+  font-size: 11px;
   flex-wrap: wrap;
 }
 
@@ -10869,7 +10869,7 @@ Motion
   display: inline-flex;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   background: var(--surface-2);
   color: var(--text-2);
@@ -10897,7 +10897,7 @@ Motion
 }
 
 .queue-card__message {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-2);
   margin-bottom: 6px;
   line-height: 1.4;
@@ -10909,7 +10909,7 @@ Motion
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-3);
   padding-top: 8px;
   border-top: 1px solid var(--border-0);
@@ -10962,7 +10962,7 @@ Motion
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .queue-stat {
@@ -10975,7 +10975,7 @@ Motion
 }
 
 .queue-stat__label {
-  font-size: 8px;
+  font-size: 11px;
   color: var(--text-3);
   font-weight: 700;
   text-transform: uppercase;
@@ -11007,7 +11007,7 @@ Motion
   display: inline-flex;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   background: rgba(62, 207, 142, 0.12);
   color: var(--tone-primary);
@@ -11035,7 +11035,7 @@ Motion
 .queue-month-header {
   padding: 8px;
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
@@ -11068,7 +11068,7 @@ Motion
 }
 
 .queue-month-cell__date {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-0);
 }
@@ -11077,7 +11077,7 @@ Motion
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 8px;
+  font-size: 11px;
   flex: 1;
   justify-content: flex-start;
 }
@@ -11118,7 +11118,7 @@ Motion
   font-weight: 700;
   color: var(--text-2);
   background: var(--surface-0);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-right: 1px solid var(--border-0);
@@ -11165,7 +11165,7 @@ Motion
   display: inline-flex;
   padding: 3px 7px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -11244,7 +11244,7 @@ Motion
   display: inline-flex;
   padding: 3px 8px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -11283,7 +11283,7 @@ Motion
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-0);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--text-2);
   max-height: 80px;
@@ -11320,7 +11320,7 @@ Motion
   display: inline-flex;
   padding: 2px 6px;
   border-radius: 2px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   background: rgba(248, 113, 113, 0.12);
@@ -11366,13 +11366,13 @@ Motion
 }
 
 .queue-failure-item__retries {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-3);
   font-family: var(--font-mono);
 }
 
 .queue-failure-item__property {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-2);
   margin-bottom: 6px;
 }
@@ -11442,7 +11442,7 @@ Motion
 
 .queue-inspector-section__title {
   margin: 0 0 10px 0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -11465,7 +11465,7 @@ Motion
   font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.05em;
 }
 
@@ -11485,7 +11485,7 @@ Motion
   color: var(--text-1);
   max-height: 110px;
   overflow-y: auto;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .queue-inspector-actions {
@@ -11692,13 +11692,13 @@ Motion
 
 /* Responsive */
 
-@media (max-width: 1400px) {
+@media (max-width: 1439.98px) {
   .queue-column--right {
     width: 280px;
   }
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1439.98px) {
   .queue-column--left {
     width: 200px;
   }
@@ -11708,7 +11708,7 @@ Motion
   }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1023.98px) {
   .queue-workspace {
     flex-direction: row;
   }
@@ -11722,7 +11722,7 @@ Motion
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .queue-header {
     flex-direction: column;
     align-items: flex-start;
@@ -11797,7 +11797,7 @@ Motion
 }
 
 .nx-header-meta-v3 {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-3);
   text-transform: uppercase;
@@ -11814,7 +11814,7 @@ Motion
   background: rgba(255, 255, 255, 0.015);
   border: 1px solid var(--border-0);
   border-radius: 4px;
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
@@ -11823,7 +11823,7 @@ Motion
 }
 
 .nx-header-interest-v3 svg {
-  font-size: 10px !important;
+  font-size: 11px !important;
   opacity: 0.6;
 }
 
@@ -11848,7 +11848,7 @@ Motion
   background: transparent !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 4px !important;
-  font-size: 9.5px !important;
+  font-size: 11px !important;
   font-weight: 700 !important;
   color: var(--text-2) !important;
   text-transform: uppercase;
@@ -11877,7 +11877,7 @@ Motion
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
@@ -11901,7 +11901,7 @@ Motion
   border-radius: 4px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 479.98px) {
   .nx-header-identity-row-v3 { flex-direction: column; align-items: flex-start; gap: 12px; }
   .nx-header-interest-v3 { width: 100%; justify-content: center; }
   .nx-header-actions-v3 { flex-direction: column; }

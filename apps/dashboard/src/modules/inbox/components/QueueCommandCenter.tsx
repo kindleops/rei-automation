@@ -685,7 +685,7 @@ export function QueueCommandCenter({
             style={{ width: '100%', justifyContent: 'space-between', display: 'flex', alignItems: 'center' }}
           >
             <span>ADVANCED DIAGNOSTICS</span>
-            <span style={{ fontSize: 9 }}>{showAdvanced ? '▲' : '▼'}</span>
+            <span style={{ fontSize: 11 }}>{showAdvanced ? '▲' : '▼'}</span>
           </button>
 
           {showAdvanced && (
@@ -744,7 +744,7 @@ export function QueueCommandCenter({
                   ['max_per_market_per_hour', 'Per Market / Hr'],
                 ] as Array<[keyof QueueCommandCaps, string]>).map(([key, label]) => (
                   <label key={key} className="qcc-cap" style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', opacity: 0.5 }}>{label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', opacity: 0.5 }}>{label}</span>
                     <input
                       type="number"
                       min={0}

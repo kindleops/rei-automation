@@ -296,7 +296,7 @@
   display: grid;
   place-items: center;
   color: var(--smc-muted);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -361,7 +361,7 @@
   align-items: center;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -423,7 +423,7 @@
 .smc-metrics--focus {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-@media (max-width: 520px) {
+@media (max-width: 767.98px) {
   .smc-metrics--focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -437,7 +437,7 @@
 }
 .smc-metric span {
   display: block;
-  font-size: 7.5px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -465,7 +465,7 @@
   flex-shrink: 0;
 }
 .smc-intel-head__label {
-  font-size: 7.5px;
+  font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -473,7 +473,7 @@
 }
 .smc-context-line {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
   color: color-mix(in srgb, var(--smc-text) 78%, transparent);
 }
@@ -494,7 +494,7 @@
 }
 .smc-intel-strip__cell span {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -502,7 +502,7 @@
 .smc-intel-strip__cell strong {
   display: block;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -515,7 +515,7 @@
   gap: 2px;
 }
 .smc-intel-strip__priority > span {
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -539,12 +539,12 @@
 .smc-priority-ring__tag {
   position: absolute;
   bottom: -2px;
-  font-size: 6px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--smc-muted);
 }
 .smc-priority-ring.is-compact .smc-priority-ring__value {
-  font-size: 9px;
+  font-size: 11px;
 }
 .smc-priority-ring.is-compact .smc-priority-ring__tag {
   display: none;
@@ -558,7 +558,7 @@
 .smc-flag {
   padding: 3px 7px;
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -588,7 +588,7 @@
   flex-shrink: 0;
 }
 .smc-activity__head {
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -619,7 +619,7 @@
 }
 .smc-section h4 {
   margin: 0 0 6px;
-  font-size: 8.5px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -637,7 +637,7 @@
 }
 .smc-kv span {
   display: block;
-  font-size: 7.5px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -645,7 +645,7 @@
 .smc-kv strong {
   display: block;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.3;
 }
 
@@ -720,7 +720,7 @@
 }
 .smc-conversation__name { font-size: 13px; font-weight: 700; }
 .smc-conversation__addr {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--smc-muted);
   margin-top: 2px;
   white-space: nowrap;
@@ -737,7 +737,7 @@
   display: flex;
   gap: 8px;
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -776,7 +776,7 @@
 .smc-thread__translated {
   display: block;
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   opacity: 0.7;
@@ -1103,7 +1103,7 @@
   gap: 8px;
   margin-top: 4px;
   padding: 0 2px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--nx-live-text-muted, var(--smc-muted));
 }
 
@@ -1117,7 +1117,7 @@
   align-items: center;
   gap: 10px;
   margin: 8px 0 10px;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--nx-live-text-muted, var(--smc-muted));
@@ -1320,7 +1320,7 @@
 
 .smc-shell:not(.is-mobile) .smc-identity__phone {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--smc-muted);
 }
@@ -1352,7 +1352,7 @@
 }
 
 .smc-metrics--dense .smc-metric span {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .smc-metrics--dense .smc-metric strong {
@@ -1400,7 +1400,7 @@
 }
 
 .smc-contact-state__pill {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1413,7 +1413,7 @@
 
 .smc-contact-state__badge,
 .smc-badge--active {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1430,7 +1430,7 @@
 .smc-section--profile h4,
 .smc-section--ops h4 {
   margin: 0 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -1445,7 +1445,7 @@
 }
 
 .smc-kv-grid--compact .smc-kv span {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .smc-kv-grid--compact .smc-kv strong {
@@ -1464,7 +1464,7 @@
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--smc-muted);
 }
 
@@ -1495,7 +1495,7 @@
 .smc-pressure-card__summary,
 .smc-empty-line {
   margin: 0 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--smc-muted);
 }
 
@@ -1517,7 +1517,7 @@
 
 .smc-pressure-driver,
 .smc-contact-badge {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1552,7 +1552,7 @@
 
 .smc-profile-group h5 {
   margin: 0 0 4px;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -1581,7 +1581,7 @@
 
 .smc-shell:not(.is-mobile) .smc-actions--sticky .smc-action {
   height: 30px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   border-radius: 9px;
   letter-spacing: 0.02em;
@@ -1633,7 +1633,7 @@
 
 .smc-fin-summary__chip span {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--smc-muted);
@@ -1642,7 +1642,7 @@
 .smc-fin-summary__chip strong {
   display: block;
   margin-top: 1px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--smc-text);
 }
@@ -1689,11 +1689,11 @@
 }
 
 .smc-kv--flat span {
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .smc-kv--flat strong {
-  font-size: 10px;
+  font-size: 11px;
   margin-top: 1px;
 }
 
@@ -1734,7 +1734,7 @@
 
 .smc-dossier-group h5 {
   margin: 0 0 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1763,7 +1763,7 @@
 
 .smc-operational-state {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: color-mix(in srgb, var(--smc-muted) 92%, transparent);
   line-height: 1.35;

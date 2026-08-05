@@ -1,3 +1,5 @@
+import { LC_BAND_MIN } from './breakpoints'
+
 export type ViewportMetrics = {
   layoutWidth: number
   layoutHeight: number
@@ -6,9 +8,11 @@ export type ViewportMetrics = {
   isPortrait: boolean
 }
 
-/** Correct Safari "Request Desktop Website" layout viewport inflation on phones. */
-const PHONE_MAX = 767
-const PHONE_LONG_EDGE_MAX = 1024
+/** Correct Safari "Request Desktop Website" layout viewport inflation on phones.
+ *  Bounds come from the §15 band contract so this heuristic can never drift
+ *  from `useBreakpoint` or from CSS. */
+const PHONE_MAX = LC_BAND_MIN.md - 1
+const PHONE_LONG_EDGE_MAX = LC_BAND_MIN.lg
 
 export function resolveViewportMetrics(input: {
   innerWidth: number

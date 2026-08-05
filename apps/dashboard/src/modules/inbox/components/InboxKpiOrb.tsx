@@ -71,7 +71,7 @@ function MCard({ label, value, tone, span2 }: {
       gap: '3px',
       gridColumn: span2 ? 'span 2' : undefined,
     }}>
-      <div style={{ fontSize: '9px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+      <div style={{ fontSize: '11px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         {label}
       </div>
       <div style={{ fontSize: '17px', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
@@ -91,7 +91,7 @@ function Grid({ children, cols = 3 }: { children: React.ReactNode; cols?: number
 
 function SubLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: '9px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
+    <div style={{ fontSize: '11px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
       {children}
     </div>
   )
@@ -122,9 +122,9 @@ function HighlightCard({ tone, eyebrow, title, detail }: {
       borderRadius: '8px',
       fontSize: '11px',
     }}>
-      <div style={{ fontSize: '8px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
+      <div style={{ fontSize: '11px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
       <div style={{ fontWeight: 600, marginBottom: '2px', color: 'var(--nx-kpi-highlight-title, rgba(255,255,255,0.85))' }}>{title}</div>
-      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '10px' }}>{detail}</div>
+      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '11px' }}>{detail}</div>
     </div>
   )
 }
@@ -233,7 +233,7 @@ function AutoRepliesSection({ sections, stage, onStage }: {
               border: `1px solid ${stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-border, rgba(255,255,255,0.08))'}`,
               background: stage === d.id ? `${d.color}1a` : 'var(--nx-kpi-tab-inactive-bg, rgba(255,255,255,0.03))',
               color: stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-text, rgba(255,255,255,0.38))',
-              fontSize: '10px',
+              fontSize: '11px',
               fontWeight: stage === d.id ? 700 : 400,
               cursor: 'pointer',
             }}
@@ -384,7 +384,7 @@ function DeliverabilitySection({ kpis, sections }: { kpis: KpiData; sections: Co
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px',
               }}>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.5))', fontFamily: 'monospace' }}>{reason}</span>
+                <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.5))', fontFamily: 'monospace' }}>{reason}</span>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: count > 5 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-warn, #f97316)' }}>{fmtN(count)}</span>
               </div>
             ))}
@@ -430,12 +430,12 @@ function TemplatesSection({ sections, outliers }: { sections: CockpitOpsSections
                 display: 'grid', gridTemplateColumns: '1fr auto auto auto',
                 gap: '10px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
               }}>
-                <span style={{ fontFamily: 'monospace', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.68))' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.68))' }}>
                   {t.template_id}
                 </span>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-label, rgba(255,255,255,0.35))' }}>{fmtN(t.sent)} sent</span>
-                <span style={{ fontSize: '10px', color: t.failed > 0 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.22))' }}>{fmtN(t.failed)} fail</span>
-                <span style={{ fontSize: '10px', color: t.failure_rate !== null && t.failure_rate > 10 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-label, rgba(255,255,255,0.32))' }}>
+                <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-label, rgba(255,255,255,0.35))' }}>{fmtN(t.sent)} sent</span>
+                <span style={{ fontSize: '11px', color: t.failed > 0 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.22))' }}>{fmtN(t.failed)} fail</span>
+                <span style={{ fontSize: '11px', color: t.failure_rate !== null && t.failure_rate > 10 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-label, rgba(255,255,255,0.32))' }}>
                   {fmtRate(t.failure_rate)}
                 </span>
               </div>
@@ -480,14 +480,14 @@ function NumbersSection({ sections, outliers }: { sections: CockpitOpsSections |
               display: 'grid', gridTemplateColumns: '1fr auto auto auto auto',
               gap: '8px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
             }}>
-              <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.65))' }}>{n.number}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.3))' }}>{fmtN(n.sent)}</span>
-              <span style={{ fontSize: '10px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)' }}>{fmtRate(n.delivery_rate)}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-text, rgba(255,255,255,0.42))' }}>{fmtRate(n.reply_rate)}</span>
-              <span style={{ fontSize: '10px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? 'var(--nx-kpi-warn, #f97316)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.28))' }}>{fmtRate(n.opt_out_rate)}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.65))' }}>{n.number}</span>
+              <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.3))' }}>{fmtN(n.sent)}</span>
+              <span style={{ fontSize: '11px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)' }}>{fmtRate(n.delivery_rate)}</span>
+              <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-text, rgba(255,255,255,0.42))' }}>{fmtRate(n.reply_rate)}</span>
+              <span style={{ fontSize: '11px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? 'var(--nx-kpi-warn, #f97316)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.28))' }}>{fmtRate(n.opt_out_rate)}</span>
             </div>
           ))}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '8px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.2))', letterSpacing: '0.05em' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.2))', letterSpacing: '0.05em' }}>
             <span />
             <span>SENT</span><span>DEL%</span><span>REP%</span><span>OPT%</span>
           </div>
@@ -727,7 +727,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
               <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.03em', color: 'var(--nx-kpi-title, rgba(255,255,255,0.9))' }}>
                 Operational Intelligence
               </div>
-              <div style={{ fontSize: '9px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
                 {isLive ? '⚡ Live' : 'System telemetry'}
               </div>
             </div>
@@ -743,7 +743,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
                     border: 'none',
                     background: timeWindow === w ? 'var(--nx-kpi-active-btn-bg, rgba(56,208,240,0.14))' : 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
                     color: timeWindow === w ? 'var(--nx-kpi-active-btn-color, #38d0f0)' : 'var(--nx-kpi-btn-color, rgba(255,255,255,0.38))',
-                    fontSize: '9px',
+                    fontSize: '11px',
                     fontWeight: timeWindow === w ? 700 : 400,
                     cursor: 'pointer',
                     letterSpacing: '0.04em',
@@ -791,7 +791,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
                   border: `1px solid ${section === s.id ? 'var(--nx-kpi-active-pill-border, #38d0f0)' : 'var(--nx-kpi-pill-border, rgba(255,255,255,0.08))'}`,
                   background: section === s.id ? 'var(--nx-kpi-active-pill-bg, rgba(56,208,240,0.1))' : 'transparent',
                   color: section === s.id ? 'var(--nx-kpi-active-pill-color, #38d0f0)' : 'var(--nx-kpi-pill-color, rgba(255,255,255,0.38))',
-                  fontSize: '10px',
+                  fontSize: '11px',
                   fontWeight: section === s.id ? 700 : 400,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -821,7 +821,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
               <span>Telemetry error</span>
               <button
                 onClick={() => refreshKpis()}
-                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '2px 8px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '10px' }}
+                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '2px 8px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '11px' }}
               >
                 Retry
               </button>
@@ -897,10 +897,10 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
               flexShrink: 0,
               background: 'var(--nx-kpi-rec-bg, rgba(99,102,241,0.05))',
             }}>
-              <div style={{ fontSize: '8px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
                 Recommended Action
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
                 {recommendations[0]}
               </div>
             </div>
@@ -915,11 +915,11 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
             alignItems: 'center',
             flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
               <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: kpiError ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-good, #00e87a)' }} />
               {kpiError ? 'Unavailable' : 'Up to date'}
             </div>
-            <div style={{ fontSize: '9px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
+            <div style={{ fontSize: '11px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
               {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>

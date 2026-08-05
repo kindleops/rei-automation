@@ -181,7 +181,8 @@ export const NexusTopBar = ({
   const [isCompactMenu, setIsCompactMenu] = useState(false)
 
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 1024px)')
+    // §15 band contract (modules/mobile/breakpoints.ts): md-and-below.
+    const media = window.matchMedia('(max-width: 1023.98px)')
     const apply = () => setIsCompactMenu(media.matches)
     apply()
     media.addEventListener('change', apply)

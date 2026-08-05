@@ -87,7 +87,7 @@
   border: 1px solid var(--icv-border);
   background: rgba(255,255,255,0.04);
   color: var(--icv-text-1);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -130,7 +130,7 @@
 
 .icv-btn--sm {
   padding: 3px 7px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 /* ── KPI strip ──────────────────────────────────────────────────────────────── */
@@ -166,7 +166,7 @@
 .icv__kpi-val.is-danger  { color: var(--icv-danger); }
 
 .icv__kpi-lbl {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -180,7 +180,7 @@
   align-items: center;
   gap: 5px;
   padding: 7px 12px 5px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -237,7 +237,7 @@
 }
 
 .icv-linked-card__label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -279,7 +279,7 @@
 }
 
 .icv-target-status {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -329,7 +329,7 @@
 
 .icv-linked-metric__lbl {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -351,7 +351,7 @@
   gap: 4px;
   padding: 1px 7px;
   border-radius: 100px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -436,7 +436,7 @@
   border-radius: 100px;
   border: 1px solid var(--icv-border);
   background: rgba(255,255,255,0.03);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -455,7 +455,7 @@
 
 .icv__count {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--icv-text-2);
 }
 
@@ -532,7 +532,7 @@
 }
 
 .icv-row__autosend {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -543,7 +543,7 @@
 }
 
 .icv-row__interval {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--icv-text-2);
 }
 
@@ -575,7 +575,7 @@
 .icv-stat__val.is-accent { color: var(--icv-accent); }
 
 .icv-stat__lbl {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -595,7 +595,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--icv-text-2);
 }
 
@@ -708,7 +708,7 @@
 }
 
 .icv-detail__cell-lbl {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -727,7 +727,7 @@
 }
 
 .icv-detail__rate-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--icv-text-2);
   width: 90px;
   flex-shrink: 0;
@@ -779,7 +779,7 @@
 }
 
 .icv-detail__footer-key {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -849,7 +849,7 @@
 }
 
 .icv-linked-chip__meta {
-  font-size: 10px;
+  font-size: 11px;
   color: #71717a;
   display: flex;
   align-items: center;
@@ -895,7 +895,7 @@
   gap: 6px;
   padding: 9px 10px 7px;
   border-bottom: 1px solid rgba(255,255,255,0.07);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -906,7 +906,7 @@
 
 .icv-compact__count {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   background: rgba(255,255,255,0.08);
   padding: 1px 6px;
   border-radius: 100px;
@@ -965,7 +965,7 @@
 }
 
 .icv-compact__stats {
-  font-size: 10px;
+  font-size: 11px;
   color: #71717a;
   display: flex;
   align-items: center;
@@ -979,7 +979,7 @@
 
 .icv-btn--xs {
   padding: 3px 7px !important;
-  font-size: 9px !important;
+  font-size: 11px !important;
   border-radius: 4px !important;
   white-space: nowrap;
 }

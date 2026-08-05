@@ -38,7 +38,7 @@
 
 .wfs-kicker {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   font-weight: 700;
   color: #82d9c9;
@@ -369,7 +369,7 @@
 
 .wfs-metric-grid span {
   color: rgba(232, 243, 241, 0.62);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -463,7 +463,7 @@
 }
 
 .wfs-language-grid strong {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(232, 243, 241, 0.62);
 }
 
@@ -633,7 +633,7 @@
   display: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023.98px) {
   .wfs-shell,
   .wfs-panel-grid,
   .wfs-panel-grid.is-wide {
@@ -1049,7 +1049,7 @@
 
 .wfs-canvas-node__main small {
   color: var(--wfs-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1062,7 +1062,7 @@
   border-radius: 7px;
   background: rgba(101, 242, 211, 0.08);
   color: #baf8ea;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1356,7 +1356,7 @@
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1439.98px) {
   .wfs-commandbar {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -1372,7 +1372,7 @@
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1023.98px) {
   .wfs-shell {
     grid-template-columns: 1fr;
   }
@@ -1674,7 +1674,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--wfs-dim);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .wfs-library-node:hover {
@@ -1735,7 +1735,7 @@
   border-radius: 999px;
   background: rgba(0,0,0,0.22);
   color: var(--wfs-cyan);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .wfs-mode-switch button.is-active {
@@ -1808,7 +1808,7 @@
   border-radius: 7px;
   background: rgba(255,255,255,0.045);
   color: var(--wfs-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2042,7 +2042,7 @@
 
 .wfs-canvas-node__main small {
   color: var(--wfs-muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
 }
@@ -2096,7 +2096,7 @@
   border-radius: 7px;
   background: rgba(255,255,255,0.045);
   color: var(--wfs-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
 }
 
@@ -2193,7 +2193,7 @@
   padding: 0 7px;
   border: 1px solid rgba(99, 244, 220, 0.28);
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2322,7 +2322,7 @@
   gap: 5px;
   padding: 0 8px;
   color: var(--wfs-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2584,7 +2584,7 @@
 
 .wfs-variant-list button strong {
   color: var(--wfs-gold);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2760,7 +2760,7 @@
 
 .wfs-sender-pool header small {
   color: var(--wfs-dim);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .wfs-route-chip {
@@ -2772,7 +2772,7 @@
   border-radius: 7px;
   color: #d7e4ff;
   background: rgba(45,81,154,0.18);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2833,7 +2833,7 @@
 
 .wfs-member-table strong {
   color: var(--wfs-green);
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -2893,7 +2893,7 @@
   50% { box-shadow: 0 0 0 4px rgba(99,244,220,0.06); }
 }
 
-@media (max-width: 1380px) {
+@media (max-width: 1439.98px) {
   .wfs-commandbar {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2913,7 +2913,7 @@
   }
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1439.98px) {
   .wfs-workbench {
     grid-template-columns: 1fr;
   }
@@ -3045,7 +3045,7 @@
 .wfs.is-width-25 .wfs-mode-switch button {
   min-height: 28px;
   padding-inline: 7px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .wfs.is-width-25 .wfs-mode-switch {

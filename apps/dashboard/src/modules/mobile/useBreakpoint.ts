@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react'
+import { type LcBand, resolveBand } from './breakpoints'
 import { resolveViewportMetrics } from './viewport-metrics'
 
 export type Breakpoint = 'phone' | 'tablet' | 'desktop'
 
-const PHONE_MAX = 767
-const TABLET_MAX = 1023
+/**
+ * Coarse layout classes, derived from the §15 bands in `breakpoints.ts` so JS
+ * and CSS can never disagree again:
+ *   phone   = xs + sm  → CSS `(max-width: 767.98px)`
+ *   tablet  = md       → CSS `(min-width: 768px) and (max-width: 1023.98px)`
+ *   desktop = lg + xl  → CSS `(min-width: 1024px)`
+ */
+const BAND_TO_BREAKPOINT: Record<LcBand, Breakpoint> = {
+  xs: 'phone',
+  sm: 'phone',
+  md: 'tablet',
+  lg: 'desktop',
+  xl: 'desktop',
+}
 
 export function resolveBreakpoint(width: number): Breakpoint {
-  if (width <= PHONE_MAX) return 'phone'
-  if (width <= TABLET_MAX) return 'tablet'
-  return 'desktop'
+  return BAND_TO_BREAKPOINT[resolveBand(width)]
 }
 
 function readViewportState() {

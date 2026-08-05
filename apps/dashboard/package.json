@@ -55,7 +55,10 @@
     "typecheck": "tsc --noEmit",
     "proof:dev-runtime": "npx tsx scripts/proof/dev-runtime-diagnostics-proof.ts",
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
-    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api"
+    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
+    "gate:a11y": "playwright test --config=playwright.a11y.config.ts",
+    "gate:responsive-audit": "node scripts/lc-responsive-audit.mjs",
+    "gate:lane-g": "npm run gate:responsive-audit && npm run gate:a11y"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

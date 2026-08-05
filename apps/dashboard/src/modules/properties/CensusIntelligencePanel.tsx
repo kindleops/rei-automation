@@ -65,12 +65,12 @@ export const CensusIntelligencePanel = ({ property }: CensusIntelligencePanelPro
         <Icon name="search" />
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
           <div>
-            <span style={{ color: '#C6FF4A', opacity: 0.8, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Demographic Intelligence</span>
+            <span style={{ color: '#C6FF4A', opacity: 0.8, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Demographic Intelligence</span>
             <h2 style={{ fontFamily: 'var(--nx-font-mono)', fontSize: '14px', margin: '2px 0 0 0' }}>ACS 5-YEAR ESTIMATES</h2>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '20px', fontWeight: 'bold', color: scoreColor, fontFamily: 'var(--nx-font-mono)' }}>{score}</div>
-            <div style={{ fontSize: '9px', opacity: 0.5, textTransform: 'uppercase' }}>Opportunity</div>
+            <div style={{ fontSize: '11px', opacity: 0.5, textTransform: 'uppercase' }}>Opportunity</div>
           </div>
         </div>
       </div>

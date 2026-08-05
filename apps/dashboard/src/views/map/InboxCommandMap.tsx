@@ -4218,7 +4218,7 @@ export function InboxCommandMap({
     isMobileRef.current = isMobile
   }, [isMobile])
   const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>(() => (
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'compact' : 'full'
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767.98px)').matches ? 'compact' : 'full'
   ))
 
   useEffect(() => {
