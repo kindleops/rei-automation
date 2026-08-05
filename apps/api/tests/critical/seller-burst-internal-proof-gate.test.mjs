@@ -135,17 +135,50 @@ function gateDeps(overrides = {}) {
   };
 }
 
-async function runGate({ mode, internal_phone, session, session_error = false }) {
+// A session payload the REAL parser accepts: pinned recipient/sender/campaign,
+// inside the 240-minute cap, expiring in the future relative to `now`.
+function proofSessionValue({ minutes_ago = 5, minutes_ahead = 30, closed_at = null } = {}) {
+  const now = Date.now();
+  return {
+    session_id: "proof-1",
+    queue_row_id: "00000000-0000-4000-8000-00000000f001",
+    recipient: "+16128072000",
+    sender: "+16128060495",
+    campaign_id: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
+    created_at: new Date(now - minutes_ago * 60_000).toISOString(),
+    expires_at: new Date(now + minutes_ahead * 60_000).toISOString(),
+    ...(closed_at ? { closed_at } : {}),
+  };
+}
+
+// The webhook gate resolves through the shared burst-flush activation authority
+// (which honors closed_at and produces the session's bounds), NOT through a
+// bare session load. Driving the real module against an injected system value
+// exercises the production seam instead of a stub of it.
+async function runGate({
+  mode,
+  internal_phone,
+  session,
+  session_error = false,
+  session_value = undefined,
+}) {
   const loader_calls = [];
+  const value =
+    session_value !== undefined
+      ? session_value
+      : session?.active
+        ? proofSessionValue()
+        : null;
   __setTextgridInboundTestDeps(
     gateDeps({
       resolveSellerInboundBurstMode: () => mode,
       isSellerInboundBurstEnabled: () => mode === "enabled",
       isInternalTestPhone: () => internal_phone,
-      loadActiveInternalProofSession: async (args) => {
-        loader_calls.push(args);
+      getSystemValue: async (key) => {
+        if (key !== "internal_proof_session") return null;
+        loader_calls.push({ key });
         if (session_error) throw new Error("system_control unavailable");
-        return session;
+        return value;
       },
     })
   );
@@ -170,6 +203,40 @@ test("internal_proof + internal phone + active session engages burst for the mes
   assert.equal(result.seller_burst_mode, "internal_proof");
   assert.equal(result.seller_burst_enabled, true);
   assert.equal(loader_calls.length, 1, "session must be checked");
+});
+
+// The gate must hand the coordinator a THREAD-BOUNDED scope, never a bare
+// global activation. A global scope in internal_proof mode would admit any open
+// generation on the pinned thread — including one created before the session,
+// which is exactly how the preserved incident burst becomes reachable.
+test("engaged internal_proof gate yields a thread-scoped, time-floored activation scope", async () => {
+  const { result } = await runGate({
+    mode: "internal_proof",
+    internal_phone: true,
+    session: { active: true },
+  });
+  const scope = result.seller_burst_activation_scope;
+  assert.ok(scope, "an engaged internal_proof gate must carry an activation scope");
+  assert.equal(scope.authorized, true);
+  assert.equal(scope.global, false, "internal_proof must never assert global activation");
+  assert.deepEqual(scope.thread_keys, ["+16128072000"]);
+  assert.ok(scope.min_first_received_at, "a message-time floor is required");
+  assert.ok(scope.min_created_at, "a row-creation floor is required");
+  assert.equal(scope.session_id, "proof-1");
+});
+
+// closed_at is not part of parseInternalProofSession's contract; the burst
+// activation authority layers it. A closed session must not engage burst here
+// any more than it may on the flush path.
+test("a CLOSED internal_proof session does not engage burst", async () => {
+  const { result } = await runGate({
+    mode: "internal_proof",
+    internal_phone: true,
+    session: { active: true },
+    session_value: proofSessionValue({ closed_at: new Date(Date.now() - 60_000).toISOString() }),
+  });
+  assert.equal(result.seller_burst_enabled, false);
+  assert.equal(result.seller_burst_activation_scope, null);
 });
 
 test("internal_proof + internal phone WITHOUT an active session leaves burst disabled", async () => {

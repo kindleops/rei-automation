@@ -89,9 +89,12 @@ test("a safety-suppressed burst settles its ledger rows as suppressed", async ()
   assert.equal(settled.result.ok, true, "suppression is a successful terminal outcome");
   assert.equal(settled.result.suppression_kind != null, true, "the safety kind is carried through");
 
-  // Nothing is left open for the thread afterwards.
+  // Nothing is left open for the thread afterwards. A thread_key with no
+  // burst_id is now a filter over the scoped eligible list rather than a bare
+  // thread-scoped claim, so "nothing left" is an empty result set instead of
+  // one refused claim carrying `no_eligible_burst`.
   const flush = await h.coordinator.flushEligible({ thread_key: THREAD });
-  assert.equal(flush.results[0]?.reason, "no_eligible_burst");
+  assert.equal(flush.results.length, 0, "nothing eligible → no claim attempted");
   assert.equal(h.state.settlements.length, 1, "and it is not settled twice");
 });
 

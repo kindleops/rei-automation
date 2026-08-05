@@ -380,9 +380,13 @@ test("DOCUMENTED HAZARD: a benign inbound on an already-suppressed thread parks 
 
   // Nothing is left to settle it, now or ever.
   h.state.clock = ms(T0) + 25_000;
+  // A thread_key with no burst_id is now a filter over the scoped eligible
+  // list, so "nothing left to settle it" reads as an empty result set rather
+  // than one refused claim carrying `no_eligible_burst`. The hazard being
+  // characterized is unchanged: the row is still parked with nothing to settle
+  // it.
   const flush = await h.coordinator.flushEligible({ thread_key: THREAD });
-  assert.equal(flush.results[0].ok, false);
-  assert.equal(flush.results[0].reason, "no_eligible_burst");
+  assert.equal(flush.results.length, 0, "nothing eligible → no claim attempted");
 
   const row = h.ledger.get("k1");
   assert.equal(row.status, "processing", "CURRENT BEHAVIOUR: the row is parked indefinitely");
