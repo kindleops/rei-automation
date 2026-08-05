@@ -57,11 +57,33 @@ const OUTCOMES = BURST_FLUSH_OUTCOMES;
 /** Every value in the vocabulary, for the one-outcome invariant assertion. */
 export const BURST_FLUSH_OUTCOME_VALUES = Object.freeze(Object.values(BURST_FLUSH_OUTCOMES));
 
-// A finalize reason is an internal error/status string, never a seller message.
-// It is truncated anyway: process_error propagates an exception message from
-// processSellerInboundMessage, and an exception message is the one field in
-// this pipeline whose content we do not author.
-const MAX_REASON_LENGTH = 200;
+// ── Reason sanitization: the one field this pipeline does not author ────────
+//
+// `reason` reaches three sinks — the HTTP response (`failed_reasons`,
+// `results[].reason`), the structured log, and the alert payload. On the
+// coordinator's `process_error` path its value is
+// `err.message` from inside processSellerInboundMessage, i.e. an exception
+// message. Truncation bounds the LENGTH of that string; it does not bound its
+// CONTENT, so it was a hole in the same redaction boundary that closed the
+// `aggregated` echo.
+//
+// Proving the field safe would mean proving that no exception anywhere in the
+// seller-inbound call graph — our code, Supabase, the AI SDK, V8 itself —
+// interpolates message content. That is not provable, and the mechanism is
+// real: V8's own JSON.parse echoes the first ten characters of its input
+// (`JSON.parse("Yeah I want $150k")` → `Unexpected token 'Y', "Yeah I wan"...
+// is not valid JSON`). natural-response-engine.js:353 parses raw LLM completion
+// content exactly that way; today its caller catches and maps to a fixed
+// `model_error` token, so it does not escape — but that containment is one
+// `catch` block away from disappearing, and nothing test-enforces it.
+//
+// So the boundary is structural instead of audited. Every reason WE author is
+// an identifier (`attempts_exhausted`, `burst_scope_unauthorized`,
+// `coordinator_refused:burst_scope_unauthorized`). Free-form prose is, by
+// construction, not ours. Identifier-shaped values pass through verbatim;
+// anything else becomes a stable correlation digest that preserves
+// "same error recurring" without carrying a single character of the text.
+const SAFE_REASON_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/;
 
 function jsonResponse(body, init = {}) {
   return new Response(JSON.stringify(body), {
@@ -70,10 +92,14 @@ function jsonResponse(body, init = {}) {
   });
 }
 
-function truncateReason(value) {
+export function sanitizeReason(value) {
   if (value == null) return null;
-  const text = String(value);
-  return text.length > MAX_REASON_LENGTH ? `${text.slice(0, MAX_REASON_LENGTH)}…` : text;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (SAFE_REASON_PATTERN.test(text)) return text;
+  // Unauthored. Correlatable, never readable.
+  const digest = crypto.createHash("sha256").update(text).digest("hex").slice(0, 12);
+  return `unauthored_error_redacted:${digest}`;
 }
 
 /**
@@ -135,7 +161,7 @@ export function summarizeFlushResults(results = []) {
     queued_count: list.filter((r) => r.queued).length,
     suppressed_count: list.filter((r) => r.suppressed).length,
     failed_count: failures.length,
-    failed_reasons: failures.map((r) => truncateReason(r.reason)).slice(0, 10),
+    failed_reasons: failures.map((r) => sanitizeReason(r.reason)).slice(0, 10),
     no_eligible_burst_count: all.length - list.length,
   };
 }
@@ -154,7 +180,7 @@ export function redactFlushResults(results = []) {
     burst_id: r.burst?.burst_id || null,
     thread_key: r.burst?.thread_key || null,
     ok: r.ok === true,
-    reason: truncateReason(r.reason) ?? null,
+    reason: sanitizeReason(r.reason) ?? null,
     suppressed: Boolean(r.suppressed),
     queued: Boolean(r.queued),
   }));
@@ -205,7 +231,7 @@ export function auditClaimedBurstAdmissions({ policy, results, isBurstAdmitted }
         burst_id: burst.burst_id,
         thread_key: burst.thread_key || null,
         generation: burst.generation ?? null,
-        admission_reason: truncateReason(verdict?.reason) || "not_admitted",
+        admission_reason: sanitizeReason(verdict?.reason) || "not_admitted",
       });
     }
   }
@@ -383,17 +409,19 @@ export async function handleFlushInboundBurstsRequest(request, deps = {}) {
     policy = null;
     logger.warn?.("seller_inbound_burst.flush_policy_threw", {
       ...log_base,
-      error_message: policy_error?.message || "unknown_error",
+      error_message: sanitizeReason(policy_error?.message) || "unknown_error",
     });
     return finish({
       outcome: OUTCOMES.PROOF_SCOPE_RESOLUTION_FAILED,
-      reason: `activation_policy_resolution_failed:${policy_error?.message || "unknown_error"}`,
+      reason: sanitizeReason(
+        `activation_policy_resolution_failed:${policy_error?.message || "unknown_error"}`
+      ),
       status: 503,
       alert: () =>
         alerts?.burstFlushFailure?.({
           ...log_base,
           reason: "activation_policy_resolution_failed",
-          error_message: policy_error?.message || "unknown_error",
+          error_message: sanitizeReason(policy_error?.message) || "unknown_error",
         }),
     });
   }
@@ -502,7 +530,7 @@ export async function handleFlushInboundBurstsRequest(request, deps = {}) {
     // safe and makes the failure visible to cron monitoring.
     logger.warn?.("seller_inbound_burst.flush_threw", {
       ...log_base,
-      error_message: flush_error?.message || "unknown_error",
+      error_message: sanitizeReason(flush_error?.message) || "unknown_error",
     });
     return finish({
       outcome: OUTCOMES.FLUSH_FAILED,
@@ -512,7 +540,7 @@ export async function handleFlushInboundBurstsRequest(request, deps = {}) {
       alert: () =>
         alerts?.burstFlushFailure?.({
           ...log_base,
-          error_message: flush_error?.message || "unknown_error",
+          error_message: sanitizeReason(flush_error?.message) || "unknown_error",
           thread_scoped: Boolean(thread_key),
         }),
     });
@@ -524,12 +552,12 @@ export async function handleFlushInboundBurstsRequest(request, deps = {}) {
   // tick (`results: []`). Reporting it as "no authorized bursts" would hide a
   // broken translation behind a green 200 forever — the incident's signature.
   if (result && result.ok === false) {
-    const refusal = truncateReason(result.reason) || "coordinator_refused";
+    const refusal = sanitizeReason(result.reason) || "coordinator_refused";
     logger.warn?.("seller_inbound_burst.flush_coordinator_refused", {
       ...log_base,
       mode,
       reason: refusal,
-      scope_reason: truncateReason(result.scope_reason) || null,
+      scope_reason: sanitizeReason(result.scope_reason) || null,
     });
     return finish({
       outcome: OUTCOMES.PROOF_SCOPE_RESOLUTION_FAILED,
@@ -542,7 +570,7 @@ export async function handleFlushInboundBurstsRequest(request, deps = {}) {
           reason: "coordinator_refused_authorized_policy",
           mode,
           coordinator_reason: refusal,
-          scope_reason: truncateReason(result.scope_reason) || null,
+          scope_reason: sanitizeReason(result.scope_reason) || null,
         }),
     });
   }

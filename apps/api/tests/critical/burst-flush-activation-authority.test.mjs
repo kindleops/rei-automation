@@ -36,6 +36,7 @@ import {
   redactFlushResults,
   auditClaimedBurstAdmissions,
   isFatalActivationPolicy,
+  sanitizeReason,
   BURST_FLUSH_OUTCOMES,
   BURST_FLUSH_OUTCOME_VALUES,
 } from "@/lib/domain/seller-flow/flush-inbound-bursts-request.js";
@@ -752,6 +753,9 @@ test(
       { burstEnv: "internal_proof", session: activeSession() }
     );
     assert.equal(result.calls[0].limit, 100, "limit is bounded");
+    // worker_id lands in claimed_by. Path separators, spaces and traversal
+    // sequences are stripped rather than merely bounded.
+    assert.equal(result.built[0].worker_id, "evilworkerid", "worker_id is sanitized");
 
     const zero = await runPost(
       { limit: -5 },
@@ -1219,6 +1223,102 @@ test(
     // The failure itself is still reported and alerted.
     assert.equal(result.body.failed_count, 1);
     assert.ok(result.alerts.some((a) => a.kind === "burstFlushFailure"));
+  })
+);
+
+test("sanitizeReason passes authored codes verbatim and redacts unauthored prose", () => {
+  // Everything this system authors is an identifier, so it survives untouched —
+  // sanitization must not cost us the diagnostics we do control.
+  for (const authored of [
+    "attempts_exhausted",
+    "no_eligible_burst",
+    "burst_scope_unauthorized",
+    "coordinator_refused:burst_scope_unauthorized",
+    "activation_policy_resolution_failed:system_control_unreachable",
+    "seller_inbound_burst_flush_failed",
+  ]) {
+    assert.equal(sanitizeReason(authored), authored, `${authored} must survive verbatim`);
+  }
+
+  // Free-form prose is by construction not ours.
+  const leaky = `Unexpected token 'Y', "Yeah I wan"... is not valid JSON`;
+  const out = sanitizeReason(leaky);
+  assert.match(out, /^unauthored_error_redacted:[0-9a-f]{12}$/);
+  assert.ok(!out.includes("Yeah"), "not one character of the payload survives");
+
+  // Stable, so "the same error is recurring" stays observable without the text.
+  assert.equal(sanitizeReason(leaky), out);
+  assert.notEqual(sanitizeReason("a different failure entirely"), out);
+});
+
+test(
+  "an exception message that echoes seller text cannot escape through `reason`",
+  withSecrets(async () => {
+    // CWE-532. `reason` is the one field in this pipeline whose content we do
+    // not author: on the coordinator's process_error path it is `err.message`
+    // from inside processSellerInboundMessage. Truncation bounded its length,
+    // never its content.
+    //
+    // The mechanism is real and needs no exotic throw site — V8's own JSON.parse
+    // echoes the first ten characters of its input, and
+    // natural-response-engine.js:353 parses raw LLM completion content. That one
+    // is caught by its caller today; this test does not depend on that catch
+    // surviving, which is the point.
+    const CANARY_BODY = "CANARY_SELLER_BODY_do_not_leak";
+    const leaked_exception = `Unexpected token 'C', "${CANARY_BODY}"... is not valid JSON`;
+
+    const result = await runCron({
+      burstEnv: "internal_proof",
+      session: activeSession(),
+      flushResults: [
+        {
+          ok: false,
+          reason: leaked_exception, // exactly what process_error would carry
+          retry_after_lease: true,
+          burst: inSessionBurst(),
+        },
+      ],
+    });
+
+    // All three sinks: HTTP response, structured log, alert payload.
+    const surfaces = JSON.stringify({
+      body: result.body,
+      logs: result.logs,
+      alerts: result.alerts,
+    });
+    assert.ok(
+      !surfaces.includes(CANARY_BODY),
+      "an exception message must not carry seller text into any sink"
+    );
+    assert.ok(!surfaces.includes("Unexpected token"), "nor the surrounding prose");
+
+    // The failure is still counted, reported and alerted — redaction must not
+    // buy privacy by discarding the signal.
+    assert.equal(result.body.failed_count, 1);
+    assert.match(result.body.failed_reasons[0], /^unauthored_error_redacted:/);
+    assert.ok(result.alerts.some((a) => a.kind === "burstFlushFailure"));
+  })
+);
+
+test(
+  "a thrown flush error cannot carry seller text into the alert either",
+  withSecrets(async () => {
+    const CANARY_BODY = "CANARY_SELLER_BODY_do_not_leak";
+    const result = await runCron({
+      burstEnv: "internal_proof",
+      session: activeSession(),
+      flushThrows: `Unexpected token 'C', "${CANARY_BODY}"... is not valid JSON`,
+    });
+
+    assert.equal(result.response.status, 500);
+    const surfaces = JSON.stringify({
+      body: result.body,
+      logs: result.logs,
+      alerts: result.alerts,
+    });
+    assert.ok(!surfaces.includes(CANARY_BODY), "the throw path is sanitized too");
+    assert.equal(result.alerts.length, 1, "and the failure still pages");
+    assert.match(result.alerts[0].meta.error_message, /^unauthored_error_redacted:/);
   })
 );
 
