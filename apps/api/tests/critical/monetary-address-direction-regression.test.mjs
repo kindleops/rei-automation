@@ -162,3 +162,66 @@ test("REGRESSION: a per-unit number survives tokenization, not just resolution",
   assert.equal(mentions.length, 1, "the number must not be discarded");
   assert.equal(mentions[0].value, 300000);
 });
+
+// ── over-suppression repair: a capitalized word is not automatically a street ──
+//
+// The proper-noun branch fired on ANY capitalized word following a bare number,
+// so a trailing price qualifier read as a street name and the amount was
+// deleted. Measured across 40 capitalized followers with a reference in scope:
+// 38 of 40 lost the number entirely versus production baseline eeee5bd8.
+
+test("REGRESSION: a capitalized monetary qualifier is not a street name", () => {
+  // The two cases surfaced by the baseline differential.
+  assert.equal(signalPrice("I need 300 Net"), 300);
+  assert.equal(signalPrice("my net is 300 Net"), 300);
+  assert.equal(
+    extractMonetaryMentions("I need 300 Net")[0]?.kind,
+    "net_requirement",
+    "the qualifier must still classify the amount, not delete it"
+  );
+});
+
+test("REGRESSION: the whole capitalized-follower family survives", () => {
+  // Every one of these returned 300000 on eeee5bd8 and null on the branch.
+  for (const word of [
+    "Net", "Cash", "Firm", "Total", "Obo", "Down", "Flat", "Minimum", "Best",
+    "Plus", "Even", "Dollars", "Bucks", "Negotiable", "Only", "Max", "Min",
+    "Today", "Tops", "Clear", "Package", "Deposit", "Payoff", "Taxes",
+  ]) {
+    const message = `I want 300 ${word}`;
+    assert.equal(
+      extractMonetaryMentions(message, { reference: 200000 }).length,
+      1,
+      `${message} — the number must survive`
+    );
+  }
+});
+
+test("a capitalized street name is STILL an address after that narrowing", () => {
+  // The narrowing must not re-open the original incident.
+  assert.equal(signalPrice("327 Pennsylvania"), null);
+  assert.equal(signalPrice("I own 331 Pennsylvania"), null);
+  assert.equal(factPrice("For 327 Pennsylvania alone 130,000"), 130000);
+  assert.equal(signalPrice("its 8612 Oak Leaf Rd"), null);
+});
+
+test("a monetary cue before a street number does not make it a price", () => {
+  // The narrowing is by VOCABULARY, not by "a monetary cue precedes the
+  // number". The cue-based rule was implemented, measured, and rejected: an
+  // address follows those cues too, so it re-opened the incident — a seller
+  // saying "how about 331 Pennsylvania" about the neighbouring property had its
+  // street number read as a price again. These are the cases that proved it.
+  // (Production baseline eeee5bd8 extracts 327/331 here; this is stricter.)
+  for (const message of [
+    "what about 327 Pennsylvania",
+    "how about 331 Pennsylvania",
+    "around 327 Pennsylvania",
+    "about 327 Pennsylvania",
+    "take 327 Pennsylvania",
+    "want 327 Pennsylvania",
+    "need 4157 Oak Drive",
+  ]) {
+    assert.equal(signalPrice(message), null, message);
+    assert.deepEqual(extractMonetaryMentions(message), [], message);
+  }
+});

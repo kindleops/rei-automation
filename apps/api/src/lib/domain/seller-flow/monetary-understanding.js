@@ -191,8 +191,12 @@ function isAddressAdjacent(text, match) {
   if (words.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
   const first = String(words[0] || "");
   // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.
-  if (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first) && !SCALE_WORDS[first.toLowerCase()]) return true;
-  return false;
+  // This branch has no evidence beyond capitalization, so it must yield to any
+  // monetary reading: "I want 300 Cash" and "I need 300 Net" are prices.
+  if (!/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first)) return false;
+  if (SCALE_WORDS[first.toLowerCase()]) return false;
+  if (MONETARY_QUALIFIER_WORDS.has(first.toLowerCase())) return false;
+  return true;
 }
 
 // ─── postal codes and calendar years are not money ──────────────────────────
@@ -351,6 +355,40 @@ const KIND_CUES = Object.freeze([
 const ASK_CUES = ["want", "asking", "ask", "take", "sell for", "let it go", "looking for", "need", "give me", "i'd do", "id do", "price is", "worth", "quiero", "pido", "lo doy en", "how about", "what about", "meet me at"];
 const FIRM_CUES = ["firm", "non negotiable", "non-negotiable", "not negotiable", "take it or leave it", "won't budge", "wont budge", "precio firme", "no negociable", "best and final"];
 const APPROX_CUES = ["around", "about", "roughly", "approximately", "somewhere", "ish", "close to", "más o menos", "mas o menos", "como"];
+
+// ─── monetary vocabulary reused by the address guard ────────────────────────
+// The proper-noun branch of isAddressAdjacent fires on ANY capitalized word, so
+// "I want 300 Cash" and "I need 300 Net" read as addresses and the seller's
+// number was deleted outright. This narrows that branch by vocabulary, DERIVED
+// from the cue tables above rather than duplicated — a second hand-maintained
+// list would drift out of sync with the classifier.
+//
+// Vocabulary, deliberately, and NOT "a monetary cue sits before the number":
+// an address follows those cues too, so that rule re-opened the original
+// incident — "how about 331 Pennsylvania" read the neighbouring property's
+// street number as a price again. Measured, then rejected.
+//
+// Declared after the cue tables and referenced from the hoisted
+// isAddressAdjacent, which only ever runs after module initialization.
+
+/** Single capitalized words that are monetary vocabulary, never street names. */
+const MONETARY_QUALIFIER_WORDS = (() => {
+  const words = new Set([
+    // qualifier vocabulary that is not itself a classification cue
+    "cash", "obo", "total", "down", "flat", "plus", "even", "dollars", "bucks",
+    "negotiable", "only", "max", "min", "tops", "today", "best", "apiece",
+    "otd", "usd", "each", "firm",
+  ]);
+  const add = (cue) => {
+    const token = String(cue).trim().toLowerCase();
+    if (token && !/[^a-zà-ÿ']/.test(token)) words.add(token);
+  };
+  for (const entry of KIND_CUES) entry.cues.forEach(add);
+  ASK_CUES.forEach(add);
+  FIRM_CUES.forEach(add);
+  APPROX_CUES.forEach(add);
+  return words;
+})();
 
 function windowFor(text, amount, radius = 60) {
   const start = Math.max(0, amount.index - radius);
