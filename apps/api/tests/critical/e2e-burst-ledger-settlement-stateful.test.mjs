@@ -334,6 +334,66 @@ test("a row belonging to another burst is never adopted", async () => {
   assert.equal(foreign.terminal_disposition, null);
 });
 
+// ── DOCUMENTED HAZARD (characterization, not an endorsement) ────────────────
+
+test("DOCUMENTED HAZARD: a benign inbound on an already-suppressed thread parks a ledger row that no watchdog alarms", async () => {
+  // This test PINS CURRENT BEHAVIOUR so that whoever fixes it later gets a loud,
+  // executable signal. It is not an assertion that this behaviour is correct.
+  //
+  // Chain: a thread carries durable suppression (a prior STOP). Any later
+  // BENIGN message latches safety with kind `contact_suppression`
+  // (seller-inbound-burst-coordinator.js:176-182) and the burst finalizes
+  // INLINE during onPersistedInbound. The webhook only marks the ledger row
+  // awaiting_burst_finalization AFTERWARDS (handle-textgrid-inbound.js:1051,
+  // outside the core that ran the burst at :2267) — and because the message is
+  // benign, resolveInboundTerminalDisposition does not take the opt_out branch
+  // and falls through to the burst-deferral PENDING branch instead. The row is
+  // therefore marked as awaiting a burst that already completed.
+  //
+  // Seller-facing behaviour is CORRECT: the thread is suppressed, so silence is
+  // right and nobody is ignored who should have been answered. The cost is
+  // ledger hygiene and observability — the row sits at status='processing'
+  // forever, and findInboundLedgerSlaBreaches filters awaiting-burst rows out
+  // of stuck_processing (inbound-processing-ledger.js:565-578), so it
+  // contributes zero to breach_count and never pages. The exclusion is
+  // justified in-comment by "the burst liveness scan alarms an open/claimed
+  // burst", which cannot cover this case: the burst here is COMPLETED.
+  const h = harness();
+
+  const ingested = await h.coordinator.onPersistedInbound({
+    thread_key: THREAD,
+    event_id: "evt-1",
+    provider_message_id: "SM-evt-1",
+    body: "Yeah", // benign — NOT an opt-out
+    received_at: h.now(),
+    prior_thread_suppressed: true,
+  });
+
+  assert.equal(ingested.safety?.latch, true, "durable suppression latches every later fragment");
+  assert.equal(ingested.safety?.kind, "contact_suppression");
+  assert.equal(ingested.flush?.suppressed, true, "the burst finalized inline, during ingest");
+
+  // The webhook marks the row only after the core returned — by which time the
+  // burst is already terminal.
+  const burst_id = ingested.append?.burst?.burst_id;
+  h.ledger.add({ key: "k1", burst_id });
+
+  // Nothing is left to settle it, now or ever.
+  h.state.clock = ms(T0) + 25_000;
+  const flush = await h.coordinator.flushEligible({ thread_key: THREAD });
+  assert.equal(flush.results[0].ok, false);
+  assert.equal(flush.results[0].reason, "no_eligible_burst");
+
+  const row = h.ledger.get("k1");
+  assert.equal(row.status, "processing", "CURRENT BEHAVIOUR: the row is parked indefinitely");
+  assert.equal(row.terminal_disposition, null, "CURRENT BEHAVIOUR: no disposition is ever recorded");
+  assert.equal(
+    row.disposition_detail[AWAITING_BURST_DETAIL_KEY],
+    true,
+    "and it still claims to be awaiting a burst that has already completed"
+  );
+});
+
 test("the real terminal-disposition validation is in the loop", async () => {
   // Guards the guard: completeInboundProcessingClaim rejects any disposition
   // outside the canonical terminal set, so the doubles above cannot silently
