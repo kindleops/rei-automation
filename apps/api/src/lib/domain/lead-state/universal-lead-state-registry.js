@@ -321,6 +321,11 @@ const CONTACTABILITY_ALIAS_MAP = Object.freeze({
   do_not_contact: CONTACTABILITY_CODES.DNC,
   provider_blacklisted: CONTACTABILITY_CODES.PROVIDER_BLACKLISTED,
   invalid_number: CONTACTABILITY_CODES.INVALID_NUMBER,
+  // The natural-language value callers actually write. Without this alias it
+  // matched nothing and fell through to the `contactable` fallback, so a
+  // confirmed wrong number normalized into "keep texting them" — the same
+  // inversion class as the 2026-08-04 suppression incident.
+  wrong_number: CONTACTABILITY_CODES.INVALID_NUMBER,
   do_not_text: CONTACTABILITY_CODES.DO_NOT_TEXT,
   suppressed: CONTACTABILITY_CODES.OPTED_OUT,
 });
