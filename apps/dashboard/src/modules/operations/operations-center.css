@@ -579,7 +579,7 @@
 
 /* ── Responsive (§15) ───────────────────────────────────────────────── */
 
-@media (max-width: 767px) {
+@media (max-width: 767.98px) {
   .opsc-root.is-popover {
     top: auto;
     bottom: 0;

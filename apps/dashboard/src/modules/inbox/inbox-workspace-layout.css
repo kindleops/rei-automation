@@ -533,7 +533,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-k {
-  font-size: 6.5px;
+  /* LANE H — R2.1 floor (was 6.5px), R2.2 (no sub-pixel sizes). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -542,7 +543,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-v {
-  font-size: 10px;
+  /* LANE H — R2.1 floor (was 10px). */
+  font-size: 11px;
   font-weight: 800;
   color: rgba(236, 244, 255, 0.94);
   font-variant-numeric: tabular-nums;
@@ -553,7 +555,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-v.is-condition {
-  font-size: 9.5px;
+  /* LANE H — R2.1 floor (was 9.5px). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
 }
@@ -739,7 +742,8 @@
 }
 
 .nx-cc-table__th {
-  font-size: 8px;
+  /* LANE H — R2.1 floor (was 8px). A table header the operator reads to act. */
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -944,14 +948,15 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  /* LANE H — R2.1 floor (was 10px). Delivery receipt is load-bearing. */
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .nx-cc-row__receipt svg { width: 11px; height: 11px; flex-shrink: 0; }
 .nx-cc-row__receipt-sep { opacity: 0.45; }
-.nx-cc-row__receipt-time { font-size: 10px; color: rgba(156, 180, 212, 0.78); }
+.nx-cc-row__receipt-time { font-size: 11px; color: rgba(156, 180, 212, 0.78); }
 
 .nx-cc-row__receipt.is-delivered { color: #34d399; }
 .nx-cc-row__receipt.is-failed { color: #f87171; }
@@ -980,7 +985,8 @@
 }
 
 .nx-cc-row__metric-k {
-  font-size: 7px;
+  /* LANE H — R2.1 floor (was 7px). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;

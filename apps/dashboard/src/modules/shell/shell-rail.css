@@ -228,7 +228,7 @@
 
 /* The label goes first when the rail runs out of room; the icon and the
    shortcut keep the control identifiable (§15.4 — recompose, do not hide). */
-@media (max-width: 1279px) {
+@media (max-width: 1439.98px) {
   .lc-rail__search-label,
   .lc-rail__search-keys {
     display: none;

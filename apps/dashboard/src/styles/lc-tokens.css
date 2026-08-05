@@ -254,7 +254,7 @@
 }
 
 /* §3.3 Panel gutters step down with viewport */
-@media (max-width: 1023px) {
+@media (max-width: 1023.98px) {
   :root {
     --lc-gutter: var(--lc-space-3);
   }

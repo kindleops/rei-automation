@@ -1051,7 +1051,8 @@
 }
 
 .nx-premium-inbox .nx-row25__metric-k {
-  font-size: 7px;
+  /* LANE H — R2.1 floor (was 7px). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
