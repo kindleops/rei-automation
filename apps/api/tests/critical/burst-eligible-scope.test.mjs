@@ -959,7 +959,11 @@ test("append: an authorized thread with an out-of-window message inserts NOTHING
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "thread_out_of_scope");
+  assert.equal(
+    result.reason,
+    "message_outside_scope_window",
+    "distinct from thread_out_of_scope: the thread IS authorized, the timestamp is not"
+  );
   assert.equal(result.burst, null);
   assert.equal(store._debug.listAll().length, 0, "no orphan generation was opened");
 });
@@ -1025,4 +1029,73 @@ test("append under GLOBAL scope: a brand-new generation still opens normally", a
   assert.equal(result.created, true);
   assert.equal(result.burst.generation, 1);
   assert.equal(store._debug.listAll().length, 1);
+});
+
+// ── 12. The three refusals are three distinct operator situations ────────────
+
+test("the three append refusals are distinguishable, and none of them is a fallthrough", async () => {
+  // 1. thread never authorized.
+  const s1 = createMemorySellerInboundBurstStore({ now: () => "2026-08-05T11:00:00.000Z" });
+  const foreign = await s1.appendMessage({
+    thread_key: OTHER_THREAD,
+    message: { event_id: "a", provider_message_id: "pa", body: "hi", received_at: "2026-08-05T11:00:00.000Z" },
+    now: "2026-08-05T11:00:00.000Z",
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(foreign.reason, "thread_out_of_scope");
+
+  // 2. authorized thread, message timestamp outside the session window.
+  const s2 = createMemorySellerInboundBurstStore({ now: () => LATE });
+  const late = await s2.appendMessage({
+    thread_key: THREAD,
+    message: { event_id: "b", provider_message_id: "pb", body: "hi", received_at: LATE },
+    now: LATE,
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(late.reason, "message_outside_scope_window");
+
+  // 3. authorized thread, in-window message, blocked by an out-of-scope OPEN row.
+  const s3 = seedMemoryStore([PRESERVED]);
+  s3._debug.openByThread.set(THREAD, PRESERVED.id);
+  const blocked = await s3.appendMessage({
+    thread_key: THREAD,
+    message: { event_id: "c", provider_message_id: "pc", body: "hi", received_at: "2026-08-05T11:00:00.000Z" },
+    now: "2026-08-05T11:00:00.000Z",
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(blocked.reason, "open_generation_out_of_scope");
+
+  // Every refusal is ok:false and rollover:false — the shape the coordinator
+  // matches on to declare `declined` rather than `deferred`. A refusal that
+  // set rollover:true would re-enter the rollover loop instead of declining.
+  for (const r of [foreign, late, blocked]) {
+    assert.equal(r.ok, false);
+    assert.equal(r.rollover, false);
+    assert.equal(r.burst, null);
+  }
+  assert.equal(new Set([foreign.reason, late.reason, blocked.reason]).size, 3);
+});
+
+test("append: provider clock skew below the floor declines — nobody did anything wrong", async () => {
+  // The realistic shape of this failure: TextGrid stamps a message 11:49:50,
+  // the operator opened the session 11:50:00. The floor is the session's own
+  // created_at with no grace, so the message sits 10 seconds below it. Without
+  // this guard the row is created and stranded — unclaimable forever, and its
+  // ledger rows park at awaiting_burst_finalization, which breach_count
+  // excludes. Declining hands the message to the ordinary per-message path,
+  // where it is answered.
+  const SKEWED = "2026-08-05T09:59:50.000Z"; // 10s before SESSION_START
+  const store = createMemorySellerInboundBurstStore({ now: () => "2026-08-05T10:00:05.000Z" });
+
+  const result = await store.appendMessage({
+    thread_key: THREAD,
+    message: { event_id: "e-skew", provider_message_id: "p-skew", body: "hi", received_at: SKEWED },
+    now: "2026-08-05T10:00:05.000Z",
+    scope: PROOF_SCOPE,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "message_outside_scope_window");
+  assert.equal(result.rollover, false, "must decline, never re-enter the rollover loop");
+  assert.equal(store._debug.listAll().length, 0, "no row is stranded below the floor");
 });

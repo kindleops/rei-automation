@@ -290,7 +290,12 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
             created_at: nowIso,
           };
           if (!matchesBurstScope(prospective, scoped)) {
-            return { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false };
+            return {
+              ok: false,
+              reason: "message_outside_scope_window",
+              burst: null,
+              rollover: false,
+            };
           }
           // Next generation = max existing + 1
           const gens = listAll()
@@ -754,6 +759,12 @@ export function createSupabaseSellerInboundBurstStore({
       // Test the row we are ABOUT to write, with the same predicate that
       // guards every other door. Refuse before the generation read, so an
       // unauthorized append still issues no write and no further query.
+      // Distinct reason from thread_out_of_scope: the thread allowlist was
+      // already satisfied above, so anything failing here is TEMPORAL. The
+      // three refusals name three different operator situations —
+      //   thread_out_of_scope          this thread was never authorized
+      //   open_generation_out_of_scope an old generation blocks an authorized thread
+      //   message_outside_scope_window the thread is right, this message's time is not
       const prospective = {
         thread_key: group,
         first_received_at: message?.received_at || nowIso,
@@ -761,7 +772,12 @@ export function createSupabaseSellerInboundBurstStore({
       };
       if (!matchesBurstScope(prospective, scoped)) {
         return {
-          value: { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false },
+          value: {
+            ok: false,
+            reason: "message_outside_scope_window",
+            burst: null,
+            rollover: false,
+          },
         };
       }
       const { data: lastRows } = await supabase
