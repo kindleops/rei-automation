@@ -56,6 +56,25 @@
 // A parseable closed_at <= now is terminal; an unparseable closed_at fails
 // closed. The underlying gap is tracked as a separate follow-up.
 //
+// ── may_scan / may_claim: SYMMETRIC TODAY, and that is not an oversight ─────
+// The pair is a deliberate decomposition — "you may look" and "you may take"
+// are genuinely different licences — but be honest about what exists NOW:
+//
+//   * There are exactly three assignment sites. deniedPolicy sets both false;
+//     the `enabled` branch sets both true; the active `internal_proof` branch
+//     sets both true.
+//   * NO path emits `may_scan && !may_claim`. The asymmetry has no producer.
+//   * toBurstFlushScopeDescriptor collapses the pair to a single `allowed`
+//     (may_scan && may_claim), so downstream cannot observe a difference even
+//     in principle.
+//
+// Do NOT gate anything on the distinction believing it is live — today it is
+// unobservable, and code that branches on it is dead by construction. Making
+// it real requires BOTH halves: a producer here that emits
+// `may_scan && !may_claim`, AND a non-finalizing path in flushEligible that
+// scans without claiming. A dry-run mode is the obvious motivation. Until both
+// land, treat `allowed` as the whole truth.
+//
 // ── RULING: the scoped_canary_only coupling is NOT inherited ────────────────
 // evaluateInternalProofContactWindowBypass additionally requires
 // queue_execution_mode === "scoped_canary_only". This module deliberately does
@@ -362,9 +381,23 @@ export function toBurstFlushScopeDescriptor(policy = null) {
 }
 
 /**
- * THE ONE RULE. Every layer — store filter, coordinator, handler re-check —
- * calls this. Three copies of this logic would be three rules that drift, and
- * the first divergence is a burst admitted by one layer and denied by another.
+ * THE ONE RULE for everything downstream of the policy: the coordinator and
+ * the handler re-check both call it, so admission and re-verification cannot
+ * disagree.
+ *
+ * NOT the store. An earlier version of this comment claimed "three importers"
+ * including the store filter; that architecture was deliberately NOT built.
+ * The production import chain is policy → coordinator → store, so a store-side
+ * import of this module would close a module cycle. The store therefore
+ * applies the rule a SECOND time, in SQL and JS, and the two copies are kept
+ * honest by a one-directional invariant test that imports this predicate
+ * test-only and asserts: anything the store admits, the policy admits.
+ * (Not the converse — the store is permitted to be strictly narrower.) That
+ * test covers 15 row shapes including ±1ms boundaries.
+ *
+ * So: two copies by necessity, one direction pinned by test. If you are
+ * tempted to import this from the store to "fix" the duplication, the cycle is
+ * why you cannot, and the invariant test is what makes the duplication safe.
  *
  * Returns { within, reason } so both façades below can share it.
  * Denies on any missing or unparseable field.
@@ -440,8 +473,10 @@ function evaluateBurstScope(burst, scope) {
 
 /**
  * PURE, SHARED. The scope predicate for the store filter, the coordinator and
- * the handler re-check. One export, three importers — do not reimplement it
- * locally.
+ * the handler re-check. Imported directly by the coordinator and the handler;
+ * imported TEST-ONLY by the store's invariant test (see evaluateBurstScope for
+ * why the store cannot import it on the production path). Do not reimplement
+ * it in a new consumer.
  *
  * @param {{ burst: object, scope: object }} args — `scope` is the inner
  *        `.scope` of a toBurstFlushScopeDescriptor() result.
