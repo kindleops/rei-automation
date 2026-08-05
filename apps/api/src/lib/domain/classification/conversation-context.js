@@ -289,6 +289,66 @@ export function resolveAggregateShortReplyFragment(text) {
 }
 
 /**
+ * Stop-like signals, for the aggregate-rescue path ONLY.
+ *
+ * The rescue was originally guarded on `primary === "unclear"` alone, on the
+ * argument that unclear means no competing intent. That argument was WRONG, and
+ * this is the correction. `unclear` proves only that NO RULE MATCHED — it does
+ * not prove no stop request is present. The opt-out detector does not cover
+ * every phrasing, so an uncovered one ("please quit bothering me", "no more
+ * texts") lands in `unclear`, which was exactly the state the rescue treated as
+ * a licence to promote. Measured at 3b40ef5a, those promoted to
+ * ownership_confirmed 0.88 with auto-reply allowed.
+ *
+ * This list is INTENTIONALLY broader than the opt-out rule and intentionally
+ * over-triggers. The costs are not symmetric: a false refusal loses one
+ * automated reply and routes to a human; a false promotion texts someone who
+ * asked us to stop. So anything that even resembles a stop request refuses.
+ *
+ * Scoped deliberately to the rescue. It does NOT change primary_intent for any
+ * caller — widening the opt-out classifier itself would alter classification
+ * for every consumer, which is far too broad a change to make here.
+ */
+const STOP_LIKE_PATTERNS = Object.freeze([
+  // quit / stop / cease / knock off + a contact verb
+  /\b(?:stop|quit|cease|discontinue|halt|knock\s+it\s+off|cut\s+it\s+out)\b/u,
+  // "no more" / "any more" + a contact noun
+  /\bno\s+more\b[\s\S]{0,20}?\b(?:text|texts|texting|message|messages|messaging|call|calls|calling|email|emails|contact|mail)\b/u,
+  /\b(?:text|texts|message|messages|call|calls|email|emails)\b[\s\S]{0,12}?\bany\s*more\b/u,
+  // negated contact verbs, contractions included
+  /\b(?:do\s*n[o']?t|don'?t|dont|doesn'?t|won'?t|wont|never|no)\b[\s\S]{0,20}?\b(?:contact|text|txt|message|msg|call|reach|bother|harass|write|email)\b/u,
+  // remove / take off a list
+  /\b(?:remove|delete|take)\b[\s\S]{0,20}?\b(?:list|database|records?|system)\b/u,
+  /\btake\s+me\s+off\b/u,
+  /\bunsubscribe|opt\s*-?\s*out\b/u,
+  // being-left-alone phrasings
+  /\bleave\s+me\s+alone\b/u,
+  /\bbothering\s+me\b|\bharass(?:ing|ment)?\b|\bpester(?:ing)?\b/u,
+  /\bnot\s+interested\b[\s\S]{0,24}?\b(?:contact|contacted|text|texted|call|called|hearing)\b/u,
+  /\blose\s+my\s+number\b|\bforget\s+(?:this|my)\s+number\b/u,
+  // Spanish — mirrors the vocabulary the opt-out rule already knows
+  /\bno\s+me\s+(?:escriba|escribas|llame|llames|contacte|contactes|moleste|molestes)\b/u,
+  /\bdeje[n]?\s+de\s+(?:escribirme|llamarme|molestarme|contactarme)\b/u,
+  /\bno\s+m[áa]s\s+(?:mensajes|textos|llamadas)\b/u,
+  /\bpare\b|\bbasta\b|\bd[ée]jame\s+en\s+paz\b/u,
+]);
+
+/**
+ * True when ANY part of an aggregate carries something that could be a request
+ * to stop contacting. Fail-closed: an unreadable or empty value returns true so
+ * a caller can never promote what it could not inspect.
+ */
+export function aggregateCarriesStopRequest(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return true;
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/\s+/g, ' ');
+  return STOP_LIKE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
  * Apply validated context to short yes/no (and similar) replies.
  * @returns {{ applied: boolean, primary_intent?: string, labels?: string[], rule_id?: string, force_unclear?: boolean, confidence?: number, rationale?: string }}
  */

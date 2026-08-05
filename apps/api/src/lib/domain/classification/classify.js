@@ -9,6 +9,7 @@ import {
   validateConversationContext,
   applyContextualShortReply,
   resolveAggregateShortReplyFragment,
+  aggregateCarriesStopRequest,
   CONTEXT_VERSION,
 } from "@/lib/domain/classification/conversation-context.js";
 
@@ -5100,14 +5101,26 @@ function resolveIntents(
   // "Yeah\nits a 3br" — strictly MORE information — fell to unclear/0.64 and
   // was routed to human review.
   //
-  // This runs LAST, and only when `primary === "unclear"`. That guard is the
-  // whole safety argument: unclear is the classifier's own statement that no
-  // fragment carried a competing intent. A burst containing STOP, "not
-  // interested", or "I already sold it" resolves to opt_out / not_interested /
-  // wrong_number here and never reaches this branch — so unlike binding the
-  // first fragment eagerly, this can never discard a terminal signal. It can
-  // only ever upgrade a message we were otherwise going to give up on.
-  if (primary === "unclear" && ctxValidation.context_status === "valid") {
+  // This runs LAST, and only when `primary === "unclear"` — the classifier's
+  // own statement that no rule matched.
+  //
+  // `unclear` ALONE IS NOT SUFFICIENT, and the first version of this rescue was
+  // wrong to treat it as such. It proves no rule matched; it does NOT prove no
+  // stop request is present. The opt-out detector does not cover every
+  // phrasing, so an uncovered one ("please quit bothering me", "no more texts")
+  // lands in unclear — and unclear was the licence to promote. Those were
+  // measured promoting to ownership_confirmed 0.88 with auto-reply allowed: a
+  // seller asking us to stop, answered with another text.
+  //
+  // So promotion now also requires that NO fragment carries a stop-like signal,
+  // scanned by a deliberately over-broad, fail-closed predicate. Refusing costs
+  // one automated reply and routes to a human; promoting wrongly texts someone
+  // who asked us to stop. Those are not symmetric.
+  if (
+    primary === "unclear" &&
+    ctxValidation.context_status === "valid" &&
+    !aggregateCarriesStopRequest(rawMessage)
+  ) {
     const fragment = resolveAggregateShortReplyFragment(rawMessage);
     const fragmentCtx = fragment
       ? applyContextualShortReply(fragment, ctxValidation)
