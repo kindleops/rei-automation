@@ -152,8 +152,11 @@ export interface LiveInboxMapPin {
   id: string
   threadKey: string
   propertyId?: string
-  lat: number
-  lng: number
+  /** null when the row carries no usable coordinate. Never 0 — see pinCoordinate. */
+  lat: number | null
+  lng: number | null
+  latitude: number | null
+  longitude: number | null
   status?: string
   stage?: string
   ownerName?: string
@@ -1694,6 +1697,20 @@ const normalizeLiveThread = (row: AnyRecord, index: number): InboxThread => {
   return normalizeInboxThread(row, 0, index)
 }
 
+/**
+ * Returns the first candidate that is a real coordinate, or null.
+ * `0` is treated as absent: it is the null-island sentinel produced by the old
+ * `asNumber(..., 0)` default, and it silently fails every downstream
+ * `Math.abs(lat) > 0.001` guard.
+ */
+const pinCoordinate = (...candidates: unknown[]): number | null => {
+  for (const candidate of candidates) {
+    const num = Number(candidate)
+    if (Number.isFinite(num) && Math.abs(num) > 0.001) return num
+  }
+  return null
+}
+
 const normalizeLiveInboxMapPin = (row: AnyRecord, index: number): LiveInboxMapPin => {
   const propertyId = asString(row.property_id ?? row.propertyId, '')
   const threadKey = asString(
@@ -1705,8 +1722,15 @@ const normalizeLiveInboxMapPin = (row: AnyRecord, index: number): LiveInboxMapPi
     id,
     threadKey: threadKey || id,
     propertyId: propertyId || undefined,
-    lat: asNumber(row.lat ?? row.latitude, 0),
-    lng: asNumber(row.lng ?? row.longitude, 0),
+    // Cross-lane fix requested by Lane E. This previously defaulted to `0`, and a
+    // finite 0 fails the downstream `Math.abs(lat) > 0.001` coordinate guard, so a
+    // pin/row carrying real coordinates was treated as having none and fell back to
+    // geocoding an address string. Emit null for "no coordinate" and publish the
+    // `latitude`/`longitude` aliases the media layer actually reads.
+    lat: pinCoordinate(row.lat, row.latitude),
+    lng: pinCoordinate(row.lng, row.longitude),
+    latitude: pinCoordinate(row.lat, row.latitude),
+    longitude: pinCoordinate(row.lng, row.longitude),
     status: asString(row.status ?? row.thread_stage ?? row.inbox_status, ''),
     stage: asString(row.stage ?? row.thread_stage ?? row.conversation_stage, ''),
     ownerName: asString(row.owner_name ?? row.ownerName ?? row.prospect_name, ''),
@@ -1785,7 +1809,17 @@ export const fetchLiveInbox = async ({
     limit,
     map: map ? '1' : '0',
     advanced: advanced && Object.keys(advanced).length > 0 ? JSON.stringify(advanced) : undefined,
-    timeout_mode: timeoutMode,
+    // RC-2/RC-3 root cause. The API treats `timeout_mode=initial_boot` as
+    // "skip linked-context hydration" (apps/api live-inbox-service.js:2369), which
+    // returns every row with NULL owner_name / display_name / property_address_full /
+    // property_address / market / stage / property_type. Those hollow rows are what
+    // rendered a raw phone number as the title, "No Address", and "Unknown" on every
+    // row — and the adapter then persisted them as `lastGood`, so they survived reload.
+    // The skip buys nothing: measured on this stack, unenriched boot took 1535ms vs
+    // 829-1007ms enriched for the same 25 rows.
+    // We keep the *client-side* timeout budget (resolved from `_timeoutMode` in
+    // inbox.adapter.ts) and simply stop asking the server to drop row identity.
+    timeout_mode: timeoutMode === 'initial_boot' ? undefined : timeoutMode,
     refresh_reason: refreshReason,
     skip_counts: skipCounts ? '1' : undefined,
     skip_delivery: skipDelivery ? '1' : undefined,
@@ -2008,6 +2042,40 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
   // Merge row and dc carefully: row (live) takes precedence for existing fields.
   const merged = fillEmptyFields(row, dc as unknown as AnyRecord)
 
+  // Defence in depth for RC-2/RC-3. Several fields below were written as
+  // `dc.<field>` alone, so an empty DealContext overwrote a perfectly good value
+  // that had arrived on the raw row. Identity fields must degrade, never clobber:
+  // take the first non-empty candidate instead.
+  const firstText = (...candidates: unknown[]): string => {
+    for (const candidate of candidates) {
+      const text = asString(candidate, '').trim()
+      if (text) return text
+    }
+    return ''
+  }
+  // A coordinate of exactly 0 is the null-island sentinel, not a location. Emitting
+  // it made `Math.abs(lat) > 0.001` reject the row, so every thumbnail fell back to
+  // geocoding an address string. Emit null so callers can tell "unknown" from "0,0".
+  const realCoord = (...candidates: unknown[]): number | null => {
+    for (const candidate of candidates) {
+      const num = Number(candidate)
+      if (Number.isFinite(num) && Math.abs(num) > 0.001) return num
+    }
+    return null
+  }
+  const resolvedAddress = firstText(
+    dc.propertyAddress,
+    row.property_address_full,
+    row.propertyAddressFull,
+    row.property_address,
+    row.propertyAddress,
+  )
+  const resolvedMarket = firstText(dc.market, row.market, row.filter_market, row.display_market)
+  const resolvedOwnerName = firstText(dc.ownerName, row.owner_name, row.ownerName, row.owner_display_name)
+  const resolvedDisplayName = firstText(dc.displayName, row.display_name, row.displayName, resolvedOwnerName)
+  const resolvedLatitude = realCoord(dc.latitude, row.latitude, row.lat)
+  const resolvedLongitude = realCoord(dc.longitude, row.longitude, row.lng)
+
   return {
     ...merged,
     id: conversationThreadId,
@@ -2025,9 +2093,9 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     textgridNumberId: dc.textgridNumberId || dc.textgrid_number_id || asString(row.textgridNumberId || row.textgrid_number_id, '') || undefined,
     queueId: dc.queueRowId || dc.queue_row_id || null,
     marketId: dc.market || '',
-    ownerName: dc.ownerName || asString(row.ownerName || row.owner_name),
-    sellerName: dc.sellerDisplayName || dc.ownerName || asString(row.sellerName || row.seller_name),
-    subject: dc.propertyAddress || asString(row.propertyAddress || row.property_address || row.subject),
+    ownerName: resolvedOwnerName,
+    sellerName: firstText(dc.sellerDisplayName, dc.ownerName, row.sellerName, row.seller_name, resolvedOwnerName),
+    subject: firstText(resolvedAddress, row.subject),
     preview: dc.latestMessageBody || asString(row.latestMessageBody || row.latest_message_body || row.preview || row.message_body),
     status: (row.isArchived || row.is_archived) ? 'archived' : (needsReply ? 'unread' : 'read'),
     priority: (category === 'hot_leads' || category === 'new_inbound') ? 'urgent' : 'normal',
@@ -2074,11 +2142,11 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     queueStatus: queueStatus || undefined,
     queue_status: queueStatus || undefined,
     
-    ownerDisplayName: dc.displayName || dc.ownerName,
-    propertyAddress: dc.propertyAddress,
-    propertyAddressFull: dc.propertyAddress,
+    ownerDisplayName: resolvedDisplayName || resolvedOwnerName,
+    propertyAddress: resolvedAddress,
+    propertyAddressFull: resolvedAddress,
     propertyCity: asString((row as AnyRecord).property_address_city ?? (row as AnyRecord).city, ''),
-    market: dc.market,
+    market: resolvedMarket,
     propertyState: dc.propertyState,
     propertyZip: dc.propertyZip,
     city: asString((row as AnyRecord).city ?? (row as AnyRecord).property_address_city, ''),
@@ -2109,19 +2177,19 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     priorityScore: dc.priority_score,
     propertyTags: dc.propertyTags,
     sellerTags: dc.sellerTags,
-    lat: dc.latitude,
-    lng: dc.longitude,
-    latitude: dc.latitude,
-    longitude: dc.longitude,
+    lat: resolvedLatitude,
+    lng: resolvedLongitude,
+    latitude: resolvedLatitude,
+    longitude: resolvedLongitude,
     optOut: dc.optOut,
     wrongNumber: dc.wrongNumber,
     notInterested: dc.notInterested,
     needsReview: dc.needsReview,
     suppressed: dc.suppressed,
     isOptOut: dc.optOut,
-    property_address_full: dc.propertyAddress,
-    owner_name: dc.ownerName,
-    display_name: dc.displayName,
+    property_address_full: resolvedAddress,
+    owner_name: resolvedOwnerName,
+    display_name: resolvedDisplayName,
     seller_phone: dc.sellerPhone,
     sender_phone: dc.senderPhone,
     universal_status: dc.universalStatus,
@@ -2132,8 +2200,8 @@ export const normalizeInboxThread = (row: AnyRecord, offset = 0, index = 0): Inb
     latest_is_final_failure: asBoolean(row.latest_is_final_failure ?? row.latestIsFinalFailure ?? row.is_final_failure, false),
     latestIsFinalFailure: asBoolean(row.latest_is_final_failure ?? row.latestIsFinalFailure ?? row.is_final_failure, false),
     
-    owner: { name: dc.owner_name },
-    property: { address: dc.property_address_full, market: dc.market },
+    owner: { name: resolvedOwnerName },
+    property: { address: resolvedAddress, market: resolvedMarket },
     threadStateSummary: {
       bucket: inboxBucket,
       status: dc.universalStatus,

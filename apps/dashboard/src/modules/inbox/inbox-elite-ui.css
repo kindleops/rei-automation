@@ -613,6 +613,143 @@
   outline-offset: 1px;
 }
 
+/* ------------------------------------------------------------------
+   Multi-select (RC-13)
+   The checkbox is the control that makes bulk actions reachable at all.
+   It stays out of the way until the row is hovered/focused or a selection
+   is in progress, but its hit area is a full 44x44 (R15.3) even though the
+   visible box is 16px.
+   ------------------------------------------------------------------ */
+.nx-premium-inbox .nx-row25 {
+  position: relative;
+}
+
+.nx-premium-inbox .nx-row25__select {
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.nx-premium-inbox .nx-row25:hover .nx-row25__select,
+.nx-premium-inbox .nx-row25:focus-within .nx-row25__select,
+.nx-premium-inbox .nx-row25.is-selection-mode .nx-row25__select,
+.nx-premium-inbox .nx-row25.is-bulk-selected .nx-row25__select {
+  display: inline-flex;
+}
+
+.nx-premium-inbox .nx-row25__select-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--nx-border-strong, rgba(186, 210, 238, 0.45));
+  background: rgba(8, 14, 24, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+
+.nx-premium-inbox .nx-row25__select-box svg { width: 11px; height: 11px; }
+
+.nx-premium-inbox .nx-row25.is-bulk-selected .nx-row25__select-box {
+  background: var(--nx-surface-accent);
+  border-color: var(--nx-surface-accent);
+}
+
+.nx-premium-inbox .nx-row25__select:focus-visible {
+  outline: 2px solid var(--nx-surface-accent);
+  outline-offset: -6px;
+  border-radius: 8px;
+}
+
+/* Shift the row content aside only while the checkbox is actually present, so
+   density is unchanged in the normal reading state. */
+.nx-premium-inbox .nx-row25.is-selection-mode {
+  padding-left: 30px;
+}
+
+.nx-premium-inbox .nx-row25.is-bulk-selected {
+  background: color-mix(in srgb, var(--nx-surface-accent) 10%, transparent);
+}
+
+/* Bulk bar: partial-failure reporting (R10.4) */
+.nx-premium-inbox .nx-inbox-rebuilt-floating-bar__error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--nx-danger, #f87171);
+}
+
+.nx-premium-inbox .nx-inbox-rebuilt-floating-bar__actions button.is-ghost {
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------
+   Category visibility picker (item 7)
+   ------------------------------------------------------------------ */
+.nx-cat-config {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  margin: 4px 8px 8px;
+  border: 1px solid var(--nx-border, rgba(148, 176, 210, 0.22));
+  border-radius: 10px;
+  background: var(--nx-surface-elevated, rgba(10, 16, 27, 0.96));
+}
+
+.nx-cat-config__hint {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nx-muted, rgba(156, 180, 212, 0.9));
+}
+
+.nx-cat-config__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.nx-cat-config__row:hover { background: rgba(148, 176, 210, 0.1); }
+.nx-cat-config__label { flex: 1; }
+.nx-cat-config__count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--nx-muted, rgba(156, 180, 212, 0.82));
+}
+
+/* Icon-only so the picker costs the chip rail as little width as possible. */
+.nx-cat-nav__item--config {
+  flex: 0 0 auto;
+  min-width: 44px;
+  width: 44px;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0.8;
+}
+
+.nx-cat-nav__item--config .nx-cat-nav__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
 /* Zone placement */
 .nx-premium-inbox .nx-row25__zone--media { grid-area: media; }
 .nx-premium-inbox .nx-row25__zone--conversation { grid-area: conversation; }
@@ -734,7 +871,7 @@
 
 .nx-premium-inbox .nx-row25__time {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   color: rgba(156, 180, 212, 0.82);
   font-variant-numeric: tabular-nums;
@@ -748,7 +885,7 @@
 }
 
 .nx-premium-inbox .nx-row25__addr {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: rgba(196, 214, 238, 0.88);
   white-space: nowrap;
@@ -787,7 +924,7 @@
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -796,7 +933,7 @@
 .nx-premium-inbox .nx-row25__receipt svg { width: 11px; height: 11px; flex-shrink: 0; }
 
 .nx-premium-inbox .nx-row25__receipt-label {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -804,14 +941,14 @@
 }
 
 .nx-premium-inbox .nx-row25__receipt-sep {
-  font-size: 9px;
+  font-size: 12px;
   opacity: 0.45;
   flex-shrink: 0;
   line-height: 1;
 }
 
 .nx-premium-inbox .nx-row25__receipt-time {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   color: rgba(156, 180, 212, 0.78);
   font-variant-numeric: tabular-nums;
@@ -835,9 +972,34 @@
   flex-shrink: 0;
 }
 
+/* The market/type meta now sits inline in the footer next to the delivery receipt.
+   It is descriptive text, not a pill (R5.4/R5.5): a static category label must not
+   compete visually with state that actually changes. */
+.nx-premium-inbox .nx-row25__footer .nx-row25__context-line {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: right;
+}
+
+.nx-premium-inbox .nx-row25__footer .nx-row25__receipt + .nx-row25__context-line {
+  padding-left: 8px;
+}
+
+/* Unnamed contacts read as a stated absence, not as data. */
+.nx-premium-inbox .nx-row25__name.is-unnamed {
+  font-style: italic;
+  font-weight: 600;
+  color: var(--nx-muted, rgba(176, 198, 226, 0.86));
+}
+
+/* Phone shown as secondary identity uses tabular figures (R2.6). */
+.nx-premium-inbox .nx-row25__addr.is-phone {
+  font-variant-numeric: tabular-nums;
+}
+
 .nx-premium-inbox .nx-row25__context-line {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: 0.01em;
@@ -1028,4 +1190,27 @@
   box-shadow:
     0 0 0 2px rgba(16, 185, 129, 0.16),
     0 0 8px rgba(16, 185, 129, 0.35);
+}
+/* ------------------------------------------------------------------
+   Lane C: sidebar toolbar accessibility floors.
+   These five controls sat below the 44px touch target (R15.3) and two of
+   them below the 11px type floor (R2.1). They are the controls that filter
+   and save the operator's working queue, so they are not "meta".
+   Kept visually compact: the hit area grows, the chrome does not.
+   ------------------------------------------------------------------ */
+.nx-premium-inbox .nx-inbox-header-shell .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 9px;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__search-input-wrap input {
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.nx-premium-inbox .nx-sidebar-rebuilt__secondary-controls > button {
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 12px;
 }
