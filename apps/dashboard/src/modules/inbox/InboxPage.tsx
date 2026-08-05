@@ -225,6 +225,8 @@ import {
   resolveWorkspaceWidthLabels,
   type ViewWidthPercent,
 } from '../../domain/inbox/view-layout'
+import { WorkspaceSplit } from './workspace/WorkspaceSplit'
+import { useWorkspaceGeometry } from './workspace/useWorkspaceGeometry'
 import {
   createThreadSelectHandlers,
   executeThreadSelectFetches,
@@ -670,7 +672,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     publishMobileInboxBadge(data.unreadCount ?? 0)
   }, [data.unreadCount])
   const { user, loading: authLoading, signOut } = useAuth()
-  const { isMobile } = useBreakpoint()
+  const { isMobile, width: viewportWidth } = useBreakpoint()
   const DEV = Boolean(import.meta.env.DEV)
   /**
    * N.1 — the one writable Deal Desk selection source (DD-018).
@@ -1442,13 +1444,60 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === selectedWorkspaceKey) ?? NEXUS_WORKSPACE_PRESETS[0],
     [selectedWorkspaceKey],
   )
-  const workspaceFlexBases = useMemo(
+  /**
+   * Workspace geometry (Constitution §12).
+   *
+   * The preset resolver still produces the *seed* bases — that is what the
+   * width pills and workspace presets write. Once the operator drags, keyboard
+   * resizes, collapses or maximises a pane, `workspaceGeometry` becomes the
+   * source of truth and holds continuous values. `workspaceWidths` is still the
+   * quantized '25' | '50' | '75' | '100' label, derived from the continuous
+   * basis, so every existing `is-width-*` consumer keeps working unchanged.
+   */
+  const workspaceSeedBases = useMemo(
     () => computeWorkspaceFlexBases(selectedWorkspaceViews, workspaceWidthOverrides),
     [selectedWorkspaceViews, workspaceWidthOverrides],
   )
+  const workspaceGeometryDisabled = isMobile
+  const workspaceGeometry = useWorkspaceGeometry({
+    order: selectedWorkspaceViews,
+    userKey: user?.id ?? 'local',
+    routeKey: isRouteFullscreen ? `fullscreen:${initialWorkspaceView ?? 'default'}` : '/inbox',
+    seedBases: workspaceSeedBases as Partial<Record<string, number>>,
+    disabled: workspaceGeometryDisabled,
+  })
+
+  // A width pill or workspace preset re-seeds the geometry. A pane-set change
+  // does not — the hook restores that set's saved layout instead (R12.3).
+  const workspaceSeedSignature = JSON.stringify(workspaceSeedBases)
+  const workspacePaneSetSignature = [...selectedWorkspaceViews].sort().join('|')
+  const workspaceSeedRef = useRef(workspaceSeedBases)
+  workspaceSeedRef.current = workspaceSeedBases
+  const workspaceSeedGuardRef = useRef({ set: workspacePaneSetSignature, seed: workspaceSeedSignature })
+  const applyWorkspaceBases = workspaceGeometry.applyBases
+  useEffect(() => {
+    const previous = workspaceSeedGuardRef.current
+    workspaceSeedGuardRef.current = { set: workspacePaneSetSignature, seed: workspaceSeedSignature }
+    if (previous.set !== workspacePaneSetSignature) return
+    if (previous.seed === workspaceSeedSignature) return
+    applyWorkspaceBases(workspaceSeedRef.current as Partial<Record<string, number>>)
+  }, [applyWorkspaceBases, workspacePaneSetSignature, workspaceSeedSignature])
+
+  const workspaceFlexBases = useMemo(() => {
+    if (workspaceGeometryDisabled) return workspaceSeedBases
+    const panes = workspaceGeometry.layout.panes
+    const resolved: Partial<Record<InboxWorkspaceView, number>> = {}
+    for (const view of selectedWorkspaceViews) {
+      resolved[view] = panes[view]?.basis ?? workspaceSeedBases[view] ?? 100 / selectedWorkspaceViews.length
+    }
+    return resolved
+  }, [workspaceGeometry.layout, workspaceGeometryDisabled, workspaceSeedBases, selectedWorkspaceViews])
+
   const workspaceWidths = useMemo(
-    () => computeWorkspaceWidths(selectedWorkspaceViews, workspaceWidthOverrides),
-    [selectedWorkspaceViews, workspaceWidthOverrides],
+    () => (workspaceGeometryDisabled
+      ? computeWorkspaceWidths(selectedWorkspaceViews, workspaceWidthOverrides)
+      : resolveWorkspaceWidthLabels(selectedWorkspaceViews, {}, workspaceFlexBases)),
+    [workspaceGeometryDisabled, selectedWorkspaceViews, workspaceWidthOverrides, workspaceFlexBases],
   )
   const activeWorkspaceLabel = selectedWorkspacePreset.label
   const activeContextSubtitle = selectedWorkspacePreset.description
@@ -4620,6 +4669,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [useMobileInboxFlow, mobileIntelOpen, mobileThreadOpen])
 
   const viewsToRender = mobilePaneViews ?? renderViews
+
+  /** R12.8 — below 1024px the split becomes a stack with explicit navigation. */
+  const workspaceStacked = !useMobileInboxFlow && viewportWidth < 1024
+  const workspaceGeometryLabels = useMemo(
+    () => Object.fromEntries(
+      selectedWorkspaceViews.map((view) => [view, viewLabelByKey.get(view) ?? view]),
+    ) as Record<string, string>,
+    [selectedWorkspaceViews, viewLabelByKey],
+  )
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
     || (isMultiView
       && renderViews.includes('thread')
@@ -5416,36 +5474,53 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           )}
 
           {isMultiView ? (
-            <section className="nx-workspace-split-grid">
-              {viewsToRender.map((view) => {
-                const paneWidth = workspaceWidths[view] ?? '25'
-                const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
-                const layoutMode = resolveMobileAwareLayoutMode(
-                  view,
-                  flexBasis,
-                  workspaceWidthOverrides[view] ?? paneWidth,
-                  isMobile,
-                )
-                const mobilePaneStyle = useMobileInboxFlow
-                  ? { flex: '1 1 auto', maxWidth: '100%', minWidth: 0 }
-                  : { flex: `1 1 ${flexBasis}%`, maxWidth: `${flexBasis}%`, minWidth: 0 }
-                return (
-                  <div
-                    key={view}
-                    className={cls(
-                      'nx-workspace-pane',
-                      `is-view-${view}`,
-                      `is-width-${paneWidth}`,
-                      `is-layout-${layoutMode}`,
-                      view === activeWorkspaceView && 'is-primary',
-                    )}
-                    style={mobilePaneStyle}
-                  >
-                    {renderWorkspacePane(view, 'multi', paneWidth)}
-                  </div>
-                )
-              })}
-            </section>
+            useMobileInboxFlow ? (
+              /* Mobile keeps its own single-pane flow (mobile-operating-shell.css).
+               * Lane B does not reshape it — geometry is disabled below 768px. */
+              <section className="nx-workspace-split-grid">
+                {viewsToRender.map((view) => {
+                  const paneWidth = workspaceWidths[view] ?? '25'
+                  const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
+                  const layoutMode = resolveMobileAwareLayoutMode(
+                    view,
+                    flexBasis,
+                    workspaceWidthOverrides[view] ?? paneWidth,
+                    isMobile,
+                  )
+                  return (
+                    <div
+                      key={view}
+                      className={cls(
+                        'nx-workspace-pane',
+                        `is-view-${view}`,
+                        `is-width-${paneWidth}`,
+                        `is-layout-${layoutMode}`,
+                        view === activeWorkspaceView && 'is-primary',
+                      )}
+                      style={{ flex: '1 1 auto', maxWidth: '100%', minWidth: 0 }}
+                    >
+                      {renderWorkspacePane(view, 'multi', paneWidth)}
+                    </div>
+                  )
+                })}
+              </section>
+            ) : (
+              <WorkspaceSplit
+                order={viewsToRender}
+                layout={workspaceGeometry.layout}
+                labels={workspaceGeometryLabels}
+                primaryId={activeWorkspaceView}
+                stacked={workspaceStacked}
+                onCommitResize={workspaceGeometry.commitResize}
+                onToggleCollapse={workspaceGeometry.collapse}
+                onExpand={workspaceGeometry.expand}
+                onToggleMaximize={workspaceGeometry.maximize}
+                onReset={workspaceGeometry.reset}
+                renderPane={(view, widthLabel) =>
+                  renderWorkspacePane(view as InboxWorkspaceView, 'multi', widthLabel)
+                }
+              />
+            )
           ) : (
             renderWorkspacePane(activeWorkspaceView, 'single', '100')
           )}
