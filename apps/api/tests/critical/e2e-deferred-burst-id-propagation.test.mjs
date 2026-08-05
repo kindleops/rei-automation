@@ -28,7 +28,10 @@ import { resolveInboundTerminalDisposition } from "@/lib/domain/inbound/terminal
 import { AWAITING_BURST_DETAIL_KEY } from "@/lib/domain/inbound/inbound-processing-ledger.js";
 import { TERMINAL_DISPOSITIONS } from "@/lib/domain/inbound/terminal-disposition.js";
 import { classify } from "@/lib/domain/classification/classify.js";
-import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import {
+  resolveAskingPriceSignal,
+  extractMonetaryMentions,
+} from "@/lib/domain/seller-flow/monetary-understanding.js";
 
 const THREAD = "+15550100455";
 const T0 = "2026-08-04T10:00:00.000Z";
@@ -340,6 +343,27 @@ test("a directional word after a priced number does not turn it into an address"
       resolveAskingPriceSignal(message, {})?.asking_price?.value ?? null,
       expected,
       `${JSON.stringify(message)} states a real price`
+    );
+  }
+});
+
+test("a directional phrase after a number is preserved AT THE MENTION LEVEL", () => {
+  // The third measurement of this string, and the one an asking-price probe
+  // cannot see. extractMonetaryMentions is upstream of the asking-price
+  // qualification rule, so it shows the direction guard's effect directly:
+  //   "I want 300 East of the drive"   41edd220 []  ->  HEAD ["asking_price:300"]
+  // Pinned because the no-reference asking-price path is null on BOTH trees and
+  // therefore cannot detect a regression of bdf58c1d on its own.
+  for (const message of [
+    "I want 300 East of the drive",
+    "I want 300 North of town",
+    "I want 300 west of here",
+  ]) {
+    const kinds = extractMonetaryMentions(message, {}).map((m) => `${m.kind}:${m.value}`);
+    assert.deepEqual(
+      kinds,
+      ["asking_price:300"],
+      `${JSON.stringify(message)} must still yield the mention`
     );
   }
 });

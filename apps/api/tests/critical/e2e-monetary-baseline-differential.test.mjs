@@ -203,6 +203,54 @@ test("multi-property messages bind the price to the stated figure", () => {
   );
 });
 
+// ── Spanish prices ──────────────────────────────────────────────────────────
+// This file had no Spanish coverage at all. Spanish sellers are a real segment
+// and "mil" is a SCALE word (1_000), so every Spanish price runs through a
+// multiplier that English prices never touch.
+
+test("Spanish 'mil' prices extract at the correct magnitude, not 1000x", () => {
+  // A 1000x inflation here would offer $150,000,000 on a $150,000 house.
+  for (const [message, expected] of [
+    ["quiero 150 mil", 150000],
+    ["quiero 150 mil por la casa", 150000],
+    ["150 mil", 150000],
+    ["pido 200 mil", 200000],
+    ["150 mil pesos", 150000],
+    ["quiero $150 mil", 150000],
+    ["quiero 200 mil dolares", 200000],
+    ["lo doy en 150 mil", 150000],
+  ]) {
+    assert.equal(
+      askingPrice(message),
+      expected,
+      `${JSON.stringify(message)} must be ${expected}, not ${expected * 1000}`
+    );
+  }
+});
+
+test("Spanish spelled-out prices extract at the correct magnitude", () => {
+  assert.equal(askingPrice("ciento cincuenta mil"), 150000);
+  assert.equal(askingPrice("quiero ciento cincuenta mil"), 150000);
+});
+
+test("KNOWN DEFECT: a thousands-separated number followed by 'mil' inflates 1000x (PR #66)", () => {
+  // Characterizes CURRENT behaviour. "150,000 mil" — a redundant form a Spanish
+  // speaker may write meaning 150 thousand — yields 150,000,000 on BOTH the
+  // monetary authority and classify's parseSellerAskingPrice.
+  //
+  // Scope, measured: this is the ONLY Spanish form I could make inflate. The
+  // common phrasings above are all correct, including "quiero 150 mil", which
+  // has been described elsewhere as reading $150,000,000 — it does not, on
+  // either extractor or through extractSellerFacts.
+  assert.equal(askingPrice("150,000 mil"), 150000000, "CURRENT BEHAVIOUR");
+});
+
+test("KNOWN GAP: a fully spelled-out Spanish price with no digits is not extracted", () => {
+  // "doscientos mil" (two hundred thousand) yields nothing. A miss, not an
+  // inflation — the seller's price is dropped rather than misread.
+  assert.equal(askingPrice("doscientos mil"), null, "CURRENT BEHAVIOUR");
+});
+
 // ── legitimate prices must always extract ───────────────────────────────────
 
 test("prices carrying real monetary evidence always extract", () => {
