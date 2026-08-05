@@ -194,7 +194,14 @@ test("ACCEPTANCE: an inbound during an active proof session does not mutate the 
     "every evidence-bearing field on the preserved row must be byte-identical"
   );
   assert.equal(processCalls.length, 0, "the preserved burst must never reach an orchestration turn");
-  assert.equal(result.ok, false, "the append must fail closed rather than roll the preserved row over");
+  // The burst layer DECLINES: it neither rolls the preserved row over nor
+  // claims custody of the message. `deferred: false` is the load-bearing half —
+  // saying `true` here would abandon the message with no burst to finalize it,
+  // and `ok: false` would throw the webhook into endless provider redelivery
+  // against a refusal that can never succeed.
+  assert.equal(result.declined, true, "the burst layer must declare the decline");
+  assert.equal(result.deferred, false, "a declined message must NOT be reported as deferred");
+  assert.equal(result.ok, true, "a decline is not an infrastructure failure — it must not redeliver");
   assert.equal(result.reason, "open_generation_out_of_scope");
   assert.equal(
     result.blocking_burst_id,

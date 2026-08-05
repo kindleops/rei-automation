@@ -2408,8 +2408,24 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       // Burst invariant: while burst mode is enabled the deferral above must
       // have produced an orchestration result — the legacy per-message V2
       // fallback below is only reachable when burst mode is disabled.
-      if (seller_burst_enabled && !seller_orchestration) {
+      //
+      // EXCEPTION: the burst layer may explicitly DECLINE a message whose
+      // thread the activation scope does not authorize, or whose open
+      // generation is out of scope (internal_proof mode). A decline is not a
+      // failure and must not redeliver — the burst layer never took custody, so
+      // the per-message path below owns the message exactly as it does when
+      // burst mode is off. Without this, a declined message either throws into
+      // an endless provider-redelivery loop or is silently swallowed.
+      if (seller_burst_enabled && !seller_orchestration && !burst_deferral?.declined) {
         throw new Error("seller_inbound_burst_orchestration_missing");
+      }
+      if (burst_deferral?.declined) {
+        safeInfo("textgrid.inbound_burst_declined_falling_back", {
+          message_id: extracted.message_id,
+          inbound_from,
+          reason: burst_deferral.reason || "burst_append_refused",
+          blocking_burst_id: burst_deferral.blocking_burst_id || null,
+        });
       }
 
       if (!seller_orchestration) {

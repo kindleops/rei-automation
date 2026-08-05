@@ -335,18 +335,30 @@ export function createSellerInboundBurstCoordinator({
       now: now(),
       scope,
     });
-    // An out-of-scope OPEN generation on this thread refuses the append with no
-    // write of any kind. This is the guard that protects a preserved burst from
-    // being force-marked eligible by the rollover path (store: the eligible_at
-    // /version bump lands BEFORE the coordinator sees `rollover: true`, so it
-    // cannot be gated from here — only inside appendMessage itself).
-    if (append?.reason === "open_generation_out_of_scope") {
+    // The store DECLINED to take this message. Two flavours today — an
+    // out-of-scope OPEN generation on the thread (the guard protecting a
+    // preserved burst from the rollover force-eligible write, which lands
+    // inside appendMessage before the coordinator can see `rollover`), and a
+    // thread the scope never authorized at all.
+    //
+    // `deferred` means "the burst layer has taken custody of this message". A
+    // decline is the opposite, and saying `deferred: true` here silently drops
+    // the message: no burst row, no orchestration, no error, no redelivery.
+    //
+    // Matched on `ok === false` rather than on a list of reasons. Enumerating
+    // reasons is exactly how `thread_out_of_scope` slipped through — the two
+    // branches that existed covered the two failures that were in mind when
+    // they were written. A new refusal reason must fail into "declined", never
+    // into "deferred".
+    if (append?.ok === false && !append?.rollover) {
       return {
-        ok: false,
+        ok: true,
+        declined: true,
         deferred: false,
-        reason: "open_generation_out_of_scope",
+        reason: append.reason || "burst_append_refused",
         blocking_burst_id: append?.blocking_burst_id || null,
         blocking_first_received_at: append?.blocking_first_received_at || null,
+        append,
         safety,
         cancel_result,
         orchestration_context,
