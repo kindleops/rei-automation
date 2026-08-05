@@ -3292,7 +3292,15 @@ function detectPositiveSignals(message) {
 // ══════════════════════════════════════════════════════════════════════════
 
 const ASKING_PRICE_PATTERNS = [
-  /\b(?:i\s+want|want|asking|ask(?:ing)?\s+for|around|about|at|least|min|minimum)\s+\$?\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\b/i,
+  // Split from the cue list below: "at", "around" and "about" are also the way
+  // a seller states a TIME ("call at 3"), so a bare digit after them was read
+  // as an asking price — "Please call at 3" became an offer to sell for $3,
+  // with auto-reply allowed. Those three cues now require the number to look
+  // like money: an explicit $, a scale suffix, thousands separators, or 4+
+  // digits. The intent cues ("i want", "asking", "least"...) are unambiguous on
+  // their own and keep accepting a bare number.
+  /\b(?:i\s+want|want|asking|ask(?:ing)?\s+for|least|min|minimum)\s+\$?\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\b/i,
+  /\b(?:at|around|about)\s+(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,})/i,
   /^\s*(?:\$?\s*)?\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?\s*(?:as\s+is|as-is|firm|obo|neg|negotiable)?\s*\$?\s*$/i,
   /\b\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million)\b/i,
   /\b\d{2,3}k\b/i,
@@ -3304,7 +3312,10 @@ const ASKING_PRICE_PATTERNS = [
   // Negation-guarded: "not worth 200k" / "isn't worth 50k" are refusals, not
   // asking prices.
   /\b(?<!\b(?:not|isn't|isnt|ain't|aint|never|wasn't|wasnt)\s)worth\s+\$?\s*\d[\d,.]*/i,
-  /\bbetween\s+\$?\s*\d[\d,.]*\s+and\s+\$?\s*\d[\d,.]*/i,
+  // Same money-shape requirement on at least one side of the range, so
+  // "between 3 and 4" (a time window) is not a price while
+  // "between $90,000 and $100,000" and "between 90k and 100k" still are.
+  /\bbetween\s+(?:\$?\s*(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,})\s+and\s+\$?\s*\d[\d,.]*|\$?\s*\d[\d,.]*\s+and\s+\$?\s*(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,}))/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
   /\bmi\s+precio\s+es\b/i,
@@ -3456,7 +3467,22 @@ export function parseSellerAskingPrice(message) {
   let evidence = null;
 
   const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
-  if (between) {
+  // Same money-shape requirement the ASKING_PRICE_PATTERNS gate applies to
+  // "at"/"around"/"about". This parser is a THIRD, independent consumer: it
+  // sets price_parse without consulting that gate, so "between 3 and 4" — a
+  // time window — was still read as a $3 asking price after the gate was
+  // repaired. At least one side must carry a scale suffix, an explicit $,
+  // a thousands separator, or 4+ digits.
+  const between_is_monetary = Boolean(
+    between &&
+      (between[2] ||
+        between[4] ||
+        /\$/.test(between[0]) ||
+        /\d,\d{3}\b/.test(between[0]) ||
+        String(between[1]).replace(/\D/g, "").length >= 4 ||
+        String(between[3]).replace(/\D/g, "").length >= 4)
+  );
+  if (between && between_is_monetary) {
     const lo = scalePriceToken(between[1], between[2]);
     const hi = scalePriceToken(between[3], between[4]);
     if (lo != null && hi != null) {
@@ -3560,7 +3586,13 @@ function scalePriceToken(numStr, suffix) {
   if (Number.isNaN(val)) return null;
   const s = (suffix || "").toLowerCase();
   if (s.startsWith("k") || s.startsWith("thou")) val *= 1000;
-  if (s.startsWith("m")) val *= 1000000;
+  // Spanish "mil" is a THOUSAND, not a million: "150 mil" is $150,000, and
+  // scaling it as a million produced a $150,000,000 asking price on the single
+  // most common way a Spanish-speaking seller states a price. The exact token
+  // must be checked BEFORE the generic million branch, which it prefixes.
+  // monetary-understanding.js already had this right (mil: 1_000).
+  else if (s === "mil") val *= 1000;
+  else if (s.startsWith("m")) val *= 1000000;
   // bare "250" in "no less than 250" often means 250k in REI SMS — leave as-is if < 1000 without suffix
   return val;
 }
