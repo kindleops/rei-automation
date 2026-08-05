@@ -26,6 +26,7 @@ import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
 import { ShellTopRail } from '../modules/shell/ShellTopRail'
 import { SHELL_NAV_ITEMS } from '../modules/shell/shell-nav'
 import { SkipLink } from '../shared/ui'
+import { startSessionEventBridge } from '../modules/operations/session-event-bridge'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -129,7 +130,26 @@ const GlobalNotificationShell = ({
 }) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
-  const showGlobalBell = routePath !== '/inbox' && !isMobile
+
+  /*
+   * Start the toast -> Operations Center bridge once, at the shell level, so a
+   * toast that fires and auto-dismisses after 6s is still recoverable in the
+   * Operations Center's Activity section. The toast bus was previously a
+   * closed third notification system with an incompatible severity enum.
+   */
+  useEffect(() => startSessionEventBridge(), [])
+  /*
+   * LANE F — two notification bells rendered simultaneously on six routes.
+   *
+   * This guard was `routePath !== '/inbox'`, but the inbox command shell —
+   * which carries its own bell in NexusTopBar — also runs on '/',
+   * '/conversation', '/map', '/pipeline', '/calendar' and '/comp-intelligence'.
+   * On all six the operator got two bells, two independent open-states and two
+   * LeadCommandNotificationCenter mounts. The correct test is "does this route
+   * already have the command shell", which is what routeHasInboxCommandShell
+   * answers.
+   */
+  const showGlobalBell = !routeHasInboxCommandShell(routePath) && !isMobile
   const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
 
   return (

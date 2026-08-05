@@ -591,7 +591,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
 
   const kpiPanelActive = isControlled ? Boolean(open) : isOpen || isPinned
   const useDrawerPanel = isMobile || isTouchUi
-  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
+  const { kpis, isLive, recommendations, error: kpiError, isSlow: kpisAreSlow, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
   const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
 
   const allKpisList = useMemo(() => {
@@ -836,9 +836,36 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
             scrollbarWidth: 'thin',
             scrollbarColor: 'var(--nx-kpi-scrollbar, rgba(255,255,255,0.08)) transparent',
           }}>
-            {!kpis ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
-                Loading...
+            {!kpis && kpiError ? (
+              /*
+               * LANE F (§8.3): this branch used to be `!kpis ? "Loading..."`, so a
+               * failed read rendered a spinner forever — the operator could not
+               * tell a slow network from a dead one. A failure now says so and
+               * offers the way out.
+               */
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '100px', padding: '0 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', color: 'var(--nx-kpi-error-text, #ff6b6b)' }}>
+                  Operational telemetry could not be read
+                </div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>
+                  The numbers below are unavailable — this panel is blind, not idle.
+                </div>
+                <button
+                  onClick={() => refreshKpis()}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '4px 12px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '11px' }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !kpis ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
+                <span>Loading operational telemetry…</span>
+                {/* Past 2s, say why the wait continues rather than spinning mutely. */}
+                {kpisAreSlow && (
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.32)' }}>
+                    Still reading — this can take a few seconds on a large window.
+                  </span>
+                )}
               </div>
             ) : (
               <>
@@ -856,7 +883,13 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
 
           </div>
 
-          {/* AI Recommendation strip */}
+          {/*
+            Recommended Action strip.
+            LANE F (§0.1): this was labelled "AI Rec". These strings are produced
+            by fixed threshold checks in `operationalKpis.ts` ("Rule-based
+            recommendations") — no model is involved. Naming follows Composer's
+            "Operator Polish": say what it does, don't claim AI.
+          */}
           {recommendations.length > 0 && (
             <div style={{
               borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
@@ -865,7 +898,7 @@ export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: I
               background: 'var(--nx-kpi-rec-bg, rgba(99,102,241,0.05))',
             }}>
               <div style={{ fontSize: '8px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
-                AI Rec
+                Recommended Action
               </div>
               <div style={{ fontSize: '10px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
                 {recommendations[0]}

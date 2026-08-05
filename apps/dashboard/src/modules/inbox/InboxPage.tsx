@@ -2790,9 +2790,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           )
         }
       }
-      const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
+      /*
+       * LANE F: `localStorage['nx.queue.mode']` was a seventh source of truth
+       * for queue status. It was read here on mount and won on first paint, so
+       * the operator saw whatever *this browser* last selected rather than
+       * server state. Queue posture is server-owned — it now comes only from
+       * `refreshQueueControl()` and `resolveSendingStatus`. Caps stay local
+       * because they are a per-operator preference, not system state.
+       */
       const savedCaps = window.localStorage.getItem('nx.queue.caps')
-      if (savedMode === 'paused' || savedMode === 'assisted' || savedMode === 'automatic') setQueueCommandMode(savedMode)
       if (savedCaps) {
         const parsed = JSON.parse(savedCaps) as Partial<QueueCommandCaps>
         setQueueCommandCaps((current) => ({ ...current, ...parsed }))
@@ -5369,9 +5375,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           humanReview: viewCounts.needs_review ?? 0,
           followUps: viewCounts.follow_up ?? 0,
           failedSends: queueProcessorHealth?.failedTodayCount ?? viewCounts.failed ?? 0,
-          decisionsRequired: viewCounts.needs_review ?? 0,
-          closingTasks: null,
-          systemTasks: null,
+          // LANE F: `decisionsRequired` was a second copy of `viewCounts.needs_review`
+          // and double-counted into the Action Center badge. `closingTasks` and
+          // `systemTasks` were hardcoded null, so their rows could never render.
+          // All three are removed; sending blockers now come from the resolver.
         }}
         onNavigateInboxView={handleNavigateInboxView}
         onOpenQueueCommand={() => pushRoutePath('/queue')}

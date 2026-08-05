@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { pushRoutePath } from '../../app/router'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import type {
+  GroupedNotification,
   NotificationDomain,
   NotificationEvent,
   NotificationSeverity,
@@ -86,7 +87,7 @@ const NotificationCard = ({
   onRunAction,
   mobileCompact = false,
 }: {
-  item: NotificationEvent
+  item: GroupedNotification
   expanded: boolean
   selected: boolean
   onToggleSelect: () => void
@@ -137,15 +138,22 @@ const NotificationCard = ({
             {item.createdAt ? formatRelativeTime(item.createdAt) : 'Now'}
           </span>
           {isUnread ? <span className="lcnc-card__unread-dot" aria-label="Unread" /> : null}
-          {!mobileCompact ? (
-            <button type="button" className="lcnc-card__dismiss-btn" onClick={onDismiss} aria-label="Dismiss">
-              <Icon name="close" size={12} />
-            </button>
-          ) : null}
+          {/* Dismiss is present at every breakpoint. It used to be gated on
+              `!mobileCompact`, so mobile had no way to dismiss anything. */}
+          <button
+            type="button"
+            className="lcnc-card__dismiss-btn"
+            onClick={onDismiss}
+            aria-label={`Dismiss "${item.title}"`}
+          >
+            <Icon name="close" size={12} />
+          </button>
         </div>
 
         <button type="button" className="lcnc-card__body-btn" onClick={onOpen}>
+          {/* Sanitised by the domain contract — never a raw phone or event code. */}
           <strong className="lcnc-card__title">{item.title}</strong>
+          {item.subject ? <span className="lcnc-card__subject">{item.subject}</span> : null}
           <p className="lcnc-card__text">{expanded ? item.body : (item.summary ?? item.body)}</p>
         </button>
 
@@ -302,6 +310,9 @@ export const LeadCommandNotificationCenter = ({
     const query = search.trim().toLowerCase()
     return notifications.filter((item) => {
       if (item.status === 'dismissed') return false
+      // Snooze used to be visually a no-op: it was wired end-to-end but this
+      // filter only excluded 'dismissed', so a snoozed card stayed on screen.
+      if (item.status === 'snoozed') return false
       if (severityFilter !== 'all' && item.severity !== severityFilter) return false
       if (domainFilter !== 'all' && item.domain !== domainFilter) return false
       if (!query) return true
@@ -337,6 +348,20 @@ export const LeadCommandNotificationCenter = ({
   const snoozeOneHour = useCallback(async (id: string) => {
     const until = new Date(Date.now() + 60 * 60 * 1000).toISOString()
     await patch(id, 'snooze', { snoozeUntil: until })
+  }, [patch])
+
+  /**
+   * The feed emits the same event twice — once keyed '+1252…' and once '252…'.
+   * Cards are deduplicated for display, so dismissing one must dismiss every
+   * backend row it stands for; otherwise the twin reappears and dismissal
+   * looks broken.
+   */
+  const dismissGroup = useCallback(async (item: GroupedNotification) => {
+    if (item.groupMemberIds.length > 1) {
+      await patch(item.id, 'bulk_dismiss', { ids: item.groupMemberIds })
+      return
+    }
+    await patch(item.id, 'dismiss')
   }, [patch])
 
   const bulkMarkRead = useCallback(async () => {
@@ -505,7 +530,7 @@ export const LeadCommandNotificationCenter = ({
                       mobileCompact={useSheetLayout}
                       onToggleSelect={() => toggleSelected(item.id)}
                       onOpen={() => void handleOpen(item)}
-                      onDismiss={() => void patch(item.id, 'dismiss')}
+                      onDismiss={() => void dismissGroup(item)}
                       onMarkRead={() => void patch(item.id, 'mark_read')}
                       onMarkUnread={() => void patch(item.id, 'mark_unread')}
                       onSnooze={() => void snoozeOneHour(item.id)}
