@@ -279,16 +279,44 @@ test("KNOWN GAP: Spanish million forms are not extracted at all", () => {
   }
 });
 
-test("KNOWN DEFECT: a thousands-separated number followed by 'mil' inflates 1000x (PR #66)", () => {
-  // Characterizes CURRENT behaviour. "150,000 mil" — a redundant form a Spanish
-  // speaker may write meaning 150 thousand — yields 150,000,000 on BOTH the
-  // monetary authority and classify's parseSellerAskingPrice.
+test("DOCUMENTED RESIDUAL: '150,000 mil' inflates 1000x — accepted, not an open defect", () => {
+  // This is a DECISION, not a bug awaiting a fix. "150,000 mil" is a redundant
+  // form (thousands separator AND the scale word) meaning 150 thousand; the mil
+  // multiplier is applied to a base that already carries thousands magnitude.
+  // Reviewed and accepted as a residual after the 9feba185 'mil' fix, which
+  // deliberately does not cover it.
   //
-  // Scope, measured: this is the ONLY Spanish form I could make inflate. The
-  // common phrasings above are all correct, including "quiero 150 mil", which
-  // has been described elsewhere as reading $150,000,000 — it does not, on
-  // either extractor or through extractSellerFacts.
-  assert.equal(askingPrice("150,000 mil"), 150000000, "CURRENT BEHAVIOUR");
+  // Pinned so the decision is visible and any change to it is deliberate.
+  assert.equal(askingPrice("150,000 mil"), 150000000, "ACCEPTED RESIDUAL");
+});
+
+// NOTE — A DIVERGENCE GUARD FOR THE ACCEPTED RESIDUAL IS DELIBERATELY NOT
+// ASSERTED HERE YET. At committed HEAD both extractors return 150,000,000 for
+// "150,000 mil" and agree. An uncommitted in-flight change to classify.js moves
+// it to 150,000 while monetary-understanding stays at 150,000,000, which would
+// reintroduce the exact extractor divergence that caused the original Spanish
+// launch blocker — on the one string that was reviewed and accepted as a
+// residual. Raised with the lead; the guard lands once the tree settles and the
+// intended value is ruled on, so this file does not pin a moving target.
+
+test("legitimate money survives the clock-time and 'mil' narrowing", () => {
+  // Controls for both fixes at once: narrowing the "m" suffix and gating bare
+  // digits after "at"/"between" must not cost real prices, including the
+  // preposition and range forms those gates touch directly.
+  for (const [message, expected] of [
+    ["at least 85k", 85000],
+    ["meet me at 200k", 200000],
+    ["between 100k and 150k", 100000],
+    ["at $200k", 200000],
+    ["$500,000", 500000],
+  ]) {
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      expected,
+      `classify must preserve ${JSON.stringify(message)}`
+    );
+    assert.equal(askingPrice(message), expected, "and the monetary authority must agree");
+  }
 });
 
 test("KNOWN GAP: a fully spelled-out Spanish price with no digits is not extracted", () => {

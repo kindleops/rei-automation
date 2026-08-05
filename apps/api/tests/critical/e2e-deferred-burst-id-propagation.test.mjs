@@ -465,37 +465,33 @@ test("PRE-EXISTING: an unscaled bare number is not money, with or without a dire
   }
 });
 
-test("KNOWN DEFECT: a price ending in a capitalized compass direction is dropped (residual of the direction skip, PR #66)", () => {
-  // Characterizes CURRENT behaviour so it flips loudly when fixed.
+test("a price ending in a capitalized compass direction is preserved", () => {
+  // The fifth regression family from the direction-skip work, now fixed.
+  // Measured with a reference supplied, the form the negotiation path uses:
+  //   "I want 300 East"       eeee5bd8 300000 -> regressed null -> fixed 300000
+  //   "I want 300 South"      eeee5bd8 300000 -> regressed null -> fixed 300000
+  //   "I'd take 250 North"    eeee5bd8 250000 -> regressed null -> fixed 250000
+  //   "my price is 300 East"  eeee5bd8 300000 -> regressed null -> fixed 300000
   //
-  // MEASURED REGRESSION, still live after bdf58c1d. With a reference supplied:
-  //   "I want 300 East"       eeee5bd8 300000 -> HEAD null
-  //   "I want 300 South"      eeee5bd8 300000 -> HEAD null
-  //   "I'd take 250 North"    eeee5bd8 250000 -> HEAD null
-  //   "my price is 300 East"  eeee5bd8 300000 -> HEAD null
-  //
-  // Root cause is the capitalized-proper-noun branch of isAddressAdjacent
+  // Root cause was the capitalized-proper-noun branch of isAddressAdjacent
   // (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/), the same branch behind the "Net" family: a
-  // capitalized full-word direction at the end of the message looks like a
-  // street name because nothing follows it to disambiguate. bdf58c1d fixed the
-  // case where a phrase FOLLOWS the direction; the trailing form is untouched.
-  //
-  // Bounded honestly — these do NOT regress, which is what isolates the trigger
-  // to a capitalized, multi-letter, trailing direction:
-  //   "I want 300 west" (lowercase)          300000, unchanged
-  //   "I want 300 E" (single letter)         300000, unchanged
-  //   "I want 300 South of the river"        300000, unchanged
-  //   "I want 300 East side"                 300000, unchanged
-  for (const message of ["I want 300 East", "I want 300 South", "I'd take 250 North", "my price is 300 East"]) {
+  // capitalized full-word direction at the END of a message looks like a street
+  // name because nothing follows it to disambiguate.
+  for (const [message, expected] of [
+    ["I want 300 East", 300000],
+    ["I want 300 South", 300000],
+    ["I'd take 250 North", 250000],
+    ["my price is 300 East", 300000],
+  ]) {
     assert.equal(
-      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price ?? null,
-      null,
-      `CURRENT BEHAVIOUR (regressed from baseline) for ${JSON.stringify(message)}`
+      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      expected,
+      `${JSON.stringify(message)} is a price, not an address`
     );
   }
 
-  // The bounding cases must keep working — if one of these breaks, the fix for
-  // the above over-corrected.
+  // Cases that were NEVER regressed — they isolate the original trigger to a
+  // capitalized, multi-letter, trailing direction and must keep working.
   for (const [message, expected] of [
     ["I want 300 west", 300000],
     ["I want 300 E", 300000],
@@ -506,6 +502,15 @@ test("KNOWN DEFECT: a price ending in a capitalized compass direction is dropped
       resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
       expected,
       `${JSON.stringify(message)} must keep extracting`
+    );
+  }
+
+  // And the fix must not have over-corrected: real addresses are still not money.
+  for (const message of ["4157 S Main St", "327 Pennsylvania Ave", "331 Oak Street"]) {
+    assert.equal(
+      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price ?? null,
+      null,
+      `${JSON.stringify(message)} is an address, not a price`
     );
   }
 });
