@@ -8,6 +8,7 @@
 // Memory store is for unit/critical tests only — never production authority.
 
 import crypto from "node:crypto";
+import { isBurstWithinFlushScope } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
 import {
   BURST_STATUSES,
   buildBurstDecisionIdempotencyKey,
@@ -74,16 +75,22 @@ function clone(value) {
 // are what stands between a proof session and a 36-hour-old burst on the same
 // thread. "Open the session, then text" is a runbook precondition.
 //
-// The admission RULE lives in burst-flush-activation-policy.isBurstWithinFlushScope
-// and this module does not import it: the policy imports the coordinator, the
-// coordinator imports this store, so importing back would close a module cycle
-// through the production path. Instead the resolved bounds below are applied
-// identically in SQL and in JS, and their equivalence to the policy's predicate
-// is pinned by test (burst-eligible-scope.test.mjs) — which CAN import both
-// without a production cycle. The invariant the test enforces is one-directional
-// and deliberately so: anything this store admits, the policy admits too.
+// The row-level admission RULE is NOT implemented here. It lives in
+// burst-flush-activation-policy.isBurstWithinFlushScope ("one export, three
+// importers — do not reimplement it locally") and matchesBurstScope below
+// delegates to it. What this function owns is the SQL-shaped projection of the
+// same scope: the bounds the PostgREST filter needs so that selection happens
+// before `.limit(n)` rather than after it. Query and verdict therefore cannot
+// disagree — the verdict is the shared predicate.
+//
+// NOTE — this import closes a module cycle: store → policy → coordinator →
+// store (the policy needs resolveSellerInboundBurstMode). It resolves cleanly
+// because every binding across the cycle is a hoisted `export function`, so it
+// is initialized before any call. Verified from both entry orders (store-first
+// and coordinator-first). If any of those exports is ever converted to a
+// `const` arrow, the cycle breaks at TDZ — keep them function declarations.
 export function resolveBurstScopeFilter(scope) {
-  if (scope == null) return { deny: true, reason: "burst_scope_absent" };
+  if (scope == null) return { deny: true, reason: "burst_scope_required" };
   if (typeof scope !== "object" || Array.isArray(scope)) {
     return { deny: true, reason: "burst_scope_invalid" };
   }
@@ -97,7 +104,7 @@ export function resolveBurstScopeFilter(scope) {
   if (scope.authorized !== true) return { deny: true, reason: "burst_scope_not_authorized" };
 
   if (scope.global === true || scope.kind === "global") {
-    return { deny: false, global: true, thread_keys: [] };
+    return { deny: false, global: true, thread_keys: [], source: scope };
   }
   // Any scope kind other than the thread-bounded one — including "none" and an
   // absent kind — is not an activation.
@@ -131,33 +138,43 @@ export function resolveBurstScopeFilter(scope) {
     max_first: new Date(max_first).toISOString(),
     min_created: new Date(min_created).toISOString(),
     max_created: new Date(max_created).toISOString(),
+    // The scope as the policy shaped it, carried through untouched so the
+    // row-level verdict is decided by the policy's predicate and not by this
+    // module's normalization of it.
+    source: scope,
   };
 }
 
 /**
- * In-process re-assert of the same predicate the query applies. Both stores
- * run it on every candidate BEFORE any claim, so a mis-parsed PostgREST filter
- * degrades to "claims nothing" instead of "claims anything".
+ * Row-level verdict. Delegates to the activation policy's shared predicate —
+ * the query filter above and this check are then two projections of ONE rule,
+ * so they cannot disagree about a row.
+ *
+ * Both stores run this on every candidate BEFORE any claim or mutation, so a
+ * mis-parsed PostgREST filter degrades to "touches nothing" instead of
+ * "touches anything".
  */
 export function matchesBurstScope(burst, resolved) {
   if (!burst || !resolved || resolved.deny) return false;
+  // A global activation is the COORDINATOR's assertion (enabled mode), not a
+  // policy scope verdict, so it is answered here rather than delegated —
+  // `{authorized: true, global: true}` carries no bounds for the policy to read.
   if (resolved.global) return true;
-  if (!resolved.thread_keys.includes(clean(burst.thread_key))) return false;
+  return isBurstWithinFlushScope({ burst, scope: resolved.source }) === true;
+}
 
-  // A row that cannot prove when it opened, or when it was inserted, cannot
-  // prove it belongs to the session. Unprovable membership is denied membership.
-  const first_ms = parseIsoMs(burst.first_received_at, null);
-  if (!Number.isFinite(first_ms)) return false;
-  if (first_ms < parseIsoMs(resolved.min_first)) return false;
-  if (first_ms > parseIsoMs(resolved.max_first)) return false;
-
-  if (burst.created_at == null || clean(burst.created_at) === "") return false;
-  const created_ms = parseIsoMs(burst.created_at, null);
-  if (!Number.isFinite(created_ms)) return false;
-  if (created_ms < parseIsoMs(resolved.min_created)) return false;
-  if (created_ms > parseIsoMs(resolved.max_created)) return false;
-
-  return true;
+/**
+ * Thread-level verdict for a message that has NO durable row yet (opening a new
+ * generation). There is nothing to date, so only the thread allowlist can be
+ * applied — deliberately narrower than matchesBurstScope, never wider: a thread
+ * outside scope may not open a generation at all.
+ */
+export function matchesBurstScopeThread(thread_key, resolved) {
+  if (!resolved || resolved.deny) return false;
+  if (resolved.global) return true;
+  const key = clean(thread_key);
+  if (!key) return false;
+  return resolved.thread_keys.includes(key);
 }
 
 // ── Memory store (tests) ─────────────────────────────────────────────────────
@@ -214,13 +231,37 @@ export function createMemorySellerInboundBurstStore({ now = () => new Date().toI
     debounce_ms = SELLER_INBOUND_BURST_DEBOUNCE_MS,
     max_duration_ms = SELLER_INBOUND_BURST_MAX_DURATION_MS,
     now: nowArg = null,
+    scope = null,
   } = {}) {
+    // Mirrors the Supabase append authority exactly (see the comment there):
+    // append writes to the OPEN row, so the gate lives here, not in a caller.
+    const scoped = resolveBurstScopeFilter(scope);
+    if (scoped.deny) {
+      return { ok: false, reason: scoped.reason, burst: null, rollover: false };
+    }
     const group = resolveBurstGroupKey({ thread_key });
+    if (!matchesBurstScopeThread(group, scoped)) {
+      return { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false };
+    }
     return withThreadLock(group, async () => {
       const nowIso = nowArg || now();
       // Loop (never recurse through the thread lock) for CAS retries.
       for (let round = 0; round < BURST_APPEND_MAX_ROUNDS; round += 1) {
         const open = getOpen(group);
+
+        // An OPEN generation outside scope is untouchable — every branch below
+        // mutates it (rollover force-eligible, or the version-CAS append).
+        if (open && !matchesBurstScope(open, scoped)) {
+          return {
+            ok: false,
+            reason: "open_generation_out_of_scope",
+            burst: null,
+            rollover: false,
+            blocking_burst_id: open.burst_id || null,
+            blocking_generation: open.generation ?? null,
+            blocking_first_received_at: open.first_received_at || null,
+          };
+        }
 
         if (!open) {
           // Next generation = max existing + 1
@@ -597,8 +638,25 @@ export function createSupabaseSellerInboundBurstStore({
     debounce_ms = SELLER_INBOUND_BURST_DEBOUNCE_MS,
     max_duration_ms = SELLER_INBOUND_BURST_MAX_DURATION_MS,
     now: nowArg = null,
+    scope = null,
   } = {}) {
+    // THE THIRD DOOR. Append is not a read-only ingest: the rollover branch
+    // below writes to whatever row is OPEN on this thread, and it does so
+    // before returning, so no caller-side gate can come between the decision
+    // and the write. A pre-check anywhere above this function is a TOCTOU
+    // window with the mutation on the far side of it. The authority therefore
+    // lives here, adjacent to the write.
+    const scoped = resolveBurstScopeFilter(scope);
+    if (scoped.deny) {
+      return { ok: false, reason: scoped.reason, burst: null, rollover: false };
+    }
     const group = resolveBurstGroupKey({ thread_key });
+    // Thread-level refusal happens before fetchOpen, so an unauthorized thread
+    // issues no query at all — the same property already proven on the claim
+    // path. A thread outside scope may not open a generation either.
+    if (!matchesBurstScopeThread(group, scoped)) {
+      return { ok: false, reason: "thread_out_of_scope", burst: null, rollover: false };
+    }
     const nowIso = nowArg || now();
     // Bounded iterative retry (no recursion) for the two append races:
     // unique open-generation insert race and version-CAS lose. Exhaustion is
@@ -611,6 +669,7 @@ export function createSupabaseSellerInboundBurstStore({
         debounce_ms,
         max_duration_ms,
         nowIso,
+        scoped,
       });
       if (result.retry) continue;
       return result.value;
@@ -618,8 +677,37 @@ export function createSupabaseSellerInboundBurstStore({
     throw new Error("burst_append_retry_exhausted");
   }
 
-  async function appendMessageOnce({ group, message, debounce_ms, max_duration_ms, nowIso }) {
+  async function appendMessageOnce({ group, message, debounce_ms, max_duration_ms, nowIso, scoped }) {
     const open = await fetchOpen(group);
+
+    // An OPEN generation outside scope is untouchable — not rolled over, not
+    // appended to, not force-marked eligible. EVERY branch below this point
+    // writes to `open` (rollover force-eligible, or the version-CAS append),
+    // so the refusal is placed above all of them rather than in each.
+    //
+    // This is the live path to the preserved 2026-08-03 burst: it is the one
+    // OPEN row on the pinned internal thread, so a proof-session message on
+    // that thread lands here, projects to rollover (36h past hard_close_at)
+    // and force-writes `eligible_at` to the evidence row. Refusing costs the
+    // proof its burst leg while that row stays open; that is the intended
+    // trade, and releasing the row is an operator decision, not this module's.
+    //
+    // The diagnostic names the blocking generation so an operator can see what
+    // is in the way. Identifiers only — never seller content, and the row
+    // itself is not returned.
+    if (open && !matchesBurstScope(open, scoped)) {
+      return {
+        value: {
+          ok: false,
+          reason: "open_generation_out_of_scope",
+          burst: null,
+          rollover: false,
+          blocking_burst_id: open.burst_id || null,
+          blocking_generation: open.generation ?? null,
+          blocking_first_received_at: open.first_received_at || null,
+        },
+      };
+    }
 
     if (!open) {
       const { data: lastRows } = await supabase
@@ -1051,4 +1139,5 @@ export default {
   createSupabaseSellerInboundBurstStore,
   resolveBurstScopeFilter,
   matchesBurstScope,
+  matchesBurstScopeThread,
 };

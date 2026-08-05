@@ -30,6 +30,7 @@ import {
   createSupabaseSellerInboundBurstStore,
   resolveBurstScopeFilter,
   matchesBurstScope,
+  matchesBurstScopeThread,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
 import {
   BURST_STATUSES,
@@ -293,8 +294,8 @@ function sqlClaimRpc({ params, table }) {
 // ── 1. Scope resolution is fail-closed ───────────────────────────────────────
 
 test("scope resolution: every ambiguity denies — absent, malformed, unauthorized, half-built", () => {
-  assert.equal(resolveBurstScopeFilter(undefined).reason, "burst_scope_absent");
-  assert.equal(resolveBurstScopeFilter(null).reason, "burst_scope_absent");
+  assert.equal(resolveBurstScopeFilter(undefined).reason, "burst_scope_required");
+  assert.equal(resolveBurstScopeFilter(null).reason, "burst_scope_required");
   assert.equal(resolveBurstScopeFilter("global").reason, "burst_scope_invalid");
   assert.equal(resolveBurstScopeFilter([THREAD]).reason, "burst_scope_invalid");
   assert.equal(resolveBurstScopeFilter({}).reason, "burst_scope_not_authorized");
@@ -453,7 +454,7 @@ test("memory: NO scope means NO work — both doors deny and nothing is mutated"
   assert.deepEqual(await store.listEligible({ now: NOW }), []);
   const claim = await store.claimEligible({ thread_key: THREAD, now: NOW });
   assert.equal(claim.ok, false);
-  assert.equal(claim.reason, "burst_scope_absent");
+  assert.equal(claim.reason, "burst_scope_required");
   for (const f of ALL) assert.deepEqual(store.getById(f.id), memoryRow(f));
 });
 
@@ -598,7 +599,7 @@ test("supabase: a denied scope touches the database not at all", async () => {
   const absent = await store.claimEligible({ thread_key: THREAD, now: NOW });
 
   assert.equal(denied.reason, "session_expired");
-  assert.equal(absent.reason, "burst_scope_absent");
+  assert.equal(absent.reason, "burst_scope_required");
   assert.deepEqual(log.selects, [], "no select");
   assert.deepEqual(log.rpcs, [], "no rpc");
   assert.deepEqual(log.updates, [], "no update");
@@ -751,4 +752,181 @@ test("store scope predicate agrees with the policy on global activation", () => 
     assert.equal(matchesBurstScope(row, resolved), true);
     assert.equal(isBurstWithinFlushScope({ burst: row, scope: global_policy_scope }), true);
   }
+});
+
+// ── 10. THE THIRD DOOR: append writes to the open row ────────────────────────
+//
+// appendMessage is not a read-only ingest. When the open generation is past its
+// hard close the rollover branch force-writes `eligible_at` to whatever row is
+// OPEN on that thread, and it does so BEFORE returning `rollover: true` — so no
+// caller-side gate can come between the decision and the write, and a
+// pre-check above this layer is a TOCTOU window with the mutation on the far
+// side of it.
+//
+// The live path: proof session opens → operator texts the pinned internal
+// number → webhook engages burst for exactly that thread → appendMessage →
+// the one OPEN row on `+16128072000` is the preserved 2026-08-03 burst, 36h
+// past hard_close_at → rollover → unconditional UPDATE on protected evidence.
+
+/** Supabase double that treats ANY write to the burst table as a test failure. */
+function makeNoWriteBurstSupabase({ rows = [] }) {
+  const table = rows.map((r) => ({ ...r }));
+  const log = { selects: [], writes: [] };
+  const supabase = {
+    from(table_name) {
+      const calls = [{ op: "from", args: [table_name] }];
+      const chain = new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            if (prop === "then") {
+              const p = Promise.resolve().then(() => {
+                const write = calls.find((c) => ["update", "insert", "upsert", "delete"].includes(c.op));
+                if (write) {
+                  log.writes.push(write);
+                  throw new Error(`FORBIDDEN_WRITE:${write.op}`);
+                }
+                log.selects.push(calls.slice());
+                let out = applyFilters(calls, table, { now: NOW, lease_ms: SELLER_INBOUND_BURST_CLAIM_LEASE_MS });
+                const single = calls.some((c) => c.op === "maybeSingle" || c.op === "single");
+                return { data: single ? out[0] || null : out, error: null };
+              });
+              return p.then.bind(p);
+            }
+            if (typeof prop === "symbol") return undefined;
+            return (...args) => {
+              calls.push({ op: String(prop), args });
+              return chain;
+            };
+          },
+        }
+      );
+      return chain;
+    },
+  };
+  return { supabase, log, table };
+}
+
+const PROOF_MESSAGE = Object.freeze({
+  event_id: "evt-proof-inbound",
+  provider_message_id: "SMI~proofinbound",
+  body: "Yeah",
+  received_at: "2026-08-05T10:30:00.000Z",
+});
+
+test("supabase append: a proof message CANNOT roll over the preserved burst — and writes nothing", async () => {
+  // The preserved row is the one OPEN generation on the thread, and it is 36h
+  // past its hard close, so this append projects to rollover.
+  const { supabase, log } = makeNoWriteBurstSupabase({ rows: [dbRow(PRESERVED)] });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => "2026-08-05T10:30:00.000Z" });
+
+  const result = await store.appendMessage({
+    thread_key: THREAD,
+    message: PROOF_MESSAGE,
+    now: "2026-08-05T10:30:00.000Z",
+    scope: PROOF_SCOPE,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "open_generation_out_of_scope");
+  assert.equal(result.rollover, false, "refusal is not a rollover — no handoff is implied");
+  assert.equal(result.burst, null, "the protected row is not returned to the caller");
+
+  // The diagnostic names what is in the way, identifiers only.
+  assert.equal(result.blocking_burst_id, PRESERVED.burst_id);
+  assert.equal(result.blocking_generation, 1);
+  assert.equal(result.blocking_first_received_at, "2026-08-03T22:40:31.039Z");
+
+  assert.deepEqual(log.writes, [], "ZERO writes reached the burst table");
+});
+
+test("memory append: same refusal, same zero-write property, same diagnostic", async () => {
+  const store = seedMemoryStore([PRESERVED]);
+  // The preserved row must actually be the thread's OPEN generation.
+  store._debug.openByThread.set(THREAD, PRESERVED.id);
+  const before = JSON.stringify(store.getById(PRESERVED.id));
+
+  const result = await store.appendMessage({
+    thread_key: THREAD,
+    message: PROOF_MESSAGE,
+    now: "2026-08-05T10:30:00.000Z",
+    scope: PROOF_SCOPE,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "open_generation_out_of_scope");
+  assert.equal(result.rollover, false);
+  assert.equal(result.burst, null);
+  assert.equal(result.blocking_burst_id, PRESERVED.burst_id);
+  assert.equal(
+    JSON.stringify(store.getById(PRESERVED.id)),
+    before,
+    "the preserved row is byte-identical after the refused append"
+  );
+});
+
+test("append: deny-by-default — no scope means no append, and no query", async () => {
+  const { supabase, log } = makeNoWriteBurstSupabase({ rows: [dbRow(PRESERVED)] });
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+
+  const result = await store.appendMessage({ thread_key: THREAD, message: PROOF_MESSAGE, now: NOW });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "burst_scope_required");
+  assert.equal(result.burst, null);
+  assert.deepEqual(log.selects, [], "an unauthorized append issues no query at all");
+  assert.deepEqual(log.writes, []);
+});
+
+test("append: a thread outside scope may not open a NEW generation either", async () => {
+  const { supabase, log } = makeNoWriteBurstSupabase({ rows: [] }); // no open row anywhere
+  const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => NOW });
+
+  const result = await store.appendMessage({
+    thread_key: OTHER_THREAD, // a real seller, not the proof thread
+    message: PROOF_MESSAGE,
+    now: NOW,
+    scope: PROOF_SCOPE,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "thread_out_of_scope");
+  assert.deepEqual(log.selects, [], "refused before fetchOpen — no query");
+  assert.deepEqual(log.writes, [], "no generation was inserted");
+});
+
+test("append thread predicate: global admits every thread, scoped admits only the allowlist", () => {
+  const global_resolved = resolveBurstScopeFilter(GLOBAL_SCOPE);
+  const scoped_resolved = resolveBurstScopeFilter(PROOF_SCOPE);
+  assert.equal(matchesBurstScopeThread(OTHER_THREAD, global_resolved), true);
+  assert.equal(matchesBurstScopeThread(THREAD, scoped_resolved), true);
+  assert.equal(matchesBurstScopeThread(OTHER_THREAD, scoped_resolved), false);
+  assert.equal(matchesBurstScopeThread("", scoped_resolved), false);
+  assert.equal(matchesBurstScopeThread(THREAD, { deny: true, reason: "x" }), false);
+});
+
+test("append under GLOBAL scope: rollover behaviour is preserved exactly", async () => {
+  // Same fixture, same 36h-stale open row — but enabled-mode activation. The
+  // pre-existing contract must survive byte for byte: force-eligible write on
+  // the old generation, then the flush_required handoff.
+  const { supabase, log } = makeRecordingBurstSupabase({
+    rows: [dbRow(PRESERVED)],
+    now: "2026-08-05T10:30:00.000Z",
+  });
+  const store = createSupabaseSellerInboundBurstStore({
+    supabase,
+    now: () => "2026-08-05T10:30:00.000Z",
+  });
+
+  const result = await store.appendMessage({
+    thread_key: THREAD,
+    message: PROOF_MESSAGE,
+    now: "2026-08-05T10:30:00.000Z",
+    scope: GLOBAL_SCOPE,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "open_burst_past_hard_close_flush_required");
+  assert.equal(result.rollover, true, "enabled mode still rolls over");
+  assert.equal(result.burst.burst_id, PRESERVED.burst_id);
+  assert.equal(log.updates.length, 1, "the force-eligible write still happens under global scope");
+  assert.equal(log.updates[0].patch.eligible_at, "2026-08-05T10:30:00.000Z");
 });
