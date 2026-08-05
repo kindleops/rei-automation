@@ -591,10 +591,19 @@ export const CommandCenterApp = () => {
           {/* §16.2/§16.6 — first keyboard entry point in the app. */}
           <SkipLink targetId="lc-main" />
 
-          {/* The ONE top rail. Renders on every route, at every viewport.
+          {/* The ONE top rail. Renders on every route, at desktop/tablet widths.
               It replaces the fixed `.nx-room-label` overlay that used to
-              collide with each view's own page header. */}
-          <ShellTopRail routeTitle={route.title} />
+              collide with each view's own page header. On mobile it is
+              deliberately NOT mounted: mobile already has its own proven
+              chrome (MobileCommandDock + PortableCommandShell/PinnedAppDock),
+              and stacking the rail on top of that produced two visible menus
+              plus a duplicated top-offset reservation (the rail's own
+              `margin-top` clearing the fixed dock, on top of the inbox
+              shell's pre-existing `padding-top` for the same dock) that left
+              a dead gap of empty decorative background between them. This
+              mirrors the pre-existing `.nx-room-label` gate, which also never
+              rendered on mobile. */}
+          {!isMobile ? <ShellTopRail routeTitle={route.title} /> : null}
 
           <main className="nx-stage" id="lc-main">
             <ErrorBoundary label={route.title} resetKey={route.path}>
