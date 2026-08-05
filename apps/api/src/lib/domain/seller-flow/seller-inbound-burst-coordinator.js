@@ -814,12 +814,26 @@ export function createSellerInboundBurstCoordinator({
     // WITHOUT a burst_id is a FILTER over the eligible set — never a bare
     // claim. That distinction is the whole repair: a bare thread-scoped claim
     // is what selects a 36-hour-old artifact ahead of the burst beside it.
+    // The thread filter goes IN THE QUERY, before `limit`. Filtering in JS
+    // afterwards means a page can be filled entirely by other threads' older
+    // bursts and the named thread's live burst never makes it — a targeted
+    // flush that reports no work while work exists. Reachable in `enabled`
+    // mode, where the scope is global and the operator supplies the thread.
+    // Same rule the scope filter already follows, one layer up.
+    const group = clean(thread_key);
     const eligible =
       typeof burstStore.listEligible === "function"
-        ? await burstStore.listEligible({ now: now(), limit, lease_ms: claim_lease_ms, scope })
+        ? await burstStore.listEligible({
+            now: now(),
+            limit,
+            lease_ms: claim_lease_ms,
+            scope,
+            thread_key: group || null,
+          })
         : [];
-    const group = clean(thread_key);
     for (const b of eligible) {
+      // Post-condition, not the enforcement: the store constrains the thread
+      // in-query. Kept so a store that ignores the parameter cannot widen us.
       if (group && clean(b.thread_key) !== group) continue;
       // A listed row with no burst_id would finalize as an unpinned claim. The
       // store should never produce one; refuse rather than trust it.
