@@ -27,7 +27,7 @@ import { finalizeBurstConstituentLedger } from "@/lib/domain/seller-flow/finaliz
 import { resolveInboundTerminalDisposition } from "@/lib/domain/inbound/terminal-disposition.js";
 import { AWAITING_BURST_DETAIL_KEY } from "@/lib/domain/inbound/inbound-processing-ledger.js";
 import { TERMINAL_DISPOSITIONS } from "@/lib/domain/inbound/terminal-disposition.js";
-import { classify } from "@/lib/domain/classification/classify.js";
+import { classify, parseSellerAskingPrice } from "@/lib/domain/classification/classify.js";
 import {
   resolveAskingPriceSignal,
   extractMonetaryMentions,
@@ -318,6 +318,65 @@ test("an appointment the seller already has is neither a call request nor a pric
     '"at 3pm" is a time, not an asking price'
   );
   assert.equal(resolveAskingPriceSignal("I have a scheduled call at 3pm", {})?.asking_price ?? null, null);
+});
+
+test("every call-request phrasing carrying a clock time is a call request, not a price", async () => {
+  // The time-as-price hijack: classify's own parseSellerAskingPrice read the
+  // bare "3" in "call at 3" as money, and asking_price_provided outranks
+  // callback_requested in INTENT_PRIORITY — so a seller offering a time to talk
+  // was recorded as naming a price of $3.
+  for (const message of [
+    "Can you call at 3?",
+    "You can call at 3",
+    "Please call at 3",
+    "Can we have a call at 3?",
+    "Schedule a call for 3",
+    "Give me a call at 3",
+  ]) {
+    const result = await classify(message, null, { heuristicOnly: true });
+    assert.equal(
+      result.primary_intent,
+      "callback_requested",
+      `${JSON.stringify(message)} offers a time to talk`
+    );
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      null,
+      `${JSON.stringify(message)} contains a clock time, not money`
+    );
+  }
+});
+
+test("a clock time is never money and never an asking-price intent", async () => {
+  // Includes "call between 2 and 4", which leaked past the first fix and priced
+  // the range's lower bound at 2.
+  for (const message of [
+    "I have a call at 3",
+    "Im free at 5",
+    "Tomorrow at 2",
+    "The appointment is at 6",
+    "Call at 3",
+    "meeting at 10",
+    "call you around 3",
+    "call between 2 and 4",
+  ]) {
+    const result = await classify(message, null, { heuristicOnly: true });
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      null,
+      `${JSON.stringify(message)} states a time, not a price`
+    );
+    assert.notEqual(
+      result.primary_intent,
+      "asking_price_provided",
+      `${JSON.stringify(message)} must not be read as naming a price`
+    );
+    assert.equal(
+      resolveAskingPriceSignal(message, {})?.asking_price ?? null,
+      null,
+      "the monetary authority must agree"
+    );
+  }
 });
 
 test("an offer of availability IS a call request, and still not a price", async () => {

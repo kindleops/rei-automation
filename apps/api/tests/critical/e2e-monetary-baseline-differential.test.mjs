@@ -31,6 +31,7 @@ import {
   MONETARY_KINDS,
 } from "@/lib/domain/seller-flow/monetary-understanding.js";
 import { extractSellerFacts } from "@/lib/domain/seller-flow/extract-seller-facts.js";
+import { parseSellerAskingPrice } from "@/lib/domain/classification/classify.js";
 
 const askingPrice = (message) => resolveAskingPriceSignal(message, {})?.asking_price?.value ?? null;
 /**
@@ -231,6 +232,51 @@ test("Spanish 'mil' prices extract at the correct magnitude, not 1000x", () => {
 test("Spanish spelled-out prices extract at the correct magnitude", () => {
   assert.equal(askingPrice("ciento cincuenta mil"), 150000);
   assert.equal(askingPrice("quiero ciento cincuenta mil"), 150000);
+});
+
+test("classify's OWN extractor agrees with the monetary authority on Spanish 'mil'", () => {
+  // THIS is where the launch blocker lived. classify.js scaled any suffix
+  // starting with "m" by 1_000_000, so Spanish "mil" (thousand) became a
+  // million: "quiero 150 mil" was read as $150,000,000 on a $150,000 house.
+  // monetary-understanding.js had `mil: 1_000` correct all along, so the two
+  // extractors disagreed by three orders of magnitude on the single most common
+  // Spanish price phrasing — and nothing in the suite exercised a Spanish price
+  // through classify, which is why it shipped undetected.
+  //
+  // Both extractors are asserted together so they can never diverge again.
+  for (const [message, expected] of [
+    ["quiero 150 mil", 150000],
+    ["150 mil", 150000],
+    ["pido 200 mil", 200000],
+    ["lo doy en 150 mil", 150000],
+    ["vendo en 250 mil", 250000],
+  ]) {
+    assert.equal(
+      parseSellerAskingPrice(message)?.value ?? null,
+      expected,
+      `classify must read ${JSON.stringify(message)} as ${expected}, not ${expected * 1000}`
+    );
+    assert.equal(askingPrice(message), expected, "and the monetary authority must agree");
+  }
+});
+
+test("a real million still scales to a million — the 'mil' fix must not over-correct", () => {
+  // The control that makes the fix above safe: narrowing the "m" suffix must
+  // not stop a genuine million from scaling.
+  assert.equal(parseSellerAskingPrice("1.2 million")?.value ?? null, 1200000);
+  assert.equal(askingPrice("1.2 million"), 1200000);
+  assert.equal(parseSellerAskingPrice("150k")?.value ?? null, 150000);
+  assert.equal(askingPrice("150k"), 150000);
+});
+
+test("KNOWN GAP: Spanish million forms are not extracted at all", () => {
+  // "un millon" and "1.2 millones" yield nothing on BOTH extractors — a miss,
+  // not an inflation, and the mirror image of the "mil" defect. Pinned so the
+  // Spanish scale vocabulary is visibly incomplete rather than silently so.
+  for (const message of ["un millon", "1.2 millones"]) {
+    assert.equal(askingPrice(message), null, "CURRENT BEHAVIOUR");
+    assert.equal(parseSellerAskingPrice(message)?.value ?? null, null, "CURRENT BEHAVIOUR");
+  }
 });
 
 test("KNOWN DEFECT: a thousands-separated number followed by 'mil' inflates 1000x (PR #66)", () => {
