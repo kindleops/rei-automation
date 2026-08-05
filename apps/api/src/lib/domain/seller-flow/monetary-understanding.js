@@ -341,7 +341,10 @@ function tokenizeAmounts(text) {
 const KIND_CUES = Object.freeze([
   // Most specific first; a window is the ±60 chars of text around the amount.
   { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "debo"] },
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "/mo", "each month", "al mes", "mensual"] },
+  // "/month" is listed alongside "/mo": the word-boundary matcher will not find
+  // "/mo" inside "/month", and a seller's monthly rent misread as an asking
+  // price makes a rental look like a $1,450 house.
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
   { kind: MONETARY_KINDS.REPAIR_AMOUNT, cues: ["repair", "repairs", "fix", "roof cost", "quote for", "estimate for", "to fix", "in work", "reparar", "arreglar"] },
   { kind: MONETARY_KINDS.EARNEST_MONEY, cues: ["earnest", "deposit", "down payment", "depósito"] },
@@ -409,7 +412,16 @@ function precedingWindow(text, amount, radius = 40) {
  * "owe", so "130,000...however" bound the asking price to the MORTGAGE_PAYOFF
  * cue and the amount was discarded — the seller's $130,000 vanished. The same
  * trap sits in "net" (cabinet, network), "clear" (clearly) and "fix" (fixture).
+ *
+ * A strict right boundary then went too far the other way: it also stopped
+ * matching ordinary INFLECTIONS, so "I owed 60,000 on it" stopped being a
+ * payoff and "I fixed it for 15,000" stopped being a repair — both silently
+ * became asking prices. Regular verb/noun endings are therefore still part of
+ * the cue. "ly" and "er" are deliberately NOT included: they are exactly what
+ * make "clearly" and "fixer" the traps the boundary rule exists to close.
  */
+const CUE_INFLECTION_SUFFIX = "(?:s|es|d|ed|ing)?";
+
 const CUE_BOUNDARY_CACHE = new Map();
 
 /** Boundary-aware matcher per cue, compiled once. */
@@ -419,7 +431,7 @@ function cueBoundaryRegex(cue) {
     const escaped = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const left = /[a-z0-9\u00e0-\u00ff]/i.test(cue[0]) ? "(?<![a-z0-9\u00e0-\u00ff])" : "";
     const right = /[a-z0-9\u00e0-\u00ff]/i.test(cue[cue.length - 1])
-      ? "(?![a-z0-9\u00e0-\u00ff])"
+      ? `${CUE_INFLECTION_SUFFIX}(?![a-z0-9\u00e0-\u00ff])`
       : "";
     re = new RegExp(`${left}${escaped}${right}`, "gi");
     CUE_BOUNDARY_CACHE.set(cue, re);
