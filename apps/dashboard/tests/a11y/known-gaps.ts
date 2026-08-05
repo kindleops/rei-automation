@@ -44,6 +44,22 @@ export const KNOWN_GAPS: KnownGap[] = [
     lane: 'E',
     reason: 'dossier.css carries 23 sub-11px declarations; Lane E owns that file.',
   },
+  {
+    selector: 'nx-load-more-btn',
+    lane: 'C',
+    reason:
+      'inbox-density-25.css:42 — 10.5px, and :47 colours it rgba(140,168,200,0.36) ⇒ 1.96:1. '
+      + 'Both are in the sidebar density sheet Lane C owns; already DEFERRED by '
+      + 'scripts/lc-responsive-audit.mjs, so the runtime gate must agree with the static one.',
+  },
+  {
+    selector: 'nx-pic-',
+    lane: 'E',
+    reason:
+      'Property intelligence card labels. Lane G repairs the measured CONTRAST failures from '
+      + 'lc-responsive.css; the remaining sub-11px declarations live in IntelligencePanel.tsx '
+      + '(inline style, e.g. :1386 fontSize 10px) which Lane E owns.',
+  },
 
   /* ── §16.1 contrast ──────────────────────────────────────────────────── */
   {

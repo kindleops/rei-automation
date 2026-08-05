@@ -257,6 +257,162 @@ small {
   opacity: 1;
 }
 
+/* ── Measured repairs ───────────────────────────────────────────────────────
+   Every selector below FAILED a rendered-contrast sweep of dark + cyan across
+   /queue /inbox /calendar /analytics /pipeline /deal-intelligence. The measured
+   ratio is recorded against each so the repair can be re-checked rather than
+   trusted. `:root:root` (0,2,0) is the specificity device from §2 — these are
+   corrections to declarations in sheets that evaluate later, and R1.6 forbids
+   reaching for a 6,692nd `!important`.
+
+   The muted family all resolves to #94a3b8, which measures 6.8:1 on the app
+   background. The failures are not the hue — they are the alpha and the
+   `opacity` multiplier stacked on top of it. */
+
+/* /analytics — MetricsWarRoom.css:66 hard-codes #636366, which is the LIGHT
+   theme's `--nexus-muted` (nexus-theme.css:579) pasted into an unscoped rule.
+   On dark it measures 3.2:1. 16 table headers + 3 view buttons. */
+:root:root .nx-leaderboard-table th,
+:root:root .nx-war-room th,
+:root:root .nx-view-btn:not(.is-active) {
+  color: var(--nx-muted, #94a3b8);
+}
+
+/* /properties + /deal-intelligence property intelligence cards.
+   inbox-polish.css:8155 `rgba(163,186,221,0.38)` → 2.38:1 (14 labels)
+   inbox-polish.css:7784 `rgba(163,186,221,0.48)` → 3.02:1
+   inbox-polish.css:7840/8135 `rgba(226,234,247,0.5…0.55)` → 4.22:1 (11 strongs)
+   inbox-polish.css:7111 `rgba(226,234,247,0.5)` on the media tabs → 4.28:1 */
+:root:root .nx-pic-field label,
+:root:root .nx-pic-exec-card label,
+:root:root .nx-pic-section__header strong,
+:root:root .nx-prop-media-tabs__btn {
+  color: var(--nx-muted, #94a3b8);
+}
+
+/* /queue row meta separators — queue-ops.css:2298 `opacity: 0.65` over #94a3b8
+   → 3.79:1 across 13 rows. The glyph is a "·" divider, but it is still a text
+   node the audit (correctly) measures, and 1.0 costs nothing visually here. */
+:root:root .occ-row-meta__sep {
+  opacity: 1;
+}
+
+/* /deal-intelligence — deal-intelligence-25.css:2446 `opacity: 0.42` on
+   `.is-pending` engine-theater steps → 3.77:1 across 12 nodes. A pending step
+   is not an inactive CONTROL (WCAG's exemption), it is readable copy telling the
+   operator what is queued. 0.7 keeps the "not yet run" hierarchy against the
+   `opacity: 1` running step and clears 4.5:1. */
+:root:root .nx-di25-engine-theater__step.is-pending {
+  opacity: 0.7;
+}
+
+/* /pipeline — pipeline-view.css builds an ENTIRE muted scale out of one hue at
+   eight different alphas: rgba(130,155,200, .3 .35 .38 .4 .45 .5 .55 .65).
+   Measured on the primary theme, everything at or below 0.65 fails:
+     .3  → 1.67:1 (19 lane-empty messages)   .38 → 1.98:1 (3 descriptions)
+     .4  → 2.06:1 (search icon)              .45 → 2.29:1 (10 lane counts)
+     .5  → 2.54:1 (4 field labels)           .65 → 3.39:1 (filter chip)
+   The hue itself is fine — #829bc8 is ≈6.6:1 at full alpha — so the repair is
+   to stop encoding hierarchy in alpha. Two levels: readable text at 1, genuinely
+   secondary text at 0.8 (≈5.2:1). `.is-muted` carries `!important` at
+   pipeline-view.css:30, so that one selector must match it (documented). */
+:root:root :is(.plv-lane__count, .plv-filter-chip, .plv-field label, .plv-empty-lane, .plv-lane__stat),
+:root:root .plv-empty-lane span,
+:root:root .plv-detail-empty span,
+:root:root .plv-detail-empty p,
+:root:root .plv-detail-empty strong,
+:root:root .plv-filters__search-icon {
+  color: rgb(130, 155, 200);
+}
+
+:root:root .plv-lane__stat.is-muted,
+:root:root .plv-detail-empty__label {
+  color: rgba(130, 155, 200, 0.8) !important; /* defeats pipeline-view.css:30 */
+}
+
+/* Large decorative empty-state glyphs ("·" 20px, "◎" 28px) measured 1.24:1 and
+   1.17:1 — below even the 3:1 large-text threshold. They are decorative, but
+   they are rendered text nodes, so they are raised rather than exempted. */
+:root:root .plv-empty-lane__icon,
+:root:root .plv-detail-empty__icon {
+  opacity: 0.9;
+}
+
+/* IMPORTANT, and worth recording because the first attempt got it wrong:
+   `opacity` MULTIPLIES down the tree. Setting `opacity: 0.78` on the failing
+   text node when an ANCESTOR declares 0.42 yields 0.33, which is worse than
+   where it started (3.77:1 → 2.72:1, measured). The repair has to land on the
+   element that actually declares it, so each rule below names that element. */
+
+/* /calendar — `.nx-cal__month-cell.is-outside { opacity: 0.42 }` → 3.77:1.
+   Adjacent-month days are still real, clickable dates carrying event dots. */
+:root:root .nx-cal__month-cell.is-outside {
+  opacity: 0.62;
+}
+
+/* /analytics — the whole `.nx-channel-card` was drawn at `opacity: 0.4`
+   ("Tracking not wired yet"), taking its heading and body copy to 3.32:1. That
+   0.4 is an INLINE style (KpiIntelligencePage.tsx:371,375), which no stylesheet
+   rule can outrank, so it is raised at source to 0.75. §9 wants an unwired
+   surface to read as unwired — the empty-state copy already does that. */
+
+/* The unread badge is the least readable text in the shell. It is a bare
+   `<span>` (LeadCommandNotificationCenter.tsx:571, NexusTopBar.tsx:816) drawn
+   with `color: var(--nexus-text)` (inbox-premium.css:297) over a saturated chip.
+
+   MEASURED backgrounds — both hard-coded, neither theme-derived:
+     Action Center "34"  on rgb(239,68,68)  red-500   — #e5e7eb ⇒ 3.04:1
+     Notifications "11"  on rgb(6,182,212)  cyan-600  — #e5e7eb ⇒ 1.96:1
+   Near-black on those same two chips measures 4.6:1 and 8.0:1, so the fix is
+   the foreground, not the chip — the colour still reads as alert/accent.
+
+   DOCUMENTED EXCEPTION to R1.6, the third and last in this sheet.
+   `nx-ui-foundation-final.css:373` sets the chip background with `!important`;
+   matching that weight here keeps the pair consistent under every accent. Like
+   the other two exceptions it only ever makes something MORE perceivable.
+
+   Scoped to `.nx-notification-button` and NOT to its `.nx-notification-control`
+   wrapper: the wrapper also contains the avatar initials, which sit on a
+   TRANSPARENT background. A first attempt at the wrapper drove "RK" to 1.09:1 —
+   a foreground repair is only safe where the chip behind it is known. */
+:root:root .nx-notification-button span {
+  color: #05070d !important;
+}
+
+/* #64748b — the `--text-muted` slate the lane brief flagged — measures 4.03:1
+   as a section heading. */
+:root:root .nx-card-section__body h4 {
+  color: var(--nx-muted, #94a3b8);
+}
+
+/* /deal-intelligence — deal intel field labels at alpha 0.5 → 2.54:1. */
+:root:root .nx-deal-intel-item label {
+  color: rgb(130, 155, 200);
+}
+
+/* `.text-red` carries `!important` at its source, so the danger repair above
+   cannot reach the cells that actually use it. Matched here on the same class
+   so the override is like-for-like rather than broader. */
+:root:root .text-red {
+  color: #f87171 !important;
+}
+
+/* Inbox sidebar secondary control — inbox-premium.css:22898 hard-codes #6b7280
+   (gray-500) → 4.16:1. */
+:root:root .nx-sidebar-rebuilt__secondary-controls button {
+  color: var(--nx-muted, #94a3b8);
+}
+
+/* Semantic danger text renders rgb(212,64,76) ≈ 3.95–4.23:1 on the primary
+   theme — under 4.5:1 for the 11–12px badges and table cells that use it. The
+   dark system already defines a compliant danger (#f87171 ≈ 5.9:1, index.css:45);
+   the failing surfaces simply predate it. */
+:root:root .nx-status-badge,
+:root:root .nx-health-item__status,
+:root:root td.text-red {
+  color: #f87171;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    6. §15 — /queue responsive treatment
 

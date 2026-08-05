@@ -254,7 +254,7 @@ export const KpiIntelligencePage = () => {
         <Section title="Elite Leaderboards" className="nx-grid-leaderboards">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
             <div>
-              <h4 style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP MARKETS</h4>
+              <h4 style={{ fontSize: '11px', color: 'var(--nx-muted, #94a3b8)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP MARKETS</h4>
               <table className="nx-leaderboard-table">
                 <thead>
                   <tr>
@@ -280,7 +280,7 @@ export const KpiIntelligencePage = () => {
             </div>
 
             <div>
-              <h4 style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP TEMPLATES</h4>
+              <h4 style={{ fontSize: '11px', color: 'var(--nx-muted, #94a3b8)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP TEMPLATES</h4>
               <table className="nx-leaderboard-table">
                 <thead>
                   <tr>
@@ -368,11 +368,11 @@ export const KpiIntelligencePage = () => {
                 <div>Pos: <strong className="text-green">{formatPercent((overview?.positive_rate_pct || 0) / 100)}</strong></div>
               </div>
             </div>
-            <div className="nx-channel-card" style={{ opacity: 0.4, background: 'rgba(255,255,255,0.01)' }}>
+            <div className="nx-channel-card" style={{ opacity: 0.75, background: 'rgba(255,255,255,0.01)' }}>
               <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 4px 0', fontSize: '13px' }}><Icon name="file-text" /> EMAIL</h4>
               <p style={{ fontSize: '11px', fontStyle: 'italic', margin: 0 }}>Tracking not wired yet — connect email events to message_events.</p>
             </div>
-            <div className="nx-channel-card" style={{ opacity: 0.4, background: 'rgba(255,255,255,0.01)' }}>
+            <div className="nx-channel-card" style={{ opacity: 0.75, background: 'rgba(255,255,255,0.01)' }}>
               <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 4px 0', fontSize: '13px' }}><Icon name="phone" /> VOICE / RVM</h4>
               <p style={{ fontSize: '11px', fontStyle: 'italic', margin: 0 }}>Future placeholder — awaiting RVM integration.</p>
             </div>

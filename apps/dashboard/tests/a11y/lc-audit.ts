@@ -242,6 +242,18 @@ export function runLcAudit(): LcAuditResult {
     const cs = getComputedStyle(el)
     if (cs.visibility === 'hidden') continue
 
+    /**
+     * WCAG 1.4.3 exempts "inactive user interface components" from the contrast
+     * minimum, and this is not a loophole — a disabled control that meets 4.5:1
+     * is indistinguishable from an enabled one, which is a WORSE outcome for the
+     * operator. Measured example: `.occ-page-btn:disabled { opacity: 0.35 }`
+     * ("« First" at 1.91:1) is correct as drawn.
+     */
+    const inactive = el.closest(
+      ':disabled, [disabled], [aria-disabled="true"], [data-disabled="true"]',
+    )
+    if (inactive) continue
+
     let opacity = 1
     let node: Element | null = el
     while (node && node !== document.body) {

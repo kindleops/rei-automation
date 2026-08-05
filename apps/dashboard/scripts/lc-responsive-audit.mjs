@@ -69,13 +69,48 @@ const files = []
   }
 })(SRC)
 
-const violations = { breakpoints: [], viewportWidth: [], typeFloor: [] }
+/**
+ * A CSS comment left unterminated — or prose left OUTSIDE one — is not a
+ * compile error anywhere in this toolchain. Vite serves the file, the browser's
+ * parser silently discards from the error to the next recoverable token, and
+ * the rules after it never apply. That happened twice while writing
+ * lc-responsive.css and cost two full measurement cycles: the badge contrast
+ * repair "did not work" when in fact it was never parsed. Cheap to check.
+ */
+function cssStructureError(src) {
+  let depth = 0
+  let line = 1
+  for (let i = 0; i < src.length; ) {
+    if (src[i] === '\n') line++
+    if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2)
+      if (end < 0) return `unterminated comment opened at line ${line}`
+      for (let k = i; k < end; k++) if (src[k] === '\n') line++
+      i = end + 2
+      continue
+    }
+    if (src[i] === '{') depth++
+    if (src[i] === '}') {
+      depth--
+      if (depth < 0) return `unbalanced "}" at line ${line}`
+    }
+    i++
+  }
+  return depth === 0 ? null : `${depth} unclosed block(s)`
+}
+
+const violations = { breakpoints: [], viewportWidth: [], typeFloor: [], cssStructure: [] }
 const deferred = []
 const rel = (f) => path.relative(SRC, f)
 
 for (const file of files) {
   const src = fs.readFileSync(file, 'utf8')
   const lines = src.split('\n')
+
+  if (file.endsWith('.css')) {
+    const structural = cssStructureError(src)
+    if (structural) violations.cssStructure.push(`${rel(file)}  ${structural}`)
+  }
 
   lines.forEach((line, i) => {
     const at = `${rel(file)}:${i + 1}`
@@ -112,6 +147,7 @@ for (const file of files) {
 }
 
 const sections = [
+  ['—      CSS that the browser cannot fully parse', violations.cssStructure],
   ['§15.1  breakpoints outside the five bands', violations.breakpoints],
   ['§15.2  scrollbar-inclusive viewport width', violations.viewportWidth],
   ['§2.1   font-size below the 11px floor', violations.typeFloor],
