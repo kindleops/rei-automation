@@ -180,11 +180,18 @@ export function PropertyMediaViewer({
       )
     }
 
+    /* `src=""` is not "no image" — the browser resolves it against the page URL,
+     * fetches the document, and leaves an <img> with an empty currentSrc and
+     * naturalWidth 0 in the DOM. Headed verification found exactly one of those
+     * here. Hold the last valid frame instead (R13.3), and render nothing at all
+     * rather than a broken element. */
+    const streetUrl = media.street.url ?? media.street.lastGoodUrl
+    if (!streetUrl) return null
     return (
       <img
-        src={media.street.url ?? ''}
+        src={streetUrl}
         alt={`Street view of ${media.identity.address ?? 'the property'}`}
-        className="lc-media-img"
+        className={`lc-media-img${media.street.url ? '' : ' is-stale'}`}
         loading="eager"
         decoding="async"
         onLoad={media.street.onLoaded}
