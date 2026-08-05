@@ -327,10 +327,35 @@ export function createSellerInboundBurstCoordinator({
         alert: alertBurstFailure,
       });
     } catch (settle_error) {
+      // finalizeBurstConstituentLedger alerts on its OWN partial-failure path
+      // (it is handed `alert` above). A throw bypasses that entirely: without
+      // this the burst still reports ok:true, the constituent rows keep their
+      // awaiting_burst_finalization marker — which findInboundLedgerSlaBreaches
+      // excludes from breach_count — and scanBurstLiveness sees a healthy
+      // terminal burst. Nobody is paged and nothing is stuck-scanned: the
+      // unwatched-parking hazard, reached through a second door.
+      //
+      // Alert exactly once here, with burst identity and error metadata only.
+      // NEVER seller content: alert payloads travel to notification sinks.
+      try {
+        await alertBurstFailure?.({
+          reason: "ledger_finalization_threw",
+          burst_id: finalBurst.burst_id,
+          generation: finalBurst.generation ?? null,
+          thread_key: finalBurst.thread_key || null,
+          constituent_count: Array.isArray(finalBurst.constituents)
+            ? finalBurst.constituents.length
+            : null,
+          error: settle_error?.message || "unknown_error",
+        });
+      } catch {
+        /* alerting must never mask the ledger failure it is reporting */
+      }
       return {
         ok: false,
         reason: "ledger_finalization_threw",
         message: settle_error?.message || "unknown_error",
+        alerted: true,
       };
     }
   }

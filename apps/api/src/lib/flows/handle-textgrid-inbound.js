@@ -1048,10 +1048,34 @@ export async function handleTextgridInboundWebhook(payload = {}, opts = {}) {
         // burst failure is alarmed independently by the burst liveness scan, so
         // nothing is unwatched. Constituent rows are finalized for real when
         // the burst completes.
+        // A marker without a burst id is worse than no marker: it parks the row
+        // at status='processing' where findInboundLedgerSlaBreaches deliberately
+        // excludes it from the stuck scan, while finalizeBurstConstituentLedger
+        // adopts constituents by EXACT burst_id match and so can never settle
+        // it. The row becomes permanently unsettleable and invisible to both
+        // watchdogs. Fail loudly and RETRIABLY instead — the provider redelivers
+        // and the next attempt can associate it properly.
+        const pending_burst_id = clean(resolved.detail?.burst_id);
+        if (!pending_burst_id) {
+          await recordDispositionOrAlert({
+            ledger_id: ledger.ledger_id || null,
+            idempotency_key,
+            disposition: TERMINAL_DISPOSITIONS.FAILED_RETRIABLE,
+            detail: {
+              awaiting_burst_missing_burst_id: true,
+              pending_disposition: resolved.disposition,
+            },
+            latency_ms: Date.now() - started_at_ms,
+          });
+          if (result && typeof result === "object") {
+            result.terminal_disposition = TERMINAL_DISPOSITIONS.FAILED_RETRIABLE;
+          }
+          return result;
+        }
         const marked = await runtimeDeps.markInboundAwaitingBurst({
           idempotency_key,
-          burst_id: resolved.detail?.burst_id || null,
-          detail: resolved.detail,
+          burst_id: pending_burst_id,
+          detail: { ...resolved.detail, burst_id: pending_burst_id },
           processing_run_id: claim?.processing_run_id || null,
         });
         if (marked?.ok === false) {
@@ -2025,7 +2049,16 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       underwriting_follow_up, maybe_offer, active_offer_item_id,
       contract, pipeline, underwriting_transfer, autopilot_queue_row = null,
       seller_followup_result = { ok: false, skipped: true, reason: "not_attempted" },
-      intelligence_snapshot = null;
+      intelligence_snapshot = null,
+      // Burst handoff provenance. Declared at THIS scope on purpose: the
+      // deferred branch builds `seller_orchestration` inside a deeper block, so
+      // its burst_id is unreachable from the result assembly below. Without
+      // these the ledger marker is written with burst_id=null, which no burst
+      // can ever adopt (finalizeBurstConstituentLedger matches the id exactly)
+      // and which findInboundLedgerSlaBreaches excludes from the stuck scan —
+      // a row parked forever, invisible to both watchdogs.
+      deferred_burst = false,
+      deferred_burst_id = null;
 
     try {
       const offer_route = offer_routing?.offer_route || null;
@@ -2299,6 +2332,10 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           seller_orchestration = burst_deferral.flush.orchestration;
         } else if (burst_deferral?.deferred) {
           // Decision deferred to burst flush — no per-message auto-reply.
+          // Lift the association out to result scope: the ledger marker is
+          // worthless without the exact burst id that will later settle it.
+          deferred_burst = true;
+          deferred_burst_id = burst_deferral?.append?.burst?.burst_id || null;
           seller_orchestration = {
             ok: true,
             deferred_burst: true,
@@ -3028,6 +3065,10 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       contract,
       pipeline,
       idempotency_key,
+      // Burst handoff provenance, read by resolveInboundTerminalDisposition to
+      // associate the pending ledger row with the burst that will settle it.
+      deferred_burst,
+      burst_id: deferred_burst_id,
       matched: true,
     };
 
