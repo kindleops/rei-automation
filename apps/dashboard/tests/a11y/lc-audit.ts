@@ -21,6 +21,22 @@ export type LcContrastFail = {
 export type LcAuditResult = {
   width: number
   documentOverflowPx: number
+  /**
+   * R15.2 names `scrollWidth > clientWidth` as the enforcement test. In THIS
+   * app that test can never fail: `html` and `body` both compute
+   * `overflow-x: hidden`, so the document is structurally incapable of
+   * scrolling sideways. Measured at 390px on the untouched baseline —
+   * docScroll 390 === docClient 390 — while 26 elements on /queue and 25 on
+   * /calendar genuinely sat past the right edge. The honest signals are
+   * therefore the two below, not the document metric:
+   *   overflowers       — escaped the viewport with nothing to clip or scroll
+   *                       them. This is the real R15.2 failure. Must be 0.
+   *   containedOverflow — sits past the edge INSIDE a scroller that itself
+   *                       fits (a tab strip, a table). Legitimate under §15.6,
+   *                       but reported so it is a visible decision rather than
+   *                       something the audit silently swallows.
+   */
+  containedOverflow: number
   overflowers: LcOverflower[]
   tiny: LcTiny[]
   smallTargets: LcSmallTarget[]
@@ -69,13 +85,17 @@ export function runLcAudit(): LcAuditResult {
   }
 
   const overflowers: LcOverflower[] = []
+  let containedOverflow = 0
   for (const el of Array.from(document.querySelectorAll('body *'))) {
     if (skip(el)) continue
     const r = el.getBoundingClientRect()
     if (r.width === 0 || r.height === 0) continue
     if (getComputedStyle(el).visibility === 'hidden') continue
     if (r.right > vw + 2 || r.left < -2) {
-      if (isContained(el)) continue
+      if (isContained(el)) {
+        containedOverflow++
+        continue
+      }
       if (overflowers.length < 25) {
         overflowers.push({
           selector: selectorOf(el),
@@ -304,6 +324,7 @@ export function runLcAudit(): LcAuditResult {
   return {
     width: vw,
     documentOverflowPx: Math.max(0, de.scrollWidth - de.clientWidth),
+    containedOverflow,
     overflowers,
     tiny,
     smallTargets,
