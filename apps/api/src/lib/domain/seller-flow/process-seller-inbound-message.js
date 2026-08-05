@@ -65,6 +65,9 @@ import { info, warn } from "@/lib/logging/logger.js";
 
 const defaultDeps = {
   classify,
+  // Injectable for the same reason classify is: without it the burst leg's
+  // context construction cannot be doubled, and nothing can pin it.
+  buildConversationContext,
   runInboundIntelligencePhase,
   executeInboundAutomationDecision,
   persistInboundIntelligenceSnapshot,
@@ -581,11 +584,27 @@ export async function processSellerInboundMessage({
     // ownership confirmation is routed to human review — the 2026-08-03
     // incident. Resolution failure is non-fatal: classify falls back to its
     // existing `context_status: unavailable` behaviour.
-    const conversation_context = await buildConversationContext({
+    //
+    // The burst constituents MUST be excluded from the answered-question scan.
+    // This is the live path for a burst flush, and the aggregate's
+    // inbound_received_at is the LAST fragment's timestamp — so without the
+    // exclusion every earlier fragment of this same burst falls inside the
+    // "did anyone already answer?" window, question_status flips to "answered",
+    // and validateConversationContext discards the context as stale. A seller
+    // who replies "Yeah" as two messages would then reproduce the very
+    // incident this wiring exists to prevent.
+    const conversation_context = await runtimeDeps.buildConversationContext({
       thread_key: threadKey || inboundFrom,
       inbound_received_at: inboundReceivedAt || new Date().toISOString(),
       supabase,
       canonical_stage: stageBefore,
+      // The `lt` bound on created_at is exclusive, so the current inbound is
+      // usually outside the window already — but "usually" is not a guarantee
+      // when created_at is an insert timestamp, hence the explicit exclusion.
+      current_inbound_event_id: inboundEventId || providerMessageId || null,
+      burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
+        ? burstContext.constituent_event_ids
+        : [],
     }).catch(() => null);
 
     classification = await runtimeDeps.classify(message, conversationBrain, {

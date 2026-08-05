@@ -1731,6 +1731,14 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
             inbound_received_at: extracted?.received_at || payload?.http_received_at || null,
             supabase: context_supabase,
             canonical_stage: stage_before,
+            // Exclude THIS inbound from the "has the question already been
+            // answered?" scan. The builder's created_at window uses an
+            // exclusive upper bound, which usually excludes the current
+            // message on its own — but created_at is an insert timestamp, not
+            // the carrier receipt time, so "usually" is not a guarantee. A
+            // message that counted itself as its own prior answer would mark
+            // the question answered and discard the context that binds it.
+            current_inbound_event_id: inbound_message_event_id || null,
           });
         }
       } catch {
