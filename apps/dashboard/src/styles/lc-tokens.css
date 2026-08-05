@@ -318,6 +318,28 @@
   border-color: var(--lc-line-interactive);
 }
 
+/* The rule above only reaches shell-owned surfaces. Measured in a real browser,
+   every legacy field outside them still drew its edge at 1.24:1 — `.occ-search`
+   and `.occ-filter-select` on /queue, and the same story in every other module.
+   "Form fields go to 3:1" has to mean all of them, so the rule below reaches
+   fields wherever they live.
+
+   Why the doubled `[class]`: module sheets style these with class selectors, so
+   a bare `input` selector loses the cascade. `input[class][class]` is (0,2,1) —
+   it beats a one- or two-class module rule WITHOUT `!important`, which §1 bans
+   and of which this app already carries 6,691.
+
+   This only sets a COLOUR. A field with `border-width: 0` (the inbox composer,
+   the palette input, every borderless search box) is untouched, so no field
+   gains an edge it did not already draw — the existing edges just become
+   visible ones. Width, radius, background and focus styling are left to the
+   owning lane. */
+input[class][class]:not([type='checkbox']):not([type='radio']):not([type='range']),
+select[class][class],
+textarea[class][class] {
+  border-color: var(--lc-line-interactive);
+}
+
 /* §12.1/§12.4 — a split-pane divider is an interactive control with
    `role="separator"`, not decoration. Any lane's divider inherits 3:1 here. */
 [role='separator'][tabindex],
