@@ -32,6 +32,8 @@ function PropertyMediaBase({ url, alt, className, attribution = true }: Property
             className="civ4-media__img"
             src={url ?? undefined}
             alt={alt}
+            /* IL-03: secondary media inside the dev-gated V4 comp workspace —
+               a grid of comparable tiles, not the selected property. */
             loading="lazy"
             decoding="async"
             onError={() => {

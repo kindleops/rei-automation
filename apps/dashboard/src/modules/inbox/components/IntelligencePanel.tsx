@@ -3521,6 +3521,13 @@ const CompIntelligenceModule = ({ thread, snapshot, dealContext: _dealContext }:
                 src={compMapUrl}
                 title={`Comp map for ${address}`}
                 className="nx-comp-module__map-iframe"
+                /* IL-03 exception, stated rather than silent: a third-party map
+                   EMBED, not property media, sitting far down a long panel.
+                   The canvas it sits in is never blank — the radius heat rings
+                   and comp pins paint over it regardless — so deferring the
+                   iframe costs the operator nothing and saves a heavy frame on
+                   every thread change. Property imagery on this surface goes
+                   through PropertyMediaViewer, which is eager. */
                 loading="lazy"
                 allowFullScreen
                 referrerPolicy="no-referrer-when-downgrade"

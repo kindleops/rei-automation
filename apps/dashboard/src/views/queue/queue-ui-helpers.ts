@@ -108,7 +108,10 @@ export interface SellerIdentity {
   primary: string
   secondary: string | null
   masterOwner: string | null
+  /** `…2000` — the badge form, safe to render beside a title. */
   phoneEnding: string | null
+  /** The whole number, for `title=`/tooltips and dossiers. Never a title. */
+  phoneFull: string | null
   glyph: 'person' | 'property' | 'unknown'
 }
 
@@ -136,7 +139,17 @@ export const resolveSellerIdentity = (item: QueueItem): SellerIdentity => {
     String(md.thread_participant_name ?? md.participant_name ?? ''),
     String(md.contact_owner_name ?? md.contact_method_owner ?? ''),
   ])
-    ?? (phone && !phone.toLowerCase().includes('no phone') ? phone : null)
+    /* IL-04. This used to fall through to the raw phone number, which is how
+     * `+16128072000` ended up rendering as the row title on /queue at three
+     * viewports — the last surviving instance of the defect Lane C cleared
+     * from the inbox (169 → 3 across the app; those 3 were this one element).
+     *
+     * A phone number is not a name. It is contact metadata, and it is already
+     * on the row as the `…2000` badge (full number in its tooltip) and in the
+     * dossier as a labelled phone chip. What identifies the row when no name
+     * resolves is the property address on the line below, so the title says
+     * plainly that the owner is unknown rather than dressing a phone number up
+     * as one. */
     ?? 'Unknown owner'
 
   const masterOwner = clean(
@@ -151,7 +164,9 @@ export const resolveSellerIdentity = (item: QueueItem): SellerIdentity => {
 
   const glyph: SellerIdentity['glyph'] = primary === 'Unknown owner' ? 'unknown' : item.linkedPropertyId ? 'property' : 'person'
 
-  return { primary, secondary, masterOwner, phoneEnding, glyph }
+  const phoneFull = phone && !phone.toLowerCase().includes('no phone') ? phone : null
+
+  return { primary, secondary, masterOwner, phoneEnding, phoneFull, glyph }
 }
 
 export const displayName = (item: QueueItem): string => resolveSellerIdentity(item).primary

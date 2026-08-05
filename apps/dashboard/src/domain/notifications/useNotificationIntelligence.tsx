@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react'
 import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
@@ -26,12 +27,22 @@ import type {
 } from './notification-contract'
 import { deduplicateNotifications } from './notification-contract'
 import { playGroupedNotificationSounds } from './notification-sound-bridge'
+import {
+  addTombstones as storeAddTombstones,
+  confirmTombstones as storeConfirmTombstones,
+  getVersion as getSuppressionVersion,
+  isSuppressed,
+  markUnconfirmed as storeMarkUnconfirmed,
+  pruneExpired as storePruneExpired,
+  subscribe as subscribeSuppression,
+  unconfirmedEntries,
+} from './notification-suppression-store'
 
 const POLL_INTERVAL_MS = 30_000
 const POLL_BACKOFF_MAX_MS = 5 * 60_000
 
 /**
- * Tombstones — why they exist.
+ * Tombstones — why they exist, and where they live.
  *
  * `patch()` used to optimistically remove a card, then `await refresh()` on
  * BOTH the success and failure branches, replacing state wholesale from the
@@ -42,50 +53,15 @@ const POLL_BACKOFF_MAX_MS = 5 * 60_000
  *   - a duplicate row (the feed emits the same event keyed by '+1252…' and
  *     '252…') surviving and looking identical to the one just dismissed
  *
- * A tombstone records "the operator finished with this id" locally. Nothing
- * tombstoned renders again, whatever the server returns, until the tombstone
- * is explicitly reverted because the write failed.
+ * A tombstone records "the operator finished with this id". Nothing tombstoned
+ * renders again, whatever the server returns.
+ *
+ * The map itself is NOT hook state. It lives in
+ * `notification-suppression-store.ts` as a module singleton every consumer
+ * subscribes to, persisted in localStorage, written by a single merging
+ * writer. See that file's header for why each of those three properties is
+ * load-bearing.
  */
-const TOMBSTONE_STORAGE_KEY = 'lc.notifications.tombstones.v1'
-const TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000
-
-type TombstoneKind = 'dismissed' | 'snoozed'
-
-interface Tombstone {
-  kind: TombstoneKind
-  /** For snoozes: when the item is allowed back. */
-  until: number | null
-  createdAt: number
-}
-
-function loadTombstones(): Map<string, Tombstone> {
-  const map = new Map<string, Tombstone>()
-  if (typeof window === 'undefined') return map
-  try {
-    const raw = window.sessionStorage.getItem(TOMBSTONE_STORAGE_KEY)
-    if (!raw) return map
-    const parsed = JSON.parse(raw) as Record<string, Tombstone>
-    const now = Date.now()
-    for (const [id, tombstone] of Object.entries(parsed)) {
-      if (!tombstone) continue
-      if (now - tombstone.createdAt > TOMBSTONE_TTL_MS) continue
-      if (tombstone.kind === 'snoozed' && tombstone.until != null && tombstone.until <= now) continue
-      map.set(id, tombstone)
-    }
-  } catch {
-    // A corrupt store must never take the feed down.
-  }
-  return map
-}
-
-function persistTombstones(map: Map<string, Tombstone>) {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(TOMBSTONE_STORAGE_KEY, JSON.stringify(Object.fromEntries(map)))
-  } catch {
-    // Storage full or blocked — in-memory tombstones still hold for this session.
-  }
-}
 
 export interface NotificationIntelligenceState {
   /** Deduplicated, tombstone-filtered, snooze-filtered. What the UI renders. */
@@ -150,51 +126,31 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
   const preferencesRef = useRef(preferences)
   preferencesRef.current = preferences
   const pollBackoffMsRef = useRef(POLL_INTERVAL_MS)
-  const tombstonesRef = useRef<Map<string, Tombstone>>(loadTombstones())
-  /** Bumped whenever tombstones change so derived state recomputes. */
-  const [tombstoneVersion, setTombstoneVersion] = useState(0)
 
-  const addTombstones = useCallback((ids: string[], kind: TombstoneKind, until?: string) => {
-    const now = Date.now()
-    const untilMs = until ? new Date(until).getTime() : null
-    for (const id of ids) {
-      tombstonesRef.current.set(id, {
-        kind,
-        until: Number.isFinite(untilMs) ? untilMs : null,
-        createdAt: now,
-      })
-    }
-    persistTombstones(tombstonesRef.current)
-    setTombstoneVersion((v) => v + 1)
-  }, [])
-
-  const removeTombstones = useCallback((ids: string[]) => {
-    for (const id of ids) tombstonesRef.current.delete(id)
-    persistTombstones(tombstonesRef.current)
-    setTombstoneVersion((v) => v + 1)
-  }, [])
+  /**
+   * The suppression set is a module singleton, so every consumer of this hook —
+   * and every other subscriber — sees the same map at the same version. This is
+   * a subscription, not a copy.
+   */
+  const tombstoneVersion = useSyncExternalStore(
+    subscribeSuppression,
+    getSuppressionVersion,
+    () => 0,
+  )
 
   /** Drop anything the operator has already finished with, plus live snoozes. */
   const applySuppression = useCallback((items: NotificationEvent[]): NotificationEvent[] => {
     const now = Date.now()
-    let changed = false
-    const kept = items.filter((item) => {
-      const tombstone = tombstonesRef.current.get(item.id)
-      if (tombstone) {
-        if (tombstone.kind === 'dismissed') return false
-        if (tombstone.until == null || tombstone.until > now) return false
-        // Snooze expired — retire the tombstone and let the item back.
-        tombstonesRef.current.delete(item.id)
-        changed = true
-      }
+    // Expired snoozes retire here, through the store's single writer.
+    storePruneExpired()
+    return items.filter((item) => {
+      if (isSuppressed(item.id, now)) return false
       // The server already excludes dismissed rows and live snoozes, but a
       // status-bearing row must never slip through client-side either.
       if (item.status === 'dismissed') return false
       if (item.status === 'snoozed') return false
       return true
     })
-    if (changed) persistTombstones(tombstonesRef.current)
-    return kept
   }, [])
 
   const applyLocalPatch = useCallback((id: string, op: NotificationPatchOp, extras?: { ids?: string[]; snoozeUntil?: string }) => {
@@ -286,16 +242,39 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
     void loadPrefs()
   }, [loadPrefs, refresh])
 
+  /**
+   * Re-send suppression decisions the server never accepted. Runs on the poll
+   * cycle only — never from `patch()` — so a failing endpoint cannot produce a
+   * write/retry loop. Both ops are idempotent and attempts are capped in the
+   * store (`MAX_SYNC_ATTEMPTS`).
+   */
+  const reconcileSuppression = useCallback(async () => {
+    const pending = unconfirmedEntries().slice(0, 5)
+    for (const { id, entry } of pending) {
+      const result = await patchNotification(
+        id,
+        entry.kind === 'snoozed' ? 'snooze' : 'dismiss',
+        entry.kind === 'snoozed' && entry.until != null
+          ? { snoozeUntil: new Date(entry.until).toISOString() }
+          : {},
+      )
+      if (result.ok) storeConfirmTombstones([id])
+      else storeMarkUnconfirmed([id])
+    }
+  }, [])
+
   useEffect(() => {
     let timeoutId = 0
     const schedulePoll = () => {
       timeoutId = window.setTimeout(() => {
-        void refresh().finally(schedulePoll)
+        void reconcileSuppression()
+          .then(() => refresh())
+          .finally(schedulePoll)
       }, pollBackoffMsRef.current)
     }
     schedulePoll()
     return () => window.clearTimeout(timeoutId)
-  }, [refresh])
+  }, [refresh, reconcileSuppression])
 
   useEffect(() => {
     const unsubSettings = subscribeSettings(() => {
@@ -321,7 +300,7 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
 
     // Tombstone BEFORE the request so an in-flight poll cannot resurrect it.
     if (removesFromView) {
-      addTombstones(targetIds, op === 'snooze' ? 'snoozed' : 'dismissed', extras?.snoozeUntil)
+      storeAddTombstones(targetIds, op === 'snooze' ? 'snoozed' : 'dismissed', extras?.snoozeUntil)
     }
     applyLocalPatch(id, op, extras)
 
@@ -331,24 +310,27 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
     const result = await patchNotification(requestId, op, extras)
 
     if (!result.ok) {
-      // Revert precisely. Refreshing here is what used to make dismissal look
-      // like a no-op: the whole list came back from the server, card included,
-      // with no indication anything had failed.
-      if (removesFromView) removeTombstones(targetIds)
+      // The write failed. Deleting the tombstone here is what produced IL-01:
+      // the operator's decision was thrown away, so the card came back after a
+      // reload with nothing to show it had ever been dismissed. The decision is
+      // KEPT and flagged instead — `markUnconfirmed` — and re-sent on a later
+      // poll cycle. The operator is told plainly that it is not saved yet.
+      if (removesFromView) storeMarkUnconfirmed(targetIds)
       setError(
         result.message
           ?? result.error
           ?? (removesFromView
-            ? 'Could not update this notification, so it is still showing. Retry from the card menu.'
+            ? 'Saved here only — the server did not record it yet. Retrying automatically.'
             : 'Notification update failed'),
       )
       await refresh()
       return
     }
 
+    if (removesFromView) storeConfirmTombstones(targetIds)
     setError(null)
     await refresh()
-  }, [addTombstones, applyLocalPatch, refresh, removeTombstones])
+  }, [applyLocalPatch, refresh])
 
   const runAction = useCallback(async (id: string, actionType: string, payload: Record<string, unknown> = {}) => {
     const result = await executeNotificationAction(id, actionType, payload)

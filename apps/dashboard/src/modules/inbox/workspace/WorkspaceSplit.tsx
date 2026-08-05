@@ -47,6 +47,7 @@ import { PaneWidthProvider } from '../../../shared/workspace/PaneWidthContext'
 import { useElementWidth } from '../../../shared/workspace/useElementWidth'
 import { deriveWidthPercentFromFlex, getViewLayoutMode } from '../../../domain/inbox/view-layout'
 import type { ViewWidthPercent } from '../../../domain/inbox/view-layout'
+import { usePaneScrollRetention } from './usePaneScrollRetention'
 import './workspace-split.css'
 
 const cx = (...parts: Array<string | false | null | undefined>): string =>
@@ -557,70 +558,30 @@ export function WorkspaceSplit({
    * change is not: its virtualised lists re-measure on the width change and
    * settle on a different offset, some of it asynchronously.
    *
-   * So every geometry commit is bracketed: snapshot the scroll offsets of every
-   * scroll container in the workspace *before* the state change (in the event
-   * handler, while the old DOM is still live), then re-apply them after layout,
-   * after the next frame, and once more after the virtualiser has settled.
+   * The controller lives in `usePaneScrollRetention`: it records offsets
+   * continuously (so a VIEWPORT resize, which runs none of our handlers, is
+   * covered) and restores until the layout stops moving (so a virtualiser that
+   * settles past any fixed timeout is covered). See that file's header.
    * This is geometry work — it never reaches into what a pane renders. */
-  const scrollSnapshotRef = useRef<Array<{ el: Element; top: number; left: number }>>([])
-  const restoreTimersRef = useRef<number[]>([])
+  const scrollRetention = usePaneScrollRetention(paneElementsRef)
 
-  const captureScroll = useCallback(() => {
-    const snapshot: Array<{ el: Element; top: number; left: number }> = []
-    paneElementsRef.current.forEach((pane) => {
-      const nodes = pane.querySelectorAll('*')
-      for (const node of nodes) {
-        if (node.scrollTop > 0 || node.scrollLeft > 0) {
-          snapshot.push({ el: node, top: node.scrollTop, left: node.scrollLeft })
-        }
-      }
-    })
-    scrollSnapshotRef.current = snapshot
-  }, [])
-
-  const restoreScroll = useCallback(() => {
-    for (const { el, top, left } of scrollSnapshotRef.current) {
-      if (!el.isConnected) continue
-      /* The ref holds DOM nodes; writing their scroll offset is the entire
-       * purpose. `react-hooks/immutability` reads this as mutating ref state. */
-      // eslint-disable-next-line react-hooks/immutability
-      if (el.scrollTop !== top) el.scrollTop = top
-      if (el.scrollLeft !== left) el.scrollLeft = left
-    }
-  }, [])
-
-  // Pre-paint pass. Deliberately has no cleanup: the async passes below must
-  // survive the unrelated re-renders this page produces constantly (polling,
-  // realtime patches). Tying them to an effect's lifecycle cancelled them.
+  // Pre-paint pass, so a committed geometry change never paints at offset 0.
   useLayoutEffect(() => {
-    if (scrollSnapshotRef.current.length > 0) restoreScroll()
-  }, [layout, restoreScroll])
+    scrollRetention.applyNow()
+  }, [layout, stacked, scrollRetention])
 
-  const scheduleRestore = useCallback(() => {
-    restoreTimersRef.current.forEach((id) => window.clearTimeout(id))
-    requestAnimationFrame(restoreScroll)
-    // Virtualised lists re-measure asynchronously after a width change. Two
-    // staggered late passes catch the offset they settle on; the window stays
-    // short enough that it can never fight a deliberate operator scroll.
-    restoreTimersRef.current = [
-      window.setTimeout(restoreScroll, 160),
-      window.setTimeout(() => {
-        restoreScroll()
-        scrollSnapshotRef.current = []
-      }, 420),
-    ]
-  }, [restoreScroll])
-
-  useEffect(() => () => {
-    restoreTimersRef.current.forEach((id) => window.clearTimeout(id))
-  }, [])
+  // Responsive recomposition — including the ≤1024px stack transition — is a
+  // geometry change we do not originate. Hold the offsets through it.
+  useEffect(() => {
+    scrollRetention.markGeometryChange()
+  }, [stacked, scrollRetention])
 
   const withScrollContinuity = useCallback(<A extends unknown[]>(action: (...args: A) => void) =>
     (...args: A) => {
-      captureScroll()
+      scrollRetention.record()
       action(...args)
-      scheduleRestore()
-    }, [captureScroll, scheduleRestore])
+      scrollRetention.markGeometryChange()
+    }, [scrollRetention])
 
   const handleCommitResize = useMemo(() => withScrollContinuity(onCommitResize), [withScrollContinuity, onCommitResize])
   const handleToggleCollapse = useMemo(() => withScrollContinuity(onToggleCollapse), [withScrollContinuity, onToggleCollapse])

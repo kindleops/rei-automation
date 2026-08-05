@@ -78,9 +78,14 @@
   color: var(--lc-text-muted);
 }
 
+/* Renders as <h1> on the nine routes whose view has no heading of its own
+   (R16.5 — see `ownsHeading` in shell-nav.ts) and as <span> on the rest. Every
+   property a heading would otherwise take from the UA sheet is set explicitly
+   here, so the rail's geometry and type are identical either way. */
 .lc-rail__room {
   flex: 0 1 auto;
   min-width: 0;
+  margin: 0;
   overflow: hidden;
   font-size: var(--lc-text-base);
   font-weight: var(--lc-weight-heading);

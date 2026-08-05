@@ -2658,7 +2658,11 @@ const SoldCompMapCard = ({
         <button type="button" className="nx-map-card__close-btn" onClick={onClose} aria-label="Close">×</button>
       )}
 
-      {/* Media header */}
+      {/* Media header.
+          IL-03: the image below is SECONDARY media — comparable-sale cards in
+          a long list of many comps, not the selected property, so genuinely
+          offscreen and correctly lazy. The selected property's own imagery is
+          rendered eagerly by SellerMapCard. */}
       <div className="nx-map-card__media">
         {imageUrl ? (
           <img src={imageUrl} alt={comp.property_address_full || 'Comp'} loading="lazy" />

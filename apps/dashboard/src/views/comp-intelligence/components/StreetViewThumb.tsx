@@ -47,6 +47,9 @@ export function StreetViewThumb({
       src={sizedUrl}
       alt=""
       className={`ci-sv-img ci-sv-img--${size} ${className}`.trim()}
+      /* IL-03: secondary media — comp-grid thumbnails, dozens per screen and
+         genuinely offscreen. Lazy is correct. The subject property renders
+         through PropertyMediaViewer, which is eager. */
       loading="lazy"
       decoding="async"
       onError={() => setErr(true)}

@@ -123,6 +123,16 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
   const active = findShellNavItem(routePath)
   const roomLabel = active?.room ?? routeTitle?.replace(/^NEXUS \| /, '') ?? 'Command Center'
 
+  /* R16.5 / IL-16 — exactly one <h1> per view.
+   *
+   * The room label is already the visible name of the surface the operator is
+   * in, so on the nine routes whose view renders no <h1> of its own, this IS
+   * the page heading and is marked up as one. No new chrome, no vertical cost.
+   * `/properties` renders its own <h1> but is not in SHELL_NAV_ITEMS, so it
+   * needs saying here; every other case is the `ownsHeading` flag. */
+  const viewOwnsHeading = active?.ownsHeading ?? routePath.startsWith('/properties')
+  const RoomTag = viewOwnsHeading ? 'span' : 'h1'
+
   /** §15.4 — the rail recomposes by width, it does not hide chrome. */
   const inlineCount = width >= 1600 ? 8 : width >= 1360 ? 6 : width >= 1180 ? 4 : 0
 
@@ -224,9 +234,9 @@ export const ShellTopRail = ({ routeTitle }: { routeTitle?: string }) => {
         <span className="lc-rail__sep" aria-hidden>
           /
         </span>
-        <span className="lc-rail__room" title={roomLabel}>
+        <RoomTag className="lc-rail__room" title={roomLabel}>
           {roomLabel}
-        </span>
+        </RoomTag>
       </div>
 
       <nav className="lc-rail__nav" aria-label="Global navigation">

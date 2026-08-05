@@ -212,15 +212,39 @@ export function PropertyMediaViewer({
         />
       )
     }
+    /* R13.3 + IL-03. Two things were wrong here.
+     *
+     * `loading="lazy"` on the pane that is not the active tab means a real
+     * browser never fetches it — and headless Chromium ignores the attribute
+     * and fetches anyway, so a headless check reports imagery that an operator
+     * never sees. That is precisely the failure (RC-16) that made 0 of 14
+     * Street View tiles load in a real browser while the harness said 14/14.
+     * This viewer only ever shows ONE property — the selected one — so both of
+     * its panes are primary media and both load eagerly.
+     *
+     * And the previous frame is now held underneath while the new tile decodes,
+     * so changing property never blanks to the browser's empty-image box. */
+    const staleAerial =
+      media.aerial.lastGoodUrl && media.aerial.lastGoodUrl !== media.aerial.url
+        ? media.aerial.lastGoodUrl
+        : null
     return (
-      <img
-        src={media.aerial.url ?? ''}
-        alt={`Aerial view of ${media.identity.address ?? 'the property'}`}
-        className="lc-media-img"
-        loading="lazy"
-        decoding="async"
-        onError={media.aerial.onError}
-      />
+      <>
+        {staleAerial ? (
+          <img src={staleAerial} alt="" className="lc-media-img is-stale" aria-hidden />
+        ) : null}
+        {media.aerial.url ? (
+          <img
+            src={media.aerial.url}
+            alt={`Aerial view of ${media.identity.address ?? 'the property'}`}
+            className="lc-media-img"
+            loading="eager"
+            decoding="async"
+            onLoad={media.aerial.onLoaded}
+            onError={media.aerial.onError}
+          />
+        ) : null}
+      </>
     )
   }
 

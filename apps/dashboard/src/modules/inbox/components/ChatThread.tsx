@@ -743,7 +743,7 @@ export const ChatThread = ({
                 rel="noopener noreferrer"
                 aria-label="Open street view"
               >
-                <img src={streetViewThumbUrl} alt="" loading="lazy" decoding="async" />
+                <img src={streetViewThumbUrl} alt="" loading="eager" decoding="async" />
               </a>
             ) : null}
             <div className="nx-conv-mobile-identity">

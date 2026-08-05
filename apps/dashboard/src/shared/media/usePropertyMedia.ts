@@ -61,6 +61,8 @@ export interface PropertyMediaResult {
   aerial: {
     status: 'ready' | 'failed'
     url: string | null
+    /** Last URL that painted successfully for ANY key on this surface (R13.3). */
+    lastGoodUrl: string | null
     reason: MediaFailureReason | null
     onLoaded: () => void
     onError: () => void
@@ -149,6 +151,10 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
   const [streetImageFailed, setStreetImageFailed] = useState(false)
   const [aerialFailed, setAerialFailed] = useState(false)
   const [lastGoodUrl, setLastGoodUrl] = useState<string | null>(null)
+  // R13.3 applies to BOTH panes. The aerial pane had no last-good frame, so a
+  // property change blanked it to the browser's empty-image box while the new
+  // tile decoded.
+  const [lastGoodAerialUrl, setLastGoodAerialUrl] = useState<string | null>(null)
   const [retryTick, setRetryTick] = useState(0)
 
   // Re-sync every piece of local state when the stable key changes.
@@ -237,6 +243,10 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
 
   const retryAerial = useCallback(() => setAerialFailed(false), [])
 
+  const onAerialLoaded = useCallback(() => {
+    if (resolvedAerialUrl) setLastGoodAerialUrl(resolvedAerialUrl)
+  }, [resolvedAerialUrl])
+
   return {
     identity,
     street: {
@@ -252,8 +262,9 @@ export function usePropertyMedia(options: UsePropertyMediaOptions): PropertyMedi
     aerial: {
       status: aerialStatus,
       url: aerialStatus === 'ready' ? resolvedAerialUrl : null,
+      lastGoodUrl: lastGoodAerialUrl,
       reason: aerialReason,
-      onLoaded: () => undefined,
+      onLoaded: onAerialLoaded,
       onError: () => setAerialFailed(true),
       retry: retryAerial,
     },

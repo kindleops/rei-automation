@@ -216,7 +216,11 @@ export function OccPropertyInspector({ item, mode, onClose, onOpenQueueRow, onNa
               <img
                 src={imageUrl!}
                 alt={`Street view for ${item.propertyAddress || 'property'}`}
-                loading="lazy"
+                /* IL-03: this is the SELECTED queue row's property. Primary
+                   media loads eagerly — a lazy attribute here means a real
+                   browser shows an empty inspector while headless reports it
+                   working (RC-16). */
+                loading="eager"
                 onLoad={() => setImageLoaded(true)}
                 onError={() => setImageFailed(true)}
               />

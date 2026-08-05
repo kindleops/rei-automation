@@ -108,6 +108,10 @@ const NotificationCard = ({
   return (
     <article
       role="listitem"
+      // The suppression store is keyed by notification id, so verification has
+      // to be able to assert on an id's ABSENCE. A count is not a valid
+      // assertion here — the list backfills after a dismissal.
+      data-notification-id={item.id}
       className={cls(
         'lcnc-card',
         `is-${item.severity}`,
