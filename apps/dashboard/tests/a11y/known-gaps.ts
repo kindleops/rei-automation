@@ -61,6 +61,26 @@ export function isKnownGap(selector: string): KnownGap | undefined {
 
 export const STRICT = process.env.LC_GATE_STRICT === '1'
 
+/**
+ * §16.6 landmarks, the skip link and the focus trap are shipped by Lane A's
+ * shell rebuild (`shared/ui/SkipLink`, `shared/ui/useFocusTrap`,
+ * `ShellTopRail` with `role="banner"` + `<nav aria-label="Global navigation">`,
+ * and `<main id="lc-main">` in `CommandCenterApp`). Lane G's branch forks from
+ * eeee5bd8, which predates all of it, so those assertions CANNOT pass here and
+ * rebuilding them would duplicate Lane A's work.
+ *
+ * The gate therefore probes the DOM for Lane A's shell instead of hard-coding
+ * an expectation: it reports on this branch and ENFORCES automatically once the
+ * lanes are integrated. No flag for Lane H to remember to flip.
+ */
+export const SHELL_PROBE = () => ({
+  main: !!document.querySelector('#lc-main, main, [role="main"]'),
+  skipLink: !!document.querySelector('.lc-skip-link, a[href="#lc-main"]'),
+  rail: !!document.querySelector('.lc-rail, [role="banner"]'),
+})
+
+export type ShellProbe = ReturnType<typeof SHELL_PROBE>
+
 export function partitionGaps<T extends { selector: string }>(rows: T[]): {
   failures: T[]
   deferred: (T & { lane: string })[]

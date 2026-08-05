@@ -170,10 +170,16 @@ export function runLcAudit(): LcAuditResult {
   }))
 
   /* ── §16.1 rendered contrast ────────────────────────────────────────── */
+  /**
+   * getComputedStyle can return `rgb()`, `rgba()` or `color(srgb r g b / a)`.
+   * The `color()` form is 0–1 per channel, so it must be scaled — reading it as
+   * 0–255 makes near-white text measure as near-black and invents failures.
+   */
   const parse = (c: string): number[] | null => {
     const m = c.match(/[\d.]+/g)
     if (!m) return null
-    return [+m[0], +m[1], +m[2], m[3] === undefined ? 1 : +m[3]]
+    const scale = /^color\(/.test(c.trim()) ? 255 : 1
+    return [+m[0] * scale, +m[1] * scale, +m[2] * scale, m[3] === undefined ? 1 : +m[3]]
   }
   const lin = (v: number) => {
     const x = v / 255
@@ -189,18 +195,39 @@ export function runLcAudit(): LcAuditResult {
     const l2 = lum(b)
     return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
   }
+  /**
+   * Source-over composite of the accumulated (upper) stack onto a lower layer,
+   * PRESERVING alpha. Collapsing alpha to 1 after the first translucent layer
+   * — the obvious mistake — makes a `rgba(255,255,255,0.03)` row hover read as
+   * solid white and reports every row as a contrast failure.
+   */
+  const stack = (top: number[], bottom: number[]): number[] => {
+    const a = top[3] + bottom[3] * (1 - top[3])
+    if (a === 0) return [0, 0, 0, 0]
+    return [
+      (top[0] * top[3] + bottom[0] * bottom[3] * (1 - top[3])) / a,
+      (top[1] * top[3] + bottom[1] * bottom[3] * (1 - top[3])) / a,
+      (top[2] * top[3] + bottom[2] * bottom[3] * (1 - top[3])) / a,
+      a,
+    ]
+  }
+
   const bgOf = (el: Element): number[] => {
     let node: Element | null = el
-    let acc: number[] | null = null
+    let acc: number[] = [0, 0, 0, 0]
     while (node) {
       const c = parse(getComputedStyle(node).backgroundColor)
       if (c && c[3] > 0) {
-        acc = acc ? over(acc, c) : c
-        if (c[3] === 1) return acc
+        acc = stack(acc, c)
+        if (acc[3] >= 0.999) return [acc[0], acc[1], acc[2], 1]
       }
       node = node.parentElement
     }
-    return acc || [0, 0, 0, 1]
+    // Nothing opaque found: the page background is the app's base surface.
+    const bodyBg = parse(getComputedStyle(document.body).backgroundColor)
+    const base = bodyBg && bodyBg[3] > 0 ? bodyBg : [0, 0, 0, 1]
+    const final = stack(acc, [base[0], base[1], base[2], 1])
+    return [final[0], final[1], final[2], 1]
   }
 
   const contrastFailures: LcContrastFail[] = []

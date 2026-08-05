@@ -53,6 +53,44 @@ small {
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
+   1b. §15.2 / R15.4 — the app top bar is unreachable across the whole md band
+
+   MEASURED (baseline eeee5bd8, /inbox @820×900): `.nx-topbar` rendered at
+   `top: 750px` in a 900px viewport, with `.nx-inbox-shell` occupying the space
+   above it. At 1440 the same bar sits at `top: 37`. The operator loses the
+   entire top bar — search, workspace switcher, Action Center, notifications —
+   on every tablet-width screen.
+
+   ROOT CAUSE, not the one reported. The lane brief attributed this to
+   `.nx-premium-inbox { position: absolute; inset: 0 }`, but that declaration
+   is unconditional: it is identical at 1440 where the bar renders correctly.
+   The real cause is `inbox-premium.css:3347-3358`, inside
+   `@media (max-width: 1023.98px)`:
+
+       .nx-topbar       { grid-column: 1 / -1; order: 3; }
+       .nx-global-search{ grid-column: 1 / -1; order: 3; }
+
+   Those declarations were written for a GRID parent — `grid-column` is inert
+   here — but `.nx-premium-inbox` is `display: flex; flex-direction: column`.
+   Its other child, `.nx-inbox-shell`, keeps the initial `order: 0`, so
+   `order: 3` moves the top bar BELOW the entire application body. It is not
+   covered; it is ordered off the bottom of the screen.
+
+   Fixed here rather than in `inbox-premium.css` so that Lane C can rewrite
+   that sheet without colliding with this lane. `.nx-premium-inbox > .nx-topbar`
+   is (0,2,0) and outranks the (0,1,0) source rule on specificity, so no
+   `!important` is needed (R1.6). Verified at 390/820/1024 — see
+   artifacts/lane-g.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023.98px) {
+  .nx-premium-inbox > .nx-topbar,
+  .nx-premium-inbox > .nx-global-search {
+    order: 0;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
    2. §15.3 — touch targets: 44×44 minimum, ≥8px separation
    Scoped to touch-shaped viewports (md and below) and to coarse pointers.
    Desktop keeps §3 tactical density; §15.3 lives in the responsive chapter and
@@ -60,32 +98,42 @@ small {
    would contradict §3.2 rather than serve it.
    ─────────────────────────────────────────────────────────────────────────── */
 
+/* `:root:root` is a specificity device, not a selector: the app's standard
+   chrome control is 36px, hard-coded as `min-height: 36px` in ~40 component
+   rules that all load AFTER this sheet. `:root:root :is(…)` scores (0,3,0),
+   which outranks those `.class`/`.class element` rules on specificity rather
+   than by adding a 6,692nd `!important` (R1.6). */
 @media (max-width: 1023.98px) {
-  button,
-  select,
-  summary,
-  a[href],
-  [role='button'],
-  [role='tab'],
-  [role='menuitem'],
-  [role='option'],
-  [role='switch'],
-  [tabindex]:not([tabindex='-1']) {
+  :root:root
+    :is(
+      button,
+      select,
+      summary,
+      a[href],
+      [role='button'],
+      [role='tab'],
+      [role='menuitem'],
+      [role='option'],
+      [role='switch'],
+      [tabindex]:not([tabindex='-1'])
+    ) {
     min-height: 44px;
   }
 
-  button,
-  select,
-  [role='button'],
-  [role='switch'],
-  [tabindex]:not([tabindex='-1']),
-  input[type='checkbox'],
-  input[type='radio'] {
+  :root:root
+    :is(
+      button,
+      select,
+      [role='button'],
+      [role='switch'],
+      [tabindex]:not([tabindex='-1']),
+      input[type='checkbox'],
+      input[type='radio']
+    ) {
     min-width: 44px;
   }
 
-  input,
-  textarea {
+  :root:root :is(input, textarea) {
     min-height: 44px;
   }
 
@@ -155,13 +203,25 @@ small {
    impossible without this. Verified in a real browser under
    `prefers-reduced-motion: reduce` — see artifacts/lane-g.
 
-   INTEGRATION NOTE (Lane H): this block and Lane A's are duplicates. Keep one.
+   `!important` alone is NOT sufficient here, which is the thing worth knowing.
+   A universal `*` selector scores (0,0,0), so ANY class-scoped
+   `transition: ... !important` in a sheet that evaluates later still wins on
+   specificity. Measured: `inbox-polish.css:4418`
+   (`.nx-send-button { transition: all 0.3s ease !important }`) survived the
+   naive rule and kept transitioning under `prefers-reduced-motion: reduce`.
+   `:root:root *` scores (0,2,0) and outranks the single-class `!important`
+   declarations that make up the bulk of the 6,691. Re-measured after the
+   change: 0 residual animating/transitioning elements on /inbox, /queue,
+   /calendar, /analytics.
+
+   INTEGRATION NOTE (Lane H): this block and Lane A's are duplicates. Keep the
+   HIGHER-SPECIFICITY one — Lane A's bare `*` loses to `.nx-send-button`.
    ─────────────────────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:root *,
+  :root:root *::before,
+  :root:root *::after {
     animation-duration: 1ms !important;
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;

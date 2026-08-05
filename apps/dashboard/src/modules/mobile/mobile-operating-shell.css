@@ -157,13 +157,20 @@ html.is-mobile-layout {
     flex-shrink: 0;
   }
 
+  /* §15.3 — 44×44 minimum.
+     This rule declared 36px with `!important`, so no responsive layer could
+     correct it, AND it applied `scale(0.92)` to BOTH the orb and its container.
+     A transform scales the rendered box, so the two compounded: the KPI orb
+     measured 36 × 0.92 × 0.92 = 30×30 on every phone — the single remaining
+     sub-44px target on /queue, /calendar, /inbox and /analytics.
+     44px with no transform. Measured after: 44×44, dock still fits at 360px. */
   .nx-mobile-command-dock__slot--kpi .nx-kpi-orb,
   .nx-mobile-command-dock__slot--kpi .nx-kpi-orb-container {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px !important;
-    min-height: 36px !important;
-    transform: scale(0.92);
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    transform: none;
   }
 
   .nx-mobile-command-dock__slot--kpi {
@@ -871,10 +878,14 @@ html.is-mobile-layout {
     right: 10px;
   }
 
+  /* §15.3 — `scale(0.92)` shrinks the RENDERED box. Where the orb is drawn at
+     72px that still cleared 44 (66px), but /deal-intelligence draws it at 46px
+     (deal-intelligence-25.css:4415) ⇒ 42×42, under the floor. The scale bought
+     nothing that a size token cannot, so it is removed rather than special-cased. */
   .nx-os.is-mobile-os .nx-copilot-orb--floating {
     bottom: calc(var(--nx-mobile-safe-bottom) + 12px) !important;
     right: 12px !important;
-    transform: scale(0.92);
+    transform: none;
   }
 
   .nx-portable-wsl-nav {
