@@ -102,12 +102,28 @@ async function seedEligibleBurst({ processResult } = {}) {
   return { state, store, coordinator, now };
 }
 
+/**
+ * Credentials AND global burst activation.
+ *
+ * These tests describe what the cron GET does WHEN THE WORKER IS ACTIVATED —
+ * that was always their subject, but it used to be expressed by handing the
+ * coordinator a hardcoded `enabled: true`, which is the defect itself. The
+ * handler now resolves activation from SELLER_INBOUND_BURST_ENABLED, so the
+ * premise has to be stated honestly in the environment instead of smuggled in
+ * through a constructor argument.
+ *
+ * Activation-gate behaviour (disabled, internal_proof, resolver faults, the
+ * preserved 2026-08-03 burst) is covered in
+ * burst-flush-activation-authority.test.mjs.
+ */
 function withCronSecret(fn) {
   return async (...args) => {
     const saved_cron = process.env.CRON_SECRET;
     const saved_internal = process.env.INTERNAL_API_SECRET;
+    const saved_burst = process.env.SELLER_INBOUND_BURST_ENABLED;
     process.env.CRON_SECRET = CRON_SECRET;
     process.env.INTERNAL_API_SECRET = INTERNAL_SECRET;
+    process.env.SELLER_INBOUND_BURST_ENABLED = "1";
     try {
       return await fn(...args);
     } finally {
@@ -115,6 +131,8 @@ function withCronSecret(fn) {
       else process.env.CRON_SECRET = saved_cron;
       if (saved_internal === undefined) delete process.env.INTERNAL_API_SECRET;
       else process.env.INTERNAL_API_SECRET = saved_internal;
+      if (saved_burst === undefined) delete process.env.SELLER_INBOUND_BURST_ENABLED;
+      else process.env.SELLER_INBOUND_BURST_ENABLED = saved_burst;
     }
   };
 }
