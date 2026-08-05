@@ -959,6 +959,7 @@ test("lease: fresh claim cannot be stolen; stale claim reclaims deterministicall
   const now = () => new Date(clock).toISOString();
   const store = createMemorySellerInboundBurstStore({ now });
   await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: "+1555111LEASE",
     message: { body: "yes I own it, want $200k", event_id: "L1", provider_message_id: "pl1", received_at: T0 },
     now: T0,
@@ -1317,6 +1318,7 @@ test("rollover: memory store mirrors production flush_required contract — neve
       .filter((b) => b.thread_key === K && b.status === BURST_STATUSES.OPEN).length;
 
   await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: K,
     message: { body: "first", event_id: "m1", provider_message_id: "pm1", received_at: T0 },
     now: T0,
@@ -1326,6 +1328,7 @@ test("rollover: memory store mirrors production flush_required contract — neve
   const late = plus(T0, 95_000);
   clock = ms(late);
   const r = await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: K,
     message: { body: "after cap", event_id: "m2", provider_message_id: "pm2", received_at: late },
     now: late,
@@ -1353,6 +1356,7 @@ test("rollover: memory store mirrors production flush_required contract — neve
   assert.equal(done.ok, true);
 
   const r2 = await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: K,
     message: { body: "after cap", event_id: "m2", provider_message_id: "pm2", received_at: late },
     now: late,
@@ -1501,6 +1505,7 @@ test("crash recovery: complete is idempotent on claim_token", async () => {
   const now = () => new Date(clock).toISOString();
   const store = createMemorySellerInboundBurstStore({ now });
   await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: "+1555111CR",
     message: { body: "x", event_id: "1", provider_message_id: "p", received_at: T0 },
     now: T0,
@@ -1617,6 +1622,7 @@ test("append race: repeated unique open-generation race succeeds within the boun
   });
   const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => T0 });
   const r = await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: "+1555111UNIQ",
     message: { body: "hello", event_id: "u1", provider_message_id: "pu1", received_at: T0 },
     now: T0,
@@ -1662,6 +1668,7 @@ test("append race: repeated version-CAS race succeeds within the bounded cap —
   });
   const store = createSupabaseSellerInboundBurstStore({ supabase, now: () => plus(T0, 1000) });
   const r = await store.appendMessage({
+    scope: UNRESTRICTED_SCOPE,
     thread_key: "+1555111CAS",
     message: { body: "second", event_id: "c2", provider_message_id: "pc2", received_at: plus(T0, 1000) },
     now: plus(T0, 1000),
@@ -1701,6 +1708,7 @@ test("append race: persistent CAS conflict fails explicitly at the bounded cap �
   await assert.rejects(
     () =>
       store.appendMessage({
+        scope: UNRESTRICTED_SCOPE,
         thread_key: "+1555111EXH",
         message: { body: "second", event_id: "x2", provider_message_id: "px2", received_at: plus(T0, 1000) },
         now: plus(T0, 1000),
@@ -3007,9 +3015,16 @@ test("flush route auth: invalid credential → 401 unauthorized; unconfigured se
 
   // Valid credential passes auth — the next guard (no supabase config in the
   // test env) answers 503, proving auth no longer hardcodes 401 on this path.
+  // Asserted field by field rather than as a whole-body deepEqual: the subject
+  // here is "the credential passed auth and stopped at the NEXT guard", not the
+  // response's exact shape. The handler additionally names a canonical outcome
+  // on every authenticated invocation, and that vocabulary is owned and
+  // exercised by burst-flush-activation-authority.test.mjs.
   const authed = await flushInboundBurstsPost(makeReq({ "x-internal-api-secret": "test" }));
   assert.equal(authed.status, 503);
-  assert.deepEqual(await authed.json(), { ok: false, reason: "missing_supabase" });
+  const authed_body = await authed.json();
+  assert.equal(authed_body.ok, false);
+  assert.equal(authed_body.reason, "missing_supabase");
 
   // No secrets configured at all → the helper's 500 must surface untouched.
   const saved = {

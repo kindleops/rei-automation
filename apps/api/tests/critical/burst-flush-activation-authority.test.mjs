@@ -35,6 +35,7 @@ import {
   summarizeFlushResults,
   redactFlushResults,
   auditClaimedBurstAdmissions,
+  isFatalActivationPolicy,
   BURST_FLUSH_OUTCOMES,
   BURST_FLUSH_OUTCOME_VALUES,
 } from "@/lib/domain/seller-flow/flush-inbound-bursts-request.js";
@@ -45,6 +46,8 @@ import {
   BURST_FLUSH_ACTIVATION_REASONS as REASONS,
 } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
 import { activationScopeFromDescriptor } from "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js";
+import { createMemorySellerInboundBurstStore } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
+import { loadBurstFlushActivationPolicy } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
 
 /** The production translation chain, kept in one place so tests exercise it whole. */
 const scopeFromPolicy = (policy) => activationScopeFromDescriptor(toBurstFlushScopeDescriptor(policy));
@@ -844,6 +847,51 @@ test(
   })
 );
 
+test("the policy still publishes a fault flag — tolerance must not degrade into reading nothing", async () => {
+  // The handler tolerates `fatal` OR `alertable` OR the reason string, because a
+  // rename already silently downgraded a fatal fault to a benign 200 once. That
+  // tolerance is a shock absorber, not a licence for the contract to evaporate:
+  // if BOTH flags disappear, the handler would still catch today's faults via
+  // the reason prefix, and would quietly stop catching any future fault whose
+  // reason is spelled differently.
+  //
+  // So this asserts the PRODUCER, not the consumer: the real policy module must
+  // publish an explicit boolean fault flag on a real fault. Tolerate spellings;
+  // do not tolerate absence.
+  const faulted = await loadBurstFlushActivationPolicy({
+    env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
+    now: new Date(NOW_MS),
+    getSystemValue: async () => {
+      throw new Error("system_control_unreachable");
+    },
+  });
+
+  const has_flag =
+    Object.hasOwn(faulted, "fatal") || Object.hasOwn(faulted, "alertable");
+  assert.ok(
+    has_flag,
+    "the policy must publish `fatal` or `alertable`; the handler's tolerant read is a shock absorber, not a substitute for the contract"
+  );
+  assert.equal(
+    faulted.fatal === true || faulted.alertable === true,
+    true,
+    "a session-lookup failure must be flagged as a fault, not merely described in prose"
+  );
+  assert.equal(faulted.may_scan, false, "a faulted policy licences nothing");
+  assert.equal(faulted.may_claim, false);
+
+  // The mirror image: a benign denial must NOT carry the fault flag, or every
+  // idle tick pages.
+  const benign = await loadBurstFlushActivationPolicy({
+    env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
+    now: new Date(NOW_MS),
+    getSystemValue: async () => null,
+  });
+  assert.equal(benign.fatal === true || benign.alertable === true, false);
+  assert.equal(isFatalActivationPolicy(benign), false, "no session open is not a fault");
+  assert.equal(isFatalActivationPolicy(faulted), true, "a lookup failure is");
+});
+
 test(
   "a policy loader that throws fails closed with no global fallback",
   withSecrets(async () => {
@@ -973,7 +1021,124 @@ test(
   })
 );
 
-// ══ 12. Counters, redaction, hygiene ══════════════════════════════════════
+// ══ 12. DOCUMENTED RESIDUAL: crash recovery is scope-gated ════════════════
+
+test("DOCUMENTED HAZARD: a session expiring mid-flight strands a claimed burst forever", async () => {
+  // CHARACTERIZATION, NOT A FIX. Binding activation authority to the session
+  // window also binds CRASH RECOVERY to it. Stale-lease reclaim is the mechanism
+  // that rescues a burst whose worker died mid-finalize; it runs through the
+  // scoped eligible list, so a burst outside the active scope is invisible to it.
+  //
+  // For the preserved 2026-08-03 burst that is exactly the intent. The
+  // unintended case is a burst claimed legitimately INSIDE a session whose
+  // session then expires before the finalize completes. Its lease expires, but
+  // no future session's window can ever contain it — a session's floor is its
+  // own created_at, and the burst is older than any session opened afterwards.
+  // The row parks at status=claimed with completed_at null, and its constituent
+  // ledger rows keep `awaiting_burst_finalization`, which
+  // findInboundLedgerSlaBreaches EXCLUDES from breach_count. Nobody is paged.
+  //
+  // This pins the behaviour so whoever addresses it inherits a signal rather
+  // than rediscovering it.
+  const THREAD = PINNED_RECIPIENT;
+  let clock = "2026-08-05T11:55:00.000Z";
+  const store = createMemorySellerInboundBurstStore({ now: () => clock });
+
+  const session_1 = activeSession(); // 11:50 → 13:50
+  const scope_1 = scopeFromPolicy(
+    resolveBurstFlushActivationPolicy({
+      mode: "internal_proof",
+      session_raw: JSON.stringify(session_1),
+      now: new Date("2026-08-05T11:56:00.000Z"),
+    })
+  );
+  assert.equal(scope_1.authorized, true, "precondition: session 1 genuinely authorizes");
+
+  const appended = await store.appendMessage({
+    thread_key: THREAD,
+    message: { event_id: "evt-midflight", body: "Yeah", received_at: clock },
+    now: clock,
+    scope: scope_1,
+  });
+  assert.equal(appended.ok, true, "precondition: an in-session append is authorized");
+  const burst_id = appended.burst.burst_id;
+
+  // A worker claims it legitimately, inside the session, then dies before
+  // completeClaimed — the crash the lease exists to recover from.
+  clock = "2026-08-05T11:56:00.000Z";
+  const claim = await store.claimEligible({
+    thread_key: THREAD,
+    burst_id,
+    now: clock,
+    worker_id: "worker-that-dies",
+    scope: scope_1,
+  });
+  assert.equal(claim.ok, true, "precondition: the in-session claim succeeds");
+
+  // While the session still lives, stale-lease reclaim works exactly as designed.
+  const during_session = await store.listEligible({
+    now: "2026-08-05T12:05:00.000Z", // past the 300s lease
+    limit: 20,
+    scope: scope_1,
+  });
+  assert.equal(during_session.length, 1, "reclaim works while the session is open");
+
+  // The session expires. A NEW session is opened afterwards — the operator's
+  // natural recovery move.
+  const session_2 = activeSession({
+    session_id: "proof-session-2026-08-05-B",
+    created_at: "2026-08-05T14:00:00.000Z",
+    expires_at: "2026-08-05T16:00:00.000Z",
+  });
+  const scope_2 = scopeFromPolicy(
+    resolveBurstFlushActivationPolicy({
+      mode: "internal_proof",
+      session_raw: JSON.stringify(session_2),
+      now: new Date("2026-08-05T14:05:00.000Z"),
+    })
+  );
+  assert.equal(scope_2.authorized, true, "the new session is genuinely active");
+
+  const after_expiry = await store.listEligible({
+    now: "2026-08-05T14:05:00.000Z",
+    limit: 20,
+    scope: scope_2,
+  });
+  assert.equal(after_expiry.length, 0, "THE RESIDUAL: the stranded burst is unreachable");
+
+  // And it is unreachable from EVERY future session, not just this one: a
+  // session's floor is its own created_at, so a burst predating it can never
+  // re-enter scope. Swept forward a week to make the permanence explicit.
+  for (const day of ["2026-08-06", "2026-08-08", "2026-08-12"]) {
+    const later = scopeFromPolicy(
+      resolveBurstFlushActivationPolicy({
+        mode: "internal_proof",
+        session_raw: JSON.stringify(
+          activeSession({
+            created_at: `${day}T10:00:00.000Z`,
+            expires_at: `${day}T12:00:00.000Z`,
+          })
+        ),
+        now: new Date(`${day}T10:05:00.000Z`),
+      })
+    );
+    const rows = await store.listEligible({
+      now: `${day}T10:05:00.000Z`,
+      limit: 20,
+      scope: later,
+    });
+    assert.equal(rows.length, 0, `still stranded on ${day}`);
+  }
+
+  // The row itself is still mid-flight: claimed, never completed. This is the
+  // parked state no watchdog alarms on.
+  const stranded = await store.getById?.(burst_id);
+  const row = stranded || store._debug.listAll().find((b) => b.burst_id === burst_id);
+  assert.equal(row.completed_at, null, "never finalized");
+  assert.equal(row.status, "claimed", "parked mid-flight");
+});
+
+// ══ 13. Counters, redaction, hygiene ══════════════════════════════════════
 
 test("summarizeFlushResults derives counters from the coordinator's real shape", () => {
   const counts = summarizeFlushResults([
