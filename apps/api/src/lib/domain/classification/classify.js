@@ -4567,10 +4567,33 @@ function resolveIntents(
   const have_a_call_request_re =
     /\b(?:can|could|should|shall|may|might|let'?s|lets|let\s+us|want(?:ed)?\s+to|wanna|would\s+like\s+to|like\s+to|love\s+to|happy\s+to|glad\s+to|willing\s+to|down\s+to|ready\s+to|able\s+to|need\s+to|we\s+(?:can|could|should)|i\s+(?:can|could|should))\s+(?:(?!not\b|never\b|don'?t\b|doesn'?t\b|won'?t\b|cannot\b)\w+\s+){0,3}?have\s+(?:a|an|another)\s+(?:\w+\s+){0,2}call\b/i;
   // "call at" as a VERB ("call at 5pm", "call at 2145551212"), never as the
-  // object of a determiner ("a call at 3", "my call at 4") — that is the
+  // object of a noun phrase ("a call at 3", "my call at 4") — that is the
   // seller describing an appointment they already have.
-  const call_at_request_re =
-    /(?<!\b(?:a|an|another|the|this|that|my|your|his|her|their|our)\s)\bcall\s+at\b/i;
+  //
+  // This REQUIRES a positive subject rather than excluding determiners. The
+  // earlier determiner lookbehind was defeated by any adjective sitting between
+  // the determiner and the noun: in "I have a scheduled call at 3pm" the token
+  // immediately before "call" is "scheduled", so the lookbehind did not apply
+  // and an appointment report classified as a request for contact. Enumerating
+  // the ways a noun phrase can be padded is open-ended; enumerating the ways a
+  // request is introduced is not.
+  const call_at_request_re = new RegExp(
+    [
+      // Imperative, at the start of the message or after a clause boundary:
+      // "call at 2145551212", "Sure, call at 3", "I'm busy. Please call at 5".
+      String.raw`(?:^|[.!?;,]\s*|\b(?:and|so|then|but|ok|okay|sure|yes|yeah|yep)\s*,?\s+)(?:please\s+|pls\s+|kindly\s+|just\s+)*call\s+at\b`,
+      // Request: "can you call at 3", "could we call at 3".
+      String.raw`\b(?:can|could|may|would|will|should|shall)\s+(?:you|we|u|i)\s+(?:please\s+|just\s+)*call\s+at\b`,
+      // Permission / invitation: "you can call at 3", "we could call at 3".
+      String.raw`\b(?:you|u|we)\s+(?:can|could|may|might|should)\s+(?:please\s+|just\s+)*call\s+at\b`,
+      // Politeness-led imperative anywhere: "…, please call at 3".
+      String.raw`\bplease\s+call\s+at\b`,
+      // Availability / invitation frames: "feel free to call at", "best to call at 5".
+      String.raw`\b(?:feel\s+free\s+to|free\s+to|ok(?:ay)?\s+to|fine\s+to|welcome\s+to|try\s+to|best\s+to|better\s+to|good\s+to|happy\s+to)\s+call\s+at\b`,
+      String.raw`\b(?:best|good|great|fine)\s+time\s+to\s+call\s+at\b`,
+    ].join("|"),
+    "i"
+  );
 
   if (
     includesAny(text, [

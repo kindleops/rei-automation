@@ -114,6 +114,75 @@ test("a non-burst call still passes an empty exclusion set, never undefined", as
   assert.equal(args.current_inbound_event_id, "evt-fragment-2");
 });
 
+// ── Context resolution failure is non-fatal, in every failure mode ─────────
+// The call site promises "resolution failure is non-fatal". `.catch(() => null)`
+// only kept that promise for a rejected Promise: it assumed the dep both
+// returns a value and returns a thenable one. Measured, three of four modes
+// escaped and would have failed the turn — a synchronous throw fires before
+// .catch attaches, and null / non-Promise returns TypeError on `.catch`.
+
+const CONTEXT_FAILURE_MODES = [
+  ["a rejected Promise", () => Promise.reject(new Error("context store unreachable"))],
+  ["a synchronous throw", () => { throw new Error("context builder exploded"); }],
+  ["a null return", () => null],
+  ["an undefined return", () => undefined],
+];
+
+for (const [label, impl] of CONTEXT_FAILURE_MODES) {
+  test(`context resolution surviving ${label} degrades to null, never throws`, async (t) => {
+    const classify_calls = [];
+    let context_args = null;
+    __setSellerInboundOrchestratorDeps({
+      buildConversationContext: (args) => {
+        context_args = args;
+        return impl();
+      },
+      classify: async (message, brain, options) => {
+        classify_calls.push(options);
+        return { primary_intent: "unclear", confidence: 0.4, version: "throw-safety" };
+      },
+      getSupabaseClient: () => ({}),
+    });
+    t.after(() => __resetSellerInboundOrchestratorDeps());
+
+    // No assert.rejects: the point is that it does NOT throw.
+    const result = await runOrchestrator({
+      burstContext: { constituent_event_ids: ["evt-fragment-1", "evt-fragment-2"] },
+    });
+    assert.notEqual(result?.threw, true, `${label} must not escape the orchestrator`);
+
+    assert.equal(classify_calls.length >= 1, true, "classification still runs");
+    assert.equal(classify_calls[0].conversation_context, null, "degrades to null context");
+    assert.equal(classify_calls[0].heuristicOnly, true, "the no-AI guarantee survives");
+
+    // The inputs are still handed over intact — a failure must not quietly
+    // change what we asked for.
+    assert.deepEqual(context_args.burst_event_ids, ["evt-fragment-1", "evt-fragment-2"]);
+    assert.equal(context_args.current_inbound_event_id, "evt-fragment-2");
+    assert.equal(context_args.thread_key, THREAD);
+    assert.equal(context_args.inbound_received_at, LAST_FRAGMENT_AT);
+  });
+}
+
+test("a synchronously-returned context object is used, not discarded", async (t) => {
+  // An injected double that answers without a Promise is legitimate; awaiting
+  // it means it is honoured rather than TypeError'ing on .catch.
+  const CONTEXT = { context_version: "conversation_context_v1", canonical_thread: THREAD };
+  const classify_calls = [];
+  __setSellerInboundOrchestratorDeps({
+    buildConversationContext: () => CONTEXT,
+    classify: async (message, brain, options) => {
+      classify_calls.push(options);
+      return { primary_intent: "unclear", confidence: 0.4, version: "sync-return" };
+    },
+    getSupabaseClient: () => ({}),
+  });
+  t.after(() => __resetSellerInboundOrchestratorDeps());
+
+  await runOrchestrator({ burstContext: null });
+  assert.equal(classify_calls[0].conversation_context, CONTEXT, "the exact object, not null");
+});
+
 // ── The defect itself, against the REAL builder ────────────────────────────
 // Proves the wiring above is load-bearing rather than decorative: identical
 // stored evidence, and the only difference is whether the constituents were

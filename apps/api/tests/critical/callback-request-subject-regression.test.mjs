@@ -53,6 +53,11 @@ function assertNoCallback(result, text) {
 }
 
 // ── Reports of an existing appointment — never a request for contact ────────
+// The adjective-padded cases are the second round of this defect. The first fix
+// excluded a determiner immediately before "call" ("a call at 3"), which any
+// adjective defeats: in "I have a scheduled call at 3pm" the token before
+// "call" is "scheduled". Enumerating how a noun phrase can be padded is
+// open-ended, so the rule now requires a positive request subject instead.
 for (const text of [
   "I have a call at 3",
   "I have a call at 3pm today",
@@ -60,6 +65,16 @@ for (const text of [
   "I have another call coming in",
   "we already had a call",
   "my call at 4 ran long",
+  // Adjective between the determiner and the noun.
+  "I have a scheduled call at 3pm",
+  "I have an important call at 4",
+  "I have a quick call at 2",
+  "I have a conference call at 9",
+  "I already have a call at 3",
+  // Other appointment reports.
+  "the call at noon ran long",
+  "Im currently on a call",
+  "sorry im on a call at the moment",
 ]) {
   test(`not a callback request: ${JSON.stringify(text)}`, async () => {
     assertNoCallback(await classifyText(text), text);
@@ -80,7 +95,7 @@ for (const text of [
   "want to have a call",
   "wanna have a call",
   "would love to have a call",
-  // "call at" as a verb, which the determiner gate must still admit.
+  // "call at" as a verb, which the request-subject gate must still admit.
   "call at 2145551212",
   "You can call at 5pm",
   "Please call at your convenience",
@@ -108,6 +123,37 @@ for (const text of [
       result.primary_intent,
       "callback_requested",
       `${text} must read as a callback request (got ${result.primary_intent})`
+    );
+  });
+}
+
+// ── Request-subject forms of "call at", asserted on the CALLBACK AXIS ──────
+// These carry a bare 1-2 digit time ("call at 3"), which a separate,
+// pre-existing and deliberately out-of-scope defect reads as an asking price —
+// so primary_intent is captured by asking_price_provided for several of them.
+// Asserting the callback axis keeps these meaningful either way, and they will
+// still hold if the pricing defect is fixed later.
+for (const text of [
+  "Can you call at 3?",
+  "You can call at 3",
+  "Please call at 3",
+  "could we call at 4",
+  "u can call at 6",
+  "best to call at 5",
+  "Sure, call at 3",
+  "Im busy. Please call at 5",
+  "Call at 3 works for me",
+  "Can we have a call at 3?",
+  "Give me a call at 3",
+  "Schedule a call for 3",
+]) {
+  test(`request-subject "call at" still reads as a callback: ${JSON.stringify(text)}`, async () => {
+    const result = await classifyText(text);
+    const axes = callbackAxes(result);
+    assert.equal(
+      axes.matched.includes("callback_requested") || axes.primary === "callback_requested",
+      true,
+      `${text} must match the callback rule (got primary ${axes.primary}, matched ${JSON.stringify(axes.matched)})`
     );
   });
 }

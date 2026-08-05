@@ -594,19 +594,39 @@ export async function processSellerInboundMessage({
     // and validateConversationContext discards the context as stale. A seller
     // who replies "Yeah" as two messages would then reproduce the very
     // incident this wiring exists to prevent.
-    const conversation_context = await runtimeDeps.buildConversationContext({
-      thread_key: threadKey || inboundFrom,
-      inbound_received_at: inboundReceivedAt || new Date().toISOString(),
-      supabase,
-      canonical_stage: stageBefore,
-      // The `lt` bound on created_at is exclusive, so the current inbound is
-      // usually outside the window already — but "usually" is not a guarantee
-      // when created_at is an insert timestamp, hence the explicit exclusion.
-      current_inbound_event_id: inboundEventId || providerMessageId || null,
-      burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
-        ? burstContext.constituent_event_ids
-        : [],
-    }).catch(() => null);
+    // try/catch around an `await`, NOT `.catch()` on the returned value. The
+    // comment above promises that resolution failure is non-fatal, and
+    // `.catch()` only kept that promise for a rejected Promise — it assumed the
+    // dep both returns a value and returns a thenable one. Measured, three of
+    // four failure modes escaped and would have 500'd the webhook:
+    //   rejected Promise   -> caught (the only case that worked)
+    //   synchronous throw  -> escaped: the throw happens before .catch attaches
+    //   null return        -> escaped: TypeError reading 'catch' of null
+    //   non-Promise return -> escaped: TypeError, .catch is not a function
+    // `await` in a try block handles all four, and also unwraps a plain
+    // (non-Promise) return so an injected double that answers synchronously is
+    // used rather than discarded.
+    let conversation_context = null;
+    try {
+      conversation_context =
+        (await runtimeDeps.buildConversationContext({
+          thread_key: threadKey || inboundFrom,
+          inbound_received_at: inboundReceivedAt || new Date().toISOString(),
+          supabase,
+          canonical_stage: stageBefore,
+          // The `lt` bound on created_at is exclusive, so the current inbound is
+          // usually outside the window already — but "usually" is not a guarantee
+          // when created_at is an insert timestamp, hence the explicit exclusion.
+          current_inbound_event_id: inboundEventId || providerMessageId || null,
+          burst_event_ids: Array.isArray(burstContext?.constituent_event_ids)
+            ? burstContext.constituent_event_ids
+            : [],
+        })) ?? null;
+    } catch {
+      // Non-fatal by contract: classify keeps its existing
+      // `context_status: unavailable` behaviour rather than failing the turn.
+      conversation_context = null;
+    }
 
     classification = await runtimeDeps.classify(message, conversationBrain, {
       heuristicOnly: true,
