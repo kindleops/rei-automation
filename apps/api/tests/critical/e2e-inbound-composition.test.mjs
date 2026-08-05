@@ -92,9 +92,15 @@ function conversationDatabase({ intervening_inbound = [] } = {}) {
 }
 
 /**
- * Silence everything downstream of classification. `classify` is deliberately
- * NOT overridden — the real classifier is the subject of this test, and
- * buildConversationContext is a direct import that cannot be stubbed at all.
+ * Silence everything downstream of classification. `classify` and
+ * `buildConversationContext` are deliberately NOT overridden — they are the
+ * subject of this test, so the real classifier and the real context builder run.
+ *
+ * Both ARE injectable (process-seller-inbound-message.js defaultDeps), so the
+ * guarantee here is the omission below, not an inability to stub. An earlier
+ * revision of this comment claimed buildConversationContext was a direct import
+ * that could not be stubbed; that stopped being true once the burst leg needed
+ * to double it, and a future reader must not rely on it.
  */
 function stubDownstream(supabase) {
   __setSellerInboundOrchestratorDeps({
