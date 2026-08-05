@@ -26,6 +26,7 @@ import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js
 import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
 import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 import {
+  activationScopeFromDescriptor,
   createSellerInboundBurstCoordinator,
   isSellerInboundBurstEnabled,
   resolveSellerInboundBurstMode,
@@ -1193,6 +1194,11 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   let seller_burst_enabled = runtimeDeps.isSellerInboundBurstEnabled
     ? runtimeDeps.isSellerInboundBurstEnabled()
     : seller_burst_mode === "enabled";
+  // Scope handed to the burst coordinator. Global activation asserts it via
+  // `enabled: true` (unchanged); internal_proof MUST carry the session's own
+  // bounds, because a bare global assertion in that mode would admit any open
+  // generation on the pinned thread — including one predating the session.
+  let seller_burst_activation_scope = null;
   let podio_business_writes_enabled = podio_sync_enabled && !seller_burst_enabled;
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
@@ -1331,24 +1337,41 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       runtimeDeps.isInternalTestPhone || isInternalTestPhone;
     if (isInternalPhoneImpl(inbound_from)) {
       try {
-        const loadSession =
-          runtimeDeps.loadActiveInternalProofSession ||
-          (await import("@/lib/domain/queue/internal-proof-session.js"))
-            .loadActiveInternalProofSession;
-        const session = await loadSession({});
-        if (session?.active) {
+        // Resolved through the shared activation authority rather than a local
+        // session load. That authority additionally honors `closed_at`, which
+        // parseInternalProofSession does not read — a closed session must not
+        // engage burst here any more than it may on the flush path.
+        const policy_module = await import(
+          "@/lib/domain/seller-flow/burst-flush-activation-policy.js"
+        );
+        const loadPolicy =
+          runtimeDeps.loadBurstFlushActivationPolicy ||
+          policy_module.loadBurstFlushActivationPolicy;
+        const policy = await loadPolicy({
+          supabase: runtimeDeps.getSupabaseClient?.() || null,
+          getSystemValue: runtimeDeps.getSystemValue || null,
+          // Reuse the mode this request already resolved. Resolving twice would
+          // let an injected/overridden mode and the raw env disagree, and the
+          // gate would then be deciding on a different mode than the one logged.
+          resolveMode: () => seller_burst_mode,
+        });
+        const scope = activationScopeFromDescriptor(
+          policy_module.toBurstFlushScopeDescriptor(policy)
+        );
+        if (scope.authorized) {
           seller_burst_enabled = true;
+          seller_burst_activation_scope = scope;
           podio_business_writes_enabled = false;
           safeInfo("textgrid.inbound_burst_internal_proof_engaged", {
             message_id: extracted.message_id,
             inbound_from,
-            session_id: session.session?.session_id || null,
+            session_id: scope.session_id || null,
           });
         } else {
           safeInfo("textgrid.inbound_burst_internal_proof_denied", {
             message_id: extracted.message_id,
             inbound_from,
-            reason: session?.reason || "no_active_session",
+            reason: scope.reason || policy?.reason || "no_active_session",
           });
         }
       } catch (session_error) {
@@ -1462,6 +1485,7 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       idempotency_key,
       seller_burst_enabled,
       seller_burst_mode,
+      seller_burst_activation_scope,
     };
   }
 
@@ -2262,7 +2286,12 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
               supabase: supabase_for_burst,
             }),
           worker_id: "textgrid_inbound",
-          enabled: true,
+          // internal_proof carries the session's bounds; global activation
+          // keeps asserting `enabled: true`. Never both, and never a bare
+          // global assertion while a scope exists.
+          ...(seller_burst_activation_scope
+            ? { activation_scope: seller_burst_activation_scope }
+            : { enabled: true }),
         });
 
         const orchestration_context = {
