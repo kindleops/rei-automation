@@ -40,6 +40,11 @@ test("the outbound property's street number is never a price", () => {
   assert.equal(price("its 8612 Oak Leaf Rd"), null);
   assert.equal(price("327 Pennsylvania"), null);
   assert.equal(price("I own 331 Pennsylvania"), null);
+  // A compass direction between the number and the street name pushed the
+  // street type out of the two-word lookahead, so 4157 survived as a price.
+  // Full coverage lives in monetary-address-direction-regression.test.mjs.
+  assert.equal(price("4157 S Main St"), null);
+  assert.equal(price("Do you still own 4157 S Main St?"), null);
 });
 
 // ── real prices must still extract ──────────────────────────────────────────
@@ -72,6 +77,19 @@ test("a currency symbol always wins over address adjacency", () => {
   // An explicit $ is monetary evidence, so the address-adjacency guard must not
   // fire. (A bare 327 would be discarded as a street number.)
   assert.equal(price("$327,000 Pennsylvania")?.amount, 327000);
+});
+
+test("the address guard never eats a per-unit price", async () => {
+  // "unit" is a street-type token, so this guard was discarding real per-unit
+  // money outright. Over-suppression is as damaging as under-suppression.
+  const { resolveAskingPriceSignal } = await import(
+    "@/lib/domain/seller-flow/monetary-understanding.js"
+  );
+  assert.equal(
+    resolveAskingPriceSignal("I want 300 per unit", { reference: 200000, now: NOW })
+      .asking_price?.value,
+    300000
+  );
 });
 
 // ── the 'alone' phrase must never suppress a live seller ────────────────────

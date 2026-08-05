@@ -71,12 +71,24 @@ test("street numbers are not money", () => {
   assert.equal(askingPrice("I own 331 Pennsylvania"), null);
 });
 
-test("KNOWN PRE-EXISTING GAP: bare years and ZIP codes still parse as amounts", () => {
-  // Documented, not fixed here. Both behave identically on pristine eeee5bd8,
-  // so this is not a regression — but it is a real defect and must not be
-  // mistaken for covered behaviour.
-  assert.equal(askingPrice("I bought it in 1998")?.amount, 1998);
+test("years and cued ZIP codes no longer parse as amounts", () => {
+  // Previously a documented gap on this line; now fixed, cue-based, in
+  // monetary-understanding.js. Full coverage lives in
+  // monetary-zip-year-regression.test.mjs.
+  assert.equal(askingPrice("I bought it in 1998"), null);
+  assert.equal(askingPrice("built in 1987"), null);
+  assert.equal(askingPrice("zip is 55407"), null);
+  assert.equal(askingPrice("Minneapolis, MN 55407"), null);
+});
+
+test("NARROWED GAP: a ZIP after a bare preposition still parses as an amount", () => {
+  // What remains open, stated precisely rather than deleted. Catching this
+  // needs a bare "in" cue, and "in" also precedes real money — suppressing on
+  // it would destroy "I'm interested in 95000" and "I put in 2000 for repairs".
+  // The trade is not worth it, so this case is knowingly NOT covered.
   assert.equal(askingPrice("we are in 55407")?.amount, 55407);
+  // Proof of what a bare-"in" rule would have cost:
+  assert.equal(askingPrice("I'm interested in 95000")?.amount, 95000);
 });
 
 test("legitimate asking prices still bind", () => {

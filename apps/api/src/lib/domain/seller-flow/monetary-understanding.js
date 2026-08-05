@@ -142,22 +142,111 @@ const STREET_TYPE_TOKENS = new Set([
 ]);
 
 /**
+ * Compass directions sit between the street number and the street name
+ * ("4157 S Main St"), pushing the street type outside a two-word window.
+ */
+const DIRECTION_TOKENS = new Set([
+  "n", "s", "e", "w", "ne", "nw", "se", "sw",
+  "north", "south", "east", "west",
+  "northeast", "northwest", "southeast", "southwest",
+]);
+
+/**
+ * A street number is never followed by a function word. "300 per unit" and
+ * "250 for the unit" are PRICES — but "unit" is a street-type token, so without
+ * this the address guard silently deletes real per-unit money.
+ */
+const NON_STREET_LEAD_TOKENS = new Set([
+  "per", "a", "an", "the", "each", "every", "for", "of", "in", "on", "at",
+  "to", "and", "or", "with", "por", "de", "del", "la", "el", "los", "las",
+  "un", "una", "cada", "y",
+]);
+
+/** Up to four following words; an ordinal ("3rd", "42nd") is a street name. */
+const ADDRESS_WORD_RE =
+  /^\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?\.?\s*([A-Za-zÀ-ÿ']+|\d{1,4}(?:st|nd|rd|th))?/i;
+
+/**
  * True when a bare number is positioned like a street number: immediately
- * followed by a street type ("4157 Pillsbury Ave") or by a capitalized proper
- * noun ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
+ * followed by a street type ("4157 Pillsbury Ave"), by a compass direction and
+ * then a street type ("4157 S Main St"), or by a capitalized proper noun
+ * ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
  * numbers carrying no monetary evidence at all.
  */
 function isAddressAdjacent(text, match) {
   const after = text.slice(match.index + match[0].length);
-  const next = /^\s*([A-Za-zÀ-ÿ']+)\.?\s*([A-Za-zÀ-ÿ']+)?/.exec(after);
+  const next = ADDRESS_WORD_RE.exec(after);
   if (!next) return false;
-  const first = String(next[1] || "");
-  const second = String(next[2] || "");
-  if (STREET_TYPE_TOKENS.has(first.toLowerCase())) return true;
-  if (STREET_TYPE_TOKENS.has(second.toLowerCase())) return true;
+  const all = [next[1], next[2], next[3], next[4]].filter(Boolean).map(String);
+  if (!all.length) return false;
+  // "300 per unit" is money, not 300 Unit Street.
+  if (NON_STREET_LEAD_TOKENS.has(all[0].toLowerCase())) return false;
+  // Skip exactly one leading compass direction, then look one word further —
+  // the direction is itself strong address evidence. Every other message keeps
+  // the original two-word window.
+  const words =
+    all.length > 1 && DIRECTION_TOKENS.has(all[0].toLowerCase())
+      ? all.slice(1, 4)
+      : all.slice(0, 2);
+  if (words.some((word) => STREET_TYPE_TOKENS.has(word.toLowerCase()))) return true;
+  const first = String(words[0] || "");
   // "327 Pennsylvania" — a capitalized word that is not a scale/quantity term.
   if (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/.test(first) && !SCALE_WORDS[first.toLowerCase()]) return true;
   return false;
+}
+
+// ─── postal codes and calendar years are not money ──────────────────────────
+// Both are suppressed ONLY on a textual cue. "55407" and a $55,407 asking price
+// are structurally identical, as are "1998" and $1,998 — a rule based on digit
+// count alone would silently eat real seller money, so the cue does the work.
+
+/** US state abbreviations that are never ordinary English words. */
+const UNAMBIGUOUS_STATE_ABBREVIATIONS = new Set([
+  "ak", "az", "ar", "ca", "ct", "dc", "fl", "ga", "il", "ia", "ks", "ky", "md",
+  "mi", "mn", "ms", "mo", "mt", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "ri",
+  "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
+]);
+
+const ZIP_CUE_RE =
+  /(?:^|[^a-z0-9])(?:zip|zipcode|postal|postcode|codigo postal|código postal)\s*(?:code)?\s*(?:is|are|=|:|es)?\s*$/i;
+/** "Minneapolis, MN 55407" — a comma makes any state abbreviation safe. */
+const COMMA_STATE_RE = /,\s*[A-Za-z]{2}\.?\s*$/;
+/** "Minneapolis MN 55407" — no comma, so require an UPPERCASE unambiguous state. */
+const BARE_STATE_RE = /(?:^|[^A-Za-z])([A-Z]{2})\.?\s*$/;
+
+/**
+ * True when a bare 5-digit number is cued as a postal code. Deliberately does
+ * NOT treat a bare preposition as a cue: "I'm interested in 95000" and "would
+ * be interested in 95k" are price statements, so "in 55407" stays money.
+ */
+function isPostalCode(text, match, digits) {
+  if (!/^\d{5}$/.test(String(digits))) return false;
+  const before = text.slice(0, match.index);
+  if (ZIP_CUE_RE.test(before)) return true;
+  if (COMMA_STATE_RE.test(before)) return true;
+  const bare = BARE_STATE_RE.exec(before);
+  return Boolean(bare && UNAMBIGUOUS_STATE_ABBREVIATIONS.has(bare[1].toLowerCase()));
+}
+
+const YEAR_DIRECT_CUE_RE =
+  /(?:^|[^a-z0-9])(?:since|circa|est|established|year|built|build|rebuilt|bought|purchased|acquired|remodeled|renovated|rehabbed|updated|replaced|constructed|inherited|desde)\.?\s*(?:in|of|en)?\s*$/i;
+/** A preposition alone is not a year cue — it needs a temporal subject nearby. */
+const YEAR_PREP_RE = /(?:^|[^a-z0-9])(?:in|of|en|de|del)\s*$/i;
+const YEAR_SUBJECT_RE =
+  /(?:built|build|rebuilt|bought|buy|purchas|acquir|remodel|renovat|rehab|updat|replac|redone|construct|inherit|moved|lived|owned|roof)/i;
+
+/**
+ * True when a bare 4-digit number is cued as a calendar year ("built in 1987",
+ * "since 1998"). The 1900-2099 bound is only a precondition; the cue decides.
+ * A bare preposition is NOT sufficient on its own — "I put in 2000 for repairs"
+ * is a real repair figure and must survive.
+ */
+function isCalendarYear(text, match, digits, value) {
+  if (!/^\d{4}$/.test(String(digits))) return false;
+  if (!(value >= 1900 && value <= 2099)) return false;
+  const before = text.slice(0, match.index);
+  if (YEAR_DIRECT_CUE_RE.test(before)) return true;
+  return YEAR_PREP_RE.test(before) && YEAR_SUBJECT_RE.test(before.slice(-40));
 }
 
 /** Extract every numeric token (digits or words) with its position + suffix scale. */
@@ -188,6 +277,12 @@ function tokenizeAmounts(text) {
     // type is an address, not a price.
     if (!suffix && !hasCurrency && !hadThousandsSeparator && isAddressAdjacent(text, match)) {
       continue;
+    }
+    // A postal code ("zip is 55407", "Minneapolis, MN 55407") and a calendar
+    // year ("built in 1987") are not money either.
+    if (!suffix && !hasCurrency && !hadThousandsSeparator) {
+      if (isPostalCode(text, match, match[1])) continue;
+      if (isCalendarYear(text, match, match[1], value)) continue;
     }
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
