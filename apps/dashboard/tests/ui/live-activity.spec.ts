@@ -28,7 +28,7 @@ test.describe('Map Activity command rail', () => {
   })
 
   test('renders minimal rail with accurate header and no static placeholder', async ({ page }) => {
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     const rail = page.locator('.nx-icm-activity.is-minimal')
     await expect(rail).toBeVisible({ timeout: 30000 })
@@ -50,7 +50,7 @@ test.describe('Map Activity command rail', () => {
       window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, displayMode: 'compact', visible: true, speed: 'paused' }))
     }, LIVE_ACTIVITY_SETTINGS_STORAGE_KEY)
 
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     const rail = page.locator('.nx-icm-activity.is-compact')
     await expect(rail).toBeVisible({ timeout: 30000 })
@@ -66,7 +66,7 @@ test.describe('Map Activity command rail', () => {
       window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, displayMode: 'compact', visible: true }))
     }, LIVE_ACTIVITY_SETTINGS_STORAGE_KEY)
 
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     const rail = page.locator('.nx-icm-activity.is-compact')
     await expect(rail).toBeVisible({ timeout: 30000 })
@@ -83,7 +83,7 @@ test.describe('Map Activity command rail', () => {
       window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, displayMode: 'expanded', visible: true }))
     }, LIVE_ACTIVITY_SETTINGS_STORAGE_KEY)
 
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     const rail = page.locator('.nx-icm-activity.is-expanded')
     await expect(rail).toBeVisible({ timeout: 30000 })
@@ -99,7 +99,7 @@ test.describe('Map Activity command rail', () => {
       window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, displayMode: 'docked', visible: true }))
     }, LIVE_ACTIVITY_SETTINGS_STORAGE_KEY)
 
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     const rail = page.locator('.nx-icm-activity.is-docked')
     await expect(rail).toBeVisible({ timeout: 30000 })
@@ -121,7 +121,7 @@ test.describe('Map Activity command rail', () => {
       window.localStorage.setItem(storageKey, JSON.stringify({ ...parsed, displayMode: 'docked', visible: true }))
     }, LIVE_ACTIVITY_SETTINGS_STORAGE_KEY)
 
-    await page.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded' })
 
     await expect(page.locator('.nx-icm-activity.is-docked')).toHaveCount(0)
     const expanded = page.locator('.nx-icm-activity.is-expanded, .nx-icm-activity.is-minimal, .nx-icm-activity.is-compact')
