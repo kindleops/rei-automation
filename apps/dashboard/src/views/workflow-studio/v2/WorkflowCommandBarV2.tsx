@@ -66,7 +66,9 @@ export const WorkflowCommandBarV2 = ({
     <header className="wfs2-cmd">
       <div className="wfs2-cmd__identity">
         <span className="wfs2-cmd__kicker">Workflow Studio V2</span>
-        <h1>{workflow?.name ?? 'Select or create a workflow'}</h1>
+        {/* R16.5 — see WorkflowStudio.tsx: the rail carries this route's <h1>
+            because this bar does not render at every viewport. */}
+        <h2>{workflow?.name ?? 'Select or create a workflow'}</h2>
         <div className="wfs2-cmd__chips">
           <span className={cls('wfs2__badge', workflow && `is-${workflow.status}`)}>
             {workflow?.operational_mode ?? workflow?.status ?? 'draft'}

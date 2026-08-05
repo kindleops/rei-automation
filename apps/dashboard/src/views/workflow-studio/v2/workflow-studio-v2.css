@@ -421,7 +421,7 @@
   min-width: 0;
 }
 
-.wfs2-cmd__identity h1 {
+.wfs2-cmd__identity h2 {
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;

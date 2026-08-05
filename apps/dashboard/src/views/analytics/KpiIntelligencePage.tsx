@@ -89,7 +89,9 @@ export const KpiIntelligencePage = () => {
   const Section = ({ title, children, className, action }: any) => (
     <section className={`nx-card-section ${className || ''}`}>
       <header className="nx-card-section__header">
-        <h3>{title}</h3>
+        {/* R16.5 — these are the page's top-level sections, directly under the
+            <h1>. As <h3> they made /analytics skip a level. */}
+        <h2>{title}</h2>
         {action}
       </header>
       <div className="nx-card-section__body">

@@ -164,7 +164,10 @@ const WorkflowStudioLegacy = ({
       <header className="wfs-topbar">
         <div>
           <span className="wfs-kicker">Inbox</span>
-          <h1>Workflow Studio</h1>
+          {/* R16.5: the rail owns the <h1> for this route (shell-nav
+              `ownsHeading` is false here) because this header is not rendered
+              at every viewport — /workflow-studio had 0 <h1> at mobile. */}
+          <h2>Workflow Studio</h2>
         </div>
         <div className="wfs-topbar__metrics">
           <span><strong>{workflows.length}</strong> workflows</span>

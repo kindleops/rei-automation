@@ -58,7 +58,7 @@ export const SHELL_NAV_ITEMS: ShellNavItem[] = [
   { path: '/buyer-match', ownsHeading: true, label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match', group: 'Investigate' },
   { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'layers', shortcut: 'O', room: 'Comp Intelligence', group: 'Investigate' },
   { path: '/entity-graph', ownsHeading: true, label: 'Entity Graph', icon: 'grid', shortcut: 'E', room: 'Entity Graph', group: 'Investigate' },
-  { path: '/workflow-studio', ownsHeading: true, label: 'Workflow Studio', icon: 'command', shortcut: 'W', room: 'Workflow Studio', group: 'Build' },
+  { path: '/workflow-studio', label: 'Workflow Studio', icon: 'command', shortcut: 'W', room: 'Workflow Studio', group: 'Build' },
 ]
 
 export const findShellNavItem = (path: string): ShellNavItem | undefined =>

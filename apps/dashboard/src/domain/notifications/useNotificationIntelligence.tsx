@@ -138,11 +138,17 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
     () => 0,
   )
 
-  /** Drop anything the operator has already finished with, plus live snoozes. */
+  /**
+   * Drop anything the operator has already finished with, plus live snoozes.
+   *
+   * Read-only on purpose. This runs inside a `useMemo` during render, and the
+   * store is external state — writing to it here (the old code retired expired
+   * snoozes inline) would notify every subscriber mid-render. `isSuppressed`
+   * already treats an elapsed snooze as not-suppressed, so the filter is
+   * correct without pruning; pruning is housekeeping and happens in `refresh`.
+   */
   const applySuppression = useCallback((items: NotificationEvent[]): NotificationEvent[] => {
     const now = Date.now()
-    // Expired snoozes retire here, through the store's single writer.
-    storePruneExpired()
     return items.filter((item) => {
       if (isSuppressed(item.id, now)) return false
       // The server already excludes dismissed rows and live snoozes, but a
@@ -178,6 +184,9 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
 
   const refresh = useCallback(async (filters?: NotificationListFilters) => {
     if (filters) filtersRef.current = { ...filtersRef.current, ...filters }
+    // Housekeeping, outside render: retire elapsed snoozes and anything past
+    // the TTL so the store cannot grow without bound.
+    storePruneExpired()
 
     setLoading((prev) => prev || initialLoadRef.current)
     const result = await fetchNotifications(filtersRef.current)
