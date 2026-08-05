@@ -344,16 +344,31 @@ test("a directional word after a priced number does not turn it into an address"
   }
 });
 
-test("PRE-EXISTING LIMITATION: a bare number followed by a direction is not read as money", () => {
-  // Characterization, NOT a regression. "I want 300 East of the drive" returns
-  // null — and it returned null on eeee5bd8 too, verified by loading the
-  // baseline module via `git show eeee5bd8:<file>` and diffing. A bare
-  // sub-thousand number with no currency symbol, thousands separator or scale
-  // suffix does not qualify as an asking price in either tree, independently of
-  // the direction skip this PR added.
-  //
-  // Pinned so the compass-direction logic cannot later be blamed for it, and so
-  // that if the qualification rule is ever loosened this test reports it.
+test("a directional phrase after a scaled price is preserved", () => {
+  // Three-way measured (eeee5bd8 / 41edd220 / HEAD) with a reference supplied,
+  // which is the form the negotiation path uses:
+  //   "I want 300 East of the drive"  300000 -> null -> 300000
+  // The middle column is the direction-skip regression; the right column is
+  // bdf58c1d fixing it. Pinned so it cannot silently regress a second time.
+  for (const message of [
+    "I want 300 East of the drive",
+    "I want 300 North of town",
+    "I want 300 west of here",
+  ]) {
+    assert.equal(
+      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      300000,
+      `${JSON.stringify(message)} is a price with a direction phrase after it`
+    );
+  }
+});
+
+test("PRE-EXISTING: an unscaled bare number is not money, with or without a direction", () => {
+  // Narrower than an earlier revision of this test claimed. WITHOUT a reference
+  // these are null on eeee5bd8, on 41edd220 and on HEAD alike — a bare
+  // sub-thousand number carrying no currency symbol, thousands separator or
+  // scale suffix has never qualified. That is a property of the qualification
+  // rule, not of the direction skip.
   for (const message of [
     "I want 300 East of the drive",
     "I want 300 North of town",
@@ -362,7 +377,52 @@ test("PRE-EXISTING LIMITATION: a bare number followed by a direction is not read
     assert.equal(
       resolveAskingPriceSignal(message, {})?.asking_price ?? null,
       null,
-      `CURRENT BEHAVIOUR (and baseline behaviour) for ${JSON.stringify(message)}`
+      `CURRENT AND BASELINE BEHAVIOUR for ${JSON.stringify(message)} with no reference`
+    );
+  }
+});
+
+test("KNOWN DEFECT: a price ending in a capitalized compass direction is dropped (residual of the direction skip, PR #66)", () => {
+  // Characterizes CURRENT behaviour so it flips loudly when fixed.
+  //
+  // MEASURED REGRESSION, still live after bdf58c1d. With a reference supplied:
+  //   "I want 300 East"       eeee5bd8 300000 -> HEAD null
+  //   "I want 300 South"      eeee5bd8 300000 -> HEAD null
+  //   "I'd take 250 North"    eeee5bd8 250000 -> HEAD null
+  //   "my price is 300 East"  eeee5bd8 300000 -> HEAD null
+  //
+  // Root cause is the capitalized-proper-noun branch of isAddressAdjacent
+  // (/^[A-ZÀ-Ý][a-zà-ÿ]{2,}$/), the same branch behind the "Net" family: a
+  // capitalized full-word direction at the end of the message looks like a
+  // street name because nothing follows it to disambiguate. bdf58c1d fixed the
+  // case where a phrase FOLLOWS the direction; the trailing form is untouched.
+  //
+  // Bounded honestly — these do NOT regress, which is what isolates the trigger
+  // to a capitalized, multi-letter, trailing direction:
+  //   "I want 300 west" (lowercase)          300000, unchanged
+  //   "I want 300 E" (single letter)         300000, unchanged
+  //   "I want 300 South of the river"        300000, unchanged
+  //   "I want 300 East side"                 300000, unchanged
+  for (const message of ["I want 300 East", "I want 300 South", "I'd take 250 North", "my price is 300 East"]) {
+    assert.equal(
+      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price ?? null,
+      null,
+      `CURRENT BEHAVIOUR (regressed from baseline) for ${JSON.stringify(message)}`
+    );
+  }
+
+  // The bounding cases must keep working — if one of these breaks, the fix for
+  // the above over-corrected.
+  for (const [message, expected] of [
+    ["I want 300 west", 300000],
+    ["I want 300 E", 300000],
+    ["I want 300 South of the river", 300000],
+    ["I want 300 East side", 300000],
+  ]) {
+    assert.equal(
+      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      expected,
+      `${JSON.stringify(message)} must keep extracting`
     );
   }
 });
