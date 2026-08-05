@@ -3312,10 +3312,11 @@ const ASKING_PRICE_PATTERNS = [
   // Negation-guarded: "not worth 200k" / "isn't worth 50k" are refusals, not
   // asking prices.
   /\b(?<!\b(?:not|isn't|isnt|ain't|aint|never|wasn't|wasnt)\s)worth\s+\$?\s*\d[\d,.]*/i,
-  // Same money-shape requirement on at least one side of the range, so
+  // At least one side must be more than a bare one-or-two-digit number, so
   // "between 3 and 4" (a time window) is not a price while
-  // "between $90,000 and $100,000" and "between 90k and 100k" still are.
-  /\bbetween\s+(?:\$?\s*(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,})\s+and\s+\$?\s*\d[\d,.]*|\$?\s*\d[\d,.]*\s+and\s+\$?\s*(?:\$\s*\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)?|\d[\d,.]*(?:\.\d+)?\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{4,}))/i,
+  // "between $90,000 and $100,000", "between 90k and 100k" and
+  // "between 240 and 260" (REI shorthand for 240k-260k) all still are.
+  /\bbetween\s+(?:\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,})\s+and\s+\$?\s*[\d,.]+|\$?\s*[\d,.]+\s+and\s+\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,}))/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
   /\bmi\s+precio\s+es\b/i,
@@ -3467,22 +3468,26 @@ export function parseSellerAskingPrice(message) {
   let evidence = null;
 
   const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
-  // Same money-shape requirement the ASKING_PRICE_PATTERNS gate applies to
-  // "at"/"around"/"about". This parser is a THIRD, independent consumer: it
-  // sets price_parse without consulting that gate, so "between 3 and 4" — a
-  // time window — was still read as a $3 asking price after the gate was
-  // repaired. At least one side must carry a scale suffix, an explicit $,
-  // a thousands separator, or 4+ digits.
-  const between_is_monetary = Boolean(
+  // This parser is a THIRD, independent consumer of the price signal: it sets
+  // price_parse without consulting ASKING_PRICE_PATTERNS, so "between 3 and 4"
+  // — a time window — was still read as a $3 asking price after that gate was
+  // repaired.
+  //
+  // The test is what makes a range a CLOCK, not what makes it money. Requiring
+  // a money shape was too strict and rejected "Between 240 and 260", which in
+  // REI SMS is a 240k-260k range — the same convention the bare-"250" comment
+  // in scalePriceToken notes. A range is a clock only when BOTH sides are bare
+  // one-or-two-digit numbers with no currency marker, suffix or separator;
+  // anything larger or qualified is a price.
+  const looks_like_clock_side = (num, suffix) =>
+    !suffix && !/[.,]/.test(String(num)) && String(num).replace(/\D/g, "").length <= 2;
+  const between_is_clock_range = Boolean(
     between &&
-      (between[2] ||
-        between[4] ||
-        /\$/.test(between[0]) ||
-        /\d,\d{3}\b/.test(between[0]) ||
-        String(between[1]).replace(/\D/g, "").length >= 4 ||
-        String(between[3]).replace(/\D/g, "").length >= 4)
+      !/\$/.test(between[0]) &&
+      looks_like_clock_side(between[1], between[2]) &&
+      looks_like_clock_side(between[3], between[4])
   );
-  if (between && between_is_monetary) {
+  if (between && !between_is_clock_range) {
     const lo = scalePriceToken(between[1], between[2]);
     const hi = scalePriceToken(between[3], between[4]);
     if (lo != null && hi != null) {
@@ -3591,7 +3596,16 @@ function scalePriceToken(numStr, suffix) {
   // most common way a Spanish-speaking seller states a price. The exact token
   // must be checked BEFORE the generic million branch, which it prefixes.
   // monetary-understanding.js already had this right (mil: 1_000).
-  else if (s === "mil") val *= 1000;
+  else if (s === "mil") {
+    // "150,000 mil" is a Spanish speaker writing the magnitude twice — it means
+    // 150 thousand, and multiplying gave $150,000,000. The arithmetic was right
+    // on a redundant input; the reading was wrong. Declining to multiply when
+    // the base ALREADY carries thousands magnitude needs no guess about which
+    // magnitude was meant, so it stays a rule rather than a disambiguation:
+    // "mil" after a thousands-scale number is redundant, not multiplicative.
+    const base_is_already_thousands = /[.,]\d{3}\b/.test(String(numStr)) || val >= 1000;
+    if (!base_is_already_thousands) val *= 1000;
+  }
   else if (s.startsWith("m")) val *= 1000000;
   // bare "250" in "no less than 250" often means 250k in REI SMS — leave as-is if < 1000 without suffix
   return val;

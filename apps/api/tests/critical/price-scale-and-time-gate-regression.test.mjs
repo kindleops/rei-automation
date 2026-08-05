@@ -60,6 +60,17 @@ test("the other scale suffixes are unchanged by the mil fix", async () => {
   assert.equal(await priceOf("300 thousand"), 300_000);
 });
 
+test("'mil' after an already-thousands base is redundant, not multiplicative", async () => {
+  // "150,000 mil" is the magnitude written twice. Multiplying was arithmetically
+  // correct on a redundant input and wrong on intent — it produced $150,000,000.
+  // The guard needs no guess about which magnitude was meant: the base carries it.
+  assert.equal(await priceOf("150,000 mil"), 150_000);
+  assert.equal(await priceOf("200,000 mil"), 200_000);
+  // …while a small base still scales, which is the common form.
+  assert.equal(await priceOf("150 mil"), 150_000);
+  assert.equal(await priceOf("2 mil"), 2_000);
+});
+
 // ── Blocker 2: a clock time is not a price ─────────────────────────────────
 
 const CLOCK_PHRASES = [
@@ -124,12 +135,31 @@ for (const text of [
 
 // ── The independent range parser, which the gate does not cover ────────────
 
-test("the between-range parser applies the same money-shape requirement", async () => {
-  // A bare numeric range is a time window, not a price range.
+test("a between-range is a clock only when BOTH sides are bare 1-2 digit numbers", async () => {
+  // Clock windows.
   assert.equal(await priceOf("between 3 and 4"), null);
   assert.equal(await priceOf("between 2 and 5"), null);
-  // Money-shaped ranges on either side still parse.
+  assert.equal(await priceOf("call between 2 and 4"), null);
+  assert.equal(await priceOf("between 10 and 12"), null);
+  // Money-shaped ranges.
   assert.equal(await priceOf("between 90k and 100k"), 90_000);
   assert.equal(await priceOf("between $90,000 and $100,000"), 90_000);
   assert.equal(await priceOf("between 90000 and 100000"), 90_000);
+});
+
+test("REI bare-hundreds ranges are prices, not clock windows", async () => {
+  // Regression guard on my own first attempt at the rule above. Requiring the
+  // range to "look like money" was too strict: "Between 240 and 260" is REI
+  // shorthand for a 240k-260k range — the same convention scalePriceToken notes
+  // for a bare "250" — and rejecting it silently dropped a stated asking price.
+  // The distinguisher is smallness, not money-shape.
+  for (const text of ["Between 240 and 260", "between 240 and 260", "between 100 and 120"]) {
+    const result = await classify(text, null, { heuristicOnly: true });
+    assert.equal(
+      result.primary_intent,
+      "asking_price_provided",
+      `${text} must remain a stated price range`
+    );
+    assert.ok((result.price_parse?.value ?? 0) > 0, `${text} must carry a price value`);
+  }
 });
