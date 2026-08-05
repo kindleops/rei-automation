@@ -18,9 +18,15 @@ import {
   BURST_FLUSH_ACTIVATION_SCOPES,
   BURST_FLUSH_ACTIVATION_REASONS as R,
   resolveBurstFlushActivationPolicy,
+  toBurstFlushScopeDescriptor,
+  isBurstWithinFlushScope,
   isBurstAdmittedByActivationPolicy,
   loadBurstFlushActivationPolicy,
 } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
+import {
+  INTERNAL_PROOF_SESSION_MAX_MINUTES,
+  parseInternalProofSession,
+} from "@/lib/domain/queue/internal-proof-session.js";
 
 const PINNED_RECIPIENT = "+16128072000";
 const PINNED_SENDER = "+16128060495";
@@ -99,7 +105,7 @@ test("mode: unset env resolves to disabled with a hard no-op", () => {
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
   assert.equal(policy.scope, BURST_FLUSH_ACTIVATION_SCOPES.NONE);
-  assert.equal(policy.reason, R.DISABLED_NOOP);
+  assert.equal(policy.reason, R.MODE_DISABLED);
   assert.equal(policy.allowed_thread_key, null);
   assert.equal(policy.received_not_before, null);
   assert.equal(policy.received_not_after, null);
@@ -152,7 +158,7 @@ test("disabled: even a perfectly matching internal burst is denied", () => {
   const verdict = isBurstAdmittedByActivationPolicy({ policy, burst: burst() });
   assert.equal(verdict.admitted, false);
   assert.equal(verdict.reason, R.NOT_ACTIVATED);
-  assert.equal(verdict.policy_reason, R.DISABLED_NOOP);
+  assert.equal(verdict.policy_reason, R.MODE_DISABLED);
 });
 
 // ── internal_proof: session resolution ──────────────────────────────────────
@@ -236,7 +242,7 @@ test("internal_proof: an active session is thread-scoped and carries its OWN win
   assert.equal(policy.scope, BURST_FLUSH_ACTIVATION_SCOPES.THREAD);
 });
 
-test("internal_proof: a throwing session parser is alertable, not permissive", () => {
+test("internal_proof: a throwing session parser is fatal, not permissive", () => {
   const policy = resolveBurstFlushActivationPolicy({
     mode: BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF,
     session_raw: JSON.stringify(activeSession()),
@@ -247,11 +253,11 @@ test("internal_proof: a throwing session parser is alertable, not permissive", (
   });
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.alertable, true);
+  assert.equal(policy.fatal, true);
   assert.match(policy.reason, /^activation_policy_resolution_failed:boom$/);
 });
 
-test("mode resolution that throws is alertable and disabled", () => {
+test("mode resolution that throws is fatal and disabled", () => {
   const policy = resolveBurstFlushActivationPolicy({
     now: NOW,
     resolveMode: () => {
@@ -260,7 +266,7 @@ test("mode resolution that throws is alertable and disabled", () => {
   });
   assert.equal(policy.mode, BURST_FLUSH_ACTIVATION_MODES.DISABLED);
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.alertable, true);
+  assert.equal(policy.fatal, true);
 });
 
 // ── THE INCIDENT: the preserved 2026-08-03 burst ────────────────────────────
@@ -475,7 +481,7 @@ test("loader: internal_proof reads the session and resolves it", async () => {
   assert.equal(policy.proof_session_id, session.session_id);
 });
 
-test("loader: a failing session lookup is alertable and never global", async () => {
+test("loader: a failing session lookup is fatal and never global", async () => {
   const policy = await loadBurstFlushActivationPolicy({
     env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
     now: NOW,
@@ -487,8 +493,9 @@ test("loader: a failing session lookup is alertable and never global", async () 
   assert.equal(policy.may_scan, false);
   assert.equal(policy.may_claim, false);
   assert.equal(policy.scope, BURST_FLUSH_ACTIVATION_SCOPES.NONE);
-  assert.equal(policy.alertable, true);
-  assert.match(policy.reason, /^activation_policy_resolution_failed:supabase_down$/);
+  assert.equal(policy.fatal, true);
+  assert.equal(policy.reason, R.SESSION_LOOKUP_FAILED);
+  assert.equal(policy.error_message, "supabase_down");
 });
 
 test("loader: no session source supplied fails closed rather than reading a stale cache", async () => {
@@ -497,8 +504,9 @@ test("loader: no session source supplied fails closed rather than reading a stal
     now: NOW,
   });
   assert.equal(policy.may_claim, false);
-  assert.equal(policy.alertable, true);
-  assert.match(policy.reason, /session_source_unavailable/);
+  assert.equal(policy.fatal, true);
+  assert.equal(policy.reason, R.SESSION_LOOKUP_FAILED);
+  assert.equal(policy.error_message, "session_source_unavailable");
 });
 
 test("loader: supabase path reads system_control directly (cache-bypassing)", async () => {
@@ -525,6 +533,288 @@ test("loader: supabase path reads system_control directly (cache-bypassing)", as
   assert.deepEqual(calls, ["system_control", "key=internal_proof_session"]);
   assert.equal(policy.may_claim, true);
   assert.equal(policy.proof_session_id, session.session_id);
+});
+
+// ── fatal vs quiet ──────────────────────────────────────────────────────────
+
+test("fatal: a lookup failure is fatal and NEVER collapses to session_not_configured", () => {
+  // The Incident-A shape: a Supabase read error rendering as "the operator
+  // hasn't started a session" gives a cron reporting clean idle ticks forever
+  // while the subsystem is down. These two must be distinguishable.
+  const lookup_failed = { fatal: true };
+  return loadBurstFlushActivationPolicy({
+    env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
+    now: NOW,
+    getSystemValue: async () => {
+      throw new Error("ECONNRESET");
+    },
+  }).then(async (broken) => {
+    assert.equal(broken.fatal, lookup_failed.fatal);
+    assert.equal(broken.reason, R.SESSION_LOOKUP_FAILED);
+    assert.equal(broken.error_message, "ECONNRESET");
+    assert.equal(broken.may_scan, false);
+
+    const quiet = await loadBurstFlushActivationPolicy({
+      env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
+      now: NOW,
+      getSystemValue: async () => null,
+    });
+    assert.equal(quiet.fatal, false);
+    assert.equal(quiet.reason, "session_not_configured");
+    assert.equal(quiet.may_scan, false);
+
+    // Same denial, different operational meaning — that is the whole point.
+    assert.notEqual(broken.reason, quiet.reason);
+    assert.notEqual(broken.fatal, quiet.fatal);
+  });
+});
+
+test("fatal: classification matrix — quiet states are quiet, thrown states are fatal", () => {
+  const quiet = [
+    ["mode_disabled", resolveBurstFlushActivationPolicy({ env: {}, now: NOW })],
+    [
+      "session_not_configured",
+      resolveBurstFlushActivationPolicy({
+        mode: BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF,
+        session_raw: null,
+        now: NOW,
+      }),
+    ],
+    [
+      "session_expired",
+      policyFor(activeSession({ expires_at: "2026-08-05T11:59:00.000Z" })),
+    ],
+    ["session_recipient_not_pinned", policyFor(activeSession({ recipient: OTHER_INTERNAL }))],
+    ["session_closed", policyFor(activeSession({ closed_at: "2026-08-05T11:58:00.000Z" }))],
+  ];
+  for (const [label, policy] of quiet) {
+    assert.equal(policy.fatal, false, `${label} must be quiet`);
+    assert.equal(policy.may_scan, false, label);
+  }
+
+  const fatal = [
+    [
+      "parser throws",
+      resolveBurstFlushActivationPolicy({
+        mode: BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF,
+        session_raw: JSON.stringify(activeSession()),
+        now: NOW,
+        parseSession: () => {
+          throw new Error("x");
+        },
+      }),
+    ],
+    [
+      "mode resolution throws",
+      resolveBurstFlushActivationPolicy({
+        now: NOW,
+        resolveMode: () => {
+          throw new Error("y");
+        },
+      }),
+    ],
+  ];
+  for (const [label, policy] of fatal) {
+    assert.equal(policy.fatal, true, `${label} must be fatal`);
+    assert.equal(policy.may_scan, false, label);
+  }
+});
+
+// ── shared scope predicate ──────────────────────────────────────────────────
+
+test("scope descriptor: ratified shape, with the session's own window and no grace", () => {
+  const session = activeSession();
+  const d = toBurstFlushScopeDescriptor(policyFor(session));
+  assert.equal(d.ok, true);
+  assert.equal(d.mode, BURST_FLUSH_ACTIVATION_MODES.INTERNAL_PROOF);
+  assert.equal(d.allowed, true);
+  assert.equal(d.fatal, false);
+  assert.equal(d.reason, R.INTERNAL_PROOF_SESSION_ACTIVE);
+  assert.equal(d.scope.kind, BURST_FLUSH_ACTIVATION_SCOPES.THREAD);
+  assert.deepEqual(d.scope.thread_keys, [PINNED_RECIPIENT]);
+  // No grace window: the floor IS the session's created_at.
+  assert.equal(d.scope.min_first_received_at, session.created_at);
+  assert.equal(d.scope.max_first_received_at, session.expires_at);
+  assert.equal(d.scope.min_created_at, session.created_at);
+  assert.equal(d.scope.session_id, session.session_id);
+  assert.equal(d.scope.session_created_at, session.created_at);
+  assert.equal(d.scope.session_expires_at, session.expires_at);
+  // Every ratified key present.
+  for (const key of [
+    "kind", "thread_keys", "min_first_received_at", "max_first_received_at",
+    "min_created_at", "session_id", "session_created_at", "session_expires_at",
+  ]) {
+    assert.ok(key in d.scope, `missing ratified key ${key}`);
+  }
+});
+
+test("scope descriptor: disabled and fatal policies project to a closed scope", () => {
+  const off = toBurstFlushScopeDescriptor(resolveBurstFlushActivationPolicy({ env: {}, now: NOW }));
+  assert.equal(off.ok, true, "disabled is a determined answer, so ok");
+  assert.equal(off.allowed, false);
+  assert.equal(off.fatal, false);
+  assert.equal(off.scope.kind, BURST_FLUSH_ACTIVATION_SCOPES.NONE);
+  assert.deepEqual(off.scope.thread_keys, []);
+
+  const broken = toBurstFlushScopeDescriptor(
+    resolveBurstFlushActivationPolicy({
+      now: NOW,
+      resolveMode: () => {
+        throw new Error("z");
+      },
+    })
+  );
+  assert.equal(broken.ok, false);
+  assert.equal(broken.allowed, false);
+  assert.equal(broken.fatal, true);
+
+  // A null/garbage policy must never project to an open scope.
+  for (const bad of [null, undefined, {}, "nope", 7]) {
+    const d = toBurstFlushScopeDescriptor(bad);
+    assert.equal(d.allowed, false, JSON.stringify(bad));
+    assert.notEqual(d.scope.kind, BURST_FLUSH_ACTIVATION_SCOPES.GLOBAL, JSON.stringify(bad));
+    assert.equal(isBurstWithinFlushScope({ burst: burst(), scope: d.scope }), false);
+  }
+});
+
+test("scope predicate: it is THE rule — admission and filtering agree on every case", () => {
+  const policy = policyFor(activeSession());
+  const scope = toBurstFlushScopeDescriptor(policy).scope;
+  const candidates = [
+    PRESERVED_INCIDENT_BURST,
+    burst(),
+    burst({ thread_key: REAL_SELLER }),
+    burst({ thread_key: OTHER_INTERNAL }),
+    burst({ thread_key: null }),
+    burst({ created_at: null }),
+    burst({ created_at: "nope" }),
+    burst({ first_received_at: null }),
+    burst({ first_received_at: "2026-08-05T13:00:00.001Z" }),
+    burst({ first_received_at: "2026-08-05T12:10:00.000Z", created_at: "2026-08-05T11:00:00.000Z" }),
+    burst({ first_received_at: "2026-08-05T12:10:00.000Z", created_at: "2026-08-05T13:30:00.000Z" }),
+    null,
+  ];
+  for (const candidate of candidates) {
+    const admitted = isBurstAdmittedByActivationPolicy({ policy, burst: candidate }).admitted;
+    const within = isBurstWithinFlushScope({ burst: candidate, scope });
+    assert.equal(
+      admitted,
+      within,
+      `divergence between admission and scope filter for ${JSON.stringify(candidate)}`
+    );
+  }
+});
+
+test("scope predicate: denies on any missing or unparseable scope field", () => {
+  const good = toBurstFlushScopeDescriptor(policyFor(activeSession())).scope;
+  const b = burst({ first_received_at: "2026-08-05T12:10:00.000Z", created_at: "2026-08-05T12:10:00.000Z" });
+  assert.equal(isBurstWithinFlushScope({ burst: b, scope: good }), true, "baseline admits");
+
+  const mutations = [
+    ["no scope", null],
+    ["empty thread_keys", { ...good, thread_keys: [] }],
+    ["thread_keys not an array", { ...good, thread_keys: PINNED_RECIPIENT }],
+    ["min_first missing", { ...good, min_first_received_at: null }],
+    ["max_first missing", { ...good, max_first_received_at: null }],
+    ["min_created missing", { ...good, min_created_at: null }],
+    ["min_first unparseable", { ...good, min_first_received_at: "soon" }],
+    ["inverted window", { ...good, min_first_received_at: good.max_first_received_at, max_first_received_at: good.min_first_received_at }],
+    ["unknown kind", { ...good, kind: "everything" }],
+  ];
+  for (const [label, scope] of mutations) {
+    assert.equal(isBurstWithinFlushScope({ burst: b, scope }), false, label);
+  }
+});
+
+// ── the structural-sufficiency invariant (the load-bearing beam) ────────────
+
+test("INVARIANT: the 240-minute cap is what makes the time floor sufficient", () => {
+  // Teammate 3's argument: an ACTIVE session's created_at can never be more
+  // than INTERNAL_PROOF_SESSION_MAX_MINUTES old, because the parser demands
+  // expires_at > now AND expires_at - created_at <= that cap. If anyone raises
+  // the cap, the floor widens and this test must fail loudly.
+  assert.equal(INTERNAL_PROOF_SESSION_MAX_MINUTES, 240);
+
+  const base = {
+    session_id: "s",
+    campaign_id: PINNED_CAMPAIGN,
+    queue_row_id: "q",
+    recipient: PINNED_RECIPIENT,
+    sender: PINNED_SENDER,
+  };
+  let worst_floor_age_minutes = 0;
+  let active_count = 0;
+  for (let age = 1; age <= 600; age += 1) {
+    for (const ahead of [1, 60, 239, 240, 241]) {
+      const raw = JSON.stringify({
+        ...base,
+        created_at: new Date(NOW.getTime() - age * 60_000).toISOString(),
+        expires_at: new Date(NOW.getTime() + ahead * 60_000).toISOString(),
+      });
+      const parsed = parseInternalProofSession(raw, NOW);
+      if (!parsed.ok) continue;
+      active_count += 1;
+      const floor_age = (NOW.getTime() - Date.parse(parsed.session.created_at)) / 60_000;
+      worst_floor_age_minutes = Math.max(worst_floor_age_minutes, floor_age);
+    }
+  }
+  assert.ok(active_count > 0, "the sweep must actually produce active sessions");
+  assert.ok(
+    worst_floor_age_minutes < INTERNAL_PROOF_SESSION_MAX_MINUTES,
+    `no active session may have a floor older than the cap; worst was ${worst_floor_age_minutes}`
+  );
+
+  // The preserved burst is ~2239 minutes old — an order of magnitude beyond
+  // the widest reachable floor. No craftable active session can contain it.
+  const burst_age_minutes =
+    (NOW.getTime() - Date.parse(PRESERVED_INCIDENT_BURST.first_received_at)) / 60_000;
+  assert.ok(
+    burst_age_minutes > INTERNAL_PROOF_SESSION_MAX_MINUTES,
+    "the preserved burst must be older than any reachable session floor"
+  );
+});
+
+test("INVARIANT: a backdated session crafted to contain the preserved burst is rejected", () => {
+  const crafted = [
+    // Wide window covering the burst → exceeds the 240-minute cap.
+    ["long window", "2026-08-03T22:00:00.000Z", "2026-08-05T13:00:00.000Z", "session_exceeds_max_length"],
+    // Legal 240-minute window at the burst's time → long expired.
+    ["240min at burst time", "2026-08-03T22:00:00.000Z", "2026-08-04T02:00:00.000Z", "session_expired"],
+  ];
+  for (const [label, created_at, expires_at, expected] of crafted) {
+    const policy = policyFor(activeSession({ created_at, expires_at }));
+    assert.equal(policy.reason, expected, label);
+    assert.equal(policy.may_claim, false, label);
+    assert.equal(
+      isBurstAdmittedByActivationPolicy({ policy, burst: PRESERVED_INCIDENT_BURST }).admitted,
+      false,
+      label
+    );
+  }
+
+  // And the widest LEGAL active session still cannot reach back to the burst.
+  const widest = policyFor(
+    activeSession({ created_at: "2026-08-05T09:00:00.000Z", expires_at: "2026-08-05T13:00:00.000Z" })
+  );
+  assert.equal(widest.may_claim, true, "widest legal session is active");
+  assert.equal(
+    isBurstAdmittedByActivationPolicy({ policy: widest, burst: PRESERVED_INCIDENT_BURST }).reason,
+    R.BURST_RECEIVED_BEFORE_SESSION
+  );
+});
+
+test("INVARIANT: the closed_at layer only ever tightens the floor, never widens it", () => {
+  // FINDING A cannot undermine the sufficiency argument: the layered check adds
+  // denials and removes none. Any session the layer rejects was already denied
+  // or is denied now — never newly admitted.
+  const session = activeSession();
+  const open = policyFor(session);
+  const closed = policyFor({ ...session, closed_at: "2026-08-05T11:58:00.000Z" });
+  assert.equal(open.may_claim, true);
+  assert.equal(closed.may_claim, false);
+  assert.equal(closed.reason, R.SESSION_CLOSED);
+  // The floor never moves earlier as a result of the layer.
+  assert.equal(closed.received_not_before, null, "a denied policy exposes no window at all");
 });
 
 test("reason vocabulary is a frozen single source of truth", () => {

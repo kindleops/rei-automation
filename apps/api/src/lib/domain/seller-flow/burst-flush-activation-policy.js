@@ -102,7 +102,8 @@ export const BURST_FLUSH_ACTIVATION_SCOPES = Object.freeze({
  */
 export const BURST_FLUSH_ACTIVATION_REASONS = Object.freeze({
   // Policy resolution
-  DISABLED_NOOP: "disabled_noop",
+  MODE_DISABLED: "mode_disabled",
+  SESSION_LOOKUP_FAILED: "session_lookup_failed",
   GLOBAL_ACTIVATION: "global_activation",
   INTERNAL_PROOF_SESSION_ACTIVE: "internal_proof_session_active",
   SESSION_CLOSED: "session_closed",
@@ -151,7 +152,27 @@ function normalizeE164(value) {
   return raw.startsWith("+") ? raw : null;
 }
 
-function deniedPolicy(mode, reason, { alertable = false } = {}) {
+/**
+ * FATAL vs QUIET.
+ *
+ * The rule is: `fatal` means THE RESOLVER COULD NOT DETERMINE THE ANSWER —
+ * the session lookup threw, the parser threw, or mode resolution threw.
+ * `fatal:false` means the resolver DID determine the answer and the answer is
+ * "no": mode_disabled, session_not_configured, session_expired,
+ * session_recipient_not_pinned, session_closed, and every other parse
+ * rejection. Those are legitimate quiet states.
+ *
+ * This distinction is load-bearing, not cosmetic. A Supabase read error that
+ * rendered as "the operator hasn't started a session" would produce a cron
+ * reporting a clean idle tick forever while the subsystem was down — the exact
+ * signature of the 2026-08-03 incident, where a worker that never ran also
+ * reported nothing. fatal:true callers must return 503 and alert once;
+ * fatal:false callers return 200 and stay silent.
+ *
+ * Stating it as "could the resolver answer?" rather than enumerating strings
+ * means reasons nobody has written yet classify correctly by construction.
+ */
+function deniedPolicy(mode, reason, { fatal = false } = {}) {
   return {
     mode,
     may_scan: false,
@@ -162,7 +183,7 @@ function deniedPolicy(mode, reason, { alertable = false } = {}) {
     received_not_before: null,
     received_not_after: null,
     reason,
-    alertable,
+    fatal,
   };
 }
 
@@ -198,7 +219,7 @@ function rawSessionObject(session_raw) {
  *   mode: string, may_scan: boolean, may_claim: boolean, scope: string,
  *   allowed_thread_key: string|null, proof_session_id: string|null,
  *   received_not_before: string|null, received_not_after: string|null,
- *   reason: string, alertable: boolean
+ *   reason: string, fatal: boolean
  * }}
  *
  * CONTRACT: allowed_thread_key !== null ⇒ the scan MUST be scoped to that
@@ -217,7 +238,7 @@ export function resolveBurstFlushActivationPolicy({
     resolved_mode = clean(mode) || resolveMode({ env });
   } catch (error) {
     return deniedPolicy(MODES.DISABLED, `${REASONS.RESOLUTION_FAILED}:${error?.message || "mode_resolution_failed"}`, {
-      alertable: true,
+      fatal: true,
     });
   }
 
@@ -234,12 +255,12 @@ export function resolveBurstFlushActivationPolicy({
       received_not_before: null,
       received_not_after: null,
       reason: REASONS.GLOBAL_ACTIVATION,
-      alertable: false,
+      fatal: false,
     };
   }
 
   if (resolved_mode !== MODES.INTERNAL_PROOF) {
-    return deniedPolicy(MODES.DISABLED, REASONS.DISABLED_NOOP);
+    return deniedPolicy(MODES.DISABLED, REASONS.MODE_DISABLED);
   }
 
   try {
@@ -273,19 +294,151 @@ export function resolveBurstFlushActivationPolicy({
       received_not_before: session.created_at,
       received_not_after: session.expires_at,
       reason: REASONS.INTERNAL_PROOF_SESSION_ACTIVE,
-      alertable: false,
+      fatal: false,
     };
   } catch (error) {
     return deniedPolicy(
       MODES.INTERNAL_PROOF,
       `${REASONS.RESOLUTION_FAILED}:${error?.message || "unknown_error"}`,
-      { alertable: true }
+      { fatal: true }
     );
   }
 }
 
 /**
+ * Project a resolved policy into the ratified scope descriptor.
+ *
+ * `ok`      — the resolver reached an answer (i.e. !fatal).
+ * `allowed` — activation was granted (may_scan && may_claim).
+ *
+ * `max_created_at` is a deliberate SUPERSET field beyond the ratified shape.
+ * Every ratified field is present verbatim; this one additionally carries the
+ * upper created_at bound so the anti-backdating leg survives. Dropping it
+ * would admit a row whose first_received_at is inside the window but which was
+ * INSERTED long after — a replayed artifact. Consumers that ignore the field
+ * still get identical behaviour, because isBurstWithinFlushScope is the single
+ * rule everyone calls.
+ */
+export function toBurstFlushScopeDescriptor(policy = null) {
+  const p = policy && typeof policy === "object" ? policy : null;
+  const kind = p?.scope || SCOPES.NONE;
+  const thread_keys =
+    kind === SCOPES.THREAD && p?.allowed_thread_key ? [p.allowed_thread_key] : [];
+  return {
+    ok: p ? p.fatal !== true : false,
+    mode: p?.mode || MODES.DISABLED,
+    allowed: Boolean(p?.may_scan && p?.may_claim),
+    fatal: Boolean(p?.fatal),
+    reason: p?.reason || REASONS.MODE_DISABLED,
+    scope: {
+      kind,
+      thread_keys,
+      // No grace window: the floor is the session's own created_at.
+      min_first_received_at: p?.received_not_before ?? null,
+      max_first_received_at: p?.received_not_after ?? null,
+      min_created_at: p?.received_not_before ?? null,
+      max_created_at: p?.received_not_after ?? null,
+      session_id: p?.proof_session_id ?? null,
+      session_created_at: p?.received_not_before ?? null,
+      session_expires_at: p?.received_not_after ?? null,
+    },
+  };
+}
+
+/**
+ * THE ONE RULE. Every layer — store filter, coordinator, handler re-check —
+ * calls this. Three copies of this logic would be three rules that drift, and
+ * the first divergence is a burst admitted by one layer and denied by another.
+ *
+ * Returns { within, reason } so both façades below can share it.
+ * Denies on any missing or unparseable field.
+ */
+function evaluateBurstScope(burst, scope) {
+  if (!scope || typeof scope !== "object") {
+    return { within: false, reason: REASONS.POLICY_BOUNDS_INVALID };
+  }
+  if (!burst || typeof burst !== "object") {
+    return { within: false, reason: REASONS.MISSING_BURST };
+  }
+
+  // Global activation — existing behaviour, unchanged.
+  if (scope.kind === SCOPES.GLOBAL) {
+    return { within: true, reason: REASONS.ADMITTED };
+  }
+  if (scope.kind !== SCOPES.THREAD) {
+    return { within: false, reason: REASONS.NOT_ACTIVATED };
+  }
+
+  const allowed = (Array.isArray(scope.thread_keys) ? scope.thread_keys : [])
+    .map((key) => normalizeE164(key))
+    .filter(Boolean);
+  const min_first = toTimestamp(scope.min_first_received_at);
+  const max_first = toTimestamp(scope.max_first_received_at);
+  const min_created = toTimestamp(scope.min_created_at);
+  // Superset field: absent ⇒ fall back to the session expiry, never unbounded.
+  const max_created = toTimestamp(scope.max_created_at ?? scope.session_expires_at);
+  if (
+    allowed.length === 0 ||
+    min_first === null ||
+    max_first === null ||
+    min_created === null ||
+    max_created === null ||
+    max_first < min_first
+  ) {
+    return { within: false, reason: REASONS.POLICY_BOUNDS_INVALID };
+  }
+
+  const thread_key = normalizeE164(burst.thread_key);
+  if (!thread_key) return { within: false, reason: REASONS.THREAD_KEY_MISSING };
+  if (!allowed.includes(thread_key)) {
+    return { within: false, reason: REASONS.THREAD_KEY_NOT_ALLOWED };
+  }
+
+  const first_received_ts = toTimestamp(burst.first_received_at);
+  if (first_received_ts === null) {
+    return { within: false, reason: REASONS.BURST_FIRST_RECEIVED_AT_INVALID };
+  }
+  if (burst.created_at == null || clean(burst.created_at) === "") {
+    return { within: false, reason: REASONS.BURST_CREATED_AT_MISSING };
+  }
+  const created_ts = toTimestamp(burst.created_at);
+  if (created_ts === null) {
+    return { within: false, reason: REASONS.BURST_CREATED_AT_INVALID };
+  }
+
+  // Bounds are inclusive at both ends.
+  if (first_received_ts < min_first) {
+    return { within: false, reason: REASONS.BURST_RECEIVED_BEFORE_SESSION };
+  }
+  if (first_received_ts > max_first) {
+    return { within: false, reason: REASONS.BURST_RECEIVED_AFTER_SESSION };
+  }
+  if (created_ts < min_created) {
+    return { within: false, reason: REASONS.BURST_CREATED_BEFORE_SESSION };
+  }
+  if (created_ts > max_created) {
+    return { within: false, reason: REASONS.BURST_CREATED_AFTER_SESSION };
+  }
+  return { within: true, reason: REASONS.ADMITTED };
+}
+
+/**
+ * PURE, SHARED. The scope predicate for the store filter, the coordinator and
+ * the handler re-check. One export, three importers — do not reimplement it
+ * locally.
+ *
+ * @param {{ burst: object, scope: object }} args — `scope` is the inner
+ *        `.scope` of a toBurstFlushScopeDescriptor() result.
+ * @returns {boolean}
+ */
+export function isBurstWithinFlushScope({ burst = null, scope = null } = {}) {
+  return evaluateBurstScope(burst, scope).within === true;
+}
+
+/**
  * PURE. Is this specific burst admitted for claim under the resolved policy?
+ * Implemented ON TOP of the shared predicate, so admission and scope filtering
+ * are the same rule by construction rather than by convention.
  *
  * Fails closed on every ambiguity. Never widens to a phone-only gate.
  *
@@ -300,61 +453,15 @@ export function isBurstAdmittedByActivationPolicy({ policy = null, burst = null 
       policy_reason: policy?.reason ?? null,
     };
   }
-  if (!burst || typeof burst !== "object") {
-    return { admitted: false, reason: REASONS.MISSING_BURST };
+  const descriptor = toBurstFlushScopeDescriptor(policy);
+  const verdict = evaluateBurstScope(burst, descriptor.scope);
+  if (!verdict.within) {
+    return { admitted: false, reason: verdict.reason };
   }
-
-  // Global activation — existing behaviour, unchanged.
-  if (policy.scope === SCOPES.GLOBAL && policy.allowed_thread_key == null) {
-    return { admitted: true, reason: REASONS.ADMITTED, proof_session_id: null };
-  }
-
-  const allowed_thread_key = normalizeE164(policy.allowed_thread_key);
-  const not_before = toTimestamp(policy.received_not_before);
-  const not_after = toTimestamp(policy.received_not_after);
-  if (!allowed_thread_key || not_before === null || not_after === null || not_after < not_before) {
-    return { admitted: false, reason: REASONS.POLICY_BOUNDS_INVALID };
-  }
-
-  const thread_key = normalizeE164(burst.thread_key);
-  if (!thread_key) {
-    return { admitted: false, reason: REASONS.THREAD_KEY_MISSING };
-  }
-  if (thread_key !== allowed_thread_key) {
-    return { admitted: false, reason: REASONS.THREAD_KEY_NOT_ALLOWED };
-  }
-
-  const first_received_ts = toTimestamp(burst.first_received_at);
-  if (first_received_ts === null) {
-    return { admitted: false, reason: REASONS.BURST_FIRST_RECEIVED_AT_INVALID };
-  }
-
-  if (burst.created_at == null || clean(burst.created_at) === "") {
-    return { admitted: false, reason: REASONS.BURST_CREATED_AT_MISSING };
-  }
-  const created_ts = toTimestamp(burst.created_at);
-  if (created_ts === null) {
-    return { admitted: false, reason: REASONS.BURST_CREATED_AT_INVALID };
-  }
-
-  // Bounds are inclusive at both ends.
-  if (first_received_ts < not_before) {
-    return { admitted: false, reason: REASONS.BURST_RECEIVED_BEFORE_SESSION };
-  }
-  if (first_received_ts > not_after) {
-    return { admitted: false, reason: REASONS.BURST_RECEIVED_AFTER_SESSION };
-  }
-  if (created_ts < not_before) {
-    return { admitted: false, reason: REASONS.BURST_CREATED_BEFORE_SESSION };
-  }
-  if (created_ts > not_after) {
-    return { admitted: false, reason: REASONS.BURST_CREATED_AFTER_SESSION };
-  }
-
   return {
     admitted: true,
     reason: REASONS.ADMITTED,
-    proof_session_id: policy.proof_session_id ?? null,
+    proof_session_id: descriptor.scope.session_id,
   };
 }
 
@@ -385,7 +492,7 @@ async function readRawProofSession({ getSystemValue = null, supabase = null } = 
  * actually needs it, then delegate to the pure resolver.
  *
  * Any throw — mode resolution, session lookup, parse — yields a disabled-shaped
- * result with alertable:true. NEVER a global fallback.
+ * result with fatal:true. NEVER a global fallback.
  */
 export async function loadBurstFlushActivationPolicy({
   env = process.env,
@@ -402,7 +509,7 @@ export async function loadBurstFlushActivationPolicy({
     return deniedPolicy(
       MODES.DISABLED,
       `${REASONS.RESOLUTION_FAILED}:${error?.message || "mode_resolution_failed"}`,
-      { alertable: true }
+      { fatal: true }
     );
   }
 
@@ -414,11 +521,14 @@ export async function loadBurstFlushActivationPolicy({
   try {
     session_raw = await readRawProofSession({ getSystemValue, supabase });
   } catch (error) {
-    return deniedPolicy(
-      MODES.INTERNAL_PROOF,
-      `${REASONS.RESOLUTION_FAILED}:${error?.message || "session_lookup_failed"}`,
-      { alertable: true }
-    );
+    // FATAL. This must never render as "the operator hasn't started a session":
+    // a Supabase read error that collapsed into session_not_configured would
+    // produce a cron reporting clean idle ticks forever while the subsystem was
+    // down — the 2026-08-03 signature. Caller returns 503 + one alert.
+    return {
+      ...deniedPolicy(MODES.INTERNAL_PROOF, REASONS.SESSION_LOOKUP_FAILED, { fatal: true }),
+      error_message: error?.message || "session_lookup_failed",
+    };
   }
 
   return resolveBurstFlushActivationPolicy({ mode, session_raw, now, env, parseSession });
@@ -429,6 +539,8 @@ export default {
   BURST_FLUSH_ACTIVATION_SCOPES,
   BURST_FLUSH_ACTIVATION_REASONS,
   resolveBurstFlushActivationPolicy,
+  toBurstFlushScopeDescriptor,
+  isBurstWithinFlushScope,
   isBurstAdmittedByActivationPolicy,
   loadBurstFlushActivationPolicy,
 };
