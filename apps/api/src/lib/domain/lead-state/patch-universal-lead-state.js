@@ -251,6 +251,18 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   return rowPatch;
 }
 
+/**
+ * Bookkeeping columns that do not constitute a state write. If a guard strips
+ * everything else, what is left is not a patch — upserting it would mint an
+ * empty row on a thread that had none. Both refusal paths MUST use this same
+ * list; when they diverged, one of them counted `updated_by` as substance.
+ */
+const NON_SUBSTANTIVE_ROW_FIELDS = Object.freeze(['thread_key', 'updated_at', 'updated_by']);
+
+function substantiveFields(rowPatch) {
+  return Object.keys(rowPatch).filter((field) => !NON_SUBSTANTIVE_ROW_FIELDS.includes(field));
+}
+
 /** Alerting must never break the write path. */
 async function emitSuppressionAlert(payload) {
   try {
@@ -401,10 +413,7 @@ export async function patchUniversalLeadState({
   // If the suppression guard removed everything the caller actually asked for,
   // say so rather than reporting a successful no-op write.
   if (suppressionWrite.strip.length) {
-    const meaningful = Object.keys(rowPatch).filter(
-      (field) => !['thread_key', 'updated_at', 'updated_by'].includes(field),
-    );
-    if (!meaningful.length) {
+    if (!substantiveFields(rowPatch).length) {
       return {
         ok: true,
         blocked: true,
@@ -446,10 +455,7 @@ export async function patchUniversalLeadState({
       attempted_is_suppressed: patch?.is_suppressed ?? null,
       attempted_disposition: patch?.disposition || null,
     });
-    const remaining = Object.keys(rowPatch).filter(
-      (field) => field !== 'thread_key' && field !== 'updated_at',
-    );
-    if (!remaining.length) {
+    if (!substantiveFields(rowPatch).length) {
       return {
         ok: false,
         blocked: true,

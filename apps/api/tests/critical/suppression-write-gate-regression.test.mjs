@@ -415,6 +415,54 @@ test("the merged-row invariant is evaluated on previous + patch, and names both 
   );
 });
 
+test("a fully-stripped patch never creates a row, with or without updated_by", async () => {
+  // Both refusal paths must agree on what counts as substance. `updated_by` is
+  // bookkeeping: if a guard strips everything else, upserting what remains would
+  // mint {thread_key, updated_at, updated_by} on a thread that had no row — a
+  // mystery row born from a REJECTED suppression write. The two filters had
+  // diverged on exactly this field.
+  for (const meta of [
+    { change_source: "autopilot" },
+    { change_source: "autopilot", updated_by: "automation_engine" },
+    { change_source: "autopilot", updated_by: "automation_engine", operator_id: null },
+  ]) {
+    const store = makeStore({ initialRow: SUPPRESSED_ROW });
+    const result = await patchUniversalLeadState({
+      threadKey: THREAD,
+      patch: { contactability_status: "contactable" },
+      supabase: store,
+      meta,
+    });
+    assert.equal(result.blocked, true, JSON.stringify(meta));
+    assert.equal(
+      result.reason,
+      "suppression_clear_requires_operator_authority",
+      "the refusal must name the real cause, not a generic no-op"
+    );
+    // The pre-existing row is untouched…
+    assert.equal(store.row().contactability_status, "opted_out");
+    assert.equal(store.row().is_suppressed, true);
+    assert.equal(store.row().updated_by, undefined, "a refused write leaves no trace");
+  }
+
+  // …and on a thread with NO row, nothing is created at all.
+  for (const meta of [
+    { change_source: "autopilot" },
+    { change_source: "autopilot", updated_by: "automation_engine" },
+  ]) {
+    const store = makeStore();
+    const result = await patchUniversalLeadState({
+      threadKey: THREAD,
+      patch: { contactability_status: "do_not_text" },
+      supabase: store,
+      meta: { ...meta, reason: "S1_TO_S4_CONDITION_DISCLOSED" },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(store.row(), null, `no empty row may be minted (${JSON.stringify(meta)})`);
+    assert.equal(store.tables.inbox_thread_state.length, 0);
+  }
+});
+
 test("an unrelated write to an already-contradictory legacy row is not blocked or repaired", async () => {
   // 292 production rows are already contradictory. The gate must not make every
   // unrelated write to them fail, and must not silently rewrite them either.
