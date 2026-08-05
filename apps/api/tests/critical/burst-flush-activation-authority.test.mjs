@@ -83,6 +83,10 @@ const PRESERVED_BURST = Object.freeze({
   completed_at: null,
   safety_latched: false,
   version: 1,
+  // Eighth recorded field of the containment fingerprint. Aligned with
+  // preserved-burst-acceptance.test.mjs so the two files are one canonical
+  // replica rather than two partial ones claiming the same fidelity.
+  updated_at: "2026-08-03T22:42:16.901Z",
 });
 
 // The OLD session the preserved burst was created inside. Kept as data so the
@@ -1299,6 +1303,93 @@ test(
     assert.ok(result.alerts.some((a) => a.kind === "burstFlushFailure"));
   })
 );
+
+test("CONTAINMENT: a model returning non-JSON cannot leak seller text through its exception", async () => {
+  // Pins natural-response-engine.js, which is not this file's subject but is
+  // the upstream source of the exception messages the flush worker's `reason`
+  // field carries. Placed here rather than in a new file so the shard
+  // composition the suite measurement depends on is unchanged.
+  //
+  // THE MECHANISM, exercised for real rather than simulated: :353 does
+  // `JSON.parse(String(content ?? ""))` on RAW LLM completion content — text
+  // generated from, and routinely paraphrasing, the seller's own message. A
+  // model that returns a prose preamble, a markdown fence, or a refusal throws,
+  // and V8 puts the first ten characters of the input INTO the error message.
+  //
+  // THE CONTAINMENT, which is what this asserts: the caller at :508 catches
+  // every throw from that path and maps it to a fixed `model_error` token, so
+  // `err.message` never escapes. That containment is one `catch` block away from
+  // disappearing and was previously untested. A refactor that lets the message
+  // through now fails here, loudly, instead of quietly shipping seller text into
+  // logs and alerts.
+  const { buildModelCallFromEnv, generateConstrainedReply } = await import(
+    "@/lib/domain/seller-flow/natural-response-engine.js"
+  );
+
+  const CANARY = "CANARY_SELLER_BODY_do_not_leak";
+  // Exactly the common failure: the model ignores response_format and answers
+  // in prose that echoes the seller.
+  const non_json_content = `${CANARY} — sure, I'd take $150k for it`;
+
+  // Sanity-check the premise: this really does throw with the payload inside.
+  let v8_message = null;
+  try {
+    JSON.parse(non_json_content);
+  } catch (error) {
+    v8_message = error.message;
+  }
+  assert.ok(v8_message, "premise: parsing prose throws");
+  assert.ok(
+    v8_message.includes(CANARY.slice(0, 10)),
+    `premise: V8 echoes the input into the message — got: ${v8_message}`
+  );
+
+  // Counted, because `model_error` is also what a fetch failure produces. Without
+  // proving the request completed and delivered this content, the test would pass
+  // for the wrong reason and stop guarding the parse it exists to guard.
+  let fetch_calls = 0;
+  let content_delivered = false;
+  const modelCall = buildModelCallFromEnv({
+    env: { GROQ_API_KEY: "test-key-not-used-no-network" },
+    fetchImpl: async () => {
+      fetch_calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => {
+          content_delivered = true;
+          return { choices: [{ message: { content: non_json_content } }] };
+        },
+      };
+    },
+  });
+  assert.ok(modelCall, "precondition: the env yields a model call");
+
+  const result = await generateConstrainedReply({
+    objective: "acknowledge",
+    deterministicText: "Thanks — what's the address?",
+    modelCall,
+    timeoutMs: 5000,
+  });
+
+  // The failure really came from parsing delivered content, not from the transport.
+  assert.equal(fetch_calls, 1, "the model request completed — this is not a transport failure");
+  assert.ok(content_delivered, "the non-JSON content reached the parse");
+
+  // Contained: fixed token, deterministic fallback, no seller text anywhere.
+  assert.equal(result.fallback_reason, "model_error", "the throw maps to a fixed token");
+  assert.equal(result.source, "deterministic_fallback");
+
+  const surfaces = JSON.stringify(result);
+  assert.ok(
+    !surfaces.includes(CANARY),
+    "the model's echoed seller text must not survive in any returned field"
+  );
+  assert.ok(
+    !surfaces.includes("Unexpected token"),
+    "nor the raw V8 parse message that carries it"
+  );
+});
 
 test(
   "a thrown flush error cannot carry seller text into the alert either",
