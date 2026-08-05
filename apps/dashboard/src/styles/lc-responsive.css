@@ -396,6 +396,26 @@ small {
   color: var(--nx-muted, #94a3b8);
 }
 
+/* /email-command — email.css:17 defines its OWN `--text-2: #71717a` (zinc-500),
+   a local muted scale that never went through the theme system. 3.87:1 across
+   25 KPI labels, sub-labels and tabs — the whole route's secondary type. */
+:root:root .ecc__kpi-label,
+:root:root .ecc__kpi-sub,
+:root:root .ecc__subtitle,
+:root:root .ecc__tab {
+  color: var(--nx-muted, #94a3b8);
+}
+
+/* /campaign-command — `--accent-blue: #007aff` (iOS system blue) is tuned for a
+   LIGHT surface: 3.96–4.12:1 as text on this one. Lightened for text use only;
+   the fills and borders built from the same token are boundaries, which the
+   operator's decision holds to 3:1, and they already clear it. */
+:root:root .ccc-status,
+:root:root .ccc-btn,
+:root:root .icv-linked-chip__status {
+  color: #4da3ff;
+}
+
 /* /deal-intelligence — deal intel field labels at alpha 0.5 → 2.54:1. */
 :root:root .nx-deal-intel-item label {
   color: rgb(130, 155, 200);
