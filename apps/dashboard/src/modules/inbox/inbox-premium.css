@@ -19734,8 +19734,8 @@ center+right hidden */
 
 .dch-meta-sep {
   margin: 0 7px;
-  /* LANE H — separator only, but 0.36 rendered it as noise. */
-  opacity: 0.55;
+  /* LANE H — 0.36 was noise; 0.55 measured 4.20:1, still under the 4.5 floor. */
+  opacity: 0.78;
   font-size: 11px;
   user-select: none;
 }
@@ -19951,7 +19951,8 @@ center+right hidden */
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(210, 225, 245, 0.48);
+  /* LANE H — measured 4.04:1 at 0.48 alpha. */
+  color: rgba(219, 232, 250, 0.82);
   text-align: center;
 }
 
@@ -19961,7 +19962,8 @@ center+right hidden */
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(180, 205, 238, 0.54);
+  /* LANE H — 4.10:1 -> clears 4.5. */
+  color: rgba(203, 221, 246, 0.9);
 }
 
 /* Confidence rail — sits flush under the score block, same visual weight as the dial ring */
@@ -19990,7 +19992,8 @@ center+right hidden */
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(180, 205, 238, 0.5);
+  /* LANE H — 3.66:1 -> clears 4.5. */
+  color: rgba(203, 221, 246, 0.92);
 }
 
 .dch-conf-metric__value {
@@ -23284,7 +23287,11 @@ no clipping */
   display: grid;
   place-items: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.42);
+  /* LANE H — 4.04:1. Inherited by both the ⌂ glyph and the "No imagery" label
+     inside Lane E's typed media fallback. The glyph is aria-hidden and decorative,
+     but the label beside it is the only thing telling the operator why the tile is
+     empty, so the whole placeholder is raised rather than exempted. */
+  color: rgba(255, 255, 255, 0.72);
   background:
     linear-gradient(145deg, rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.08), rgba(255, 255, 255, 0.02)),
     repeating-linear-gradient(

@@ -52,7 +52,9 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--nx-contract-text-muted) 70%, transparent);
+  /* LANE H — measured 4.20:1 under the a11y gate; 4.5 required for 11px body text.
+     The 70% mix toward transparent was the whole deficit. */
+  color: var(--nx-contract-text-muted);
 }
 
 .nx-workspace-bar__chips {
@@ -154,7 +156,9 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  opacity: 0.7;
+  /* LANE H — was opacity 0.7 => 4.20:1. This is a real control ("Reset"), not
+     decoration, so it has to clear 4.5:1 in its resting state, not on hover. */
+  opacity: 1;
 }
 
 .nx-workspace-bar__reset:hover {

@@ -371,7 +371,10 @@
   border: none;
   border-radius: 0;
   background: transparent;
-  color: rgba(186, 204, 228, 0.55);
+  /* LANE H — 4.22:1 against the rail surface; 4.5 required. This colour drives
+     BOTH .nx-cat-nav__label and .nx-cat-nav__icon, i.e. the whole category rail —
+     the control the operator uses to pick which queue they are working. */
+  color: rgba(203, 219, 240, 0.95);
   cursor: pointer;
   transition: color 0.2s ease, background 0.2s ease;
   isolation: isolate;
