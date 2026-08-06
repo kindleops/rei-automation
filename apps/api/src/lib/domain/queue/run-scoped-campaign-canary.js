@@ -6,7 +6,7 @@ import {
   validateSendQueueRowPreclaim,
 } from "@/lib/supabase/sms-engine.js";
 import { processSendQueueItem as defaultProcessSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
-import { getSystemValue } from "@/lib/system-control.js";
+import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import {
   blockedExecutionModeResult,
   evaluateScopedCanaryDispatchGate,
@@ -334,8 +334,17 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
     };
   }
 
+  // Execution mode is read FRESH, never from the 30s value cache. An operator
+  // flips paused -> scoped_canary_only immediately before an attended dispatch,
+  // and any earlier read in the same process (a preflight check, a prior gate)
+  // would otherwise serve the stale `paused` and deny the run with
+  // queue_execution_mode_not_scoped_canary_only before it ever reaches
+  // queue_atomic_claim_send_row. The DB still re-checks the mode atomically at
+  // claim time; this only stops the in-process cache from denying first.
+  const get_system_value_fresh = deps.getSystemValueFresh || getSystemValueFresh;
   const execution_mode =
-    deps.queue_execution_mode || (await getQueueExecutionMode({ getSystemValue: get_system_value }));
+    deps.queue_execution_mode ||
+    (await getQueueExecutionMode({ getSystemValue: get_system_value_fresh }));
   const mode_gate = evaluateScopedCanaryDispatchGate(execution_mode, { action: "runScopedCampaignCanary" });
   if (!mode_gate.ok) {
     return {
