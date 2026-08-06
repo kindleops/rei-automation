@@ -149,6 +149,43 @@ export async function getSystemValue(key, opts = {}) {
 }
 
 /**
+ * Uncached read of a single system_control value.
+ *
+ * getSystemValue() memoizes for CACHE_TTL_MS. That is correct for hot-path
+ * reads, but it is wrong for an authority that an operator flips immediately
+ * before a bounded, attended dispatch: a value warmed seconds earlier is served
+ * from cache and the operator's change is invisible until the TTL lapses.
+ *
+ * This reader queries the table every time and writes nothing to _value_cache,
+ * so it can neither serve nor poison the cached path. Fails closed: any error,
+ * missing row, or absent Supabase configuration returns null, which every
+ * execution-mode consumer normalizes to the fail-closed posture.
+ */
+export async function getSystemValueFresh(key, opts = {}) {
+  const { supabase = defaultSupabase } = opts;
+  const normalized_key = clean(key);
+  if (!opts.supabase && !hasSupabaseConfig()) return null;
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("value")
+      .eq("key", normalized_key)
+      .maybeSingle();
+    if (error) {
+      warn("system_control.fetch_value_fresh_error", { key: normalized_key, message: error.message });
+      return null;
+    }
+    return data ? clean(data.value) : null;
+  } catch (err) {
+    warn("system_control.fetch_value_fresh_unexpected_error", {
+      key: normalized_key,
+      message: err?.message,
+    });
+    return null;
+  }
+}
+
+/**
  * Write system_control values.
  *
  * Authority is RESTRICTIVE BY DEFAULT: a caller that does not declare an
