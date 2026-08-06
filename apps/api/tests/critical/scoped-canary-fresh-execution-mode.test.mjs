@@ -132,10 +132,18 @@ test("runScopedCampaignCanary reads the mode fresh and never from the warmed cac
         observed.push(`cached:${key}`);
         return getSystemValue(key, { ...opts, supabase });
       },
-      // Fresh reader — the new execution-mode authority.
+      // Fresh reader — the new execution-mode authority. Asserts that the
+      // canary FORWARDS its resolved client: without it the reader would fall
+      // back to the default client and either read a different database or,
+      // with no env credentials, fail closed to `stopped` and block a valid run.
       getSystemValueFresh: async (key, opts) => {
         observed.push(`fresh:${key}`);
-        return getSystemValueFresh(key, { ...opts, supabase });
+        assert.equal(
+          opts?.supabase,
+          supabase,
+          "the canary must forward its resolved supabase client to the fresh reader"
+        );
+        return getSystemValueFresh(key, opts);
       },
       supabase,
       sendSms: async () => {

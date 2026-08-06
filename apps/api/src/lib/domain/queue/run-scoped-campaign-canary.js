@@ -341,10 +341,15 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
   // queue_execution_mode_not_scoped_canary_only before it ever reaches
   // queue_atomic_claim_send_row. The DB still re-checks the mode atomically at
   // claim time; this only stops the in-process cache from denying first.
+  // getQueueExecutionMode forwards this object to the reader as its opts, so the
+  // resolved client MUST be included: without it getSystemValueFresh falls back
+  // to the default client, and a run with an injected client would either read a
+  // different database or (with no env credentials) fail closed to `stopped` and
+  // block a legitimate canary.
   const get_system_value_fresh = deps.getSystemValueFresh || getSystemValueFresh;
   const execution_mode =
     deps.queue_execution_mode ||
-    (await getQueueExecutionMode({ getSystemValue: get_system_value_fresh }));
+    (await getQueueExecutionMode({ getSystemValue: get_system_value_fresh, supabase }));
   const mode_gate = evaluateScopedCanaryDispatchGate(execution_mode, { action: "runScopedCampaignCanary" });
   if (!mode_gate.ok) {
     return {
