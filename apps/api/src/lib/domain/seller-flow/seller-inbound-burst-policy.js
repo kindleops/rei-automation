@@ -246,6 +246,49 @@ export function constituentKey(message = {}) {
  * Merge ordered unique constituents. Duplicates (same provider id) are ignored
  * and must NOT extend the deadline.
  */
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+/**
+ * The execution facts a scheduled flush needs to reproduce the webhook's
+ * already-validated decision, and NOTHING else.
+ *
+ * This is an explicit allowlist of JSON-serializable scalars/objects. The live
+ * orchestration context also carries a Supabase client and bound functions;
+ * those are per-request handles that must never be written to a jsonb column,
+ * so they are excluded by construction rather than by filtering.
+ */
+export const DURABLE_EXECUTION_CONTEXT_KEYS = Object.freeze([
+  "propertyId",
+  "prospectId",
+  "ownerId",
+  "phoneId",
+  "context",
+  "route",
+  "inboundTo",
+  "stageBefore",
+  "autoReplyMode",
+  "executionAllowed",
+  "systemFollowupEnabled",
+  "inboundAutopilotDelaySeconds",
+  "timezoneOverride",
+  "contactWindowOverride",
+  "recentOutbound",
+]);
+
+export function durableExecutionContext(source = null) {
+  const src = plainObject(source);
+  if (!src) return null;
+  const out = {};
+  for (const key of DURABLE_EXECUTION_CONTEXT_KEYS) {
+    const value = src[key];
+    if (value === undefined || typeof value === "function") continue;
+    out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function appendConstituent(existing = [], next = {}) {
   const list = Array.isArray(existing) ? [...existing] : [];
   const key = constituentKey(next);
@@ -258,6 +301,19 @@ export function appendConstituent(existing = [], next = {}) {
     body: clean(next.body ?? next.message ?? next.message_body),
     received_at: next.received_at || next.inbound_received_at || null,
   };
+  // Execution-critical facts the WEBHOOK already validated. Without these the
+  // scheduled flush re-derives the turn from the aggregated body alone: a
+  // contextual short reply like "Yeah" has no question to bind to minutes
+  // later, so a decision the webhook made at 0.88 confidence collapses to
+  // `unclear` and the turn ends as effective_action=none.
+  //
+  // Stored on the constituent because seller_inbound_bursts.constituent_messages
+  // is already jsonb — no schema change, and the facts stay attached to the
+  // exact inbound they describe.
+  const classification = plainObject(next.classification);
+  if (classification) row.classification = classification;
+  const execution_context = durableExecutionContext(next.execution_context);
+  if (execution_context) row.execution_context = execution_context;
   if (!row.body && !row.provider_message_id && !row.event_id) {
     return { constituents: list, appended: false, duplicate: false };
   }
