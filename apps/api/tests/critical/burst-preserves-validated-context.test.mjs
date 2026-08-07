@@ -1,35 +1,26 @@
 // ─── burst-preserves-validated-context.test.mjs ──────────────────────────────
-// Regression lock for the 2026-08-06 live-handset failure.
+// A contextual short reply validated by the webhook must survive durable burst
+// persistence and remain authoritative when the SCHEDULED flush runs later.
 //
-// Canonical failing event: inbound 4dd580d3-1fb6-49fd-8c29-deebe5194877
-// (provider SMIebYg3DJfcXf59o0xRQ4ZWw==), body "Yeah", received 23:10:18.641Z,
-// 36 seconds after a valid ownership question, proof session active,
-// allow_thread_auto_replies true.
+// The failure this locks out: the durable constituent kept only
+// { event_id, provider_message_id, body, received_at }, and the execution
+// context was not persisted at all. The cron flush therefore ran with
+// `const ctx = orchestration_context || {}` and rebuilt the turn from the bare
+// aggregated body. An affirmative like "Yeah" has no question to bind to
+// minutes later, so a decision already validated at high confidence collapsed
+// and the turn ended as effective_action "none" with no reply row.
 //
-// The webhook classified it correctly — ownership_confirmed at 0.88, rule
-// ctx_yes_after_ownership_check, queue_action queue_auto_reply — then deferred
-// to the burst. Burst sib:+16128072000:g2:SMIebYg3DJfcXf59o0xRQ4ZWw== completed
-// with effective_action "none", queued false, and no S2 row was created.
-//
-// Two things were lost between the webhook and the scheduled flush:
-//
-//   1. appendConstituent kept only { event_id, provider_message_id, body,
-//      received_at } and DROPPED the classification the coordinator passed.
-//   2. orchestration_context was never persisted at all, so the cron flush ran
-//      with `const ctx = orchestration_context || {}` — every execution-critical
-//      field null: property/prospect/owner, conversation context, stageBefore,
-//      autoReplyMode, executionAllowed.
-//
-// The flush therefore re-derived the turn from the bare aggregated body. "Yeah"
-// with no question to bind to is not ownership_confirmed, so a decision already
-// made at 0.88 collapsed and the turn ended as none.
+// All identifiers below are synthetic fixtures. Incident-specific evidence
+// belongs in the PR description, not in a permanent test.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
   appendConstituent,
+  durableClassification,
   durableExecutionContext,
+  jsonSafeClone,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import {
   createSellerInboundBurstCoordinator,
@@ -37,13 +28,79 @@ import {
 } from "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js";
 import { createMemorySellerInboundBurstStore } from "@/lib/domain/seller-flow/seller-inbound-burst-store.js";
 
-const THREAD = "+16128072000";
-const SENDER = "+16128060495";
-const INBOUND_EVENT_ID = "4dd580d3-1fb6-49fd-8c29-deebe5194877";
-const PROVIDER_ID = "SMIebYg3DJfcXf59o0xRQ4ZWw==";
+const THREAD = "+15550000001";
+const SENDER = "+15550000002";
+const INBOUND_EVENT_ID = "00000000-0000-4000-8000-00000000e001";
+const PROVIDER_ID = "FIXTURE-PROVIDER-INBOUND-1";
 const UNRESTRICTED = Object.freeze({ authorized: true, global: true });
 
-// The classification the webhook actually produced for the live "Yeah".
+// ── JSONB safety boundary ──────────────────────────────────────────────────
+// Everything persisted into constituent_messages passes jsonSafeClone first.
+// It is all-or-nothing: a partially stripped decision record would be worse
+// than none, because the flush would treat the remainder as authoritative.
+
+test("jsonSafeClone rejects a NESTED function", () => {
+  const r = jsonSafeClone({ a: 1, deep: { nested: { fn: () => 1 } } });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "function");
+});
+
+test("jsonSafeClone rejects BigInt and symbols, including symbol keys", () => {
+  assert.equal(jsonSafeClone({ n: 1n }).ok, false);
+  assert.equal(jsonSafeClone({ n: 1n }).reason, "bigint");
+  assert.equal(jsonSafeClone({ s: Symbol("x") }).ok, false);
+  assert.equal(jsonSafeClone({ s: Symbol("x") }).reason, "symbol");
+  const symKeyed = { ok: 1 };
+  symKeyed[Symbol("k")] = 2;
+  assert.equal(jsonSafeClone(symKeyed).reason, "symbol_key");
+});
+
+test("jsonSafeClone rejects a CYCLIC object instead of overflowing", () => {
+  const cyclic = { a: 1 };
+  cyclic.self = cyclic;
+  const r = jsonSafeClone(cyclic);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "cycle");
+});
+
+test("jsonSafeClone preserves valid nested JSON exactly and deep-copies it", () => {
+  const input = { a: 1, b: "two", c: null, d: [1, { e: true }], f: { g: { h: 0.88 } } };
+  const r = jsonSafeClone(input);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, input);
+  r.value.f.g.h = 999;
+  assert.equal(input.f.g.h, 0.88, "must be a copy, not a live reference");
+  assert.deepEqual(JSON.parse(JSON.stringify(r.value)), r.value, "round-trips through JSON");
+});
+
+test("classification uses the SAME safety boundary and is rejected as a whole", () => {
+  const unsafe = ownershipConfirmedClassification({ automation_decision: { hook: () => true } });
+  assert.equal(durableClassification(unsafe), null, "a partially-safe decision record is not persisted");
+  const safe = durableClassification(ownershipConfirmedClassification());
+  assert.equal(safe.canonical_intent, "ownership_confirmed");
+  assert.equal(safe.automation_decision.queue_action, "queue_auto_reply");
+});
+
+test("append does not throw, and drops ONLY the unsafe optional field", () => {
+  const cyclic = {};
+  cyclic.self = cyclic;
+  const { constituents } = appendConstituent([], {
+    event_id: INBOUND_EVENT_ID,
+    provider_message_id: PROVIDER_ID,
+    body: "Yeah",
+    received_at: "2030-01-01T00:00:00.000Z",
+    classification: ownershipConfirmedClassification(),
+    execution_context: durableExecutionContext({ ...liveOrchestrationContext(), context: cyclic }),
+  });
+  const row = constituents[0];
+  assert.equal(row.body, "Yeah", "append still succeeds");
+  assert.ok(row.classification, "the safe field is still persisted");
+  assert.equal(row.execution_context.context, undefined, "the cyclic field is omitted");
+  assert.equal(row.execution_context.executionAllowed, true, "sibling safe fields survive");
+  assert.deepEqual(JSON.parse(JSON.stringify(row)), row, "the whole constituent round-trips");
+});
+
+// The classification shape the webhook produces for a contextual affirmative.
 function ownershipConfirmedClassification(overrides = {}) {
   return {
     primary_intent: "ownership_confirmed",
@@ -52,7 +109,7 @@ function ownershipConfirmedClassification(overrides = {}) {
     matched_rule: "ctx_yes_after_ownership_check",
     context_status: "valid",
     context_use_case: "ownership_check",
-    context_source_outbound_id: "SMOlrdbmG7sQuYjX5EPJPeTUA==",
+    context_source_outbound_id: "FIXTURE-PROVIDER-OUTBOUND-1",
     automation_decision: { auto_reply_allowed: true, queue_action: "queue_auto_reply" },
     ...overrides,
   };
@@ -62,9 +119,9 @@ function ownershipConfirmedClassification(overrides = {}) {
 // Includes two NON-serializable handles that must never reach jsonb.
 function liveOrchestrationContext() {
   return {
-    propertyId: "canaryprop_6bb8a46414092cb6318fbc35",
-    prospectId: "pros1_8fc28a914d507bd9104daab2",
-    ownerId: "mo_52f521c7e28ea3152f5e5f2c",
+    propertyId: "fixture_property_1",
+    prospectId: "fixture_prospect_1",
+    ownerId: "fixture_owner_1",
     phoneId: "phone_1",
     context: { context_status: "valid", last_outbound_use_case: "ownership_check" },
     route: "seller_flow",
@@ -74,7 +131,7 @@ function liveOrchestrationContext() {
     executionAllowed: true,
     systemFollowupEnabled: true,
     inboundAutopilotDelaySeconds: 0,
-    recentOutbound: { provider_message_id: "SMOlrdbmG7sQuYjX5EPJPeTUA==" },
+    recentOutbound: { provider_message_id: "FIXTURE-PROVIDER-OUTBOUND-1" },
     supabaseClient: { from() { throw new Error("must not be persisted"); } },
     getSystemValue: async () => null,
   };
@@ -85,7 +142,7 @@ test("appendConstituent PRESERVES the webhook classification (it was silently dr
     event_id: INBOUND_EVENT_ID,
     provider_message_id: PROVIDER_ID,
     body: "Yeah",
-    received_at: "2026-08-06T23:10:18.641Z",
+    received_at: "2030-01-01T00:00:00.000Z",
     classification: ownershipConfirmedClassification(),
     execution_context: durableExecutionContext(liveOrchestrationContext()),
   });
@@ -96,7 +153,7 @@ test("appendConstituent PRESERVES the webhook classification (it was silently dr
   assert.equal(row.classification.confidence, 0.88);
   assert.equal(row.classification.matched_rule, "ctx_yes_after_ownership_check");
   assert.ok(row.execution_context, "execution context must survive into the durable constituent");
-  assert.equal(row.execution_context.propertyId, "canaryprop_6bb8a46414092cb6318fbc35");
+  assert.equal(row.execution_context.propertyId, "fixture_property_1");
   assert.equal(row.execution_context.executionAllowed, true);
   assert.equal(row.execution_context.stageBefore, "ownership_check");
 });
@@ -105,7 +162,7 @@ test("durableExecutionContext excludes non-serializable request handles", () => 
   const durable = durableExecutionContext(liveOrchestrationContext());
   assert.equal(durable.supabaseClient, undefined, "a Supabase client must never reach jsonb");
   assert.equal(durable.getSystemValue, undefined, "a bound function must never reach jsonb");
-  assert.equal(JSON.parse(JSON.stringify(durable)).propertyId, "canaryprop_6bb8a46414092cb6318fbc35");
+  assert.equal(JSON.parse(JSON.stringify(durable)).propertyId, "fixture_property_1");
   for (const [, v] of Object.entries(durable)) assert.notEqual(typeof v, "function");
 });
 
@@ -122,7 +179,7 @@ test("latestPersistedTurnFacts recovers the newest validated turn", () => {
 //    flush -> ownership_confirmed still authoritative -> exactly one S2 row. ──
 
 function buildHarness() {
-  let clock = Date.parse("2026-08-06T23:10:18.641Z");
+  let clock = Date.parse("2030-01-01T00:00:00.000Z");
   const now = () => new Date(clock).toISOString();
   const store = createMemorySellerInboundBurstStore({ now });
   const turns = [];
@@ -206,9 +263,9 @@ for (const phrase of ["Yeah", "Yep, I still do"]) {
     );
     assert.equal(turn.classification?.confidence, 0.88);
     assert.equal(turn.executionAllowed, true, "execution authorization must survive the flush");
-    assert.equal(turn.propertyId, "canaryprop_6bb8a46414092cb6318fbc35");
-    assert.equal(turn.prospectId, "pros1_8fc28a914d507bd9104daab2");
-    assert.equal(turn.ownerId, "mo_52f521c7e28ea3152f5e5f2c");
+    assert.equal(turn.propertyId, "fixture_property_1");
+    assert.equal(turn.prospectId, "fixture_prospect_1");
+    assert.equal(turn.ownerId, "fixture_owner_1");
     assert.equal(turn.stageBefore, "ownership_check");
     assert.equal(turn.inboundTo, SENDER);
     assert.equal(turn.threadKey, THREAD);

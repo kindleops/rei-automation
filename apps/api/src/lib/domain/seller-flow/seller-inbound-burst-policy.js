@@ -251,6 +251,83 @@ function plainObject(value) {
 }
 
 /**
+ * THE JSONB SAFETY BOUNDARY.
+ *
+ * Everything written into seller_inbound_bursts.constituent_messages passes
+ * through here first. It returns a deep copy built only from values that
+ * round-trip through JSONB, or null if ANY part of the input cannot.
+ *
+ * All-or-nothing on purpose. Silently stripping one nested key would persist a
+ * shape that differs from what the webhook validated, and a later flush would
+ * act on a decision record that quietly lost a field. A rejected value is
+ * omitted entirely instead, which leaves the previous (pre-persistence)
+ * behaviour for that field rather than a subtly wrong one.
+ *
+ * Rejects: functions (at any depth), symbols (values or keys), BigInt,
+ * cycles, and non-finite numbers. Accepts: null, finite numbers, strings,
+ * booleans, plain objects and arrays composed of the same. `undefined` object
+ * properties are dropped exactly as JSON.stringify would, since that is a
+ * lossless round-trip; `undefined` inside an array is not, so it is rejected.
+ */
+export function jsonSafeClone(value, seen = new WeakSet()) {
+  if (value === null) return { ok: true, value: null };
+  const type = typeof value;
+  if (type === "string" || type === "boolean") return { ok: true, value };
+  if (type === "number") {
+    return Number.isFinite(value) ? { ok: true, value } : { ok: false, reason: "non_finite_number" };
+  }
+  if (type === "bigint") return { ok: false, reason: "bigint" };
+  if (type === "symbol") return { ok: false, reason: "symbol" };
+  if (type === "function") return { ok: false, reason: "function" };
+  if (type === "undefined") return { ok: false, reason: "undefined" };
+  if (type !== "object") return { ok: false, reason: `unsupported_type:${type}` };
+
+  if (seen.has(value)) return { ok: false, reason: "cycle" };
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const out = [];
+      for (const item of value) {
+        const r = jsonSafeClone(item, seen);
+        if (!r.ok) return r;
+        out.push(r.value);
+      }
+      return { ok: true, value: out };
+    }
+    // Dates round-trip as ISO strings through JSONB; keep that explicit rather
+    // than letting the generic object branch produce `{}`.
+    if (value instanceof Date) {
+      return Number.isFinite(value.getTime())
+        ? { ok: true, value: value.toISOString() }
+        : { ok: false, reason: "invalid_date" };
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return { ok: false, reason: "non_plain_object" };
+    }
+    if (Object.getOwnPropertySymbols(value).length > 0) {
+      return { ok: false, reason: "symbol_key" };
+    }
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === undefined) continue; // JSON.stringify drops these losslessly
+      const r = jsonSafeClone(v, seen);
+      if (!r.ok) return r;
+      out[k] = r.value;
+    }
+    return { ok: true, value: out };
+  } finally {
+    seen.delete(value);
+  }
+}
+
+/** Convenience: the safe deep copy, or null when the value cannot be persisted. */
+export function jsonSafeOrNull(value) {
+  const result = jsonSafeClone(value);
+  return result.ok ? result.value : null;
+}
+
+/**
  * The execution facts a scheduled flush needs to reproduce the webhook's
  * already-validated decision, and NOTHING else.
  *
@@ -282,11 +359,27 @@ export function durableExecutionContext(source = null) {
   if (!src) return null;
   const out = {};
   for (const key of DURABLE_EXECUTION_CONTEXT_KEYS) {
-    const value = src[key];
-    if (value === undefined || typeof value === "function") continue;
-    out[key] = value;
+    if (!(key in src)) continue;
+    // Per-key all-or-nothing: a value that cannot round-trip through JSONB is
+    // omitted whole. It is never partially stripped, and one bad optional
+    // field never prevents the rest of the snapshot from being persisted.
+    const safe = jsonSafeClone(src[key]);
+    if (!safe.ok) continue;
+    out[key] = safe.value;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Classification passes the SAME boundary, but as a single unit: a decision
+ * record with one silently-dropped field is worse than no persisted record,
+ * because the flush would treat the remainder as authoritative.
+ */
+export function durableClassification(source = null) {
+  const src = plainObject(source);
+  if (!src) return null;
+  const safe = jsonSafeClone(src);
+  return safe.ok && Object.keys(safe.value).length ? safe.value : null;
 }
 
 export function appendConstituent(existing = [], next = {}) {
@@ -310,7 +403,9 @@ export function appendConstituent(existing = [], next = {}) {
   // Stored on the constituent because seller_inbound_bursts.constituent_messages
   // is already jsonb — no schema change, and the facts stay attached to the
   // exact inbound they describe.
-  const classification = plainObject(next.classification);
+  // Both optional. Either one failing the JSONB safety boundary is omitted;
+  // the append itself never throws because a snapshot field was unserializable.
+  const classification = durableClassification(next.classification);
   if (classification) row.classification = classification;
   const execution_context = durableExecutionContext(next.execution_context);
   if (execution_context) row.execution_context = execution_context;
