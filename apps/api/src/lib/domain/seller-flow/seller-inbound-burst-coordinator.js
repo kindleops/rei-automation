@@ -56,6 +56,7 @@ import {
   SELLER_INBOUND_BURST_CLAIM_LEASE_MS,
   SELLER_INBOUND_BURST_MAX_ATTEMPTS,
   SELLER_INBOUND_BURST_POLICY_VERSION,
+  durableExecutionContext,
 } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import {
   createMemorySellerInboundBurstStore,
@@ -64,6 +65,28 @@ import {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+/**
+ * Recover the webhook-validated facts from the burst's persisted constituents.
+ *
+ * Uses the LATEST constituent that carries each fact, so a multi-fragment burst
+ * resolves to the most recent validated turn rather than the first. Returns
+ * empty objects when nothing was persisted (bursts written before this change),
+ * which leaves the previous behaviour exactly as it was.
+ */
+export function latestPersistedTurnFacts(constituents = []) {
+  const list = Array.isArray(constituents) ? constituents : [];
+  let classification = null;
+  let execution_context = null;
+  for (const c of list) {
+    if (!c || typeof c !== "object") continue;
+    if (c.classification && typeof c.classification === "object") classification = c.classification;
+    if (c.execution_context && typeof c.execution_context === "object") {
+      execution_context = c.execution_context;
+    }
+  }
+  return { classification, execution_context };
 }
 
 function asBoolean(value, fallback = false) {
@@ -298,6 +321,10 @@ export function createSellerInboundBurstCoordinator({
       // through to the scope gate, which denies it.
       authorized_received_at: received_at || null,
       classification,
+      // Durable, allowlisted snapshot of the webhook's execution context. The
+      // scheduled flush runs minutes later with no live request context, so
+      // without this it reconstructs the turn from the body alone.
+      execution_context: durableExecutionContext(orchestration_context),
     };
 
     let safety = detectImmediateSafetySignal({ message: body, classification });
@@ -680,7 +707,21 @@ export function createSellerInboundBurstCoordinator({
       };
     }
 
-    const ctx = orchestration_context || {};
+    // A live orchestration_context exists only on the inline (webhook) finalize.
+    // The SCHEDULED flush has none, so rebuild it from the durable snapshot the
+    // webhook persisted on the constituent. Live context always wins; the
+    // persisted snapshot fills only what the caller did not supply.
+    //
+    // This is the repair for the 2026-08-06 proof: the webhook had validated
+    // ownership_confirmed at 0.88 against a 36-second-old question, and the
+    // flush then re-derived the turn from the bare body "Yeah" — no question to
+    // bind to, no property/prospect/owner, no execution authorization — and
+    // returned effective_action=none.
+    const persisted = latestPersistedTurnFacts(burst.constituents);
+    const ctx = { ...(persisted.execution_context || {}), ...(orchestration_context || {}) };
+    if (!ctx.classification && persisted.classification) {
+      ctx.classification = persisted.classification;
+    }
     let orchestration = null;
     let process_error = null;
     try {
