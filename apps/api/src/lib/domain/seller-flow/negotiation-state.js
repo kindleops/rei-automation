@@ -18,7 +18,11 @@
 import { computeNegotiationGapMetrics } from "@/lib/domain/seller-flow/negotiation-policy.js";
 import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
 
-export const NEGOTIATION_STATE_VERSION = "negotiation_state_v2";
+// v3: adds per-unit seller-ask semantics (units_count, asking_price_per_unit)
+// for multifamily/small-multi deals (spine §6 — seller ask recorded both
+// absolute and per-unit at 2+ units). Additive fields; v1/v2 shapes migrate
+// through normalizeNegotiationState unchanged.
+export const NEGOTIATION_STATE_VERSION = "negotiation_state_v3";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -94,6 +98,9 @@ export function createNegotiationState({
     asking_price_confidence: null,
     asking_price_source_message_id: null,
     asking_price_history: [],
+    // Per-unit ask (2+ unit properties): current ask ÷ known unit count.
+    units_count: null,
+    asking_price_per_unit: null,
 
     // Our position / authority (ADE-only)
     initial_offer: null,
@@ -223,6 +230,7 @@ export function applyNegotiationTurn(previous, {
   offer_execution = null,     // { queued, amount, template_use_case, queue_row_id }
   contract_facts = null,
   comp_anchor = null,         // comp-anchor policy selection
+  units_count = null,         // property unit count (per-unit ask at 2+ units)
   source_message_id = null,
   now = new Date().toISOString(),
 } = {}) {
@@ -354,6 +362,21 @@ export function applyNegotiationTurn(previous, {
   if (engine_decision?.resistance_type) next.resistance_type = engine_decision.resistance_type;
   else if (engine_decision?.negotiation_posture === "anchored") next.resistance_type = "price_anchored";
   if (seller_sentiment || intent) next.seller_sentiment = clean(seller_sentiment || intent) || next.seller_sentiment;
+
+  // ── 3b. Per-unit seller ask (spine §6: recorded absolute AND per-unit) ──
+  // The unit count sticks once learned (caller input wins over a fact over
+  // the persisted value); the per-unit ask tracks the CURRENT ask whenever
+  // the property has 2+ units. Never fabricated: unknown units ⇒ null.
+  const effectiveUnits =
+    num(units_count) ?? num(facts?.units_count) ?? num(facts?.unit_count) ?? num(next.units_count);
+  if (effectiveUnits !== null && effectiveUnits >= 1) {
+    next.units_count = Math.round(effectiveUnits);
+  }
+  const perUnitAsk = num(next.current_asking_price);
+  next.asking_price_per_unit =
+    next.units_count !== null && next.units_count >= 2 && perUnitAsk !== null
+      ? round2(perUnitAsk / next.units_count)
+      : next.asking_price_per_unit ?? null;
 
   // ── 4. Comp anchor bookkeeping ───────────────────────────────────────────
   if (comp_anchor?.eligible) {

@@ -439,7 +439,13 @@ export function routeNegotiationStrategy({
     }
     return decision(S.HUMAN_REVIEW, {
       reason_code: "INSUFFICIENT_VALUATION_CONFIDENCE",
-      review_reason: zone?.reason_code || "insufficient_confidence",
+      // Canonical spine §6 reason: a thread with NO persisted valuation
+      // authority reviews as valuation_authority_absent — the same code the
+      // orchestrator's ceiling gate uses, so review queues read one vocabulary.
+      review_reason:
+        zone?.reason_code === "NO_PERSISTED_AUTHORITY"
+          ? "valuation_authority_absent"
+          : zone?.reason_code || "insufficient_confidence",
       trace,
       events: ["review_required"],
     });

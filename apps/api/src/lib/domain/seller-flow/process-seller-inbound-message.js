@@ -181,6 +181,26 @@ export function resolveNegotiationTurn({
   if (transition.contactability_patch) return null;
 
   const now = transition.resolved_at || new Date().toISOString();
+
+  // Property unit count (spine §6: 2+ units record the ask per-unit too).
+  // Context (property row projection) wins; the seller's own stated unit
+  // count fills the gap. Integration note: today's context summary carries no
+  // unit field — Agent A's G1 units_count fix is what populates it live.
+  let units_count = null;
+  for (const candidate of [
+    contextSummary.units_count,
+    contextSummary.unit_count,
+    contextSummary.units,
+    transition.facts_patch?.units_count,
+    transition.facts_patch?.unit_count,
+  ]) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n >= 1) {
+      units_count = Math.round(n);
+      break;
+    }
+  }
+
   const state_preview = applyNegotiationTurn(priorState, {
     price_signal: priceSignal,
     ade_snapshot: adeSnapshot,
@@ -189,13 +209,14 @@ export function resolveNegotiationTurn({
     facts: transition.facts_patch || null,
     intent,
     classification_confidence: classificationConfidence,
+    units_count,
     source_message_id: sourceMessageId,
     now,
   });
 
   const policy = resolveNegotiationPolicy({
     property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
-    unit_count: contextSummary.unit_count || null,
+    unit_count: units_count ?? contextSummary.unit_count ?? null,
     market: contextSummary.market_name || contextSummary.market || null,
     reference_value: state_preview.arv ?? state_preview.current_asking_price ?? null,
     liquidity_score: adeSnapshot?.liquidity_score ?? null,
@@ -203,7 +224,7 @@ export function resolveNegotiationTurn({
 
   const sufficiency = evaluateUnderwritingSufficiency({
     property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
-    unit_count: contextSummary.unit_count || null,
+    unit_count: units_count ?? contextSummary.unit_count ?? null,
     facts: transition.facts_patch || {},
     ade_snapshot: adeSnapshot,
     policy,
@@ -298,6 +319,7 @@ export function resolveNegotiationTurn({
     intent,
     classification_confidence: classificationConfidence,
     comp_anchor,
+    units_count,
     source_message_id: sourceMessageId,
     now,
   });
@@ -1631,6 +1653,9 @@ export async function processSellerInboundMessage({
       compAnchor: negotiation?.comp_anchor || null,
       classificationConfidence: classification?.confidence ?? null,
       adeSnapshotPrecomputed: fresh_ade_snapshot,
+      // Same unit-count derivation as resolveNegotiationTurn, so the persisted
+      // reducer run records the identical per-unit ask as the preview.
+      unitsCount: negotiation?.state_preview?.units_count ?? null,
     });
   }
 
