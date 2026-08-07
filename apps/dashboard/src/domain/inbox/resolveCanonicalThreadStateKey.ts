@@ -19,6 +19,7 @@ import {
   isSyntheticThreadIdentity as isSyntheticThreadIdentityCore,
   resolveDialablePhoneFromThread as resolveDialablePhoneFromThreadCore,
   resolveWritableThreadKey,
+  type ThreadIdentityInput,
 } from './canonical-thread-reference'
 
 export const isSyntheticThreadIdentity = isSyntheticThreadIdentityCore
@@ -31,7 +32,7 @@ export const resolveDialablePhoneFromThread = resolveDialablePhoneFromThreadCore
  * Returns null when no server-writable contact route exists — callers must surface that
  * rather than substituting an unrelated identifier.
  */
-export const resolveCanonicalThreadStateKey = (thread: Record<string, unknown>): string | null => {
+export const resolveCanonicalThreadStateKey = (thread: ThreadIdentityInput): string | null => {
   const result = resolveWritableThreadKey(thread)
   return result?.ok ? result.threadKey : null
 }

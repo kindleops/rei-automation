@@ -1,0 +1,148 @@
+name: N.2 Deal Desk validation
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize, opened, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n2-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  NODE_ENV: test
+  PODIO_CLIENT_ID: test
+  PODIO_CLIENT_SECRET: test
+  PODIO_USERNAME: test
+  PODIO_PASSWORD: test
+  INTERNAL_API_SECRET: test
+  BUYER_WEBHOOK_SECRET: test
+  OPS_DASHBOARD_SECRET: test
+  APP_BASE_URL: http://localhost:3000
+  VITE_SUPABASE_URL: http://127.0.0.1:4173/_supabase_stub
+  VITE_SUPABASE_ANON_KEY: fixture-anon-key
+
+jobs:
+  n2-tests-and-build:
+    name: N.2 unit, integration, lint, typecheck, build
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 65
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm install
+      - run: mkdir -p proof/deal-desk-n2/commands
+      - name: Dashboard N.2 and N.1 unit regressions
+        working-directory: apps/dashboard
+        run: |
+          set -o pipefail
+          npx tsx --test \
+            tests/unit/deal-desk-mutation-vocabularies.test.ts \
+            tests/unit/deal-desk-n2-control-contract.test.ts \
+            tests/unit/deal-desk-n2-control-failure-surface.test.ts \
+            tests/unit/deal-desk-selection-continuity.test.ts \
+            tests/unit/deal-desk-selection.test.ts \
+            tests/unit/deal-desk-hydration.test.ts \
+            tests/unit/canonical-thread-reference.test.ts \
+            2>&1 | tee ../../proof/deal-desk-n2/commands/dashboard-unit.log
+      - name: API N.2 and current canonical inbox regressions
+        working-directory: apps/api
+        run: |
+          set -o pipefail
+          {
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/deal-desk-n2-control-mutations.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-thread-context-route.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-canonical-row-contract.test.mjs
+            node --import ./tests/register-aliases.mjs --test --test-concurrency=1 tests/critical/inbox-state-transition-matrix.test.mjs
+          } 2>&1 | tee ../../proof/deal-desk-n2/commands/api-integration.log
+      - name: Canonical N.2 dashboard lint
+        working-directory: apps/dashboard
+        run: |
+          set -o pipefail
+          npx eslint \
+            src/domain/inbox/resolveCanonicalThreadStateKey.ts \
+            src/domain/lead-state/deal-desk-control-contract.ts \
+            src/domain/lead-state/persistUniversalLeadState.ts \
+            src/domain/lead-state/universal-lead-state-registry.ts \
+            src/modules/inbox/canonical-thread-control-focus.ts \
+            src/modules/inbox/useCanonicalControlMutation.ts \
+            tests/unit/deal-desk-n2-control-contract.test.ts \
+            tests/unit/deal-desk-n2-control-failure-surface.test.ts \
+            tests/ui/deal-desk-n2-controls.spec.ts \
+            2>&1 | tee ../../proof/deal-desk-n2/commands/dashboard-lint.log
+      - name: API lint
+        working-directory: apps/api
+        run: npm run lint
+      - name: Dashboard typecheck
+        run: npm --workspace apps/dashboard run typecheck
+      - name: Dashboard build
+        run: npm --workspace apps/dashboard run build
+      - name: Upload command evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deal-desk-n2-command-evidence
+          path: proof/deal-desk-n2/commands/
+          if-no-files-found: warn
+          retention-days: 30
+
+  n2-browser:
+    name: N.2 isolated browser and N.1 continuity
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 65
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm install
+      - name: Build isolated preview
+        run: npm --workspace apps/dashboard run build
+      - name: Install Chromium
+        working-directory: apps/dashboard
+        run: npx playwright install --with-deps chromium
+      - name: Run bounded N.2 control proof
+        working-directory: apps/dashboard
+        run: |
+          set -o pipefail
+          mkdir -p proof/deal-desk-n2/commands
+          timeout --signal=TERM 12m npx playwright test \
+            tests/ui/deal-desk-n2-controls.spec.ts \
+            --workers=1 \
+            --timeout=90000 \
+            --global-timeout=600000 \
+            --reporter=line \
+            2>&1 | tee proof/deal-desk-n2/commands/browser-n2.log
+      - name: Run bounded N.1 selection continuity proof
+        working-directory: apps/dashboard
+        run: |
+          set -o pipefail
+          timeout --signal=TERM 8m npx playwright test \
+            tests/ui/deal-desk-selection-continuity.spec.ts \
+            --workers=1 \
+            --timeout=90000 \
+            --global-timeout=420000 \
+            --reporter=line \
+            2>&1 | tee proof/deal-desk-n2/commands/browser-n1.log
+      - name: Upload redacted browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deal-desk-n2-browser-evidence
+          path: |
+            apps/dashboard/proof/deal-desk-n2/
+            apps/dashboard/proof/deal-desk-selection/
+            apps/dashboard/test-results/playwright/
+          if-no-files-found: warn
+          retention-days: 30
