@@ -176,6 +176,10 @@ export function mapEffectiveExecutionLayer({
   execution_blocked_reason = null,
   recommendation = null,
   relationship = null,
+  // Whether contact suppression was ACTUALLY written. Only the execution phase
+  // can know; this layer is built during intelligence, before any mutation, so
+  // the honest default is false.
+  suppression_mutation_applied = false,
 } = {}) {
   const blocked = !execution_allowed || relationship?.automatic_send_allowed === false;
   const effective_action = blocked
@@ -189,9 +193,12 @@ export function mapEffectiveExecutionLayer({
     queue_row_created: false,
     follow_up_scheduled: false,
     provider_call_made: false,
-    suppression_mutation_applied: Boolean(
-      relationship?.should_suppress_contact && execution_allowed
-    ),
+    // Reports an applied mutation, never an intended one. This previously read
+    // `relationship.should_suppress_contact && execution_allowed`, i.e. the
+    // INTENT to suppress plus the authority to act — which is true before
+    // anything has been written, and stays true even if the write is skipped or
+    // fails.
+    suppression_mutation_applied: Boolean(suppression_mutation_applied),
     audit_only: blocked,
     shadow_only: blocked,
   };

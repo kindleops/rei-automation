@@ -402,7 +402,23 @@ export function buildWorkflowStudioContext({
     followup_scheduled_for: followUp?.scheduled_for ?? null,
     followups_cancelled: Number(followupCancellation?.cancelled || 0),
     human_review_required: Boolean(decision?.review_required || contract?.ambiguity_review_required),
-    suppression_applied: Boolean(decision?.block_reason || decision?.suppression_reason),
+    // A MUTATION flag, not an intent flag. It drives the SUPPRESSION_APPLIED
+    // workflow event, which must mean "contact suppression was actually
+    // written" and nothing else.
+    //
+    // This previously read `decision.block_reason || decision.suppression_reason`
+    // — the mere PRESENCE of a reason string. Every decision that was blocked
+    // for any reason at all (execution gating, scope denial, a duplicate guard)
+    // carries one, so SUPPRESSION_APPLIED was emitted on turns where
+    // suppression_scope was "none", should_suppress_contact was false, and no
+    // suppression was written. Studio then counted suppressions that never
+    // happened.
+    //
+    // execution.suppression_applied is the real signal: it is
+    // Boolean(suppression_result?.ok) from the one branch of
+    // executeInboundAutomationDecision that actually applies contact
+    // suppression, and literal false on every other branch.
+    suppression_applied: Boolean(execution?.suppression_applied),
   };
 }
 
@@ -812,6 +828,10 @@ export async function processSellerInboundMessage({
     legacy_plan,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
+    // The real scope verdict for this inbound, already computed above. Passing
+    // it lets the intelligence audit distinguish a genuine scope denial from
+    // the blanket block that used to be reported for every relationship.
+    auto_reply_scope_allowed: Boolean(queue_permission?.allowed),
     underwriting,
     deal_state,
     supabaseClient: supabase,

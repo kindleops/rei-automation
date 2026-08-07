@@ -164,6 +164,45 @@ const REFERRAL_HANDOFF_RE =
 
 const SAFETY_PRIORITY_INTENTS = new Set(["opt_out", "hostile_or_legal"]);
 
+/**
+ * The execution brakes this pure resolver cannot observe for itself. Each must
+ * be explicitly asserted true by whoever DID observe it; unknown is not
+ * permission.
+ */
+export const RELATIONSHIP_EXECUTION_AUTHORITIES = Object.freeze([
+  // Transport-level authority to execute at all (seller-flow execution allowed).
+  "transport_execution_allowed",
+  // evaluateAutoReplyScope passed for this inbound (mode, cutoff, allowlist).
+  "auto_reply_scope_allowed",
+  // A safe, approved template was actually selected for this turn.
+  "template_approved",
+]);
+
+/**
+ * Single authority for "may this relationship auto-send".
+ *
+ * Confirmed ownership is necessary and NOT sufficient. Every authority in
+ * RELATIONSHIP_EXECUTION_AUTHORITIES must be asserted strictly true, and the
+ * relationship itself must be execution-eligible. Anything unknown, missing or
+ * non-boolean is a block, and every block is named in `blocked_reasons` so the
+ * audit can say why rather than reporting a bare `execution_gated`.
+ */
+export function resolveRelationshipExecutionEligibility({
+  relationship_execution_eligible = false,
+  execution_authority = null,
+} = {}) {
+  const blocked_reasons = [];
+  if (relationship_execution_eligible !== true) {
+    blocked_reasons.push("relationship_not_execution_eligible");
+  }
+  const authority =
+    execution_authority && typeof execution_authority === "object" ? execution_authority : {};
+  for (const key of RELATIONSHIP_EXECUTION_AUTHORITIES) {
+    if (authority[key] !== true) blocked_reasons.push(`missing_${key}`);
+  }
+  return { allowed: blocked_reasons.length === 0, blocked_reasons };
+}
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -386,6 +425,9 @@ export function resolveInboundRelationship({
   master_owner_id = null,
   prospect_id = null,
   known_phones = [],
+  // Optional; see RELATIONSHIP_EXECUTION_AUTHORITIES. Omitted → no authority
+  // asserted → automatic_send_allowed stays false, as it always was.
+  execution_authority = null,
 } = {}) {
   const text = clean(message);
   const classifier_intent = clean(
@@ -453,7 +495,36 @@ export function resolveInboundRelationship({
       canonical_intent === "unclear"
     );
 
-  const automatic_send_allowed = false;
+  // What the RELATIONSHIP itself permits. This resolver is pure — it sees the
+  // message, the classification and the ids, and nothing about transport
+  // authority, scope, or templates — so this is a necessary condition, never a
+  // sufficient one. The remaining brakes are conjoined by
+  // resolveRelationshipExecutionEligibility below.
+  const relationship_execution_eligible =
+    ownership_confirmed &&
+    !human_review_required &&
+    !suppression.should_suppress_contact &&
+    suppression.suppression_scope === "none" &&
+    suppression.safety_status === "allowed" &&
+    !SAFETY_PRIORITY_INTENTS.has(classifier_intent) &&
+    !referral_detected &&
+    !referral_candidates.ambiguous &&
+    relationship_claim === "ownership_confirmed";
+
+  // Every named brake, conjoined in one place. `execution_authority` carries
+  // the facts this resolver cannot observe; each defaults to false, so a caller
+  // that supplies nothing gets `false` exactly as before this change.
+  //
+  // Previously this was the literal `const automatic_send_allowed = false`,
+  // which is why mapEffectiveExecutionLayer's
+  // `blocked = !execution_allowed || automatic_send_allowed === false`
+  // was unconditionally true and the audit reported execution_gated /
+  // shadow_only / audit_only for confirmed owners on a fully authorized send.
+  const execution_eligibility = resolveRelationshipExecutionEligibility({
+    relationship_execution_eligible,
+    execution_authority,
+  });
+  const automatic_send_allowed = execution_eligibility.allowed;
   const referred_automatic_send_allowed = referred_automatic_send_candidate;
 
   const referred_contact_proposed_stage = referral_detected
@@ -509,6 +580,11 @@ export function resolveInboundRelationship({
     safety_status: suppression.safety_status,
     human_review_required,
     automatic_send_allowed,
+    // The relationship-level verdict on its own, so the audit can distinguish
+    // "this relationship may never auto-send" (non-owner, suppressed, review)
+    // from "confirmed owner, blocked only by a named execution authority".
+    relationship_execution_eligible,
+    execution_authority_blocked_reasons: execution_eligibility.blocked_reasons,
     referred_automatic_send_allowed,
     ownership_confirmed,
     universal_stage: ownership_confirmed ? "offer_interest" : null,
