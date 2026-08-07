@@ -733,10 +733,15 @@ async function recoverFollowupNoResponseReengagement(supabase, { limit, dryRun, 
 
       // The thread's full follow-up ledger in one bounded read: attempt count,
       // pending detection, and latest-dispatched selection. Caps are single
-      // digits, so 50 rows is far past any policy ceiling.
+      // digits, so 50 rows is far past any policy ceiling. The thread is
+      // evaluated ONCE, at first encounter, always against its LATEST
+      // dispatched row — older rows reaching this sweep via pagination are
+      // superseded evidence and must not each get an evaluation.
       const { data: ledger_rows, error: ledger_error } = await supabase
         .from("send_queue")
-        .select("id,queue_status,sent_at,created_at,use_case_template,metadata")
+        .select(
+          "id,queue_status,sent_at,created_at,use_case_template,metadata,master_owner_id,property_id,agent_name"
+        )
         .eq("thread_key", threadKey)
         .eq("type", "followup")
         .limit(50);
@@ -758,9 +763,7 @@ async function recoverFollowupNoResponseReengagement(supabase, { limit, dryRun, 
         )
         .sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
       const latest = dispatched[0] || null;
-      // Only the LATEST dispatched follow-up may trigger re-enrollment; older
-      // rows reaching this sweep via pagination are superseded evidence.
-      if (!latest || String(latest.id) !== String(row.id)) return;
+      if (!latest) return;
 
       // Unknown thread state must never be scheduled over — fail closed.
       const { data: state, error: state_error } = await supabase
@@ -863,9 +866,9 @@ async function recoverFollowupNoResponseReengagement(supabase, { limit, dryRun, 
             trigger_queue_row_id: latest.id,
             planner_version: decision.planner_version,
             policy_version: decision.policy_version,
-            master_owner_id: row.master_owner_id || null,
-            property_id: row.property_id || null,
-            agent_name: clean(row.agent_name) || null,
+            master_owner_id: latest.master_owner_id || row.master_owner_id || null,
+            property_id: latest.property_id || row.property_id || null,
+            agent_name: clean(latest.agent_name) || clean(row.agent_name) || null,
           },
           supabase
         );

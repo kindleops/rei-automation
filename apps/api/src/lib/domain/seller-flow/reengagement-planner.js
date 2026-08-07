@@ -138,11 +138,16 @@ export function resolveReengagementDecision({
     });
   }
   if (resolved_mode === "dry_run") {
+    // Candidate plan exposed for proof runs, but the decision's own reason
+    // stays "reengagement_dry_run" — the candidate reason rides alongside.
+    const { reason: _candidate_reason, ...candidate_plan } = candidate.eligible
+      ? pickPlanFields(candidate)
+      : {};
     return deny("reengagement_dry_run", {
       mode: resolved_mode,
       would_schedule: candidate.eligible,
       candidate_reason: candidate.reason,
-      ...(candidate.eligible ? pickPlanFields(candidate) : {}),
+      ...candidate_plan,
     });
   }
   if (!SCHEDULING_MODES.has(resolved_mode)) {
