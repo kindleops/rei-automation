@@ -39,6 +39,7 @@ import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
   classifyNegotiationZone,
+  detectNewMaterialFact,
   evaluateUnderwritingSufficiency,
 } from "@/lib/domain/seller-flow/negotiation-policy.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
@@ -169,6 +170,11 @@ export function resolveNegotiationTurn({
   classificationConfidence = null,
   contextSummary = {},
   sourceMessageId = null,
+  // G7 concession-ladder inputs: the persisted fact record and THIS TURN's
+  // newly extracted facts. Both optional — absent inputs degrade to "no
+  // qualifying fact", never to a fabricated qualification.
+  knownFacts = null,
+  newFacts = null,
 } = {}) {
   if (!transition) return null;
   if (BLOCKING_NEGOTIATION_INTENTS.has(String(intent ?? ""))) return null;
@@ -236,10 +242,31 @@ export function resolveNegotiationTurn({
     previously_disclosed: state_preview.comp_anchors_used,
   });
 
+  // ── G7: concession-ladder inputs, computed PER TURN ─────────────────────
+  // seller_moved_amount is this turn's downward ask movement (prior persisted
+  // ask − this turn's extracted ask). new_material_fact is true only when this
+  // turn disclosed a material fact the persisted record did not already hold.
+  // Before this wiring both inputs were permanently 0/false, so the ladder
+  // blocked every unmoved seller with NO_QUALIFYING_MOVEMENT_OR_FACT forever.
+  const prior_ask_value = Number(priorState?.current_asking_price ?? priorState?.current_ask);
+  const turn_ask_value = Number(priceSignal?.asking_price?.value);
+  const seller_moved_amount =
+    Number.isFinite(prior_ask_value) &&
+    Number.isFinite(turn_ask_value) &&
+    turn_ask_value < prior_ask_value
+      ? prior_ask_value - turn_ask_value
+      : 0;
+  const material_fact_signal = detectNewMaterialFact({
+    new_facts: newFacts,
+    known_facts: knownFacts,
+  });
+
   const strategy_decision = routeNegotiationStrategy({
     zone,
     state: state_preview,
     sufficiency,
+    seller_moved_amount,
+    new_material_fact: material_fact_signal.new_material_fact,
     flags: {
       firm: Boolean(engineDecision?.negotiation_posture === "anchored"),
       accept: engineDecision?.outcome === "seller_accepts_offer",
@@ -282,6 +309,12 @@ export function resolveNegotiationTurn({
     zone,
     comp_anchor,
     strategy_decision,
+    // G7 audit trail: the exact concession inputs this turn was routed with.
+    concession_inputs: {
+      seller_moved_amount,
+      new_material_fact: material_fact_signal.new_material_fact,
+      new_material_fact_keys: material_fact_signal.new_material_fact_keys,
+    },
   };
 }
 
@@ -1135,6 +1168,10 @@ export async function processSellerInboundMessage({
     classificationConfidence: classification?.confidence ?? null,
     contextSummary: context?.summary || {},
     sourceMessageId: providerMessageId || inboundEventId,
+    // G7: persisted facts vs this turn's extractions feed the concession
+    // ladder (seller_moved_amount / new_material_fact).
+    knownFacts: canonical_known_facts,
+    newFacts: canonical_new_facts,
   });
 
   // Accepted terms resolve the S5 milestone — re-resolve the lifecycle so the

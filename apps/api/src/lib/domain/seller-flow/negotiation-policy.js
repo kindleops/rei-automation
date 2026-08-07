@@ -392,6 +392,74 @@ export function evaluateConcession({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// MATERIAL FACTS (spec §13 — concession qualification)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Facts whose NEW disclosure justifies one more automated monetary move.
+ * Deliberately the underwriting-relevant set: condition, occupancy, timeline,
+ * motivation, income and debt facts — not identity or contact facts.
+ */
+export const MATERIAL_FACT_KEYS = Object.freeze([
+  "condition_disclosed",
+  "condition_summary",
+  "repairs_summary",
+  "repair_fact",
+  "occupancy_status",
+  "timeline",
+  "reason_for_selling",
+  "rents_summary",
+  "current_gross_rents",
+  "avg_rent",
+  "unit_count",
+  "mortgage_payoff",
+  "motivation_signals",
+]);
+
+function isBlankFactValue(value) {
+  return (
+    value === undefined ||
+    value === null ||
+    value === false ||
+    (typeof value === "string" && value.trim() === "") ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+/**
+ * Detect whether THIS TURN disclosed a material fact that the persisted fact
+ * record did not already hold (spec §13: movement requires a reason). Compares
+ * the turn's newly extracted facts against the persisted set — a seller
+ * repeating an already-known fact never re-qualifies a concession.
+ */
+export function detectNewMaterialFact({ new_facts = null, known_facts = null } = {}) {
+  const newFacts = new_facts && typeof new_facts === "object" ? new_facts : {};
+  const knownFacts = known_facts && typeof known_facts === "object" ? known_facts : {};
+  const new_material_fact_keys = [];
+
+  for (const key of MATERIAL_FACT_KEYS) {
+    const value = newFacts[key];
+    if (isBlankFactValue(value)) continue;
+    const prior = knownFacts[key];
+    let changed;
+    if (isBlankFactValue(prior)) {
+      changed = true;
+    } else if (Array.isArray(value)) {
+      const priorList = (Array.isArray(prior) ? prior : [prior]).map((v) => lower(v));
+      changed = value.some((v) => !priorList.includes(lower(v)));
+    } else {
+      changed = lower(value) !== lower(prior);
+    }
+    if (changed) new_material_fact_keys.push(key);
+  }
+
+  return {
+    new_material_fact: new_material_fact_keys.length > 0,
+    new_material_fact_keys,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // UNDERWRITING SUFFICIENCY (spec §4)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -526,11 +594,13 @@ export function resolveClosingTermPolicy({
 export default {
   ASSET_CLASSES,
   NEGOTIATION_ZONES,
+  MATERIAL_FACT_KEYS,
   normalizeAssetClass,
   resolveValueBand,
   resolveNegotiationPolicy,
   computeNegotiationGapMetrics,
   classifyNegotiationZone,
+  detectNewMaterialFact,
   evaluateConcession,
   evaluateUnderwritingSufficiency,
   resolveClosingTermPolicy,

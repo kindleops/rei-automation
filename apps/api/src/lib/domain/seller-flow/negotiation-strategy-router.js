@@ -449,15 +449,17 @@ export function routeNegotiationStrategy({
   const referenceValue = num(property_value) ?? num(state.arv) ?? ask;
   const highValue = referenceValue !== null && referenceValue >= p.human_review_value_threshold;
 
+  // Concession inputs are the CALLER's per-turn computation (G7):
+  // resolveNegotiationTurn derives seller_moved_amount from this turn's ask
+  // delta and new_material_fact from this turn's newly disclosed facts vs the
+  // persisted record. The old fallback to the last persisted concession is
+  // retired — it was unreachable (the 0 default defeated `??`) and, worse,
+  // would have re-qualified a stale concession on every later turn.
   const concession = evaluateConcession({
     negotiation_state: state,
     policy: p,
     new_material_fact,
-    seller_moved_amount:
-      num(seller_moved_amount) ??
-      (arr(state.seller_concessions).length
-        ? num(state.seller_concessions[state.seller_concessions.length - 1]?.amount) ?? 0
-        : 0),
+    seller_moved_amount: num(seller_moved_amount) ?? 0,
     improved_terms: false,
   });
 
