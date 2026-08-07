@@ -224,7 +224,19 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
   const templateUseCase = clean(
     campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
   ) || 'ownership_check'
-  const templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  // G2 fail-open fix: a template-corpus load failure is a BLOCKING skip
+  // reason for the whole assignment pass — never a silent degradation.
+  let templateCatalog
+  try {
+    templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'template_corpus_unavailable',
+      campaign_id: campaignId,
+      detail: clean(error?.message) || null,
+    }
+  }
 
   const { data: targets, error: targetErr } = await supabase
     .from('campaign_targets')

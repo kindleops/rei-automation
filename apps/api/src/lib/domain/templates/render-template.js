@@ -18,7 +18,7 @@ export const ALLOWED_TEMPLATE_PLACEHOLDERS = Object.freeze(
   ])
 );
 
-const LEGACY_PLACEHOLDER_ALIASES = Object.freeze({
+export const LEGACY_PLACEHOLDER_ALIASES = Object.freeze({
   owner_name: "seller_first_name",
   seller_name: "seller_first_name",
   agent_name: "agent_first_name",
