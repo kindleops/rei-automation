@@ -172,8 +172,10 @@ const SAFETY_PRIORITY_INTENTS = new Set(["opt_out", "hostile_or_legal"]);
 export const RELATIONSHIP_EXECUTION_AUTHORITIES = Object.freeze([
   // Transport-level authority to execute at all (seller-flow execution allowed).
   "transport_execution_allowed",
-  // evaluateAutoReplyScope passed for this inbound (mode, cutoff, allowlist).
-  "auto_reply_scope_allowed",
+  // The auto-reply MODE permits queueing this inbound at all. This is a
+  // different question from live_limited scope: internal_only, dry_run and
+  // disabled are decided entirely here and never evaluate scope.
+  "auto_reply_mode_allowed",
   // A safe, approved template was actually selected for this turn.
   "template_approved",
 ]);
@@ -186,10 +188,21 @@ export const RELATIONSHIP_EXECUTION_AUTHORITIES = Object.freeze([
  * relationship itself must be execution-eligible. Anything unknown, missing or
  * non-boolean is a block, and every block is named in `blocked_reasons` so the
  * audit can say why rather than reporting a bare `execution_gated`.
+ *
+ * `auto_reply_scope` is deliberately NOT one of those flags. Scope is a
+ * live_limited concept — cutoff and thread allowlist — and only exists when
+ * that mode actually evaluated it. Folding a mode verdict into a scope flag
+ * would report an internal_only or dry_run denial as though the inbound had
+ * failed the live_limited cutoff, and would equally invent a passing scope
+ * verdict for a mode that never ran one. So scope is asserted only when
+ * `enforced` is true, and it carries the exact evaluateAutoReplyScope reason.
+ *
+ * @param {object} [args.auto_reply_scope] {enforced, allowed, reason} or null.
  */
 export function resolveRelationshipExecutionEligibility({
   relationship_execution_eligible = false,
   execution_authority = null,
+  auto_reply_scope = null,
 } = {}) {
   const blocked_reasons = [];
   if (relationship_execution_eligible !== true) {
@@ -199,6 +212,11 @@ export function resolveRelationshipExecutionEligibility({
     execution_authority && typeof execution_authority === "object" ? execution_authority : {};
   for (const key of RELATIONSHIP_EXECUTION_AUTHORITIES) {
     if (authority[key] !== true) blocked_reasons.push(`missing_${key}`);
+  }
+  const scope =
+    auto_reply_scope && typeof auto_reply_scope === "object" ? auto_reply_scope : null;
+  if (scope?.enforced === true && scope.allowed !== true) {
+    blocked_reasons.push(`auto_reply_scope_denied:${clean(scope.reason) || "unknown"}`);
   }
   return { allowed: blocked_reasons.length === 0, blocked_reasons };
 }
@@ -428,6 +446,8 @@ export function resolveInboundRelationship({
   // Optional; see RELATIONSHIP_EXECUTION_AUTHORITIES. Omitted → no authority
   // asserted → automatic_send_allowed stays false, as it always was.
   execution_authority = null,
+  // Optional {enforced, allowed, reason}. Only live_limited produces one.
+  auto_reply_scope = null,
 } = {}) {
   const text = clean(message);
   const classifier_intent = clean(
@@ -523,6 +543,7 @@ export function resolveInboundRelationship({
   const execution_eligibility = resolveRelationshipExecutionEligibility({
     relationship_execution_eligible,
     execution_authority,
+    auto_reply_scope,
   });
   const automatic_send_allowed = execution_eligibility.allowed;
   const referred_automatic_send_allowed = referred_automatic_send_candidate;

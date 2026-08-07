@@ -8,6 +8,12 @@ import { normalizePhone } from "@/lib/utils/phones.js";
 import { warn } from "@/lib/logging/logger.js";
 
 const SEND_QUEUE_PAIR_LIMIT = 50;
+/**
+ * A window, not limit(1). The newest outbound event may be ineligible (never
+ * sent, failed, or sent after the inbound), and the correct answer is then the
+ * newest ELIGIBLE row beneath it.
+ */
+const MESSAGE_EVENT_PAIR_LIMIT = 25;
 
 const DEPRIORITIZED_QUEUE_STATUSES = new Set([
   "blocked",
@@ -357,6 +363,42 @@ function buildSendQueueMatchContext(row = {}, match = {}) {
   };
 }
 
+/**
+ * Delivery states that mean the message did NOT reach the seller. Anything else
+ * — including a null/unknown status on an older row that has a real `sent_at` —
+ * stays eligible, so legitimate historical fallback behaviour is preserved.
+ */
+const FAILED_MESSAGE_EVENT_DELIVERY_STATUSES = new Set([
+  "failed",
+  "undelivered",
+  "rejected",
+  "error",
+  "bounced",
+  "cancelled",
+  "canceled",
+]);
+
+/**
+ * The same temporal-authority contract send_queue selection obeys.
+ *
+ * A message_event may only be the question an inbound answered when it was
+ * actually SENT (a real `sent_at`, not a failure state) and it was sent at or
+ * before the inbound arrived. Without this the fallback ordered by `sent_at`
+ * desc and took limit(1), so an outbound created AFTER the reply could become
+ * the context for that reply — the send_queue defect, one table over.
+ */
+function isConversationEligibleMessageEvent(row = {}, bound_ms = 0) {
+  if (!hasValue(row.sent_at)) return false;
+  if (FAILED_MESSAGE_EVENT_DELIVERY_STATUSES.has(lower(row.delivery_status))) return false;
+  if (hasValue(row.failed_at)) return false;
+  if (row.is_final_failure === true) return false;
+  if (bound_ms) {
+    const sent_ms = asTimestamp(row.sent_at);
+    if (sent_ms && sent_ms > bound_ms) return false;
+  }
+  return true;
+}
+
 function buildMessageEventMatchContext(row = {}) {
   const conversation_brain_id = resolveConversationBrainId(row);
   const textgrid_number_id = resolveTextgridNumberId(row);
@@ -498,15 +540,26 @@ export async function findRecentOutboundContextPair(inbound_from, inbound_to, op
 
   // Step 2: Try message_events when send_queue has no pair match.
   try {
-    const { data: me_rows, error: me_error } = await db
+    const me_bound_ms = asTimestamp(opts.inbound_received_at);
+    // Bounded in-query where possible, then re-checked in JS so the eligibility
+    // rule lives in ONE auditable predicate and a store that ignores the filter
+    // cannot widen us. A window rather than limit(1): the newest row may be
+    // ineligible (never sent, failed, or after the inbound) and the answer is
+    // then the newest eligible row beneath it, not "no context".
+    let me_query = db
       .from("message_events")
       .select("*")
       .eq("direction", "outbound")
       .in("to_phone_number", outbound_to_variants)
       .in("from_phone_number", outbound_from_variants)
+      .not("sent_at", "is", null);
+    if (me_bound_ms) {
+      me_query = me_query.lte("sent_at", new Date(me_bound_ms).toISOString());
+    }
+    const { data: me_rows, error: me_error } = await me_query
       .order("sent_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
-      .limit(1);
+      .limit(MESSAGE_EVENT_PAIR_LIMIT);
 
     if (me_error) {
       warn("context.fallback_pair_message_events_error", {
@@ -515,7 +568,22 @@ export async function findRecentOutboundContextPair(inbound_from, inbound_to, op
         error: me_error.message,
       });
     } else if (me_rows && me_rows.length > 0) {
-      const row = me_rows[0];
+      const row = (Array.isArray(me_rows) ? me_rows : []).find((candidate) =>
+        isConversationEligibleMessageEvent(candidate, me_bound_ms)
+      );
+      if (!row) {
+        warn("context.fallback_pair_message_events_none_eligible", {
+          inbound_from,
+          inbound_to,
+          candidates: me_rows.length,
+          inbound_received_at: opts.inbound_received_at || null,
+        });
+        return {
+          found: false,
+          reason: "no_recent_outbound_pair",
+          source: "recent_outbound",
+        };
+      }
       const context = buildMessageEventMatchContext(row);
 
       warn("context.fallback_pair_found_in_message_events", {

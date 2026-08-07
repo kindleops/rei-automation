@@ -479,17 +479,151 @@ test("an outbound sent AFTER the inbound cannot become the question it answered"
   assert.equal(result.context.queue_row_id, S1_QUEUE_ID);
 });
 
+// ── message_events fallback obeys the SAME temporal authority ───────────────
+// send_queue selection is bounded by inbound_received_at. The message_events
+// fallback was not: it ordered by sent_at desc and took limit(1) with no
+// temporal bound and no successful-send filter, so an outbound sent AFTER the
+// reply could become the context for that reply — the same defect, one table
+// over.
+
+/** Every send_queue candidate is post-inbound, forcing the message_events path. */
+function postInboundOnlySendQueue() {
+  return [
+    freshS1QueueRow({
+      id: "sq-after-1",
+      provider_message_id: "FIXTURE-SQ-AFTER-1",
+      sent_at: "2030-06-10T01:30:00.000Z",
+      created_at: "2030-06-10T01:30:00.000Z",
+    }),
+  ];
+}
+
+function messageEvent(overrides = {}) {
+  return {
+    id: "me-fixture-1",
+    direction: "outbound",
+    delivery_status: "delivered",
+    failed_at: null,
+    is_final_failure: false,
+    master_owner_id: OWNER_ID,
+    prospect_id: PROSPECT_ID,
+    property_id: PROPERTY_ID,
+    template_id: "400065",
+    message_body: "An older outbound that really was sent",
+    to_phone_number: THREAD,
+    from_phone_number: TEXTGRID,
+    sent_at: "2030-06-09T12:00:00.000Z",
+    created_at: "2030-06-09T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("message_events fallback must NOT bind to an outbound sent after the inbound", async () => {
+  const db = makeInboundRealPathSupabase({
+    send_queue: postInboundOnlySendQueue(),
+    message_events: [
+      messageEvent({
+        id: "me-after-inbound",
+        message_body: "Asked after the seller had already replied",
+        sent_at: "2030-06-10T01:40:00.000Z",
+        created_at: "2030-06-10T01:40:00.000Z",
+      }),
+    ],
+  });
+
+  const result = await findRecentOutboundContextPair(THREAD, TEXTGRID, {
+    supabase: db,
+    inbound_received_at: INBOUND_AT,
+  });
+
+  assert.equal(result.found, false, "a post-inbound message_event is not context");
+  assert.equal(result.reason, "no_recent_outbound_pair");
+  assert.deepEqual(db.unsupportedCalls, []);
+});
+
+test("message_events fallback binds to a valid pre-inbound successful outbound", async () => {
+  const db = makeInboundRealPathSupabase({
+    send_queue: postInboundOnlySendQueue(),
+    message_events: [messageEvent()],
+  });
+
+  const result = await findRecentOutboundContextPair(THREAD, TEXTGRID, {
+    supabase: db,
+    inbound_received_at: INBOUND_AT,
+  });
+
+  assert.equal(result.found, true, "legitimate older fallback must still work");
+  assert.equal(result.source, "recent_outbound_message_event");
+  assert.equal(result.context.event_id, "me-fixture-1");
+  assert.equal(result.context.ids.master_owner_id, OWNER_ID);
+  assert.deepEqual(db.unsupportedCalls, []);
+});
+
+test("message_events fallback skips never-sent and failed outbounds", async () => {
+  const ineligible = [
+    ["never sent", { id: "me-never-sent", sent_at: null, created_at: "2030-06-09T20:00:00.000Z" }],
+    ["failed", { id: "me-failed", delivery_status: "failed", sent_at: "2030-06-09T20:00:00.000Z" }],
+    [
+      "undelivered",
+      { id: "me-undelivered", delivery_status: "undelivered", sent_at: "2030-06-09T20:00:00.000Z" },
+    ],
+    [
+      "final failure",
+      { id: "me-final-failure", is_final_failure: true, sent_at: "2030-06-09T20:00:00.000Z" },
+    ],
+    [
+      "failed_at stamped",
+      { id: "me-failed-at", failed_at: "2030-06-09T20:00:01.000Z", sent_at: "2030-06-09T20:00:00.000Z" },
+    ],
+  ];
+
+  for (const [label, overrides] of ineligible) {
+    // The ineligible row is NEWER than the good one, so if it were eligible it
+    // would win. The good row is the correct answer in every case.
+    const db = makeInboundRealPathSupabase({
+      send_queue: postInboundOnlySendQueue(),
+      message_events: [messageEvent(overrides), messageEvent()],
+    });
+    const result = await findRecentOutboundContextPair(THREAD, TEXTGRID, {
+      supabase: db,
+      inbound_received_at: INBOUND_AT,
+    });
+    assert.equal(result.found, true, label);
+    assert.equal(result.context.event_id, "me-fixture-1", `${label} must not win`);
+    assert.deepEqual(db.unsupportedCalls, [], label);
+  }
+});
+
+test("message_events fallback without an inbound bound keeps legacy behaviour", async () => {
+  const db = makeInboundRealPathSupabase({
+    send_queue: [],
+    message_events: [messageEvent()],
+  });
+  const result = await findRecentOutboundContextPair(THREAD, TEXTGRID, { supabase: db });
+  assert.equal(result.found, true);
+  assert.equal(result.context.event_id, "me-fixture-1");
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // 3. RELATIONSHIP EXECUTION AUTHORITY
 // ════════════════════════════════════════════════════════════════════════════
 
 const FULL_AUTHORITY = Object.freeze({
   transport_execution_allowed: true,
-  auto_reply_scope_allowed: true,
+  auto_reply_mode_allowed: true,
   template_approved: true,
 });
 
-function relationshipFor(message, { classification = null, execution_authority = null } = {}) {
+const SCOPE_PASSED = Object.freeze({
+  enforced: true,
+  allowed: true,
+  reason: "auto_reply_scope_allowlisted",
+});
+
+function relationshipFor(
+  message,
+  { classification = null, execution_authority = null, auto_reply_scope = null } = {}
+) {
   return resolveInboundRelationship({
     message,
     classification,
@@ -500,6 +634,7 @@ function relationshipFor(message, { classification = null, execution_authority =
     master_owner_id: OWNER_ID,
     prospect_id: PROSPECT_ID,
     execution_authority,
+    auto_reply_scope,
   });
 }
 
@@ -522,7 +657,7 @@ test("confirmed ownership alone is NOT sufficient — each missing authority blo
   assert.equal(relationship.automatic_send_allowed, false, "unknown authority is not permission");
   assert.deepEqual(relationship.execution_authority_blocked_reasons, [
     "missing_transport_execution_allowed",
-    "missing_auto_reply_scope_allowed",
+    "missing_auto_reply_mode_allowed",
     "missing_template_approved",
   ]);
 
@@ -587,9 +722,87 @@ test("resolveRelationshipExecutionEligibility reports every block, not just the 
   assert.deepEqual(verdict.blocked_reasons, [
     "relationship_not_execution_eligible",
     "missing_transport_execution_allowed",
-    "missing_auto_reply_scope_allowed",
+    "missing_auto_reply_mode_allowed",
     "missing_template_approved",
   ]);
+});
+
+// ── Mode authority is not scope authority ───────────────────────────────────
+// autoReplyModeAllowsQueue returns a MODE verdict. internal_only, dry_run and
+// disabled never evaluate a live_limited scope and return no `scope` key at
+// all, so deriving scope authority from `allowed` invented a passing scope for
+// internal_only and reported dry_run/disabled as a cutoff failure.
+
+test("live_limited with a valid scope reports scope allowed and sends", () => {
+  const permission = queuePermissionFor(INBOUND_AT, "live_limited");
+  assert.equal(permission.scope_enforced, true);
+  assert.equal(permission.scope.allowed, true);
+
+  const relationship = relationshipFor("Yeah", {
+    classification: ownershipConfirmedClassification(),
+    execution_authority: FULL_AUTHORITY,
+    auto_reply_scope: {
+      enforced: true,
+      allowed: permission.scope.allowed,
+      reason: permission.scope.reason,
+    },
+  });
+  assert.equal(relationship.automatic_send_allowed, true);
+  assert.deepEqual(relationship.execution_authority_blocked_reasons, []);
+});
+
+test("live_limited with an invalid scope blocks with the EXACT scope reason", () => {
+  const cases = [
+    [null, "auto_reply_inbound_timestamp_missing"],
+    ["2030-05-01T00:00:00.000Z", "auto_reply_inbound_before_cutoff"],
+  ];
+  for (const [received_at, expected_reason] of cases) {
+    const permission = queuePermissionFor(received_at, "live_limited");
+    assert.equal(permission.scope_enforced, true);
+    assert.equal(permission.scope.allowed, false);
+    assert.equal(permission.scope.reason, expected_reason);
+
+    const relationship = relationshipFor("Yeah", {
+      classification: ownershipConfirmedClassification(),
+      execution_authority: FULL_AUTHORITY,
+      auto_reply_scope: {
+        enforced: true,
+        allowed: false,
+        reason: permission.scope.reason,
+      },
+    });
+    assert.equal(relationship.automatic_send_allowed, false);
+    assert.deepEqual(relationship.execution_authority_blocked_reasons, [
+      `auto_reply_scope_denied:${expected_reason}`,
+    ]);
+  }
+});
+
+test("internal_only / dry_run / disabled never fabricate a scope verdict", () => {
+  for (const mode of ["internal_only", "dry_run", "disabled"]) {
+    const permission = queuePermissionFor(INBOUND_AT, mode);
+    assert.notEqual(
+      permission.scope_enforced,
+      true,
+      `${mode} must not claim scope was enforced`
+    );
+    assert.equal(permission.scope, undefined, `${mode} must not produce a scope verdict`);
+
+    // A mode denial must be reported as a MODE block, never as a scope denial.
+    const relationship = relationshipFor("Yeah", {
+      classification: ownershipConfirmedClassification(),
+      execution_authority: { ...FULL_AUTHORITY, auto_reply_mode_allowed: permission.allowed },
+      auto_reply_scope: null,
+    });
+    const reasons = relationship.execution_authority_blocked_reasons;
+    assert.ok(
+      !reasons.some((reason) => reason.startsWith("auto_reply_scope_denied")),
+      `${mode} must not report a scope denial (got ${JSON.stringify(reasons)})`
+    );
+    if (!permission.allowed) {
+      assert.deepEqual(reasons, ["missing_auto_reply_mode_allowed"], mode);
+    }
+  }
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -786,6 +999,171 @@ test("REAL PATH: the intelligence audit reports real authority, not a blanket ex
   assert.equal(execution_layer.execution_blocked_reason, null);
   assert.equal(execution_layer.suppression_mutation_applied, false);
 });
+
+test("REAL PATH: the helper exercised only operators it truly implements", async () => {
+  const h = buildRealPathHarness();
+  await h.ingestYeah();
+  h.advance(25_000);
+  await h.coordinator.flushEligible({ thread_key: THREAD, limit: 1 });
+
+  // A silently-ignored operator would mean the "real path" suite passed while
+  // production query semantics were never actually exercised. Unsupported
+  // operators record AND throw, so this stays provable even if a throw is
+  // swallowed by a try/catch inside the code under test.
+  assert.deepEqual(
+    h.supabase.unsupportedCalls,
+    [],
+    `unsupported operators reached the helper: ${JSON.stringify(h.supabase.unsupportedCalls)}`
+  );
+
+  const audit = h.supabase.operatorAudit();
+  assert.ok(audit.length > 0, "the run must actually query something");
+  // The duplicate/retry guard filters by source_event_id and by thread+type+
+  // window. It uses eq/in/gte/limit — NOT .or() — which is why .or() can stay
+  // a loud rejection rather than needing PostgREST OR semantics here.
+  assert.ok(audit.includes("send_queue.eq"), JSON.stringify(audit));
+  assert.ok(audit.includes("send_queue.in"), JSON.stringify(audit));
+  assert.ok(audit.includes("send_queue.insert"), JSON.stringify(audit));
+  assert.ok(
+    !audit.some((entry) => entry.endsWith(".or")),
+    `no exercised query may use .or(): ${JSON.stringify(audit)}`
+  );
+});
+
+// ── Every audit surface must agree on the SAME authority verdict ────────────
+// authorized_relationship is built after all authorities settle. Previously the
+// canonical decision, semantic layer and shadow engine kept the pre-
+// authorization verdict, so the snapshot could report a send as allowed while
+// the canonical decision it embedded said the opposite.
+
+const AGREEMENT_CASES = [
+  { label: "fully authorized confirmed owner", harness: {}, expect_allowed: true },
+  {
+    label: "confirmed owner, missing transport authority",
+    harness: { executionAllowed: false },
+    expect_allowed: false,
+  },
+  {
+    label: "confirmed owner, failed live_limited scope",
+    harness: { cutoffAt: "2030-12-01T00:00:00.000Z" },
+    expect_allowed: false,
+  },
+  {
+    label: "confirmed owner, missing template",
+    harness: { templates: [] },
+    expect_allowed: false,
+  },
+  {
+    label: "confirmed owner, unsafe template",
+    harness: { templates: [{ ...CONSIDER_SELLING_TEMPLATE, safe_for_auto_reply: false }] },
+    expect_allowed: false,
+  },
+  {
+    label: "opt_out",
+    harness: {},
+    ingest: { body: "STOP", classification: { primary_intent: "opt_out" } },
+    expect_allowed: false,
+  },
+  {
+    label: "hostile_or_legal",
+    harness: {},
+    ingest: { body: "I will sue you", classification: { primary_intent: "hostile_or_legal" } },
+    expect_allowed: false,
+  },
+  {
+    label: "actual wrong number",
+    harness: {},
+    ingest: { body: "Wrong number", classification: { primary_intent: "wrong_number" } },
+    expect_allowed: false,
+  },
+];
+
+for (const agreement of AGREEMENT_CASES) {
+  test(`REAL PATH AGREEMENT: ${agreement.label} — every surface reports the same verdict`, async () => {
+    const h = buildRealPathHarness(agreement.harness);
+    await h.ingestYeah(agreement.ingest || {});
+    h.advance(25_000);
+    const flush = await h.coordinator.flushEligible({ thread_key: THREAD, limit: 1 });
+    const expected = agreement.expect_allowed;
+
+    // A safety-latched burst (opt_out, hostile, wrong number) is finalized as
+    // suppressed at ingest and never reaches orchestration at all. That is
+    // itself a consistent "not allowed" outcome, and the only surface to check
+    // is that nothing was queued.
+    const orchestration = flush.results[0]?.orchestration ?? null;
+    if (!orchestration) {
+      assert.equal(expected, false, `${agreement.label} must not be an allowed case`);
+      assert.equal(h.queueRows().length, 0, agreement.label);
+      assert.deepEqual(h.supabase.unsupportedCalls, [], agreement.label);
+      return;
+    }
+
+    const snapshot = orchestration.intelligence_snapshot;
+
+    // ── The AUTHORITY verdict, which must be identical on every surface ─────
+    assert.equal(snapshot.automatic_send_allowed, expected, `snapshot: ${agreement.label}`);
+    assert.equal(
+      snapshot.canonical_decision.automatic_send_allowed,
+      expected,
+      `canonical_decision must not contradict the snapshot: ${agreement.label}`
+    );
+    assert.deepEqual(
+      snapshot.canonical_decision.execution_authority_blocked_reasons,
+      snapshot.execution_authority_blocked_reasons,
+      `blocked reasons must match: ${agreement.label}`
+    );
+
+    // The shadow engine received the SAME authorized relationship, not the
+    // pre-authorization one.
+    const shadow_relationship =
+      snapshot.shadow_stage_engine?.relationship ??
+      snapshot.shadow_stage_engine?.inputs?.relationship ??
+      null;
+    if (shadow_relationship && "automatic_send_allowed" in shadow_relationship) {
+      assert.equal(
+        shadow_relationship.automatic_send_allowed,
+        expected,
+        `shadow engine relationship: ${agreement.label}`
+      );
+    }
+
+    // Semantic layer describes the same relationship.
+    assert.equal(
+      snapshot.decision_layers.semantic.suppression_scope,
+      snapshot.suppression_scope,
+      `semantic vs snapshot suppression scope: ${agreement.label}`
+    );
+
+    // ── The OUTCOME, which is a different question from authority ───────────
+    // decision_layers.execution is deliberately re-derived after execution by
+    // alignIntelligenceSnapshotExecutionView, so it reports what actually
+    // happened rather than what was permitted. Assert it agrees with the
+    // verdict in the only way that matters: an unauthorized turn queues
+    // nothing, and an authorized one queues exactly one row.
+    assert.equal(
+      Boolean(snapshot.reply_recommendation.should_queue_reply),
+      expected,
+      `reply_recommendation: ${agreement.label}`
+    );
+    assert.equal(
+      Boolean(snapshot.decision_layers.execution.queue_row_created),
+      expected,
+      `queue_row_created: ${agreement.label}`
+    );
+
+    if (expected) {
+      assert.deepEqual(snapshot.execution_authority_blocked_reasons, [], agreement.label);
+      assert.equal(h.queueRows().length, 1, agreement.label);
+    } else {
+      assert.ok(
+        snapshot.execution_authority_blocked_reasons.length > 0,
+        `a blocked turn must name at least one reason: ${agreement.label}`
+      );
+      assert.equal(h.queueRows().length, 0, agreement.label);
+    }
+    assert.deepEqual(h.supabase.unsupportedCalls, [], agreement.label);
+  });
+}
 
 test("REAL PATH: a retried flush creates no duplicate queue row", async () => {
   const h = buildRealPathHarness();
