@@ -8,6 +8,7 @@ import { extractSellerReferral } from "@/lib/domain/seller-flow/extract-seller-r
 import {
   isGlobalSuppressionRelationship,
   resolveInboundRelationship,
+  resolveRelationshipExecutionEligibility,
 } from "@/lib/domain/seller-flow/resolve-inbound-relationship.js";
 import { runShadowStageEngine } from "@/lib/domain/seller-flow/shadow-stage-engine-runner.js";
 import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
@@ -190,6 +191,14 @@ export async function runInboundIntelligencePhase({
   legacy_plan = null,
   auto_reply_mode = "disabled",
   execution_allowed = false,
+  // Does the MODE permit queueing this inbound at all (autoReplyModeAllowsQueue)?
+  // Distinct from scope — internal_only, dry_run and disabled are decided here
+  // and never evaluate a live_limited scope. Defaults false.
+  auto_reply_mode_allowed = false,
+  // The real evaluateAutoReplyScope verdict, {enforced, allowed, reason}, and
+  // ONLY when live_limited actually enforced one. Null for every other mode, so
+  // no scope verdict is invented for a mode that never ran one.
+  auto_reply_scope = null,
   underwriting = null,
   deal_state = null,
   supabaseClient = null,
@@ -348,11 +357,46 @@ export async function runInboundIntelligencePhase({
   const authoritative_granular_stage =
     stage_domain.engine_result?.stage_decision?.next_stage || granular_stage;
 
+  // Execution authority can only be judged once the template layer has run, so
+  // the relationship's send verdict is settled HERE rather than at resolve
+  // time. Confirmed ownership is necessary and not sufficient: every named
+  // brake must be asserted true, and each one that is not is reported by name.
+  const execution_eligibility = resolveRelationshipExecutionEligibility({
+    relationship_execution_eligible: relationship.relationship_execution_eligible,
+    execution_authority: {
+      transport_execution_allowed: execution_allowed === true,
+      auto_reply_mode_allowed: auto_reply_mode_allowed === true,
+      template_approved: Boolean(
+        template_result?.ok && template_result?.template && !relationship_template.blocked
+      ),
+    },
+    auto_reply_scope,
+  });
+  // THE single execution-authority verdict. Every audit surface below is built
+  // from this object, never from the pre-authorization `relationship`, so the
+  // canonical decision, the intelligence snapshot, the semantic/execution
+  // comparison and the shadow comparison cannot disagree about whether this
+  // turn was allowed to send.
+  const authorized_relationship = {
+    ...relationship,
+    automatic_send_allowed: execution_eligibility.allowed,
+    execution_authority_blocked_reasons: execution_eligibility.blocked_reasons,
+  };
+  // The canonical decision carried the pre-authorization verdict, which was
+  // false for every relationship. Nothing GATES on this field — it is a
+  // reported value — so aligning it changes no transport authority, it only
+  // stops the canonical decision contradicting the execution layer.
+  canonical_decision = {
+    ...canonical_decision,
+    automatic_send_allowed: execution_eligibility.allowed,
+    execution_authority_blocked_reasons: execution_eligibility.blocked_reasons,
+  };
+
   const execution_blocked_reason = deriveExecutionBlockedReason({
     auto_reply_mode,
     execution_allowed,
     decision: canonical_decision,
-    relationship,
+    relationship: authorized_relationship,
   });
 
   const recommendation_layer = mapRecommendationLayer({
@@ -361,7 +405,7 @@ export async function runInboundIntelligencePhase({
   });
 
   const semantic_layer = mapSemanticLayer({
-    relationship,
+    relationship: authorized_relationship,
     classification,
     canonical_intent: semantic_intent,
     context: context || latestThreadContext,
@@ -377,7 +421,7 @@ export async function runInboundIntelligencePhase({
     execution_allowed,
     execution_blocked_reason,
     recommendation: recommendation_layer,
-    relationship,
+    relationship: authorized_relationship,
   });
 
   const shadow_stage = runShadowStageEngine({
@@ -386,10 +430,10 @@ export async function runInboundIntelligencePhase({
     context: context || latestThreadContext,
     canonical_decision,
     legacy_decision: legacy_plan,
-    relationship,
+    relationship: authorized_relationship,
     identity_class,
-    relationship_outcome: relationship.relationship_outcome,
-    suppression_scope: relationship.suppression_scope,
+    relationship_outcome: authorized_relationship.relationship_outcome,
+    suppression_scope: authorized_relationship.suppression_scope,
     universal_stage: authoritative_universal_stage,
     granular_stage: authoritative_granular_stage,
     follow_up_recommendation,
@@ -421,7 +465,9 @@ export async function runInboundIntelligencePhase({
     invalidate_phone_globally: Boolean(relationship.invalidate_phone_globally),
     invalidate_person_globally: Boolean(relationship.invalidate_person_globally),
     referred_contact_proposed_stage: relationship.referred_contact_proposed_stage || null,
-    automatic_send_allowed: Boolean(relationship.automatic_send_allowed),
+    automatic_send_allowed: Boolean(authorized_relationship.automatic_send_allowed),
+    execution_authority_blocked_reasons: execution_eligibility.blocked_reasons,
+    relationship_execution_eligible: Boolean(relationship.relationship_execution_eligible),
     referred_automatic_send_allowed: Boolean(relationship.referred_automatic_send_allowed),
     universal_stage: authoritative_universal_stage,
     granular_stage: authoritative_granular_stage,

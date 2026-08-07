@@ -112,6 +112,8 @@ function buildFallbackContext({
 async function tryOutboundPairContext({
   inbound_from,
   inbound_to,
+  inbound_received_at,
+  context_source_id,
   lookup_sources_tried,
   findRecentOutboundContextPairImpl,
 }) {
@@ -120,7 +122,14 @@ async function tryOutboundPairContext({
   lookup_sources_tried.push("fallback_outbound_pair");
   info("context.load_attempting_outbound_pair", { inbound_from, inbound_to });
 
-  const fallback_result = await findRecentOutboundContextPairImpl(inbound_from, inbound_to);
+  // Both optional and both narrowing: the receipt instant bounds the candidate
+  // set to outbounds the seller could actually have been answering, and an
+  // explicit classifier linkage pins the exact one. Omitted → unchanged
+  // behaviour, so callers that have neither are unaffected.
+  const fallback_result = await findRecentOutboundContextPairImpl(inbound_from, inbound_to, {
+    inbound_received_at: inbound_received_at || null,
+    context_source_id: context_source_id || null,
+  });
   if (!fallback_result?.found) {
     info("context.load_outbound_pair_not_found", {
       inbound_from,
@@ -151,6 +160,8 @@ async function tryOutboundPairContext({
 export async function loadContextWithFallback({
   inbound_from,
   inbound_to,
+  inbound_received_at = null,
+  context_source_id = null,
   create_brain_if_missing = true,
   primary_context = null,
   loadContextImpl = loadContext,
@@ -164,6 +175,8 @@ export async function loadContextWithFallback({
   const pair_context = await tryOutboundPairContext({
     inbound_from,
     inbound_to,
+    inbound_received_at,
+    context_source_id,
     lookup_sources_tried,
     findRecentOutboundContextPairImpl,
   });

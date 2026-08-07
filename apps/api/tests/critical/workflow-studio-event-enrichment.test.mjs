@@ -57,13 +57,50 @@ test("studio context carries the full canonical automation story", () => {
   assert.equal(ctx.followups_cancelled, 2);
 });
 
-test("studio context flags human review and suppression from real decision fields", () => {
+test("studio context flags human review from real decision fields", () => {
   const ctx = buildWorkflowStudioContext({
     ...BASE,
     decision: { ...BASE.decision, review_required: true, block_reason: "opt_out" },
   });
   assert.equal(ctx.human_review_required, true);
-  assert.equal(ctx.suppression_applied, true);
+});
+
+// suppression_applied drives the SUPPRESSION_APPLIED workflow event, so it must
+// mean "contact suppression was actually written" — never "a reason string was
+// present". This test previously asserted the opposite: that a decision merely
+// CARRYING block_reason "opt_out" counted as an applied suppression. Every
+// decision blocked for any reason at all carries one, so the event fired on
+// turns where suppression_scope was "none", should_suppress_contact was false,
+// and nothing was ever mutated.
+test("suppression_applied requires an APPLIED mutation, not a block/suppression reason", () => {
+  const with_reason_only = buildWorkflowStudioContext({
+    ...BASE,
+    decision: { ...BASE.decision, block_reason: "opt_out", suppression_reason: "opt_out" },
+    execution: { ...BASE.execution, suppression_applied: false },
+  });
+  assert.equal(
+    with_reason_only.suppression_applied,
+    false,
+    "a reason string is an intent, not a mutation"
+  );
+
+  const attempted_but_not_applied = buildWorkflowStudioContext({
+    ...BASE,
+    decision: { ...BASE.decision, suppression_reason: "opt_out" },
+    execution: { ...BASE.execution, suppression_applied: false, queued: false },
+  });
+  assert.equal(attempted_but_not_applied.suppression_applied, false);
+
+  const actually_applied = buildWorkflowStudioContext({
+    ...BASE,
+    decision: { ...BASE.decision, suppression_reason: "opt_out" },
+    execution: { ...BASE.execution, suppression_applied: true },
+  });
+  assert.equal(
+    actually_applied.suppression_applied,
+    true,
+    "a real suppression write must still be reported"
+  );
 });
 
 test("studio context flags extraction review when a conflict is present", () => {
