@@ -262,7 +262,10 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Advance interest into the price conversation." },
     state_hints: { lifecycle_stage: "offer_interest", operational_status: "active_communication", lead_temperature: "warm", disposition: "interested", automation: "continue" },
-    classifier_aliases: ["seller_interested", "interested", "open_to_offer", "open_to_selling", "property_interest", "motivated"],
+    // "positive_interest" is the V1 auto-reply planner's label for the same
+    // meaning (resolve-seller-auto-reply-plan.js) and a follow-up policy key
+    // (ACTIVE_INTENTS) — bridged here so no policy key is orphaned.
+    classifier_aliases: ["seller_interested", "interested", "open_to_offer", "open_to_selling", "property_interest", "motivated", "positive_interest"],
     compliance: NO_COMPLIANCE,
   },
   conditionally_interested: {
@@ -271,7 +274,11 @@ const RAW = {
     terminal_hint: "reply_sent",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Surface the stated condition and advance the conversation." },
     state_hints: { lifecycle_stage: "offer_interest", operational_status: "active_communication", lead_temperature: "warm", disposition: "interested", automation: "continue" },
-    classifier_aliases: ["latent_interest", "curious"],
+    // "conditional_interest" / "maybe_depends_on_price" are the V1 planner and
+    // follow-up nurture-policy labels for exactly this meaning (NURTURE_DAYS,
+    // resolve-deferred-queue-message candidates) — bridged so the policy keys
+    // resolve to a canonical slug instead of orphaning.
+    classifier_aliases: ["latent_interest", "curious", "conditional_interest", "maybe_depends_on_price"],
     compliance: NO_COMPLIANCE,
   },
   not_interested: {
@@ -464,7 +471,13 @@ const RAW = {
     terminal_hint: "suppressed_policy",
     reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: true, objective: "No automated reply; compliance/human review of the hostility or legal claim." },
     state_hints: { lifecycle_stage: null, operational_status: "needs_review", lead_temperature: "cold", disposition: "unqualified", automation: "stop" },
-    classifier_aliases: ["hostile_or_legal", "hostile", "legal", "attorney", "harassment", "legal_threat", "hostile_legal", "frustrated"],
+    // "timing_complaint" (V1 planner label for "why are you texting me at
+    // 6am"-class messages) is policy-suppressed exactly like hostility:
+    // SUPPRESSED_INTENTS treats it as permanent suppression, the stage map
+    // routes it to the hostile_or_legal lane with manual review, and
+    // exception-workflows maps it to legal_compliance_hold — bridged here so
+    // the policy key resolves instead of orphaning.
+    classifier_aliases: ["hostile_or_legal", "hostile", "legal", "attorney", "harassment", "legal_threat", "hostile_legal", "frustrated", "timing_complaint"],
     compliance: { legally_binding_opt_out: false, blocks_all_future_contact: true },
   },
   seller_initiated_after_stop: {
