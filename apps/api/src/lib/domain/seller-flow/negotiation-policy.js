@@ -16,6 +16,8 @@
 // Pure module: no I/O, no AI. All monetary authority referenced here is the
 // persisted ADE snapshot; this module never invents an amount.
 
+import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
+
 function num(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -287,8 +289,12 @@ export function classifyNegotiationZone({
   const ask = num(current_ask);
   const recommended = num(recommended_offer);
   const ceiling = num(authorized_offer_ceiling) ?? recommended;
-  const confidence = num(valuation_confidence);
-  const askConfidence = num(asking_price_confidence);
+  // Defensive boundary normalization (spine §6): policy thresholds are 0–1,
+  // but callers historically fed ADE's native 0–100 valuation_confidence
+  // straight through — which made this gate impossible to fail (30 < 0.45 is
+  // false). Both scales are accepted here and compared on 0–1.
+  const confidence = normalizeOfferConfidence(valuation_confidence);
+  const askConfidence = normalizeOfferConfidence(asking_price_confidence);
 
   if (
     recommended === null ||
@@ -411,7 +417,9 @@ export function evaluateUnderwritingSufficiency({
   const askKnown = num(facts?.asking_price?.value ?? facts?.asking_price) !== null;
   if (!askKnown && facts?.wants_offer !== true) missing.push("asking_price");
 
-  const valuationConfidence = num(ade_snapshot?.valuation_confidence);
+  // Same defensive boundary as classifyNegotiationZone: ADE-native 0–100
+  // confidence is normalized to the 0–1 policy scale before comparison.
+  const valuationConfidence = normalizeOfferConfidence(ade_snapshot?.valuation_confidence);
   const compCount = num(ade_snapshot?.comp_count) ?? 0;
   const valuationReliable =
     valuationConfidence !== null && valuationConfidence >= p.min_valuation_confidence && compCount >= 3;

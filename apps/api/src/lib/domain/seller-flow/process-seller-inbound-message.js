@@ -43,6 +43,7 @@ import {
 } from "@/lib/domain/seller-flow/negotiation-policy.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { routeNegotiationStrategy } from "@/lib/domain/seller-flow/negotiation-strategy-router.js";
+import { resolveValuationAuthority } from "@/lib/domain/underwriting/valuation-authority.js";
 import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-policy.js";
 import {
   autoReplyModeAllowsQueue,
@@ -1184,12 +1185,40 @@ export async function processSellerInboundMessage({
   // ── Monetary authority for template rendering (spec §12): fail closed.
   // Offer tokens render ONLY from this persisted/derived ADE authority — never
   // from the seller's own price and never above the ceiling.
+  //
+  // The ceiling comes ONLY from the canonical valuation authority (spine §6):
+  // the negotiation state's ADE-ingested ceiling, or the resolver over the
+  // same effective ADE snapshot when no negotiation turn ran. The former
+  // fallback to `underwriting.max_allowable_offer` is retired — that chain let
+  // a different engine's number (the comp-intelligence pipeline's ARV×0.75,
+  // computed on a different confidence scale with no ledger) become the SEND
+  // ceiling whenever ADE authority was absent. Absent authority now means NO
+  // monetary send and a human-review route, never another engine's number.
+  const valuation_authority = resolveValuationAuthority({
+    ade_snapshot: effective_ade_snapshot,
+    facts: transition?.facts_patch || null,
+    property: context?.summary || null,
+  });
   const authorized_ceiling =
     negotiation?.state_preview?.authorized_offer_ceiling ??
-    underwriting.max_allowable_offer ??
+    valuation_authority.maximum_acquisition_price ??
     null;
   let authorized_amount = negotiation?.strategy_decision?.monetary?.amount ?? null;
-  if (
+  let valuation_authority_gate = null;
+  if (authorized_amount != null && authorized_ceiling == null) {
+    // A monetary directive with no authoritative ceiling cannot be bounded —
+    // fail closed to review instead of trusting an unboundable amount.
+    valuation_authority_gate = {
+      applied: true,
+      reason: "valuation_authority_absent",
+      attempted_amount: authorized_amount,
+    };
+    runtimeDeps.warn("[NEGOTIATION_AUTHORITY_ABSENT]", {
+      thread_key: threadKey || inboundFrom,
+      attempted_amount: authorized_amount,
+    });
+    authorized_amount = null; // fail closed → renderer blocks monetary sends
+  } else if (
     authorized_amount != null &&
     authorized_ceiling != null &&
     Number(authorized_amount) > Number(authorized_ceiling)
@@ -1200,6 +1229,13 @@ export async function processSellerInboundMessage({
       ceiling: authorized_ceiling,
     });
     authorized_amount = null; // fail closed → renderer blocks monetary sends
+  }
+  if (valuation_authority_gate && transition) {
+    transition = {
+      ...transition,
+      review_required: true,
+      review_reason: transition.review_reason || valuation_authority_gate.reason,
+    };
   }
   const deal_authority = {
     recommended_offer:
@@ -1277,11 +1313,19 @@ export async function processSellerInboundMessage({
       negotiation?.strategy_decision && !authority_gate_applied
         ? {
             strategy: negotiation.strategy_decision.strategy,
-            reason_code: negotiation.strategy_decision.reason_code,
+            reason_code: valuation_authority_gate
+              ? "VALUATION_AUTHORITY_ABSENT"
+              : negotiation.strategy_decision.reason_code,
             template_use_case: negotiation.strategy_decision.template_use_case,
             allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
-            review_required: negotiation.strategy_decision.review_required,
-            review_reason: negotiation.strategy_decision.review_reason,
+            // A monetary directive whose ceiling authority is absent must not
+            // merely drop its amount (the offer template would then fail on an
+            // empty token) — it routes to review with the canonical reason.
+            review_required:
+              negotiation.strategy_decision.review_required || Boolean(valuation_authority_gate),
+            review_reason:
+              negotiation.strategy_decision.review_reason ||
+              (valuation_authority_gate ? valuation_authority_gate.reason : null),
             monetary_amount: authorized_amount,
           }
         : null,

@@ -16,6 +16,7 @@
 // Pure module — no I/O. Persistence stays in persist-seller-transition.js.
 
 import { computeNegotiationGapMetrics } from "@/lib/domain/seller-flow/negotiation-policy.js";
+import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
 
 export const NEGOTIATION_STATE_VERSION = "negotiation_state_v2";
 
@@ -260,7 +261,11 @@ export function applyNegotiationTurn(previous, {
       num(ade_snapshot.investor_ceiling_high) ?? next.authorized_offer_ceiling ?? next.direct_purchase_maximum;
     next.arv = num(ade_snapshot.valuation_mid) ?? next.arv;
     next.repair_estimate = num(ade_snapshot.estimated_repairs) ?? next.repair_estimate;
-    next.comp_confidence = num(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
+    // Confidence enters state on the canonical 0–1 scale (spine §6): ADE's
+    // native 0–100 valuation_confidence is converted HERE so every downstream
+    // gate (zone policy min_valuation_confidence, gap metrics deal_confidence,
+    // automation_confidence) compares like with like.
+    next.comp_confidence = normalizeOfferConfidence(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
     if (ade_snapshot_id || ade_snapshot.id) next.ade_snapshot_id = ade_snapshot_id || ade_snapshot.id;
     next.alternate_strategy_eligibility = {
       subject_to_score: num(ade_snapshot.subject_to_score),

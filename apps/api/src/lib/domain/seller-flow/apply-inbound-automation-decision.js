@@ -1021,7 +1021,8 @@ function formatUsd(value) {
     : null;
 }
 
-function buildPersonalizationContext({
+// Exported for direct authority-gate testing — pure and deterministic.
+export function buildPersonalizationContext({
   message = "",
   inboundFrom = "",
   inboundTo = "",
@@ -1038,10 +1039,16 @@ function buildPersonalizationContext({
   // precedence over the bare recommended offer; any amount above the persisted
   // ceiling is discarded so the render fails closed instead of over-offering.
   const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  const hasCeilingAuthority = Number.isFinite(ceiling) && ceiling > 0;
   const pickAuthorized = (value) => {
     const amount = Number(value);
     if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
+    // No authoritative ceiling ⇒ NO monetary render at all (spine §6): an
+    // unbounded amount — even an ADE recommended offer — cannot be proven
+    // within authority, so the offer token stays empty and the render fails
+    // closed to review instead of sending an unboundable number.
+    if (!hasCeilingAuthority) return null;
+    if (amount > ceiling) return null;
     return amount;
   };
   const authorized_offer = formatUsd(
