@@ -144,10 +144,16 @@ test("contract send writes a deterministic pipeline blocker when no usable templ
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "missing_documents_or_template");
+  // G10: with no file documents AND no resolvable server template, the
+  // document-generation seam is consulted; its default provider is absent,
+  // so the failure reason is the explicit capability statement instead of
+  // the generic missing-documents reason.
+  assert.equal(result.reason, "document_generation_not_configured");
+  assert.equal(result.document_generation?.capability_absent, true);
   assert.equal(pipelinePayload.contract_item_id, 6001);
   assert.equal(pipelinePayload.current_engine, "Contracts");
   assert.equal(pipelinePayload.blocked, "Yes");
+  // Operator routing is unchanged: no resolvable template ⇒ resolve it.
   assert.equal(pipelinePayload.next_system_action, "resolve_contract_template");
 });
 

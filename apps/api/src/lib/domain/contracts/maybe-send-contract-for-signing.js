@@ -279,14 +279,20 @@ function buildContractSendBlocker({
     case "document_generation_not_configured":
     case "document_generation_failed":
     case "document_generation_empty_result":
+      // The result reason is the explicit capability statement; the pipeline
+      // blocker keeps routing the operator to the cheapest fix — resolving a
+      // Podio template when none resolved, configuring docgen otherwise.
       return {
         blocked: "Yes",
         automation_status: "Escalated",
         current_engine: "Contracts",
         blocker_type: "Missing Docs",
-        next_system_action: "configure_document_generation",
-        blocker_summary:
-          "Contract cannot be sent: no file documents, no DocuSign server template, and document generation is not configured.",
+        next_system_action: resolved_template?.ok
+          ? "configure_document_generation"
+          : "resolve_contract_template",
+        blocker_summary: resolved_template?.ok
+          ? "Contract cannot be sent: no file documents, no DocuSign server template, and document generation is not configured."
+          : "No active contract template could be resolved and document generation is not configured.",
       };
     case "missing_signers":
       return {
