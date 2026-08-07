@@ -124,6 +124,14 @@ export const ENV = {
   STORAGE_S3_SECRET_ACCESS_KEY: getEnv("STORAGE_S3_SECRET_ACCESS_KEY"),
   STORAGE_S3_FORCE_PATH_STYLE: getBooleanEnv("STORAGE_S3_FORCE_PATH_STYLE", false),
 
+  // Document generation provider for the contract path (G10). Default
+  // "not_configured": the adapter returns an explicit capability-absent
+  // result and never fabricates documents.
+  DOCUMENT_GENERATION_PROVIDER: getEnv(
+    "DOCUMENT_GENERATION_PROVIDER",
+    "not_configured"
+  ),
+
   ENABLE_DEALS_AUTOPILOT: getBooleanEnv("ENABLE_DEALS_AUTOPILOT", true),
   ENABLE_LIVE_SENDING: getBooleanEnv("ENABLE_LIVE_SENDING", false),
   AUTOMATION_LIVE_SENDS_ENABLED: getBooleanEnv("AUTOMATION_LIVE_SENDS_ENABLED", false),
@@ -132,6 +140,13 @@ export const ENV = {
   ENABLE_AUTO_OFFER_FLOW: getBooleanEnv("ENABLE_AUTO_OFFER_FLOW", true),
   ENABLE_AUTO_CONTRACT_FLOW: getBooleanEnv("ENABLE_AUTO_CONTRACT_FLOW", true),
   ENABLE_AUTO_CONTRACT_SEND: getBooleanEnv("ENABLE_AUTO_CONTRACT_SEND", false),
+  // NEW (G10): archive the signed envelope document to file storage on the
+  // envelope-completed webhook. Default OFF — zero behavior change until an
+  // operator enables it.
+  ENABLE_SIGNED_CONTRACT_ARCHIVAL: getBooleanEnv(
+    "ENABLE_SIGNED_CONTRACT_ARCHIVAL",
+    false
+  ),
   ENABLE_AUTO_TITLE_ROUTING: getBooleanEnv("ENABLE_AUTO_TITLE_ROUTING", true),
   ENABLE_AUTO_TITLE_COMPANY_ASSIGNMENT: getBooleanEnv(
     "ENABLE_AUTO_TITLE_COMPANY_ASSIGNMENT",
