@@ -372,23 +372,32 @@ export function applyNegotiationTurn(previous, {
     next.current_strategy = strategy_decision.strategy;
   }
 
-  // ── 6. Our offers (append-only ledger, ceiling-guarded) ─────────────────
+  // ── 6. Our offers (append-only ledger, ceiling-guarded, replay-safe) ────
   const executedAmount = num(offer_execution?.amount);
   if (offer_execution?.queued && executedAmount !== null && !next.terms_accepted) {
-    const ceiling = num(next.authorized_offer_ceiling);
-    // Authority violation is recorded, never silently accepted.
-    const withinAuthority = ceiling === null || executedAmount <= ceiling;
-    next.offers_made.push({
-      amount: executedAmount,
-      strategy: strategy_decision?.strategy || next.current_strategy || null,
-      template_use_case: offer_execution.template_use_case || null,
-      queue_row_id: offer_execution.queue_row_id || null,
-      within_authority: withinAuthority,
-      at: now,
-    });
-    if (next.initial_offer == null) next.initial_offer = executedAmount;
-    next.latest_offer = executedAmount;
-    next.negotiation_round += 1;
+    // Replay idempotency (G8): the same queued send (same queue row) must
+    // never append twice — a reprocessed inbound would otherwise double-count
+    // one offer against the turn/concession caps.
+    const executedRowId = clean(offer_execution.queue_row_id);
+    const alreadyRecorded =
+      executedRowId !== "" &&
+      next.offers_made.some((entry) => clean(entry?.queue_row_id) === executedRowId);
+    if (!alreadyRecorded) {
+      const ceiling = num(next.authorized_offer_ceiling);
+      // Authority violation is recorded, never silently accepted.
+      const withinAuthority = ceiling === null || executedAmount <= ceiling;
+      next.offers_made.push({
+        amount: executedAmount,
+        strategy: strategy_decision?.strategy || next.current_strategy || null,
+        template_use_case: offer_execution.template_use_case || null,
+        queue_row_id: offer_execution.queue_row_id || null,
+        within_authority: withinAuthority,
+        at: now,
+      });
+      if (next.initial_offer == null) next.initial_offer = executedAmount;
+      next.latest_offer = executedAmount;
+      next.negotiation_round += 1;
+    }
   }
 
   // ── 7. Accepted-terms lock (spec §14) ───────────────────────────────────

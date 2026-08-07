@@ -1582,6 +1582,8 @@ export async function processSellerInboundMessage({
   // canonical ADE snapshot, monotonic stage advancement, §16 workflow events.
   let deal_persistence = null;
   if (transition && supabase) {
+    // Known offer-bearing use cases — retained ONLY as a fallback for callers
+    // (test doubles, legacy executors) that do not report render accounting.
     const offer_use_cases = new Set([
       "initial_offer",
       "conditional_offer",
@@ -1590,13 +1592,23 @@ export async function processSellerInboundMessage({
       "offer_reveal_cash",
     ]);
     const queued_use_case = clean(execution?.selected_template?.use_case) || null;
+    // G8 ledger completeness: ANY queued send whose rendered template carried
+    // an offer-amount placeholder appends to offers_made — the renderer's own
+    // accounting (offer_amount_rendered / rendered_offer_amount) is the
+    // primary source, so an offer sent through a template outside the
+    // use-case list above no longer escapes turn/concession caps.
+    const rendered_offer_amount =
+      execution?.offer_amount_rendered && execution?.rendered_offer_amount != null
+        ? Number(execution.rendered_offer_amount)
+        : null;
+    const fallback_offer_amount =
+      authorized_amount != null && queued_use_case && offer_use_cases.has(queued_use_case)
+        ? authorized_amount
+        : null;
     const offer_execution = execution?.queued
       ? {
           queued: true,
-          amount:
-            authorized_amount != null && queued_use_case && offer_use_cases.has(queued_use_case)
-              ? authorized_amount
-              : null,
+          amount: rendered_offer_amount ?? fallback_offer_amount,
           template_use_case: queued_use_case,
           queue_row_id: execution?.queue_row_id || null,
         }
