@@ -1,5 +1,15 @@
 // ─── property_scope.js ────────────────────────────────────────────────────
 // Resolve template Property Type Scope from property/owner context.
+//
+// Unit-count parsing is delegated to the canonical property communication
+// class module (spine §7) — lib/domain/properties/property-communication-class.js
+// — so campaign, feeder, and template paths all agree on what a units signal
+// means. This module keeps its exported scope vocabulary stable.
+
+import {
+  normalizeUnitsCount,
+  parseUnitsCountFromLabel,
+} from "@/lib/domain/properties/property-communication-class.js";
 
 const VALID_SCOPES = Object.freeze([
   "Any Residential",
@@ -20,17 +30,11 @@ function lc(val) {
 }
 
 function parseUnitCount(context = {}) {
-  if (typeof context.unit_count === "number" && Number.isFinite(context.unit_count)) {
-    return context.unit_count;
-  }
-  const propertyType = lc(context.property_type);
-  if (propertyType.includes("duplex") || propertyType === "2 units") return 2;
-  if (propertyType.includes("triplex") || propertyType === "3 units") return 3;
-  if (propertyType.includes("fourplex") || propertyType === "4 units") return 4;
-  const matched = propertyType.match(/(\d+)\s*\+?\s*units?/);
-  if (matched) return Number(matched[1]);
-  if (propertyType.includes("5+") || propertyType.includes("5 plus")) return 5;
-  return null;
+  // Canonical units signal — `units_count` is the graph/target snapshot column
+  // name; `unit_count` is the legacy context key. Both are accepted.
+  const explicit = normalizeUnitsCount(context.units_count ?? context.unit_count);
+  if (explicit !== null) return explicit;
+  return parseUnitsCountFromLabel(context.property_type);
 }
 
 function isMultifamily24Label(propertyType = "") {
@@ -61,7 +65,8 @@ function isMultifamily5PlusLabel(propertyType = "") {
  * @param {boolean} [context.is_follow_up]
  * @param {string} [context.owner_type] - "Corporate", "Trust / Estate", "Individual", etc.
  * @param {string} [context.property_type] - "Single Family", "Multi-Family", etc.
- * @param {number} [context.unit_count] - Number of units
+ * @param {number} [context.unit_count] - Number of units (legacy key)
+ * @param {number} [context.units_count] - Number of units (canonical snapshot column)
  * @param {boolean} [context.is_probate]
  * @param {boolean} [context.is_trust]
  * @param {boolean} [context.is_corporate]

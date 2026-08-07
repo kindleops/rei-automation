@@ -1,6 +1,7 @@
 import { normalizeSellerFlowUseCase } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { sanitizeSmsTextMap } from "@/lib/sms/sanitize.js";
 import { detectEntityOwner } from "@/lib/identity/ownerProspectAlignment.js";
+import { renderedBodyViolationsForClass } from "@/lib/domain/properties/property-communication-class.js";
 
 export const ALLOWED_TEMPLATE_PLACEHOLDERS = Object.freeze(
   new Set([
@@ -326,6 +327,7 @@ export function evaluateTemplatePlaceholders({
   variant_group = null,
   context = {},
   overrides = {},
+  property_communication_class = null,
 } = {}) {
   const placeholders = extractPlaceholders(template_text);
   const variables = buildVariableMap(context, overrides);
@@ -379,11 +381,21 @@ export function evaluateTemplatePlaceholders({
   const has_bad_greeting = bad_greetings.some((g) => rendered_preview.startsWith(g));
   const has_entity_greeting = hasEntityGreeting(rendered_preview);
 
+  // Render-time class assert (spine §7): when the caller passes a property
+  // communication class, the rendered preview must satisfy its hard wording
+  // rules (no unit wording for single_family/unknown, no cross-plex wording).
+  // Null/absent class means no class claim — no check.
+  const class_wording_violations = renderedBodyViolationsForClass(
+    rendered_preview,
+    property_communication_class
+  );
+
   const ok =
     missing_required_placeholders.length === 0 &&
     !has_token_leak &&
     !has_bad_greeting &&
-    !has_entity_greeting;
+    !has_entity_greeting &&
+    class_wording_violations.length === 0;
 
   return {
     ok,
@@ -395,7 +407,8 @@ export function evaluateTemplatePlaceholders({
     safety_violations: {
       has_token_leak,
       has_bad_greeting,
-      has_entity_greeting
+      has_entity_greeting,
+      class_wording_violations
     }
   };
 }
@@ -408,6 +421,7 @@ export function renderTemplate({
   remove_unknown_placeholders = true,
   use_case = null,
   variant_group = null,
+  property_communication_class = null,
 } = {}) {
   const raw_template = String(template_text ?? "");
   if (!raw_template.trim()) {
@@ -420,6 +434,7 @@ export function renderTemplate({
     variant_group,
     context,
     overrides,
+    property_communication_class,
   });
 
   const variables = validation.variables;
@@ -465,6 +480,7 @@ export function renderTemplate({
     missing_placeholders,
     invalid_placeholders: validation.invalid_placeholders,
     missing_required_placeholders: validation.missing_required_placeholders,
+    safety_violations: validation.safety_violations,
     variables,
   };
 }

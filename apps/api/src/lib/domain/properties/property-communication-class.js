@@ -152,6 +152,12 @@ export function communicationClassFromLabel(label) {
     return PROPERTY_COMMUNICATION_CLASSES.MULTIFAMILY_5_PLUS;
   }
 
+  // "Mobile Home Park" / "RV Park" are multi-unit commercial parks, not a
+  // single mobile home — never single_family.
+  if (normalized.includes("mobile home park") || normalized.includes("rv park")) {
+    return null;
+  }
+
   if (isSfrToken(normalized)) return PROPERTY_COMMUNICATION_CLASSES.SINGLE_FAMILY;
   for (const marker of SINGLE_FAMILY_LABEL_MARKERS) {
     if (normalized.includes(marker)) return PROPERTY_COMMUNICATION_CLASSES.SINGLE_FAMILY;

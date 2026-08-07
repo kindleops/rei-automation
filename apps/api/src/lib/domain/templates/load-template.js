@@ -19,6 +19,7 @@ import {
   scoreDealStrategyMatch,
   scorePropertyTypeScopeMatch,
   summarizeTemplateSelectorMetadata,
+  templateCommunicationClassRejections,
   TEMPLATE_TOUCH_TYPES,
 } from "@/lib/domain/templates/template-selector.js";
 import { info, warn } from "@/lib/logging/logger.js";
@@ -593,6 +594,13 @@ function evaluateTemplateCandidate(
   if (!property_type_scope_compatibility.compatible) {
     rejection_reasons.push("property_type_scope_incompatible");
   }
+
+  // HARD guarantee (spine §7): unit wording/placeholders forbidden for the
+  // selector's property communication class make the template unselectable —
+  // a filter-level rejection evaluated before any scoring can rank it.
+  rejection_reasons.push(
+    ...templateCommunicationClassRejections(template, selector_input)
+  );
 
   if (
     !isDealStrategyCompatible({
@@ -1531,7 +1539,35 @@ export async function loadTemplate({
   const top_score = scored[0].score;
   const top_cluster = scored.filter((template) => template.score >= top_score - 10);
 
-  return rotateVariant(top_cluster, rotation_key);
+  // Rotation identity includes the property communication class claim (spine
+  // §7 / G2) so a retry can never hash into a different wording class. Derived
+  // from the same inputs the candidate scoring used; callers' rotation keys
+  // are otherwise preserved unchanged.
+  const rotation_class_claim = clean(
+    buildTemplateSelectorInput({
+      template_selector,
+      use_case,
+      language,
+      property_type_scope,
+      deal_strategy,
+      touch_type,
+      touch_number,
+      message_type,
+      category,
+      secondary_category,
+      sequence_position,
+      route: context?.route || null,
+      context,
+      strict_touch_one_podio_only,
+    }).property_communication_class
+  );
+  const effective_rotation_key = rotation_key
+    ? rotation_class_claim
+      ? `${rotation_key}|class:${rotation_class_claim}`
+      : rotation_key
+    : rotation_key;
+
+  return rotateVariant(top_cluster, effective_rotation_key);
 }
 
 // Exported for white-box testing only

@@ -38,6 +38,10 @@ import {
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import {
+  normalizeUnitsCount,
+  resolvePropertyCommunicationClass,
+} from '@/lib/domain/properties/property-communication-class.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import {
   acquireCampaignExecutionLock,
@@ -1236,6 +1240,14 @@ function buildTargetSnapshot(campaign, candidate, routing, rendered, index) {
         state: candidate.state,
         language: candidate.best_language || candidate.language || null,
         final_acquisition_score: candidate.final_acquisition_score,
+        // Property signals for downstream template property-scope resolution.
+        // `units_count` is the canonical column name (campaign_target_graph /
+        // properties) — without it a 7-unit property can never select a
+        // 5+ Units template at launch time.
+        property_type: candidate.property_type || candidate.raw?.property_type || null,
+        property_class: candidate.property_class || candidate.raw?.property_class || null,
+        canonical_property_group: candidate.canonical_property_group || null,
+        units_count: normalizeUnitsCount(candidate.units_count ?? candidate.raw?.units_count),
       },
     },
   }
@@ -4263,6 +4275,9 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
         property_zip: row.property_zip,
         property_type: row.property_type,
         property_class: row.property_class,
+        // Canonical units column — required so template property-scope
+        // resolution sees the unit count at launch time (spine §7 / G1).
+        units_count: normalizeUnitsCount(row.units_count),
         canonical_property_group: row.canonical_property_group,
         phone_owner: row.phone_owner,
         phone_activity_status: row.phone_activity_status,
@@ -6233,6 +6248,21 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
   const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
   const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
   const propertyType = firstNonEmpty(snapshot.property_type, target.asset_type)
+  // LIVE DEFECT FIX (spine §7 / G1): the graph/target snapshot column is
+  // `units_count` — the previous read (`snapshot.unit_count ?? snapshot.units`)
+  // matched nothing, so unit counts never reached template property-scope
+  // resolution on the campaign path and a 7-unit property could not select a
+  // 5+ Units template. Legacy keys kept as fallback for snapshots persisted
+  // before this fix.
+  const unitsCount = normalizeUnitsCount(
+    snapshot.units_count ?? snapshot.unit_count ?? snapshot.units
+  )
+  const communicationClass = resolvePropertyCommunicationClass({
+    units_count: unitsCount,
+    property_type: propertyType,
+    property_class: snapshot.property_class,
+    normalized_asset_class: snapshot.canonical_property_group,
+  })
   return {
     master_owner_id: firstNonEmpty(target.master_owner_id, snapshot.master_owner_id),
     prospect_id: prospectId,
@@ -6264,6 +6294,8 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     property_zip: firstNonEmpty(snapshot.property_zip),
     property_type: firstNonEmpty(snapshot.property_type, target.asset_type),
     property_class: firstNonEmpty(snapshot.property_class),
+    units_count: unitsCount,
+    property_communication_class: communicationClass,
     canonical_property_group: firstNonEmpty(snapshot.canonical_property_group, target.asset_type),
     final_acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
     acquisition_score: target.priority_score ?? snapshot.acquisition_score ?? null,
@@ -6292,10 +6324,12 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
       ...snapshot,
       language: canonicalLanguage,
       language_preference: canonicalLanguage,
+      units_count: unitsCount,
+      property_communication_class: communicationClass,
       property_type_scope: resolvePropertyTypeScope({
         use_case: firstNonEmpty(metadata.template_use_case, campaign.metadata?.template_use_case, campaign.objective, 'ownership_check'),
         property_type: propertyType,
-        unit_count: snapshot.unit_count ?? snapshot.units ?? null,
+        units_count: unitsCount,
         owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
       }),
     },
@@ -6347,6 +6381,7 @@ export function candidateSnapshotForMetadata(candidate = {}) {
     property_zip: candidate.property_zip || null,
     property_type: candidate.property_type || null,
     property_class: candidate.property_class || null,
+    units_count: normalizeUnitsCount(candidate.units_count ?? candidate.raw?.units_count),
     canonical_property_group: candidate.canonical_property_group || null,
     touch_number: candidate.touch_number || 1,
     acquisition_score: candidate.acquisition_score ?? candidate.final_acquisition_score ?? null,

@@ -27,6 +27,14 @@ import {
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { resolveLanguage } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
+import {
+  communicationClassFromUnits,
+  communicationClassToCanonicalPropertyGroup,
+  isTemplateAllowedForCommunicationClass,
+  normalizeUnitsCount,
+  renderedBodyViolationsForClass,
+  resolvePropertyCommunicationClass,
+} from "@/lib/domain/properties/property-communication-class.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -245,9 +253,10 @@ function isRelationshipProbeTemplate(template = {}) {
 function isGenericOwnershipTemplateBody(template = {}) {
   const body = lower(pick(template?.template_body, template?.english_translation, ""));
   if (!body) return false;
-  if (body.includes("duplex") || body.includes("triplex") || body.includes("fourplex")) return false;
-  if (body.includes("units") && !body.includes("units?")) return false;
-  return true;
+  // Canonical `unknown`-class wording rule (spine §7): a body is only generic
+  // when it carries NO unit-count wording at all. This intentionally tightens
+  // the old check, which exempted "units?" question phrasing.
+  return renderedBodyViolationsForClass(body, "unknown").length === 0;
 }
 
 function canRenderOwnershipTemplateWithoutPropertyType(template = {}, candidate = {}, selector = {}) {
@@ -338,28 +347,45 @@ function titleCaseNameToken(value) {
     .replace(/(^|[-'\s])([a-z])/g, (_, prefix, letter) => `${prefix}${letter.toUpperCase()}`);
 }
 
+// Groups whose properties are explicitly commercial — the residential property
+// communication class wording rules (spine §7) do not govern them. Note
+// "other_commercial" is NOT here: it is also the default for absent/unrecognized
+// labels, which must keep the strict unknown-class rules.
+const DEFINITE_COMMERCIAL_PROPERTY_GROUPS = new Set([
+  "retail",
+  "office",
+  "industrial",
+  "self_storage",
+  "hotel_motel",
+  "mobile_home_park",
+  "land",
+]);
+
 /**
  * Determine the canonical property group for template matching.
  */
 export function getCanonicalPropertyGroup(hints = {}) {
   let pt = lower(typeof hints === "string" ? hints : hints.property_type);
+  if (typeof hints === "object" && hints !== null) {
+    // Spine §7: a numeric units count is AUTHORITATIVE — it outranks labels.
+    // Delegated to the canonical property communication class module; the
+    // group vocabulary stays feeder-stable (5–10 units → small_multifamily).
+    const units = normalizeUnitsCount(hints.units_count ?? hints.raw?.units_count);
+    if (units !== null) {
+      const units_group = communicationClassToCanonicalPropertyGroup(
+        communicationClassFromUnits(units),
+        units
+      );
+      if (units_group) return units_group;
+    }
+  }
   if (!pt && typeof hints === "object" && hints !== null) {
     const raw_pt = lower(hints.raw_payload_json?.property_type || hints.raw?.raw_payload_json?.property_type);
     const p_class = lower(hints.property_class || hints.raw?.property_class);
     const options = lower(hints.options || hints.raw?.options);
     const podio_tags = lower(hints.podio_tags || hints.raw?.podio_tags);
-    const units = asNumber(hints.units_count || hints.raw?.units_count, null);
 
     pt = pick(pt, raw_pt, p_class);
-
-    if (!pt) {
-       if (units === 1) pt = "sfr";
-       else if (units === 2) pt = "duplex";
-       else if (units === 3) pt = "triplex";
-       else if (units === 4) pt = "fourplex";
-       else if (units > 4 && units <= 10) pt = "small_multifamily";
-       else if (units > 10) pt = "multifamily_5_plus";
-    }
 
     if (!pt && options) {
       if (options.includes("sfr") || options.includes("single family")) pt = "sfr";
@@ -1140,10 +1166,36 @@ function runOutboundSafetyGate(candidate, rendered, options, batchState = {}) {
   // ── Phase B: Property Group Wording Lint ────────────────────────────────
   const group = candidate.canonical_property_group;
   const body_lower = lower(msg_body);
-  
+
   if (group === 'sfr') {
     if (body_lower.includes('duplex') || body_lower.includes('triplex') || body_lower.includes('fourplex')) {
         return { ok: false, reason: "outbound_gate_property_type_mismatch_sfr_as_multi", reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE, gate_block_type: "property_mismatch" };
+    }
+  }
+
+  // ── Canonical class wording assert (spine §7) ───────────────────────────
+  // Final DB-insert defense: the rendered body must satisfy the property
+  // communication class wording rules. Explicitly commercial properties keep
+  // their own lint below instead.
+  if (!DEFINITE_COMMERCIAL_PROPERTY_GROUPS.has(group)) {
+    const gate_communication_class =
+      clean(pick(candidate.property_communication_class, candidate.raw?.property_communication_class)) ||
+      resolvePropertyCommunicationClass({
+        units_count: candidate.units_count ?? candidate.raw?.units_count,
+        property_type: pick(candidate.property_type, candidate.raw?.property_type),
+        property_class: pick(candidate.property_class, candidate.raw?.property_class),
+        normalized_asset_class: pick(candidate.canonical_property_group, candidate.raw?.canonical_property_group),
+      });
+    const gate_class_violations = renderedBodyViolationsForClass(msg_body, gate_communication_class);
+    if (gate_class_violations.length) {
+      return {
+        ok: false,
+        reason: "outbound_gate_property_class_wording_violation",
+        reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
+        gate_block_type: "property_mismatch",
+        property_communication_class: gate_communication_class,
+        class_wording_violations: gate_class_violations,
+      };
     }
   }
 
@@ -1445,6 +1497,7 @@ function buildTemplateRotationSeed({
   stage_code,
   campaign_key,
   day_bucket,
+  communication_class,
 } = {}) {
   const utc_bucket = clean(day_bucket) || new Date().toISOString().slice(0, 10);
   return [
@@ -1456,6 +1509,9 @@ function buildTemplateRotationSeed({
     clean(stage_code),
     clean(campaign_key),
     utc_bucket,
+    // Property communication class is part of the rotation identity so a
+    // retry can never flip wording class (spine §7 / G2).
+    clean(communication_class),
   ].join("|");
 }
 
@@ -3273,6 +3329,22 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   const property_type = clean(
     pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
   );
+  // Canonical property communication class (spine §7). An upstream class
+  // (campaign launchCandidateFromTarget) wins; otherwise resolve from the
+  // candidate's own signals — units_count is authoritative.
+  const communication_class =
+    clean(pick(candidate.property_communication_class, candidate.raw?.property_communication_class)) ||
+    resolvePropertyCommunicationClass({
+      units_count: candidate.units_count ?? candidate.raw?.units_count,
+      property_type: pick(candidate.property_type, candidate.raw?.property_type),
+      property_class: pick(candidate.property_class, candidate.raw?.property_class),
+      normalized_asset_class: pick(candidate.canonical_property_group, candidate.raw?.canonical_property_group),
+    });
+  // The residential class wording rules do not govern explicitly commercial
+  // properties (their own lint lives in runOutboundSafetyGate). An absent or
+  // unrecognized label still gets the strict unknown-class rules.
+  const class_rules_apply = !DEFINITE_COMMERCIAL_PROPERTY_GROUPS.has(candidate_group);
+  template_routing_details.property_communication_class = communication_class;
 
   // Reusable property group filter (same logic for all levels)
   const filterByPropertyGroup = (tmplList) => tmplList.filter((t) => {
@@ -3338,13 +3410,33 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   template_routing_details.template_routing_reason = fallback_routing_reason;
   template_routing_details.template_fallback_level = template_fallback_level;
 
+  // ── HARD guarantee (spine §7): every fallback level must be class-safe ────
+  // Templates whose wording/placeholders conflict with the property
+  // communication class are unselectable — filtered out here, before scoring
+  // and rotation, so no cascade level can resurrect forbidden wording.
+  const class_filter_input_count = templates.length;
+  if (class_rules_apply) {
+    templates = templates.filter(
+      (t) => isTemplateAllowedForCommunicationClass(t, communication_class).allowed
+    );
+  }
+  const class_filter_emptied = class_filter_input_count > 0 && templates.length === 0;
+  if (class_filter_emptied) {
+    fallback_routing_reason = `${fallback_routing_reason}_class_filtered`;
+    template_routing_details.template_routing_reason = fallback_routing_reason;
+  }
+
   if (!templates.length) {
-    logTemplateRenderFailure(candidate, "no_template_after_fallback", {
+    const no_template_reason = class_filter_emptied
+      ? "no_class_safe_template"
+      : "no_template_after_fallback";
+    logTemplateRenderFailure(candidate, no_template_reason, {
       selected_template_id: null,
       missing_variables: [],
       template_routing_reason: fallback_routing_reason,
       candidate_group,
       property_type,
+      property_communication_class: communication_class,
     });
     logger.info("feeder.template_routing_no_template", {
       master_owner_id: candidate.master_owner_id,
@@ -3353,11 +3445,12 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       selected_template_id: null,
       template_routing_reason: fallback_routing_reason,
       template_fallback_level,
+      property_communication_class: communication_class,
     });
     return {
       ok: false,
       reason_code: REASON_CODES.NO_TEMPLATE,
-      reason: "no_template_after_fallback",
+      reason: no_template_reason,
       template: null,
       rendered_message_body: null,
       missing_variables: [],
@@ -3435,6 +3528,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     stage_code: selector.stage_code,
     campaign_key: clean(options.campaign_key || options.campaign_session_id || candidate.campaign_session_id),
     day_bucket: clean(options.day_bucket) || clean(options.now).slice(0, 10),
+    communication_class,
   });
   const rotation_choice = rotation_enabled
     ? chooseRotatingTemplate(pool_result.pool, rotation_seed)
@@ -3767,6 +3861,49 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       missing_variables: rendered.missing_variables,
       agent_name_raw,
       agent_first_name,
+      variable_payload_preview: variable_payload,
+      selected_template_preview: {
+        id: selected_template?.id || null,
+        template_id: selected_template?.template_id || null,
+        podio_template_id: selected_template?.podio_template_id || null,
+        template_name: selected_template?.template_name || null,
+        use_case: selected_template?.use_case || null,
+        language: selected_template?.language || null,
+        stage_code: selected_template?.stage_code || null,
+        stage_label: selected_template?.stage_label || null,
+      },
+      template_rotation,
+      ...template_routing_details,
+    };
+  }
+
+  // ── Render-time class assert (spine §7) ───────────────────────────────────
+  // Defense-in-depth behind the selection filter: the final rendered body must
+  // not carry wording forbidden for the property communication class.
+  const class_wording_violations = class_rules_apply
+    ? renderedBodyViolationsForClass(normalized_rendered, communication_class)
+    : [];
+  if (class_wording_violations.length) {
+    logTemplateRenderFailure(candidate, "class_wording_violation", {
+      template_id: getTemplateReferenceId(selected_template),
+      missing_variables: rendered.missing_variables,
+      template_routing_reason: template_routing_details.template_routing_reason,
+      candidate_group,
+      property_type,
+      property_communication_class: communication_class,
+      class_wording_violations,
+    });
+    return {
+      ok: false,
+      reason_code: REASON_CODES.TEMPLATE_RENDER_LINT_FAILURE,
+      reason: "class_wording_violation",
+      render_error_message: `Rendered body violates ${communication_class} wording rules: ${class_wording_violations.join(", ")}`,
+      class_wording_violations,
+      template: selected_template_with_source,
+      template_id: selected_template?.template_id || selected_template?.id || null,
+      rendered_preview: normalized_rendered.slice(0, 200),
+      rendered_message_body: null,
+      missing_variables: rendered.missing_variables,
       variable_payload_preview: variable_payload,
       selected_template_preview: {
         id: selected_template?.id || null,
