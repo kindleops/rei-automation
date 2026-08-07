@@ -7,7 +7,7 @@ const itemIcon = (id: string): Parameters<typeof Icon>[0]['name'] => {
   if (id === 'human-review') return 'shield'
   if (id === 'follow-ups') return 'clock'
   if (id === 'failed-sends') return 'alert'
-  if (id === 'decisions') return 'flag'
+  if (id === 'sending-blockers') return 'flag'
   if (id === 'closing-tasks') return 'dollar-sign'
   return 'activity'
 }
@@ -44,11 +44,18 @@ export const ActionCenter = ({
       className="nx-action-center-popover"
       placement="bottom-end"
       width={300}
+      label="Action Center"
     >
       <header className="nx-action-center__header">
         <strong>Action Center</strong>
         <small>Operator tasks requiring attention</small>
       </header>
+      {/*
+        Kept deliberately narrow: four live counts that each deep-link
+        somewhere. Anything richer — blockers, degraded explanations, activity,
+        notifications, system health — belongs to the Operations Center
+        (`modules/operations`), which owns dismiss/snooze/complete/dedupe.
+      */}
       <div className="nx-action-center__list" role="menu">
         {loading && visibleItems.length === 0 ? <ShellSkeleton rows={4} /> : null}
         {visibleItems.map((item) => (

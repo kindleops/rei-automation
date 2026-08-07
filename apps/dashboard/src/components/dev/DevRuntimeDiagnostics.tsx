@@ -100,6 +100,8 @@ export const DevRuntimeDiagnostics = () => {
     <div
       role="alert"
       data-testid="dev-runtime-banner"
+      /* Lane G: dev-only overlay, never shipped — excluded from the a11y gate. */
+      data-lc-dev-overlay="true"
       style={{
         position: 'fixed',
         bottom: 0,

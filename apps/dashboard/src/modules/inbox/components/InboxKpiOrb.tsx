@@ -71,7 +71,7 @@ function MCard({ label, value, tone, span2 }: {
       gap: '3px',
       gridColumn: span2 ? 'span 2' : undefined,
     }}>
-      <div style={{ fontSize: '9px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+      <div style={{ fontSize: '11px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         {label}
       </div>
       <div style={{ fontSize: '17px', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
@@ -91,7 +91,7 @@ function Grid({ children, cols = 3 }: { children: React.ReactNode; cols?: number
 
 function SubLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: '9px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
+    <div style={{ fontSize: '11px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
       {children}
     </div>
   )
@@ -122,9 +122,9 @@ function HighlightCard({ tone, eyebrow, title, detail }: {
       borderRadius: '8px',
       fontSize: '11px',
     }}>
-      <div style={{ fontSize: '8px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
+      <div style={{ fontSize: '11px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
       <div style={{ fontWeight: 600, marginBottom: '2px', color: 'var(--nx-kpi-highlight-title, rgba(255,255,255,0.85))' }}>{title}</div>
-      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '10px' }}>{detail}</div>
+      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '11px' }}>{detail}</div>
     </div>
   )
 }
@@ -233,7 +233,7 @@ function AutoRepliesSection({ sections, stage, onStage }: {
               border: `1px solid ${stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-border, rgba(255,255,255,0.08))'}`,
               background: stage === d.id ? `${d.color}1a` : 'var(--nx-kpi-tab-inactive-bg, rgba(255,255,255,0.03))',
               color: stage === d.id ? d.color : 'var(--nx-kpi-tab-inactive-text, rgba(255,255,255,0.38))',
-              fontSize: '10px',
+              fontSize: '11px',
               fontWeight: stage === d.id ? 700 : 400,
               cursor: 'pointer',
             }}
@@ -384,7 +384,7 @@ function DeliverabilitySection({ kpis, sections }: { kpis: KpiData; sections: Co
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px',
               }}>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.5))', fontFamily: 'monospace' }}>{reason}</span>
+                <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.5))', fontFamily: 'monospace' }}>{reason}</span>
                 <span style={{ fontSize: '12px', fontWeight: 700, color: count > 5 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-warn, #f97316)' }}>{fmtN(count)}</span>
               </div>
             ))}
@@ -430,12 +430,12 @@ function TemplatesSection({ sections, outliers }: { sections: CockpitOpsSections
                 display: 'grid', gridTemplateColumns: '1fr auto auto auto',
                 gap: '10px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
               }}>
-                <span style={{ fontFamily: 'monospace', fontSize: '10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.68))' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.68))' }}>
                   {t.template_id}
                 </span>
-                <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-label, rgba(255,255,255,0.35))' }}>{fmtN(t.sent)} sent</span>
-                <span style={{ fontSize: '10px', color: t.failed > 0 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.22))' }}>{fmtN(t.failed)} fail</span>
-                <span style={{ fontSize: '10px', color: t.failure_rate !== null && t.failure_rate > 10 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-label, rgba(255,255,255,0.32))' }}>
+                <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-label, rgba(255,255,255,0.35))' }}>{fmtN(t.sent)} sent</span>
+                <span style={{ fontSize: '11px', color: t.failed > 0 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.22))' }}>{fmtN(t.failed)} fail</span>
+                <span style={{ fontSize: '11px', color: t.failure_rate !== null && t.failure_rate > 10 ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-info-label, rgba(255,255,255,0.32))' }}>
                   {fmtRate(t.failure_rate)}
                 </span>
               </div>
@@ -480,14 +480,14 @@ function NumbersSection({ sections, outliers }: { sections: CockpitOpsSections |
               display: 'grid', gridTemplateColumns: '1fr auto auto auto auto',
               gap: '8px', padding: '6px 10px', background: 'var(--nx-kpi-info-bg, rgba(255,255,255,0.03))', borderRadius: '6px', alignItems: 'center',
             }}>
-              <span style={{ fontFamily: 'monospace', fontSize: '10px', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.65))' }}>{n.number}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.3))' }}>{fmtN(n.sent)}</span>
-              <span style={{ fontSize: '10px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)' }}>{fmtRate(n.delivery_rate)}</span>
-              <span style={{ fontSize: '10px', color: 'var(--nx-kpi-info-text, rgba(255,255,255,0.42))' }}>{fmtRate(n.reply_rate)}</span>
-              <span style={{ fontSize: '10px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? 'var(--nx-kpi-warn, #f97316)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.28))' }}>{fmtRate(n.opt_out_rate)}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--nx-kpi-info-title, rgba(255,255,255,0.65))' }}>{n.number}</span>
+              <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.3))' }}>{fmtN(n.sent)}</span>
+              <span style={{ fontSize: '11px', color: n.delivery_rate !== null && n.delivery_rate > 90 ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)' }}>{fmtRate(n.delivery_rate)}</span>
+              <span style={{ fontSize: '11px', color: 'var(--nx-kpi-info-text, rgba(255,255,255,0.42))' }}>{fmtRate(n.reply_rate)}</span>
+              <span style={{ fontSize: '11px', color: n.opt_out_rate !== null && n.opt_out_rate > 3 ? 'var(--nx-kpi-warn, #f97316)' : 'var(--nx-kpi-info-muted, rgba(255,255,255,0.28))' }}>{fmtRate(n.opt_out_rate)}</span>
             </div>
           ))}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '8px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.2))', letterSpacing: '0.05em' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: '8px', padding: '2px 10px', fontSize: '11px', color: 'var(--nx-kpi-info-muted, rgba(255,255,255,0.2))', letterSpacing: '0.05em' }}>
             <span />
             <span>SENT</span><span>DEL%</span><span>REP%</span><span>OPT%</span>
           </div>
@@ -550,7 +550,23 @@ function PipelineSection({ kpis }: { kpis: KpiData }) {
 
 const HOVER_CLOSE_MS = 140
 
-export const InboxKpiOrb = () => {
+/**
+ * Optional CONTROLLED mode, added by Lane A so the shell can own the entry
+ * point to Operational Intelligence on all 15 routes without this 945-line
+ * component being rebuilt or duplicated. Passing `hideTrigger` suppresses the
+ * orb and hands open/close to the caller; `anchorRef` is what the desktop
+ * popover positions against. Omit all of them and the component behaves exactly
+ * as before (the inbox toolbar and the mobile dock still use it that way).
+ */
+export interface InboxKpiOrbProps {
+  hideTrigger?: boolean
+  open?: boolean
+  onClose?: () => void
+  anchorRef?: React.RefObject<HTMLElement | null>
+}
+
+export const InboxKpiOrb = ({ hideTrigger = false, open, onClose, anchorRef }: InboxKpiOrbProps = {}) => {
+  const isControlled = typeof open === 'boolean'
   const { isMobile } = useBreakpoint()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dashboardRef = useRef<HTMLDivElement | null>(null)
@@ -573,9 +589,9 @@ export const InboxKpiOrb = () => {
     return () => media.removeEventListener('change', apply)
   }, [])
 
-  const kpiPanelActive = isOpen || isPinned
+  const kpiPanelActive = isControlled ? Boolean(open) : isOpen || isPinned
   const useDrawerPanel = isMobile || isTouchUi
-  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
+  const { kpis, isLive, recommendations, error: kpiError, isSlow: kpisAreSlow, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
   const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
 
   const allKpisList = useMemo(() => {
@@ -615,7 +631,8 @@ export const InboxKpiOrb = () => {
   }, [isPinned])
 
   const updateDashboardPosition = useCallback(() => {
-    const anchor = containerRef.current?.getBoundingClientRect()
+    const anchorEl = anchorRef?.current ?? containerRef.current
+    const anchor = anchorEl?.getBoundingClientRect()
     const panel = dashboardRef.current
     if (!anchor) return
 
@@ -631,7 +648,7 @@ export const InboxKpiOrb = () => {
       top: anchor.bottom + gap,
       left,
     })
-  }, [])
+  }, [anchorRef])
 
   useLayoutEffect(() => {
     if (!kpiPanelActive || useDrawerPanel) {
@@ -656,13 +673,20 @@ export const InboxKpiOrb = () => {
     if (hoverCloseRef.current) clearTimeout(hoverCloseRef.current)
   }, [])
 
+  /* Uncontrolled desktop closes on hover-out. Everything else — touch, and the
+     shell-controlled mode where there is no orb to hover off — closes on an
+     outside pointer press (§11.10). */
   useEffect(() => {
-    if (!useDrawerPanel || !kpiPanelActive || isPinned) return
+    if (!kpiPanelActive) return
+    if (!useDrawerPanel && !isControlled) return
+    if (isPinned && !isControlled) return
     const handlePointer = (event: Event) => {
       const target = event.target as Node
       if (containerRef.current?.contains(target)) return
       if (dashboardRef.current?.contains(target)) return
-      setIsOpen(false)
+      if (anchorRef?.current?.contains(target)) return
+      if (isControlled) onClose?.()
+      else setIsOpen(false)
     }
     window.addEventListener('mousedown', handlePointer)
     window.addEventListener('touchstart', handlePointer, { passive: true })
@@ -670,12 +694,13 @@ export const InboxKpiOrb = () => {
       window.removeEventListener('mousedown', handlePointer)
       window.removeEventListener('touchstart', handlePointer)
     }
-  }, [useDrawerPanel, kpiPanelActive, isPinned])
+  }, [useDrawerPanel, kpiPanelActive, isPinned, isControlled, onClose, anchorRef])
 
   const closePanel = useCallback(() => {
     setIsOpen(false)
     setIsPinned(false)
-  }, [])
+    onClose?.()
+  }, [onClose])
 
   const handleOrbClick = useCallback(() => {
     if (useDrawerPanel) {
@@ -702,7 +727,7 @@ export const InboxKpiOrb = () => {
               <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.03em', color: 'var(--nx-kpi-title, rgba(255,255,255,0.9))' }}>
                 Operational Intelligence
               </div>
-              <div style={{ fontSize: '9px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
                 {isLive ? '⚡ Live' : 'System telemetry'}
               </div>
             </div>
@@ -718,7 +743,7 @@ export const InboxKpiOrb = () => {
                     border: 'none',
                     background: timeWindow === w ? 'var(--nx-kpi-active-btn-bg, rgba(56,208,240,0.14))' : 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
                     color: timeWindow === w ? 'var(--nx-kpi-active-btn-color, #38d0f0)' : 'var(--nx-kpi-btn-color, rgba(255,255,255,0.38))',
-                    fontSize: '9px',
+                    fontSize: '11px',
                     fontWeight: timeWindow === w ? 700 : 400,
                     cursor: 'pointer',
                     letterSpacing: '0.04em',
@@ -766,7 +791,7 @@ export const InboxKpiOrb = () => {
                   border: `1px solid ${section === s.id ? 'var(--nx-kpi-active-pill-border, #38d0f0)' : 'var(--nx-kpi-pill-border, rgba(255,255,255,0.08))'}`,
                   background: section === s.id ? 'var(--nx-kpi-active-pill-bg, rgba(56,208,240,0.1))' : 'transparent',
                   color: section === s.id ? 'var(--nx-kpi-active-pill-color, #38d0f0)' : 'var(--nx-kpi-pill-color, rgba(255,255,255,0.38))',
-                  fontSize: '10px',
+                  fontSize: '11px',
                   fontWeight: section === s.id ? 700 : 400,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -796,7 +821,7 @@ export const InboxKpiOrb = () => {
               <span>Telemetry error</span>
               <button
                 onClick={() => refreshKpis()}
-                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '2px 8px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '10px' }}
+                style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '2px 8px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '11px' }}
               >
                 Retry
               </button>
@@ -811,9 +836,36 @@ export const InboxKpiOrb = () => {
             scrollbarWidth: 'thin',
             scrollbarColor: 'var(--nx-kpi-scrollbar, rgba(255,255,255,0.08)) transparent',
           }}>
-            {!kpis ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
-                Loading...
+            {!kpis && kpiError ? (
+              /*
+               * LANE F (§8.3): this branch used to be `!kpis ? "Loading..."`, so a
+               * failed read rendered a spinner forever — the operator could not
+               * tell a slow network from a dead one. A failure now says so and
+               * offers the way out.
+               */
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '100px', padding: '0 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', color: 'var(--nx-kpi-error-text, #ff6b6b)' }}>
+                  Operational telemetry could not be read
+                </div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>
+                  The numbers below are unavailable — this panel is blind, not idle.
+                </div>
+                <button
+                  onClick={() => refreshKpis()}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', padding: '4px 12px', borderRadius: '4px', color: 'white', cursor: 'pointer', fontSize: '11px' }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !kpis ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '6px', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
+                <span>Loading operational telemetry…</span>
+                {/* Past 2s, say why the wait continues rather than spinning mutely. */}
+                {kpisAreSlow && (
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.32)' }}>
+                    Still reading — this can take a few seconds on a large window.
+                  </span>
+                )}
               </div>
             ) : (
               <>
@@ -831,7 +883,13 @@ export const InboxKpiOrb = () => {
 
           </div>
 
-          {/* AI Recommendation strip */}
+          {/*
+            Recommended Action strip.
+            LANE F (§0.1): this was labelled "AI Rec". These strings are produced
+            by fixed threshold checks in `operationalKpis.ts` ("Rule-based
+            recommendations") — no model is involved. Naming follows Composer's
+            "Operator Polish": say what it does, don't claim AI.
+          */}
           {recommendations.length > 0 && (
             <div style={{
               borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
@@ -839,10 +897,10 @@ export const InboxKpiOrb = () => {
               flexShrink: 0,
               background: 'var(--nx-kpi-rec-bg, rgba(99,102,241,0.05))',
             }}>
-              <div style={{ fontSize: '8px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
-                AI Rec
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
+                Recommended Action
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
+              <div style={{ fontSize: '11px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
                 {recommendations[0]}
               </div>
             </div>
@@ -857,11 +915,11 @@ export const InboxKpiOrb = () => {
             alignItems: 'center',
             flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
               <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: kpiError ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-good, #00e87a)' }} />
               {kpiError ? 'Unavailable' : 'Up to date'}
             </div>
-            <div style={{ fontSize: '9px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
+            <div style={{ fontSize: '11px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
               {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
             </div>
           </div>
@@ -881,12 +939,34 @@ export const InboxKpiOrb = () => {
         flexDirection: 'column',
         overflow: 'hidden',
       }}
-      onMouseEnter={openPanel}
-      onMouseLeave={scheduleClose}
+      onMouseEnter={isControlled ? undefined : openPanel}
+      onMouseLeave={isControlled ? undefined : scheduleClose}
     >
       {dashboardBody}
     </div>
   ) : null
+
+  /* Shell-controlled, trigger-less: render the panel only. The rail owns the
+     button, so no orb and no hover container is emitted here. */
+  const surface = useDrawerPanel ? (
+    isMobile ? (
+      <MobileSheet open={kpiPanelActive} title="Operational Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
+        <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+          {dashboardBody}
+        </div>
+      </MobileSheet>
+    ) : (
+      <CommandDrawer open={kpiPanelActive} title="Operational Intelligence" onClose={closePanel} fullWidth>
+        <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
+          {dashboardBody}
+        </div>
+      </CommandDrawer>
+    )
+  ) : typeof document !== 'undefined' && dashboardPopover ? (
+    createPortal(dashboardPopover, document.body)
+  ) : null
+
+  if (hideTrigger) return surface
 
   return (
     <div
@@ -901,7 +981,7 @@ export const InboxKpiOrb = () => {
         role="button"
         tabIndex={0}
         aria-expanded={kpiPanelActive}
-        aria-label="KPI Intelligence"
+        aria-label="Operational Intelligence"
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
@@ -921,25 +1001,7 @@ export const InboxKpiOrb = () => {
         </div>
       </div>
 
-      {useDrawerPanel ? (
-        isMobile ? (
-          <MobileSheet open={kpiPanelActive} title="KPI Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
-            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-              {dashboardBody}
-            </div>
-          </MobileSheet>
-        ) : (
-          <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
-            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-              {dashboardBody}
-            </div>
-          </CommandDrawer>
-        )
-      ) : (
-        typeof document !== 'undefined' && dashboardPopover
-          ? createPortal(dashboardPopover, document.body)
-          : null
-      )}
+      {surface}
     </div>
   )
 }

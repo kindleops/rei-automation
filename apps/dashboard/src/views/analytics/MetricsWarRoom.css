@@ -63,7 +63,11 @@
 .nx-view-btn {
   background: transparent;
   border: none;
-  color: #636366;
+  /* LANE H — this hard-coded #636366 is the *light* theme's muted grey, in an
+     unscoped rule, so it was applied in every theme. In the primary dark theme it
+     rendered near-invisible against the dark toolbar. Routed through the semantic
+     token so it follows whichever theme is active (R1.1/R1.2). */
+  color: var(--lc-text-muted, #636366);
   padding: 6px 12px;
   font-size: 11px;
   font-weight: 700;
@@ -107,7 +111,7 @@
 }
 
 .nx-kpi-card__label {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--nx-text-3);
@@ -194,7 +198,7 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
-.nx-card-section__header h3 {
+.nx-card-section__header h2 {
   margin: 0;
   font-size: 12px;
   text-transform: uppercase;
@@ -268,7 +272,7 @@
   border-bottom: 1px solid var(--nx-border);
   font-weight: 600;
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.05em;
 }
 
@@ -294,7 +298,7 @@
 .nx-status-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
 }

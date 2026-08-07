@@ -40,6 +40,7 @@ import {
   normalizeDisposition,
 } from '../../domain/lead-state/universal-lead-state-registry'
 import { buildMapFocusCompFromRecord, openInboxMapComp } from '../../views/map/command-map-bridge'
+import { DealVerdictSurface } from './DealVerdictSurface'
 import './deal-intelligence-25.css'
 
 type DealIntelligenceSection =
@@ -1532,7 +1533,20 @@ export const DealIntelligence25Panel = ({
   const [addrCopied, setAddrCopied] = useState(false)
   const [engineElapsedMs, setEngineElapsedMs] = useState(0)
   const [activityAsc, setActivityAsc] = useState(false)
-  const showDi = (_section: DealIntelligenceSection) => true
+  const [deepDiveOpen, setDeepDiveOpen] = useState(false)
+
+  /**
+   * Composition per width band (constitution §12.5).
+   *
+   * The 25% band is a *decision surface*, not the whole dossier squeezed into a
+   * column: identity, one verdict, one action. Everything else stays one click
+   * away behind the deep-dive disclosure rather than being scrolled past.
+   * This gate used to be `() => true`, which is why every section rendered at
+   * every width.
+   */
+  const DECISION_SECTIONS = new Set<DealIntelligenceSection>(['overview', 'deal'])
+  const showDi = (section: DealIntelligenceSection) =>
+    deepDiveOpen || DECISION_SECTIONS.has(section)
 
   const address = dossier?.property?.full_address || fallbackAddress || null
   const links = useMemo(() => buildPropertyExternalLinks(address), [address])
@@ -1700,6 +1714,15 @@ export const DealIntelligence25Panel = ({
 
   return (
     <div className={cls('nx-deal-compact-shell', engineRunning && 'is-engine-running')}>
+      {/* The decision surface answers "is this an opportunity, why, what is
+          uncertain, what happens next" before anything else is read. */}
+      <DealVerdictSurface
+        dossier={dossier}
+        band="compact"
+        engineRunning={engineRunning}
+        onRunEngine={runDecisionEngine ? () => void runDecisionEngine() : undefined}
+      />
+
       {showDi('overview') ? (
       <>
       <section className="nx-di25-media-block" aria-label="Property imagery">
@@ -1713,6 +1736,7 @@ export const DealIntelligence25Panel = ({
         </div>
         <DealIntelligenceMedia
           activeTab={mediaTab}
+          propertyId={property?.property_id}
           address={address}
           lat={property?.latitude}
           lng={property?.longitude}
@@ -1951,6 +1975,18 @@ export const DealIntelligence25Panel = ({
         </div>
       </section>
       ) : null}
+
+      <button
+        type="button"
+        className={cls('nx-di25-deepdive-toggle', deepDiveOpen && 'is-open')}
+        onClick={() => setDeepDiveOpen((v) => !v)}
+        aria-expanded={deepDiveOpen}
+      >
+        {deepDiveOpen ? 'Hide full record' : 'Open full record'}
+        <span className="nx-di25-deepdive-toggle__hint">
+          {deepDiveOpen ? '' : 'comps · seller · owner · contact · valuation · activity'}
+        </span>
+      </button>
 
       {showDi('property') && isMultifamily && dossier?.multifamily?.status === 'available' ? (
         <MultifamilyIntelligencePanel multifamily={dossier.multifamily} property={property} />

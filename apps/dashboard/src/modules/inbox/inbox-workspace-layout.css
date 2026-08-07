@@ -21,8 +21,20 @@
   overflow: hidden;
 }
 
+/* ─── Split container ─────────────────────────────────────────────────────
+ * RC-15: these rules were moved out of `inbox-polish.css`, which Map imports
+ * wholesale. This stylesheet is imported only by InboxPage.tsx, so the Deal
+ * Desk's geometry is no longer reachable from another route's cascade.
+ * ─────────────────────────────────────────────────────────────────────────── */
 .nx-workspace-split-grid {
+  display: flex;
   gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .nx-premium-inbox.is-multi-view-active .nx-workspace-split-grid {
@@ -30,6 +42,41 @@
   flex-wrap: nowrap;
   width: 100%;
   min-width: 0;
+}
+
+.nx-workspace-pane {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.nx-workspace-pane > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The geometry engine wraps every pane's content in `__body` so a folded or
+ * parked pane can be clipped at a frozen pixel width instead of relayouting.
+ * These mirror the `.nx-workspace-pane > *` contracts one level down. */
+.nx-workspace-pane > .nx-workspace-pane__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.nx-workspace-pane__body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* Every workspace pane must fill its flex column at 25 / 50 / 75 / 100 */
@@ -42,7 +89,8 @@
   overflow: hidden;
 }
 
-.nx-premium-inbox.is-multi-view-active .nx-workspace-pane > * {
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane > *,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane__body > * {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -284,9 +332,12 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-cat-nav__item {
-  flex: 0 0 auto;
-  min-width: 84px;
-  padding: 5px 7px 6px;
+  /* Let the chips share the rail instead of each demanding 84px. With short labels
+     at the 12px floor the whole set fits without scrolling, so no bucket is hidden
+     off-edge — the state the operator navigates by must always be visible. */
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 4px 6px;
   gap: 2px;
   scroll-snap-align: center;
 }
@@ -298,13 +349,13 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-cat-nav__label {
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: 0.03em;
   white-space: nowrap;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-cat-nav__count {
-  font-size: 9px;
+  font-size: 12px;
   padding: 0 5px;
 }
 
@@ -327,13 +378,18 @@
 .nx-prop-flags__badge {
   display: inline-flex;
   align-items: center;
-  max-width: 108px;
+  /* At the 12px type floor these boxes truncated mid-word ("TIRED LANDL",
+     "PRE-FORECLO"), which is worse than showing fewer flags: an ambiguous label
+     costs the operator a click to disambiguate. Sized to fit the real vocabulary. */
+  max-width: 152px;
   padding: 2px 6px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  /* Not uppercased: these are content labels, not eyebrow micro-labels. Uppercase
+     cost ~15% width at the 12px floor and pushed every multi-word flag into an
+     ellipsis. Sentence case fits and reads faster. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -348,7 +404,7 @@
   align-items: center;
   padding: 2px 6px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   color: rgba(186, 210, 238, 0.9);
   background: color-mix(in srgb, var(--nx-surface-accent) 14%, rgba(8, 14, 28, 0.7));
@@ -384,13 +440,13 @@
 }
 
 .nx-prop-flags.is-compact .nx-prop-flags__badge {
-  font-size: 8.5px;
+  font-size: 12px;
   padding: 1px 5px;
-  max-width: 92px;
+  max-width: 146px;
 }
 
 .nx-prop-flags.is-rich .nx-prop-flags__badge {
-  font-size: 9.5px;
+  font-size: 12px;
   padding: 2px 7px;
   max-width: 120px;
 }
@@ -445,20 +501,20 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__preview {
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__receipt-label {
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__context-line {
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metrics {
@@ -477,7 +533,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-k {
-  font-size: 6.5px;
+  /* LANE H — R2.1 floor (was 6.5px), R2.2 (no sub-pixel sizes). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -486,7 +543,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-v {
-  font-size: 10px;
+  /* LANE H — R2.1 floor (was 10px). */
+  font-size: 11px;
   font-weight: 800;
   color: rgba(236, 244, 255, 0.94);
   font-variant-numeric: tabular-nums;
@@ -497,7 +555,8 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__compact-metric-v.is-condition {
-  font-size: 9.5px;
+  /* LANE H — R2.1 floor (was 9.5px). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
 }
@@ -529,7 +588,7 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-review50 .nx-cat-nav__label {
-  font-size: 9px;
+  font-size: 12px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -639,7 +698,7 @@
 }
 
 .nx-premium-inbox .nx-sidebar--mode-full100 .nx-cat-nav__label {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .nx-premium-inbox .nx-sidebar--mode-full100 .nx-sidebar-rebuilt__threads {
@@ -683,7 +742,8 @@
 }
 
 .nx-cc-table__th {
-  font-size: 8px;
+  /* LANE H — R2.1 floor (was 8px). A table header the operator reads to act. */
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -888,14 +948,15 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  /* LANE H — R2.1 floor (was 10px). Delivery receipt is load-bearing. */
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .nx-cc-row__receipt svg { width: 11px; height: 11px; flex-shrink: 0; }
 .nx-cc-row__receipt-sep { opacity: 0.45; }
-.nx-cc-row__receipt-time { font-size: 10px; color: rgba(156, 180, 212, 0.78); }
+.nx-cc-row__receipt-time { font-size: 11px; color: rgba(156, 180, 212, 0.78); }
 
 .nx-cc-row__receipt.is-delivered { color: #34d399; }
 .nx-cc-row__receipt.is-failed { color: #f87171; }
@@ -904,7 +965,8 @@
 .nx-cc-row__receipt.is-pending { color: #fbbf24; }
 
 .nx-cc-row__meta-line {
-  font-size: 10.5px;
+  /* LANE H — R2.1 floor and R2.2 (no sub-pixel sizes). */
+  font-size: 11px;
   font-weight: 600;
   color: rgba(148, 176, 210, 0.86);
   white-space: nowrap;
@@ -923,7 +985,8 @@
 }
 
 .nx-cc-row__metric-k {
-  font-size: 7px;
+  /* LANE H — R2.1 floor (was 7px). */
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;

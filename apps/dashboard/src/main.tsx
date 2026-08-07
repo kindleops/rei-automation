@@ -2,13 +2,21 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './shared/fullscreen-app-shell.css'
 import './styles/nexus-theme.css'
-import './dossier.css'
+// dossier.css removed — 1,216 lines / 24 KB of fully orphaned rules. Zero bare
+// `.dossier-*` classes appear in any .tsx; every match in the tree is a
+// different, prefixed family (`nx-`, `occ-`, `aic-`, `cd-`) defined elsewhere.
 import './styles/mobile-responsive.css'
 import './modules/mobile/mobile-operating-shell.css'
 import './modules/mobile/pinned-app-dock.css'
 import './styles/nx-glass-system.css'
 import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
+// Semantic layer (Lane A). Must load AFTER nexus-theme.css so the --nx-*
+// primitives it maps are already declared, and before any --lc-* consumer.
+import './styles/lc-tokens.css'
+import './shared/ui/lc-ui.css'
+// Lane G — responsive + a11y final authority. Must stay the last global sheet.
+import './styles/lc-responsive.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

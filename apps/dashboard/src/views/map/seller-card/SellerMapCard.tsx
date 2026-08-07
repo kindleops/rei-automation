@@ -208,7 +208,7 @@ export const SellerMapCard = ({
 
   const imageBlock = viewModel.property.imageUrl ? (
     <div className={cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')}>
-      <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="lazy" decoding="async" />
+      <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="eager" decoding="async" />
       <div className="smc-image__gradient" />
       {!isPeek && onClose ? (
         <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>

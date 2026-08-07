@@ -64,7 +64,16 @@ export function WorkflowAutomationActivityPanel({
     <section className="wfs2-activity" aria-label="Live automation activity">
       <div className="wfs2-activity__head">
         <strong>Automation activity</strong>
-        <button type="button" className="wfs2-activity__refresh" onClick={() => void refresh()} disabled={loading}>
+        {/* R16.4 — icon-only, so the name has to be stated. Found by running the
+            a11y gate over all 16 routes; /workflow-studio was never in it. */}
+        <button
+          type="button"
+          className="wfs2-activity__refresh"
+          onClick={() => void refresh()}
+          disabled={loading}
+          aria-label="Refresh automation activity"
+          title="Refresh automation activity"
+        >
           <Icon name="refresh-cw" size={12} />
         </button>
       </div>

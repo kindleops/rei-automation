@@ -537,7 +537,7 @@ export function SellerIntelligenceCard({
   const imgHtml = currentImageUrl ? `<img
     src="${currentImageUrl}"
     alt="${address.replace(/"/g, '&quot;')}"
-    loading="lazy"
+    loading="eager"
     style="object-fit: cover; width: 100%; height: 100%; border-radius: 8px"
     onerror="
       var seq = [${imageSequence.map(s => `'${s}'`).join(',')}];

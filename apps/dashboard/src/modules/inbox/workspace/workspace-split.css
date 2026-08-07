@@ -1,0 +1,407 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   WORKSPACE SPLIT — geometry chrome only (Constitution §12)
+   Gutters, rails, the layout bar, the stack fallback.
+
+   Scope discipline (RC-15): every selector below is anchored on a
+   `.nx-workspace-*` geometry class this lane owns. Nothing here reaches into
+   pane content, and nothing here can be reached by Map, Queue or Pipeline.
+   No `!important`, no bare hex, no literal z-index at a use site.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.nx-workspace-geometry {
+  --lc-gutter-w: 12px;
+  --lc-gutter-line: 1px;
+  --lc-rail-w: 44px;
+  --lc-z-gutter: 6;
+  --lc-z-ghost: 7;
+  --lc-z-rail: 5;
+  --lc-dur-geo: 140ms;
+  --lc-ease-geo: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ─── Layout bar ─────────────────────────────────────────────────────────── */
+
+.nx-workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--nx-contract-border);
+  background: color-mix(in srgb, var(--nx-contract-surface) 62%, transparent);
+  color: var(--nx-contract-text-muted);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.nx-workspace-bar::-webkit-scrollbar { display: none; }
+
+.nx-workspace-bar__legend {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  /* LANE H — measured 4.20:1 under the a11y gate; 4.5 required for 11px body text.
+     The 70% mix toward transparent was the whole deficit. */
+  color: var(--nx-contract-text-muted);
+}
+
+.nx-workspace-bar__chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nx-workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 2px 0 0;
+  border: 1px solid var(--nx-contract-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nx-contract-text-muted);
+  transition: border-color var(--lc-dur-geo) var(--lc-ease-geo), color var(--lc-dur-geo) var(--lc-ease-geo);
+}
+
+.nx-workspace-chip.is-active {
+  color: var(--nx-contract-text);
+  border-color: color-mix(in srgb, var(--nx-contract-accent) 34%, var(--nx-contract-border));
+}
+
+.nx-workspace-chip.is-collapsed {
+  opacity: 0.62;
+}
+
+.nx-workspace-chip__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.nx-workspace-chip__pct {
+  min-width: 34px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: color-mix(in srgb, var(--nx-contract-accent) 80%, var(--nx-contract-text));
+}
+
+.nx-workspace-chip.is-collapsed .nx-workspace-chip__pct {
+  color: var(--nx-contract-text-muted);
+}
+
+.nx-workspace-chip__fold,
+.nx-workspace-chip__max,
+.nx-workspace-bar__reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.nx-workspace-chip__fold,
+.nx-workspace-chip__max {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  opacity: 0.66;
+  transition: opacity var(--lc-dur-geo) var(--lc-ease-geo), background var(--lc-dur-geo) var(--lc-ease-geo);
+}
+
+.nx-workspace-chip__fold svg,
+.nx-workspace-chip__max svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nx-workspace-chip__fold:hover,
+.nx-workspace-chip__max:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--nx-contract-accent) 14%, transparent);
+}
+
+.nx-workspace-chip__max.is-on {
+  opacity: 1;
+  color: var(--nx-contract-accent);
+  background: color-mix(in srgb, var(--nx-contract-accent) 18%, transparent);
+}
+
+.nx-workspace-bar__reset {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  /* LANE H — was opacity 0.7 => 4.20:1. This is a real control ("Reset"), not
+     decoration, so it has to clear 4.5:1 in its resting state, not on hover. */
+  opacity: 1;
+}
+
+.nx-workspace-bar__reset:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--nx-contract-accent) 12%, transparent);
+}
+
+/* R16.2 — visible focus ring on every geometry control. */
+.nx-workspace-chip__fold:focus-visible,
+.nx-workspace-chip__max:focus-visible,
+.nx-workspace-bar__reset:focus-visible,
+.nx-workspace-chip:focus-visible,
+.nx-workspace-rail:focus-visible,
+.nx-workspace-gutter__hit:focus-visible {
+  outline: 2px solid var(--nx-contract-accent);
+  outline-offset: 2px;
+}
+
+/* ─── Gutter ─────────────────────────────────────────────────────────────── */
+
+/* Zero-width anchor: the divider must not consume any of the workspace, or
+ * every pane loses `gutterWidth / paneCount` px of its declared share. */
+.nx-workspace-gutter {
+  position: relative;
+  align-self: stretch;
+  flex: 0 0 0px;
+  width: 0;
+  min-width: 0;
+  z-index: var(--lc-z-gutter);
+  background: transparent;
+}
+
+/* The real, comfortable grab target — straddles the pane boundary. */
+.nx-workspace-gutter__hit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  border: 0;
+}
+
+.nx-workspace-gutter.is-inactive .nx-workspace-gutter__hit {
+  cursor: default;
+}
+
+/* The hairline that replaces the old `pane + pane` border. */
+.nx-workspace-gutter__line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--lc-gutter-line);
+  margin-left: calc(var(--lc-gutter-line) / -2);
+  background: var(--nx-contract-border);
+  transition: background var(--lc-dur-geo) var(--lc-ease-geo);
+  pointer-events: none;
+}
+
+/* The grab affordance — only visible when it is actually usable. */
+.nx-workspace-gutter__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 34px;
+  margin: -17px 0 0 -1.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nx-contract-text-muted) 46%, transparent);
+  opacity: 0;
+  transition: opacity var(--lc-dur-geo) var(--lc-ease-geo);
+  pointer-events: none;
+}
+
+.nx-workspace-gutter__hit:hover .nx-workspace-gutter__grip,
+.nx-workspace-gutter__hit:focus-visible .nx-workspace-gutter__grip,
+.nx-workspace-gutter.is-dragging .nx-workspace-gutter__grip {
+  opacity: 1;
+}
+
+.nx-workspace-gutter.is-inactive .nx-workspace-gutter__hit:hover .nx-workspace-gutter__grip {
+  opacity: 0;
+}
+
+.nx-workspace-gutter__hit:hover .nx-workspace-gutter__line,
+.nx-workspace-gutter__hit:focus-visible .nx-workspace-gutter__line {
+  background: color-mix(in srgb, var(--nx-contract-accent) 62%, var(--nx-contract-border));
+}
+
+/* R12.7 — the ONLY thing that moves during a drag. Compositor-only. */
+.nx-workspace-gutter__ghost {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  z-index: var(--lc-z-ghost);
+  background: var(--nx-contract-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--nx-contract-accent) 55%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+  contain: layout style;
+}
+
+.nx-workspace-gutter.is-dragging .nx-workspace-gutter__ghost {
+  opacity: 1;
+}
+
+.nx-workspace-gutter__readout {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--nx-contract-accent) 40%, transparent);
+  background: var(--nx-contract-surface);
+  color: var(--nx-contract-text);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Whole-document drag affordance — no text selection mid-resize. */
+body.nx-workspace-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* ─── Collapsed rail ─────────────────────────────────────────────────────── */
+
+.nx-workspace-pane.is-collapsed,
+.nx-workspace-pane.is-frozen {
+  position: relative;
+}
+
+/* `overflow: hidden` would make the pane a scroll container. With a body frozen
+ * far wider than the rail, any scroll-into-view inside the parked content then
+ * scrolls the pane itself and drags the rail off-screen. `clip` clips without
+ * ever creating a scrollport, so the rail cannot be displaced. */
+.nx-workspace-pane.is-frozen,
+.nx-premium-inbox .nx-workspace-pane.is-frozen,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-frozen {
+  overflow: clip;
+}
+
+.nx-workspace-rail {
+  position: absolute;
+  inset: 0;
+  z-index: var(--lc-z-rail);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-inline: 1px solid var(--nx-contract-border);
+  background: color-mix(in srgb, var(--nx-contract-surface) 86%, transparent);
+  color: var(--nx-contract-text-muted);
+  cursor: pointer;
+  transition: color var(--lc-dur-geo) var(--lc-ease-geo), background var(--lc-dur-geo) var(--lc-ease-geo);
+}
+
+.nx-workspace-rail:hover {
+  color: var(--nx-contract-text);
+  background: color-mix(in srgb, var(--nx-contract-accent) 10%, var(--nx-contract-surface));
+}
+
+.nx-workspace-rail__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.nx-workspace-rail__glyph svg {
+  width: 15px;
+  height: 15px;
+}
+
+.nx-workspace-rail__label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Frozen / parked panes ──────────────────────────────────────────────── */
+
+/* R12.6 — a folded or parked pane keeps its body at the last live pixel width
+   and simply clips it. Nothing inside relayouts, so scroll offsets survive. */
+.nx-workspace-pane.is-frozen > .nx-workspace-pane__body,
+.nx-premium-inbox .nx-workspace-pane.is-frozen > .nx-workspace-pane__body,
+.nx-premium-inbox.is-multi-view-active .nx-workspace-pane.is-frozen > .nx-workspace-pane__body {
+  width: var(--lc-pane-frozen-w, 100%);
+  min-width: var(--lc-pane-frozen-w, 0);
+  flex: 0 0 var(--lc-pane-frozen-w, 100%);
+  pointer-events: none;
+}
+
+.nx-workspace-pane.is-collapsed > .nx-workspace-pane__body {
+  opacity: 0;
+}
+
+.nx-workspace-pane.is-parked {
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* ─── Stack fallback below 1024px (R12.8) ────────────────────────────────── */
+
+.nx-workspace-geometry.is-stacked .nx-workspace-split-grid {
+  flex-direction: column;
+}
+
+.nx-workspace-geometry.is-stacked .nx-workspace-bar {
+  min-height: 38px;
+  gap: 6px;
+}
+
+.nx-workspace-geometry.is-stacked .nx-workspace-chip {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.nx-workspace-geometry.is-stacked .nx-workspace-chip.is-active {
+  background: color-mix(in srgb, var(--nx-contract-accent) 16%, transparent);
+  color: var(--nx-contract-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-workspace-geometry * {
+    transition-duration: 1ms;
+  }
+}

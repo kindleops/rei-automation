@@ -150,7 +150,7 @@
 }
 
 .nx-translation-draft-preview__header span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: #0a84ff;
   text-transform: uppercase;
@@ -183,7 +183,7 @@
 }
 
 .nx-bubble-footer time {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--op-muted);
 }
@@ -194,7 +194,7 @@
   gap: 4px;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -279,7 +279,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: #ff453a;
   text-transform: uppercase;
@@ -370,7 +370,7 @@
 }
 
 .nx-dossier-metric__label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   color: var(--op-muted);
@@ -384,7 +384,7 @@
 }
 
 .nx-dossier-metric__suffix {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--op-muted);
   margin-left: 2px;
 }

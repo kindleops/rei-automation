@@ -1,43 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+/**
+ * Deal Intelligence media pane.
+ *
+ * This file used to be a second, independent Street View implementation with
+ * its own URL builder, its own mode state machine, and its own failure
+ * handling. It is now a thin adapter over the single shared viewer
+ * (`shared/media`), keeping only what is genuinely Deal-Intelligence-specific:
+ * the interactive maplibre satellite map used for the aerial pane.
+ */
+import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { buildAerialViewUrl, buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
+import { PropertyMediaViewer } from '../../shared/media/PropertyMediaViewer'
 import { getCommandMapThemeStyle } from '../../views/map/commandMapThemes'
-import { getGoogleMapsApiKey } from '../../lib/maps/loadGoogleMaps'
-import { InteractiveStreetViewPanorama } from './InteractiveStreetViewPanorama'
 
 export type MediaTab = 'street' | 'aerial'
-export type StreetMode = 'interactive' | 'embed' | 'static' | 'unavailable' | 'loading'
-export type AerialMode = 'interactive' | 'static' | 'unavailable' | 'loading'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-export function buildInteractiveStreetViewUrl({
-  address,
-  lat,
-  lng,
-}: {
-  address?: string | null
-  lat?: number | null
-  lng?: number | null
-}) {
-  const apiKey = getGoogleMapsApiKey()
-  if (!apiKey) return null
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const location = hasCoords ? `${lat},${lng}` : address
-  if (!location) return null
-  const params = new URLSearchParams({
-    key: apiKey,
-    location,
-    heading: '210',
-    pitch: '2',
-    fov: '85',
-  })
-  return `https://www.google.com/maps/embed/v1/streetview?${params.toString()}`
-}
-
 interface DealIntelligenceMediaProps {
   activeTab: MediaTab
+  propertyId?: string | number | null
   address?: string | null
   lat?: number | null
   lng?: number | null
@@ -45,15 +27,11 @@ interface DealIntelligenceMediaProps {
   aerialStoredUrl?: string | null
 }
 
-const AerialMap = ({
-  lat,
-  lng,
-  visible,
-}: {
-  lat: number
-  lng: number
-  visible: boolean
-}) => {
+/**
+ * Interactive satellite map. Keyed on coordinates by the caller, so switching
+ * tabs or resizing the pane resizes the existing map rather than rebuilding it.
+ */
+const AerialMap = ({ lat, lng, visible }: { lat: number; lng: number; visible: boolean }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markerRef = useRef<maplibregl.Marker | null>(null)
@@ -84,7 +62,7 @@ const AerialMap = ({
   }, [lat, lng])
 
   useEffect(() => {
-    mapRef.current?.resize()
+    if (visible) mapRef.current?.resize()
   }, [visible])
 
   const reset = () => {
@@ -105,142 +83,27 @@ const AerialMap = ({
 
 export const DealIntelligenceMedia = ({
   activeTab,
+  propertyId,
   address,
   lat,
   lng,
   streetStoredUrl,
   aerialStoredUrl,
-}: DealIntelligenceMediaProps) => {
-  const [streetMode, setStreetMode] = useState<StreetMode>('loading')
-  const [aerialMode, setAerialMode] = useState<AerialMode>('loading')
-  const [streetStaticFailed, setStreetStaticFailed] = useState(false)
-  const [aerialStaticFailed, setAerialStaticFailed] = useState(false)
-
-  const streetEmbedUrl = useMemo(
-    () => buildInteractiveStreetViewUrl({ address, lat, lng }),
-    [address, lat, lng],
-  )
-  const staticStreetUrl = useMemo(
-    () => buildStreetViewUrl(address ?? null, lat, lng),
-    [address, lat, lng],
-  )
-  const staticAerialUrl = useMemo(
-    () => buildAerialViewUrl(address ?? null, lat, lng),
-    [address, lat, lng],
-  )
-  const resolvedStreetImage = streetStoredUrl || staticStreetUrl
-
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001
-  const canUseInteractiveStreet = Boolean(getGoogleMapsApiKey() && (hasCoords || address?.trim()))
-
-  useEffect(() => {
-    setStreetStaticFailed(false)
-    if (canUseInteractiveStreet) {
-      setStreetMode('interactive')
-      return
-    }
-    if (streetEmbedUrl) {
-      setStreetMode('embed')
-      return
-    }
-    if ((streetStoredUrl || staticStreetUrl) && !streetStaticFailed) {
-      setStreetMode('static')
-      return
-    }
-    setStreetMode('unavailable')
-  }, [canUseInteractiveStreet, streetEmbedUrl, streetStaticFailed, streetStoredUrl, staticStreetUrl])
-
-  useEffect(() => {
-    setAerialStaticFailed(false)
-    if (hasCoords) {
-      setAerialMode('interactive')
-      return
-    }
-    if ((aerialStoredUrl || staticAerialUrl) && !aerialStaticFailed) {
-      setAerialMode('static')
-      return
-    }
-    setAerialMode('unavailable')
-  }, [aerialStoredUrl, aerialStaticFailed, hasCoords, staticAerialUrl])
-
-  const handlePanoramaFailure = () => {
-    if (streetEmbedUrl) {
-      setStreetMode('embed')
-      return
-    }
-    if ((streetStoredUrl || staticStreetUrl) && !streetStaticFailed) {
-      setStreetMode('static')
-      return
-    }
-    setStreetMode('unavailable')
-  }
-
-  const renderStreetPane = () => {
-    if (streetMode === 'loading') return <div className="nx-di25-media__state">Loading Street View…</div>
-    if (streetMode === 'interactive') {
-      return (
-        <InteractiveStreetViewPanorama
-          address={address}
-          lat={lat}
-          lng={lng}
-          visible
-          onFailure={handlePanoramaFailure}
-        />
-      )
-    }
-    if (streetMode === 'embed' && streetEmbedUrl) {
-      return (
-        <iframe
-          title="Interactive Street View"
-          src={streetEmbedUrl}
-          className="nx-di25-media__iframe"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-          allowFullScreen
-        />
-      )
-    }
-    if (streetMode === 'static' && resolvedStreetImage) {
-      return (
-        <img
-          src={resolvedStreetImage}
-          alt="Street View"
-          className="nx-di25-media__img"
-          loading="eager"
-          decoding="async"
-          onError={() => {
-            setStreetStaticFailed(true)
-            setStreetMode('unavailable')
-          }}
-        />
-      )
-    }
-    return <div className="nx-di25-media__state">Street View unavailable</div>
-  }
-
-  const renderAerialPane = () => {
-    if (aerialMode === 'loading') return <div className="nx-di25-media__state">Loading aerial…</div>
-    if (aerialMode === 'interactive' && hasCoords) {
-      return <AerialMap lat={Number(lat)} lng={Number(lng)} visible />
-    }
-    if (aerialMode === 'static' && (aerialStoredUrl || staticAerialUrl)) {
-      return (
-        <img
-          src={aerialStoredUrl || staticAerialUrl || ''}
-          alt="Aerial"
-          className="nx-di25-media__img"
-          onError={() => setAerialStaticFailed(true)}
-        />
-      )
-    }
-    return <div className="nx-di25-media__state">Aerial view unavailable</div>
-  }
-
-  return (
-    <div className="nx-di25-media__surface">
-      <div className="nx-di25-media__pane">
-        {activeTab === 'street' ? renderStreetPane() : renderAerialPane()}
-      </div>
-    </div>
-  )
-}
+}: DealIntelligenceMediaProps) => (
+  <div className="nx-di25-media__surface">
+    <PropertyMediaViewer
+      className="nx-di25-media__viewer"
+      propertyId={propertyId}
+      address={address}
+      lat={lat}
+      lng={lng}
+      storedStreetUrl={streetStoredUrl}
+      storedAerialUrl={aerialStoredUrl}
+      activeTab={activeTab}
+      showTabs={false}
+      renderInteractiveAerial={({ lat: aLat, lng: aLng, visible }) => (
+        <AerialMap lat={aLat} lng={aLng} visible={visible} />
+      )}
+    />
+  </div>
+)

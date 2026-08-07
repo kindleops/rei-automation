@@ -148,7 +148,7 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
     <>
       <section
         className={railClassName}
-        aria-label="Live Activity"
+        aria-label="Map Activity"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onTouchStart={handleTouchStart}
@@ -158,7 +158,7 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
           <div className="nx-icm-activity__heading">
             <span className="nx-icm-activity__dot" aria-hidden />
             <div className="nx-icm-activity__title-block">
-              <strong>Live Activity</strong>
+              <strong>Map Activity</strong>
               <span className="nx-icm-activity__meta">
                 {displayCount} in flow
                 <em className="nx-icm-activity__scope">{scopeLabel}</em>

@@ -11,7 +11,7 @@
    SHARED MOBILE UTILITIES
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Horizontal scroll container for wide content that must scroll */
   .nx-mobile-hscroll {
     overflow-x: auto;
@@ -31,7 +31,7 @@
    1. LIVE DASHBOARD & MAP (hq / cc-shell)
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Header collapses to 2 zones */
   .cc-header {
     grid-template-columns: auto 1fr;
@@ -110,7 +110,7 @@
    2. INBOX (nx-inbox-shell / nx-premium-inbox)
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Inbox topbar: 2-column on mobile */
   .nx-topbar {
     grid-template-columns: 1fr auto !important;
@@ -298,7 +298,7 @@
    3. QUEUE PAGE (nx-premium-queue)
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Queue page: full-screen column layout */
   .nx-premium-queue {
     display: flex !important;
@@ -439,7 +439,7 @@
   .nx-queue-month-grid,
   .nx-month-heatmap .nx-queue-month-grid {
     grid-template-columns: repeat(7, 1fr) !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
   .nx-month-cell { padding: 4px 2px !important; }
   .nx-month-metrics { display: none !important; }
@@ -449,7 +449,7 @@
     min-width: 52px !important;
     padding: 4px 8px !important;
   }
-  .nx-queue-stat small { font-size: 8px !important; }
+  .nx-queue-stat small { font-size: 11px !important; }
   .nx-queue-stat b { font-size: 18px !important; }
 
   /* Queue action buttons: 44px tall */
@@ -463,7 +463,7 @@
    4. PIPELINE VIEW (plv-*)
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Pipeline filters: wrap */
   .plv-filters {
     flex-wrap: wrap !important;
@@ -544,7 +544,7 @@
    5. LIST VIEWS — generic table → card conversion
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Any nx-queue-table: card layout */
   .nx-queue-table { display: block !important; width: 100% !important; }
   .nx-queue-table thead { display: none !important; }
@@ -565,7 +565,7 @@
   }
   .nx-queue-table td::before {
     content: attr(data-label);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -591,7 +591,7 @@
    6. DEAL / COMP INTELLIGENCE
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Comp Intelligence: stack map over list */
   .ci-workspace {
     flex-direction: column !important;
@@ -639,7 +639,7 @@
 
   /* Collapsible inspector cards: full-width */
   .nx-inspector-card { max-width: 100% !important; }
-  .nx-inspector-json { font-size: 10px !important; max-height: 200px !important; overflow-y: auto; }
+  .nx-inspector-json { font-size: 11px !important; max-height: 200px !important; overflow-y: auto; }
 }
 /* ══════════════════════════════════════════════════════════════════════════
    8. GLOBAL CHROME — room label,
@@ -647,11 +647,11 @@ nav,
 modals
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Room label: compact */
   .nx-room-label {
     padding: 4px 12px !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
 
   /* Grammar hint: bottom of screen */
@@ -688,7 +688,7 @@ pipeline,
 inbox — shows critical actions
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Sticky bottom bar for any page that needs it */
   .nx-mobile-sticky-bar {
     position: fixed !important;
@@ -739,7 +739,7 @@ inbox — shows critical actions
    10. TAP TARGET ENFORCEMENT (all interactive elements)
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Every button and interactive element: min 44×44px */
   button,
   [role="button"],
@@ -785,7 +785,7 @@ inbox — shows critical actions
    11. DROPDOWN / MODAL VIEWPORT FIT
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Popovers: full-width bottom sheet instead of floating */
   .nx-popover,
   .nx-dropdown-menu,
@@ -828,7 +828,7 @@ inbox — shows critical actions
    12. PROPERTIES / DOSSIER LIST
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Property cards: single column */
   .nx-property-grid,
   .nx-properties-grid {
@@ -853,7 +853,7 @@ inbox — shows critical actions
    13. STATS / KPI / INTELLIGENCE DASHBOARDS
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Stats KPI grid: 2-column */
   .nx-kpi-grid,
   .nx-stats-grid,
@@ -879,7 +879,7 @@ inbox — shows critical actions
    14. ACQUISITION / PROSPECT VIEWS
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .nx-acquisition-shell { flex-direction: column !important; }
   .nx-acquisition-sidebar {
     width: 100% !important;
@@ -894,7 +894,7 @@ inbox — shows critical actions
    15. PHONE-SPECIFIC (≤430px) — tighten spacing further
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 430px) {
+@media (max-width: 479.98px) {
   /* Reduce all section padding */
   .cc-header { padding: 0 8px !important; }
   .nx-queue-topbar { padding: 8px !important; }
@@ -936,7 +936,7 @@ inbox — shows critical actions
    16. PREVENT CONTENT CUT-OFF — overflow safety net
    ══════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   /* Prevent any fixed-width element from causing horizontal body scroll */
   body { overflow-x: hidden !important; }
 
@@ -945,7 +945,7 @@ inbox — shows critical actions
   .nx-premium-inbox,
   .cc-shell,
   .plv {
-    max-width: 100vw !important;
+    max-width: 100% !important;
     overflow-x: hidden !important;
   }
 

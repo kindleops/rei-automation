@@ -55,7 +55,7 @@
 }
 
 .plv-kpi__label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -103,7 +103,7 @@
 }
 
 .plv-rail-kpi__label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -294,7 +294,7 @@
   padding: 1px 6px;
 }
 
-.plv-stage-chip__hot { font-size: 10px; }
+.plv-stage-chip__hot { font-size: 11px; }
 
 /* Tone-aware active state */
 .plv-stage-chip.is-active.is-cyan   { background: rgba(34,  211, 238, 0.12); border-color: rgba(34,  211, 238, 0.4);  color: rgba(34,  211, 238, 0.9);  }
@@ -382,7 +382,7 @@
 }
 
 .plv-lane__name {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -416,7 +416,7 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(180, 200, 230, 0.65);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
   line-height: 1;
 }
@@ -447,7 +447,7 @@
   margin-bottom: 0;
 }
 .plv-lane--collapsed .plv-lane__name {
-  font-size: 9px;
+  font-size: 11px;
   max-height: 140px;
   white-space: nowrap;
 }
@@ -480,7 +480,7 @@
 }
 
 .plv-lane__stat {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 4px;
@@ -646,7 +646,7 @@
 }
 
 .plv-card__market {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.5);
   flex-shrink: 0;
   text-align: right;
@@ -681,7 +681,7 @@
 }
 
 .plv-card__age {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.4);
   font-variant-numeric: tabular-nums;
 }
@@ -707,7 +707,7 @@
 }
 
 .plv-card__meta-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -790,7 +790,7 @@
   align-items: center;
   padding: 1px 6px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -927,7 +927,7 @@
 .plv-detail-row:last-child { border-bottom: none; }
 
 .plv-detail-row__label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -952,7 +952,7 @@
 
 .plv-deal-detail__section-label {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -992,7 +992,7 @@
 .plv-metric-block:last-child { border-right: none; }
 
 .plv-metric-block__label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1320,7 +1320,7 @@
   font-size: 12px;
 }
 .plv-view-selector__option.is-active { background: rgba(72, 138, 236, 0.15); }
-.plv-view-selector__option small { opacity: 0.65; font-size: 10px; }
+.plv-view-selector__option small { opacity: 0.65; font-size: 11px; }
 .plv-view-selector__section { display: flex; flex-direction: column; gap: 2px; }
 .plv-view-selector__section + .plv-view-selector__section {
   margin-top: 6px;
@@ -1328,7 +1328,7 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 .plv-view-selector__section-label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1344,7 +1344,7 @@
 }
 .plv-view-selector__readonly,
 .plv-lane__readonly-badge {
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1416,7 +1416,7 @@
   flex-shrink: 0;
 }
 .plv-command-panel__hydrate {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: rgba(130, 155, 200, 0.65);
   letter-spacing: 0.02em;
@@ -1528,7 +1528,7 @@
   margin: 0 12px 6px;
   padding: 3px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1549,7 +1549,7 @@
 }
 
 .plv-scope-bar__hint {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.55;
   margin-left: 4px;
 }
@@ -1898,7 +1898,7 @@
   margin: 6px 0;
 }
 .plv-context-dock__chips span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1913,7 +1913,7 @@
   margin-top: 8px;
 }
 .plv-card__type {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -1926,7 +1926,7 @@
   margin-top: 4px;
 }
 .plv-card__state-row span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.55);
 }
@@ -1988,7 +1988,7 @@
 .plv-card--configurable .plv-card__accent.is-unknown { background: linear-gradient(180deg, #94a3b8, #64748b); }
 
 .plv-card__eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2233,7 +2233,7 @@
 
 .plv-card-designer__field-group { margin-bottom: 10px; }
 .plv-card-designer__group-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2381,7 +2381,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .plv-universal-nav__label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(148, 163, 184, 0.75);
@@ -2427,11 +2427,11 @@
 }
 
 .plv-filters__controls .plv-liquid-filter .occ-liquid-filter__trigger-title {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .plv-filters__controls .plv-liquid-filter .occ-liquid-filter__trigger-sub {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* ── Rich desktop deal cards ─────────────────────────────────────────────── */
@@ -2482,7 +2482,7 @@
   right: 6px;
   bottom: 4px;
   z-index: 2;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: rgba(255,255,255,0.55);
@@ -2501,7 +2501,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -2526,13 +2526,13 @@
 
 .plv-rich-card__age {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.45);
 }
 
 .plv-rich-card__address {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.65);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2547,7 +2547,7 @@
 
 .plv-rich-card__snippet {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
   color: rgba(130, 155, 200, 0.58);
   display: -webkit-box;
@@ -2581,7 +2581,7 @@
 
 .plv-rich-card__kpi em {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -2592,7 +2592,7 @@
 .plv-rich-card__kpi strong {
   display: block;
   margin-top: 2px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(210, 228, 255, 0.85);
   overflow: hidden;
@@ -2610,7 +2610,7 @@
   align-items: baseline;
   gap: 6px;
   margin-top: 2px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .plv-rich-card__next span {

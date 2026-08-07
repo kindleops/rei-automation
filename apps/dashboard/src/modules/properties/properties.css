@@ -1329,7 +1329,7 @@
   font-weight: 500;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1439.98px) {
   .pi-app-header,
   .pi-focus-stack,
   .pi-detail-hero {
@@ -1353,7 +1353,7 @@
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767.98px) {
   .properties-page {
     padding: 10px 10px 108px;
   }
@@ -2045,7 +2045,7 @@
   position: fixed;
   inset: 0 0 0 auto;
   z-index: 2300;
-  width: min(620px, 100vw);
+  width: min(620px, 100%);
   padding: 20px;
   background: rgba(3, 10, 12, 0.98);
   backdrop-filter: blur(18px);
@@ -2087,7 +2087,7 @@
   background: rgba(0, 0, 0, 0.26);
 }
 
-@media (max-width: 1440px) {
+@media (max-width: 1439.98px) {
   .pi-command-header,
   .pi-workspace-grid {
     grid-template-columns: 1fr;
@@ -2107,7 +2107,7 @@
   }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1023.98px) {
   .pi-workspace-below,
   .pi-deal-strip,
   .pi-command-header__stats,
@@ -2124,7 +2124,7 @@
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 767.98px) {
   .properties-page--workspace {
     padding-bottom: 108px;
   }
@@ -2188,5 +2188,5 @@
   border: 1px solid currentColor;
   font-family: var(--nx-font-mono);
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: 11px;
 }
