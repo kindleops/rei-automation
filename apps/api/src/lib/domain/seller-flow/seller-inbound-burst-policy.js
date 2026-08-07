@@ -382,6 +382,51 @@ export function durableClassification(source = null) {
   return safe.ok && Object.keys(safe.value).length ? safe.value : null;
 }
 
+/**
+ * The AUTHORIZATION timestamp, as supplied at ingress, or null.
+ *
+ * Distinct from `received_at`, which is a TIMING value the coordinator
+ * synthesizes from `now()` when the provider gave us nothing. This value is
+ * never synthesized: it is the instant a real inbound was actually received,
+ * and it is the only input `live_limited` will accept for the eligibility
+ * cutoff (see evaluateAutoReplyScope). A fabricated instant here would clear
+ * the cutoff for a message that never earned it.
+ *
+ * Preservation rules:
+ *  - a string is stored BYTE-FOR-BYTE once it parses, so the flush authorizes
+ *    against the identical value the webhook did — no re-formatting drift;
+ *  - a Date or epoch-ms number normalizes to the SAME INSTANT as ISO-8601,
+ *    because neither survives a jsonb round-trip in its original form;
+ *  - anything unparseable, non-finite, out of Date range, or of any other type
+ *    is REJECTED to null.
+ *
+ * Rejection is fail-closed and deliberate. A null propagates to
+ * aggregateBurstMessage → last_authorized_received_at → the scope gate, which
+ * denies with `auto_reply_inbound_timestamp_missing`. The message itself is
+ * still ingested and still forms its burst; only the authority to auto-send
+ * on it is withheld. Guessing an instant for a garbage value would be the one
+ * outcome worse than denying.
+ */
+export function durableAuthorizedReceivedAt(value) {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? value.toISOString() : null;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? new Date(value).toISOString() : null;
+  }
+  if (typeof value !== "string") return null;
+  // Validated on the RAW string, so the value that is stored is exactly the
+  // value that was proven to parse. A whitespace-only string is NaN here and
+  // falls out with everything else unparseable.
+  if (!Number.isFinite(Date.parse(value))) return null;
+  // Byte-for-byte: the exact string the webhook authorized against.
+  return value;
+}
+
 export function appendConstituent(existing = [], next = {}) {
   const list = Array.isArray(existing) ? [...existing] : [];
   const key = constituentKey(next);
@@ -394,6 +439,23 @@ export function appendConstituent(existing = [], next = {}) {
     body: clean(next.body ?? next.message ?? next.message_body),
     received_at: next.received_at || next.inbound_received_at || null,
   };
+  // THE AUTHORIZATION TIMESTAMP. aggregateBurstMessage reads exactly this key
+  // (last_authorized_received_at) and will not substitute received_at, so a
+  // constituent that omits it can never authorize a live_limited auto-reply.
+  //
+  // It was dropped here until now: the row above was built from four fields and
+  // the coordinator's fifth was discarded on the way into jsonb. Every scheduled
+  // flush therefore called executeInboundAutomationDecision with
+  // inboundReceivedAt = null and failed closed at
+  // `auto_reply_inbound_timestamp_missing` — the exact branch that blocked the
+  // 2026-08-06 handset proof from ever reaching send-queue insertion.
+  //
+  // Set only when present and valid, so an absent value stays absent (`in`
+  // remains false) rather than becoming an explicit null.
+  const authorized_received_at = durableAuthorizedReceivedAt(
+    next.authorized_received_at
+  );
+  if (authorized_received_at) row.authorized_received_at = authorized_received_at;
   // Execution-critical facts the WEBHOOK already validated. Without these the
   // scheduled flush re-derives the turn from the aggregated body alone: a
   // contextual short reply like "Yeah" has no question to bind to minutes
