@@ -15,6 +15,7 @@ import { supabase as defaultSupabase, hasSupabaseConfig } from "@/lib/supabase/c
 import {
   scheduleFollowUp,
   STAGE_NO_REPLY_FOLLOWUP_INTENT,
+  UNAPPROVED_FOLLOWUP_INTENTS,
 } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
@@ -213,7 +214,13 @@ async function loadLeadStateGuards(supabase, thread_key) {
   }
 }
 
-async function resolveEffectiveFollowUpMode({
+/**
+ * Resolve the effective followup_automation_mode from system control / request
+ * / env, failing closed to disabled. Exported so the re-engagement sweeper
+ * (recover-seller-execution-gaps #8) consults the SAME authority instead of
+ * growing a parallel mode reader.
+ */
+export async function resolveEffectiveFollowUpMode({
   followUpMode = null,
   legacyLiveEnabled = false,
   getSystemValueImpl = getSystemValue,
@@ -330,8 +337,18 @@ export async function maybeScheduleFollowUpAfterDelivery({
         stage_no_reply_days > 0 &&
         outbound_use_case
     );
+    // Unapproved-intent fallback: a declared intent with no approved follow-up
+    // schedule (condition_disclosed, latent_interest) previously dead-ended
+    // here — the scheduler refused it and the thread was orphaned with no
+    // follow-up at all. The operator policy on those intents is unchanged
+    // (they still never get an intent-layer nurture), but a delivered STAGE
+    // QUESTION with no reply is stage-layer business: fall back to the stage
+    // registry's no-reply plan so the thread keeps its stage cadence.
+    const declared_intent_unapproved =
+      Boolean(declared_followup_intent) &&
+      UNAPPROVED_FOLLOWUP_INTENTS.has(declared_followup_intent);
     const followup_intent =
-      declared_followup_intent ||
+      (declared_intent_unapproved ? null : declared_followup_intent) ||
       (stage_plan_available ? STAGE_NO_REPLY_FOLLOWUP_INTENT : null);
 
     const decision = resolveDeliveryFollowUpDecision({
@@ -411,6 +428,13 @@ export async function maybeScheduleFollowUpAfterDelivery({
         stage: stage_policy.stage,
         stage_no_reply_days: stage_plan_available ? stage_no_reply_days : null,
         followup_use_case: outbound_use_case,
+        // Audit trail for the unapproved-intent → stage-plan fallback.
+        ...(declared_intent_unapproved
+          ? {
+              declared_followup_intent,
+              unapproved_intent_stage_fallback: true,
+            }
+          : {}),
         agent_name:
           clean(event_metadata.agent_name) || clean(event_metadata.agent_first_name) || null,
       },

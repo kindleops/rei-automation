@@ -6,9 +6,15 @@
 //   • accepted terms without contract action
 //   • resolved transition persisted on the message but never patched to state
 //   • seller replied but an older reply-pending follow-up is still scheduled
+//   • dispatched follow-up got no inbound inside its policy window (G3):
+//     re-enroll the thread for its next attempt via the canonical follow-up
+//     scheduler — a DEFERRED scheduled row, never an immediate send, and only
+//     when followup_automation_mode grants scheduling authority
 //
-// Recovery NEVER re-sends messages. It only repairs state, schedules reviews,
-// runs ADE, cancels stale follow-ups, and emits Workflow Studio events.
+// Recovery NEVER re-sends messages: it repairs state, schedules reviews, runs
+// ADE, cancels stale follow-ups, emits Workflow Studio events, and (sweep #8
+// only, mode-gated and fail-closed) writes deferred follow-up rows through the
+// same scheduleFollowUp/enqueueSendQueueItem path every other follow-up uses.
 //
 // Every sweep is deterministic and starvation-proof: candidate queries are
 // keyset-paginated in ascending cursor order (never an unordered first page),
@@ -624,6 +630,295 @@ async function recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }) {
 }
 
 /**
+ * Gap 8 (G3) — a dispatched follow-up got no inbound within its policy window
+ * and nothing ever re-enrolled the thread. Scans threads whose LATEST
+ * follow-up row is sent/delivered, verifies every stop condition through the
+ * pure reengagement planner (fail-closed), and schedules the next
+ * attempt-numbered row via the canonical scheduleFollowUp path.
+ *
+ * Authority: followup_automation_mode is resolved ONCE per run through the
+ * same reader the delivery trigger uses; when it denies, this sweep is inert.
+ * queue_execution_mode still gates dispatch downstream — a scheduled row is
+ * never a send.
+ */
+const REENGAGEMENT_MIN_WINDOW_HOURS = 48; // coarse pre-filter; exact window per-row
+
+const PENDING_QUEUE_STATUSES = new Set([
+  "held",
+  "queued",
+  "scheduled",
+  "pending",
+  "approved",
+  "ready",
+  "processing",
+  "sending",
+]);
+
+const DISPATCHED_QUEUE_STATUSES = new Set(["sent", "delivered"]);
+
+function followupRowIntent(row) {
+  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const direct = clean(metadata.intent).toLowerCase();
+  if (direct) return direct;
+  const from_template = clean(row?.use_case_template).toLowerCase();
+  if (from_template.startsWith("nurture_")) return from_template.slice("nurture_".length);
+  return "unclear";
+}
+
+async function recoverFollowupNoResponseReengagement(supabase, { limit, dryRun, now, deps }) {
+  const outcome = {
+    gap: "followup_no_response_reengagement",
+    scanned: 0,
+    repaired: 0,
+    results: [],
+    denied: {},
+    mode: null,
+  };
+
+  const [
+    { resolveEffectiveFollowUpMode },
+    { resolveReengagementDecision },
+    { scheduleFollowUp },
+    { isInternalTestPhone },
+  ] = await Promise.all([
+    import("@/lib/domain/seller-flow/delivery-triggered-followup.js"),
+    import("@/lib/domain/seller-flow/reengagement-planner.js"),
+    import("@/lib/domain/seller-flow/seller-followup-scheduler.js"),
+    import("@/lib/config/internal-phones.js"),
+  ]);
+
+  const mode_resolution = await resolveEffectiveFollowUpMode({
+    followUpMode: deps?.followUpMode || null,
+    ...(deps?.getSystemValueImpl ? { getSystemValueImpl: deps.getSystemValueImpl } : {}),
+  });
+  outcome.mode = mode_resolution.mode;
+  outcome.mode_source = mode_resolution.source;
+  if (mode_resolution.mode === "disabled") {
+    // Sole scheduling authority denied ⇒ the whole sweep is inert (no reads).
+    outcome.skipped = "followup_automation_disabled";
+    return outcome;
+  }
+
+  const isInternalPhoneImpl = deps?.isInternalTestPhoneImpl || isInternalTestPhone;
+  const scheduleFollowUpImpl = deps?.scheduleFollowUpImpl || scheduleFollowUp;
+  const seen_threads = new Set();
+
+  const countDenied = (reason) => {
+    const key = clean(reason) || "unknown";
+    outcome.denied[key] = (outcome.denied[key] || 0) + 1;
+  };
+
+  const fetchError = await walkSweepPages({
+    fetchPage: (cursor) => {
+      let query = supabase
+        .from("send_queue")
+        .select(
+          "id,thread_key,to_phone_number,queue_status,type,sent_at,created_at,use_case_template,metadata,master_owner_id,property_id,agent_name"
+        )
+        .eq("type", "followup")
+        .in("queue_status", [...DISPATCHED_QUEUE_STATUSES])
+        .not("sent_at", "is", null)
+        .lt("sent_at", hoursAgoIso(REENGAGEMENT_MIN_WINDOW_HOURS, now));
+      if (cursor) query = query.gt("id", cursor);
+      return query.order("id", { ascending: true }).limit(limit);
+    },
+    cursorOf: (row) => row.id,
+    pageSize: limit,
+    budget: limit,
+    outcome,
+    processRow: async (row) => {
+      const threadKey = clean(row.thread_key || row.to_phone_number);
+      if (!threadKey || seen_threads.has(threadKey)) return;
+      seen_threads.add(threadKey);
+
+      // The thread's full follow-up ledger in one bounded read: attempt count,
+      // pending detection, and latest-dispatched selection. Caps are single
+      // digits, so 50 rows is far past any policy ceiling. The thread is
+      // evaluated ONCE, at first encounter, always against its LATEST
+      // dispatched row — older rows reaching this sweep via pagination are
+      // superseded evidence and must not each get an evaluation.
+      const { data: ledger_rows, error: ledger_error } = await supabase
+        .from("send_queue")
+        .select(
+          "id,queue_status,sent_at,created_at,use_case_template,metadata,master_owner_id,property_id,agent_name"
+        )
+        .eq("thread_key", threadKey)
+        .eq("type", "followup")
+        .limit(50);
+      if (ledger_error) {
+        outcome.results.push({ thread_key: threadKey, ok: false, reason: ledger_error.message });
+        return;
+      }
+      const ledger = Array.isArray(ledger_rows) ? ledger_rows : [];
+      const prior_automated_followups = ledger.filter(
+        (r) => !["cancelled", "canceled"].includes(clean(r.queue_status).toLowerCase())
+      ).length;
+      const pending_followup_exists = ledger.some((r) =>
+        PENDING_QUEUE_STATUSES.has(clean(r.queue_status).toLowerCase())
+      );
+      const dispatched = ledger
+        .filter(
+          (r) =>
+            DISPATCHED_QUEUE_STATUSES.has(clean(r.queue_status).toLowerCase()) && clean(r.sent_at)
+        )
+        .sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at));
+      const latest = dispatched[0] || null;
+      if (!latest) return;
+
+      // Unknown thread state must never be scheduled over — fail closed.
+      const { data: state, error: state_error } = await supabase
+        .from("inbox_thread_state")
+        .select(
+          "thread_key,is_suppressed,is_archived,contactability_status,lifecycle_stage,disposition,last_inbound_at"
+        )
+        .eq("thread_key", threadKey)
+        .maybeSingle();
+      if (state_error) {
+        outcome.results.push({ thread_key: threadKey, ok: false, reason: state_error.message });
+        return;
+      }
+      if (!state) {
+        countDenied("thread_state_missing");
+        return;
+      }
+
+      // Accepted terms live on the deal record; an unreadable record fails closed.
+      let terms_accepted = false;
+      const { data: opps, error: opps_error } = await supabase
+        .from("acquisition_opportunities")
+        .select("metadata")
+        .eq("primary_thread_key", threadKey)
+        .limit(1);
+      if (opps_error) {
+        outcome.results.push({ thread_key: threadKey, ok: false, reason: opps_error.message });
+        return;
+      }
+      terms_accepted = opps?.[0]?.metadata?.negotiation_state?.terms_accepted === true;
+
+      const latest_meta = latest.metadata && typeof latest.metadata === "object" ? latest.metadata : {};
+      const intent = followupRowIntent(latest);
+      const followup_use_case =
+        clean(latest_meta.followup_use_case) ||
+        (clean(latest.use_case_template).toLowerCase() !== "stage_no_reply" &&
+        !clean(latest.use_case_template).toLowerCase().startsWith("nurture_")
+          ? clean(latest.use_case_template)
+          : "");
+
+      outcome.scanned += 1;
+
+      const decision = resolveReengagementDecision({
+        now,
+        mode: mode_resolution,
+        is_internal_phone: Boolean(isInternalPhoneImpl(threadKey)),
+        thread: state,
+        last_followup: {
+          intent,
+          sent_at: latest.sent_at,
+          followup_use_case: followup_use_case || null,
+          queue_row_id: latest.id,
+        },
+        prior_automated_followups,
+        pending_followup_exists,
+        terms_accepted,
+      });
+
+      if (!decision.eligible) {
+        countDenied(decision.reason);
+        if (decision.would_schedule) {
+          // Mode said no but every guard passed — surfaced for dry-run proof.
+          outcome.results.push({
+            thread_key: threadKey,
+            ok: true,
+            scheduled: false,
+            would_schedule: true,
+            reason: decision.reason,
+          });
+        }
+        return;
+      }
+
+      if (dryRun) {
+        outcome.repaired += 1;
+        outcome.results.push({
+          thread_key: threadKey,
+          ok: true,
+          dry_run: true,
+          reason: decision.reason,
+          attempt: decision.attempt,
+          scheduled_for: decision.scheduled_for,
+        });
+        return;
+      }
+
+      try {
+        const scheduled = await scheduleFollowUpImpl(
+          decision.intent,
+          threadKey,
+          {
+            source: "reengagement_gap_recovery",
+            attempt: decision.attempt,
+            reengagement_scheduled_for: decision.scheduled_for,
+            reengagement_window_days: decision.window_days,
+            reengagement_reason: decision.reason,
+            reengagement_wave: decision.wave,
+            stage: decision.stage,
+            followup_use_case: decision.followup_use_case || undefined,
+            trigger_queue_row_id: latest.id,
+            planner_version: decision.planner_version,
+            policy_version: decision.policy_version,
+            master_owner_id: latest.master_owner_id || row.master_owner_id || null,
+            property_id: latest.property_id || row.property_id || null,
+            agent_name: clean(latest.agent_name) || clean(row.agent_name) || null,
+          },
+          supabase
+        );
+        if (!scheduled?.ok) {
+          // Idempotent replay and scheduler-side suppression are safe no-ops,
+          // not failures: the row either already exists or must not exist.
+          countDenied(scheduled?.reason || "schedule_failed");
+          outcome.results.push({
+            thread_key: threadKey,
+            ok: scheduled?.reason === "duplicate_followup_exists",
+            scheduled: false,
+            reason: scheduled?.reason || "schedule_failed",
+          });
+          return;
+        }
+        await emitRecoveryEvent(supabase, {
+          type: "RECOVERY_REENGAGEMENT_SCHEDULED",
+          subjectId: threadKey,
+          payload: {
+            gap_key: latest.id,
+            attempt: decision.attempt,
+            wave: decision.wave,
+            reason: decision.reason,
+            scheduled_for: decision.scheduled_for,
+            queue_row_id: scheduled.queue_row_id || null,
+          },
+        });
+        outcome.repaired += 1;
+        outcome.results.push({
+          thread_key: threadKey,
+          ok: true,
+          scheduled: true,
+          attempt: decision.attempt,
+          reason: decision.reason,
+          queue_row_id: scheduled.queue_row_id || null,
+        });
+      } catch (schedule_error) {
+        outcome.results.push({
+          thread_key: threadKey,
+          ok: false,
+          reason: schedule_error?.message || "reengagement_schedule_failed",
+        });
+      }
+    },
+  });
+
+  return fetchError ? { ...outcome, error: fetchError } : outcome;
+}
+
+/**
  * Run all execution-gap sweeps. Each sweep is isolated; one failing sweep
  * never blocks the others.
  */
@@ -645,6 +940,7 @@ export async function recoverSellerExecutionGaps({
     () => recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now }),
     () => recoverNegotiationStateIntegrity(supabase, { limit, dryRun }),
     () => recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }),
+    () => recoverFollowupNoResponseReengagement(supabase, { limit, dryRun, now, deps }),
   ];
 
   const outcomes = [];
