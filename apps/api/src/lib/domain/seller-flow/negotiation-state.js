@@ -16,8 +16,13 @@
 // Pure module — no I/O. Persistence stays in persist-seller-transition.js.
 
 import { computeNegotiationGapMetrics } from "@/lib/domain/seller-flow/negotiation-policy.js";
+import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
 
-export const NEGOTIATION_STATE_VERSION = "negotiation_state_v2";
+// v3: adds per-unit seller-ask semantics (units_count, asking_price_per_unit)
+// for multifamily/small-multi deals (spine §6 — seller ask recorded both
+// absolute and per-unit at 2+ units). Additive fields; v1/v2 shapes migrate
+// through normalizeNegotiationState unchanged.
+export const NEGOTIATION_STATE_VERSION = "negotiation_state_v3";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -93,6 +98,9 @@ export function createNegotiationState({
     asking_price_confidence: null,
     asking_price_source_message_id: null,
     asking_price_history: [],
+    // Per-unit ask (2+ unit properties): current ask ÷ known unit count.
+    units_count: null,
+    asking_price_per_unit: null,
 
     // Our position / authority (ADE-only)
     initial_offer: null,
@@ -222,6 +230,7 @@ export function applyNegotiationTurn(previous, {
   offer_execution = null,     // { queued, amount, template_use_case, queue_row_id }
   contract_facts = null,
   comp_anchor = null,         // comp-anchor policy selection
+  units_count = null,         // property unit count (per-unit ask at 2+ units)
   source_message_id = null,
   now = new Date().toISOString(),
 } = {}) {
@@ -260,7 +269,11 @@ export function applyNegotiationTurn(previous, {
       num(ade_snapshot.investor_ceiling_high) ?? next.authorized_offer_ceiling ?? next.direct_purchase_maximum;
     next.arv = num(ade_snapshot.valuation_mid) ?? next.arv;
     next.repair_estimate = num(ade_snapshot.estimated_repairs) ?? next.repair_estimate;
-    next.comp_confidence = num(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
+    // Confidence enters state on the canonical 0–1 scale (spine §6): ADE's
+    // native 0–100 valuation_confidence is converted HERE so every downstream
+    // gate (zone policy min_valuation_confidence, gap metrics deal_confidence,
+    // automation_confidence) compares like with like.
+    next.comp_confidence = normalizeOfferConfidence(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
     if (ade_snapshot_id || ade_snapshot.id) next.ade_snapshot_id = ade_snapshot_id || ade_snapshot.id;
     next.alternate_strategy_eligibility = {
       subject_to_score: num(ade_snapshot.subject_to_score),
@@ -350,6 +363,21 @@ export function applyNegotiationTurn(previous, {
   else if (engine_decision?.negotiation_posture === "anchored") next.resistance_type = "price_anchored";
   if (seller_sentiment || intent) next.seller_sentiment = clean(seller_sentiment || intent) || next.seller_sentiment;
 
+  // ── 3b. Per-unit seller ask (spine §6: recorded absolute AND per-unit) ──
+  // The unit count sticks once learned (caller input wins over a fact over
+  // the persisted value); the per-unit ask tracks the CURRENT ask whenever
+  // the property has 2+ units. Never fabricated: unknown units ⇒ null.
+  const effectiveUnits =
+    num(units_count) ?? num(facts?.units_count) ?? num(facts?.unit_count) ?? num(next.units_count);
+  if (effectiveUnits !== null && effectiveUnits >= 1) {
+    next.units_count = Math.round(effectiveUnits);
+  }
+  const perUnitAsk = num(next.current_asking_price);
+  next.asking_price_per_unit =
+    next.units_count !== null && next.units_count >= 2 && perUnitAsk !== null
+      ? round2(perUnitAsk / next.units_count)
+      : next.asking_price_per_unit ?? null;
+
   // ── 4. Comp anchor bookkeeping ───────────────────────────────────────────
   if (comp_anchor?.eligible) {
     next.selected_comp_anchor = comp_anchor.anchor;
@@ -367,23 +395,32 @@ export function applyNegotiationTurn(previous, {
     next.current_strategy = strategy_decision.strategy;
   }
 
-  // ── 6. Our offers (append-only ledger, ceiling-guarded) ─────────────────
+  // ── 6. Our offers (append-only ledger, ceiling-guarded, replay-safe) ────
   const executedAmount = num(offer_execution?.amount);
   if (offer_execution?.queued && executedAmount !== null && !next.terms_accepted) {
-    const ceiling = num(next.authorized_offer_ceiling);
-    // Authority violation is recorded, never silently accepted.
-    const withinAuthority = ceiling === null || executedAmount <= ceiling;
-    next.offers_made.push({
-      amount: executedAmount,
-      strategy: strategy_decision?.strategy || next.current_strategy || null,
-      template_use_case: offer_execution.template_use_case || null,
-      queue_row_id: offer_execution.queue_row_id || null,
-      within_authority: withinAuthority,
-      at: now,
-    });
-    if (next.initial_offer == null) next.initial_offer = executedAmount;
-    next.latest_offer = executedAmount;
-    next.negotiation_round += 1;
+    // Replay idempotency (G8): the same queued send (same queue row) must
+    // never append twice — a reprocessed inbound would otherwise double-count
+    // one offer against the turn/concession caps.
+    const executedRowId = clean(offer_execution.queue_row_id);
+    const alreadyRecorded =
+      executedRowId !== "" &&
+      next.offers_made.some((entry) => clean(entry?.queue_row_id) === executedRowId);
+    if (!alreadyRecorded) {
+      const ceiling = num(next.authorized_offer_ceiling);
+      // Authority violation is recorded, never silently accepted.
+      const withinAuthority = ceiling === null || executedAmount <= ceiling;
+      next.offers_made.push({
+        amount: executedAmount,
+        strategy: strategy_decision?.strategy || next.current_strategy || null,
+        template_use_case: offer_execution.template_use_case || null,
+        queue_row_id: offer_execution.queue_row_id || null,
+        within_authority: withinAuthority,
+        at: now,
+      });
+      if (next.initial_offer == null) next.initial_offer = executedAmount;
+      next.latest_offer = executedAmount;
+      next.negotiation_round += 1;
+    }
   }
 
   // ── 7. Accepted-terms lock (spec §14) ───────────────────────────────────

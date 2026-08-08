@@ -367,6 +367,7 @@ export async function persistSellerTransitionArtifacts({
   compAnchor = null,
   classificationConfidence = null,
   adeSnapshotPrecomputed = null,
+  unitsCount = null,
 } = {}) {
   const summary = {
     ok: true,
@@ -488,6 +489,7 @@ export async function persistSellerTransitionArtifacts({
       offer_execution: offerExecution,
       contract_facts: contractFacts,
       comp_anchor: compAnchor,
+      units_count: unitsCount,
       source_message_id:
         priceFact?.source_message_id || transition.source_message_id || inboundEventId || null,
       now: nowIso,

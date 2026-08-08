@@ -1021,7 +1021,37 @@ function formatUsd(value) {
     : null;
 }
 
-function buildPersonalizationContext({
+// Offer-amount placeholders: ANY template whose body carries one of these
+// renders a monetary offer. The offers_made ledger accounting keys off THIS
+// detection (G8) — not off a use-case name list — so an offer sent through
+// any template family is counted against turn/concession caps.
+const OFFER_AMOUNT_PLACEHOLDER_PATTERN = /\{\{\s*(?:offer_price|smart_cash_offer_display)\s*\}\}/;
+
+export function templateCarriesOfferAmount(templateBody = "") {
+  return OFFER_AMOUNT_PLACEHOLDER_PATTERN.test(String(templateBody ?? ""));
+}
+
+/**
+ * The single numeric offer amount a render is authorized to carry: the
+ * strategy-authorized amount, else the ADE recommended offer — each admitted
+ * only under a positive authoritative ceiling and never above it (spine §6).
+ * Exported so ledger accounting and rendering can never disagree.
+ */
+export function resolveAuthorizedOfferAmount(dealAuthority = null) {
+  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  const hasCeilingAuthority = Number.isFinite(ceiling) && ceiling > 0;
+  const pick = (value) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (!hasCeilingAuthority) return null;
+    if (amount > ceiling) return null;
+    return amount;
+  };
+  return pick(dealAuthority?.authorized_offer_amount) ?? pick(dealAuthority?.recommended_offer);
+}
+
+// Exported for direct authority-gate testing — pure and deterministic.
+export function buildPersonalizationContext({
   message = "",
   inboundFrom = "",
   inboundTo = "",
@@ -1037,17 +1067,12 @@ function buildPersonalizationContext({
   // A strategy-authorized amount (already ceiling-bounded by the router) takes
   // precedence over the bare recommended offer; any amount above the persisted
   // ceiling is discarded so the render fails closed instead of over-offering.
-  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
-  const pickAuthorized = (value) => {
-    const amount = Number(value);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
-    return amount;
-  };
-  const authorized_offer = formatUsd(
-    pickAuthorized(dealAuthority?.authorized_offer_amount) ??
-      pickAuthorized(dealAuthority?.recommended_offer)
-  );
+  // No authoritative ceiling ⇒ NO monetary render at all (spine §6): an
+  // unbounded amount — even an ADE recommended offer — cannot be proven
+  // within authority, so the offer token stays empty and the render fails
+  // closed to review instead of sending an unboundable number. See
+  // resolveAuthorizedOfferAmount — the ledger uses the same resolution.
+  const authorized_offer = formatUsd(resolveAuthorizedOfferAmount(dealAuthority));
 
   return {
     message_body: clean(message) || null,
@@ -1128,10 +1153,20 @@ function renderSafeTemplate({
     };
   }
 
+  // Offer accounting (G8): whether THIS render carried a monetary offer, and
+  // the exact authorized amount it carried — detected from the template body,
+  // never from a use-case name list.
+  const carries_offer_amount = templateCarriesOfferAmount(template.template_body);
+  const rendered_offer_amount = carries_offer_amount
+    ? resolveAuthorizedOfferAmount(dealAuthority)
+    : null;
+
   return {
     ok: true,
     rendered_message_text: prepared.text,
     placeholders_used: rendered.placeholders_used || [],
+    offer_amount_rendered: carries_offer_amount && rendered_offer_amount != null,
+    rendered_offer_amount,
   };
 }
 
@@ -2343,6 +2378,8 @@ export async function executeInboundAutomationDecision({
       queue_item_id: null,
       queue_row_id: null,
       queue_result: null,
+      offer_amount_rendered: Boolean(render_result.offer_amount_rendered),
+      rendered_offer_amount: render_result.rendered_offer_amount ?? null,
       suppression_applied: false,
       duplicate_suppressed: false,
       dry_run: true,
@@ -2622,6 +2659,10 @@ export async function executeInboundAutomationDecision({
     queue_item_id: queue_result.queue_item_id || null,
     queue_row_id: queue_result.queue_row_id || null,
     queue_result,
+    // G8 offer accounting: this queued send carried a monetary offer of this
+    // exact amount (template-body detection, not a use-case list).
+    offer_amount_rendered: Boolean(render_result.offer_amount_rendered),
+    rendered_offer_amount: render_result.rendered_offer_amount ?? null,
     suppression_applied: false,
     duplicate_suppressed: false,
     dry_run: false,
