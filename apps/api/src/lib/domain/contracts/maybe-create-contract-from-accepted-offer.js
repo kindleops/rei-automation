@@ -5,7 +5,26 @@ import {
 } from "@/lib/podio/apps/contracts.js";
 import { createContractFromOffer } from "@/lib/domain/contracts/create-contract-from-offer.js";
 import { maybeSendContractForSigning } from "@/lib/domain/contracts/maybe-send-contract-for-signing.js";
+import { recordTermsSnapshot } from "@/lib/domain/agreements/record-terms-snapshot.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
+
+const defaultDeps = {
+  findContractItems,
+  createContractFromOffer,
+  maybeSendContractForSigning,
+  recordTermsSnapshot,
+  syncPipelineState,
+};
+
+let runtimeDeps = { ...defaultDeps };
+
+export function __setMaybeCreateContractTestDeps(overrides = {}) {
+  runtimeDeps = { ...runtimeDeps, ...overrides };
+}
+
+export function __resetMaybeCreateContractTestDeps() {
+  runtimeDeps = { ...defaultDeps };
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -67,13 +86,57 @@ function isAcceptedOffer({
 async function findLatestContractByOfferId(offer_item_id) {
   if (!offer_item_id) return null;
 
-  const matches = await findContractItems(
+  const matches = await runtimeDeps.findContractItems(
     { [CONTRACT_FIELDS.offer]: offer_item_id },
     50,
     0
   );
 
   return sortNewestFirst(matches)[0] || null;
+}
+
+function firstAppRefId(payload_value) {
+  if (Array.isArray(payload_value)) return payload_value[0] || null;
+  return payload_value || null;
+}
+
+// Durable terms snapshot (spine gap G9): capture the exact economics written
+// to Podio at contract creation. Never fatal — the snapshot writer degrades to
+// a logged no-op (missing table / missing config) and never throws.
+async function recordContractCreationTermsSnapshot({
+  created_contract = null,
+  metadata = {},
+} = {}) {
+  const payload = created_contract?.payload || {};
+
+  return runtimeDeps.recordTermsSnapshot({
+    opportunity_id: metadata?.opportunity_id || null,
+    thread_key: metadata?.thread_key || null,
+    property_id: firstAppRefId(payload[CONTRACT_FIELDS.property]),
+    master_owner_id: firstAppRefId(payload[CONTRACT_FIELDS.master_owner]),
+    accepted_price: payload[CONTRACT_FIELDS.purchase_price_final] ?? null,
+    accepted_terms: {
+      contract_id: payload[CONTRACT_FIELDS.contract_id] || null,
+      contract_status: payload[CONTRACT_FIELDS.contract_status] || null,
+      contract_type: payload[CONTRACT_FIELDS.contract_type] || null,
+      template_type: payload[CONTRACT_FIELDS.template_type] || null,
+      purchase_price: payload[CONTRACT_FIELDS.purchase_price_final] ?? null,
+      emd_amount: payload[CONTRACT_FIELDS.emd_amount] ?? null,
+      closing_timeline_days:
+        payload[CONTRACT_FIELDS.closing_timeline_days] ?? null,
+      closing_date_target:
+        payload[CONTRACT_FIELDS.closing_date_target]?.start || null,
+      creative_terms: payload[CONTRACT_FIELDS.creative_terms] || null,
+      offer_item_id: firstAppRefId(payload[CONTRACT_FIELDS.offer]),
+    },
+    seller_ask_at_acceptance: metadata?.seller_ask_at_acceptance ?? null,
+    our_last_offer: metadata?.our_last_offer ?? null,
+    authorized_ceiling_at_acceptance:
+      metadata?.authorized_ceiling_at_acceptance ?? null,
+    negotiation_state_version: metadata?.negotiation_state_version || null,
+    source: "contract_creation",
+    podio_contract_item_id: created_contract?.contract_item_id || null,
+  });
 }
 
 function isTerminalContractStatus(status = "") {
@@ -143,7 +206,7 @@ export async function maybeCreateContractFromAcceptedOffer({
     );
 
     if (!isTerminalContractStatus(existing_contract_status)) {
-      const maybe_send_existing = await maybeSendContractForSigning({
+      const maybe_send_existing = await runtimeDeps.maybeSendContractForSigning({
         contract: existing_contract,
         documents,
         signers,
@@ -154,7 +217,7 @@ export async function maybeCreateContractFromAcceptedOffer({
         auto_send,
         dry_run,
       });
-      const pipeline = await syncPipelineState({
+      const pipeline = await runtimeDeps.syncPipelineState({
         offer_item_id: resolved_offer_item_id,
         contract_item_id: existing_contract.item_id,
         notes: maybe_send_existing?.sent
@@ -176,7 +239,7 @@ export async function maybeCreateContractFromAcceptedOffer({
     }
   }
 
-  const created_contract = await createContractFromOffer({
+  const created_contract = await runtimeDeps.createContractFromOffer({
     offer_item_id: resolved_offer_item_id,
     offer_item,
     context,
@@ -200,7 +263,12 @@ export async function maybeCreateContractFromAcceptedOffer({
     };
   }
 
-  const maybe_send = await maybeSendContractForSigning({
+  const terms_snapshot = await recordContractCreationTermsSnapshot({
+    created_contract,
+    metadata,
+  });
+
+  const maybe_send = await runtimeDeps.maybeSendContractForSigning({
     contract: {
       contract_item_id: created_contract.contract_item_id,
     },
@@ -222,6 +290,7 @@ export async function maybeCreateContractFromAcceptedOffer({
     offer_item_id: resolved_offer_item_id,
     contract_item_id: created_contract.contract_item_id,
     contract: created_contract,
+    terms_snapshot,
     send_result: maybe_send,
   };
 }

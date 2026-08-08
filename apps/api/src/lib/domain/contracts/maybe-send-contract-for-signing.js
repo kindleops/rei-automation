@@ -7,6 +7,7 @@ import {
   buildContractArchiveFiles,
   createStoredDocumentPackage,
 } from "@/lib/domain/documents/document-packages.js";
+import { generateContractDocument } from "@/lib/domain/documents/document-generation-adapter.js";
 import { sendContractViaDocusign } from "@/lib/domain/contracts/send-contract-via-docusign.js";
 import { resolveContractTemplate } from "@/lib/domain/contracts/resolve-contract-template.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
@@ -236,6 +237,7 @@ function validateSigningInputs({
 const defaultDeps = {
   createStoredDocumentPackage,
   createMessageEvent,
+  generateContractDocument,
   sendContractViaDocusign,
   resolveContractTemplate,
   syncPipelineState,
@@ -273,6 +275,24 @@ function buildContractSendBlocker({
         blocker_summary: resolved_template?.ok
           ? "Contract is missing a sendable template package or file documents."
           : "No active auto-generation contract template could be resolved.",
+      };
+    case "document_generation_not_configured":
+    case "document_generation_failed":
+    case "document_generation_empty_result":
+      // The result reason is the explicit capability statement; the pipeline
+      // blocker keeps routing the operator to the cheapest fix — resolving a
+      // Podio template when none resolved, configuring docgen otherwise.
+      return {
+        blocked: "Yes",
+        automation_status: "Escalated",
+        current_engine: "Contracts",
+        blocker_type: "Missing Docs",
+        next_system_action: resolved_template?.ok
+          ? "configure_document_generation"
+          : "resolve_contract_template",
+        blocker_summary: resolved_template?.ok
+          ? "Contract cannot be sent: no file documents, no DocuSign server template, and document generation is not configured."
+          : "No active contract template could be resolved and document generation is not configured.",
       };
     case "missing_signers":
       return {
@@ -343,18 +363,57 @@ export async function maybeSendContractForSigning({
         })
       : null;
 
+  // Document generation seam (G10): when the caller supplied no file
+  // documents AND no DocuSign server template is available, ask the
+  // document-generation adapter for one. With the default not_configured
+  // provider this yields an explicit capability-absent result, which turns
+  // the eventual failure reason into "document_generation_not_configured"
+  // instead of the generic missing-documents reason. Behavior is otherwise
+  // unchanged: a real provider (future) feeds its document into validation.
+  const has_supplied_documents = normalizeDocuments(documents).length > 0;
+  const has_server_template = Boolean(
+    clean(template_id) ||
+      (template_resolution?.ok &&
+        clean(template_resolution?.docusign_template_id))
+  );
+
+  let document_generation = null;
+  let effective_documents = documents;
+
+  if (!has_supplied_documents && !has_server_template) {
+    document_generation = await runtimeDeps.generateContractDocument(
+      { contract_item_id },
+      template_resolution || null
+    );
+
+    if (document_generation?.ok && document_generation?.document) {
+      effective_documents = [document_generation.document];
+    }
+  }
+
   const validation = validateSigningInputs({
     contract_item,
     contract_item_id,
-    documents,
+    documents: effective_documents,
     signers,
     template_id,
     resolved_template: template_resolution?.ok ? template_resolution : null,
   });
 
   if (!validation.ok) {
+    const missing_documents_reasons = [
+      "missing_documents_or_template",
+      "missing_documents_or_resolved_template",
+    ];
+    const effective_validation =
+      missing_documents_reasons.includes(validation.reason) &&
+      document_generation &&
+      !document_generation.ok
+        ? { ...validation, reason: document_generation.reason }
+        : validation;
+
     const blocker = buildContractSendBlocker({
-      validation,
+      validation: effective_validation,
       resolved_template: template_resolution,
     });
 
@@ -376,11 +435,12 @@ export async function maybeSendContractForSigning({
       ok: false,
       attempted: false,
       sent: false,
-      reason: validation.reason,
+      reason: effective_validation.reason,
       contract_item_id: validation.contract_item_id,
       contract_status: validation.contract_status || null,
       envelope_id: validation.envelope_id || null,
       template_resolution,
+      document_generation,
     };
   }
 
@@ -396,6 +456,7 @@ export async function maybeSendContractForSigning({
       documents_count: validation.documents.length,
       signers_count: validation.signers.length,
       template_resolution,
+      document_generation,
     };
   }
 
@@ -473,6 +534,7 @@ export async function maybeSendContractForSigning({
     documents_count: validation.documents.length,
     signers_count: validation.signers.length,
     template_resolution,
+    document_generation,
     document_archive,
     send_result,
   };
