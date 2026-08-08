@@ -80,10 +80,12 @@ test("terms hash is deterministic and independent of object key order", () => {
     seller_ask_at_acceptance: 155000,
     our_last_offer: 148000,
     authorized_ceiling_at_acceptance: 152000,
+    podio_contract_item_id: 9001,
     source: "negotiation_acceptance",
   });
   const b = computeTermsHash({
     source: "negotiation_acceptance",
+    podio_contract_item_id: 9001,
     authorized_ceiling_at_acceptance: 152000,
     our_last_offer: 148000,
     seller_ask_at_acceptance: 155000,
@@ -109,6 +111,44 @@ test("terms hash separates different economics, identities, and sources", () => 
   assert.notEqual(original, computeTermsHash({ ...base, accepted_price: 151000 }));
   assert.notEqual(original, computeTermsHash({ ...base, opportunity_id: "6f6a3a24-0000-4000-8000-000000000002" }));
   assert.notEqual(original, computeTermsHash({ ...base, source: "contract_creation" }));
+});
+
+test("a RE-ISSUED contract with identical economics gets its own hash", () => {
+  // podio_contract_item_id is part of snapshot identity. Without it, cancelling
+  // a contract and issuing a replacement at the same price hashed to the
+  // original row and the replacement was silently deduped away, leaving the
+  // live contract with no snapshot of its own.
+  const economics = {
+    opportunity_id: "6f6a3a24-0000-4000-8000-000000000001",
+    accepted_price: 150000,
+    accepted_terms: { price: 150000 },
+    source: "contract_creation",
+  };
+
+  const first = computeTermsHash({ ...economics, podio_contract_item_id: 9001 });
+  const reissued = computeTermsHash({ ...economics, podio_contract_item_id: 9002 });
+
+  assert.notEqual(first, reissued);
+  assert.equal(
+    first,
+    computeTermsHash({ ...economics, podio_contract_item_id: 9001 }),
+    "the same contract still dedupes"
+  );
+  assert.equal(
+    computeTermsHash({ ...economics, podio_contract_item_id: 9001 }),
+    computeTermsHash({ ...economics, podio_contract_item_id: "9001" }),
+    "id type does not fork the hash"
+  );
+});
+
+test("an absent contract id is still a stable, distinct identity", () => {
+  const economics = {
+    opportunity_id: "6f6a3a24-0000-4000-8000-000000000001",
+    accepted_price: 150000,
+    source: "negotiation_acceptance",
+  };
+  assert.equal(computeTermsHash(economics), computeTermsHash({ ...economics, podio_contract_item_id: null }));
+  assert.notEqual(computeTermsHash(economics), computeTermsHash({ ...economics, podio_contract_item_id: 9001 }));
 });
 
 // ── writer behavior ───────────────────────────────────────────────────────

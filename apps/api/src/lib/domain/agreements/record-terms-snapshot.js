@@ -66,6 +66,7 @@ export function computeTermsHash({
   seller_ask_at_acceptance = null,
   our_last_offer = null,
   authorized_ceiling_at_acceptance = null,
+  podio_contract_item_id = null,
   source = null,
 } = {}) {
   const canonical = canonicalize({
@@ -74,6 +75,11 @@ export function computeTermsHash({
       thread_key: clean(thread_key) || null,
       property_id: clean(property_id) || null,
       master_owner_id: clean(master_owner_id) || null,
+      // The contract is part of the snapshot's identity. Without it, a
+      // RE-ISSUED Podio contract carrying identical economics hashed to the
+      // existing row and was silently deduped away, so the second contract had
+      // no snapshot of its own.
+      podio_contract_item_id: clean(podio_contract_item_id) || null,
     },
     economics: {
       accepted_price: asNumberOrNull(accepted_price),
@@ -171,6 +177,7 @@ export async function recordTermsSnapshot({
     seller_ask_at_acceptance,
     our_last_offer,
     authorized_ceiling_at_acceptance,
+    podio_contract_item_id,
     source: normalized_source,
   });
 

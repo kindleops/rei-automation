@@ -21,6 +21,10 @@ export async function sendContract({
     metadata,
     dry_run,
     auto_send,
+    // This is the deliberate, authenticated operator send (internal/contracts/
+    // send, shared-secret gated). It is the ONE path allowed past the
+    // ENABLE_AUTO_CONTRACT_SEND kill switch; automatic paths are not.
+    operator_override: true,
   });
 }
 

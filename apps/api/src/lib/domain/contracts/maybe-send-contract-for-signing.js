@@ -12,6 +12,7 @@ import { sendContractViaDocusign } from "@/lib/domain/contracts/send-contract-vi
 import { resolveContractTemplate } from "@/lib/domain/contracts/resolve-contract-template.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { createMessageEvent } from "@/lib/providers/podio.js";
+import { FEATURE_FLAGS } from "@/lib/config/feature-flags.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -241,6 +242,9 @@ const defaultDeps = {
   sendContractViaDocusign,
   resolveContractTemplate,
   syncPipelineState,
+  // The last un-injectable network call in this module: callers that pass only
+  // a contract id (the operator send route) otherwise reach real Podio.
+  getContractItem,
 };
 
 let runtimeDeps = { ...defaultDeps };
@@ -337,7 +341,25 @@ export async function maybeSendContractForSigning({
   metadata = {},
   dry_run = false,
   auto_send = true,
+  operator_override = false,
 } = {}) {
+  // Authority lives in the SENDER, not only in one caller. Previously the sole
+  // ENABLE_AUTO_CONTRACT_SEND check sat in run-deals-autopilot, so every other
+  // path into this function — the accepted-offer contract creation among them
+  // — could dispatch a real e-signature envelope with the flag off.
+  //
+  // A deliberate, authenticated operator send passes operator_override; nothing
+  // automatic does. The flag is default-false and stays the kill switch.
+  if (!FEATURE_FLAGS.ENABLE_AUTO_CONTRACT_SEND && operator_override !== true) {
+    return {
+      ok: true,
+      attempted: false,
+      sent: false,
+      reason: "auto_contract_send_disabled",
+      contract_item_id: deriveContractItemId(contract),
+    };
+  }
+
   const contract_item_id = deriveContractItemId(contract);
 
   if (!contract_item_id) {
@@ -353,7 +375,7 @@ export async function maybeSendContractForSigning({
   const contract_item =
     contract?.fields
       ? contract
-      : await getContractItem(contract_item_id);
+      : await runtimeDeps.getContractItem(contract_item_id);
 
   const template_resolution =
     !normalizeDocuments(documents).length && !clean(template_id)

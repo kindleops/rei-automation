@@ -139,6 +139,10 @@ test("a configured docgen provider feeds its document into the signing flow", as
     documents: [],
     signers: [{ name: "Seller One", email: "seller@example.com", role_name: "Seller" }],
     auto_send: true,
+    // Deliberate operator send: ENABLE_AUTO_CONTRACT_SEND is default-false and
+    // now gates the SENDER itself, so this seam test states its authority
+    // explicitly rather than relying on the sender being ungated.
+    operator_override: true,
   });
 
   assert.equal(result.ok, true);
@@ -173,6 +177,10 @@ test("capability-absent docgen keeps documents-supplied and server-template flow
     documents: [],
     signers: [{ name: "Seller One", email: "seller@example.com", role_name: "Seller" }],
     auto_send: true,
+    // Deliberate operator send: ENABLE_AUTO_CONTRACT_SEND is default-false and
+    // now gates the SENDER itself, so this seam test states its authority
+    // explicitly rather than relying on the sender being ungated.
+    operator_override: true,
   });
 
   assert.equal(via_template.ok, true);
@@ -187,6 +195,10 @@ test("capability-absent docgen keeps documents-supplied and server-template flow
     ],
     signers: [{ name: "Seller One", email: "seller@example.com", role_name: "Seller" }],
     auto_send: true,
+    // Deliberate operator send: ENABLE_AUTO_CONTRACT_SEND is default-false and
+    // now gates the SENDER itself, so this seam test states its authority
+    // explicitly rather than relying on the sender being ungated.
+    operator_override: true,
   });
 
   assert.equal(via_documents.ok, true);

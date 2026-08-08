@@ -605,12 +605,16 @@ export async function persistSellerTransitionArtifacts({
       });
     }
 
-    // Durable agreement record (spine G9): first turn where terms become
-    // accepted writes the terms snapshot. The hook is idempotent (terms_hash
-    // dedupe) and never throws by design; the guard try keeps a defect in it
-    // from ever blocking deal persistence, and keeps its failures labeled as
-    // its own rather than as a metadata failure.
-    if (negotiationState?.terms_accepted && !previousState?.terms_accepted) {
+    // Durable agreement record (spine G9): every persist while terms are
+    // accepted attempts the terms snapshot. It used to fire ONLY on the
+    // transition edge (!previousState?.terms_accepted), so a snapshot that
+    // failed — missing table, transient Supabase error — was never retried and
+    // the accepted deal stayed permanently unrecorded. The hook is
+    // terms_hash-idempotent by design, so repeating it dedupes rather than
+    // duplicates. The guard try keeps a defect in it from ever blocking deal
+    // persistence, and keeps its failures labeled as its own rather than as a
+    // metadata failure.
+    if (negotiationState?.terms_accepted) {
       try {
         summary.terms_snapshot = await recordAcceptanceTermsSnapshot(
           negotiationState,
