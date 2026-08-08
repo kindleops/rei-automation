@@ -279,6 +279,34 @@ function clampLimit(value) {
   return Math.min(Math.floor(parsed), 100);
 }
 
+/**
+ * Context resolution for the SCHEDULED flush.
+ *
+ * Extracted from the production coordinator so the temporal bound below is
+ * directly assertable: the webhook path bounds outbound-pair selection by the
+ * inbound receipt instant, and the flush must apply the SAME bound or an
+ * outbound that left after the seller replied can be selected as the question
+ * they answered.
+ */
+export async function resolveBurstFlushContext(
+  args = {},
+  { loadContextWithFallbackImpl, loadContextImpl } = {}
+) {
+  if (args.context) return args.context;
+  if (!args.threadKey) return null;
+  try {
+    return await loadContextWithFallbackImpl({
+      inbound_from: args.threadKey,
+      inbound_to: args.inboundTo || null,
+      inbound_received_at: args.inboundReceivedAt || null,
+      create_brain_if_missing: false,
+      loadContextImpl,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export async function handleFlushInboundBurstsRequest(request, deps = {}) {
   const method = String(deps.method || request?.method || "POST").toUpperCase();
   const json_response = deps.jsonResponse || jsonResponse;
@@ -669,19 +697,10 @@ async function buildProductionCoordinator({ supabase, policy, worker_id, method 
     ]);
 
   async function processWithContext(args = {}) {
-    let context = args.context || null;
-    if (!context && args.threadKey) {
-      try {
-        context = await loadContextWithFallback({
-          inbound_from: args.threadKey,
-          inbound_to: args.inboundTo || null,
-          create_brain_if_missing: false,
-          loadContextImpl: loadContext,
-        });
-      } catch {
-        context = null;
-      }
-    }
+    const context = await resolveBurstFlushContext(args, {
+      loadContextWithFallbackImpl: loadContextWithFallback,
+      loadContextImpl: loadContext,
+    });
     return processSellerInboundMessage({
       ...args,
       context: context || args.context || null,

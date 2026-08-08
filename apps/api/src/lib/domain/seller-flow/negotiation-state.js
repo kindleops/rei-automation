@@ -101,6 +101,10 @@ export function createNegotiationState({
     // Per-unit ask (2+ unit properties): current ask ÷ known unit count.
     units_count: null,
     asking_price_per_unit: null,
+    // Set when the seller quoted PER UNIT but the unit count is unknown, so no
+    // property-level ask can be derived. Clarify; never guess a multiplier.
+    asking_price_needs_clarification: false,
+    asking_price_clarification_reason: null,
 
     // Our position / authority (ADE-only)
     initial_offer: null,
