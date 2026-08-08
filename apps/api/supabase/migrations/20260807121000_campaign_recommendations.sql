@@ -45,7 +45,12 @@ CREATE TABLE IF NOT EXISTS public.campaign_recommendations (
   -- A decision must carry who/when together.
   CONSTRAINT campaign_recommendations_decision_consistency CHECK (
     (status = 'proposed' AND decided_by IS NULL AND decided_at IS NULL)
-    OR (status <> 'proposed' AND decided_at IS NOT NULL)
+    OR (
+      status IN ('approved', 'dismissed')
+      AND decided_by IS NOT NULL
+      AND decided_at IS NOT NULL
+    )
+    OR (status = 'expired')
   ),
   CONSTRAINT campaign_recommendations_daily_cell_unique
     UNIQUE (market, property_class, campaign_type, model_version, recommended_on)
@@ -67,3 +72,12 @@ COMMENT ON COLUMN public.campaign_recommendations.status IS
   'proposed = machine output awaiting review; approved/dismissed = operator decision (decided_by/decided_at set); expired = superseded without decision. No status value triggers execution.';
 
 ALTER TABLE public.campaign_recommendations ENABLE ROW LEVEL SECURITY;
+
+-- Containment posture per 20260729193000_launch_containment_security_addendum:
+-- RLS-with-no-policies does not cover TRUNCATE, and Supabase default
+-- privileges grant broadly to anon/authenticated on new public tables.
+-- Service-role is the only writer.
+REVOKE ALL ON TABLE public.campaign_recommendations FROM PUBLIC;
+REVOKE ALL ON TABLE public.campaign_recommendations FROM anon;
+REVOKE ALL ON TABLE public.campaign_recommendations FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.campaign_recommendations TO service_role;

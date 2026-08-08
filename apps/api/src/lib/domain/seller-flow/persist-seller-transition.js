@@ -598,22 +598,30 @@ export async function persistSellerTransitionArtifacts({
         .eq("id", opportunity.id);
       if (metadataError) throw metadataError;
       summary.negotiation_state_updated = true;
-
-      // Durable agreement record (spine G9): first turn where terms become
-      // accepted writes the terms snapshot. The hook is idempotent
-      // (terms_hash dedupe) and never throws; table-missing degrades to a
-      // logged no-op, so deal persistence is never blocked by it.
-      if (negotiationState?.terms_accepted && !previousState?.terms_accepted) {
-        summary.terms_snapshot = await recordAcceptanceTermsSnapshot(
-          negotiationState,
-          opportunity
-        );
-      }
     } catch (metadata_error) {
       warn("[SELLER_TRANSITION_METADATA_FAILED]", {
         opportunity_id: opportunity.id,
         error: metadata_error?.message || "metadata_update_failed",
       });
+    }
+
+    // Durable agreement record (spine G9): first turn where terms become
+    // accepted writes the terms snapshot. The hook is idempotent (terms_hash
+    // dedupe) and never throws by design; the guard try keeps a defect in it
+    // from ever blocking deal persistence, and keeps its failures labeled as
+    // its own rather than as a metadata failure.
+    if (negotiationState?.terms_accepted && !previousState?.terms_accepted) {
+      try {
+        summary.terms_snapshot = await recordAcceptanceTermsSnapshot(
+          negotiationState,
+          opportunity
+        );
+      } catch (snapshot_error) {
+        warn("[SELLER_TRANSITION_TERMS_SNAPSHOT_FAILED]", {
+          opportunity_id: opportunity.id,
+          error: snapshot_error?.message || "terms_snapshot_failed",
+        });
+      }
     }
 
     // ── Workflow Studio negotiation events (spec §16) ───────────────────

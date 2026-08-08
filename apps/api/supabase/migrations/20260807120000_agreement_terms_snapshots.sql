@@ -75,3 +75,12 @@ COMMENT ON COLUMN public.agreement_terms_snapshots.accepted_terms IS
   'The exact terms object captured at snapshot time (price, basis, closing preference, contract type, EMD, closing target, creative terms, ...). Shape depends on source; always JSON-serializable and canonicalized before hashing.';
 
 ALTER TABLE public.agreement_terms_snapshots ENABLE ROW LEVEL SECURITY;
+
+-- Containment posture per 20260729193000_launch_containment_security_addendum:
+-- RLS-with-no-policies does not cover TRUNCATE, and Supabase default
+-- privileges grant broadly to anon/authenticated on new public tables.
+-- Service-role is the only writer.
+REVOKE ALL ON TABLE public.agreement_terms_snapshots FROM PUBLIC;
+REVOKE ALL ON TABLE public.agreement_terms_snapshots FROM anon;
+REVOKE ALL ON TABLE public.agreement_terms_snapshots FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.agreement_terms_snapshots TO service_role;
