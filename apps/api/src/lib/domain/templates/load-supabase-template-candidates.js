@@ -146,6 +146,7 @@ export function normalizeSupabaseTemplateRow(row = {}) {
     template_name:       clean(row.template_name)       || null,
     metadata:            row.metadata  || {},
     variables:           row.variables || [],
+    cooldown_days:       row.cooldown_days ?? null,
 
     // Performance hints (no Podio-sourced engagement metrics available) -----
     spam_risk:               null,
@@ -179,35 +180,35 @@ function isStage1SelectorRequest(selector_input = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch active template candidates from the sms_templates Supabase table.
+ * Detailed fetch of active template candidates from sms_templates.
  *
- * For Stage 1 / first-touch requests the query uses an OR-filter across the
- * three canonical Stage 1 signals so that any matching template is returned
- * regardless of which signal column was populated:
+ * Unlike the legacy `fetchSupabaseTemplateCandidates`, this variant reports
+ * WHY a load produced no candidates, so callers on the campaign path can treat
+ * a corpus-load failure as a blocking skip (`template_corpus_unavailable`)
+ * instead of silently degrading to Podio / the local registry (G2 fail-open
+ * fix). Query semantics are identical:
  *
- *   use_case = 'ownership_check'
- *   OR  stage_code = 'S1'
- *   OR  is_first_touch = true
+ *   Stage 1 / first-touch selector → OR-filter across the three canonical
+ *   Stage 1 signals (use_case = 'ownership_check' OR stage_code = 'S1' OR
+ *   is_first_touch = true). Other selectors match use_case exactly; a selector
+ *   with no use_case loads the full active corpus.
  *
- * For other selectors the query matches by use_case exactly.
- *
- * Rows with an empty / HTML-only template_body are pre-filtered out before
- * being returned so the caller's evaluateTemplateCandidate sees clean data.
- *
- * Returns [] (fail-open) when:
- *   - Supabase is not configured and no client is injected
- *   - The Supabase query throws
- *
- * @param {object}      selector_input              - normalised selector
- * @param {object}      [opts]
- * @param {object|null} [opts.supabase_client]      - injectable client for testing
- * @returns {Promise<object[]>}  normalised template candidates
+ * @returns {Promise<{ok: boolean, configured: boolean, reason: string|null,
+ *                    error: Error|null, candidates: object[]}>}
  */
-export async function fetchSupabaseTemplateCandidates(
+export async function fetchSupabaseTemplateCandidatesDetailed(
   selector_input = {},
   { supabase_client = null } = {}
 ) {
-  if (!supabase_client && !hasSupabaseConfig()) return [];
+  if (!supabase_client && !hasSupabaseConfig()) {
+    return {
+      ok: false,
+      configured: false,
+      reason: "supabase_not_configured",
+      error: null,
+      candidates: [],
+    };
+  }
 
   const client   = supabase_client || defaultSupabase;
   const use_case = clean(selector_input?.use_case) || null;
@@ -230,12 +231,55 @@ export async function fetchSupabaseTemplateCandidates(
     const { data, error } = await query;
     if (error) throw error;
 
-    return (Array.isArray(data) ? data : [])
+    const candidates = (Array.isArray(data) ? data : [])
       .map(normalizeSupabaseTemplateRow)
       .filter(Boolean)
       .filter((row) => Boolean(stripHtmlForEmptyCheck(row.text)));
-  } catch {
-    // Fail open — let the Podio / local-registry path handle it.
-    return [];
+
+    return { ok: true, configured: true, reason: null, error: null, candidates };
+  } catch (error) {
+    return {
+      ok: false,
+      configured: true,
+      reason: "template_corpus_unavailable",
+      error: error instanceof Error ? error : new Error(String(error)),
+      candidates: [],
+    };
   }
+}
+
+/**
+ * Fetch active template candidates from the sms_templates Supabase table.
+ *
+ * For Stage 1 / first-touch requests the query uses an OR-filter across the
+ * three canonical Stage 1 signals so that any matching template is returned
+ * regardless of which signal column was populated:
+ *
+ *   use_case = 'ownership_check'
+ *   OR  stage_code = 'S1'
+ *   OR  is_first_touch = true
+ *
+ * For other selectors the query matches by use_case exactly.
+ *
+ * Rows with an empty / HTML-only template_body are pre-filtered out before
+ * being returned so the caller's evaluateTemplateCandidate sees clean data.
+ *
+ * Returns [] (fail-open) when:
+ *   - Supabase is not configured and no client is injected
+ *   - The Supabase query throws
+ *
+ * Callers that must NOT fail open (campaign-path resolution) use
+ * `fetchSupabaseTemplateCandidatesDetailed` instead.
+ *
+ * @param {object}      selector_input              - normalised selector
+ * @param {object}      [opts]
+ * @param {object|null} [opts.supabase_client]      - injectable client for testing
+ * @returns {Promise<object[]>}  normalised template candidates
+ */
+export async function fetchSupabaseTemplateCandidates(
+  selector_input = {},
+  opts = {}
+) {
+  const detailed = await fetchSupabaseTemplateCandidatesDetailed(selector_input, opts);
+  return detailed.candidates;
 }

@@ -7,6 +7,11 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage, templateCatalogLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { expandTemplatePropertyScopes } from '@/lib/sms/property_scope.js'
+import {
+  isTemplateAllowedForCommunicationClass,
+  normalizeUnitsCount,
+  resolvePropertyCommunicationClass,
+} from '@/lib/domain/properties/property-communication-class.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -69,7 +74,7 @@ function pickDeterministicTemplate(candidates, seed) {
   return sorted[index]
 }
 
-function assignTemplateForTargetFast(target, campaign, templateCatalog) {
+export function assignTemplateForTargetFast(target, campaign, templateCatalog) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
@@ -94,15 +99,34 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
   ) || 'ownership_check'
 
   const propertyType = clean(snapshot.property_type || target.asset_type || metadata.property_type)
+  // LIVE DEFECT FIX (spine §7 / G1): the snapshot column is `units_count`; the
+  // previous read (`snapshot.unit_count ?? snapshot.units`) never matched, so
+  // unit counts never reached property-scope resolution here. Legacy keys kept
+  // as fallback for snapshots persisted before the fix.
+  const unitsCount = normalizeUnitsCount(
+    snapshot.units_count ?? snapshot.unit_count ?? snapshot.units
+  )
+  const communicationClass = resolvePropertyCommunicationClass({
+    units_count: unitsCount,
+    property_type: propertyType,
+    property_class: snapshot.property_class,
+    normalized_asset_class: snapshot.canonical_property_group,
+  })
   const propertyScopes = expandTemplatePropertyScopes({
     use_case: templateUseCase,
     property_type: propertyType,
-    unit_count: snapshot.unit_count ?? snapshot.units ?? null,
+    units_count: unitsCount,
     owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
   })
 
   const languageMatches = templatesForLanguage(templateCatalog, canonicalLanguage)
   const scopedMatches = templatesForPropertyScopes(languageMatches, propertyScopes)
+  // HARD guarantee (spine §7): a template whose wording/placeholders conflict
+  // with the property communication class is unselectable — filtered before
+  // deterministic selection, never merely down-scored.
+  const classSafeMatches = scopedMatches.filter(
+    (row) => isTemplateAllowedForCommunicationClass(row, communicationClass).allowed
+  )
   const seed = [
     target.id,
     target.master_owner_id,
@@ -110,21 +134,30 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
     target.phone_id,
     canonicalLanguage,
     propertyScopes[0],
+    // Rotation key includes the communication class so a retry can never flip
+    // wording class (spine §7 / G2).
+    communicationClass,
     stageCode,
     templateUseCase,
   ].join('|')
-  const selected = pickDeterministicTemplate(scopedMatches, seed)
+  const selected = pickDeterministicTemplate(classSafeMatches, seed)
   const templateId = clean(selected?.template_id || selected?.id)
 
   if (!templateId) {
+    const classFiltered = scopedMatches.length > 0 && classSafeMatches.length === 0
+    const blockReason = classFiltered
+      ? 'no_template_for_communication_class'
+      : 'no_template_for_language_scope'
     return {
       ok: false,
       excluded: false,
-      reason: 'no_template_for_language_scope',
+      reason: blockReason,
       language: canonicalLanguage,
       template_status: 'blocked',
-      block_reason: 'no_template_for_language_scope',
+      block_reason: blockReason,
       property_scopes: propertyScopes,
+      property_communication_class: communicationClass,
+      units_count: unitsCount,
     }
   }
 
@@ -136,6 +169,8 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
     template_status: 'ready',
     template_name: selected?.template_name || null,
     property_type_scope: selected?.property_type_scope || propertyScopes[0] || null,
+    property_communication_class: communicationClass,
+    units_count: unitsCount,
     block_reason: null,
   }
 }
@@ -189,7 +224,19 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
   const templateUseCase = clean(
     campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
   ) || 'ownership_check'
-  const templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  // G2 fail-open fix: a template-corpus load failure is a BLOCKING skip
+  // reason for the whole assignment pass — never a silent degradation.
+  let templateCatalog
+  try {
+    templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'template_corpus_unavailable',
+      campaign_id: campaignId,
+      detail: clean(error?.message) || null,
+    }
+  }
 
   const { data: targets, error: targetErr } = await supabase
     .from('campaign_targets')
@@ -252,9 +299,11 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
           template_use_case: templateUseCase,
           template_name: result.template_name,
           property_type_scope: result.property_type_scope,
+          property_communication_class: result.property_communication_class || null,
           template_assignment: {
             template_id: result.template_id,
             language: lang,
+            property_communication_class: result.property_communication_class || null,
             assigned_at: new Date().toISOString(),
           },
         },

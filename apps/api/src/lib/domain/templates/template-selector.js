@@ -1,5 +1,9 @@
 import { normalizeSellerFlowUseCase } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { getCategoryValue, safeCategoryEquals } from "@/lib/providers/podio.js";
+import {
+  communicationClassFromPropertyTypeScope,
+  templateWordingViolationsForClass,
+} from "@/lib/domain/properties/property-communication-class.js";
 
 export const TEMPLATE_TOUCH_TYPES = Object.freeze({
   FIRST_TOUCH: "First Touch",
@@ -854,6 +858,7 @@ export function buildTemplateSelectorInput({
   use_case = null,
   language = null,
   property_type_scope = null,
+  property_communication_class = null,
   deal_strategy = null,
   touch_type = null,
   touch_number = null,
@@ -904,14 +909,38 @@ export function buildTemplateSelectorInput({
     ) ||
     deriveDealStrategyFromUseCase(resolved_use_case);
 
+  // Property communication class claim (spine §7). An explicit class wins;
+  // otherwise it is derived from the resolved scope ("Residential" claims
+  // single_family, "Any Residential" claims unknown, unit scopes claim their
+  // class). null means NO class claim — the hard wording filter only applies
+  // when a claim exists.
+  const resolved_property_communication_class =
+    clean(
+      template_selector?.property_communication_class || property_communication_class
+    ) || communicationClassFromPropertyTypeScope(resolved_property_type_scope);
+
   return {
     active: "Yes",
     use_case: resolved_use_case,
     language: resolved_language,
     property_type_scope: resolved_property_type_scope,
+    property_communication_class: resolved_property_communication_class || null,
     deal_strategy: resolved_deal_strategy,
     touch_type: resolved_touch_type,
   };
+}
+
+/**
+ * HARD wording guard (spine §7): rejection reasons for a template that uses
+ * unit placeholders or unit wording forbidden for the selector's property
+ * communication class. Empty when no class claim exists or the template is
+ * class-safe. This is a filter-level rejection, not a score.
+ */
+export function templateCommunicationClassRejections(template = null, selector_input = null) {
+  const communication_class = clean(selector_input?.property_communication_class);
+  if (!communication_class) return [];
+  const violations = templateWordingViolationsForClass(template || {}, communication_class);
+  return violations.length ? ["unit_wording_forbidden_for_communication_class"] : [];
 }
 
 export function summarizeTemplateSelectorMetadata(template = null) {
