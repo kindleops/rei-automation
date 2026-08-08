@@ -22,7 +22,23 @@ export function ensureMutationAuth(request) {
     process.env.API_MUTATION_SECRET ||
     '';
 
-  if (!secret) return { ok: true };
+  // No configured secret must DENY, not allow: mutation surfaces behind this
+  // gate (manual inbox send, workflow enroll/process) would otherwise be
+  // open to the world in any environment missing the env var.
+  if (!secret) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: 'mutation_auth_not_configured',
+          message:
+            'No mutation auth secret is configured; mutation surfaces fail closed.',
+        },
+        { status: 503 }
+      ),
+    };
+  }
 
   const headers = request?.headers;
   const authHeader = headers?.get?.('authorization') || '';

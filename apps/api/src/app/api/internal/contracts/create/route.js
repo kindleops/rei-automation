@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
+import { requireSharedSecretAuth } from "@/lib/security/shared-secret.js";
 import { maybeCreateContractFromAcceptedOffer } from "@/lib/domain/contracts/maybe-create-contract-from-accepted-offer.js";
 
 export const runtime = "nodejs";
@@ -32,6 +33,12 @@ function statusForResult(result) {
 }
 
 export async function GET(request) {
+  const auth = requireSharedSecretAuth(request, logger, {
+    env_name: "INTERNAL_API_SECRET",
+    header_names: ["x-internal-api-secret"],
+  });
+  if (!auth.authorized) return auth.response;
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -79,6 +86,12 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const auth = requireSharedSecretAuth(request, logger, {
+    env_name: "INTERNAL_API_SECRET",
+    header_names: ["x-internal-api-secret"],
+  });
+  if (!auth.authorized) return auth.response;
+
   try {
     const body = await request.json().catch(() => ({}));
 

@@ -22,7 +22,11 @@ function workflowMetadata({
   nodeId,
   extra = {},
 } = {}) {
+  // Containment keys are set AFTER the caller-supplied spread on purpose:
+  // enrollment payload metadata must never be able to override no_send /
+  // sms_eligible and flip a workflow row live.
   return {
+    ...extra,
     no_send: true,
     proof_no_send: true,
     confirm_live: false,
@@ -31,7 +35,6 @@ function workflowMetadata({
     workflow_definition_id: clean(workflowDefinitionId) || null,
     enrollment_id: clean(enrollmentId) || null,
     node_id: clean(nodeId) || null,
-    ...extra,
   };
 }
 
@@ -62,6 +65,13 @@ function resolveDedupeKey(input = {}) {
   return canonicalKey || workflowKey;
 }
 
+function workflowLiveEnqueueEnabled(deps = {}) {
+  if (typeof deps.workflow_v2_live_enqueue_enabled === 'boolean') {
+    return deps.workflow_v2_live_enqueue_enabled;
+  }
+  return process.env.WORKFLOW_V2_LIVE_ENQUEUE_ENABLED === 'true';
+}
+
 async function enqueueWorkflowMessage(input = {}, deps = {}) {
   const client = db(deps);
   const now = new Date().toISOString();
@@ -77,11 +87,19 @@ async function enqueueWorkflowMessage(input = {}, deps = {}) {
     clean(input.queue_key ?? input.queueKey ?? '') ||
     `wfv2:${channel}:${enrollmentId || 'no_enrollment'}:${nodeId || 'no_node'}:${Date.now()}`;
 
+  // Default-off live-enqueue gate (WORKFLOW_V2_LIVE_ENQUEUE_ENABLED): while
+  // disabled, every workflow row is written as 'held' — a status the
+  // queue_atomic_claim_send_row RPC can never claim (it selects only
+  // queued/scheduled/pending/approved/ready) — so workflow-v2 cannot place a
+  // dispatchable row regardless of caller-supplied queue_status.
+  const live_enqueue_enabled = workflowLiveEnqueueEnabled(deps);
+  const requestedQueueStatus = clean(input.queue_status ?? 'queued');
+
   const payload = {
     queue_key: queueKey,
     queue_id: queueKey,
     dedupe_key: dedupeKey,
-    queue_status: clean(input.queue_status ?? 'queued'),
+    queue_status: live_enqueue_enabled ? requestedQueueStatus : 'held',
     scheduled_for: input.scheduled_for ?? now,
     scheduled_for_utc: input.scheduled_for_utc ?? input.scheduled_for ?? now,
     scheduled_for_local: input.scheduled_for_local ?? input.scheduled_for ?? now,
@@ -142,6 +160,10 @@ async function enqueueWorkflowMessage(input = {}, deps = {}) {
     duplicate: false,
     queue_row_id: result.queue_row_id ?? result.item_id ?? null,
     live_send_blocked: true,
+    queue_status: live_enqueue_enabled ? requestedQueueStatus : 'held',
+    ...(live_enqueue_enabled
+      ? {}
+      : { containment: 'workflow_v2_live_enqueue_disabled' }),
   };
 }
 
