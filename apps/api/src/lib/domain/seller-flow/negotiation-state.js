@@ -259,6 +259,9 @@ export function applyNegotiationTurn(previous, {
     seller_priorities: [...state.seller_priorities],
     contract_facts: { ...state.contract_facts },
     duplicate_acceptance_suppressed: false,
+    // Per-turn verdicts, never inherited.
+    asking_price_needs_clarification: false,
+    asking_price_clarification_reason: null,
   };
 
   // ── 1. ADE authority (only source of monetary authority) ────────────────
@@ -288,10 +291,41 @@ export function applyNegotiationTurn(previous, {
     };
   }
 
+  // ── 1b. Unit count (resolved BEFORE price ingestion) ────────────────────
+  // The unit count sticks once learned (caller input wins over a fact over the
+  // persisted value). It is resolved here, not after §2, because a per-unit ask
+  // cannot be converted into a property ask without it.
+  const effectiveUnits =
+    num(units_count) ?? num(facts?.units_count) ?? num(facts?.unit_count) ?? num(next.units_count);
+  if (effectiveUnits !== null && effectiveUnits >= 1) {
+    next.units_count = Math.round(effectiveUnits);
+  }
+
   // ── 2. Seller price movement (append-only history) ──────────────────────
   const signal = price_signal?.asking_price || null;
-  if (signal?.value > 0 && !next.terms_accepted) {
-    const value = num(signal.value);
+
+  // A per-unit quote is NOT the property ask. Ingested verbatim it was assigned
+  // straight to current_asking_price and then divided by units_count AGAIN at
+  // §3b: "120k per door" on 8 units landed as a $120,000 property ask plus a
+  // $15,000 per-door ask, and a prior $950,000 ask read as an $830,000
+  // concession the seller never made — fabricated authority input.
+  const signalIsPerUnit =
+    signal?.price_type === "per_unit" || signal?.qualifiers?.per_unit === true;
+  const perUnitConvertible =
+    signalIsPerUnit && next.units_count !== null && next.units_count >= 2;
+  // Per-unit with unknown (or single) unit count is unresolvable: there is no
+  // multiplier to apply and no "assume thousands"-style rule exists here.
+  // Clarify instead — no ask, no concession, no authority math.
+  const perUnitUnresolvable = signalIsPerUnit && !perUnitConvertible;
+  if (perUnitUnresolvable && signal?.value > 0) {
+    next.asking_price_needs_clarification = true;
+    next.asking_price_clarification_reason = "per_unit_price_units_unknown";
+  }
+
+  if (signal?.value > 0 && !next.terms_accepted && !perUnitUnresolvable) {
+    const quotedValue = num(signal.value);
+    // Absolute asks are unchanged; only a convertible per-unit quote is scaled.
+    const value = perUnitConvertible ? round2(quotedValue * next.units_count) : quotedValue;
     const previousAsk = num(next.current_asking_price);
     const isFirst = next.initial_asking_price == null;
 
@@ -308,6 +342,11 @@ export function applyNegotiationTurn(previous, {
         source_message_id: signal.source_message_id || source_message_id || null,
         kind: isFirst ? "initial" : price_signal?.is_counter ? "counter" : "revision",
         at: now,
+        // What the seller literally said, kept alongside the derived property
+        // ask so the conversion is auditable rather than silent.
+        ...(perUnitConvertible
+          ? { quoted_per_unit_value: quotedValue, units_multiplier: next.units_count }
+          : {}),
       });
 
       if (!isFirst && price_signal?.is_counter) {
@@ -368,14 +407,9 @@ export function applyNegotiationTurn(previous, {
   if (seller_sentiment || intent) next.seller_sentiment = clean(seller_sentiment || intent) || next.seller_sentiment;
 
   // ── 3b. Per-unit seller ask (spine §6: recorded absolute AND per-unit) ──
-  // The unit count sticks once learned (caller input wins over a fact over
-  // the persisted value); the per-unit ask tracks the CURRENT ask whenever
-  // the property has 2+ units. Never fabricated: unknown units ⇒ null.
-  const effectiveUnits =
-    num(units_count) ?? num(facts?.units_count) ?? num(facts?.unit_count) ?? num(next.units_count);
-  if (effectiveUnits !== null && effectiveUnits >= 1) {
-    next.units_count = Math.round(effectiveUnits);
-  }
+  // The unit count was resolved at §1b (price ingestion needs it). The per-unit
+  // ask tracks the CURRENT property ask whenever the property has 2+ units.
+  // Never fabricated: unknown units ⇒ null.
   const perUnitAsk = num(next.current_asking_price);
   next.asking_price_per_unit =
     next.units_count !== null && next.units_count >= 2 && perUnitAsk !== null
@@ -512,6 +546,9 @@ export function applyNegotiationTurn(previous, {
   if (strategy_decision?.review_reason) next.human_review_reason = strategy_decision.review_reason;
   else if (transition?.review_reason) next.human_review_reason = transition.review_reason;
   else if (price_signal?.needs_clarification) next.human_review_reason = price_signal.clarification_reason;
+  else if (next.asking_price_needs_clarification) {
+    next.human_review_reason = next.asking_price_clarification_reason;
+  }
 
   next.updated_from_message_id = source_message_id || next.updated_from_message_id;
   next.updated_at = now;
