@@ -23,6 +23,7 @@ import {
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import { recordAcceptanceTermsSnapshot } from "@/lib/domain/agreements/record-terms-snapshot.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const TABLE = "acquisition_opportunities";
@@ -597,6 +598,17 @@ export async function persistSellerTransitionArtifacts({
         .eq("id", opportunity.id);
       if (metadataError) throw metadataError;
       summary.negotiation_state_updated = true;
+
+      // Durable agreement record (spine G9): first turn where terms become
+      // accepted writes the terms snapshot. The hook is idempotent
+      // (terms_hash dedupe) and never throws; table-missing degrades to a
+      // logged no-op, so deal persistence is never blocked by it.
+      if (negotiationState?.terms_accepted && !previousState?.terms_accepted) {
+        summary.terms_snapshot = await recordAcceptanceTermsSnapshot(
+          negotiationState,
+          opportunity
+        );
+      }
     } catch (metadata_error) {
       warn("[SELLER_TRANSITION_METADATA_FAILED]", {
         opportunity_id: opportunity.id,
