@@ -1743,9 +1743,11 @@ export async function executeInboundAutomationDecision({
   naturalReplyModelCall = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
+  // Fail closed: a caller that omits the mode gets `disabled`, never
+  // `live_limited` — enabling queue insert is not authorization to send.
   const effective_auto_reply_mode = normalizeAutoReplyMode(
     autoReplyMode,
-    dryRun ? "dry_run" : enableQueueInsert ? "live_limited" : "disabled"
+    dryRun ? "dry_run" : "disabled"
   );
   const auto_reply_scope_config =
     effective_auto_reply_mode === "live_limited"
