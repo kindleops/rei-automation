@@ -185,3 +185,80 @@ test("scheduled queue row supplies the due time when thread state has none", asy
   assert.equal(snapshot.next_action.due_at, "2026-08-09T15:00:00.000Z");
   assert.equal(snapshot.next_action.scheduled_use_case, "nurture_unclear");
 });
+
+// ── Missing thread state must never read ACTIVE ─────────────────────────────
+// Suppression, contactability and disposition — the three things that BLOCK —
+// all live on inbox_thread_state. With no row, the resolver fell straight
+// through to the mode gates and reported ACTIVE, telling an operator that
+// automation was running on a thread it could see nothing about.
+
+test("a thread-state read failure is UNKNOWN, never ACTIVE", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    failThreadState: true,
+    opportunity: NEGOTIATING_OPPORTUNITY,
+    autoReplyMode: "live_limited",
+    queueMode: "normal",
+  }));
+
+  assert.equal(snapshot.automation.state, AUTOMATION_STATES.UNKNOWN);
+  assert.notEqual(snapshot.automation.state, AUTOMATION_STATES.ACTIVE);
+  assert.ok(
+    snapshot.automation.reasons.some((r) => r.startsWith("thread_state_read_failed")),
+    "the cause is in automation.reasons, not only in reason_codes",
+  );
+});
+
+test("a thread with no state row at all is UNKNOWN with the not-found reason", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    threadState: null,
+    opportunity: NEGOTIATING_OPPORTUNITY,
+    autoReplyMode: "live_limited",
+    queueMode: "normal",
+  }));
+
+  assert.equal(snapshot.automation.state, AUTOMATION_STATES.UNKNOWN);
+  assert.ok(snapshot.automation.reasons.includes("thread_state_not_found"));
+});
+
+test("the operator summary reports UNKNOWN rather than implying automation runs", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    threadState: null,
+    opportunity: NEGOTIATING_OPPORTUNITY,
+  }));
+  assert.match(formatThreadAutomationSummary(snapshot), /Automation: unknown/i);
+});
+
+// ── maximum_authorized mirrors the real ceiling ─────────────────────────────
+
+test("the ADE ceiling fallback prefers MID, matching what execution allows", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    threadState: ACTIVE_THREAD_STATE,
+    opportunity: {
+      ...NEGOTIATING_OPPORTUNITY,
+      metadata: {
+        ade_snapshot: { investor_ceiling_mid: 1_180_000, investor_ceiling_high: 1_260_000 },
+      },
+    },
+  }));
+
+  assert.equal(snapshot.maximum_authorized, 1_180_000, "mid, not high");
+});
+
+test("HIGH is still used when MID is absent", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    threadState: ACTIVE_THREAD_STATE,
+    opportunity: {
+      ...NEGOTIATING_OPPORTUNITY,
+      metadata: { ade_snapshot: { investor_ceiling_high: 1_260_000 } },
+    },
+  }));
+  assert.equal(snapshot.maximum_authorized, 1_260_000);
+});
+
+test("a persisted negotiation ceiling still outranks any ADE fallback", async () => {
+  const snapshot = await resolveThreadAutomationSnapshot(THREAD, makeDeps({
+    threadState: ACTIVE_THREAD_STATE,
+    opportunity: NEGOTIATING_OPPORTUNITY,
+  }));
+  assert.equal(snapshot.maximum_authorized, 1_240_000);
+});

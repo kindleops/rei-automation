@@ -124,8 +124,21 @@ async function loadMode(key, normalize, fallbackReason, deps, reasons) {
  * review beats mode gates, dispatch pause is reported even when reply
  * scheduling would be allowed (rows would accumulate without sending).
  */
-function deriveAutomationState({ threadState, threadKey, autoReplyMode, queueMode }) {
+function deriveAutomationState({ threadState, threadKey, autoReplyMode, queueMode, threadStateReasons = [] }) {
   const reasons = [];
+
+  // No thread state means we cannot see suppression, contactability, or
+  // disposition — the three things that BLOCK. Reporting ACTIVE there would
+  // tell an operator automation is running on a thread we know nothing about.
+  // Fail to UNKNOWN and carry the read failure into the automation block, not
+  // just the top-level reason_codes an operator may never open.
+  if (!threadState) {
+    const cause = threadStateReasons.find(
+      (r) => r === "thread_state_not_found" || String(r).startsWith("thread_state_read_failed"),
+    );
+    reasons.push(cause || "thread_state_unavailable");
+    return { state: AUTOMATION_STATES.UNKNOWN, reasons };
+  }
 
   const suppressed = threadState?.is_suppressed === true;
   const contactability = normalizeContactability(
@@ -236,6 +249,7 @@ export async function resolveThreadAutomationSnapshot(
     threadKey: thread_key,
     autoReplyMode,
     queueMode,
+    threadStateReasons: reasons,
   });
 
   const nextActionSource = clean(threadState?.next_action) || clean(opportunity?.next_action) || null;
@@ -259,7 +273,14 @@ export async function resolveThreadAutomationSnapshot(
     seller_ask_per_unit: num(negotiation?.asking_price_per_unit),
     our_last_offer: num(negotiation?.latest_offer ?? opportunity?.current_offer),
     recommended_offer: num(negotiation?.recommended_offer ?? opportunity?.recommended_offer),
-    maximum_authorized: num(negotiation?.authorized_offer_ceiling ?? ade?.investor_ceiling_high),
+    // Mirror the real authority: applyNegotiationTurn ingests the ADE ceiling
+    // as investor_ceiling_mid ?? investor_ceiling_high. Falling back to HIGH
+    // alone reported a maximum above the one execution would actually allow.
+    maximum_authorized: num(
+      negotiation?.authorized_offer_ceiling ??
+        ade?.investor_ceiling_mid ??
+        ade?.investor_ceiling_high,
+    ),
     seller_counter: num(opportunity?.seller_counter),
     terms_accepted: negotiation?.terms_accepted === true,
     accepted_price: num(negotiation?.accepted_price),
