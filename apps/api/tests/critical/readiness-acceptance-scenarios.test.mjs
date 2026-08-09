@@ -658,8 +658,11 @@ test("A9: contract flow becomes eligible but auto contract send stays contained"
     assert.equal(result.ok, true);
     assert.equal(result.sent, false, "no signature dispatch while contained");
     assert.equal(result.attempted, false);
-    assert.equal(result.reason, "auto_send_disabled", "gate reason is explicit");
-    assert.equal(result.ready, true, "the contract itself was sendable — only the gate held");
+    // The hardened sender gates on ENABLE_AUTO_CONTRACT_SEND FIRST — before
+    // any Podio or readiness work — so the containment reason is the flag
+    // gate's own, and no readiness field is computed on the gated path
+    // (sendability itself is proven by the acceptance steps above).
+    assert.equal(result.reason, "auto_contract_send_disabled", "gate reason is explicit");
     assert.equal(docusignCalls.length, 0, "DocuSign egress never invoked");
   } finally {
     __resetMaybeSendContractForSigningTestDeps();
