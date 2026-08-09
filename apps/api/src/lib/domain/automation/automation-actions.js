@@ -1,6 +1,10 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { scheduleFollowUp } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import {
+  resolveEffectiveFollowUpMode,
+  followUpModeAllowsScheduling,
+} from "@/lib/domain/seller-flow/delivery-triggered-followup.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import {
@@ -729,6 +733,31 @@ async function scheduleFollowUpAction({ db, event, rule, action, params, dry_run
 
   const live_check = canRunLiveSend({ event, rule, action, options });
   if (live_check !== true) return live_check;
+
+  // followup_automation_mode is the scheduling authority for every follow-up
+  // writer (spine §5); the engine's own flags are additional AND-conditions.
+  // Unreadable mode fails closed.
+  try {
+    const mode_resolution = await resolveEffectiveFollowUpMode({});
+    if (!followUpModeAllowsScheduling(mode_resolution?.mode)) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "followup_automation_mode_blocked",
+        mode: mode_resolution?.mode || "disabled",
+        intent,
+        thread_key,
+      };
+    }
+  } catch {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "followup_automation_mode_unreadable_fail_closed",
+      intent,
+      thread_key,
+    };
+  }
 
   const result = await scheduleFollowUp(
     intent,

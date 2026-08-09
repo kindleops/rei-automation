@@ -1,4 +1,9 @@
 // ─── agreements/adapters.js ──────────────────────────────────────────────
+// ⚠️ BOUNDARY REGISTRY / SCAFFOLDING — NO PRODUCTION CALL-SITE YET. The
+// providers this module names are all live via their own call paths; this
+// registry itself is documentation-as-code until consumers import it. Do not
+// cite it as an enforcement layer.
+//
 // Agreement-chain adapter boundaries (spine gap G10).
 //
 // One place that NAMES each provider boundary in the post-agreement chain and

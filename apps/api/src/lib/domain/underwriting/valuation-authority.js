@@ -97,6 +97,20 @@ export function normalizeOfferConfidence(value) {
   return round2(Math.min(1, scaled));
 }
 
+/**
+ * ADE-native confidence normalizer for values read DIRECTLY off an
+ * ade_snapshot, which is always the engine's native 0–100 scale. Always
+ * divides by 100 — so a native value of 1 means 1% (0.01), never full
+ * confidence. Use normalizeOfferConfidence only for mixed-provenance values
+ * (persisted state that may already be 0–1).
+ */
+export function normalizeAdeNativeConfidence(value) {
+  const n = num(value);
+  if (n === null) return null;
+  if (n <= 0) return 0;
+  return round2(Math.min(1, n / 100));
+}
+
 /** Best-available unit count across property row, seller facts and ADE subject. */
 export function resolveUnitsCount({ property = null, facts = null, ade_snapshot = null } = {}) {
   const candidates = [
@@ -211,7 +225,7 @@ export function resolveValuationAuthority({
   const maximum_acquisition_price =
     num(ade_snapshot.investor_ceiling_mid) ?? num(ade_snapshot.investor_ceiling_high);
   const initial_offer = num(ade_snapshot.minimum_acceptable_offer) ?? target_acquisition_price;
-  const offer_confidence = normalizeOfferConfidence(ade_snapshot.valuation_confidence);
+  const offer_confidence = normalizeAdeNativeConfidence(ade_snapshot.valuation_confidence);
   const supporting_comp_count = num(ade_snapshot.comp_count);
   const supporting_comps = Array.isArray(ade_snapshot.evidence?.selected_comps)
     ? ade_snapshot.evidence.selected_comps

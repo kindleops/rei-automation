@@ -57,7 +57,7 @@ export const FOLLOW_UP_AUTOMATION_MODES = Object.freeze([
 ]);
 
 const FOLLOW_UP_MODE_SET = new Set(FOLLOW_UP_AUTOMATION_MODES);
-const FOLLOW_UP_SCHEDULING_MODES = new Set([
+export const FOLLOW_UP_SCHEDULING_MODES = new Set([
   "internal_only",
   "canary_market",
   "canary_sender",
@@ -220,6 +220,11 @@ async function loadLeadStateGuards(supabase, thread_key) {
  * (recover-seller-execution-gaps #8) consults the SAME authority instead of
  * growing a parallel mode reader.
  */
+/** True only for modes that authorize creating a scheduled follow-up row. */
+export function followUpModeAllowsScheduling(mode) {
+  return FOLLOW_UP_SCHEDULING_MODES.has(normalizeFollowUpAutomationMode(mode, "disabled"));
+}
+
 export async function resolveEffectiveFollowUpMode({
   followUpMode = null,
   legacyLiveEnabled = false,

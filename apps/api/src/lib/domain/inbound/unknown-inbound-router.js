@@ -4,6 +4,7 @@ import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { insertSupabaseSendQueueRow } from "@/lib/supabase/sms-engine.js";
 import { notifyDiscordOps } from "@/lib/discord/notify-discord-ops.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
+import { normalizeAutoReplyMode } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const UNKNOWN_BUCKETS = Object.freeze({
@@ -301,7 +302,11 @@ export async function handleUnknownInboundRouter({
   inbound_to = null,
   message_body = "",
   dry_run = false,
-  auto_reply_enabled = true,
+  // Deny by default: this module carries its own reply copy and its own
+  // enqueue — it must never arm itself. The caller must BOTH enable it AND
+  // supply an auto_reply_mode that permits queueing.
+  auto_reply_enabled = false,
+  auto_reply_mode = null,
   inbound_user_initiated = true,
 } = {}) {
   const db = runtimeDeps.supabase;
@@ -333,9 +338,13 @@ export async function handleUnknownInboundRouter({
   const last_auto_reply_at = unknown_contact_before?.auto_reply_sent_at || null;
   const within_24h = Boolean(last_auto_reply_at) && (Date.now() - new Date(last_auto_reply_at).getTime()) < (24 * 60 * 60 * 1000);
 
+  const normalized_auto_reply_mode = normalizeAutoReplyMode(auto_reply_mode, "disabled");
+  const mode_allows_queue = !["disabled", "dry_run"].includes(normalized_auto_reply_mode);
+
   const should_auto_reply = Boolean(
     !dry_run &&
     auto_reply_enabled &&
+    mode_allows_queue &&
     inbound_user_initiated &&
     !blocked_auto_reply &&
     !within_24h &&

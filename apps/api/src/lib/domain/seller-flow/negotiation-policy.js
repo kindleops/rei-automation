@@ -487,6 +487,10 @@ export function evaluateUnderwritingSufficiency({
 
   // Same defensive boundary as classifyNegotiationZone: ADE-native 0–100
   // confidence is normalized to the 0–1 policy scale before comparison.
+  // Mixed provenance: persisted snapshots may carry either 0–1 or ADE-native
+  // 0–100 confidence, so this site keeps the heuristic normalizer. The strict
+  // ADE-native normalizer applies only at the valuation-authority resolver,
+  // whose input contract is raw engine output.
   const valuationConfidence = normalizeOfferConfidence(ade_snapshot?.valuation_confidence);
   const compCount = num(ade_snapshot?.comp_count) ?? 0;
   const valuationReliable =

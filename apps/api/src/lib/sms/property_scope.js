@@ -32,7 +32,10 @@ function lc(val) {
 function parseUnitCount(context = {}) {
   // Canonical units signal — `units_count` is the graph/target snapshot column
   // name; `unit_count` is the legacy context key. Both are accepted.
-  const explicit = normalizeUnitsCount(context.units_count ?? context.unit_count);
+  // Normalize each key independently: a meaningless 0 in the canonical
+  // column must not shadow a valid legacy unit_count (?? treats 0 as present).
+  const explicit =
+    normalizeUnitsCount(context.units_count) ?? normalizeUnitsCount(context.unit_count);
   if (explicit !== null) return explicit;
   return parseUnitsCountFromLabel(context.property_type);
 }

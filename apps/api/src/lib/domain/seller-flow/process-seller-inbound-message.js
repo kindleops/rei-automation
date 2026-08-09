@@ -13,6 +13,10 @@ import {
   scheduleFollowUp,
   cancelPendingFollowUpsForThread,
 } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import {
+  resolveEffectiveFollowUpMode,
+  followUpModeAllowsScheduling,
+} from "@/lib/domain/seller-flow/delivery-triggered-followup.js";
 import { normalizeClassificationContract } from "@/lib/domain/seller-flow/normalize-classification-contract.js";
 import {
   buildSellerFlowDecision,
@@ -1441,7 +1445,36 @@ export async function processSellerInboundMessage({
             canonical_decision?.next_action === "do_not_reply"))
     );
 
+    // followup_automation_mode is the scheduling authority for EVERY
+    // follow-up writer (spine §5). The legacy followup_enabled flag above is
+    // an additional AND-condition, never sufficient by itself; an unreadable
+    // mode fails closed to disabled.
+    let followup_mode_allows = false;
     if (should_schedule_followup && execution_allowed && !writes_suppressed) {
+      try {
+        const mode_resolution = await resolveEffectiveFollowUpMode({
+          getSystemValueImpl: runtimeDeps.getSystemValue || getSystemValue || undefined,
+        });
+        followup_mode_allows = followUpModeAllowsScheduling(mode_resolution?.mode);
+        if (!followup_mode_allows) {
+          follow_up_result = {
+            ok: true,
+            skipped: true,
+            reason: "followup_automation_mode_blocked",
+            mode: mode_resolution?.mode || "disabled",
+          };
+        }
+      } catch {
+        followup_mode_allows = false;
+        follow_up_result = {
+          ok: true,
+          skipped: true,
+          reason: "followup_automation_mode_unreadable_fail_closed",
+        };
+      }
+    }
+
+    if (should_schedule_followup && execution_allowed && !writes_suppressed && followup_mode_allows) {
       try {
         follow_up_result = await runtimeDeps.scheduleFollowUp(follow_up_intent, threadKey || inboundFrom, {
           is_suppressed: Boolean(canonical_decision?.should_suppress_contact),

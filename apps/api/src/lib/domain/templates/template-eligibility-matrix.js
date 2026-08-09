@@ -1,5 +1,15 @@
 // ─── template-eligibility-matrix.js ──────────────────────────────────────────
 //
+// ⚠️ POLICY SCAFFOLDING — NO PRODUCTION CALL-SITE YET. Until this module is
+// wired as the candidate source for the feeder scorer
+// (supabase-candidate-feeder) and the inbound template query
+// (apply-inbound-automation-decision), its eligibility and
+// template_corpus_unavailable blocking semantics are NOT in force anywhere.
+// The class-safety guarantees that ARE live today are enforced directly in
+// template-selector.js (hard filters) and the render/safety gates. Planned
+// wiring is tracked in the readiness report; do not describe this matrix as
+// an active gate until then.
+//
 // G2 (spine §8): deterministic template eligibility matrix.
 //
 // For {campaign_type, property_communication_class, stage_code, use_case} this
