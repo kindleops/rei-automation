@@ -130,6 +130,10 @@ test("contract send writes a deterministic pipeline blocker when no usable templ
   });
 
   const result = await maybeSendContractForSigning({
+    // The ENABLE_AUTO_CONTRACT_SEND front gate now precedes template
+    // resolution; this test exercises the blocker mechanics BEHIND the gate,
+    // which is the authed operator path.
+    operator_override: true,
     contract: createPodioItem(6001, {
       [CONTRACT_FIELDS.contract_status]: categoryField("Draft"),
     }),

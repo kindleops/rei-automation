@@ -122,6 +122,10 @@ async function runUnknownRouter(message_body, options = {}) {
     dry_run: Boolean(options.dry_run),
     auto_reply_enabled:
       options.auto_reply_enabled === undefined ? true : Boolean(options.auto_reply_enabled),
+    // The router is deny-by-default now: arming requires BOTH the enable flag
+    // and a permitted mode. Tests that exercise the armed path opt in here.
+    auto_reply_mode:
+      options.auto_reply_mode === undefined ? "live_limited" : options.auto_reply_mode,
     inbound_user_initiated:
       options.inbound_user_initiated === undefined ? true : Boolean(options.inbound_user_initiated),
   });
