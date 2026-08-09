@@ -170,6 +170,10 @@ export async function recoverUnprocessedInboundMessages({
       context = await resolveContext({
         inbound_from,
         inbound_to,
+        // Recovery replays historical inbounds, so the bound matters MORE here
+        // than live: without it every outbound sent since would look like the
+        // message this seller was answering.
+        inbound_received_at: row.received_at || null,
         create_brain_if_missing: false,
       });
     } catch (context_error) {

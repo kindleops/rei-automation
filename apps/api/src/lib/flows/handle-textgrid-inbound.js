@@ -1518,6 +1518,10 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       context = await runtimeDeps.loadContextWithFallback({
         inbound_from,
         inbound_to,
+        // Bounds outbound-pair selection to messages the seller had actually
+        // received by the time they replied, so the orchestrator binds to the
+        // same outbound buildConversationContext hands the classifier.
+        inbound_received_at: extracted.received_at || payload?.http_received_at || null,
         create_brain_if_missing: podio_business_writes_enabled,
         loadContextImpl: runtimeDeps.loadContext,
       });

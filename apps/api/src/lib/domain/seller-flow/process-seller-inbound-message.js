@@ -402,7 +402,23 @@ export function buildWorkflowStudioContext({
     followup_scheduled_for: followUp?.scheduled_for ?? null,
     followups_cancelled: Number(followupCancellation?.cancelled || 0),
     human_review_required: Boolean(decision?.review_required || contract?.ambiguity_review_required),
-    suppression_applied: Boolean(decision?.block_reason || decision?.suppression_reason),
+    // A MUTATION flag, not an intent flag. It drives the SUPPRESSION_APPLIED
+    // workflow event, which must mean "contact suppression was actually
+    // written" and nothing else.
+    //
+    // This previously read `decision.block_reason || decision.suppression_reason`
+    // — the mere PRESENCE of a reason string. Every decision that was blocked
+    // for any reason at all (execution gating, scope denial, a duplicate guard)
+    // carries one, so SUPPRESSION_APPLIED was emitted on turns where
+    // suppression_scope was "none", should_suppress_contact was false, and no
+    // suppression was written. Studio then counted suppressions that never
+    // happened.
+    //
+    // execution.suppression_applied is the real signal: it is
+    // Boolean(suppression_result?.ok) from the one branch of
+    // executeInboundAutomationDecision that actually applies contact
+    // suppression, and literal false on every other branch.
+    suppression_applied: Boolean(execution?.suppression_applied),
   };
 }
 
@@ -812,6 +828,26 @@ export async function processSellerInboundMessage({
     legacy_plan,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
+    // Mode and scope are separate authorities and are reported separately.
+    //
+    // queue_permission.allowed is a MODE verdict. For internal_only it means
+    // "this is an internal test phone"; for dry_run/disabled it is simply
+    // false. None of those evaluate a live_limited scope at all — the returned
+    // object has no `scope` key. Passing `Boolean(allowed)` as the scope
+    // authority therefore invented a passing scope verdict for internal_only
+    // and reported dry_run/disabled as though the inbound had failed the
+    // live_limited cutoff.
+    auto_reply_mode_allowed: Boolean(queue_permission?.allowed),
+    // Populated ONLY from a real live_limited scope evaluation, which is what
+    // scope_enforced marks. Null for every other mode.
+    auto_reply_scope:
+      queue_permission?.scope_enforced === true
+        ? {
+            enforced: true,
+            allowed: Boolean(queue_permission.scope?.allowed),
+            reason: queue_permission.scope?.reason || null,
+          }
+        : null,
     underwriting,
     deal_state,
     supabaseClient: supabase,
