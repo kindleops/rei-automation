@@ -10,7 +10,9 @@ import {
   runDevSendTest,
 } from "@/app/api/dev/send-test/route.js";
 import { GET as getDevEnvCheck } from "@/app/api/dev/env-check/route.js";
-import { GET as getDevForceSend, handleDevForceSendRequest } from "@/app/api/dev/force-send/route.js";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   finalizeSendQueueSuccess,
   loadRunnableSendQueueRows,
@@ -873,15 +875,11 @@ test("dev SMS routes return 404 in production without x-internal-api-secret", as
       url: "http://localhost/api/dev/send-test",
       headers: new Headers(),
     });
-    const denied_force_send = await getDevForceSend({
-      headers: new Headers(),
-    });
     const denied_env_check = await getDevEnvCheck({
       headers: new Headers(),
     });
 
     assert.equal(denied_send_test.status, 404);
-    assert.equal(denied_force_send.status, 404);
     assert.equal(denied_env_check.status, 404);
   } finally {
     if (original_node_env === undefined) {
@@ -898,42 +896,13 @@ test("dev SMS routes return 404 in production without x-internal-api-secret", as
   }
 });
 
-test("dev force-send returns 404 in production before sendTextgridSMS", async () => {
-  let send_calls = 0;
-  let access_guard_calls = 0;
-  const warnings = [];
-
-  const response = await handleDevForceSendRequest(
-    {
-      headers: new Headers({
-        "x-internal-api-secret": "internal-secret",
-      }),
-    },
-    {
-      env: {
-        NODE_ENV: "development",
-        VERCEL_ENV: "production",
-      },
-      logger: {
-        warn: (event, meta) => warnings.push({ event, meta }),
-        log: () => {},
-        error: () => {},
-      },
-      requireDevRouteAccess: () => {
-        access_guard_calls += 1;
-        return null;
-      },
-      sendTextgridSMS: async () => {
-        send_calls += 1;
-        throw new Error("sendTextgridSMS must not run in production");
-      },
-    }
-  );
-
-  assert.equal(response.status, 404);
-  assert.equal(access_guard_calls, 0);
-  assert.equal(send_calls, 0);
-  assert.equal(warnings[0]?.event, "dev_force_send_blocked_in_production");
+test("dev force-send route stays deleted (bypass-audit retirement pin)", () => {
+  // The hardcoded-live-send dev route was retired in the bypass hardening
+  // pass. This pin keeps it from quietly returning: the strongest 404 is a
+  // route that does not exist.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const route_path = join(here, "../../src/app/api/dev/force-send/route.js");
+  assert.equal(existsSync(route_path), false, "dev/force-send must not be reintroduced");
 });
 
 test("dev SMS routes allow access in production with x-internal-api-secret", async () => {
