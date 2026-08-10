@@ -5,6 +5,7 @@ import {
   evaluateProofGate,
   runArmAndS1,
   runVerifyAndS2,
+  runAbort,
   runS1S2ProofWatchdog,
   restoreContainment,
   EXPECTED_SHA,
@@ -55,8 +56,33 @@ function makeWorld(opts = {}) {
     };
     return api;
   }
-  const supabase = { from: table };
-  const setSystemValues = async (patch) => { for (const [k, v] of Object.entries(patch)) sys.set(k, v); return { ok: true }; };
+  // Optional injection: make send_queue count queries error or return null count.
+  if (opts.countError || opts.nullCount) {
+    const orig = table;
+    // wrap `from` so send_queue head-count resolves to the injected shape
+    var wrappedFrom = (name) => {
+      const api = orig(name);
+      if (name === "send_queue") {
+        const origThen = api.then;
+        api.then = (resolve) => {
+          if (api._head) {
+            return resolve(opts.countError ? { data: null, error: { message: "count boom" }, count: null } : { data: [], error: null, count: null });
+          }
+          return origThen(resolve);
+        };
+      }
+      return api;
+    };
+  }
+  const supabase = { from: (name) => (typeof wrappedFrom === "function" ? wrappedFrom(name) : table(name)) };
+  const writeFails = opts.writeFails || (() => false); // (key) => boolean
+  const setSystemValues = async (patch) => {
+    for (const [k, v] of Object.entries(patch)) {
+      if (writeFails(k)) return { ok: false, error: { message: `write rejected: ${k}` } };
+      sys.set(k, v);
+    }
+    return { ok: true, updated: Object.keys(patch).length };
+  };
   function lastS1Id() { return queue.filter((r) => r.use_case_template === "ownership_check").slice(-1)[0]?.id ?? null; }
 
   const deps = {
@@ -70,10 +96,11 @@ function makeWorld(opts = {}) {
       return { ok: true, queue_row_id: id };
     },
     fetchQueueRow: async (id) => queue.find((r) => r.id === id) || null,
-    dispatchQueueRow: async (row) => {
+    dispatchQueueRow: async (row, ctx = {}) => {
+      events.dispatched.push({ id: row.id, ctx });
       if (opts.dispatchFails) return { ok: false, reason: "scoped_dispatch_rejected" };
       const r = queue.find((x) => x.id === row.id);
-      if (r) { r.provider_message_id = `pv-${r.id}`; r.queue_status = "sent"; r.latest_delivery_status = "sent"; events.dispatched.push(r.id); }
+      if (r) { r.provider_message_id = `pv-${r.id}`; r.queue_status = "sent"; r.latest_delivery_status = "sent"; }
       return { ok: true, provider_message_id: r?.provider_message_id };
     },
     classify: async (text) => (opts.classify ? opts.classify(text) : { primary_intent: "ownership_confirmed", confidence: 0.9 }),
@@ -242,5 +269,105 @@ test("verify fails closed when context binds to a non-S1 outbound (restores)", a
   w.advance(1000); w.addInbound(); w.seedS2();
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+// ── FINDING 1: S1 and S2 dispatch through the scoped-canary execution context ──
+test("S1 and S2 both dispatch with scoped_canary:true (normal brakes untouched)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  // S1 dispatch carried the scoped-canary context.
+  assert.equal(w.events.dispatched.length, 1);
+  assert.equal(w.events.dispatched[0].ctx.scoped_canary, true);
+  w.advance(1000); w.addInbound(); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  // S2 dispatch also carried it.
+  assert.equal(w.events.dispatched.length, 2);
+  assert.equal(w.events.dispatched[1].ctx.scoped_canary, true);
+});
+
+// ── FINDING 2: pre-arm read failure does not touch an unrelated mode ───────────
+test("pre-arm authorization read failure leaves an unrelated execution mode alone", async () => {
+  const w = makeWorld({ sys: { queue_execution_mode: "normal" }, mintNonce: () => "n1" });
+  // Break the authorization read that runs before anything is armed.
+  const realFrom = w.deps.supabase.from;
+  w.deps.supabase.from = (name) => {
+    if (name === "system_control") {
+      const api = realFrom(name);
+      const eq = api.eq;
+      api.eq = (c, v) => { if (v === "s1s2_proof_authorization") { api.maybeSingle = async () => { throw new Error("read boom"); }; } return eq(c, v); };
+      return api;
+    }
+    return realFrom(name);
+  };
+  const r = await runArmAndS1(w.deps);
+  assert.deepEqual([r.ok, r.reason], [false, "authorization_read_failed"]);
+  assert.equal(w.sys.get("queue_execution_mode"), "normal"); // NOT clobbered to paused
+  assert.equal(w.events.sms.length, 0);
+});
+test("a failure AFTER arming still restores paused (ownership-aware)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", dispatchFails: true });
+  const r = await runArmAndS1(w.deps);
+  assert.equal(r.ok, false);
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+// ── FINDING 3: containment writes verify success; watchdog raises failure ──────
+test("restoreContainment reports failure when the mode write is rejected", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", writeFails: (k) => k === "queue_execution_mode" });
+  // Arm succeeds for session/auth but the mode write is rejected → arm fails and
+  // the restore also cannot flip the mode: surface it, never silently "ok".
+  const arm = await runArmAndS1(w.deps);
+  assert.equal(arm.ok, false);
+  // Directly assert the restore contract on a scoped_canary_only state.
+  const w2 = makeWorld({ mintNonce: () => "n2" });
+  await armOk(w2);
+  w2.deps.setSystemValues = async () => ({ ok: false, error: { message: "rejected" } });
+  const res = await restoreContainment(w2.deps, "test");
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.includes("mode_restore_write_rejected"));
+});
+test("watchdog returns ok:false when restore write is rejected (error signal)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  await armOk(w);
+  w.advance(21 * 60 * 1000);
+  w.deps.setSystemValues = async () => ({ ok: false, error: { message: "rejected" } });
+  const wd = await runS1S2ProofWatchdog(w.deps);
+  assert.equal(wd.acted, true);
+  assert.equal(wd.ok, false); // the run-send-queue hook logs this at ERROR level
+  assert.ok((wd.errors || []).length > 0);
+});
+
+// ── FINDING 4: pre-existing-row count query fails closed ──────────────────────
+test("arm fails closed when the dispatchable-row count query errors", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", countError: true });
+  const r = await runArmAndS1(w.deps);
+  assert.deepEqual([r.ok, r.reason], [false, "precondition_failed"]);
+  assert.equal(w.events.sms.length, 0);
+});
+test("arm fails closed when the dispatchable-row count is null/unavailable", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", nullCount: true });
+  const r = await runArmAndS1(w.deps);
+  assert.deepEqual([r.ok, r.reason], [false, "precondition_failed"]);
+  assert.equal(w.events.sms.length, 0);
+});
+
+// ── FINDING 5: abort failure returns non-2xx + ok:false ───────────────────────
+test("abort returns non-2xx and ok:false when restore fails", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  await armOk(w);
+  w.deps.setSystemValues = async () => ({ ok: false, error: { message: "rejected" } });
+  const res = await runAbort(w.deps);
+  assert.equal(res.ok, false);
+  assert.notEqual(res.status, 200);
+  assert.ok(res.status >= 400);
+});
+test("abort returns 200 + ok:true on a clean restore", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  await armOk(w);
+  const res = await runAbort(w.deps);
+  assert.equal(res.ok, true);
+  assert.equal(res.status, 200);
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
 });

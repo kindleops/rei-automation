@@ -55,7 +55,7 @@ export async function POST(request) {
       const { data } = await supabase.from("send_queue").select("*").eq("id", id).maybeSingle();
       return data || null;
     },
-    dispatchQueueRow: (row) => processSendQueueItem(row, { supabase }),
+    dispatchQueueRow: (row, ctx = {}) => processSendQueueItem(row, { supabase, ...ctx }),
     classify,
     findRecentOutboundContextPair,
   };

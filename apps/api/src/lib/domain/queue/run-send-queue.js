@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { info, warn } from "@/lib/logging/logger.js";
+import { info, warn, error } from "@/lib/logging/logger.js";
 import { getSystemFlag, getSystemValue, buildDisabledResponse, setSystemValues } from "@/lib/system-control.js";
 import {
   blockedRuntimeBrakeResult,
@@ -159,6 +159,7 @@ export async function runSendQueue(
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
   const log_info = deps.info || info;
   const log_warn = deps.warn || warn;
+  const log_error = deps.error || error;
   const supabase = deps.supabaseClient || defaultSupabase;
   const process_item = deps.processSendQueueItem || defaultProcessSendQueueItem;
 
@@ -180,9 +181,15 @@ export async function runSendQueue(
         setSystemValues,
         operatorOpts: { authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR, supabase },
       });
-      if (wd?.acted) log_warn("s1s2_proof.watchdog_restored", { reason: wd.reason, errors: wd.errors || [] });
+      if (wd?.acted && wd.ok === false) {
+        // Containment restore was ATTEMPTED but a write was rejected — this is
+        // an unmistakable error-level signal: production may still be armed.
+        log_error("s1s2_proof.watchdog_restore_failed", { reason: wd.reason, errors: wd.errors || [] });
+      } else if (wd?.acted) {
+        log_warn("s1s2_proof.watchdog_restored", { reason: wd.reason });
+      }
     } catch (watchdog_error) {
-      log_warn("s1s2_proof.watchdog_error", { message: watchdog_error?.message || "unknown" });
+      log_error("s1s2_proof.watchdog_error", { message: watchdog_error?.message || "unknown" });
     }
   }
 

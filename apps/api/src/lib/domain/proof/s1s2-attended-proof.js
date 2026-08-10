@@ -87,21 +87,35 @@ function authorizationActive(auth, atMs) {
   return Boolean(auth) && !auth.closed_at && auth.expires_at && Date.parse(auth.expires_at) > atMs;
 }
 
+// Treat a write as failed if it threw, returned nullish, or returned ok:false
+// (setSystemValues returns { ok:false, error } on a DB write error).
+function writeFailed(res) { return !res || res.ok === false; }
+
 // ── Containment restore — idempotent; used by every exit + the watchdog ───────
+// Ownership-aware: the execution mode is reversed to "paused" ONLY when it is
+// currently the proof's own scoped_canary_only — a pre-arm failure (mode still
+// paused, or an unrelated operator mode) never clobbers it. Every write result
+// is checked; a failed write surfaces in `errors` and makes ok:false, so the
+// caller/watchdog can raise an unmistakable error signal.
 export async function restoreContainment(deps, cause = "restore") {
   const errors = [];
-  try { await writeSysval(deps, EXECUTION_MODE_KEY, "paused"); }
-  catch (e) { errors.push(`mode_restore_failed:${e.message}`); }
+  try {
+    const currentMode = clean(await readSysval(deps, EXECUTION_MODE_KEY));
+    if (currentMode === "scoped_canary_only") {
+      const res = await writeSysval(deps, EXECUTION_MODE_KEY, "paused");
+      if (writeFailed(res)) errors.push("mode_restore_write_rejected");
+    }
+  } catch (e) { errors.push(`mode_restore_failed:${e.message}`); }
   try {
     const raw = await readSysval(deps, SESSION_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (!s.closed_at) { s.closed_at = iso(nowMs(deps)); s.closed_cause = cause; await writeSysval(deps, SESSION_KEY, JSON.stringify(s)); }
+      if (!s.closed_at) { s.closed_at = iso(nowMs(deps)); s.closed_cause = cause; const res = await writeSysval(deps, SESSION_KEY, JSON.stringify(s)); if (writeFailed(res)) errors.push("session_close_write_rejected"); }
     }
   } catch (e) { errors.push(`session_close_failed:${e.message}`); }
   try {
     const auth = await loadAuthorization(deps);
-    if (auth && !auth.closed_at) { auth.closed_at = iso(nowMs(deps)); auth.closed_cause = cause; await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify(auth)); }
+    if (auth && !auth.closed_at) { auth.closed_at = iso(nowMs(deps)); auth.closed_cause = cause; const res = await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify(auth)); if (writeFailed(res)) errors.push("auth_close_write_rejected"); }
   } catch (e) { errors.push(`auth_close_failed:${e.message}`); }
   return { ok: errors.length === 0, cause, errors };
 }
@@ -113,20 +127,28 @@ async function assertPreconditions(deps) {
   if (sessionRaw) {
     try { const s = JSON.parse(sessionRaw); if (!s.closed_at && s.expires_at && Date.parse(s.expires_at) > nowMs(deps)) throw new Error("precondition: an internal_proof_session is already active"); } catch (e) { if (/already active/.test(e.message)) throw e; }
   }
-  const { count } = await deps.supabase.from("send_queue").select("id", { count: "exact", head: true })
+  // Fail CLOSED: an errored count, or an unavailable/null count, must block the
+  // proof — never fall through to arming on an unknown row count.
+  const { count, error: countError } = await deps.supabase.from("send_queue").select("id", { count: "exact", head: true })
     .eq("to_phone_number", PROOF.handset).in("queue_status", ACTIVE_STATUSES);
-  if ((count ?? 0) > 0) throw new Error(`precondition: ${count} pre-existing dispatchable rows on the handset`);
+  if (countError) throw new Error(`precondition: dispatchable-row count query failed (${countError.message || "error"})`);
+  if (count === null || count === undefined) throw new Error("precondition: dispatchable-row count unavailable");
+  if (count > 0) throw new Error(`precondition: ${count} pre-existing dispatchable rows on the handset`);
 }
 
 // ── PHASE 1: arm + exactly one S1 ─────────────────────────────────────────────
 export async function runArmAndS1(deps) {
-  // Refuse a second concurrent proof (single-flight).
-  const existing = await loadAuthorization(deps);
+  // Single-flight + preconditions run BEFORE anything is armed. A read/precondition
+  // failure here changed nothing, so we return cleanly and do NOT restore —
+  // forcing "paused" would clobber an operator execution state this proof did
+  // not create (restoreContainment is also ownership-aware as a second guard).
+  let existing;
+  try {
+    existing = await loadAuthorization(deps);
+  } catch (e) {
+    return { ok: false, status: 500, reason: "authorization_read_failed", detail: e.message };
+  }
   if (authorizationActive(existing, nowMs(deps))) return { ok: false, status: 409, reason: "proof_already_active" };
-
-  // Preconditions run BEFORE anything is armed. A failure here changed nothing,
-  // so we return cleanly and do NOT restore — forcing "paused" would clobber an
-  // operator execution state this proof did not create.
   try {
     await assertPreconditions(deps);
   } catch (pre) {
@@ -143,17 +165,17 @@ export async function runArmAndS1(deps) {
     purpose: "attended_s1_s2_canary", production_sha: EXPECTED_SHA,
   };
 
-  let armed = false;
+  const assertWrite = (res, label) => { if (writeFailed(res)) throw new Error(`arming write rejected: ${label}`); };
   try {
     // Order matters: write authorization + session BEFORE arming the mode, so the
-    // watchdog can always find and reverse an armed state.
-    await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
+    // watchdog can always find and reverse an armed state. Every arming write is
+    // verified — a rejected write must never leave arm reporting success.
+    assertWrite(await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
       nonce, phase: "armed", pinned_sha: EXPECTED_SHA, pinned_handset: PROOF.handset,
       created_at: iso(startedMs), expires_at: iso(startedMs + PROOF_TTL_MS),
-    }));
-    await writeSysval(deps, SESSION_KEY, JSON.stringify(session));
-    await writeSysval(deps, EXECUTION_MODE_KEY, "scoped_canary_only");
-    armed = true;
+    })), "authorization");
+    assertWrite(await writeSysval(deps, SESSION_KEY, JSON.stringify(session)), "session");
+    assertWrite(await writeSysval(deps, EXECUTION_MODE_KEY, "scoped_canary_only"), "execution_mode");
 
     const s1SentAt = iso(nowMs(deps));
     const enq = await deps.insertSendQueueRow({
@@ -166,22 +188,27 @@ export async function runArmAndS1(deps) {
     const s1RowId = enq?.queue_row_id || enq?.item_id || null;
     if (!enq?.ok || !s1RowId) throw new Error("S1 enqueue failed");
     const row = await deps.fetchQueueRow(s1RowId);
-    const disp = await deps.dispatchQueueRow(row);
+    // Dispatch through the queue engine's scoped-canary execution context: while
+    // mode is scoped_canary_only the ambient cron is blocked, and this one
+    // proof-owned row is dispatched via the scoped path. Normal (non-proof)
+    // dispatch is unaffected and keeps its full brakes.
+    const disp = await deps.dispatchQueueRow(row, { scoped_canary: true });
     if (disp?.ok === false) throw new Error(`S1 dispatch rejected: ${disp?.reason || "unknown"}`);
     const fresh = await deps.fetchQueueRow(s1RowId);
     const s1ProviderId = fresh?.provider_message_id || disp?.provider_message_id || null;
 
     // Persist S1 identity onto the authorization for the verify phase.
-    await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
+    assertWrite(await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
       nonce, phase: "s1_sent", pinned_sha: EXPECTED_SHA, pinned_handset: PROOF.handset,
       created_at: iso(startedMs), expires_at: iso(startedMs + PROOF_TTL_MS),
       s1_queue_row_id: s1RowId, s1_sent_at: s1SentAt,
-    }));
+    })), "s1_identity");
 
     return { ok: true, status: 200, nonce, s1_queue_row_id: s1RowId, s1_provider_id: s1ProviderId, s1_sent_at: s1SentAt, expires_at: session.expires_at };
   } catch (err) {
-    if (armed) await restoreContainment(deps, "arm_and_s1_failure");
-    else await restoreContainment(deps, "arm_and_s1_precheck_failure");
+    // Ownership-aware restore: reverses the mode only if we actually armed
+    // scoped_canary_only; always closes any session/authorization we wrote.
+    await restoreContainment(deps, "arm_and_s1_failure");
     return { ok: false, status: 500, reason: "arm_and_s1_failed", detail: err.message };
   }
 }
@@ -236,9 +263,9 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
     if (s2rows.length !== 1) throw new Error(`expected exactly one S2, found ${s2rows.length}`);
     const s2RowId = s2rows[0].id;
 
-    // 6) dispatch exactly that S2
+    // 6) dispatch exactly that S2 — through the same scoped-canary context as S1
     const s2row = await deps.fetchQueueRow(s2RowId);
-    const s2disp = await deps.dispatchQueueRow(s2row);
+    const s2disp = await deps.dispatchQueueRow(s2row, { scoped_canary: true });
     if (s2disp?.ok === false) throw new Error(`S2 dispatch rejected: ${s2disp?.reason || "unknown"}`);
     const s2fresh = await deps.fetchQueueRow(s2RowId);
     const s2ProviderId = s2fresh?.provider_message_id || s2disp?.provider_message_id || null;
@@ -264,7 +291,8 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
 
 export async function runAbort(deps) {
   const res = await restoreContainment(deps, "operator_abort");
-  return { ok: res.ok, status: 200, ...res };
+  // A failed restore must NOT read as success: non-2xx + ok:false.
+  return { ok: res.ok, status: res.ok ? 200 : 500, ...res };
 }
 
 // ── WATCHDOG: independent per-minute restore on expiry ────────────────────────
