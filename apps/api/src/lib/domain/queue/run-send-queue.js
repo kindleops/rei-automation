@@ -167,6 +167,25 @@ export async function runSendQueue(
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
 
+  // TEMPORARY proof watchdog: independently restore containment if an attended
+  // S1→S2 proof authorization has expired without completion. Runs every minute,
+  // before the dispatch gate, and never throws into the queue run.
+  if (!dry_run) {
+    try {
+      const { runS1S2ProofWatchdog } = await import("@/lib/domain/proof/s1s2-attended-proof.js");
+      const { setSystemValues } = await import("@/lib/system-control.js");
+      const { SYSTEM_CONTROL_AUTHORITIES } = await import("@/lib/domain/queue/operator-brake-authority.js");
+      const wd = await runS1S2ProofWatchdog({
+        supabase,
+        setSystemValues,
+        operatorOpts: { authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR, supabase },
+      });
+      if (wd?.acted) log_warn("s1s2_proof.watchdog_restored", { reason: wd.reason, errors: wd.errors || [] });
+    } catch (watchdog_error) {
+      log_warn("s1s2_proof.watchdog_error", { message: watchdog_error?.message || "unknown" });
+    }
+  }
+
   const execution_mode = await getQueueExecutionMode({ getSystemValue: get_system_value });
   const mode_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action: "runSendQueue" });
   if (!mode_gate.ok) {
