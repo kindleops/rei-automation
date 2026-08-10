@@ -31,16 +31,15 @@ function headerBag(request) {
 
 export async function POST(request) {
   const headers = headerBag(request);
-  const gate = evaluateProofGate({
-    env: process.env,
-    headers,
-    deployedSha: process.env.DEPLOY_GIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || null,
-  });
+  const runtimeSha = process.env.DEPLOY_GIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || null;
+  const gate = evaluateProofGate({ env: process.env, headers, deployedSha: runtimeSha });
   if (!gate.ok) {
     // Log only the reason category — never the provided/expected secret.
     logger.warn("proof.gate_denied", { reason: gate.reason });
     return NextResponse.json({ ok: false, error: gate.reason }, { status: gate.status });
   }
+  // The validated runtime SHA (=== S1S2_PROOF_EXPECTED_SHA). Both phases pin here.
+  const validatedSha = gate.deployed_sha;
 
   const body = await request.json().catch(() => ({}));
   const action = String(body?.action || "").toLowerCase();
@@ -48,6 +47,7 @@ export async function POST(request) {
   const supabase = getDefaultSupabaseClient();
   const deps = {
     supabase,
+    validatedSha,
     setSystemValues,
     operatorOpts: { authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR, supabase },
     insertSendQueueRow: (payload) => insertSupabaseSendQueueRow(payload, { supabase }),

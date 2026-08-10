@@ -8,7 +8,9 @@
 // Safety invariants (all structural, not delegated to the request):
 //   • recipient/sender are CODE-PINNED (INTERNAL_PROOF_PINNED) — the request can
 //     never name a recipient, so arbitrary targeting is impossible;
-//   • the deployed SHA must equal EXPECTED_SHA;
+//   • the runtime deployed SHA must equal the DEPLOYMENT-SUPPLIED
+//     S1S2_PROOF_EXPECTED_SHA (never a module constant), and both phases pin
+//     to that same validated deployment;
 //   • S1S2_PROOF_ENABLED must be truthy (deny-by-default);
 //   • a dedicated trigger secret must match (constant-time);
 //   • a single-use, 20-minute server-side nonce gates the two phases;
@@ -20,7 +22,6 @@
 import crypto from "node:crypto";
 import { INTERNAL_PROOF_PINNED } from "@/lib/domain/queue/internal-proof-session.js";
 
-export const EXPECTED_SHA = "7ff03fd41be8e1ab532282165c0ee6e417afc4e5";
 export const PROOF_AUTH_KEY = "s1s2_proof_authorization";
 export const EXECUTION_MODE_KEY = "queue_execution_mode";
 export const SESSION_KEY = "internal_proof_session";
@@ -53,7 +54,10 @@ function s1Body() {
 }
 
 // ── Deny-by-default gate (shared by every action) ─────────────────────────────
-// Returns { ok:true } or { ok:false, status, reason }. Never echoes secrets.
+// The deployed-SHA authority is a DEPLOYMENT-SUPPLIED value (env
+// S1S2_PROOF_EXPECTED_SHA), never a module constant — a commit cannot contain
+// its own post-merge SHA. On success returns the validated SHA so callers can
+// stamp/pin to the exact deployment. Never echoes secrets.
 export function evaluateProofGate({ env = {}, headers = {}, deployedSha = null } = {}) {
   if (!["1", "true", "yes", "on"].includes(clean(env.S1S2_PROOF_ENABLED).toLowerCase())) {
     return { ok: false, status: 403, reason: "proof_disabled" };
@@ -62,10 +66,13 @@ export function evaluateProofGate({ env = {}, headers = {}, deployedSha = null }
   if (!configured) return { ok: false, status: 503, reason: "proof_trigger_secret_not_configured" };
   const provided = clean(headers["x-s1s2-proof-secret"] || headers["X-S1S2-Proof-Secret"]);
   if (!secretEquals(provided, configured)) return { ok: false, status: 401, reason: "invalid_trigger_secret" };
-  if (clean(deployedSha) !== EXPECTED_SHA) {
+  const expectedSha = clean(env.S1S2_PROOF_EXPECTED_SHA);
+  if (!expectedSha) return { ok: false, status: 503, reason: "expected_sha_not_configured" };
+  const runtimeSha = clean(deployedSha);
+  if (!runtimeSha || runtimeSha !== expectedSha) {
     return { ok: false, status: 409, reason: "sha_mismatch" };
   }
-  return { ok: true };
+  return { ok: true, deployed_sha: runtimeSha };
 }
 
 async function readSysval(deps, key) {
@@ -149,6 +156,13 @@ export async function runArmAndS1(deps) {
     return { ok: false, status: 500, reason: "authorization_read_failed", detail: e.message };
   }
   if (authorizationActive(existing, nowMs(deps))) return { ok: false, status: 409, reason: "proof_already_active" };
+
+  // The gate already validated runtime === S1S2_PROOF_EXPECTED_SHA and passed
+  // the validated SHA through as deps.validatedSha. Fail closed if it is absent
+  // (never stamp a stale constant). Everything downstream pins to THIS value.
+  const validatedSha = clean(deps.validatedSha);
+  if (!validatedSha) return { ok: false, status: 500, reason: "validated_sha_missing" };
+
   try {
     await assertPreconditions(deps);
   } catch (pre) {
@@ -162,7 +176,7 @@ export async function runArmAndS1(deps) {
     recipient: PROOF.handset, sender: PROOF.sender,
     created_at: iso(startedMs), expires_at: iso(startedMs + PROOF_TTL_MS),
     allow_thread_auto_replies: true, opened_by: "s1s2_proof_route",
-    purpose: "attended_s1_s2_canary", production_sha: EXPECTED_SHA,
+    purpose: "attended_s1_s2_canary", production_sha: validatedSha,
   };
 
   const assertWrite = (res, label) => { if (writeFailed(res)) throw new Error(`arming write rejected: ${label}`); };
@@ -171,7 +185,7 @@ export async function runArmAndS1(deps) {
     // watchdog can always find and reverse an armed state. Every arming write is
     // verified — a rejected write must never leave arm reporting success.
     assertWrite(await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
-      nonce, phase: "armed", pinned_sha: EXPECTED_SHA, pinned_handset: PROOF.handset,
+      nonce, phase: "armed", pinned_sha: validatedSha, pinned_handset: PROOF.handset,
       created_at: iso(startedMs), expires_at: iso(startedMs + PROOF_TTL_MS),
     })), "authorization");
     assertWrite(await writeSysval(deps, SESSION_KEY, JSON.stringify(session)), "session");
@@ -199,7 +213,7 @@ export async function runArmAndS1(deps) {
 
     // Persist S1 identity onto the authorization for the verify phase.
     assertWrite(await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
-      nonce, phase: "s1_sent", pinned_sha: EXPECTED_SHA, pinned_handset: PROOF.handset,
+      nonce, phase: "s1_sent", pinned_sha: validatedSha, pinned_handset: PROOF.handset,
       created_at: iso(startedMs), expires_at: iso(startedMs + PROOF_TTL_MS),
       s1_queue_row_id: s1RowId, s1_sent_at: s1SentAt,
     })), "s1_identity");
@@ -228,6 +242,15 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
   const auth = await loadAuthorization(deps);
   const gate = checkNonce(auth, nonce, atMs, "s1_sent");
   if (!gate.ok) return gate;
+
+  // Pin phase 2 to the SAME validated deployment that armed phase 1. The route
+  // re-validated runtime === S1S2_PROOF_EXPECTED_SHA and passed deps.validatedSha;
+  // if the deployment changed between arm and verify, the recorded pin no longer
+  // matches and we deny (never dispatch S2 from a different build).
+  const validatedSha = clean(deps.validatedSha);
+  if (!validatedSha || validatedSha !== clean(auth.pinned_sha)) {
+    return { ok: false, status: 409, reason: "deployment_changed" };
+  }
 
   try {
     // 1) real inbound after S1

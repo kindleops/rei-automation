@@ -8,13 +8,16 @@ import {
   runAbort,
   runS1S2ProofWatchdog,
   restoreContainment,
-  EXPECTED_SHA,
   PROOF,
   secretEquals,
 } from "@/lib/domain/proof/s1s2-attended-proof.js";
 
 const SECRET = "trigger-secret-value";
-const GOOD_ENV = { S1S2_PROOF_ENABLED: "1", S1S2_PROOF_TRIGGER_SECRET: SECRET };
+// Deployment-supplied SHAs (never a module constant). SHA_A is the "current"
+// validated deployment; SHA_B simulates a different deployment.
+const SHA_A = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+const SHA_B = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+const GOOD_ENV = { S1S2_PROOF_ENABLED: "1", S1S2_PROOF_TRIGGER_SECRET: SECRET, S1S2_PROOF_EXPECTED_SHA: SHA_A };
 const GOOD_HEADERS = { "x-s1s2-proof-secret": SECRET };
 
 // ── In-memory fake supabase covering the four tables the lib reads ────────────
@@ -87,6 +90,10 @@ function makeWorld(opts = {}) {
 
   const deps = {
     supabase, setSystemValues, operatorOpts: {},
+    // The route validates runtime===S1S2_PROOF_EXPECTED_SHA and injects the
+    // validated SHA; tests default to SHA_A and can override to simulate a
+    // deployment change between phases.
+    validatedSha: opts.validatedSha ?? SHA_A,
     now: () => clock,
     mintNonce: opts.mintNonce,
     insertSendQueueRow: async (payload) => {
@@ -123,11 +130,11 @@ function makeWorld(opts = {}) {
 
 // ── GATE: enable flag / secret / SHA ─────────────────────────────────────────
 test("missing enable flag denies", () => {
-  const g = evaluateProofGate({ env: { S1S2_PROOF_TRIGGER_SECRET: SECRET }, headers: GOOD_HEADERS, deployedSha: EXPECTED_SHA });
+  const g = evaluateProofGate({ env: { S1S2_PROOF_TRIGGER_SECRET: SECRET }, headers: GOOD_HEADERS, deployedSha: SHA_A });
   assert.deepEqual([g.ok, g.reason], [false, "proof_disabled"]);
 });
 test("wrong secret denies (constant-time)", () => {
-  const g = evaluateProofGate({ env: GOOD_ENV, headers: { "x-s1s2-proof-secret": "nope" }, deployedSha: EXPECTED_SHA });
+  const g = evaluateProofGate({ env: GOOD_ENV, headers: { "x-s1s2-proof-secret": "nope" }, deployedSha: SHA_A });
   assert.deepEqual([g.ok, g.reason], [false, "invalid_trigger_secret"]);
   assert.equal(secretEquals("a", "ab"), false);
 });
@@ -136,7 +143,7 @@ test("wrong SHA denies", () => {
   assert.deepEqual([g.ok, g.reason], [false, "sha_mismatch"]);
 });
 test("full gate passes only when all three hold", () => {
-  assert.equal(evaluateProofGate({ env: GOOD_ENV, headers: GOOD_HEADERS, deployedSha: EXPECTED_SHA }).ok, true);
+  assert.equal(evaluateProofGate({ env: GOOD_ENV, headers: GOOD_HEADERS, deployedSha: SHA_A }).ok, true);
 });
 
 // ── RECIPIENT is code-pinned — impossible to specify arbitrary ────────────────
@@ -370,4 +377,55 @@ test("abort returns 200 + ok:true on a clean restore", async () => {
   assert.equal(res.ok, true);
   assert.equal(res.status, 200);
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+// ── DEPLOYMENT-SUPPLIED SHA AUTHORITY (S1S2_PROOF_EXPECTED_SHA) ────────────────
+test("expected SHA missing → deny (deny-by-default)", () => {
+  const env = { S1S2_PROOF_ENABLED: "1", S1S2_PROOF_TRIGGER_SECRET: SECRET }; // no S1S2_PROOF_EXPECTED_SHA
+  const g = evaluateProofGate({ env, headers: GOOD_HEADERS, deployedSha: SHA_A });
+  assert.deepEqual([g.ok, g.reason], [false, "expected_sha_not_configured"]);
+});
+test("expected SHA present but runtime mismatch → deny", () => {
+  const g = evaluateProofGate({ env: GOOD_ENV, headers: GOOD_HEADERS, deployedSha: SHA_B });
+  assert.deepEqual([g.ok, g.reason], [false, "sha_mismatch"]);
+});
+test("runtime SHA null while expected present → deny (never open)", () => {
+  const g = evaluateProofGate({ env: GOOD_ENV, headers: GOOD_HEADERS, deployedSha: null });
+  assert.deepEqual([g.ok, g.reason], [false, "sha_mismatch"]);
+});
+test("expected SHA exact match → allow and returns the validated SHA", () => {
+  const g = evaluateProofGate({ env: GOOD_ENV, headers: GOOD_HEADERS, deployedSha: SHA_A });
+  assert.equal(g.ok, true);
+  assert.equal(g.deployed_sha, SHA_A); // callers pin to THIS, not a module constant
+});
+test("authorization + session stamp the validated deployed SHA (not a constant)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", validatedSha: SHA_A });
+  const arm = await armOk(w);
+  assert.equal(arm.ok, true);
+  const session = JSON.parse(w.sys.get("internal_proof_session"));
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  assert.equal(session.production_sha, SHA_A);
+  assert.equal(auth.pinned_sha, SHA_A);
+});
+test("arm fails closed if the validated SHA was not injected", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", validatedSha: "" });
+  w.deps.validatedSha = ""; // simulate a caller that skipped the gate
+  const r = await runArmAndS1(w.deps);
+  assert.deepEqual([r.ok, r.reason], [false, "validated_sha_missing"]);
+  assert.equal(w.events.sms.length, 0);
+});
+test("second phase on a DIFFERENT deployment SHA → deny (deployment_changed)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", validatedSha: SHA_A });
+  const arm = await armOk(w);          // armed & pinned to SHA_A
+  w.advance(1000); w.addInbound(); w.seedS2();
+  w.deps.validatedSha = SHA_B;          // deployment changed between phases
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.deepEqual([v.ok, v.reason], [false, "deployment_changed"]);
+});
+test("second phase on the SAME validated SHA still succeeds", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", validatedSha: SHA_A });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound(); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
 });
