@@ -11,6 +11,7 @@ import { insertSupabaseSendQueueRow } from "@/lib/supabase/sms-engine.js";
 import { processSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
 import { classify } from "@/lib/domain/classification/classify.js";
 import { findRecentOutboundContextPair } from "@/lib/domain/context/find-recent-outbound-pair.js";
+import { resolveDeployGitSha } from "@/lib/domain/deploy/resolve-deploy-sha.js";
 import {
   evaluateProofGate,
   runArmAndS1,
@@ -31,7 +32,13 @@ function headerBag(request) {
 
 export async function POST(request) {
   const headers = headerBag(request);
-  const runtimeSha = process.env.DEPLOY_GIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || null;
+  // Use the SAME canonical resolver /api/version uses: VERCEL_GIT_COMMIT_SHA ||
+  // DEPLOY_GIT_SHA (runtime env) || the build-time .deploy-sha file. A raw
+  // process.env read is unreliable — on a CLI deploy DEPLOY_GIT_SHA is a
+  // BUILD-only var and VERCEL_GIT_COMMIT_SHA is unset, so only the baked file
+  // carries the SHA at runtime. resolveDeployGitSha returns "unknown" when
+  // absent, which the gate treats as a mismatch (fail closed).
+  const runtimeSha = resolveDeployGitSha();
   const gate = evaluateProofGate({ env: process.env, headers, deployedSha: runtimeSha });
   if (!gate.ok) {
     // Log only the reason category — never the provided/expected secret.
