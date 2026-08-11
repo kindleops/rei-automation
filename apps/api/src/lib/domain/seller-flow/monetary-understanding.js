@@ -509,13 +509,37 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   const windowEnd = Math.min(lowerText.length, amount.end + radius);
   const window = lowerText.slice(windowStart, windowEnd);
 
+  // The tokenizer's amount span absorbs its own leading separator (" 120k"),
+  // which biased every measurement toward text on the LEFT: a preceding cue
+  // measured flush against the amount (gap 0) while a following cue paid for
+  // its own separating space (gap 1). Trim the span so both sides are measured
+  // from the digits themselves.
+  let amountStart = amount.index;
+  let amountEnd = amount.end;
+  while (amountStart < amountEnd && /\s/.test(lowerText[amountStart])) amountStart += 1;
+  while (amountEnd > amountStart && /\s/.test(lowerText[amountEnd - 1])) amountEnd -= 1;
+
   let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
   const consider = (kind, cue) => {
     const re = cueBoundaryRegex(cue);
     let m;
     while ((m = re.exec(window)) !== null) {
-      const cueMid = windowStart + m.index + cue.length / 2;
-      const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
+      const cueStart = windowStart + m.index;
+      const cueEnd = cueStart + m[0].length;
+      // Edge-to-edge gap, NOT midpoint distance. Midpoint penalised a cue for
+      // being long, so a multi-word modifier sitting directly against the
+      // amount lost to a shorter intent verb further away: "I want 120k per
+      // door" classified asking_price (the per-unit qualifier vanished, and an
+      // 8-unit ask was recorded at one door's price), and "I want 1450 a
+      // month" classified a rent as a $1,450 house — the exact misread the
+      // MONTHLY_AMOUNT cue list was written to prevent. Gap is symmetric, so
+      // ties still fall to KIND_CUES, which are considered before ASK_CUES.
+      const dist =
+        cueEnd <= amountStart
+          ? amountStart - cueEnd
+          : cueStart >= amountEnd
+            ? cueStart - amountEnd
+            : 0;
       if (dist < best.dist) best = { kind, dist };
     }
   };

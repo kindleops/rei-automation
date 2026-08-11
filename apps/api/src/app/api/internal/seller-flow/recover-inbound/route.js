@@ -6,7 +6,6 @@ import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { requireSharedSecretAuth } from "@/lib/security/shared-secret.js";
 import { requireCronAuth } from "@/lib/security/cron-auth.js";
 import { getSystemValue, setSystemValues } from "@/lib/system-control.js";
-import { CANONICAL_FULL_AUTOPILOT_MODE } from "@/lib/domain/campaigns/campaign-live-execution.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +25,12 @@ function requireAuth(request) {
 async function runRecovery(body = {}) {
   const limit = Number(body.limit) || 25;
   const dryRun = body.dry_run === true;
-  const autoReplyMode = body.auto_reply_mode || (await getSystemValue("auto_reply_mode")) || CANONICAL_FULL_AUTOPILOT_MODE;
+  // Fail closed: an unreadable/missing system mode must never default a
+  // recovery cron into the most permissive posture. An explicit operator
+  // body.auto_reply_mode still wins; otherwise absent-or-unreadable means
+  // disabled, matching every other mode reader in the repo.
+  const autoReplyMode =
+    body.auto_reply_mode || (await getSystemValue("auto_reply_mode")) || "disabled";
   const proofCases = Array.isArray(body.proof_cases) ? body.proof_cases : null;
 
   const result = await recoverUnprocessedInboundMessages({

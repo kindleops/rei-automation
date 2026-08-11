@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
+import { requireSharedSecretAuth } from "@/lib/security/shared-secret.js";
 import { handleDirectSendRequestData } from "@/lib/domain/outbound/direct-send-request.js";
 
 export const runtime = "nodejs";
@@ -11,6 +12,12 @@ const logger = child({
 });
 
 export async function GET(request) {
+  const auth = requireSharedSecretAuth(request, logger, {
+    env_name: "INTERNAL_API_SECRET",
+    header_names: ["x-internal-api-secret"],
+  });
+  if (!auth.authorized) return auth.response;
+
   const { status, payload } = await handleDirectSendRequestData(request, "GET", {
     logger,
   });
@@ -18,6 +25,12 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const auth = requireSharedSecretAuth(request, logger, {
+    env_name: "INTERNAL_API_SECRET",
+    header_names: ["x-internal-api-secret"],
+  });
+  if (!auth.authorized) return auth.response;
+
   const { status, payload } = await handleDirectSendRequestData(request, "POST", {
     logger,
   });

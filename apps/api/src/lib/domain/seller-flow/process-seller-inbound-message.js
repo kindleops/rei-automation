@@ -13,6 +13,10 @@ import {
   scheduleFollowUp,
   cancelPendingFollowUpsForThread,
 } from "@/lib/domain/seller-flow/seller-followup-scheduler.js";
+import {
+  resolveEffectiveFollowUpMode,
+  followUpModeAllowsScheduling,
+} from "@/lib/domain/seller-flow/delivery-triggered-followup.js";
 import { normalizeClassificationContract } from "@/lib/domain/seller-flow/normalize-classification-contract.js";
 import {
   buildSellerFlowDecision,
@@ -39,10 +43,12 @@ import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
   classifyNegotiationZone,
+  detectNewMaterialFact,
   evaluateUnderwritingSufficiency,
 } from "@/lib/domain/seller-flow/negotiation-policy.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { routeNegotiationStrategy } from "@/lib/domain/seller-flow/negotiation-strategy-router.js";
+import { resolveValuationAuthority } from "@/lib/domain/underwriting/valuation-authority.js";
 import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-policy.js";
 import {
   autoReplyModeAllowsQueue,
@@ -168,12 +174,37 @@ export function resolveNegotiationTurn({
   classificationConfidence = null,
   contextSummary = {},
   sourceMessageId = null,
+  // G7 concession-ladder inputs: the persisted fact record and THIS TURN's
+  // newly extracted facts. Both optional — absent inputs degrade to "no
+  // qualifying fact", never to a fabricated qualification.
+  knownFacts = null,
+  newFacts = null,
 } = {}) {
   if (!transition) return null;
   if (BLOCKING_NEGOTIATION_INTENTS.has(String(intent ?? ""))) return null;
   if (transition.contactability_patch) return null;
 
   const now = transition.resolved_at || new Date().toISOString();
+
+  // Property unit count (spine §6: 2+ units record the ask per-unit too).
+  // Context (property row projection) wins; the seller's own stated unit
+  // count fills the gap. Integration note: today's context summary carries no
+  // unit field — Agent A's G1 units_count fix is what populates it live.
+  let units_count = null;
+  for (const candidate of [
+    contextSummary.units_count,
+    contextSummary.unit_count,
+    contextSummary.units,
+    transition.facts_patch?.units_count,
+    transition.facts_patch?.unit_count,
+  ]) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n >= 1) {
+      units_count = Math.round(n);
+      break;
+    }
+  }
+
   const state_preview = applyNegotiationTurn(priorState, {
     price_signal: priceSignal,
     ade_snapshot: adeSnapshot,
@@ -182,13 +213,14 @@ export function resolveNegotiationTurn({
     facts: transition.facts_patch || null,
     intent,
     classification_confidence: classificationConfidence,
+    units_count,
     source_message_id: sourceMessageId,
     now,
   });
 
   const policy = resolveNegotiationPolicy({
     property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
-    unit_count: contextSummary.unit_count || null,
+    unit_count: units_count ?? contextSummary.unit_count ?? null,
     market: contextSummary.market_name || contextSummary.market || null,
     reference_value: state_preview.arv ?? state_preview.current_asking_price ?? null,
     liquidity_score: adeSnapshot?.liquidity_score ?? null,
@@ -196,7 +228,7 @@ export function resolveNegotiationTurn({
 
   const sufficiency = evaluateUnderwritingSufficiency({
     property_type: contextSummary.property_type_scope || contextSummary.property_type || null,
-    unit_count: contextSummary.unit_count || null,
+    unit_count: units_count ?? contextSummary.unit_count ?? null,
     facts: transition.facts_patch || {},
     ade_snapshot: adeSnapshot,
     policy,
@@ -235,10 +267,31 @@ export function resolveNegotiationTurn({
     previously_disclosed: state_preview.comp_anchors_used,
   });
 
+  // ── G7: concession-ladder inputs, computed PER TURN ─────────────────────
+  // seller_moved_amount is this turn's downward ask movement (prior persisted
+  // ask − this turn's extracted ask). new_material_fact is true only when this
+  // turn disclosed a material fact the persisted record did not already hold.
+  // Before this wiring both inputs were permanently 0/false, so the ladder
+  // blocked every unmoved seller with NO_QUALIFYING_MOVEMENT_OR_FACT forever.
+  const prior_ask_value = Number(priorState?.current_asking_price ?? priorState?.current_ask);
+  const turn_ask_value = Number(priceSignal?.asking_price?.value);
+  const seller_moved_amount =
+    Number.isFinite(prior_ask_value) &&
+    Number.isFinite(turn_ask_value) &&
+    turn_ask_value < prior_ask_value
+      ? prior_ask_value - turn_ask_value
+      : 0;
+  const material_fact_signal = detectNewMaterialFact({
+    new_facts: newFacts,
+    known_facts: knownFacts,
+  });
+
   const strategy_decision = routeNegotiationStrategy({
     zone,
     state: state_preview,
     sufficiency,
+    seller_moved_amount,
+    new_material_fact: material_fact_signal.new_material_fact,
     flags: {
       firm: Boolean(engineDecision?.negotiation_posture === "anchored"),
       accept: engineDecision?.outcome === "seller_accepts_offer",
@@ -270,6 +323,7 @@ export function resolveNegotiationTurn({
     intent,
     classification_confidence: classificationConfidence,
     comp_anchor,
+    units_count,
     source_message_id: sourceMessageId,
     now,
   });
@@ -281,6 +335,12 @@ export function resolveNegotiationTurn({
     zone,
     comp_anchor,
     strategy_decision,
+    // G7 audit trail: the exact concession inputs this turn was routed with.
+    concession_inputs: {
+      seller_moved_amount,
+      new_material_fact: material_fact_signal.new_material_fact,
+      new_material_fact_keys: material_fact_signal.new_material_fact_keys,
+    },
   };
 }
 
@@ -1134,6 +1194,10 @@ export async function processSellerInboundMessage({
     classificationConfidence: classification?.confidence ?? null,
     contextSummary: context?.summary || {},
     sourceMessageId: providerMessageId || inboundEventId,
+    // G7: persisted facts vs this turn's extractions feed the concession
+    // ladder (seller_moved_amount / new_material_fact).
+    knownFacts: canonical_known_facts,
+    newFacts: canonical_new_facts,
   });
 
   // Accepted terms resolve the S5 milestone — re-resolve the lifecycle so the
@@ -1184,12 +1248,40 @@ export async function processSellerInboundMessage({
   // ── Monetary authority for template rendering (spec §12): fail closed.
   // Offer tokens render ONLY from this persisted/derived ADE authority — never
   // from the seller's own price and never above the ceiling.
+  //
+  // The ceiling comes ONLY from the canonical valuation authority (spine §6):
+  // the negotiation state's ADE-ingested ceiling, or the resolver over the
+  // same effective ADE snapshot when no negotiation turn ran. The former
+  // fallback to `underwriting.max_allowable_offer` is retired — that chain let
+  // a different engine's number (the comp-intelligence pipeline's ARV×0.75,
+  // computed on a different confidence scale with no ledger) become the SEND
+  // ceiling whenever ADE authority was absent. Absent authority now means NO
+  // monetary send and a human-review route, never another engine's number.
+  const valuation_authority = resolveValuationAuthority({
+    ade_snapshot: effective_ade_snapshot,
+    facts: transition?.facts_patch || null,
+    property: context?.summary || null,
+  });
   const authorized_ceiling =
     negotiation?.state_preview?.authorized_offer_ceiling ??
-    underwriting.max_allowable_offer ??
+    valuation_authority.maximum_acquisition_price ??
     null;
   let authorized_amount = negotiation?.strategy_decision?.monetary?.amount ?? null;
-  if (
+  let valuation_authority_gate = null;
+  if (authorized_amount != null && authorized_ceiling == null) {
+    // A monetary directive with no authoritative ceiling cannot be bounded —
+    // fail closed to review instead of trusting an unboundable amount.
+    valuation_authority_gate = {
+      applied: true,
+      reason: "valuation_authority_absent",
+      attempted_amount: authorized_amount,
+    };
+    runtimeDeps.warn("[NEGOTIATION_AUTHORITY_ABSENT]", {
+      thread_key: threadKey || inboundFrom,
+      attempted_amount: authorized_amount,
+    });
+    authorized_amount = null; // fail closed → renderer blocks monetary sends
+  } else if (
     authorized_amount != null &&
     authorized_ceiling != null &&
     Number(authorized_amount) > Number(authorized_ceiling)
@@ -1200,6 +1292,13 @@ export async function processSellerInboundMessage({
       ceiling: authorized_ceiling,
     });
     authorized_amount = null; // fail closed → renderer blocks monetary sends
+  }
+  if (valuation_authority_gate && transition) {
+    transition = {
+      ...transition,
+      review_required: true,
+      review_reason: transition.review_reason || valuation_authority_gate.reason,
+    };
   }
   const deal_authority = {
     recommended_offer:
@@ -1277,11 +1376,19 @@ export async function processSellerInboundMessage({
       negotiation?.strategy_decision && !authority_gate_applied
         ? {
             strategy: negotiation.strategy_decision.strategy,
-            reason_code: negotiation.strategy_decision.reason_code,
+            reason_code: valuation_authority_gate
+              ? "VALUATION_AUTHORITY_ABSENT"
+              : negotiation.strategy_decision.reason_code,
             template_use_case: negotiation.strategy_decision.template_use_case,
             allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
-            review_required: negotiation.strategy_decision.review_required,
-            review_reason: negotiation.strategy_decision.review_reason,
+            // A monetary directive whose ceiling authority is absent must not
+            // merely drop its amount (the offer template would then fail on an
+            // empty token) — it routes to review with the canonical reason.
+            review_required:
+              negotiation.strategy_decision.review_required || Boolean(valuation_authority_gate),
+            review_reason:
+              negotiation.strategy_decision.review_reason ||
+              (valuation_authority_gate ? valuation_authority_gate.reason : null),
             monetary_amount: authorized_amount,
           }
         : null,
@@ -1338,7 +1445,36 @@ export async function processSellerInboundMessage({
             canonical_decision?.next_action === "do_not_reply"))
     );
 
+    // followup_automation_mode is the scheduling authority for EVERY
+    // follow-up writer (spine §5). The legacy followup_enabled flag above is
+    // an additional AND-condition, never sufficient by itself; an unreadable
+    // mode fails closed to disabled.
+    let followup_mode_allows = false;
     if (should_schedule_followup && execution_allowed && !writes_suppressed) {
+      try {
+        const mode_resolution = await resolveEffectiveFollowUpMode({
+          getSystemValueImpl: runtimeDeps.getSystemValue || getSystemValue || undefined,
+        });
+        followup_mode_allows = followUpModeAllowsScheduling(mode_resolution?.mode);
+        if (!followup_mode_allows) {
+          follow_up_result = {
+            ok: true,
+            skipped: true,
+            reason: "followup_automation_mode_blocked",
+            mode: mode_resolution?.mode || "disabled",
+          };
+        }
+      } catch {
+        followup_mode_allows = false;
+        follow_up_result = {
+          ok: true,
+          skipped: true,
+          reason: "followup_automation_mode_unreadable_fail_closed",
+        };
+      }
+    }
+
+    if (should_schedule_followup && execution_allowed && !writes_suppressed && followup_mode_allows) {
       try {
         follow_up_result = await runtimeDeps.scheduleFollowUp(follow_up_intent, threadKey || inboundFrom, {
           is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
@@ -1501,6 +1637,8 @@ export async function processSellerInboundMessage({
   // canonical ADE snapshot, monotonic stage advancement, §16 workflow events.
   let deal_persistence = null;
   if (transition && supabase) {
+    // Known offer-bearing use cases — retained ONLY as a fallback for callers
+    // (test doubles, legacy executors) that do not report render accounting.
     const offer_use_cases = new Set([
       "initial_offer",
       "conditional_offer",
@@ -1509,13 +1647,23 @@ export async function processSellerInboundMessage({
       "offer_reveal_cash",
     ]);
     const queued_use_case = clean(execution?.selected_template?.use_case) || null;
+    // G8 ledger completeness: ANY queued send whose rendered template carried
+    // an offer-amount placeholder appends to offers_made — the renderer's own
+    // accounting (offer_amount_rendered / rendered_offer_amount) is the
+    // primary source, so an offer sent through a template outside the
+    // use-case list above no longer escapes turn/concession caps.
+    const rendered_offer_amount =
+      execution?.offer_amount_rendered && execution?.rendered_offer_amount != null
+        ? Number(execution.rendered_offer_amount)
+        : null;
+    const fallback_offer_amount =
+      authorized_amount != null && queued_use_case && offer_use_cases.has(queued_use_case)
+        ? authorized_amount
+        : null;
     const offer_execution = execution?.queued
       ? {
           queued: true,
-          amount:
-            authorized_amount != null && queued_use_case && offer_use_cases.has(queued_use_case)
-              ? authorized_amount
-              : null,
+          amount: rendered_offer_amount ?? fallback_offer_amount,
           template_use_case: queued_use_case,
           queue_row_id: execution?.queue_row_id || null,
         }
@@ -1538,6 +1686,9 @@ export async function processSellerInboundMessage({
       compAnchor: negotiation?.comp_anchor || null,
       classificationConfidence: classification?.confidence ?? null,
       adeSnapshotPrecomputed: fresh_ade_snapshot,
+      // Same unit-count derivation as resolveNegotiationTurn, so the persisted
+      // reducer run records the identical per-unit ask as the preview.
+      unitsCount: negotiation?.state_preview?.units_count ?? null,
     });
   }
 

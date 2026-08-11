@@ -28,7 +28,7 @@ import { normalizePhone } from "@/lib/providers/textgrid.js";
 // "not the owner" and "never owned" claims (see PROPERTY_SCOPED_CLAIMS in
 // resolve-inbound-relationship.js), and former_owner_respondent covers "sold
 // the property" claims.
-const SUPPRESSED_INTENTS = new Set([
+export const SUPPRESSED_INTENTS = new Set([
   "opt_out",
   "wrong_number",
   "wrong_person",
@@ -38,7 +38,7 @@ const SUPPRESSED_INTENTS = new Set([
   "timing_complaint",
 ]);
 
-const NURTURE_DAYS = {
+export const NURTURE_DAYS = Object.freeze({
   not_interested: 30,
   listed_or_unavailable: 45,
   tenant_or_occupancy: 21,
@@ -47,9 +47,9 @@ const NURTURE_DAYS = {
   unclear: 7,
   conditional_interest: 21,
   maybe_depends_on_price: 21,
-};
+});
 
-const ACTIVE_INTENTS = new Set([
+export const ACTIVE_INTENTS = new Set([
   "ownership_confirmed",
   "asks_offer",
   "info_request",
@@ -57,7 +57,7 @@ const ACTIVE_INTENTS = new Set([
 ]);
 
 /** Intents with no approved follow-up schedule yet — explicit safe hold state. */
-const UNAPPROVED_FOLLOWUP_INTENTS = new Set(["condition_disclosed", "latent_interest"]);
+export const UNAPPROVED_FOLLOWUP_INTENTS = new Set(["condition_disclosed", "latent_interest"]);
 
 /**
  * Stage-layer no-reply follow-up marker (followup-policy-registry.js). This is
@@ -79,8 +79,17 @@ function addDays(base, days) {
   return d.toISOString();
 }
 
-function buildFollowupDedupeKey(thread_key, intent) {
-  return `seller_followup:${clean(thread_key)}:${clean(intent)}`;
+/**
+ * Dedupe-key convention. Attempt-less keys keep the historical shape
+ * (`seller_followup:<thread>:<intent>`) so every existing row's idempotency
+ * contract is untouched; re-engagement attempts (attempt >= 2) append the
+ * attempt ordinal, so re-running the same sweep replays onto the same key and
+ * the unique index makes it a no-op instead of a second row.
+ */
+export function buildFollowupDedupeKey(thread_key, intent, attempt = null) {
+  const base = `seller_followup:${clean(thread_key)}:${clean(intent)}`;
+  const n = Number(attempt);
+  return Number.isFinite(n) && n >= 2 ? `${base}:attempt_${n}` : base;
 }
 
 function buildFollowupQueueKey(dedupe_key) {
@@ -166,6 +175,47 @@ export function resolveFollowUpPlan(intent, opts = {}) {
     return { suppressed: true, followup_created: false, reason: "thread_already_suppressed" };
   }
 
+  // ── Re-engagement attempts (G3) ──────────────────────────────────────────
+  // Attempt >= 2 means the reengagement planner already proved: last follow-up
+  // dispatched, no inbound since, policy window elapsed, caps respected, and
+  // every stop condition clear. The plan here re-checks the intent-layer
+  // suppression rules (they always outrank re-enrollment) and then honors the
+  // planner's schedule instead of restarting the first-touch cadence.
+  const reengagement_attempt = Number(opts.attempt);
+  if (Number.isFinite(reengagement_attempt) && reengagement_attempt >= 2) {
+    if (SUPPRESSED_INTENTS.has(intent)) {
+      return { suppressed: true, followup_created: false, reason: `permanent_suppression:${intent}` };
+    }
+    if (ACTIVE_INTENTS.has(intent)) {
+      return { suppressed: false, followup_created: false, reason: "active_workflow_no_nurture" };
+    }
+    if (UNAPPROVED_FOLLOWUP_INTENTS.has(intent)) {
+      return {
+        suppressed: false,
+        followup_created: false,
+        reason: "follow_up_policy_not_approved",
+        follow_up_policy: "review_required_no_schedule",
+        dispatchable: false,
+        shadow_only: true,
+      };
+    }
+    const scheduled_for = clean(opts.reengagement_scheduled_for);
+    const window_days = Number(opts.reengagement_window_days);
+    if (!scheduled_for || !Number.isFinite(window_days) || window_days <= 0) {
+      // No planner authority ⇒ fail closed; never borrow first-touch cadence.
+      return { suppressed: false, followup_created: false, reason: "reengagement_schedule_missing" };
+    }
+    return {
+      suppressed: false,
+      followup_created: true,
+      scheduled_for,
+      days: window_days,
+      attempt: reengagement_attempt,
+      reason: clean(opts.reengagement_reason) || `followup_no_response_attempt_${reengagement_attempt}`,
+      thread_key: thread_key || null,
+    };
+  }
+
   if (intent === STAGE_NO_REPLY_FOLLOWUP_INTENT) {
     const days = Number(opts.stage_no_reply_days);
     const stage = clean(opts.stage);
@@ -230,6 +280,11 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     is_suppressed: context.is_suppressed,
     stage_no_reply_days: context.stage_no_reply_days,
     stage: context.stage,
+    // Re-engagement authority (attempt >= 2): the planner's computed schedule.
+    attempt: context.attempt,
+    reengagement_scheduled_for: context.reengagement_scheduled_for,
+    reengagement_window_days: context.reengagement_window_days,
+    reengagement_reason: context.reengagement_reason,
   });
 
   if (plan.suppressed || !plan.followup_created) {
@@ -246,7 +301,7 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     return { ok: false, skipped: true, reason: "invalid_thread_key_phone" };
   }
 
-  const dedupe_key = buildFollowupDedupeKey(normalized_thread_key, intent);
+  const dedupe_key = buildFollowupDedupeKey(normalized_thread_key, intent, plan.attempt);
   const queue_key = buildFollowupQueueKey(dedupe_key);
   const scheduled_for = plan.scheduled_for;
 
@@ -281,6 +336,9 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
         intent,
         followup_reason: plan.reason,
         days_until_followup: plan.days,
+        // Attempt ledger: 1 for first-touch follow-ups, 2..N for re-engagement
+        // waves. Auditable on the row itself, independent of the dedupe key.
+        followup_attempt: plan.attempt || 1,
         ...context,
       },
     },

@@ -2198,13 +2198,24 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           if (supabase) {
             const todayStart = new Date();
             todayStart.setUTCHours(0, 0, 0, 0);
-            const { count } = await supabase
+            const { count, error: capCountError } = await supabase
               .from("send_queue")
               .select("id", { count: "exact", head: true })
               .eq("metadata->>action_type", "autopilot_inbound_reply")
               .gte("created_at", todayStart.toISOString());
-            cap_reached = (count || 0) >= auto_reply_live_cap;
-            if (cap_reached) {
+            if (capCountError) {
+              // Fail closed: an unknown daily count must be treated as
+              // cap-reached, never as zero.
+              cap_reached = true;
+              safeWarn("textgrid.inbound_auto_reply_cap_check_failed", {
+                message_id: extracted.message_id,
+                error: capCountError?.message || "count_error",
+                fail_closed: true,
+              });
+            } else {
+              cap_reached = (count || 0) >= auto_reply_live_cap;
+            }
+            if (cap_reached && !capCountError) {
               safeWarn("textgrid.inbound_auto_reply_cap_reached", {
                 message_id: extracted.message_id,
                 inbound_from,
@@ -2214,9 +2225,12 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
             }
           }
         } catch (capErr) {
+          // Fail closed on any thrown cap-check failure as well.
+          cap_reached = true;
           safeWarn("textgrid.inbound_auto_reply_cap_check_failed", {
             message_id: extracted.message_id,
             error: capErr?.message || "unknown",
+            fail_closed: true,
           });
         }
       }

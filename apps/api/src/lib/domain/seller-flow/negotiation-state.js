@@ -16,8 +16,13 @@
 // Pure module — no I/O. Persistence stays in persist-seller-transition.js.
 
 import { computeNegotiationGapMetrics } from "@/lib/domain/seller-flow/negotiation-policy.js";
+import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
 
-export const NEGOTIATION_STATE_VERSION = "negotiation_state_v2";
+// v3: adds per-unit seller-ask semantics (units_count, asking_price_per_unit)
+// for multifamily/small-multi deals (spine §6 — seller ask recorded both
+// absolute and per-unit at 2+ units). Additive fields; v1/v2 shapes migrate
+// through normalizeNegotiationState unchanged.
+export const NEGOTIATION_STATE_VERSION = "negotiation_state_v3";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -93,6 +98,13 @@ export function createNegotiationState({
     asking_price_confidence: null,
     asking_price_source_message_id: null,
     asking_price_history: [],
+    // Per-unit ask (2+ unit properties): current ask ÷ known unit count.
+    units_count: null,
+    asking_price_per_unit: null,
+    // Set when the seller quoted PER UNIT but the unit count is unknown, so no
+    // property-level ask can be derived. Clarify; never guess a multiplier.
+    asking_price_needs_clarification: false,
+    asking_price_clarification_reason: null,
 
     // Our position / authority (ADE-only)
     initial_offer: null,
@@ -222,6 +234,7 @@ export function applyNegotiationTurn(previous, {
   offer_execution = null,     // { queued, amount, template_use_case, queue_row_id }
   contract_facts = null,
   comp_anchor = null,         // comp-anchor policy selection
+  units_count = null,         // property unit count (per-unit ask at 2+ units)
   source_message_id = null,
   now = new Date().toISOString(),
 } = {}) {
@@ -246,6 +259,9 @@ export function applyNegotiationTurn(previous, {
     seller_priorities: [...state.seller_priorities],
     contract_facts: { ...state.contract_facts },
     duplicate_acceptance_suppressed: false,
+    // Per-turn verdicts, never inherited.
+    asking_price_needs_clarification: false,
+    asking_price_clarification_reason: null,
   };
 
   // ── 1. ADE authority (only source of monetary authority) ────────────────
@@ -260,7 +276,11 @@ export function applyNegotiationTurn(previous, {
       num(ade_snapshot.investor_ceiling_high) ?? next.authorized_offer_ceiling ?? next.direct_purchase_maximum;
     next.arv = num(ade_snapshot.valuation_mid) ?? next.arv;
     next.repair_estimate = num(ade_snapshot.estimated_repairs) ?? next.repair_estimate;
-    next.comp_confidence = num(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
+    // Confidence enters state on the canonical 0–1 scale (spine §6): ADE's
+    // native 0–100 valuation_confidence is converted HERE so every downstream
+    // gate (zone policy min_valuation_confidence, gap metrics deal_confidence,
+    // automation_confidence) compares like with like.
+    next.comp_confidence = normalizeOfferConfidence(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
     if (ade_snapshot_id || ade_snapshot.id) next.ade_snapshot_id = ade_snapshot_id || ade_snapshot.id;
     next.alternate_strategy_eligibility = {
       subject_to_score: num(ade_snapshot.subject_to_score),
@@ -271,10 +291,41 @@ export function applyNegotiationTurn(previous, {
     };
   }
 
+  // ── 1b. Unit count (resolved BEFORE price ingestion) ────────────────────
+  // The unit count sticks once learned (caller input wins over a fact over the
+  // persisted value). It is resolved here, not after §2, because a per-unit ask
+  // cannot be converted into a property ask without it.
+  const effectiveUnits =
+    num(units_count) ?? num(facts?.units_count) ?? num(facts?.unit_count) ?? num(next.units_count);
+  if (effectiveUnits !== null && effectiveUnits >= 1) {
+    next.units_count = Math.round(effectiveUnits);
+  }
+
   // ── 2. Seller price movement (append-only history) ──────────────────────
   const signal = price_signal?.asking_price || null;
-  if (signal?.value > 0 && !next.terms_accepted) {
-    const value = num(signal.value);
+
+  // A per-unit quote is NOT the property ask. Ingested verbatim it was assigned
+  // straight to current_asking_price and then divided by units_count AGAIN at
+  // §3b: "120k per door" on 8 units landed as a $120,000 property ask plus a
+  // $15,000 per-door ask, and a prior $950,000 ask read as an $830,000
+  // concession the seller never made — fabricated authority input.
+  const signalIsPerUnit =
+    signal?.price_type === "per_unit" || signal?.qualifiers?.per_unit === true;
+  const perUnitConvertible =
+    signalIsPerUnit && next.units_count !== null && next.units_count >= 2;
+  // Per-unit with unknown (or single) unit count is unresolvable: there is no
+  // multiplier to apply and no "assume thousands"-style rule exists here.
+  // Clarify instead — no ask, no concession, no authority math.
+  const perUnitUnresolvable = signalIsPerUnit && !perUnitConvertible;
+  if (perUnitUnresolvable && signal?.value > 0) {
+    next.asking_price_needs_clarification = true;
+    next.asking_price_clarification_reason = "per_unit_price_units_unknown";
+  }
+
+  if (signal?.value > 0 && !next.terms_accepted && !perUnitUnresolvable) {
+    const quotedValue = num(signal.value);
+    // Absolute asks are unchanged; only a convertible per-unit quote is scaled.
+    const value = perUnitConvertible ? round2(quotedValue * next.units_count) : quotedValue;
     const previousAsk = num(next.current_asking_price);
     const isFirst = next.initial_asking_price == null;
 
@@ -291,6 +342,11 @@ export function applyNegotiationTurn(previous, {
         source_message_id: signal.source_message_id || source_message_id || null,
         kind: isFirst ? "initial" : price_signal?.is_counter ? "counter" : "revision",
         at: now,
+        // What the seller literally said, kept alongside the derived property
+        // ask so the conversion is auditable rather than silent.
+        ...(perUnitConvertible
+          ? { quoted_per_unit_value: quotedValue, units_multiplier: next.units_count }
+          : {}),
       });
 
       if (!isFirst && price_signal?.is_counter) {
@@ -350,6 +406,16 @@ export function applyNegotiationTurn(previous, {
   else if (engine_decision?.negotiation_posture === "anchored") next.resistance_type = "price_anchored";
   if (seller_sentiment || intent) next.seller_sentiment = clean(seller_sentiment || intent) || next.seller_sentiment;
 
+  // ── 3b. Per-unit seller ask (spine §6: recorded absolute AND per-unit) ──
+  // The unit count was resolved at §1b (price ingestion needs it). The per-unit
+  // ask tracks the CURRENT property ask whenever the property has 2+ units.
+  // Never fabricated: unknown units ⇒ null.
+  const perUnitAsk = num(next.current_asking_price);
+  next.asking_price_per_unit =
+    next.units_count !== null && next.units_count >= 2 && perUnitAsk !== null
+      ? round2(perUnitAsk / next.units_count)
+      : next.asking_price_per_unit ?? null;
+
   // ── 4. Comp anchor bookkeeping ───────────────────────────────────────────
   if (comp_anchor?.eligible) {
     next.selected_comp_anchor = comp_anchor.anchor;
@@ -367,23 +433,32 @@ export function applyNegotiationTurn(previous, {
     next.current_strategy = strategy_decision.strategy;
   }
 
-  // ── 6. Our offers (append-only ledger, ceiling-guarded) ─────────────────
+  // ── 6. Our offers (append-only ledger, ceiling-guarded, replay-safe) ────
   const executedAmount = num(offer_execution?.amount);
   if (offer_execution?.queued && executedAmount !== null && !next.terms_accepted) {
-    const ceiling = num(next.authorized_offer_ceiling);
-    // Authority violation is recorded, never silently accepted.
-    const withinAuthority = ceiling === null || executedAmount <= ceiling;
-    next.offers_made.push({
-      amount: executedAmount,
-      strategy: strategy_decision?.strategy || next.current_strategy || null,
-      template_use_case: offer_execution.template_use_case || null,
-      queue_row_id: offer_execution.queue_row_id || null,
-      within_authority: withinAuthority,
-      at: now,
-    });
-    if (next.initial_offer == null) next.initial_offer = executedAmount;
-    next.latest_offer = executedAmount;
-    next.negotiation_round += 1;
+    // Replay idempotency (G8): the same queued send (same queue row) must
+    // never append twice — a reprocessed inbound would otherwise double-count
+    // one offer against the turn/concession caps.
+    const executedRowId = clean(offer_execution.queue_row_id);
+    const alreadyRecorded =
+      executedRowId !== "" &&
+      next.offers_made.some((entry) => clean(entry?.queue_row_id) === executedRowId);
+    if (!alreadyRecorded) {
+      const ceiling = num(next.authorized_offer_ceiling);
+      // Authority violation is recorded, never silently accepted.
+      const withinAuthority = ceiling === null || executedAmount <= ceiling;
+      next.offers_made.push({
+        amount: executedAmount,
+        strategy: strategy_decision?.strategy || next.current_strategy || null,
+        template_use_case: offer_execution.template_use_case || null,
+        queue_row_id: offer_execution.queue_row_id || null,
+        within_authority: withinAuthority,
+        at: now,
+      });
+      if (next.initial_offer == null) next.initial_offer = executedAmount;
+      next.latest_offer = executedAmount;
+      next.negotiation_round += 1;
+    }
   }
 
   // ── 7. Accepted-terms lock (spec §14) ───────────────────────────────────
@@ -471,6 +546,9 @@ export function applyNegotiationTurn(previous, {
   if (strategy_decision?.review_reason) next.human_review_reason = strategy_decision.review_reason;
   else if (transition?.review_reason) next.human_review_reason = transition.review_reason;
   else if (price_signal?.needs_clarification) next.human_review_reason = price_signal.clarification_reason;
+  else if (next.asking_price_needs_clarification) {
+    next.human_review_reason = next.asking_price_clarification_reason;
+  }
 
   next.updated_from_message_id = source_message_id || next.updated_from_message_id;
   next.updated_at = now;

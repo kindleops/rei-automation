@@ -281,3 +281,131 @@ test("transitionQualifiesForOpportunity gates on engagement", () => {
   const hold = resolveSellerStageTransition({ stage_before: "ownership_confirmation", intent: "who_is_this", classification_confidence: 0.9, now: NOW });
   assert.equal(transitionQualifiesForOpportunity(hold), false);
 });
+
+// ── G9 terms snapshot: retried on every accepted persist, not just the edge ──
+// The hook used to fire only on the transition edge (terms_accepted flipping
+// false → true). A snapshot that failed there — unapplied table, transient
+// Supabase error — was never retried and the accepted deal stayed permanently
+// unrecorded. The writer is terms_hash-idempotent, so firing every time
+// dedupes rather than duplicates.
+
+function acceptedOpportunity() {
+  return {
+    id: "opp-accepted-1",
+    dedupe_key: "thread:+13125550199",
+    primary_thread_key: "+13125550199",
+    primary_property_id: "prop-accepted-1",
+    master_owner_id: "owner-accepted-1",
+    acquisition_stage: "offer",
+    opportunity_status: "active",
+    metadata: {
+      negotiation_state: {
+        terms_accepted: true,
+        terms_accepted_at: NOW,
+        accepted_price: 132500,
+        current_ask: 140000,
+        latest_offer: 132500,
+        authorized_offer_ceiling: 135000,
+      },
+    },
+  };
+}
+
+async function persistAcceptedTurn(supabase) {
+  return persistSellerTransitionArtifacts({
+    transition: resolveSellerStageTransition({
+      stage_before: "offer",
+      intent: "seller_interested",
+      negotiation_state: { offers_made: 2, terms_accepted: true },
+      classification_confidence: 0.95,
+      now: NOW,
+    }),
+    threadKey: "+13125550199",
+    propertyId: "prop-accepted-1",
+    ownerId: "owner-accepted-1",
+    intent: "seller_interested",
+    supabaseClient: supabase,
+    deps: { scoreProperty: async () => { throw new Error("comps_unavailable"); } },
+  });
+}
+
+test("a persist while terms are ALREADY accepted still attempts the snapshot", async () => {
+  const { __setRecordTermsSnapshotTestDeps, __resetRecordTermsSnapshotTestDeps } = await import(
+    "@/lib/domain/agreements/record-terms-snapshot.js"
+  );
+
+  const inserts = [];
+  let existing = null;
+  const client = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ limit: () => ({ maybeSingle: async () => ({ data: existing, error: null }) }) }),
+      }),
+      insert: (row) => ({
+        select: () => ({
+          maybeSingle: async () => {
+            inserts.push(row);
+            existing = { id: `snap-${inserts.length}` };
+            return { data: existing, error: null };
+          },
+        }),
+      }),
+    }),
+  };
+
+  __setRecordTermsSnapshotTestDeps({
+    hasSupabaseConfig: () => true,
+    getClient: () => client,
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  try {
+    const supabase = makeFakeSupabase({ opportunities: [acceptedOpportunity()] });
+
+    // previousState.terms_accepted is ALREADY true — the pre-fix guard skipped.
+    const first = await persistAcceptedTurn(supabase);
+    assert.ok(first.terms_snapshot, "the hook ran on an already-accepted persist");
+    assert.equal(inserts.length, 1, "one row written");
+
+    // A retry of the same accepted terms must dedupe, not duplicate.
+    const second = await persistAcceptedTurn(supabase);
+    assert.ok(second.terms_snapshot, "the hook ran again");
+    assert.equal(second.terms_snapshot.deduped, true);
+    assert.equal(inserts.length, 1, "still exactly one row");
+  } finally {
+    __resetRecordTermsSnapshotTestDeps();
+  }
+});
+
+test("a persist without accepted terms never records a snapshot", async () => {
+  const { __setRecordTermsSnapshotTestDeps, __resetRecordTermsSnapshotTestDeps } = await import(
+    "@/lib/domain/agreements/record-terms-snapshot.js"
+  );
+
+  let inserted = 0;
+  __setRecordTermsSnapshotTestDeps({
+    hasSupabaseConfig: () => true,
+    getClient: () => ({
+      from: () => ({
+        select: () => ({ eq: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
+        insert: () => ({ select: () => ({ maybeSingle: async () => { inserted += 1; return { data: { id: "x" }, error: null }; } }) }),
+      }),
+    }),
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+  });
+
+  try {
+    const supabase = makeFakeSupabase();
+    const result = await persistSellerTransitionArtifacts({
+      transition: priceTransition(),
+      threadKey: "+13125550200",
+      intent: "asking_price_provided",
+      supabaseClient: supabase,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.terms_snapshot, undefined);
+    assert.equal(inserted, 0);
+  } finally {
+    __resetRecordTermsSnapshotTestDeps();
+  }
+});

@@ -23,6 +23,7 @@ import {
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import { recordAcceptanceTermsSnapshot } from "@/lib/domain/agreements/record-terms-snapshot.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const TABLE = "acquisition_opportunities";
@@ -367,6 +368,7 @@ export async function persistSellerTransitionArtifacts({
   compAnchor = null,
   classificationConfidence = null,
   adeSnapshotPrecomputed = null,
+  unitsCount = null,
 } = {}) {
   const summary = {
     ok: true,
@@ -488,6 +490,7 @@ export async function persistSellerTransitionArtifacts({
       offer_execution: offerExecution,
       contract_facts: contractFacts,
       comp_anchor: compAnchor,
+      units_count: unitsCount,
       source_message_id:
         priceFact?.source_message_id || transition.source_message_id || inboundEventId || null,
       now: nowIso,
@@ -600,6 +603,29 @@ export async function persistSellerTransitionArtifacts({
         opportunity_id: opportunity.id,
         error: metadata_error?.message || "metadata_update_failed",
       });
+    }
+
+    // Durable agreement record (spine G9): every persist while terms are
+    // accepted attempts the terms snapshot. It used to fire ONLY on the
+    // transition edge (!previousState?.terms_accepted), so a snapshot that
+    // failed — missing table, transient Supabase error — was never retried and
+    // the accepted deal stayed permanently unrecorded. The hook is
+    // terms_hash-idempotent by design, so repeating it dedupes rather than
+    // duplicates. The guard try keeps a defect in it from ever blocking deal
+    // persistence, and keeps its failures labeled as its own rather than as a
+    // metadata failure.
+    if (negotiationState?.terms_accepted) {
+      try {
+        summary.terms_snapshot = await recordAcceptanceTermsSnapshot(
+          negotiationState,
+          opportunity
+        );
+      } catch (snapshot_error) {
+        warn("[SELLER_TRANSITION_TERMS_SNAPSHOT_FAILED]", {
+          opportunity_id: opportunity.id,
+          error: snapshot_error?.message || "terms_snapshot_failed",
+        });
+      }
     }
 
     // ── Workflow Studio negotiation events (spec §16) ───────────────────

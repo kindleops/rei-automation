@@ -46,7 +46,10 @@ function baseArgs(overrides = {}) {
     inboundEventId: "evt-auth-1",
     enableQueueInsert: true,
     dryRun: false,
-    autoReplyMode: "live_all",
+    // A real, valid mode: the F8 hardening made an invalid/omitted mode fail
+    // closed to disabled, so the old invalid "live_all" no longer reaches the
+    // permissive fallback these mechanics tests relied on.
+    autoReplyMode: "live_limited",
     ...overrides,
   };
 }

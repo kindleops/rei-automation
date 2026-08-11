@@ -167,8 +167,17 @@ export function resolveSellerResponseStrategy({
       finiteOrNull(ade_snapshot?.recommended_cash_offer) ??
       finiteOrNull(state.negotiation.recommended_offer) ??
       null,
+    // Ceiling authority is ADE-only (spine §6): the persisted snapshot's
+    // investor ceiling, else the negotiation state's ADE-ingested ceiling.
+    // The former `underwriting?.max_allowable_offer` fallback is retired — it
+    // let a caller-supplied number from a different engine (comp-intelligence
+    // ARV×0.75) become the ceiling this strategy exposes. Absent ADE
+    // authority the ceiling is null and offer paths fail closed downstream.
     max_allowable_offer:
-      underwriting?.max_allowable_offer ?? state.negotiation.authorized_offer_ceiling ?? null,
+      finiteOrNull(ade_snapshot?.investor_ceiling_mid) ??
+      finiteOrNull(ade_snapshot?.investor_ceiling_high) ??
+      finiteOrNull(state.negotiation.authorized_offer_ceiling) ??
+      null,
     valuation_confidence:
       underwriting?.valuation_confidence ?? ade_snapshot?.valuation_confidence ?? null,
     repair_estimate: underwriting?.repair_estimate ?? ade_snapshot?.estimated_repairs ?? null,

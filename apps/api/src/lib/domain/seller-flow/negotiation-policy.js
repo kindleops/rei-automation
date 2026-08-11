@@ -16,6 +16,8 @@
 // Pure module: no I/O, no AI. All monetary authority referenced here is the
 // persisted ADE snapshot; this module never invents an amount.
 
+import { normalizeOfferConfidence } from "@/lib/domain/underwriting/valuation-authority.js";
+
 function num(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -287,8 +289,12 @@ export function classifyNegotiationZone({
   const ask = num(current_ask);
   const recommended = num(recommended_offer);
   const ceiling = num(authorized_offer_ceiling) ?? recommended;
-  const confidence = num(valuation_confidence);
-  const askConfidence = num(asking_price_confidence);
+  // Defensive boundary normalization (spine §6): policy thresholds are 0–1,
+  // but callers historically fed ADE's native 0–100 valuation_confidence
+  // straight through — which made this gate impossible to fail (30 < 0.45 is
+  // false). Both scales are accepted here and compared on 0–1.
+  const confidence = normalizeOfferConfidence(valuation_confidence);
+  const askConfidence = normalizeOfferConfidence(asking_price_confidence);
 
   if (
     recommended === null ||
@@ -386,6 +392,74 @@ export function evaluateConcession({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// MATERIAL FACTS (spec §13 — concession qualification)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Facts whose NEW disclosure justifies one more automated monetary move.
+ * Deliberately the underwriting-relevant set: condition, occupancy, timeline,
+ * motivation, income and debt facts — not identity or contact facts.
+ */
+export const MATERIAL_FACT_KEYS = Object.freeze([
+  "condition_disclosed",
+  "condition_summary",
+  "repairs_summary",
+  "repair_fact",
+  "occupancy_status",
+  "timeline",
+  "reason_for_selling",
+  "rents_summary",
+  "current_gross_rents",
+  "avg_rent",
+  "unit_count",
+  "mortgage_payoff",
+  "motivation_signals",
+]);
+
+function isBlankFactValue(value) {
+  return (
+    value === undefined ||
+    value === null ||
+    value === false ||
+    (typeof value === "string" && value.trim() === "") ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+/**
+ * Detect whether THIS TURN disclosed a material fact that the persisted fact
+ * record did not already hold (spec §13: movement requires a reason). Compares
+ * the turn's newly extracted facts against the persisted set — a seller
+ * repeating an already-known fact never re-qualifies a concession.
+ */
+export function detectNewMaterialFact({ new_facts = null, known_facts = null } = {}) {
+  const newFacts = new_facts && typeof new_facts === "object" ? new_facts : {};
+  const knownFacts = known_facts && typeof known_facts === "object" ? known_facts : {};
+  const new_material_fact_keys = [];
+
+  for (const key of MATERIAL_FACT_KEYS) {
+    const value = newFacts[key];
+    if (isBlankFactValue(value)) continue;
+    const prior = knownFacts[key];
+    let changed;
+    if (isBlankFactValue(prior)) {
+      changed = true;
+    } else if (Array.isArray(value)) {
+      const priorList = (Array.isArray(prior) ? prior : [prior]).map((v) => lower(v));
+      changed = value.some((v) => !priorList.includes(lower(v)));
+    } else {
+      changed = lower(value) !== lower(prior);
+    }
+    if (changed) new_material_fact_keys.push(key);
+  }
+
+  return {
+    new_material_fact: new_material_fact_keys.length > 0,
+    new_material_fact_keys,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // UNDERWRITING SUFFICIENCY (spec §4)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -411,7 +485,13 @@ export function evaluateUnderwritingSufficiency({
   const askKnown = num(facts?.asking_price?.value ?? facts?.asking_price) !== null;
   if (!askKnown && facts?.wants_offer !== true) missing.push("asking_price");
 
-  const valuationConfidence = num(ade_snapshot?.valuation_confidence);
+  // Same defensive boundary as classifyNegotiationZone: ADE-native 0–100
+  // confidence is normalized to the 0–1 policy scale before comparison.
+  // Mixed provenance: persisted snapshots may carry either 0–1 or ADE-native
+  // 0–100 confidence, so this site keeps the heuristic normalizer. The strict
+  // ADE-native normalizer applies only at the valuation-authority resolver,
+  // whose input contract is raw engine output.
+  const valuationConfidence = normalizeOfferConfidence(ade_snapshot?.valuation_confidence);
   const compCount = num(ade_snapshot?.comp_count) ?? 0;
   const valuationReliable =
     valuationConfidence !== null && valuationConfidence >= p.min_valuation_confidence && compCount >= 3;
@@ -518,11 +598,13 @@ export function resolveClosingTermPolicy({
 export default {
   ASSET_CLASSES,
   NEGOTIATION_ZONES,
+  MATERIAL_FACT_KEYS,
   normalizeAssetClass,
   resolveValueBand,
   resolveNegotiationPolicy,
   computeNegotiationGapMetrics,
   classifyNegotiationZone,
+  detectNewMaterialFact,
   evaluateConcession,
   evaluateUnderwritingSufficiency,
   resolveClosingTermPolicy,

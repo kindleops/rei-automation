@@ -280,8 +280,11 @@ export async function runSendQueue(
       return { ok: false, status: 423, ...buildDisabledResponse("queue_runner_enabled", "runSendQueue"), skipped: true, reason: "system_control_disabled", sent_count: 0, results: [] };
     }
     const outbound_sms_enabled = await get_system_flag("outbound_sms_enabled");
+    // auto_reply_live_enabled is a legacy DIAGNOSTIC flag (see
+    // auto-reply-mode.js) — it must never re-arm the runner past an explicit
+    // outbound_sms_enabled=false, so it is logged but not OR-ed into the gate.
     const auto_reply_live_enabled = await get_system_flag("auto_reply_live_enabled");
-    if (!outbound_sms_enabled && !auto_reply_live_enabled) {
+    if (!outbound_sms_enabled) {
       log_info("queue_runner.blocked", { flag: "outbound_sms_enabled", auto_reply_live_enabled });
       return { ok: false, status: 423, ...buildDisabledResponse("outbound_sms_enabled", "runSendQueue"), skipped: true, reason: "system_control_disabled", sent_count: 0, results: [] };
     }

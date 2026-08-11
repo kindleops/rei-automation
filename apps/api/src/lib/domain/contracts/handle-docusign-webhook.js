@@ -10,6 +10,8 @@ import {
   failIdempotentProcessing,
   hashIdempotencyPayload,
 } from "@/lib/domain/events/idempotency-ledger.js";
+import { isFeatureEnabled } from "@/lib/config/feature-flags.js";
+import { storeSignedContractDocument } from "@/lib/domain/agreements/store-signed-contract-document.js";
 import { maybeCreateTitleRoutingFromSignedContract } from "@/lib/domain/title/maybe-create-title-routing-from-signed-contract.js";
 import { maybeCreateClosingFromTitleRouting } from "@/lib/domain/closings/maybe-create-closing-from-title-routing.js";
 import { maybeSendTitleIntro } from "@/lib/domain/title/maybe-send-title-intro.js";
@@ -38,6 +40,8 @@ function sortNewestFirst(items = []) {
 const defaultDeps = {
   findContractItems,
   updateContractItem,
+  isFeatureEnabled,
+  storeSignedContractDocument,
   beginIdempotentProcessing,
   completeIdempotentProcessing,
   failIdempotentProcessing,
@@ -585,6 +589,19 @@ export async function handleDocusignWebhook(payload = {}) {
       await runtimeDeps.updateContractItem(contract_item.item_id, update_payload);
     }
 
+    // Signed-document archival (G10): NEW capability behind
+    // ENABLE_SIGNED_CONTRACT_ARCHIVAL (default false). While the flag is off
+    // the archival dep is never invoked and webhook behavior is unchanged.
+    const signed_document_archive =
+      normalized_status === "Completed" &&
+      runtimeDeps.isFeatureEnabled("ENABLE_SIGNED_CONTRACT_ARCHIVAL")
+        ? await runtimeDeps.storeSignedContractDocument({
+            envelope_id: extracted.envelope_id,
+            contract_item_id: contract_item.item_id,
+            completed_at: extracted.completed_at || null,
+          })
+        : null;
+
     const title_routing = await runtimeDeps.maybeCreateTitleRoutingFromSignedContract({
       contract_item,
       contract_item_id: contract_item.item_id,
@@ -663,6 +680,8 @@ export async function handleDocusignWebhook(payload = {}) {
       title_intro_sent: Boolean(title_intro?.sent),
       title_intro_reason: title_intro?.reason || null,
       title_company_email: title_intro?.title_company_email || null,
+      signed_document_archived: Boolean(signed_document_archive?.archived),
+      signed_document_archive_reason: signed_document_archive?.reason || null,
       pipeline_stage: pipeline?.current_stage || null,
       brain_updated: Boolean(brain_update?.updated),
       brain_reason: brain_update?.reason || null,
@@ -677,6 +696,7 @@ export async function handleDocusignWebhook(payload = {}) {
       normalized_status,
       contract_status: update_payload[CONTRACT_FIELDS.contract_status] || null,
       update_payload,
+      signed_document_archive,
       title_routing,
       closing,
       buyer_match,
