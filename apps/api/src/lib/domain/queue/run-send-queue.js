@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { info, warn } from "@/lib/logging/logger.js";
+import { info, warn, error } from "@/lib/logging/logger.js";
 import { getSystemFlag, getSystemValue, buildDisabledResponse, setSystemValues } from "@/lib/system-control.js";
 import {
   blockedRuntimeBrakeResult,
@@ -159,6 +159,7 @@ export async function runSendQueue(
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
   const log_info = deps.info || info;
   const log_warn = deps.warn || warn;
+  const log_error = deps.error || error;
   const supabase = deps.supabaseClient || defaultSupabase;
   const process_item = deps.processSendQueueItem || defaultProcessSendQueueItem;
 
@@ -166,6 +167,31 @@ export async function runSendQueue(
   const processing_run_id = crypto.randomUUID();
 
   log_info("queue.run_started", { limit, dry_run, now_utc: now });
+
+  // TEMPORARY proof watchdog: independently restore containment if an attended
+  // S1→S2 proof authorization has expired without completion. Runs every minute,
+  // before the dispatch gate, and never throws into the queue run.
+  if (!dry_run) {
+    try {
+      const { runS1S2ProofWatchdog } = await import("@/lib/domain/proof/s1s2-attended-proof.js");
+      const { setSystemValues } = await import("@/lib/system-control.js");
+      const { SYSTEM_CONTROL_AUTHORITIES } = await import("@/lib/domain/queue/operator-brake-authority.js");
+      const wd = await runS1S2ProofWatchdog({
+        supabase,
+        setSystemValues,
+        operatorOpts: { authority: SYSTEM_CONTROL_AUTHORITIES.OPERATOR, supabase },
+      });
+      if (wd?.acted && wd.ok === false) {
+        // Containment restore was ATTEMPTED but a write was rejected — this is
+        // an unmistakable error-level signal: production may still be armed.
+        log_error("s1s2_proof.watchdog_restore_failed", { reason: wd.reason, errors: wd.errors || [] });
+      } else if (wd?.acted) {
+        log_warn("s1s2_proof.watchdog_restored", { reason: wd.reason });
+      }
+    } catch (watchdog_error) {
+      log_error("s1s2_proof.watchdog_error", { message: watchdog_error?.message || "unknown" });
+    }
+  }
 
   const execution_mode = await getQueueExecutionMode({ getSystemValue: get_system_value });
   const mode_gate = evaluateUnrestrictedDispatchGate(execution_mode, { action: "runSendQueue" });
