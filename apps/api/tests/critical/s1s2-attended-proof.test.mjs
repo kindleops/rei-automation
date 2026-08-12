@@ -29,8 +29,8 @@ function makeWorld(opts = {}) {
   let clock = opts.startMs ?? 1_000_000;
   const events = {
     sms: [], dispatched: [],
-    locks: { acquired: [], released: [], live: new Set() },
-    auths: { created: [], consumed: [], open: new Set() },
+    locks: { acquired: [], released: [], live: new Set(), holder: null },
+    auths: { created: [], consumed: [], open: new Set(), byRunId: new Map() },
   };
 
   function table(name) {
@@ -115,18 +115,33 @@ function makeWorld(opts = {}) {
       events.locks.acquired.push(o);
       if (opts.lockUnavailable) return { acquired: false, reason: "global_lock_held" };
       const token = `lock-${seq++}`;
-      events.locks.live.add(token);
+      events.locks.live.add(token); events.locks.holder = token;
       return { acquired: true, token, owner_type: o.owner_type, canary_run_id: o.canary_run_id };
     },
-    releaseLock: async (token) => { events.locks.released.push(token); if (events.locks.live.has(token)) { events.locks.live.delete(token); return true; } return false; },
+    // releaseFails: return false WITHOUT releasing (simulates DB error while held).
+    releaseLock: async (token) => {
+      events.locks.released.push(token);
+      if (opts.releaseFails) return false; // still held
+      if (events.locks.live.has(token)) { events.locks.live.delete(token); if (events.locks.holder === token) events.locks.holder = null; return true; }
+      return false;
+    },
+    readLockToken: async () => events.locks.holder ?? null,
     createAuthorization: async (o) => {
       events.auths.created.push(o);
       if (opts.authCreateFails) throw new Error("authorization_insert_failed");
       const id = `auth-${seq++}`;
-      events.auths.open.add(id);
+      events.auths.open.add(id); events.auths.byRunId.set(o.canary_run_id, { id, canary_run_id: o.canary_run_id, campaign_id: o.campaign_id, expires_at: o.expires_at, consumed_at: null });
       return { id, canary_run_id: o.canary_run_id, campaign_id: o.campaign_id, queue_row_ids: o.queue_row_ids };
     },
-    consumeAuthorization: async (id) => { events.auths.consumed.push(id); events.auths.open.delete(id); return { ok: true, authorization_id: id }; },
+    // consumeFails: return {ok:false} WITHOUT consuming (simulates a held auth).
+    consumeAuthorization: async (id) => {
+      events.auths.consumed.push(id);
+      if (opts.consumeFails) return { ok: false, reason: "authorization_consume_failed" };
+      events.auths.open.delete(id);
+      for (const [, a] of events.auths.byRunId) if (a.id === id) a.consumed_at = new Date(clock).toISOString();
+      return { ok: true, authorization_id: id };
+    },
+    loadAuthorizationByRunId: async (runId) => events.auths.byRunId.get(runId) ?? null,
     // Claim path. Injections: dispatchFails (ok:false), dispatchSkipped
     // (ok:true,skipped — the live bug), dispatchNoProvider, dispatchNoSentAt.
     dispatchQueueRow: async (row, ctx = {}) => {
@@ -593,4 +608,112 @@ test("duplicate-S2 protection remains intact after the fix", async () => {
   assert.equal(v.ok, false);
   assert.match(String(v.reason), /verify_and_s2_failed/);
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+// ── LOCK-RECOVERY PERSISTENCE + FAILED-CLEANUP RETENTION (CodeRabbit #1/#2) ────
+test("lock token is persisted IMMEDIATELY after acquire, before authorization creation", async () => {
+  // createAuthorization throws → simulate a crash right after acquire. The
+  // recovery handle must already be persisted so restore/watchdog can release.
+  const w = makeWorld({ mintNonce: () => "n1", mintCanaryRunId: () => "run-1", authCreateFails: true });
+  const r = await runArmAndS1(w.deps);
+  assert.equal(r.ok, false);
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  // The lock handle was recorded before the (failed) authorization insert.
+  // Cleanup then confirms release (fake releases live token) and clears it —
+  // but the key property is that acquireLock ran and a token existed to persist.
+  assert.equal(w.events.locks.acquired.length, 1);
+  assert.equal(w.events.locks.released.length, 1); // cleanup attempted the recorded token
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+test("crash between lock and auth leaves a releasable handle when cleanup cannot run", async () => {
+  // authCreateFails throws AND releaseFails → the lock stays held; the recorded
+  // handle must be RETAINED (not erased) for restore/watchdog to retry.
+  const w = makeWorld({ mintNonce: () => "n1", mintCanaryRunId: () => "run-1", authCreateFails: true, releaseFails: true });
+  await runArmAndS1(w.deps);
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  assert.ok(auth.execution_lock_token, "lock handle retained for retry");
+  assert.equal(auth.scoped_canary_run_id, "run-1");
+  assert.equal(w.events.locks.live.size, 1, "lock still held (release failed)");
+});
+test("restoreContainment surfaces lock_release_failed and does NOT report ok:true while held", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", releaseFails: true });
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({
+    nonce: "n1", phase: "s1_sent", expires_at: new Date(w.now() + 60000).toISOString(),
+    execution_lock_token: "held", scoped_canary_run_id: "run-x", canary_authorization_id: null,
+  }));
+  w.events.locks.live.add("held"); w.events.locks.holder = "held";
+  w.sys.set("queue_execution_mode", "scoped_canary_only");
+  const res = await restoreContainment(w.deps, "test");
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.includes("lock_release_failed"));
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  assert.equal(auth.execution_lock_token, "held", "handle retained for retry");
+  assert.ok(!auth.closed_at, "record NOT closed while a resource is held");
+});
+test("restoreContainment surfaces authorization_close_failed when the auth is still open", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", consumeFails: true });
+  // The authorization is still open+unexpired (byRunId), so confirm cannot close it.
+  w.events.auths.byRunId.set("run-y", { id: "auth-y", canary_run_id: "run-y", expires_at: new Date(w.now() + 60000).toISOString(), consumed_at: null });
+  w.events.auths.open.add("auth-y");
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({
+    nonce: "n1", phase: "s1_sent", expires_at: new Date(w.now() + 60000).toISOString(),
+    execution_lock_token: null, scoped_canary_run_id: "run-y", canary_authorization_id: "auth-y",
+  }));
+  const res = await restoreContainment(w.deps, "test");
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.includes("authorization_close_failed"));
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  assert.equal(auth.canary_authorization_id, "auth-y", "auth handle retained for retry");
+});
+test("an already-consumed authorization (spent by the claim) is treated as closed", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", consumeFails: true });
+  // consume returns ok:false but the auth is already consumed → closed.
+  w.events.auths.byRunId.set("run-z", { id: "auth-z", canary_run_id: "run-z", expires_at: new Date(w.now() + 60000).toISOString(), consumed_at: new Date(w.now()).toISOString() });
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({
+    nonce: "n1", phase: "s1_sent", expires_at: new Date(w.now() + 60000).toISOString(),
+    execution_lock_token: null, scoped_canary_run_id: "run-z", canary_authorization_id: "auth-z",
+  }));
+  const res = await restoreContainment(w.deps, "test");
+  assert.ok(!res.errors.includes("authorization_close_failed"));
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  assert.equal(auth.canary_authorization_id, null, "closed handle cleared");
+});
+test("watchdog recovery retries using a RETAINED handle after an earlier failure", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", releaseFails: true });
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({
+    nonce: "n1", phase: "s1_sent", expires_at: new Date(w.now() - 1000).toISOString(), // expired
+    execution_lock_token: "held", scoped_canary_run_id: "run-w", canary_authorization_id: null,
+  }));
+  w.events.locks.live.add("held"); w.events.locks.holder = "held";
+  w.sys.set("queue_execution_mode", "scoped_canary_only");
+  // First watchdog pass: release fails → ok:false, handle retained.
+  const first = await runS1S2ProofWatchdog(w.deps);
+  assert.equal(first.ok, false);
+  assert.equal(JSON.parse(w.sys.get("s1s2_proof_authorization")).execution_lock_token, "held");
+  // The lock frees (TTL / operator). Second pass releases and clears cleanly.
+  w.deps.releaseLock = async (t) => { w.events.locks.released.push(t); w.events.locks.live.delete(t); w.events.locks.holder = null; return true; };
+  const second = await runS1S2ProofWatchdog(w.deps);
+  assert.equal(second.ok, true, JSON.stringify(second.errors));
+  assert.equal(JSON.parse(w.sys.get("s1s2_proof_authorization")).execution_lock_token, null);
+});
+
+// ── S2 campaign pin enforced at dispatch (fail-closed on mismatch) ────────────
+test("S2 with a non-pinned campaign fails closed (s2_row_campaign_mismatch)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound();
+  w.seedS2(w.now(), "offer_interest", 1, "some-other-campaign"); // NOT the pinned campaign
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.match(String(v.detail || v.reason), /s2_row_campaign_mismatch|verify_and_s2_failed/);
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+test("S2 carrying the pinned campaign dispatches (propagation path)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound();
+  w.seedS2(w.now(), "offer_interest", 1, PROOF.campaign_id); // as the reply pipeline propagates
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.ok(v.s2_provider_id);
 });

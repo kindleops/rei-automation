@@ -256,3 +256,30 @@ test("recovery sweep COUNTERFACTUAL: dropping the bound rebinds to the later sen
     "fixture is not vacuous: unbounded replay really does bind to a post-inbound send"
   );
 });
+
+// ── Campaign propagation to the auto-created S2 (CodeRabbit #3 verification) ───
+// The reply pipeline (apply-inbound-automation-decision:2490) sets the S2 row's
+// campaign_id from context.summary.campaign_id, which find-recent-outbound-pair
+// derives from the conversation-authority (S1) row's campaign_id COLUMN. This
+// proves an S1 carrying the pinned campaign propagates it into the reply context
+// — so the auto-created S2 satisfies the atomic-claim row.campaign_id check.
+const PINNED_CAMPAIGN = "b7c9a000-7ad3-468b-9b9b-4647dbefc35f";
+test("S1 campaign_id propagates into the reply context summary (feeds S2 campaign_id)", async () => {
+  const supabase = makeInboundRealPathSupabase({
+    send_queue: [queueRow({
+      id: "s1-proof-row",
+      provider_message_id: "PROVIDER-S1",
+      message_body: "Are you still the owner? Reply YES or NO.",
+      campaign_id: PINNED_CAMPAIGN, // set on the S1 COLUMN by the proof hotfix
+      sent_at: "2030-06-10T01:19:32.741Z",
+      created_at: "2030-06-10T01:19:32.741Z",
+    })],
+  });
+  const pair = await findRecentOutboundContextPair(THREAD, TEXTGRID, {
+    supabase,
+    inbound_received_at: INBOUND_AT,
+  });
+  assert.ok(pair?.found && pair.context, "context pair resolved from the S1 send_queue row");
+  assert.equal(pair.context.summary.campaign_id, PINNED_CAMPAIGN,
+    "reply context carries the S1 campaign → the auto-created S2 row inherits it (apply-inbound-automation-decision:2490)");
+});
