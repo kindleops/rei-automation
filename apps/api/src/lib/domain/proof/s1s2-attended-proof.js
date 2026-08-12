@@ -21,6 +21,60 @@
 
 import crypto from "node:crypto";
 import { INTERNAL_PROOF_PINNED } from "@/lib/domain/queue/internal-proof-session.js";
+import {
+  acquireGlobalExecutionLock,
+  releaseGlobalExecutionLock,
+  GLOBAL_LOCK_OWNER,
+} from "@/lib/domain/queue/queue-global-execution-lock.js";
+import {
+  createCanaryAuthorization,
+  consumeCanaryAuthorization,
+  loadCanaryAuthorizationByRunId,
+} from "@/lib/domain/queue/queue-canary-authorization.js";
+
+// Canonical scoped-canary primitives — reused, not reimplemented. Injectable for tests.
+function scopedOps(deps) {
+  return {
+    acquireLock: deps.acquireLock || ((opts) => acquireGlobalExecutionLock(deps.supabase, opts)),
+    releaseLock: deps.releaseLock || ((token) => releaseGlobalExecutionLock(deps.supabase, token)),
+    createAuthorization: deps.createAuthorization || ((opts) => createCanaryAuthorization(deps.supabase, opts)),
+    consumeAuthorization: deps.consumeAuthorization || ((id) => consumeCanaryAuthorization(deps.supabase, id)),
+    loadAuthorizationByRunId: deps.loadAuthorizationByRunId || ((runId) => loadCanaryAuthorizationByRunId(deps.supabase, runId)),
+    // Current holder of the global execution lock (id=1); null when free.
+    readLockToken: deps.readLockToken || (async () => {
+      const { data } = await deps.supabase.from("queue_global_execution_lock").select("lock_token").eq("id", 1).maybeSingle();
+      return data?.lock_token || null;
+    }),
+  };
+}
+const SCOPED_CANARY_LOCK_TTL_SECONDS = 120;
+const SCOPED_CANARY_AUTH_TTL_MS = 120 * 1000;
+
+// Confirm the proof-owned lock is no longer held BY US. release RPC returns true
+// when it cleared our token; false when no row matched our token (we don't hold
+// it) — but the JS wrapper also returns false on a thrown DB error, so on false
+// we re-read the lock holder: not-our-token ⇒ released, our-token ⇒ still held,
+// unreadable ⇒ conservatively "not released" (leave the handle for retry).
+async function confirmLockReleased(deps, ops, token) {
+  let released = false;
+  try { released = (await ops.releaseLock(token)) === true; } catch { released = false; }
+  if (released) return true;
+  try { return clean(await ops.readLockToken()) !== clean(token); } catch { return false; }
+}
+
+// Confirm the proof-owned authorization is closed. consume returns {ok:true}
+// when it marked it consumed; else re-check: already-consumed (e.g. spent by the
+// claim), expired, or gone all mean closed; still-open+unexpired means failed.
+async function confirmAuthClosed(deps, ops, authId, runId) {
+  try { const r = await ops.consumeAuthorization(authId); if (r?.ok === true) return true; } catch { /* re-check below */ }
+  try {
+    const existing = runId ? await ops.loadAuthorizationByRunId(runId) : null;
+    if (!existing) return true;
+    if (existing.consumed_at) return true;
+    if (existing.expires_at && Date.parse(existing.expires_at) <= nowMs(deps)) return true;
+    return false;
+  } catch { return false; }
+}
 
 export const PROOF_AUTH_KEY = "s1s2_proof_authorization";
 export const EXECUTION_MODE_KEY = "queue_execution_mode";
@@ -98,6 +152,99 @@ function authorizationActive(auth, atMs) {
 // (setSystemValues returns { ok:false, error } on a DB write error).
 function writeFailed(res) { return !res || res.ok === false; }
 
+// Record/clear the in-flight scoped-canary lock + authorization on the proof
+// authorization record so restoreContainment and the (stateless) watchdog can
+// release them. Read-modify-write of the persisted JSON.
+async function persistAuthLockFields(deps, fields) {
+  const raw = await readSysval(deps, PROOF_AUTH_KEY);
+  const auth = raw ? JSON.parse(raw) : {};
+  const next = { ...auth, ...fields };
+  const res = await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify(next));
+  if (writeFailed(res)) throw new Error("auth_lock_field_write_rejected");
+}
+
+// Dispatch exactly one proof-owned row through the queue engine's scoped-canary
+// authority path: acquire the global execution lock as owner scoped_canary with
+// a fresh canary_run_id, register a scoped-canary authorization allow-listing
+// ONLY this row under the pinned campaign, then dispatch with the full claim
+// context. Verifies an ACTUAL send (fail-closed). Releases the lock + consumes
+// the authorization on every path. Returns { ok, provider_id, reason }.
+async function dispatchProofRowScoped(deps, rowId, label) {
+  const ops = scopedOps(deps);
+  const row = await deps.fetchQueueRow(rowId);
+  if (!row) return { ok: false, reason: `${label}_row_missing` };
+  // Code-pinned: the row's campaign_id column must be the pinned proof campaign
+  // (the claim RPC enforces row.campaign_id === p_campaign_id).
+  if (clean(row.campaign_id) !== clean(PROOF.campaign_id)) {
+    return { ok: false, reason: `${label}_row_campaign_mismatch` };
+  }
+
+  const canary_run_id = deps.mintCanaryRunId ? deps.mintCanaryRunId() : crypto.randomUUID();
+  const authorization_token = deps.mintAuthToken ? deps.mintAuthToken() : crypto.randomBytes(32).toString("hex");
+  let lock = null;
+  let authorization = null;
+  try {
+    lock = await ops.acquireLock({
+      owner_type: GLOBAL_LOCK_OWNER.SCOPED_CANARY,
+      canary_run_id,
+      ttlSeconds: SCOPED_CANARY_LOCK_TTL_SECONDS,
+    });
+    if (!lock?.acquired) return { ok: false, reason: `${label}_scoped_canary_lock_unavailable`, detail: lock?.reason || null };
+
+    // Persist the lock recovery handle IMMEDIATELY — before the authorization
+    // insert or any other await — so a crash between acquisition and auth
+    // creation still leaves restore/watchdog a token to release.
+    await persistAuthLockFields(deps, {
+      execution_lock_token: lock.token,
+      scoped_canary_run_id: canary_run_id,
+    });
+
+    authorization = await ops.createAuthorization({
+      canary_run_id,
+      campaign_id: PROOF.campaign_id,
+      queue_row_ids: [rowId],
+      authorization_token,
+      expires_at: iso(nowMs(deps) + SCOPED_CANARY_AUTH_TTL_MS),
+      metadata: { proof: "s1s2_attended", leg: label },
+    });
+    await persistAuthLockFields(deps, { canary_authorization_id: authorization?.id || null });
+
+    const disp = await deps.dispatchQueueRow(row, {
+      scoped_canary: true,
+      canary_run_id,
+      authorization_token,
+      campaign_id: PROOF.campaign_id,
+    });
+
+    // FAIL CLOSED: a send is confirmed ONLY when the claim ran (not skipped) AND
+    // the re-read row shows a real provider send. {ok:true, skipped:true} — an
+    // unclaimed row — is NOT a send.
+    if (disp?.ok !== true || disp?.skipped === true) {
+      return { ok: false, reason: `${label}_dispatch_unconfirmed`, detail: disp?.reason || "not_claimed" };
+    }
+    const fresh = await deps.fetchQueueRow(rowId);
+    const providerId = fresh?.provider_message_id || null;
+    if (!fresh?.sent_at || !providerId) {
+      return { ok: false, reason: `${label}_dispatch_unconfirmed`, detail: "no_sent_at_or_provider_id" };
+    }
+    return { ok: true, provider_id: providerId, canary_run_id };
+  } finally {
+    // Clean up, but CLEAR a recovery handle ONLY when the resource is confirmed
+    // released — a failed cleanup keeps the handle so restore/watchdog can retry.
+    const cleared = {};
+    if (lock?.token) {
+      if (await confirmLockReleased(deps, ops, lock.token)) { cleared.execution_lock_token = null; cleared.scoped_canary_run_id = null; }
+    } else { cleared.execution_lock_token = null; cleared.scoped_canary_run_id = null; }
+    if (authorization?.id) {
+      // Confirm closed: a successful claim already consumed the single-row
+      // authorization (consume ⇒ ok:false, re-check sees consumed_at); a failed
+      // dispatch leaves it open, so we consume it here. Clear only when closed.
+      if (await confirmAuthClosed(deps, ops, authorization.id, canary_run_id)) cleared.canary_authorization_id = null;
+    } else { cleared.canary_authorization_id = null; }
+    if (Object.keys(cleared).length) { try { await persistAuthLockFields(deps, cleared); } catch { /* handle stays for retry */ } }
+  }
+}
+
 // ── Containment restore — idempotent; used by every exit + the watchdog ───────
 // Ownership-aware: the execution mode is reversed to "paused" ONLY when it is
 // currently the proof's own scoped_canary_only — a pre-arm failure (mode still
@@ -120,9 +267,34 @@ export async function restoreContainment(deps, cause = "restore") {
       if (!s.closed_at) { s.closed_at = iso(nowMs(deps)); s.closed_cause = cause; const res = await writeSysval(deps, SESSION_KEY, JSON.stringify(s)); if (writeFailed(res)) errors.push("session_close_write_rejected"); }
     }
   } catch (e) { errors.push(`session_close_failed:${e.message}`); }
+  // Release the proof-owned scoped-canary execution lock + close its
+  // authorization (idempotent; token-scoped release cannot touch another run's
+  // lock). A cleanup that is NOT confirmed released surfaces an explicit error
+  // and RETAINS its handle so a later restore/watchdog can retry — the record
+  // is NOT closed while any resource may still be held, and ok stays false.
   try {
     const auth = await loadAuthorization(deps);
-    if (auth && !auth.closed_at) { auth.closed_at = iso(nowMs(deps)); auth.closed_cause = cause; const res = await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify(auth)); if (writeFailed(res)) errors.push("auth_close_write_rejected"); }
+    if (auth) {
+      const ops = scopedOps(deps);
+      let lockReleased = true;
+      let authClosed = true;
+      if (auth.execution_lock_token) {
+        lockReleased = await confirmLockReleased(deps, ops, auth.execution_lock_token);
+        if (!lockReleased) errors.push("lock_release_failed");
+        else { auth.execution_lock_token = null; auth.scoped_canary_run_id = null; }
+      }
+      if (auth.canary_authorization_id) {
+        authClosed = await confirmAuthClosed(deps, ops, auth.canary_authorization_id, auth.scoped_canary_run_id);
+        if (!authClosed) errors.push("authorization_close_failed");
+        else { auth.canary_authorization_id = null; }
+      }
+      // Close the record only when nothing is left held; otherwise persist the
+      // cleared handles (if any) but keep it open for retry.
+      const fullyReleased = lockReleased && authClosed;
+      if (fullyReleased && !auth.closed_at) { auth.closed_at = iso(nowMs(deps)); auth.closed_cause = cause; }
+      const res = await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify(auth));
+      if (writeFailed(res)) errors.push("auth_close_write_rejected");
+    }
   } catch (e) { errors.push(`auth_close_failed:${e.message}`); }
   return { ok: errors.length === 0, cause, errors };
 }
@@ -197,19 +369,20 @@ export async function runArmAndS1(deps) {
       message_body: s1Body(), message_text: s1Body(),
       template_use_case: S1_USE_CASE, use_case_template: S1_USE_CASE,
       queue_status: "queued", type: "outbound", touch_number: 1,
+      // The campaign_id COLUMN (not just metadata) must be the pinned proof
+      // campaign — the scoped-canary claim enforces row.campaign_id === p_campaign_id.
+      campaign_id: PROOF.campaign_id,
       metadata: { source: "manual_inbox", manual_operator_send: true, proof: "s1s2_attended", use_case: S1_USE_CASE, campaign_id: PROOF.campaign_id },
     });
     const s1RowId = enq?.queue_row_id || enq?.item_id || null;
     if (!enq?.ok || !s1RowId) throw new Error("S1 enqueue failed");
-    const row = await deps.fetchQueueRow(s1RowId);
-    // Dispatch through the queue engine's scoped-canary execution context: while
-    // mode is scoped_canary_only the ambient cron is blocked, and this one
-    // proof-owned row is dispatched via the scoped path. Normal (non-proof)
-    // dispatch is unaffected and keeps its full brakes.
-    const disp = await deps.dispatchQueueRow(row, { scoped_canary: true });
-    if (disp?.ok === false) throw new Error(`S1 dispatch rejected: ${disp?.reason || "unknown"}`);
-    const fresh = await deps.fetchQueueRow(s1RowId);
-    const s1ProviderId = fresh?.provider_message_id || disp?.provider_message_id || null;
+    // Dispatch through the queue engine's REAL scoped-canary authority: acquire
+    // the scoped_canary execution lock + register an authorization scoped to
+    // this one row, then claim under scoped_canary_only. Fail closed on any
+    // non-send (the prior bug treated {ok:true,skipped:true} as success).
+    const disp = await dispatchProofRowScoped(deps, s1RowId, "s1");
+    if (!disp.ok) throw new Error(`S1 ${disp.reason}${disp.detail ? ` (${disp.detail})` : ""}`);
+    const s1ProviderId = disp.provider_id;
 
     // Persist S1 identity onto the authorization for the verify phase.
     assertWrite(await writeSysval(deps, PROOF_AUTH_KEY, JSON.stringify({
@@ -286,12 +459,11 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
     if (s2rows.length !== 1) throw new Error(`expected exactly one S2, found ${s2rows.length}`);
     const s2RowId = s2rows[0].id;
 
-    // 6) dispatch exactly that S2 — through the same scoped-canary context as S1
-    const s2row = await deps.fetchQueueRow(s2RowId);
-    const s2disp = await deps.dispatchQueueRow(s2row, { scoped_canary: true });
-    if (s2disp?.ok === false) throw new Error(`S2 dispatch rejected: ${s2disp?.reason || "unknown"}`);
-    const s2fresh = await deps.fetchQueueRow(s2RowId);
-    const s2ProviderId = s2fresh?.provider_message_id || s2disp?.provider_message_id || null;
+    // 6) dispatch exactly that S2 — through the SAME scoped-canary authority path
+    // (fresh lock + authorization scoped to this row), fail-closed on non-send.
+    const s2disp = await dispatchProofRowScoped(deps, s2RowId, "s2");
+    if (!s2disp.ok) throw new Error(`S2 ${s2disp.reason}${s2disp.detail ? ` (${s2disp.detail})` : ""}`);
+    const s2ProviderId = s2disp.provider_id;
 
     // 7) replay-idempotency — still exactly one S2
     const after = await listS2();
