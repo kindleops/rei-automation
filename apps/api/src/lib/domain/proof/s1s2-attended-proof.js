@@ -36,11 +36,13 @@ import {
 //   • aggregateBurstMessage → the authoritative last_authorized_received_at that
 //     the live burst flush consumes (derived from constituent_messages jsonb; it
 //     is NOT a seller_inbound_bursts column).
-//   • canonicalStageForUseCase/SELLER_FLOW_STAGES → the deterministic stage map's
-//     ownership_confirmed → consider_selling reply use-case (the real S2 row).
+//   • SELLER_FLOW_STAGES.CONSIDER_SELLING → the canonical ownership_confirmed →
+//     consider_selling reply use-case (the real immediate S2 row). We match the
+//     EXACT use_case (not canonicalStageForUseCase, which also folds
+//     consider_selling_follow_up onto this stage — a later row, not our S2).
 // Both modules are pure (zero I/O), so the proof stays credential-free/testable.
 import { aggregateBurstMessage } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
-import { canonicalStageForUseCase, SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
+import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 
 // Canonical scoped-canary primitives — reused, not reimplemented. Injectable for tests.
 function scopedOps(deps) {
@@ -103,12 +105,13 @@ const ACTIVE_STATUSES = ["queued", "scheduled", "pending", "approved", "ready", 
 
 // The canonical post-ownership-confirmation reply use-case is `consider_selling`
 // (deterministic-stage-map: ownership_confirmed → consider_selling; canonical-
-// seller-flow SELLER_FLOW_STAGES.CONSIDER_SELLING). Reuse the canonical stage
-// resolver instead of a proof-local enum list — the earlier proof set
-// {offer_interest,proposal_interest,interest_probe} never matched the row the
-// live automation actually creates, so the S2 leg could never be recognized.
+// seller-flow SELLER_FLOW_STAGES.CONSIDER_SELLING). This attended proof matches
+// ONLY the immediate auto-created S2 (use_case_template === "consider_selling"),
+// NOT a later consider_selling_follow_up — both canonicalize to the same
+// CONSIDER_SELLING stage, so canonicalStageForUseCase() would wrongly accept the
+// follow-up. Compare the exact cleaned use_case against the canonical constant.
 export function isCanonicalS2ReplyRow(row) {
-  return canonicalStageForUseCase(clean(row?.use_case_template)) === SELLER_FLOW_STAGES.CONSIDER_SELLING;
+  return clean(row?.use_case_template) === SELLER_FLOW_STAGES.CONSIDER_SELLING;
 }
 
 function clean(v) { return String(v ?? "").trim(); }
@@ -491,22 +494,37 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
     if (!burst) throw verifyFail("burst_authority_missing", "no seller_inbound_burst for handset");
     const authorizedAt = aggregateBurstMessage(burst.constituent_messages || []).last_authorized_received_at;
     if (!authorizedAt) throw verifyFail("temporal_authority_unavailable", "burst has no authorized_received_at constituent");
-    if (Date.parse(authorizedAt) < Date.parse(auth.s1_sent_at)) {
+    // Both the authorized receipt and the S1 send time must parse to a FINITE epoch
+    // before comparing. An unparseable/garbage value must HARD-FAIL here — never
+    // reach the stale check, where `NaN < x` is false and would silently pass (fail-open).
+    const authorizedMs = Date.parse(authorizedAt);
+    const s1SentMs = Date.parse(auth.s1_sent_at);
+    if (!Number.isFinite(authorizedMs) || !Number.isFinite(s1SentMs)) {
+      throw verifyFail("temporal_authority_unparseable", `authorized_received_at=${authorizedAt} s1_sent_at=${auth.s1_sent_at}`);
+    }
+    if (authorizedMs < s1SentMs) {
       throw verifyFail("temporal_authority_stale", `authorized_received_at ${authorizedAt} predates S1 ${auth.s1_sent_at}`);
     }
 
     // ── 4) Fresh-context authority binds to the exact S1 we sent. The canonical
     // find-recent-outbound-pair returns the id at context.queue_row_id (there is
-    // no context_source_id / outbound.id key on the canonical return).
+    // no context_source_id / outbound.id key on the canonical return). BOTH the
+    // context id and the recorded S1 id must be NON-EMPTY — a null/missing id must
+    // never compare equal via String(null)===String(null) (fail-open).
     const pair = await deps.findRecentOutboundContextPair(PROOF.handset, PROOF.sender, { supabase: deps.supabase, inbound_received_at: inbound.received_at });
-    const ctxId = pair?.context?.queue_row_id ?? pair?.context?.match?.matched_queue_id ?? null;
-    if (String(ctxId) !== String(auth.s1_queue_row_id)) {
-      throw verifyFail("context_not_bound_to_s1", `context bound to ${ctxId}, not the S1 ${auth.s1_queue_row_id}`);
+    const ctxId = clean(pair?.context?.queue_row_id ?? pair?.context?.match?.matched_queue_id ?? "");
+    const s1RowId = clean(auth.s1_queue_row_id);
+    if (!ctxId || !s1RowId) {
+      throw verifyFail("context_authority_missing", `ctx=${ctxId || "∅"} s1=${s1RowId || "∅"}`);
+    }
+    if (ctxId !== s1RowId) {
+      throw verifyFail("context_not_bound_to_s1", `context bound to ${ctxId}, not the S1 ${s1RowId}`);
     }
 
-    // ── 5) Exactly one auto-created S2 — canonical reply use-case (consider_selling
-    // via canonicalStageForUseCase) with an explicit campaign pin. Distinguish
-    // lookup-error / absent / multiple / campaign-mismatch as separate hard fails.
+    // ── 5) Exactly one auto-created S2 — the EXACT immediate reply use-case
+    // (use_case_template === "consider_selling", not the follow-up) with an
+    // explicit campaign pin. Distinguish lookup-error / absent / multiple /
+    // campaign-mismatch as separate hard fails.
     const listS2 = async () => {
       const res = await deps.supabase.from("send_queue").select("id, use_case_template, campaign_id, created_at")
         .eq("to_phone_number", PROOF.handset).gte("created_at", auth.s1_sent_at);

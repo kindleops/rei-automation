@@ -940,3 +940,99 @@ test("REGRESSION: the old proof-only use-cases are NOT recognized as S2 (no_s2_r
   assert.equal(v.ok, false);
   assert.equal(v.stage, "no_s2_row");
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FAIL-CLOSED ON UNUSABLE TEMPORAL/CONTEXT AUTHORITY (CodeRabbit Major) +
+// EXACT immediate-S2 matching (CodeRabbit Minor)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Corrupt the persisted authorization to simulate a malformed/missing recorded id
+// or timestamp reaching the verifier (values it must never trust blindly).
+function corruptAuth(w, patch) {
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({ ...auth, ...patch }));
+}
+
+test("REGRESSION: an UNPARSEABLE authorized receipt fails hard (temporal_authority_unparseable), not stale-passed", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", burstAuthorizedAt: "not-a-timestamp" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_unparseable"); // NaN < x would have fail-OPENED
+  assert.notEqual(v.reason, "no_real_inbound_yet");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+test("REGRESSION: an UNPARSEABLE s1_sent_at fails hard (temporal_authority_unparseable)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_sent_at: "0-invalid-date" }); // lexically small (inbound still found) but Date.parse → NaN
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_unparseable");
+});
+
+test("REGRESSION: an empty canonical context id fails hard (context_authority_missing)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", ctxOverride: "" }); // canonical context.queue_row_id absent
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing");
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+test("REGRESSION: an empty recorded s1_queue_row_id fails hard (context_authority_missing)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_queue_row_id: "" });
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing");
+});
+
+test("REGRESSION: BOTH ids empty must NOT compare equal via String(null) (context_authority_missing, no S2)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", ctxOverride: "" }); // ctx id empty
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_queue_row_id: "" });                          // s1 id also empty
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing"); // the fail-OPEN bug would have matched ""==="" and dispatched
+  assert.equal(w.events.dispatched.length, 1);        // S1 only — S2 never dispatched
+});
+
+test("REGRESSION: consider_selling_follow_up is NOT the immediate S2 (no_s2_row)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling_follow_up"); // canonicalizes to CONSIDER_SELLING but is a LATER row
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "no_s2_row");
+});
+
+test("REGRESSION: the exact immediate consider_selling IS accepted", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling");
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
+});
+
+test("REGRESSION: two immediate consider_selling rows → multiple_s2_rows (fail closed)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling", 2); // two exact immediate S2 rows
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "multiple_s2_rows");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
+});
