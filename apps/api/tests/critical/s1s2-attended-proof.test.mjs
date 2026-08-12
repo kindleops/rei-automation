@@ -28,7 +28,7 @@ function makeWorld(opts = {}) {
   let seq = 1;
   let clock = opts.startMs ?? 1_000_000;
   const events = {
-    sms: [], dispatched: [],
+    sms: [], dispatched: [], fromCalls: [], // fromCalls records every supabase.from(table) access
     locks: { acquired: [], released: [], live: new Set(), holder: null },
     auths: { created: [], consumed: [], open: new Set(), byRunId: new Map() },
   };
@@ -105,7 +105,7 @@ function makeWorld(opts = {}) {
       return api;
     };
   }
-  const supabase = { from: (name) => (typeof wrappedFrom === "function" ? wrappedFrom(name) : table(name)) };
+  const supabase = { from: (name) => { events.fromCalls.push(name); return (typeof wrappedFrom === "function" ? wrappedFrom(name) : table(name)); } };
   const writeFails = opts.writeFails || (() => false); // (key) => boolean
   const setSystemValues = async (patch) => {
     for (const [k, v] of Object.entries(patch)) {
@@ -965,14 +965,31 @@ test("REGRESSION: an UNPARSEABLE authorized receipt fails hard (temporal_authori
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
 });
 
-test("REGRESSION: an UNPARSEABLE s1_sent_at fails hard (temporal_authority_unparseable)", async () => {
+test("REGRESSION: a malformed s1_sent_at fails BEFORE the inbound query (temporal_authority_unparseable, no message_events call)", async () => {
   const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
   w.advance(1000); w.addInbound("Yes"); w.seedS2();
-  corruptAuth(w, { s1_sent_at: "0-invalid-date" }); // lexically small (inbound still found) but Date.parse → NaN
+  corruptAuth(w, { s1_sent_at: "0-invalid-date" }); // a malformed timestamp literal
+  const meBefore = w.events.fromCalls.filter((n) => n === "message_events").length;
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  const meAfter = w.events.fromCalls.filter((n) => n === "message_events").length;
   assert.equal(v.ok, false);
-  assert.equal(v.stage, "temporal_authority_unparseable");
+  assert.equal(v.stage, "temporal_authority_unparseable"); // validated in step 0, before any query
+  assert.notEqual(v.stage, "inbound_lookup_failed");
+  // The bound would fail the real PostgREST query — prove it is NEVER attempted.
+  assert.equal(meAfter - meBefore, 0, "message_events must not be queried with a malformed timestamp");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
+});
+
+test("REGRESSION: a valid s1_sent_at still performs the normal inbound lookup", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const meBefore = w.events.fromCalls.filter((n) => n === "message_events").length;
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  const meAfter = w.events.fromCalls.filter((n) => n === "message_events").length;
+  assert.equal(v.ok, true, v.detail);
+  assert.ok(meAfter - meBefore >= 1, "message_events queried for the inbound lookup on a valid timestamp");
 });
 
 test("REGRESSION: an empty canonical context id fails hard (context_authority_missing)", async () => {

@@ -464,13 +464,25 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
   }
 
   try {
-    // ── 1) Real inbound after S1 — REAL message_events columns. A query/schema
-    // ERROR is a HARD verifier failure (verifyFail), NEVER collapsed into
-    // no_real_inbound_yet; only a clean EMPTY result is the legitimate 425.
+    // ── 0) Validate the recorded S1 send time BEFORE any DB query uses it as a
+    // timestamp literal. In production PostgREST a malformed literal passed to
+    // .gte("received_at", auth.s1_sent_at) fails the QUERY itself — which would
+    // surface as inbound_lookup_failed instead of the correct temporal reason.
+    // Parse to a finite epoch here and fail closed with temporal_authority_unparseable;
+    // ONLY this validated value is used as the message_events/send_queue lower bound.
+    const s1SentAt = clean(auth.s1_sent_at);
+    const s1SentMs = Date.parse(s1SentAt);
+    if (!s1SentAt || !Number.isFinite(s1SentMs)) {
+      throw verifyFail("temporal_authority_unparseable", `s1_sent_at=${auth.s1_sent_at}`);
+    }
+
+    // ── 1) Real inbound after S1 — REAL message_events columns, VALIDATED bound. A
+    // query/schema ERROR is a HARD verifier failure (verifyFail), NEVER collapsed
+    // into no_real_inbound_yet; only a clean EMPTY result is the legitimate 425.
     const inbRes = await deps.supabase.from("message_events")
       .select("id, provider_message_sid, message_body, received_at, direction, thread_key")
       .eq("thread_key", PROOF.handset).eq("direction", "inbound")
-      .gte("received_at", auth.s1_sent_at).order("received_at", { ascending: false }).limit(1);
+      .gte("received_at", s1SentAt).order("received_at", { ascending: false }).limit(1);
     if (inbRes?.error) throw verifyFail("inbound_lookup_failed", inbRes.error.message || String(inbRes.error));
     const inbound = (inbRes?.data || [])[0];
     if (!inbound) return { ok: false, status: 425, reason: "no_real_inbound_yet" }; // 425 Too Early — clean, no inbound yet
@@ -494,16 +506,16 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
     if (!burst) throw verifyFail("burst_authority_missing", "no seller_inbound_burst for handset");
     const authorizedAt = aggregateBurstMessage(burst.constituent_messages || []).last_authorized_received_at;
     if (!authorizedAt) throw verifyFail("temporal_authority_unavailable", "burst has no authorized_received_at constituent");
-    // Both the authorized receipt and the S1 send time must parse to a FINITE epoch
-    // before comparing. An unparseable/garbage value must HARD-FAIL here — never
-    // reach the stale check, where `NaN < x` is false and would silently pass (fail-open).
+    // s1SentMs was already validated finite in step 0; the burst-derived authorized
+    // receipt must ALSO parse to a FINITE epoch before comparing — an unparseable
+    // value must HARD-FAIL, never reach the stale check where `NaN < x` is false
+    // and would silently pass (fail-open).
     const authorizedMs = Date.parse(authorizedAt);
-    const s1SentMs = Date.parse(auth.s1_sent_at);
-    if (!Number.isFinite(authorizedMs) || !Number.isFinite(s1SentMs)) {
-      throw verifyFail("temporal_authority_unparseable", `authorized_received_at=${authorizedAt} s1_sent_at=${auth.s1_sent_at}`);
+    if (!Number.isFinite(authorizedMs)) {
+      throw verifyFail("temporal_authority_unparseable", `authorized_received_at=${authorizedAt}`);
     }
     if (authorizedMs < s1SentMs) {
-      throw verifyFail("temporal_authority_stale", `authorized_received_at ${authorizedAt} predates S1 ${auth.s1_sent_at}`);
+      throw verifyFail("temporal_authority_stale", `authorized_received_at ${authorizedAt} predates S1 ${s1SentAt}`);
     }
 
     // ── 4) Fresh-context authority binds to the exact S1 we sent. The canonical
@@ -527,7 +539,7 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
     // campaign-mismatch as separate hard fails.
     const listS2 = async () => {
       const res = await deps.supabase.from("send_queue").select("id, use_case_template, campaign_id, created_at")
-        .eq("to_phone_number", PROOF.handset).gte("created_at", auth.s1_sent_at);
+        .eq("to_phone_number", PROOF.handset).gte("created_at", s1SentAt); // validated bound (step 0)
       if (res?.error) throw verifyFail("s2_lookup_failed", res.error.message || String(res.error));
       return (res?.data || []).filter((r) => isCanonicalS2ReplyRow(r));
     };
