@@ -104,7 +104,13 @@ export function secretEquals(a, b) {
 }
 
 function s1Body() {
-  return "Hi, this is regarding the property — are you still the owner? Reply YES or NO.";
+  // Neutral opening: NO leading greeting and no "Hi,/Hey,/Hello," anywhere, so it cannot
+  // match the provider-level blank-greeting content guard (providers/textgrid.js:20,
+  // BLANK_GREETING_RE), which reads any "Hi," as a "Hi {name}," template rendered with a
+  // blank name. The proof greeting is intentionally generic — no name personalization —
+  // and the earlier "Hi, this is regarding the property…" body tripped that guard and was
+  // fail-closed to paused_name_missing before provider submission. Keep this greeting-free.
+  return "Quick question about a property you may own — are you still the owner? Reply YES or NO.";
 }
 
 // ── Deny-by-default gate (shared by every action) ─────────────────────────────

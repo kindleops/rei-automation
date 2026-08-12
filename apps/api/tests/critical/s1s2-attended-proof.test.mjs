@@ -717,3 +717,62 @@ test("S2 carrying the pinned campaign dispatches (propagation path)", async () =
   assert.equal(v.ok, true, v.detail);
   assert.ok(v.s2_provider_id);
 });
+
+// ── S1 body clears the provider content guards ───────────────────────────────
+// Regression for the live fail-closed: the earlier "Hi, …" S1 body matched the
+// provider-level blank-greeting guard and was paused as paused_name_missing
+// BEFORE provider submission (no provider id, no sent_at, no SMS). These two
+// patterns are replicated VERBATIM from the provider content guard
+// (apps/api/src/lib/providers/textgrid.js:20-21); they are module-private there,
+// so we mirror them and pin the mirror with an anti-drift sandwich — the OLD
+// failing body MUST still match (proving the mirror reproduces the live failure)
+// and the CURRENT proof body MUST NOT. The body under test is read from the row
+// the lib actually enqueues (runArmAndS1 → getQueue), never a hand-copied string.
+const PROVIDER_BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
+const PROVIDER_UNRESOLVED_PLACEHOLDER_RE = /\{\{[^}]+\}\}/;
+const OLD_FAILING_S1_BODY = "Hi, this is regarding the property — are you still the owner? Reply YES or NO.";
+
+async function enqueuedS1(w) {
+  const r = await runArmAndS1(w.deps);
+  assert.equal(r.ok, true, r.detail);
+  const s1 = w.getQueue().find((row) => row.use_case_template === "ownership_check");
+  assert.ok(s1, "S1 row enqueued under the ownership_check use case");
+  assert.equal(s1.message_body, s1.message_text); // both are s1Body()
+  const body = String(s1.message_body);
+  assert.ok(body.trim().length > 0, "S1 body is non-empty");
+  return { s1, body };
+}
+
+test("anti-drift: the OLD S1 body reproduces the provider blank-greeting failure", () => {
+  assert.equal(PROVIDER_BLANK_GREETING_RE.test(OLD_FAILING_S1_BODY.trim()), true);
+});
+
+test("S1 body does NOT match the provider blank-greeting rule", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const { body } = await enqueuedS1(w);
+  assert.equal(PROVIDER_BLANK_GREETING_RE.test(body.trim()), false);
+});
+
+test("S1 body carries no unresolved template placeholder", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const { body } = await enqueuedS1(w);
+  assert.equal(PROVIDER_UNRESOLVED_PLACEHOLDER_RE.test(body), false);
+});
+
+test("S1 body does not require seller_first_name (no name token; row carries none)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const { s1, body } = await enqueuedS1(w);
+  // The proof never sets seller_first_name, so the provider's blank-name guard
+  // (textgrid.js:536) is skipped (null, not ""). And the copy demands no name.
+  assert.equal(s1.seller_first_name ?? null, null);
+  assert.equal(/\{\{?\s*(seller_)?first_?name\s*\}?\}|\[\s*(seller_)?first_?name\s*\]/i.test(body), false);
+});
+
+test("S1 body still carries the ownership-check intent", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const { s1, body } = await enqueuedS1(w);
+  assert.equal(s1.use_case_template, "ownership_check");
+  assert.match(body, /owner/i);
+  assert.match(body, /\bYES\b/);
+  assert.match(body, /\bNO\b/);
+});
