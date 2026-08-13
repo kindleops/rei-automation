@@ -763,6 +763,12 @@ test("S2 carrying the pinned campaign dispatches (propagation path)", async () =
 const PROVIDER_BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
 const PROVIDER_UNRESOLVED_PLACEHOLDER_RE = /\{\{[^}]+\}\}/;
 const OLD_FAILING_S1_BODY = "Hi, this is regarding the property — are you still the owner? Reply YES or NO.";
+// The CURRENT proof S1 body ("One quick question…") and the PRIOR version ("Quick
+// question…"). Version-bumped intentionally so a fresh attended S1 is a DISTINCT
+// message_body and therefore does not collide with the queue's 24h identical-body
+// hard-idempotency dedup record (the dedup guard itself is unchanged).
+const NEW_PROOF_S1_BODY = "One quick question about a property you may own — are you still the owner? Reply YES or NO.";
+const PRIOR_PROOF_S1_BODY = "Quick question about a property you may own — are you still the owner? Reply YES or NO.";
 
 async function enqueuedS1(w) {
   const r = await runArmAndS1(w.deps);
@@ -807,6 +813,22 @@ test("S1 body still carries the ownership-check intent", async () => {
   assert.match(body, /owner/i);
   assert.match(body, /\bYES\b/);
   assert.match(body, /\bNO\b/);
+});
+
+test("S1 body is the exact NEW version, DISTINCT from the prior proof body (24h dedup non-collision) and clears all content guards", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const { body } = await enqueuedS1(w);
+  // Exactly the intended new version.
+  assert.equal(body, NEW_PROOF_S1_BODY);
+  // Byte-for-byte distinct from the prior identical-body dedup record — the queue's
+  // 24h hard-idempotency match is `clean(message_body) === clean(prior)`, so a
+  // trimmed-difference is what makes the new send NOT collide.
+  assert.notEqual(body, PRIOR_PROOF_S1_BODY);
+  assert.notEqual(body.trim(), PRIOR_PROOF_S1_BODY.trim());
+  // And the new body still clears every provider content guard.
+  assert.equal(PROVIDER_BLANK_GREETING_RE.test(body.trim()), false); // no blank-greeting
+  assert.equal(PROVIDER_UNRESOLVED_PLACEHOLDER_RE.test(body), false); // no unresolved placeholder
+  assert.match(body, /owner/i); // ownership-check only
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
