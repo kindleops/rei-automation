@@ -31,17 +31,17 @@ import {
   consumeCanaryAuthorization,
   loadCanaryAuthorizationByRunId,
 } from "@/lib/domain/queue/queue-canary-authorization.js";
-// Canonical inbound/burst/reply readers — reuse the SAME semantic sources the
-// live inbound path uses (never a proof-local re-interpretation of the schema):
-//   • aggregateBurstMessage → the authoritative last_authorized_received_at that
-//     the live burst flush consumes (derived from constituent_messages jsonb; it
-//     is NOT a seller_inbound_bursts column).
+// Canonical reply-use-case reader — reuse the SAME semantic source the live
+// inbound path uses (never a proof-local re-interpretation of the schema):
 //   • SELLER_FLOW_STAGES.CONSIDER_SELLING → the canonical ownership_confirmed →
 //     consider_selling reply use-case (the real immediate S2 row). We match the
 //     EXACT use_case (not canonicalStageForUseCase, which also folds
 //     consider_selling_follow_up onto this stage — a later row, not our S2).
-// Both modules are pure (zero I/O), so the proof stays credential-free/testable.
-import { aggregateBurstMessage } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
+// Temporal authority is NOT taken from seller_inbound_bursts/aggregateBurstMessage:
+// the live reply path gates on the inbound receipt (message_events.received_at),
+// and the burst-derived last_authorized_received_at is structurally always null
+// (burst mode off; appendConstituent never persists authorized_received_at).
+// This module is pure (zero I/O), so the proof stays credential-free/testable.
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 
 // Canonical scoped-canary primitives — reused, not reimplemented. Injectable for tests.
@@ -477,16 +477,20 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
       throw verifyFail("temporal_authority_unparseable", `s1_sent_at=${auth.s1_sent_at}`);
     }
 
-    // ── 1) Real inbound after S1 — REAL message_events columns, VALIDATED bound. A
-    // query/schema ERROR is a HARD verifier failure (verifyFail), NEVER collapsed
-    // into no_real_inbound_yet; only a clean EMPTY result is the legitimate 425.
+    // ── 1) The most recent inbound on the thread — REAL message_events columns,
+    // ordered by created_at (reliable creation order; received_at can be async-
+    // stamped/re-stamped by the provider). NO received_at bound here: freshness is
+    // the temporal gate in step 3 (so a reply OLDER than S1 denies DISTINCTLY as
+    // temporal_authority_stale rather than being silently swallowed as a 425). A
+    // query/schema ERROR is a HARD failure (verifyFail), NEVER collapsed into
+    // no_real_inbound_yet; only a clean EMPTY result (no inbound at all) is the 425.
     const inbRes = await deps.supabase.from("message_events")
       .select("id, provider_message_sid, message_body, received_at, direction, thread_key")
       .eq("thread_key", PROOF.handset).eq("direction", "inbound")
-      .gte("received_at", s1SentAt).order("received_at", { ascending: false }).limit(1);
+      .order("created_at", { ascending: false }).limit(1);
     if (inbRes?.error) throw verifyFail("inbound_lookup_failed", inbRes.error.message || String(inbRes.error));
     const inbound = (inbRes?.data || [])[0];
-    if (!inbound) return { ok: false, status: 425, reason: "no_real_inbound_yet" }; // 425 Too Early — clean, no inbound yet
+    if (!inbound) return { ok: false, status: 425, reason: "no_real_inbound_yet" }; // 425 Too Early — no inbound yet
 
     // ── 2) Ownership classification (real message_body column) ──
     const cls = await deps.classify(inbound.message_body || "");
@@ -494,29 +498,21 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
       throw verifyFail("inbound_intent_not_confirmed", `${cls?.primary_intent} != ownership_confirmed`);
     }
 
-    // ── 3) Temporal authority — the SAME semantic source the live burst flush
-    // consumes: aggregateBurstMessage(constituent_messages).last_authorized_received_at
-    // (a DERIVED aggregate over the constituent jsonb, NOT a bursts column). A
-    // query error, a missing burst, an absent authorized receipt, or a receipt
-    // OLDER than our S1 (stale / non-authoritative) each deny as a distinct stage.
-    const burstRes = await deps.supabase.from("seller_inbound_bursts")
-      .select("id, thread_key, status, constituent_messages, created_at")
-      .eq("thread_key", PROOF.handset).order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (burstRes?.error) throw verifyFail("burst_lookup_failed", burstRes.error.message || String(burstRes.error));
-    const burst = burstRes?.data;
-    if (!burst) throw verifyFail("burst_authority_missing", "no seller_inbound_burst for handset");
-    const authorizedAt = aggregateBurstMessage(burst.constituent_messages || []).last_authorized_received_at;
-    if (!authorizedAt) throw verifyFail("temporal_authority_unavailable", "burst has no authorized_received_at constituent");
-    // s1SentMs was already validated finite in step 0; the burst-derived authorized
-    // receipt must ALSO parse to a FINITE epoch before comparing — an unparseable
-    // value must HARD-FAIL, never reach the stale check where `NaN < x` is false
-    // and would silently pass (fail-open).
-    const authorizedMs = Date.parse(authorizedAt);
-    if (!Number.isFinite(authorizedMs)) {
-      throw verifyFail("temporal_authority_unparseable", `authorized_received_at=${authorizedAt}`);
+    // ── 3) Temporal authority — the CANONICAL receipt production carries and gates
+    // on: message_events.received_at (already fetched above as inbound.received_at;
+    // the SAME instant fed to autoReplyModeAllowsQueue in the live reply path). NOT
+    // seller_inbound_bursts: burst mode is off for this path so no fresh burst is
+    // created, and appendConstituent never persists authorized_received_at, so the
+    // burst-derived value is structurally always null. s1SentMs was validated finite
+    // in step 0. Missing / unparseable / older-than-S1 each deny as a distinct stage.
+    const receivedAt = clean(inbound.received_at);
+    if (!receivedAt) throw verifyFail("temporal_authority_unavailable", "inbound has no received_at");
+    const receivedMs = Date.parse(receivedAt);
+    if (!Number.isFinite(receivedMs)) {
+      throw verifyFail("temporal_authority_unparseable", `received_at=${inbound.received_at}`);
     }
-    if (authorizedMs < s1SentMs) {
-      throw verifyFail("temporal_authority_stale", `authorized_received_at ${authorizedAt} predates S1 ${s1SentAt}`);
+    if (receivedMs < s1SentMs) {
+      throw verifyFail("temporal_authority_stale", `received_at ${receivedAt} predates S1 ${s1SentAt}`);
     }
 
     // ── 4) Fresh-context authority binds to the exact S1 we sent. The canonical
@@ -568,7 +564,7 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
       ok: true, status: 200,
       inbound_event_id: inbound.id, inbound_provider_id: inbound.provider_message_sid || null,
       classification: { intent: cls.primary_intent, confidence: cls.confidence },
-      burst_id: burst.id, authorized_received_at: authorizedAt, context_source_id: ctxId,
+      inbound_received_at: receivedAt, context_source_id: ctxId,
       s2_queue_row_id: s2RowId, s2_provider_id: s2ProviderId, s2_count: after.length,
       final_queue_execution_mode: "paused",
     };
