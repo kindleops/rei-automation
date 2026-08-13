@@ -129,10 +129,11 @@ function s1Body() {
   // Neutral opening: NO leading greeting and no "Hi,/Hey,/Hello," anywhere, so it cannot
   // match the provider-level blank-greeting content guard (providers/textgrid.js:20,
   // BLANK_GREETING_RE), which reads any "Hi," as a "Hi {name}," template rendered with a
-  // blank name. The proof greeting is intentionally generic — no name personalization —
-  // and the earlier "Hi, this is regarding the property…" body tripped that guard and was
-  // fail-closed to paused_name_missing before provider submission. Keep this greeting-free.
-  return "Quick question about a property you may own — are you still the owner? Reply YES or NO.";
+  // blank name. Non-personalized, ownership-check only, no unresolved placeholders.
+  // Intentionally a NEW version ("One quick question…") DISTINCT from the prior proof body
+  // ("Quick question…") so a fresh attended S1 does not collide with the queue's 24h
+  // identical-body hard-idempotency dedup record — the dedup guard itself is UNCHANGED.
+  return "One quick question about a property you may own — are you still the owner? Reply YES or NO.";
 }
 
 // ── Deny-by-default gate (shared by every action) ─────────────────────────────
