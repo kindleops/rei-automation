@@ -36,12 +36,16 @@ function makeWorld(opts = {}) {
   function table(name) {
     const f = [];
     let lim = null;
+    let ord = null; // { col, ascending } — models PostgREST .order(col, { ascending })
     const api = {
       select(_s, o) { api._head = Boolean(o?.head); return api; },
       eq(c, v) { f.push(["eq", c, v]); return api; },
       in(c, v) { f.push(["in", c, v]); return api; },
       gte(c, v) { f.push(["gte", c, v]); return api; },
-      order() { return api; },
+      // Faithful order(): record the column + direction (PostgREST default is
+      // ascending) and apply it in _rows() BEFORE limit, so `.order(col,{ascending})
+      // .limit(1)` returns the true first row by that column — not insertion order.
+      order(col, opts = {}) { ord = { col, ascending: opts.ascending !== false }; return api; },
       limit(n) { lim = n; return api; },
       _rows() {
         let src;
@@ -49,25 +53,31 @@ function makeWorld(opts = {}) {
         else if (name === "send_queue") src = queue;
         else if (name === "message_events") src = inbound;
         else if (name === "seller_inbound_bursts") {
-          // PRODUCTION-SHAPED: last_authorized_received_at is NOT a burst column —
-          // it is DERIVED by canonical aggregateBurstMessage from the
-          // constituent_messages[].authorized_received_at jsonb. Each constituent
-          // carries the real receipt timestamp. Injections:
-          //   opts.burstNoAuthorized → constituents omit authorized_received_at
-          //     (temporal_authority_unavailable); opts.burstAuthorizedAt → force a
-          //     specific (e.g. stale) authorized timestamp.
+          // Production-shaped burst row (the live path leaves this table stale — its
+          // constituents intentionally carry NO authorized_received_at, since
+          // appendConstituent never persists it). The verifier no longer reads this
+          // table for temporal authority; the burst fake exists ONLY so the schema-
+          // contract test and the "verify never queries seller_inbound_bursts" test
+          // have something to assert against. opts.noBurst → empty (no burst at all).
           const last = inbound[inbound.length - 1];
-          src = inbound.length ? [{
+          src = (inbound.length && !opts.noBurst) ? [{
             id: "burst-1", thread_key: PROOF.handset, status: "open",
             constituent_messages: inbound.map((m) => ({
               event_id: m.id, provider_message_id: m.provider_message_sid, body: m.message_body, received_at: m.received_at,
-              ...(opts.burstNoAuthorized ? {} : { authorized_received_at: opts.burstAuthorizedAt ?? m.received_at }),
             })),
             first_received_at: inbound[0].received_at, last_received_at: last.received_at, created_at: last.received_at,
           }] : [];
         } else src = [];
         let rows = src.filter((r) => f.every(([op, c, v]) =>
           op === "in" ? v.includes(r[c]) : op === "gte" ? String(r[c] ?? "") >= String(v) : r[c] === v));
+        if (ord) {
+          const dir = ord.ascending ? 1 : -1;
+          rows = [...rows].sort((a, b) => {
+            const av = a[ord.col] == null ? "" : String(a[ord.col]);
+            const bv = b[ord.col] == null ? "" : String(b[ord.col]);
+            return av < bv ? -dir : av > bv ? dir : 0;
+          });
+        }
         if (lim) rows = rows.slice(0, lim);
         return rows;
       },
@@ -189,8 +199,15 @@ function makeWorld(opts = {}) {
     now: () => clock,
     // PRODUCTION-SHAPED inbound row: real message_events columns are
     // message_body + provider_message_sid (NOT body / provider_message_id).
-    addInbound: (body = "Yes I still own it", atMs = clock) => {
-      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", message_body: body, provider_message_sid: `in-${seq}`, received_at: new Date(atMs).toISOString() });
+    // receivedAtOverride lets a test force a null/malformed/stale received_at (the
+    // canonical temporal-authority source) INDEPENDENT of created_at ordering:
+    // `atMs` sets the production-shaped created_at (the column the verifier orders
+    // by to pick the newest inbound), while received_at defaults to atMs but can be
+    // overridden. So a later-created row can carry a stale/malformed receipt.
+    addInbound: (body = "Yes I still own it", atMs = clock, receivedAtOverride = undefined) => {
+      const created_at = new Date(atMs).toISOString();
+      const received_at = receivedAtOverride !== undefined ? receivedAtOverride : created_at;
+      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", message_body: body, provider_message_sid: `in-${seq}`, received_at, created_at });
     },
     // Default to the CANONICAL post-ownership-confirmation reply use-case the live
     // automation actually creates (consider_selling), not the old proof-only enum.
@@ -905,42 +922,84 @@ test("REGRESSION: a message_events query/schema error FAILS HARD, never no_real_
   assert.equal(w.sys.get("queue_execution_mode"), "paused"); // still restores
 });
 
-test("REGRESSION: a seller_inbound_bursts query error FAILS HARD (burst_lookup_failed)", async () => {
-  const w = makeWorld({ mintNonce: () => "n1", errorTables: { seller_inbound_bursts: true } });
+test("REGRESSION: verify_and_s2 NEVER queries seller_inbound_bursts (temporal authority = message_events.received_at)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
   w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const before = w.events.fromCalls.filter((n) => n === "seller_inbound_bursts").length;
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
-  assert.equal(v.ok, false);
-  assert.equal(v.stage, "burst_lookup_failed");
-  assert.notEqual(v.reason, "no_real_inbound_yet");
+  const after = w.events.fromCalls.filter((n) => n === "seller_inbound_bursts").length;
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(after - before, 0, "verify must NOT read the deprecated seller_inbound_bursts table");
 });
 
-test("REGRESSION: canonical temporal-authority passes for a fresh authorized inbound", async () => {
-  const w = makeWorld({ mintNonce: () => "n1" });
+test("REGRESSION: a fresh received_at >= s1_sent_at PASSES with NO burst row present", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", noBurst: true }); // no seller_inbound_burst at all
   const arm = await armOk(w);
   w.advance(1000); w.addInbound("Yes"); w.seedS2();
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, true, v.detail);
-  assert.ok(v.authorized_received_at, "aggregateBurstMessage surfaced the authorized receipt");
+  assert.ok(v.inbound_received_at, "temporal authority surfaced from message_events.received_at");
 });
 
-test("REGRESSION: a burst with NO authorized receipt fails (temporal_authority_unavailable)", async () => {
-  const w = makeWorld({ mintNonce: () => "n1", burstNoAuthorized: true });
+test("EXACT LIVE SHAPE: stale/absent historical burst + valid fresh message_events.received_at → PASS", async () => {
+  // Reproduces the live failure exactly: no fresh burst (null authorized_received_at),
+  // but the inbound carries a valid fresh received_at. Old burst gate denied
+  // (temporal_authority_unavailable); the received_at gate passes.
+  const w = makeWorld({ mintNonce: () => "n1", noBurst: true });
   const arm = await armOk(w);
   w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
+});
+
+test("REGRESSION: a MISSING received_at fails (temporal_authority_unavailable)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes", w.now(), null); w.seedS2(); // received_at = null
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
   assert.equal(v.stage, "temporal_authority_unavailable");
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
 });
 
-test("REGRESSION: a STALE authorized receipt (older than S1) fails (temporal_authority_stale)", async () => {
-  const w = makeWorld({ mintNonce: () => "n1", burstAuthorizedAt: new Date(500_000).toISOString() });
-  const arm = await armOk(w); // s1_sent_at ~ clock 1_000_000; authorized forced to 500_000 (stale)
-  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+test("REGRESSION: a STALE received_at (older than S1) fails (temporal_authority_stale)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w); // s1_sent_at ~ clock 1_000_000
+  w.addInbound("Yes", w.now(), new Date(500_000).toISOString()); w.seedS2(); // received_at before S1
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
   assert.equal(v.stage, "temporal_authority_stale");
+});
+
+// ── created_at ordering (CodeRabbit Minor): the verifier orders inbounds by
+// created_at desc, so it must evaluate the NEWEST-by-created_at row, not the
+// insertion-order row. Two inbounds; the true newest decides the outcome.
+test("REGRESSION: verifier evaluates the NEWEST-by-created_at inbound — later STALE row denies (not the earlier fresh one)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w); // s1_sent_at ~ 1_000_000
+  w.addInbound("Yes", 1_001_000);                                    // A: earlier created_at, FRESH receipt (inserted first)
+  w.addInbound("Yes", 1_002_000, new Date(500_000).toISOString());  // B: LATER created_at, STALE receipt (inserted second) — the true newest
+  w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  // Insertion-order (unfaithful) fake would pick A (fresh) and PASS; created_at
+  // ordering picks B (stale, newest) → must fail temporal_authority_stale.
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_stale");
+  assert.match(String(v.detail), /predates S1/);
+});
+
+test("REGRESSION: verifier evaluates the NEWEST-by-created_at inbound — later FRESH row passes (over an earlier stale one)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.addInbound("Yes", 1_001_000, new Date(500_000).toISOString());  // A: earlier created_at, STALE receipt (inserted first)
+  w.addInbound("Yes", 1_002_000);                                   // B: LATER created_at, FRESH receipt (inserted second) — the true newest
+  w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  // Newest (B) is fresh → passes. An insertion-order fake would pick A (stale) → fail.
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
 });
 
 test("REGRESSION: the real consider_selling auto-reply is recognized as the S2 row", async () => {
@@ -975,10 +1034,10 @@ function corruptAuth(w, patch) {
   w.sys.set("s1s2_proof_authorization", JSON.stringify({ ...auth, ...patch }));
 }
 
-test("REGRESSION: an UNPARSEABLE authorized receipt fails hard (temporal_authority_unparseable), not stale-passed", async () => {
-  const w = makeWorld({ mintNonce: () => "n1", burstAuthorizedAt: "not-a-timestamp" });
+test("REGRESSION: an UNPARSEABLE received_at fails hard (temporal_authority_unparseable), not stale-passed", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
-  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  w.advance(1000); w.addInbound("Yes", w.now(), "not-a-timestamp"); w.seedS2(); // malformed received_at
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
   assert.equal(v.stage, "temporal_authority_unparseable"); // NaN < x would have fail-OPENED
