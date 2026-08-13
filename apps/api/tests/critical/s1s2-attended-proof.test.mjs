@@ -36,12 +36,16 @@ function makeWorld(opts = {}) {
   function table(name) {
     const f = [];
     let lim = null;
+    let ord = null; // { col, ascending } — models PostgREST .order(col, { ascending })
     const api = {
       select(_s, o) { api._head = Boolean(o?.head); return api; },
       eq(c, v) { f.push(["eq", c, v]); return api; },
       in(c, v) { f.push(["in", c, v]); return api; },
       gte(c, v) { f.push(["gte", c, v]); return api; },
-      order() { return api; },
+      // Faithful order(): record the column + direction (PostgREST default is
+      // ascending) and apply it in _rows() BEFORE limit, so `.order(col,{ascending})
+      // .limit(1)` returns the true first row by that column — not insertion order.
+      order(col, opts = {}) { ord = { col, ascending: opts.ascending !== false }; return api; },
       limit(n) { lim = n; return api; },
       _rows() {
         let src;
@@ -66,6 +70,14 @@ function makeWorld(opts = {}) {
         } else src = [];
         let rows = src.filter((r) => f.every(([op, c, v]) =>
           op === "in" ? v.includes(r[c]) : op === "gte" ? String(r[c] ?? "") >= String(v) : r[c] === v));
+        if (ord) {
+          const dir = ord.ascending ? 1 : -1;
+          rows = [...rows].sort((a, b) => {
+            const av = a[ord.col] == null ? "" : String(a[ord.col]);
+            const bv = b[ord.col] == null ? "" : String(b[ord.col]);
+            return av < bv ? -dir : av > bv ? dir : 0;
+          });
+        }
         if (lim) rows = rows.slice(0, lim);
         return rows;
       },
@@ -188,10 +200,14 @@ function makeWorld(opts = {}) {
     // PRODUCTION-SHAPED inbound row: real message_events columns are
     // message_body + provider_message_sid (NOT body / provider_message_id).
     // receivedAtOverride lets a test force a null/malformed/stale received_at (the
-    // canonical temporal-authority source) independent of the created ordering.
+    // canonical temporal-authority source) INDEPENDENT of created_at ordering:
+    // `atMs` sets the production-shaped created_at (the column the verifier orders
+    // by to pick the newest inbound), while received_at defaults to atMs but can be
+    // overridden. So a later-created row can carry a stale/malformed receipt.
     addInbound: (body = "Yes I still own it", atMs = clock, receivedAtOverride = undefined) => {
-      const received_at = receivedAtOverride !== undefined ? receivedAtOverride : new Date(atMs).toISOString();
-      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", message_body: body, provider_message_sid: `in-${seq}`, received_at });
+      const created_at = new Date(atMs).toISOString();
+      const received_at = receivedAtOverride !== undefined ? receivedAtOverride : created_at;
+      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", message_body: body, provider_message_sid: `in-${seq}`, received_at, created_at });
     },
     // Default to the CANONICAL post-ownership-confirmation reply use-case the live
     // automation actually creates (consider_selling), not the old proof-only enum.
@@ -955,6 +971,35 @@ test("REGRESSION: a STALE received_at (older than S1) fails (temporal_authority_
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
   assert.equal(v.stage, "temporal_authority_stale");
+});
+
+// ── created_at ordering (CodeRabbit Minor): the verifier orders inbounds by
+// created_at desc, so it must evaluate the NEWEST-by-created_at row, not the
+// insertion-order row. Two inbounds; the true newest decides the outcome.
+test("REGRESSION: verifier evaluates the NEWEST-by-created_at inbound — later STALE row denies (not the earlier fresh one)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w); // s1_sent_at ~ 1_000_000
+  w.addInbound("Yes", 1_001_000);                                    // A: earlier created_at, FRESH receipt (inserted first)
+  w.addInbound("Yes", 1_002_000, new Date(500_000).toISOString());  // B: LATER created_at, STALE receipt (inserted second) — the true newest
+  w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  // Insertion-order (unfaithful) fake would pick A (fresh) and PASS; created_at
+  // ordering picks B (stale, newest) → must fail temporal_authority_stale.
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_stale");
+  assert.match(String(v.detail), /predates S1/);
+});
+
+test("REGRESSION: verifier evaluates the NEWEST-by-created_at inbound — later FRESH row passes (over an earlier stale one)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.addInbound("Yes", 1_001_000, new Date(500_000).toISOString());  // A: earlier created_at, STALE receipt (inserted first)
+  w.addInbound("Yes", 1_002_000);                                   // B: LATER created_at, FRESH receipt (inserted second) — the true newest
+  w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  // Newest (B) is fresh → passes. An insertion-order fake would pick A (stale) → fail.
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
 });
 
 test("REGRESSION: the real consider_selling auto-reply is recognized as the S2 row", async () => {
