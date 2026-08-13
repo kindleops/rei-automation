@@ -31,6 +31,18 @@ import {
   consumeCanaryAuthorization,
   loadCanaryAuthorizationByRunId,
 } from "@/lib/domain/queue/queue-canary-authorization.js";
+// Canonical inbound/burst/reply readers — reuse the SAME semantic sources the
+// live inbound path uses (never a proof-local re-interpretation of the schema):
+//   • aggregateBurstMessage → the authoritative last_authorized_received_at that
+//     the live burst flush consumes (derived from constituent_messages jsonb; it
+//     is NOT a seller_inbound_bursts column).
+//   • SELLER_FLOW_STAGES.CONSIDER_SELLING → the canonical ownership_confirmed →
+//     consider_selling reply use-case (the real immediate S2 row). We match the
+//     EXACT use_case (not canonicalStageForUseCase, which also folds
+//     consider_selling_follow_up onto this stage — a later row, not our S2).
+// Both modules are pure (zero I/O), so the proof stays credential-free/testable.
+import { aggregateBurstMessage } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
+import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 
 // Canonical scoped-canary primitives — reused, not reimplemented. Injectable for tests.
 function scopedOps(deps) {
@@ -89,8 +101,18 @@ export const PROOF = Object.freeze({
 });
 
 const S1_USE_CASE = "ownership_check";
-export const S2_USE_CASES = Object.freeze(new Set(["offer_interest", "proposal_interest", "interest_probe"]));
 const ACTIVE_STATUSES = ["queued", "scheduled", "pending", "approved", "ready", "processing"];
+
+// The canonical post-ownership-confirmation reply use-case is `consider_selling`
+// (deterministic-stage-map: ownership_confirmed → consider_selling; canonical-
+// seller-flow SELLER_FLOW_STAGES.CONSIDER_SELLING). This attended proof matches
+// ONLY the immediate auto-created S2 (use_case_template === "consider_selling"),
+// NOT a later consider_selling_follow_up — both canonicalize to the same
+// CONSIDER_SELLING stage, so canonicalStageForUseCase() would wrongly accept the
+// follow-up. Compare the exact cleaned use_case against the canonical constant.
+export function isCanonicalS2ReplyRow(row) {
+  return clean(row?.use_case_template) === SELLER_FLOW_STAGES.CONSIDER_SELLING;
+}
 
 function clean(v) { return String(v ?? "").trim(); }
 function nowMs(deps) { return typeof deps.now === "function" ? deps.now() : Date.now(); }
@@ -415,6 +437,16 @@ function checkNonce(auth, providedNonce, atMs, requiredPhase) {
   return { ok: true };
 }
 
+// Structured verify failure — carries a stable `verify_stage` code so a DB /
+// schema / query error is a HARD proof failure surfaced with its underlying
+// reason, and can NEVER be mistaken for the legitimate "inbound not present yet"
+// (425 no_real_inbound_yet) path. Every throw inside runVerifyAndS2 uses this.
+function verifyFail(stage, msg) {
+  const e = new Error(msg ? `${stage}: ${msg}` : stage);
+  e.verify_stage = stage;
+  return e;
+}
+
 // ── PHASE 2: verify the real inbound + dispatch exactly one S2, then restore ───
 export async function runVerifyAndS2(deps, { nonce } = {}) {
   const atMs = nowMs(deps);
@@ -432,61 +464,118 @@ export async function runVerifyAndS2(deps, { nonce } = {}) {
   }
 
   try {
-    // 1) real inbound after S1
-    const { data: inb } = await deps.supabase.from("message_events")
-      .select("id, provider_message_id, body, received_at, direction")
+    // ── 0) Validate the recorded S1 send time BEFORE any DB query uses it as a
+    // timestamp literal. In production PostgREST a malformed literal passed to
+    // .gte("received_at", auth.s1_sent_at) fails the QUERY itself — which would
+    // surface as inbound_lookup_failed instead of the correct temporal reason.
+    // Parse to a finite epoch here and fail closed with temporal_authority_unparseable;
+    // ONLY this validated value is used as the message_events/send_queue lower bound.
+    const s1SentAt = clean(auth.s1_sent_at);
+    const s1SentMs = Date.parse(s1SentAt);
+    if (!s1SentAt || !Number.isFinite(s1SentMs)) {
+      throw verifyFail("temporal_authority_unparseable", `s1_sent_at=${auth.s1_sent_at}`);
+    }
+
+    // ── 1) Real inbound after S1 — REAL message_events columns, VALIDATED bound. A
+    // query/schema ERROR is a HARD verifier failure (verifyFail), NEVER collapsed
+    // into no_real_inbound_yet; only a clean EMPTY result is the legitimate 425.
+    const inbRes = await deps.supabase.from("message_events")
+      .select("id, provider_message_sid, message_body, received_at, direction, thread_key")
       .eq("thread_key", PROOF.handset).eq("direction", "inbound")
-      .gte("received_at", auth.s1_sent_at).order("received_at", { ascending: false }).limit(1);
-    const inbound = inb?.[0];
-    if (!inbound) return { ok: false, status: 425, reason: "no_real_inbound_yet" }; // 425 Too Early — operator hasn't replied
+      .gte("received_at", s1SentAt).order("received_at", { ascending: false }).limit(1);
+    if (inbRes?.error) throw verifyFail("inbound_lookup_failed", inbRes.error.message || String(inbRes.error));
+    const inbound = (inbRes?.data || [])[0];
+    if (!inbound) return { ok: false, status: 425, reason: "no_real_inbound_yet" }; // 425 Too Early — clean, no inbound yet
 
-    // 2) ownership classification
-    const cls = await deps.classify(inbound.body || "");
-    if (cls.primary_intent !== "ownership_confirmed") throw new Error(`inbound intent ${cls.primary_intent} != ownership_confirmed`);
+    // ── 2) Ownership classification (real message_body column) ──
+    const cls = await deps.classify(inbound.message_body || "");
+    if (cls?.primary_intent !== "ownership_confirmed") {
+      throw verifyFail("inbound_intent_not_confirmed", `${cls?.primary_intent} != ownership_confirmed`);
+    }
 
-    // 3) burst authorized-timestamp persistence
-    const { data: burst } = await deps.supabase.from("seller_inbound_bursts")
-      .select("id, last_authorized_received_at").eq("thread_key", PROOF.handset)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (!burst?.last_authorized_received_at) throw new Error("burst did not preserve last_authorized_received_at");
+    // ── 3) Temporal authority — the SAME semantic source the live burst flush
+    // consumes: aggregateBurstMessage(constituent_messages).last_authorized_received_at
+    // (a DERIVED aggregate over the constituent jsonb, NOT a bursts column). A
+    // query error, a missing burst, an absent authorized receipt, or a receipt
+    // OLDER than our S1 (stale / non-authoritative) each deny as a distinct stage.
+    const burstRes = await deps.supabase.from("seller_inbound_bursts")
+      .select("id, thread_key, status, constituent_messages, created_at")
+      .eq("thread_key", PROOF.handset).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (burstRes?.error) throw verifyFail("burst_lookup_failed", burstRes.error.message || String(burstRes.error));
+    const burst = burstRes?.data;
+    if (!burst) throw verifyFail("burst_authority_missing", "no seller_inbound_burst for handset");
+    const authorizedAt = aggregateBurstMessage(burst.constituent_messages || []).last_authorized_received_at;
+    if (!authorizedAt) throw verifyFail("temporal_authority_unavailable", "burst has no authorized_received_at constituent");
+    // s1SentMs was already validated finite in step 0; the burst-derived authorized
+    // receipt must ALSO parse to a FINITE epoch before comparing — an unparseable
+    // value must HARD-FAIL, never reach the stale check where `NaN < x` is false
+    // and would silently pass (fail-open).
+    const authorizedMs = Date.parse(authorizedAt);
+    if (!Number.isFinite(authorizedMs)) {
+      throw verifyFail("temporal_authority_unparseable", `authorized_received_at=${authorizedAt}`);
+    }
+    if (authorizedMs < s1SentMs) {
+      throw verifyFail("temporal_authority_stale", `authorized_received_at ${authorizedAt} predates S1 ${s1SentAt}`);
+    }
 
-    // 4) fresh-context authority binds to the S1 we sent
+    // ── 4) Fresh-context authority binds to the exact S1 we sent. The canonical
+    // find-recent-outbound-pair returns the id at context.queue_row_id (there is
+    // no context_source_id / outbound.id key on the canonical return). BOTH the
+    // context id and the recorded S1 id must be NON-EMPTY — a null/missing id must
+    // never compare equal via String(null)===String(null) (fail-open).
     const pair = await deps.findRecentOutboundContextPair(PROOF.handset, PROOF.sender, { supabase: deps.supabase, inbound_received_at: inbound.received_at });
-    const ctxId = pair?.context_source_id || pair?.outbound?.id || null;
-    if (String(ctxId) !== String(auth.s1_queue_row_id)) throw new Error(`context bound to ${ctxId}, not the S1 ${auth.s1_queue_row_id}`);
+    const ctxId = clean(pair?.context?.queue_row_id ?? pair?.context?.match?.matched_queue_id ?? "");
+    const s1RowId = clean(auth.s1_queue_row_id);
+    if (!ctxId || !s1RowId) {
+      throw verifyFail("context_authority_missing", `ctx=${ctxId || "∅"} s1=${s1RowId || "∅"}`);
+    }
+    if (ctxId !== s1RowId) {
+      throw verifyFail("context_not_bound_to_s1", `context bound to ${ctxId}, not the S1 ${s1RowId}`);
+    }
 
-    // 5) exactly one auto-created S2
+    // ── 5) Exactly one auto-created S2 — the EXACT immediate reply use-case
+    // (use_case_template === "consider_selling", not the follow-up) with an
+    // explicit campaign pin. Distinguish lookup-error / absent / multiple /
+    // campaign-mismatch as separate hard fails.
     const listS2 = async () => {
-      const { data } = await deps.supabase.from("send_queue").select("id, use_case_template, created_at")
-        .eq("to_phone_number", PROOF.handset).gte("created_at", auth.s1_sent_at);
-      return (data || []).filter((r) => S2_USE_CASES.has(clean(r.use_case_template)));
+      const res = await deps.supabase.from("send_queue").select("id, use_case_template, campaign_id, created_at")
+        .eq("to_phone_number", PROOF.handset).gte("created_at", s1SentAt); // validated bound (step 0)
+      if (res?.error) throw verifyFail("s2_lookup_failed", res.error.message || String(res.error));
+      return (res?.data || []).filter((r) => isCanonicalS2ReplyRow(r));
     };
     const s2rows = await listS2();
-    if (s2rows.length !== 1) throw new Error(`expected exactly one S2, found ${s2rows.length}`);
-    const s2RowId = s2rows[0].id;
+    if (s2rows.length === 0) throw verifyFail("no_s2_row", "no canonical consider_selling reply row");
+    if (s2rows.length > 1) throw verifyFail("multiple_s2_rows", `found ${s2rows.length}`);
+    const s2 = s2rows[0];
+    if (clean(s2.campaign_id) !== clean(PROOF.campaign_id)) {
+      throw verifyFail("s2_campaign_mismatch", `${s2.campaign_id} != ${PROOF.campaign_id}`);
+    }
+    const s2RowId = s2.id;
 
-    // 6) dispatch exactly that S2 — through the SAME scoped-canary authority path
+    // ── 6) Dispatch exactly that S2 through the SAME scoped-canary authority path
     // (fresh lock + authorization scoped to this row), fail-closed on non-send.
     const s2disp = await dispatchProofRowScoped(deps, s2RowId, "s2");
-    if (!s2disp.ok) throw new Error(`S2 ${s2disp.reason}${s2disp.detail ? ` (${s2disp.detail})` : ""}`);
+    if (!s2disp.ok) throw verifyFail("s2_dispatch_failed", `${s2disp.reason}${s2disp.detail ? ` (${s2disp.detail})` : ""}`);
     const s2ProviderId = s2disp.provider_id;
 
-    // 7) replay-idempotency — still exactly one S2
+    // ── 7) Replay-idempotency — still exactly one canonical S2 ──
     const after = await listS2();
-    if (after.length !== 1) throw new Error(`replay created additional S2 rows (${after.length})`);
+    if (after.length !== 1) throw verifyFail("s2_replay_nonidempotent", `replay left ${after.length} S2 rows`);
 
     await restoreContainment(deps, "success");
     return {
       ok: true, status: 200,
-      inbound_event_id: inbound.id, inbound_provider_id: inbound.provider_message_id || null,
+      inbound_event_id: inbound.id, inbound_provider_id: inbound.provider_message_sid || null,
       classification: { intent: cls.primary_intent, confidence: cls.confidence },
-      burst_id: burst.id, context_source_id: ctxId,
+      burst_id: burst.id, authorized_received_at: authorizedAt, context_source_id: ctxId,
       s2_queue_row_id: s2RowId, s2_provider_id: s2ProviderId, s2_count: after.length,
       final_queue_execution_mode: "paused",
     };
   } catch (err) {
     await restoreContainment(deps, "verify_and_s2_failure");
-    return { ok: false, status: 500, reason: "verify_and_s2_failed", detail: err.message };
+    // A DB/schema/query error arrives here as a HARD failure with its stage code —
+    // it is 500 verify_and_s2_failed, distinct from the 425 no_real_inbound_yet above.
+    return { ok: false, status: 500, reason: "verify_and_s2_failed", stage: err?.verify_stage || "unknown", detail: err?.message };
   }
 }
 

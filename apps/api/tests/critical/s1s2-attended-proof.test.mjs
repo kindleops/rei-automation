@@ -28,7 +28,7 @@ function makeWorld(opts = {}) {
   let seq = 1;
   let clock = opts.startMs ?? 1_000_000;
   const events = {
-    sms: [], dispatched: [],
+    sms: [], dispatched: [], fromCalls: [], // fromCalls records every supabase.from(table) access
     locks: { acquired: [], released: [], live: new Set(), holder: null },
     auths: { created: [], consumed: [], open: new Set(), byRunId: new Map() },
   };
@@ -49,9 +49,22 @@ function makeWorld(opts = {}) {
         else if (name === "send_queue") src = queue;
         else if (name === "message_events") src = inbound;
         else if (name === "seller_inbound_bursts") {
-          src = inbound.length
-            ? [{ id: "burst-1", thread_key: PROOF.handset, last_authorized_received_at: inbound[inbound.length - 1].received_at, created_at: inbound[inbound.length - 1].received_at }]
-            : [];
+          // PRODUCTION-SHAPED: last_authorized_received_at is NOT a burst column —
+          // it is DERIVED by canonical aggregateBurstMessage from the
+          // constituent_messages[].authorized_received_at jsonb. Each constituent
+          // carries the real receipt timestamp. Injections:
+          //   opts.burstNoAuthorized → constituents omit authorized_received_at
+          //     (temporal_authority_unavailable); opts.burstAuthorizedAt → force a
+          //     specific (e.g. stale) authorized timestamp.
+          const last = inbound[inbound.length - 1];
+          src = inbound.length ? [{
+            id: "burst-1", thread_key: PROOF.handset, status: "open",
+            constituent_messages: inbound.map((m) => ({
+              event_id: m.id, provider_message_id: m.provider_message_sid, body: m.message_body, received_at: m.received_at,
+              ...(opts.burstNoAuthorized ? {} : { authorized_received_at: opts.burstAuthorizedAt ?? m.received_at }),
+            })),
+            first_received_at: inbound[0].received_at, last_received_at: last.received_at, created_at: last.received_at,
+          }] : [];
         } else src = [];
         let rows = src.filter((r) => f.every(([op, c, v]) =>
           op === "in" ? v.includes(r[c]) : op === "gte" ? String(r[c] ?? "") >= String(v) : r[c] === v));
@@ -63,13 +76,24 @@ function makeWorld(opts = {}) {
     };
     return api;
   }
-  // Optional injection: make send_queue count queries error or return null count.
-  if (opts.countError || opts.nullCount) {
+  // Injections:
+  //  • send_queue head-count error / null (arm precondition fail-closed).
+  //  • hard query errors on a verify-only reader table (message_events,
+  //    seller_inbound_bursts) via opts.errorTables — proves a DB/schema/query
+  //    error becomes a HARD verify failure, never no_real_inbound_yet. These
+  //    tables are read ONLY in verify, so erroring them does not break arm.
+  const errorTables = opts.errorTables || {};
+  const needWrap = opts.countError || opts.nullCount || Object.keys(errorTables).length > 0;
+  if (needWrap) {
     const orig = table;
-    // wrap `from` so send_queue head-count resolves to the injected shape
     var wrappedFrom = (name) => {
       const api = orig(name);
-      if (name === "send_queue") {
+      if (errorTables[name]) {
+        const errShape = { data: null, error: { message: `${name} query boom` }, count: null };
+        api.then = (resolve) => resolve(errShape);
+        api.maybeSingle = async () => errShape;
+      }
+      if (name === "send_queue" && (opts.countError || opts.nullCount)) {
         const origThen = api.then;
         api.then = (resolve) => {
           if (api._head) {
@@ -81,7 +105,7 @@ function makeWorld(opts = {}) {
       return api;
     };
   }
-  const supabase = { from: (name) => (typeof wrappedFrom === "function" ? wrappedFrom(name) : table(name)) };
+  const supabase = { from: (name) => { events.fromCalls.push(name); return (typeof wrappedFrom === "function" ? wrappedFrom(name) : table(name)); } };
   const writeFails = opts.writeFails || (() => false); // (key) => boolean
   const setSystemValues = async (patch) => {
     for (const [k, v] of Object.entries(patch)) {
@@ -154,17 +178,23 @@ function makeWorld(opts = {}) {
       return { ok: true, provider_message_id: r?.provider_message_id };
     },
     classify: async (text) => (opts.classify ? opts.classify(text) : { primary_intent: "ownership_confirmed", confidence: 0.9 }),
-    findRecentOutboundContextPair: async () => ({ context_source_id: opts.ctxOverride ?? lastS1Id() }),
+    // Canonical find-recent-outbound-pair return shape: the bound outbound id is
+    // at context.queue_row_id (NOT context_source_id / outbound.id).
+    findRecentOutboundContextPair: async () => ({ found: true, context: { queue_row_id: opts.ctxOverride ?? lastS1Id() } }),
   };
 
   return {
     deps, sys, events,
     advance: (ms) => { clock += ms; },
     now: () => clock,
+    // PRODUCTION-SHAPED inbound row: real message_events columns are
+    // message_body + provider_message_sid (NOT body / provider_message_id).
     addInbound: (body = "Yes I still own it", atMs = clock) => {
-      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", body, received_at: new Date(atMs).toISOString(), provider_message_id: `in-${seq}` });
+      inbound.push({ id: `evt-${seq++}`, thread_key: PROOF.handset, direction: "inbound", message_body: body, provider_message_sid: `in-${seq}`, received_at: new Date(atMs).toISOString() });
     },
-    seedS2: (atMs = clock, useCase = "offer_interest", n = 1, campaignId = PROOF.campaign_id) => {
+    // Default to the CANONICAL post-ownership-confirmation reply use-case the live
+    // automation actually creates (consider_selling), not the old proof-only enum.
+    seedS2: (atMs = clock, useCase = "consider_selling", n = 1, campaignId = PROOF.campaign_id) => {
       for (let i = 0; i < n; i++) queue.push({ id: `s2-${seq++}`, to_phone_number: PROOF.handset, campaign_id: campaignId, use_case_template: useCase, created_at: new Date(atMs).toISOString(), provider_message_id: null });
     },
     getQueue: () => queue,
@@ -248,7 +278,7 @@ test("verify_and_s2 dispatches exactly one S2 then restores paused", async () =>
 test("verify fails closed when more than one S2 exists", async () => {
   const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
-  w.advance(1000); w.addInbound(); w.seedS2(w.now(), "offer_interest", 2);
+  w.advance(1000); w.addInbound(); w.seedS2(w.now(), "consider_selling", 2);
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.deepEqual([v.ok, v.reason], [false, "verify_and_s2_failed"]);
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
@@ -603,7 +633,7 @@ test("scoped-canary lock unavailable → S1 fails closed, containment restored",
 test("duplicate-S2 protection remains intact after the fix", async () => {
   const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
-  w.advance(1000); w.addInbound(); w.seedS2(w.now(), "offer_interest", 2); // two S2 rows
+  w.advance(1000); w.addInbound(); w.seedS2(w.now(), "consider_selling", 2); // two S2 rows
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
   assert.match(String(v.reason), /verify_and_s2_failed/);
@@ -697,22 +727,24 @@ test("watchdog recovery retries using a RETAINED handle after an earlier failure
   assert.equal(JSON.parse(w.sys.get("s1s2_proof_authorization")).execution_lock_token, null);
 });
 
-// ── S2 campaign pin enforced at dispatch (fail-closed on mismatch) ────────────
-test("S2 with a non-pinned campaign fails closed (s2_row_campaign_mismatch)", async () => {
+// ── S2 campaign pin enforced in verify (distinct s2_campaign_mismatch stage) ───
+test("S2 with a non-pinned campaign fails closed (s2_campaign_mismatch)", async () => {
   const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
   w.advance(1000); w.addInbound();
-  w.seedS2(w.now(), "offer_interest", 1, "some-other-campaign"); // NOT the pinned campaign
+  w.seedS2(w.now(), "consider_selling", 1, "some-other-campaign"); // canonical S2 use-case, WRONG campaign
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, false);
-  assert.match(String(v.detail || v.reason), /s2_row_campaign_mismatch|verify_and_s2_failed/);
+  assert.equal(v.reason, "verify_and_s2_failed");
+  assert.equal(v.stage, "s2_campaign_mismatch"); // distinct campaign gate, before dispatch
+  assert.equal(w.events.dispatched.length, 1); // S1 only — S2 never dispatched
   assert.equal(w.sys.get("queue_execution_mode"), "paused");
 });
 test("S2 carrying the pinned campaign dispatches (propagation path)", async () => {
   const w = makeWorld({ mintNonce: () => "n1" });
   const arm = await armOk(w);
   w.advance(1000); w.addInbound();
-  w.seedS2(w.now(), "offer_interest", 1, PROOF.campaign_id); // as the reply pipeline propagates
+  w.seedS2(w.now(), "consider_selling", 1, PROOF.campaign_id); // as the reply pipeline propagates
   const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
   assert.equal(v.ok, true, v.detail);
   assert.ok(v.s2_provider_id);
@@ -775,4 +807,249 @@ test("S1 body still carries the ownership-check intent", async () => {
   assert.match(body, /owner/i);
   assert.match(body, /\bYES\b/);
   assert.match(body, /\bNO\b/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VERIFIER SCHEMA/CONTRACT REGRESSIONS — the live attended proof delivered S1
+// and received a real "Yes", but verify_and_s2 returned no_real_inbound_yet
+// forever because the verifier (and its fake) used proof-only column names +
+// a stale reply-use-case enum. These fixtures use the REAL production columns
+// (provider_message_sid, message_body) + the REAL reply use-case (consider_selling).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Real production columns the verifier may read. The live incident was caused by
+// the proof (and its fake) inventing names that don't exist in production. This
+// allowlist IS the schema contract; the drift names below are banned outright.
+const PROD_MESSAGE_EVENT_COLUMNS = new Set([
+  "id", "provider_message_sid", "message_body", "message_text", "thread_key",
+  "direction", "to_phone_number", "from_phone_number", "received_at", "sent_at",
+  "delivered_at", "created_at", "updated_at", "event_timestamp", "delivery_status",
+  "provider_delivery_status", "detected_intent", "metadata", "master_owner_id",
+  "prospect_id", "property_id", "phone_number_id",
+]);
+const BANNED_MESSAGE_EVENT_COLUMNS = ["body", "provider_message_id"]; // the live-proof drift
+const BANNED_BURST_COLUMNS = ["last_authorized_received_at"]; // a derived aggregate, NOT a column
+
+async function readFakeInbound(w) {
+  const res = await w.deps.supabase.from("message_events").select("*")
+    .eq("thread_key", PROOF.handset).eq("direction", "inbound").gte("received_at", "0").order("received_at").limit(1);
+  return (res.data || [])[0];
+}
+async function readFakeBurst(w) {
+  const res = await w.deps.supabase.from("seller_inbound_bursts").select("*")
+    .eq("thread_key", PROOF.handset).order("created_at").limit(1).maybeSingle();
+  return res.data;
+}
+
+test("REGRESSION: the in-memory fake defines ONLY production columns (no proof-only drift)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  w.addInbound("Yes");
+  const row = await readFakeInbound(w);
+  assert.ok(row, "fake produced an inbound row");
+  assert.ok("message_body" in row && "provider_message_sid" in row, "real columns present");
+  for (const banned of BANNED_MESSAGE_EVENT_COLUMNS) {
+    assert.equal(banned in row, false, `banned message_events column present: ${banned}`);
+  }
+  for (const k of Object.keys(row)) {
+    assert.equal(PROD_MESSAGE_EVENT_COLUMNS.has(k), true, `non-production message_events column: ${k}`);
+  }
+  const burst = await readFakeBurst(w);
+  for (const banned of BANNED_BURST_COLUMNS) {
+    assert.equal(banned in burst, false, `banned burst column present: ${banned}`);
+  }
+  assert.ok(Array.isArray(burst.constituent_messages), "authorized receipt lives in constituent_messages jsonb");
+});
+
+test("REGRESSION: real-shaped inbound (provider_message_sid + message_body) is found and returns the SID", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  const row = await readFakeInbound(w);
+  assert.equal(v.inbound_provider_id, row.provider_message_sid); // the SID, never undefined
+});
+
+test("REGRESSION: a message_events query/schema error FAILS HARD, never no_real_inbound_yet", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", errorTables: { message_events: true } });
+  const arm = await armOk(w); // arm never touches message_events
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.notEqual(v.reason, "no_real_inbound_yet"); // the exact collapsed-error bug is fixed
+  assert.equal(v.reason, "verify_and_s2_failed");
+  assert.equal(v.stage, "inbound_lookup_failed");
+  assert.equal(v.status, 500);
+  assert.equal(w.sys.get("queue_execution_mode"), "paused"); // still restores
+});
+
+test("REGRESSION: a seller_inbound_bursts query error FAILS HARD (burst_lookup_failed)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", errorTables: { seller_inbound_bursts: true } });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "burst_lookup_failed");
+  assert.notEqual(v.reason, "no_real_inbound_yet");
+});
+
+test("REGRESSION: canonical temporal-authority passes for a fresh authorized inbound", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.ok(v.authorized_received_at, "aggregateBurstMessage surfaced the authorized receipt");
+});
+
+test("REGRESSION: a burst with NO authorized receipt fails (temporal_authority_unavailable)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", burstNoAuthorized: true });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_unavailable");
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+test("REGRESSION: a STALE authorized receipt (older than S1) fails (temporal_authority_stale)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", burstAuthorizedAt: new Date(500_000).toISOString() });
+  const arm = await armOk(w); // s1_sent_at ~ clock 1_000_000; authorized forced to 500_000 (stale)
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_stale");
+});
+
+test("REGRESSION: the real consider_selling auto-reply is recognized as the S2 row", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling"); // exactly what the live automation created
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
+});
+
+test("REGRESSION: the old proof-only use-cases are NOT recognized as S2 (no_s2_row)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "offer_interest"); // the stale proof enum — must NOT count as S2
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "no_s2_row");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FAIL-CLOSED ON UNUSABLE TEMPORAL/CONTEXT AUTHORITY (CodeRabbit Major) +
+// EXACT immediate-S2 matching (CodeRabbit Minor)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Corrupt the persisted authorization to simulate a malformed/missing recorded id
+// or timestamp reaching the verifier (values it must never trust blindly).
+function corruptAuth(w, patch) {
+  const auth = JSON.parse(w.sys.get("s1s2_proof_authorization"));
+  w.sys.set("s1s2_proof_authorization", JSON.stringify({ ...auth, ...patch }));
+}
+
+test("REGRESSION: an UNPARSEABLE authorized receipt fails hard (temporal_authority_unparseable), not stale-passed", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", burstAuthorizedAt: "not-a-timestamp" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_unparseable"); // NaN < x would have fail-OPENED
+  assert.notEqual(v.reason, "no_real_inbound_yet");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+test("REGRESSION: a malformed s1_sent_at fails BEFORE the inbound query (temporal_authority_unparseable, no message_events call)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_sent_at: "0-invalid-date" }); // a malformed timestamp literal
+  const meBefore = w.events.fromCalls.filter((n) => n === "message_events").length;
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  const meAfter = w.events.fromCalls.filter((n) => n === "message_events").length;
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "temporal_authority_unparseable"); // validated in step 0, before any query
+  assert.notEqual(v.stage, "inbound_lookup_failed");
+  // The bound would fail the real PostgREST query — prove it is NEVER attempted.
+  assert.equal(meAfter - meBefore, 0, "message_events must not be queried with a malformed timestamp");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
+});
+
+test("REGRESSION: a valid s1_sent_at still performs the normal inbound lookup", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const meBefore = w.events.fromCalls.filter((n) => n === "message_events").length;
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  const meAfter = w.events.fromCalls.filter((n) => n === "message_events").length;
+  assert.equal(v.ok, true, v.detail);
+  assert.ok(meAfter - meBefore >= 1, "message_events queried for the inbound lookup on a valid timestamp");
+});
+
+test("REGRESSION: an empty canonical context id fails hard (context_authority_missing)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", ctxOverride: "" }); // canonical context.queue_row_id absent
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing");
+  assert.equal(w.sys.get("queue_execution_mode"), "paused");
+});
+
+test("REGRESSION: an empty recorded s1_queue_row_id fails hard (context_authority_missing)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_queue_row_id: "" });
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing");
+});
+
+test("REGRESSION: BOTH ids empty must NOT compare equal via String(null) (context_authority_missing, no S2)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1", ctxOverride: "" }); // ctx id empty
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes"); w.seedS2();
+  corruptAuth(w, { s1_queue_row_id: "" });                          // s1 id also empty
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "context_authority_missing"); // the fail-OPEN bug would have matched ""==="" and dispatched
+  assert.equal(w.events.dispatched.length, 1);        // S1 only — S2 never dispatched
+});
+
+test("REGRESSION: consider_selling_follow_up is NOT the immediate S2 (no_s2_row)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling_follow_up"); // canonicalizes to CONSIDER_SELLING but is a LATER row
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "no_s2_row");
+});
+
+test("REGRESSION: the exact immediate consider_selling IS accepted", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling");
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.s2_count, 1);
+});
+
+test("REGRESSION: two immediate consider_selling rows → multiple_s2_rows (fail closed)", async () => {
+  const w = makeWorld({ mintNonce: () => "n1" });
+  const arm = await armOk(w);
+  w.advance(1000); w.addInbound("Yes");
+  w.seedS2(w.now(), "consider_selling", 2); // two exact immediate S2 rows
+  const v = await runVerifyAndS2(w.deps, { nonce: arm.nonce });
+  assert.equal(v.ok, false);
+  assert.equal(v.stage, "multiple_s2_rows");
+  assert.equal(w.events.dispatched.length, 1); // S2 never dispatched
 });
