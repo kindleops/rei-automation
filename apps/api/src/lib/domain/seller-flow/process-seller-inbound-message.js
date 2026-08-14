@@ -561,7 +561,10 @@ export async function processSellerInboundMessage({
     try {
       const deal_context = await runtimeDeps.getDealContextByThread(
         hydration_thread_key,
-        { supabase }
+        // Bind resolution to the inbound's received-at instant so a multi-context
+        // thread (or a replayed/recovered historical inbound) resolves the campaign
+        // context in force at reply time — never a later or unrelated property.
+        { supabase, asOfTimestamp: inboundReceivedAt }
       );
       const hydrated_property_id = clean(deal_context?.property_id) || null;
       const hydrated_owner_id = clean(deal_context?.master_owner_id) || null;

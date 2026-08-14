@@ -153,10 +153,12 @@ test("POSITIVE: Podio-absent inbound hydrates ids from Supabase deal context and
   });
 
   let hydration_called_with = null;
+  let hydration_as_of = undefined;
   __setSellerInboundOrchestratorDeps({
     ...baseStubs(supabase),
-    getDealContextByThread: async (threadKey) => {
+    getDealContextByThread: async (threadKey, deps) => {
       hydration_called_with = threadKey;
+      hydration_as_of = deps?.asOfTimestamp;
       return {
         thread_key: threadKey,
         property_id: PROPERTY_ID,
@@ -170,6 +172,10 @@ test("POSITIVE: Podio-absent inbound hydrates ids from Supabase deal context and
 
   // The canonical Supabase resolver was consulted for this thread.
   assert.equal(hydration_called_with, THREAD, "getDealContextByThread called with the thread key");
+  // Resolution is bound to the inbound's received-at instant, so a multi-context
+  // thread (or a replayed/recovered historical inbound) resolves the campaign
+  // context in force at reply time — never a later or unrelated property.
+  assert.equal(hydration_as_of, INBOUND_AT, "hydration must pass asOfTimestamp = inboundReceivedAt");
 
   // Classification + deterministic stage transition are unaffected by the fix.
   assert.equal(result.intelligence_snapshot?.canonical_intent, "ownership_confirmed");
