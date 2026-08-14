@@ -416,6 +416,28 @@ async function _getDealContextFallback(thread_key, supabase, asOfTimestamp = nul
     const msg = msgRes.data || {}
     const idEvent = idEventRes.data || {}
 
+    // Under an as-of bound (inbound decision / replay), the resolved instant must
+    // name a SINGLE owner. When several id-carrying events share that most-recent
+    // instant under more than one distinct owner, timestamp ordering cannot say
+    // WHO the reply is to — fail closed to review rather than guess the latest.
+    // Nothing id-carrying sits strictly between that instant and the as-of bound,
+    // so events at/after it ARE the tied top. Multiple PROPERTIES under one owner
+    // stay deterministic: the owner is unique and the property is taken from the
+    // ordered top event.
+    if (asOfTimestamp && idEvent.id) {
+      const { data: tiedEvents } = await supabase
+        .from('message_events')
+        .select('id,master_owner_id,created_at')
+        .eq('thread_key', thread_key)
+        .not('property_id', 'is', null)
+        .gte('created_at', idEvent.created_at)
+        .lte('created_at', asOfTimestamp)
+      const distinctOwners = new Set(
+        (tiedEvents || []).map((e) => clean(e.master_owner_id)).filter(Boolean)
+      )
+      if (distinctOwners.size > 1) return null
+    }
+
     if (!state.thread_key && !msg.id && !idEvent.id) return null
 
     // Identity ids. Under an as-of bound (inbound decision / replay), the bounded

@@ -183,3 +183,42 @@ test("REPLAY: reprocessing an old inbound binds the as-of context, not a newer c
 
   assertNoWidening(supabase);
 });
+
+// ── MULTI-OWNER CONCURRENT AMBIGUITY → FAIL CLOSED ───────────────────────────
+// Two DIFFERENT owners have id-carrying events at the SAME most-recent instant
+// at/before the inbound. Timestamp ordering cannot say which owner the reply is
+// to, so the resolver must fail closed to review — never silently pick the latest.
+test("MULTI-OWNER: distinct owners tied at the as-of instant fail closed (no guess)", async () => {
+  const supabase = makeInboundRealPathSupabase({
+    message_events: [
+      outbound({ id: "e1", property_id: "PROP_X", master_owner_id: "OWN_X", created_at: "2030-01-01T00:00:00.000Z" }),
+      outbound({ id: "e2", property_id: "PROP_Y", master_owner_id: "OWN_Y", created_at: "2030-01-01T00:00:00.000Z" }), // same instant, different owner
+      inboundReply({ id: "e3", created_at: "2030-01-01T00:05:00.000Z" }),
+    ],
+  });
+
+  const ctx = await getDealContextByThread(T, { supabase, asOfTimestamp: "2030-01-01T00:05:00.000Z" });
+
+  assert.equal(ctx, null, "ambiguous owner at the as-of instant must fail closed to review");
+  assertNoWidening(supabase);
+});
+
+// ── SAME-OWNER CONCURRENT (MULTI-PROPERTY) → DETERMINISTIC ───────────────────
+// The portfolio case: one owner blasted about several properties in a single
+// burst (identical timestamps). The owner is unique, so this must STILL resolve
+// deterministically — only the ambiguous-owner case fails closed.
+test("SAME-OWNER: multiple properties tied at the as-of instant still resolve deterministically", async () => {
+  const supabase = makeInboundRealPathSupabase({
+    message_events: [
+      outbound({ id: "e1", property_id: "PROP_A", master_owner_id: "OWN", created_at: "2030-01-01T00:00:00.000Z" }),
+      outbound({ id: "e2", property_id: "PROP_B", master_owner_id: "OWN", created_at: "2030-01-01T00:00:00.000Z" }), // same instant + owner, different property
+      inboundReply({ id: "e3", created_at: "2030-01-01T00:05:00.000Z" }),
+    ],
+  });
+
+  const ctx = await getDealContextByThread(T, { supabase, asOfTimestamp: "2030-01-01T00:05:00.000Z" });
+
+  assert.equal(ctx?.master_owner_id, "OWN", "unique owner must still resolve");
+  assert.equal(ctx?.property_id, "PROP_B", "property is taken deterministically from the ordered top event (id desc)");
+  assertNoWidening(supabase);
+});
