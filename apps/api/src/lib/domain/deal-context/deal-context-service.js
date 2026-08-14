@@ -340,6 +340,13 @@ export async function getDealContextByThread(threadKey, deps = {}) {
   if (!thread_key) return null
 
   const supabase = deps.supabase || defaultSupabase
+  // Optional as-of instant (e.g. an inbound reply's received-at). The enriched
+  // view reflects the CURRENT thread state, so on a multi-context thread — or when
+  // a historical inbound is reprocessed during replay/recovery — it can bind a
+  // later or unrelated property. When an as-of instant is supplied we resolve
+  // strictly from events at or before it and skip the current-state view.
+  const as_of = clean(deps.asOfTimestamp) || null
+  if (as_of) return _getDealContextFallback(thread_key, supabase, as_of)
 
   // Primary: query the enriched view
   try {
@@ -353,19 +360,42 @@ export async function getDealContextByThread(threadKey, deps = {}) {
       .maybeSingle()
 
     if (error) throw error
-    if (data) return hydrateDealContextRow(data)
+    // A view row with no usable id must NOT short-circuit the fallback: the
+    // fallback can still recover ids from the thread's id-carrying message_events.
+    if (data && (clean(data.property_id) || clean(data.master_owner_id) || clean(data.prospect_id))) {
+      return hydrateDealContextRow(data)
+    }
   } catch (viewErr) {
     // v_deal_context_cards missing/failed — fall through to fallback
     console.warn('[deal-context] primary view failed, using fallback for', thread_key, viewErr?.message)
   }
 
   // Fallback: build partial context from deal_thread_state + message_events
-  return _getDealContextFallback(thread_key, supabase)
+  return _getDealContextFallback(thread_key, supabase, null)
 }
 
-async function _getDealContextFallback(thread_key, supabase) {
+async function _getDealContextFallback(thread_key, supabase, asOfTimestamp = null) {
   try {
-    const [stateRes, msgRes] = await Promise.all([
+    // Latest id-carrying event: the campaign/outreach message that stamped the
+    // property/owner ids. The bare latest event is frequently the just-arrived
+    // null-id inbound, so identity must be read from the latest event that
+    // actually carries it. Bounded to the as-of instant when supplied, so
+    // replay/recovery of a historical inbound cannot bind a later property.
+    // (Every id-carrying event carries property_id — there are no owner-only
+    // events — so a property_id NOT NULL filter captures them all.)
+    let idEventQuery = supabase
+      .from('message_events')
+      .select('id,thread_key,master_owner_id,property_id,prospect_id,direction,created_at')
+      .eq('thread_key', thread_key)
+      .not('property_id', 'is', null)
+    if (asOfTimestamp) idEventQuery = idEventQuery.lte('created_at', asOfTimestamp)
+    idEventQuery = idEventQuery
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const [stateRes, msgRes, idEventRes] = await Promise.all([
       supabase
         .from('deal_thread_state')
         .select('*')
@@ -379,16 +409,28 @@ async function _getDealContextFallback(thread_key, supabase) {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
+      idEventQuery,
     ])
 
     const state = stateRes.data || {}
     const msg = msgRes.data || {}
+    const idEvent = idEventRes.data || {}
 
-    if (!state.thread_key && !msg.id) return null
+    if (!state.thread_key && !msg.id && !idEvent.id) return null
 
-    const property_id = clean(state.property_id || msg.property_id)
-    const master_owner_id = clean(state.master_owner_id || msg.master_owner_id)
-    let prospect_id = clean(state.prospect_id || msg.prospect_id)
+    // Identity ids. Under an as-of bound (inbound decision / replay), the bounded
+    // id-event is authoritative and current deal_thread_state — which tracks the
+    // LATEST context — must not override it. Without a bound (read path), prefer
+    // materialized state, then the id-carrying event.
+    const property_id = asOfTimestamp
+      ? clean(idEvent.property_id)
+      : clean(state.property_id || idEvent.property_id || msg.property_id)
+    const master_owner_id = asOfTimestamp
+      ? clean(idEvent.master_owner_id)
+      : clean(state.master_owner_id || idEvent.master_owner_id || msg.master_owner_id)
+    let prospect_id = asOfTimestamp
+      ? clean(idEvent.prospect_id)
+      : clean(state.prospect_id || idEvent.prospect_id || msg.prospect_id)
 
     const [propertyRes, ownerRes, prospectRes] = await Promise.all([
       property_id
