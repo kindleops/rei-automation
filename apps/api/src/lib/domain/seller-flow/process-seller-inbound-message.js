@@ -62,6 +62,7 @@ import {
 } from "@/lib/domain/seller-flow/seller-inbound-execution-view.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { getDealContextByThread } from "@/lib/domain/deal-context/deal-context-service.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const defaultDeps = {
@@ -83,6 +84,7 @@ const defaultDeps = {
   // import inside the pre-reply underwriting step.
   scoreProperty: null,
   getSupabaseClient: getDefaultSupabaseClient,
+  getDealContextByThread,
   info,
   warn,
 };
@@ -527,6 +529,63 @@ export async function processSellerInboundMessage({
   burstContext = null,
 } = {}) {
   const supabase = supabaseClient || runtimeDeps.getSupabaseClient?.();
+
+  // ── Supabase-native inbound context hydration (regression fix) ─────────
+  // The legacy Podio-derived context resolver went dark when Podio was
+  // contained: loadContextWithFallback short-circuits with no ids, so inbound
+  // replies reached this orchestrator with null property/owner/prospect ids
+  // and the decision engine fell to missing_context / safe_fallback_coverage.
+  // When no usable id is present, recover it from the canonical Supabase deal
+  // resolver (deal_thread_state + message_events + properties/master_owners/
+  // prospects). Fail-closed: if Supabase resolves nothing the ids stay null and
+  // the existing missing_context / safe_fallback path is unchanged. Read-only
+  // lookup; no Podio, no new resolver; classification, stage transition,
+  // send-authority, compliance, and transport are untouched.
+  const hydration_thread_key = clean(threadKey) || clean(inboundFrom);
+  const has_usable_context_id = Boolean(
+    clean(propertyId) ||
+      clean(prospectId) ||
+      clean(ownerId) ||
+      clean(phoneId) ||
+      clean(conversationBrain?.item_id) ||
+      clean(context?.ids?.property_id) ||
+      clean(context?.ids?.master_owner_id) ||
+      clean(context?.ids?.phone_item_id)
+  );
+  if (
+    !has_usable_context_id &&
+    hydration_thread_key &&
+    supabase &&
+    runtimeDeps.getDealContextByThread
+  ) {
+    try {
+      const deal_context = await runtimeDeps.getDealContextByThread(
+        hydration_thread_key,
+        { supabase }
+      );
+      const hydrated_property_id = clean(deal_context?.property_id) || null;
+      const hydrated_owner_id = clean(deal_context?.master_owner_id) || null;
+      const hydrated_prospect_id = clean(deal_context?.prospect_id) || null;
+      if (hydrated_property_id || hydrated_owner_id || hydrated_prospect_id) {
+        propertyId = propertyId || hydrated_property_id;
+        ownerId = ownerId || hydrated_owner_id;
+        prospectId = prospectId || hydrated_prospect_id;
+        runtimeDeps.info?.("[INBOUND_CONTEXT_HYDRATED_SUPABASE]", {
+          thread_key: hydration_thread_key,
+          property_id: propertyId,
+          master_owner_id: ownerId,
+          prospect_id: prospectId,
+          source: "getDealContextByThread",
+        });
+      }
+    } catch (hydration_error) {
+      runtimeDeps.warn?.("[INBOUND_CONTEXT_HYDRATION_FAILED]", {
+        thread_key: hydration_thread_key,
+        error: hydration_error?.message || "hydration_failed",
+      });
+    }
+  }
+
   const effective_auto_reply_mode = normalizeAutoReplyMode(
     autoReplyMode ||
       resolveGuardedAutoReplyMode({
