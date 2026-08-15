@@ -1425,3 +1425,123 @@ test("textgrid inbound route: failure before accepted emits failed_pre_accept", 
   assert.ok(checkpoint4Index > checkpoint1Index && failedIndex > checkpoint4Index);
   assert.ok(branchIndex > checkpoint4Index && failedIndex > branchIndex);
 });
+
+// ── TextGrid Breeze documented algorithm (Mode E) ────────────────────────────
+//
+// Authoritative TextGrid webhook signature (per the Breeze API spec):
+//   stringToSign = canonical_url + exact raw request body
+//   HMAC-SHA1( Webhook Secret, encodeNonAsciiCharacters(stringToSign) ) → base64
+//   header: X-TextGrid-Signature
+// No form-parameter sorting; the signing key is the webhook secret, never the
+// auth token. This is the mode that verifies real TextGrid traffic — the four
+// legacy modes (twilio/raw × auth_token/webhook_secret) never matched.
+//
+// Proven against a real captured production DLR (2026-08-15):
+//   canonical_url = https://api-steel-three-96.vercel.app/api/webhooks/textgrid/delivery
+//   raw_body      = SmsSid=...&SmsStatus=failed&...&SmsStatusDetail=Unknown%20Error
+//   X-TextGrid-Signature = 4paTan35ENehO+p7W7gLx0C2JDk=
+// verified=true live (matched_mode=textgrid_url_body+webhook_secret) AND offline
+// (computed == received). The real webhook secret is intentionally NOT committed;
+// these vectors are self-consistent under a test secret.
+
+function encodeNonAsciiCharacters(input) {
+  const s = String(input ?? "");
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    out += code > 127 ? "\\u" + code.toString(16).padStart(4, "0") : s[i];
+  }
+  return out;
+}
+
+function buildTextgridSig(url, raw_body, webhook_secret) {
+  return crypto
+    .createHmac("sha1", webhook_secret)
+    .update(encodeNonAsciiCharacters(String(url) + String(raw_body)), "utf8")
+    .digest("base64");
+}
+
+test("Mode E: verifies a valid TextGrid documented signature (url+raw_body, webhook_secret)", () => {
+  const sig = buildTextgridSig(DELIVERY_URL, RAW_BODY, TEST_WEBHOOK_SECRET);
+  const result = verifyTextgridWebhookRequest({
+    request_url: DELIVERY_URL,
+    raw_body: RAW_BODY,
+    form_params: FORM_PARAMS,
+    content_type: "application/x-www-form-urlencoded",
+    signature: sig,
+    signature_header_name: "x-textgrid-signature",
+    auth_token: "",
+    webhook_secret: TEST_WEBHOOK_SECRET,
+  });
+  assert.equal(result.verified, true, "TextGrid documented signature must verify");
+  assert.equal(result.reason, "verified");
+  assert.equal(result.algorithm, "HMAC-SHA1-TextGrid");
+  assert.equal(result.diagnostics?.mode, "textgrid_url_body+webhook_secret");
+});
+
+test("Mode E: rejects a TextGrid signature signed with the wrong secret (no legacy fallback matches)", () => {
+  const sig = buildTextgridSig(DELIVERY_URL, RAW_BODY, "wrong-secret");
+  const result = verifyTextgridWebhookRequest({
+    request_url: DELIVERY_URL,
+    raw_body: RAW_BODY,
+    form_params: FORM_PARAMS,
+    content_type: "application/x-www-form-urlencoded",
+    signature: sig,
+    signature_header_name: "x-textgrid-signature",
+    auth_token: TEST_AUTH_TOKEN, // present, but no twilio/raw mode should match either
+    webhook_secret: TEST_WEBHOOK_SECRET,
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.reason, "invalid_signature");
+});
+
+test("Mode E: signs the exact raw body, not sorted form params", () => {
+  // Raw body whose param order is NOT alphabetical. TextGrid signs the raw
+  // bytes; the Twilio sorted-param signing string is different, so only Mode E
+  // can verify — this locks in "do not sort form parameters".
+  const unsorted_body = "Zeta=1&Alpha=2&Body=hi";
+  const params = { Zeta: "1", Alpha: "2", Body: "hi" };
+  const tgSig = buildTextgridSig(DELIVERY_URL, unsorted_body, TEST_WEBHOOK_SECRET);
+  const result = verifyTextgridWebhookRequest({
+    request_url: DELIVERY_URL,
+    raw_body: unsorted_body,
+    form_params: params,
+    content_type: "application/x-www-form-urlencoded",
+    signature: tgSig,
+    signature_header_name: "x-textgrid-signature",
+    auth_token: TEST_AUTH_TOKEN,
+    webhook_secret: TEST_WEBHOOK_SECRET,
+  });
+  assert.equal(result.verified, true);
+  assert.equal(result.diagnostics?.mode, "textgrid_url_body+webhook_secret");
+  assert.notEqual(
+    buildTwilioSig(DELIVERY_URL, params, TEST_WEBHOOK_SECRET),
+    tgSig,
+    "Twilio sorted-param signature and TextGrid raw-body signature must differ"
+  );
+});
+
+test("Mode E: applies encodeNonAsciiCharacters before hashing", () => {
+  // Body containing a literal non-ASCII char (é = U+00E9). The correct signature
+  // is over the \\u00e9-escaped form; a signature over the raw (unescaped) bytes
+  // must not verify.
+  const nonAsciiBody = "note=café&Body=ok";
+  const okSig = buildTextgridSig(DELIVERY_URL, nonAsciiBody, TEST_WEBHOOK_SECRET);
+  const result = verifyTextgridWebhookRequest({
+    request_url: DELIVERY_URL,
+    raw_body: nonAsciiBody,
+    form_params: { note: "café", Body: "ok" },
+    content_type: "application/x-www-form-urlencoded",
+    signature: okSig,
+    signature_header_name: "x-textgrid-signature",
+    auth_token: "",
+    webhook_secret: TEST_WEBHOOK_SECRET,
+  });
+  assert.equal(result.verified, true, "escaped-form signature must verify");
+
+  const unescapedSig = crypto
+    .createHmac("sha1", TEST_WEBHOOK_SECRET)
+    .update(String(DELIVERY_URL) + nonAsciiBody, "utf8")
+    .digest("base64");
+  assert.notEqual(unescapedSig, okSig, "escaping non-ASCII must change the signature");
+});
