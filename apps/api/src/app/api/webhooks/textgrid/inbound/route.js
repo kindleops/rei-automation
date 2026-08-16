@@ -627,6 +627,20 @@ export async function POST(request) {
         return NextResponse.json({ ok: true, stage: "after_signature_branch_selected" });
       }
 
+      // Persist the receipt-time signature verdict ON the durable inbound record.
+      // This webhook_log write happens BEFORE the strict 401 gate below, so a
+      // forged inbound is still audited here. The async recovery cron reprocesses
+      // unprocessed webhook_log inbound rows, so it MUST be able to tell a verified
+      // inbound from a rejected one from the row itself — recovery requires
+      // signature_status === "valid" and fails closed otherwise.
+      payload.signature_status = resolveReceiptSignatureStatus({
+        mode: safe_signature_verification_mode,
+        verified: safe_signature_verified,
+        bypassed: safe_signature_bypassed,
+        header_name: safe_signature_header_name,
+      });
+      payload.signature_verified = safe_signature_verified === true;
+
       if (hasSupabaseConfig()) {
         try {
           inbound_webhook_log_row = await runtimeDeps.writeWebhookLogImpl({

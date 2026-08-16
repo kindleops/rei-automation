@@ -254,6 +254,33 @@ function buildRawBodyCandidates(raw_body, secret) {
   return [hex, b64, `sha1=${hex}`, `sha1=${b64}`];
 }
 
+// TextGrid (Breeze) documented behaviour: escape every non-ASCII UTF-16 code
+// unit to a lowercase \uXXXX sequence before hashing. ASCII is left untouched.
+function encodeNonAsciiCharacters(input) {
+  const s = String(input ?? "");
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    out += code > 127 ? "\\u" + code.toString(16).padStart(4, "0") : s[i];
+  }
+  return out;
+}
+
+// TextGrid (Breeze) documented signature:
+//   stringToSign = canonical webhook URL + exact raw request body
+//   HMAC-SHA1( Webhook Secret, encodeNonAsciiCharacters(stringToSign) ) → base64
+// No form-parameter sorting/reconstruction; the signing key is the webhook
+// secret (never the auth token).
+function buildTextgridSignature(canonical_url, raw_body, webhook_secret) {
+  const string_to_sign = encodeNonAsciiCharacters(
+    String(canonical_url ?? "") + String(raw_body ?? "")
+  );
+  return crypto
+    .createHmac("sha1", webhook_secret)
+    .update(string_to_sign, "utf8")
+    .digest("base64");
+}
+
 // ── main export ────────────────────────────────────────────────────────────
 
 /**
@@ -344,7 +371,32 @@ export function verifyTextgridWebhookRequest({
   const twilio_params = is_form_encoded && form_params ? form_params : {};
   const modes_tried = [];
 
-  // Mode A – Twilio + auth_token (primary, most likely correct for TextGrid)
+  // Mode E – TextGrid (Breeze) documented algorithm: authoritative for TextGrid.
+  // stringToSign = canonical_url + raw_body, HMAC-SHA1 keyed by the webhook
+  // secret, non-ASCII escaped. No param sorting; never the auth token.
+  if (webhook_secret) {
+    const expected = buildTextgridSignature(canonical_url, raw_body, webhook_secret);
+    modes_tried.push("textgrid_url_body+webhook_secret");
+    if (safeEqual(expected, normalized_sig)) {
+      return {
+        ok: true,
+        verified: true,
+        required: true,
+        algorithm: "HMAC-SHA1-TextGrid",
+        reason: "verified",
+        signature_present: true,
+        diagnostics: {
+          ...buildTextgridWebhookDiagnostics({
+            ...diagnostics_input,
+            modes_tried,
+          }),
+          mode: "textgrid_url_body+webhook_secret",
+        },
+      };
+    }
+  }
+
+  // Mode A – Twilio + auth_token (legacy fallback, retained for compatibility)
   if (auth_token) {
     const expected = buildTwilioSignature(canonical_url, twilio_params, auth_token);
     modes_tried.push("twilio+auth_token");
