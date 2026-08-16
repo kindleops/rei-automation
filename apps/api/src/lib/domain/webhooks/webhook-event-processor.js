@@ -597,6 +597,38 @@ export async function processInboundWebhookRecovery(options = {}, deps = {}) {
 
   const results = []
   for (const row of inbound_rows) {
+    // Fail-closed signature gate. The live inbound webhook route persists every
+    // inbound to webhook_log BEFORE the strict signature gate (so a forged inbound
+    // is still audited) and stamps the receipt-time verdict onto the row as
+    // payload.signature_status. Recovery must NEVER re-enter seller-flow for an
+    // inbound that was not verified valid — otherwise this async path silently
+    // undoes strict enforcement. Keyed on THIS row's stamped verdict (not a
+    // provider-id lookup an attacker could spoof) and independent of the current
+    // mode, so an observe/off-window bypassed event never becomes recoverable once
+    // production is strict. Rejected rows are audited + retired so they are never
+    // re-scanned.
+    const signature_status = clean(row?.payload?.signature_status)
+    if (signature_status !== 'valid') {
+      const rejected_status = signature_status || 'unverified'
+      await markWebhookRowsUnmatched(
+        [row.id],
+        `signature_${rejected_status}`,
+        buildProcessingMeta({
+          lane: 'inbound_recovery',
+          execution_id,
+          result: { status: 'signature_rejected', signature_status: rejected_status },
+        }),
+        { supabase, now }
+      )
+      results.push({
+        webhook_log_id: row.id,
+        ok: false,
+        skipped: true,
+        reason: 'signature_not_verified',
+        signature_status: rejected_status,
+      })
+      continue
+    }
     const outcome = await processInboundWebhookLive(row, { ...options, execution_id, now }, deps)
     results.push({ webhook_log_id: row.id, ...outcome })
   }
@@ -606,7 +638,10 @@ export async function processInboundWebhookRecovery(options = {}, deps = {}) {
     execution_id,
     scanned: inbound_rows.length,
     processed: results.filter((r) => r.ok).length,
-    failed: results.filter((r) => !r.ok).length,
+    skipped_unverified: results.filter(
+      (r) => r.skipped && r.reason === 'signature_not_verified'
+    ).length,
+    failed: results.filter((r) => !r.ok && !r.skipped).length,
     results: results.slice(0, 25),
   }
 }
