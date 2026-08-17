@@ -18,6 +18,10 @@ import {
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
+import {
+  buildSafeFallback,
+  uncertaintyTypeForReason,
+} from "@/lib/domain/seller-flow/coverage-net/safe-fallback.js";
 import { normalizeCanonicalIntent } from "@/lib/domain/seller-flow/coverage-net/canonical-intent-aliases.js";
 import { resolveContactIdentityClass } from "@/lib/domain/inbox/contact-identity.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
@@ -840,6 +844,97 @@ async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy =
   }
 }
 
+// ── Stage-aware safe-fallback clarifier (audit item 2) ─────────────────────
+// The coverage net has always PREPARED a stage-aware clarifier for ambiguous
+// messages (coverage-net/safe-fallback.js) but nothing dispatched it, so every
+// unclear/reaction/acknowledgement turn dead-ended in human review. This gate
+// converts ONLY the safe-ambiguous subset into a clarifier send. Fail-closed:
+// - fires only for review decisions with the ambiguous reasons below;
+// - fires only for the ambiguous intents (unclear / reaction_only /
+//   acknowledgement) — legal, probate/distress, price-objection, referral,
+//   property-correction and every other protected review lane keeps review;
+// - never fires on suppression, opt-out/compliance, or a suppressive
+//   classifier decision;
+// - the executor's suppression lookup, duplicate dedup, render safety, mode /
+//   allowlist / cutoff authority, and queue-time contact-window gates all still
+//   run downstream, exactly as for any other auto-reply.
+const CLARIFIER_REVIEW_REASONS = new Set([
+  "unclear_low_confidence",
+  "ambiguous_intent",
+  "ambiguous_context",
+  "automation_review_required",
+]);
+const CLARIFIER_INTENTS = new Set(["unclear", "reaction_only", "acknowledgement"]);
+
+// The clarifier converts LOW-INFORMATION ambiguity ("hmm", "ok?", "maybe"),
+// never unparsed CONTENT. A longer unclear message ("we closed on it in
+// March") means the classifier under-detected a potentially disposition-
+// relevant disclosure — fail-closed review is the containment for classifier
+// gaps, and the adversarial corpus pins that. Word-bounded, deterministic.
+const CLARIFIER_MAX_MESSAGE_WORDS = 4;
+
+export function resolveSafeFallbackClarifierDispatch({
+  decision = null,
+  classification = null,
+  stage = null,
+  message = null,
+} = {}) {
+  if (!decision || decision.should_queue_reply) return null;
+  if (decision.should_mark_human_review !== true) return null;
+  if (decision.should_suppress_contact) return null;
+
+  const message_text = clean(message);
+  const message_words = message_text.split(/\s+/).filter(Boolean).length;
+  if (message_words === 0 || message_words > CLARIFIER_MAX_MESSAGE_WORDS) {
+    return null;
+  }
+  // Pure-emoji / symbol-only messages carry sentiment the deterministic
+  // classifier cannot read (a middle-finger emoji classifies reaction_only) —
+  // review, never a cheerful clarifier. 👍/👎 still context-bind upstream as
+  // yes/no before this gate is ever reached.
+  if (!/[\p{L}\p{N}]/u.test(message_text)) {
+    return null;
+  }
+
+  const intent = lower(
+    classification?.primary_intent || classification?.detected_intent || ""
+  );
+  if (!CLARIFIER_INTENTS.has(intent)) return null;
+  if (classification?.compliance_flag) return null;
+  if (
+    classification?.automation_decision &&
+    classification.automation_decision.suppression_action !== "none"
+  ) {
+    return null;
+  }
+  // Protected-lane objections: probate / financial-distress / divorce and the
+  // review-only objections demand a HUMAN even when the primary intent parsed
+  // as unclear ("still going through probate" → unclear + probate objection).
+  // The clarifier must never convert those reviews.
+  const objection = lower(classification?.objection || "");
+  if (
+    objection &&
+    (HIGH_RISK_OBJECTIONS.has(objection) || REVIEW_ONLY_OBJECTIONS.has(objection))
+  ) {
+    return null;
+  }
+
+  const reason = lower(decision.human_review_reason || decision.audit_reason || "");
+  if (!CLARIFIER_REVIEW_REASONS.has(reason)) return null;
+
+  const fallback = buildSafeFallback({
+    stage,
+    uncertainty_type: uncertaintyTypeForReason(reason, intent),
+  });
+  if (!clean(fallback?.suggested_text)) return null;
+
+  return {
+    suggested_text: fallback.suggested_text,
+    uncertainty_type: fallback.uncertainty_type,
+    stage_bucket: fallback.stage_bucket,
+  };
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
@@ -876,6 +971,43 @@ export async function selectSafeAutoReplyTemplate({
     ? "English"
     : language_resolution.language;
   const languages = language === "English" ? ["English"] : [language, "English"];
+
+  // Safe-fallback clarifier dispatch: the decision carries the coverage-net's
+  // prepared stage-aware clarifier. Same idiom as the local negotiation
+  // registry fallback below — a code-authored, PR-reviewed body instead of a
+  // DB row. Language stays fail-closed: clarifier texts are English (the
+  // `language` uncertainty text is bilingual), so a non-English thread keeps
+  // the review path rather than receiving an English clarifier.
+  const clarifier = decision?.clarifier_dispatch;
+  if (clean(clarifier?.suggested_text)) {
+    if (language !== "English" && clarifier.uncertainty_type !== "language") {
+      return { ok: false, reason: "clarifier_language_unavailable", template: null };
+    }
+    const clarifier_template = {
+      template_id: `safe_clarifier_${clarifier.uncertainty_type}_${clarifier.stage_bucket}`,
+      use_case: "safe_clarifier",
+      stage_code: null,
+      language: "English",
+      template_body: clarifier.suggested_text,
+      safe_for_auto_reply: true,
+      reply_mode: "auto",
+      template_name: "Stage-aware safe clarifier (coverage-net)",
+    };
+    info("[AUTO_REPLY_TEMPLATE_SELECTED]", {
+      route_hint: decision?.route_hint || null,
+      primary_intent: classification?.primary_intent || null,
+      template_id: clarifier_template.template_id,
+      use_case: clarifier_template.use_case,
+      stage_code: null,
+      language: clarifier_template.language,
+    });
+    return {
+      ok: true,
+      reason: "safe_fallback_clarifier",
+      language_resolution,
+      template: clarifier_template,
+    };
+  }
   // Lifecycle-resolver authority (see executeInboundAutomationDecision): a
   // required use case restricts matching to EXACTLY that use case so the
   // intent profile's candidates cannot leak a stage-earlier question back in.
@@ -1702,6 +1834,7 @@ export async function executeInboundAutomationDecision({
   dealAuthority = null,
   strategyDirective = null,
   transitionDirective = null,
+  effectiveStageBefore = null,
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
@@ -1948,6 +2081,52 @@ export async function executeInboundAutomationDecision({
         brain_stage: null,
       },
     };
+  }
+
+  // Stage-aware safe-fallback clarifier: convert the safe-ambiguous review
+  // subset into a prepared clarifier send (see
+  // resolveSafeFallbackClarifierDispatch — every protected review lane and
+  // every suppression path is excluded there; the suppression lookup,
+  // duplicate dedup, render guards and mode/allowlist authority below still
+  // apply to the clarifier exactly as to any auto-reply).
+  if (!base_decision.should_queue_reply) {
+    const clarifier_dispatch = resolveSafeFallbackClarifierDispatch({
+      decision: base_decision,
+      classification,
+      message,
+      stage:
+        // Persisted lifecycle stage first (PR #84 made it authoritative);
+        // the classifier's message-content stage_hint defaults to "Ownership"
+        // on terse messages and would pin the clarifier to its S1 column.
+        transitionDirective?.stage_after ||
+        effectiveStageBefore ||
+        base_decision.stage_hint ||
+        classification?.stage_hint ||
+        null,
+    });
+    if (clarifier_dispatch) {
+      info("[AUTO_REPLY_SAFE_CLARIFIER]", {
+        thread_key: threadKey || null,
+        primary_intent: classification?.primary_intent || null,
+        uncertainty_type: clarifier_dispatch.uncertainty_type,
+        stage_bucket: clarifier_dispatch.stage_bucket,
+        prior_review_reason:
+          base_decision.human_review_reason || base_decision.audit_reason || null,
+      });
+      base_decision = {
+        ...base_decision,
+        should_queue_reply: true,
+        should_mark_human_review: false,
+        reply_mode: "auto_clarifier",
+        human_review_reason: null,
+        next_action: "send_safe_clarifier",
+        route_hint: "safe_clarifier",
+        allowed_template_stages: ["safe_clarifier"],
+        required_template_use_case: null,
+        audit_reason: "safe_fallback_clarifier",
+        clarifier_dispatch,
+      };
+    }
   }
 
   if (!base_decision.should_queue_reply) {

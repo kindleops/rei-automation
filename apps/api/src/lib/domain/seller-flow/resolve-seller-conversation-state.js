@@ -415,6 +415,25 @@ export function resolveSellerConversationState({
       suppression_required,
       no_reply_required: suppression_required,
       human_review_required,
+      // True only when classification AMBIGUITY is the sole review driver —
+      // no suppression, no identity review, no ownership conflict, no
+      // authority review, no hostile/legal. This is precisely the case the
+      // coverage-net safe-fallback clarifier exists to answer; every other
+      // review reason stays a hard withhold (see resolveV2ReplyWithhold).
+      ambiguity_only_review: Boolean(
+        contract?.ambiguity_review_required &&
+          !suppression_required &&
+          !identity.review_required &&
+          facts.ownership_conflict !== true &&
+          !authority.human_review_required &&
+          intent !== "hostile_or_legal" &&
+          // Listed-with-agent review comes from the NBA, not this safety
+          // object — exclude it here so the ambiguity carve can never pierce
+          // the agent-involvement withhold.
+          !["listed_with_agent", "agent_involved"].includes(
+            lower(facts.listing_status)
+          )
+      ),
       offer_permission,
       contract_progression_permission,
     },

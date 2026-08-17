@@ -272,13 +272,22 @@ test("genuinely low-confidence message resolves deterministically end-to-end wit
   assert.equal(result.contract.normalized_intent, "unclear");
 
   // Low confidence did not become a fabricated high-confidence intent, and
-  // the existing (unmodified) automation-decision layer already fails closed
-  // to human review for this exact state.
+  // the lifecycle decision still records the ambiguous hold for review. The
+  // executor now treats this LOW-INFORMATION ambiguous turn (short "maybe") as
+  // clarifier-eligible (activation-hardening item 2) — and because this
+  // fixture's live_limited mode has no cutoff configured, the MODE AUTHORITY
+  // fail-closes the send exactly as it does for any auto-reply: nothing
+  // queues, deterministic reason, no AI anywhere. The clarifier's live path
+  // (queued row, stage-aware text) and its protected exclusions are pinned in
+  // inbound-clarifier-queue-authority.test.mjs / inbound-safe-clarifier.test.mjs.
   assert.equal(result.decision.review_required, true);
   assert.equal(result.execution.automation_decision.should_queue_reply, false);
-  assert.equal(result.execution.automation_decision.should_mark_human_review, true);
-  assert.equal(result.execution.automation_decision.human_review_reason, "unclear_low_confidence");
-  assert.equal(result.execution.automation_decision.reply_disposition, "no_reply");
+  assert.equal(result.execution.queued, false);
+  assert.equal(
+    result.execution.automation_decision.audit_reason,
+    "auto_reply_cutoff_not_configured"
+  );
+  assert.equal(result.execution.automation_decision.reply_mode, "none");
 
   __resetSellerInboundOrchestratorDeps();
 });
