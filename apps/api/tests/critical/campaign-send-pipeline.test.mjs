@@ -96,7 +96,14 @@ test("controlled hydration warns on brakes but does not block auto_send false", 
           eq: () => terminal,
           order: () => ({
             limit: async () => ({ data: [], count: 0, error: null }),
+            // Launch readiness now reads targets with complete .range()
+            // pagination instead of a .limit() that PostgREST silently clamped
+            // to max-rows (1000). The real supabase-js builder exposes both;
+            // this double only modelled .limit(), so it under-specified the
+            // client surface the code legitimately uses.
+            range: async () => ({ data: [], count: 0, error: null }),
           }),
+          range: async () => ({ data: [], count: 0, error: null }),
           limit: async () => ({ data: [], count: 0, error: null }),
           head: true,
           then(resolve) {

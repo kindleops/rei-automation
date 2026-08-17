@@ -65,14 +65,21 @@ export async function exactCount(supabase, table, applyFilters = (q) => q) {
 /**
  * Read all campaign_targets rows for the given campaigns, complete and unclamped.
  * Ordered by id so pagination is stable.
+ *
+ * Single-campaign reads use `.eq()` rather than `.in([oneId])`. That is not
+ * cosmetic: it preserves the exact filter shape the single-campaign callers
+ * used before pagination was introduced. Widening every caller to `.in()`
+ * silently changed the query surface and broke callers whose Supabase double
+ * implements `eq` but not `in` — caught by campaign-send-pipeline's
+ * "controlled hydration warns on brakes" test. `.eq()` is also the narrower
+ * index match for the common case.
  */
 export async function fetchAllCampaignTargets(supabase, campaignIds, columns) {
-  if (!campaignIds?.length) return []
+  const ids = (campaignIds || []).filter(Boolean)
+  if (!ids.length) return []
+  const applyScope = (query) => (ids.length === 1 ? query.eq('campaign_id', ids[0]) : query.in('campaign_id', ids))
   return paginateRows((from, to) =>
-    supabase
-      .from('campaign_targets')
-      .select(columns)
-      .in('campaign_id', campaignIds)
+    applyScope(supabase.from('campaign_targets').select(columns))
       .order('id', { ascending: true })
       .range(from, to),
   )
