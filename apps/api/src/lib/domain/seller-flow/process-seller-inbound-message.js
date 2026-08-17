@@ -52,7 +52,11 @@ import {
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
-import { STATE_SOURCE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import {
+  STATE_SOURCE_CODES,
+  normalizeLifecycleStage,
+  lifecycleStageNumber,
+} from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
 import {
@@ -491,6 +495,39 @@ async function emitWorkflowStudioEvents({
 }
 
 /**
+ * Seller-stage read-source floor.
+ *
+ * The reconstructed outbound-pair context carries no stage, so the supplied
+ * `stageBefore` / `summary.conversation_stage` fall back to the S1 default
+ * (`ownership_check`) even for threads the canonical deal record has already
+ * advanced. Use the already-loaded persisted lifecycle stage
+ * (`deal_state.acquisition_stage`) as a MONOTONIC FLOOR: adopt it only when it
+ * is strictly later than the supplied stage. A genuinely later supplied stage
+ * is never regressed, and a genuine S1 thread (no persisted stage) returns the
+ * exact original supplied value (including `null`) — identical to prior
+ * behavior. Pure + exported so the webhook, burst, and recovery entry paths
+ * (all of which converge on processSellerInboundMessage) share one computation.
+ */
+export function resolveEffectiveStageBefore({
+  deal_state = null,
+  stageBefore = null,
+  suppliedConversationStage = null,
+} = {}) {
+  const supplied = stageBefore || suppliedConversationStage || null;
+  const persisted = deal_state?.acquisition_stage
+    ? normalizeLifecycleStage(deal_state.acquisition_stage)
+    : null;
+  if (
+    persisted &&
+    lifecycleStageNumber(persisted) >
+      lifecycleStageNumber(normalizeLifecycleStage(supplied))
+  ) {
+    return persisted;
+  }
+  return supplied;
+}
+
+/**
  * Canonical seller inbound orchestration entry point.
  * Every inbound webhook, retry, and recovery job must call this path.
  */
@@ -746,6 +783,13 @@ export async function processSellerInboundMessage({
     ownerId,
     supabaseClient: supabase,
   });
+  // Anchor inbound decisioning on the true persisted seller stage instead of
+  // the reconstructed-context S1 default (see resolveEffectiveStageBefore).
+  const effective_stage_before = resolveEffectiveStageBefore({
+    deal_state,
+    stageBefore,
+    suppliedConversationStage: context?.summary?.conversation_stage,
+  });
   const persisted_ade = deal_state?.ade_snapshot || null;
   const underwriting = {
     recommended_cash_offer:
@@ -863,7 +907,7 @@ export async function processSellerInboundMessage({
     classification,
     route,
     conversation_context: context,
-    current_stage: stageBefore || context?.summary?.conversation_stage || null,
+    current_stage: effective_stage_before,
     prior_use_case: route?.use_case || null,
     recent_outbound: recentOutbound,
     underwriting_signals: underwritingSignals,
@@ -1104,7 +1148,7 @@ export async function processSellerInboundMessage({
       ade_snapshot: persisted_ade,
       underwriting,
       message,
-      stage_before: stageBefore || summary.conversation_stage || null,
+      stage_before: effective_stage_before,
       now: new Date().toISOString(),
     });
     next_best_action = resolveSellerNextBestAction(conversation_state);
@@ -1120,7 +1164,7 @@ export async function processSellerInboundMessage({
   let transition = null;
   try {
     transition = resolveSellerStageTransition({
-      stage_before: stageBefore || summary.conversation_stage || null,
+      stage_before: effective_stage_before,
       known_facts: canonical_known_facts,
       // Classifier/engine values keep precedence; the evidence-backed
       // extraction fills gaps and stamps extractor_version into facts_patch.
@@ -1449,7 +1493,7 @@ export async function processSellerInboundMessage({
     automation_decision: execution?.automation_decision || canonical_decision,
     execution,
     follow_up: follow_up_result,
-    stage_before: stageBefore || context?.summary?.conversation_stage || null,
+    stage_before: effective_stage_before,
     auto_reply_mode: effective_auto_reply_mode,
     execution_allowed,
     selected_participant_id: prospectId,
