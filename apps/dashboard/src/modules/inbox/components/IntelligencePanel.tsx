@@ -65,8 +65,29 @@ const fmtMoneyU = (v: unknown): string => { const n = Number(String(v ?? '').rep
 const fmtPctU = (v: unknown, round = true): string => { const n = Number(v); return n > 0 ? `${round ? Math.round(n) : n}%` : 'Unavailable' }
 const isUnavail = (s: string) => s === 'Unavailable'
 
+/**
+ * The Maps **Embed** API accepts only `lat,lng` for `location` / `center`.
+ * Unlike Street View **Static**, it does not geocode a street address: passing
+ * one returns HTTP 400 and the iframe renders a Google error page.
+ *
+ * Both builders previously fell back to the address string whenever a property
+ * had no coordinates, so every coordinate-less property showed a broken embed.
+ * Verified against the live API:
+ *     center=3242+N+Colorado+Ave,+Indianapolis,+In+46218  -> 400
+ *     center=39.8000,-86.1200                             -> 200
+ *
+ * They now return undefined without coordinates and the caller's existing
+ * fallback UI renders instead. Resolving an address to coordinates would mean
+ * enabling the Geocoding API, which is a separate, explicit decision.
+ */
+const resolveEmbedLatLng = (lat?: number | null, lng?: number | null): string | null => {
+  const hasCoords =
+    Number.isFinite(lat) && Number.isFinite(lng)
+    && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
+  return hasCoords ? `${lat},${lng}` : null
+}
+
 const buildInteractiveStreetViewUrl = ({
-  address,
   lat,
   lng,
 }: {
@@ -76,8 +97,7 @@ const buildInteractiveStreetViewUrl = ({
 }) => {
   if (!GOOGLE_MAPS_API_KEY) return undefined
 
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const location = hasCoords ? `${lat},${lng}` : address
+  const location = resolveEmbedLatLng(lat, lng)
   if (!location) return undefined
 
   const params = new URLSearchParams({
@@ -92,7 +112,6 @@ const buildInteractiveStreetViewUrl = ({
 }
 
 const buildInteractiveAerialViewUrl = ({
-  address,
   lat,
   lng,
 }: {
@@ -102,14 +121,13 @@ const buildInteractiveAerialViewUrl = ({
 }) => {
   if (!GOOGLE_MAPS_API_KEY) return undefined
 
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const center = hasCoords ? `${lat},${lng}` : address
+  const center = resolveEmbedLatLng(lat, lng)
   if (!center) return undefined
 
   const params = new URLSearchParams({
     key: GOOGLE_MAPS_API_KEY,
     center,
-    zoom: hasCoords ? '19' : '17',
+    zoom: '19',
     maptype: 'satellite',
   })
 
