@@ -4484,6 +4484,18 @@ function resolveIntents(
       "under contract",
       "already under contract",
     ]);
+  // proposal_request recall: explicit offer/price/pay SOLICITATION phrasings the
+  // enumerated list + verb-gated regex miss. Deliberately narrow — every branch
+  // requires a second-person ask directed at us (superlative "best offer/price",
+  // "can you offer", interrogative-quantity "what/how much/the most ... you ...
+  // pay|offer|give", or "you willing to pay") — so statements ABOUT price/pay/
+  // offer ("the price is too high", "I already paid", "your offer was too low",
+  // "what price did it sell for", "will you pay for repairs") do NOT match.
+  const offer_price_solicitation =
+    /\b(your|the)\s+best\s+(cash\s+)?(offer|price)\b/i.test(text) ||
+    /\b(can|could|will|would)\s+you\s+offer\b/i.test(text) ||
+    /\b(how much|the most|what)\b[^.?!]{0,20}\byou\b[^.?!]{0,10}\b(pay|offer|give)\b/i.test(text) ||
+    /\byou\b[^.?!]{0,4}willing\s+to\s+(pay|offer)\b/i.test(text);
   if (
     !agent_handles_proposal &&
     !proposal_rejected &&
@@ -4579,6 +4591,7 @@ function resolveIntents(
       "envíen el contrato",
       "envien el contrato",
     ]) ||
+      offer_price_solicitation ||
       /\b(proposal|offer|numbers|terms)\b/i.test(text) &&
         /\b(send|put together|look at|want|need|see|give|mánd|mand|envi)/i.test(text))
   ) {
