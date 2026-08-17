@@ -69,9 +69,18 @@ async function handle(request) {
     );
   }
 
-  const url = new URL(request.url);
-  const acknowledgedShrink =
-    url.searchParams.get("i_understand_this_shrinks_the_graph") === "true";
+  // There is deliberately NO override here.
+  //
+  // An earlier revision accepted `?i_understand_this_shrinks_the_graph=true`.
+  // A query parameter is not an authorization boundary: it is not privileged,
+  // carries no identity, records no reason, and anything that can reach this
+  // route can set it. It made the guard advisory, which is the same as not
+  // having one.
+  //
+  // A graph rebuild that fails integrity is not a thing to force through an
+  // HTTP knob. Repair the input (see docs/backend/campaign_target_graph_contract.md),
+  // or perform the commit deliberately at the database boundary where the
+  // actor, reason, and before/after metrics are recorded.
 
   // ── PREFLIGHT ─────────────────────────────────────────────────────────────
   // Projected, not hypothetical: this route can only ever stage the
@@ -103,7 +112,7 @@ async function handle(request) {
     );
   }
 
-  if (!preflight.ok && !acknowledgedShrink) {
+  if (!preflight.ok) {
     logger.error("rebuild_target_graph.blocked_by_integrity", {
       violations: preflight.violations,
       metrics: preflight.metrics,
@@ -119,15 +128,17 @@ async function handle(request) {
         violations: preflight.violations,
         metrics: preflight.metrics,
         thresholds: preflight.thresholds,
-        override: "i_understand_this_shrinks_the_graph=true",
+        override: null,
+        remedy:
+          "This block cannot be overridden over HTTP. Repair the ownership input " +
+          "so the rebuild no longer shrinks the graph.",
       },
       { status: 409 }
     );
   }
 
   logger.info("rebuild_target_graph.started", {
-    preflight_ok: preflight.ok,
-    forced: acknowledgedShrink && !preflight.ok,
+    preflight_ok: preflight.ok, // always true here — a failed preflight has already returned 409
     metrics: preflight.metrics,
   });
 
