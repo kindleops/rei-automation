@@ -40,7 +40,22 @@ export async function GET(request) {
   const lat = searchParams.get('lat')
   const lng = searchParams.get('lng')
   const address = searchParams.get('address')
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_SERVER_KEY
+  /**
+   * This route does NOT call Google. It builds a Maps Embed URL with the key in
+   * the query string and returns that URL to the browser, which then loads it in
+   * an iframe. The key therefore becomes a *public* value the moment this
+   * responds — it is a browser credential, not a server secret.
+   *
+   * So `GOOGLE_MAPS_API_KEY` here must hold the same referrer-restricted browser
+   * key as the dashboard's `VITE_GOOGLE_MAPS_API_KEY`. Never point it at a
+   * server-privileged Google key: referrer restrictions are what protect it, and
+   * an unrestricted key placed here would be harvested from the iframe src.
+   *
+   * The former `GOOGLE_MAPS_SERVER_KEY` fallback was removed. It implied a
+   * separate, more-privileged server credential, which is exactly the wrong
+   * thing to expose through this response.
+   */
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
 
   if (!apiKey) {
     return NextResponse.json({ ok: false, error: 'maps_key_unavailable' }, { status: 503, headers: cors })

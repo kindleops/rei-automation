@@ -37,8 +37,12 @@ import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import type { Phase3Intelligence } from '../../../lib/data/inboxIntelligencePhase3'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
+import { getGoogleMapsApiKey } from '../../../lib/maps/loadGoogleMaps'
+
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
-const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+// Single browser-key accessor, no hardcoded fallback. The builders below
+// already return undefined on a falsy key and the UI renders its own fallback.
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey()
 
 import { detectPropertyCategory } from '../helpers/propertyHelpers'
 import { WatchBell } from '../../../shared/WatchBell'

@@ -1,8 +1,9 @@
 import { asString } from '../../lib/data/shared'
 import type { ThreadMessage, ThreadIntelligenceRecord } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-
-const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
+// Resolved through the single browser-key accessor rather than re-reading the
+// env here, so the Maps credential is defined in exactly one place.
+import { getGoogleMapsApiKey } from '../../lib/maps/loadGoogleMaps'
 
 export interface NormalizedPropertySnapshot {
   // Property Identity
@@ -116,7 +117,8 @@ export const buildStreetViewUrl = (
   lat?: number | null,
   lng?: number | null,
 ): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+  const apiKey = getGoogleMapsApiKey()
+  if (!apiKey) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
   const location = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
   if (!location) return null
@@ -124,12 +126,19 @@ export const buildStreetViewUrl = (
   return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&key=${apiKey}`
 }
 
+/**
+ * Name is historical: this is the **Maps Static API** (`/maps/api/staticmap`
+ * with `maptype=satellite`), NOT Google's Aerial View API. Lead Command does
+ * not use Aerial View, and it must not be enabled on the Maps key on account
+ * of this function's name.
+ */
 export const buildAerialViewUrl = (
   address: string | null,
   lat?: number | null,
   lng?: number | null,
 ): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+  const apiKey = getGoogleMapsApiKey()
+  if (!apiKey) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
   const center = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
   if (!center) return null
