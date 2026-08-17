@@ -43,7 +43,11 @@ export const OBJECTIVE_TEMPLATE_USE_CASE = Object.freeze({
   [ACQUISITION_OBJECTIVES.CLARIFY_REQUIRED_SIGNER]: null,
   [ACQUISITION_OBJECTIVES.CLARIFY_IDENTITY]: null,
   [ACQUISITION_OBJECTIVES.HANDLE_AGENT_INVOLVEMENT]: null,
-  [ACQUISITION_OBJECTIVES.HANDLE_TRUST_CONCERN]: null,
+  // Trust/scam concern from an engaged seller gets the existing safe identity
+  // template instead of silence (audit misroute #6): the null mapping withheld
+  // the reply AND dropped the identity template the intent profile would
+  // otherwise have sent for "is this a scam?".
+  [ACQUISITION_OBJECTIVES.HANDLE_TRUST_CONCERN]: "who_is_this",
   [ACQUISITION_OBJECTIVES.HUMAN_REVIEW]: null,
   [ACQUISITION_OBJECTIVES.SUPPRESS]: null,
   [ACQUISITION_OBJECTIVES.NO_REPLY]: null,

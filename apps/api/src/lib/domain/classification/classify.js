@@ -425,6 +425,12 @@ const COMPLIANCE_PHRASES = [
   "don't text me", "dont text me", "don't message me",
   "dont message me", "don't contact me", "dont contact me",
   "don't call me", "dont call me",
+  // Combined-channel prohibitions ("don't call or text me") previously matched
+  // no phrase and fell through to callback_requested — an explicit
+  // do-not-contact read as engagement.
+  "don't call or text", "dont call or text", "do not call or text",
+  "don't text or call", "dont text or call", "do not text or call",
+  "no calls or texts", "no texts or calls",
   "never text me", "never call me", "never contact me",
   "never message me", "never reach out",
   "please don't contact me", "please do not contact me",
@@ -600,6 +606,43 @@ const COMPLIANCE_PHRASES = [
   "μην μου ξαναστείλεις", "σβήσε τον αριθμό μου",
 ];
 
+// ── Channel-preference guard (audit misroute #4) ───────────────────────────
+// "Text me, just don't call me" is a TEXT-channel preference from an engaged
+// seller, not an opt-out. The guard applies ONLY when the message contains an
+// explicit text-channel affirmative AND no text/contact prohibition — so
+// "don't text me", "stop calling and texting", "don't call or text" all remain
+// full opt-outs. Call-only prohibitions are then ignored for compliance.
+const TEXT_CHANNEL_AFFIRMATIVES = [
+  "text me", "text only", "text is fine", "just text", "prefer text",
+  "rather text", "text instead", "texting is fine", "text works",
+  "you can text", "text is better", "texts are fine",
+  // Spanish
+  "por texto", "solo texto", "mejor texto", "mandame texto", "mándame texto",
+];
+const TEXT_OR_CONTACT_PROHIBITIONS = [
+  "don't text", "dont text", "do not text", "stop texting", "quit texting",
+  "never text", "don't message", "dont message", "do not message",
+  "stop messaging", "quit messaging", "never message",
+  "don't contact", "dont contact", "do not contact", "never contact",
+  "stop contacting", "remove me", "take me off", "opt out", "opt-out",
+  "unsubscribe", "leave me alone",
+  "don't call or text", "dont call or text", "do not call or text",
+  "don't text or call", "dont text or call", "do not text or call",
+  "no calls or texts", "no texts or calls",
+];
+const CALL_ONLY_PROHIBITIONS = [
+  "do not call", "do not call me", "don't call me", "dont call me",
+  "don't call", "dont call", "stop calling", "stop calling me",
+  "quit calling me", "quit calling", "never call me", "never call",
+  "no calls", "no phone calls",
+];
+function matchesTextChannelPreference(text) {
+  return (
+    includesAny(text, TEXT_CHANNEL_AFFIRMATIVES) &&
+    !includesAny(text, TEXT_OR_CONTACT_PROHIBITIONS)
+  );
+}
+
 function detectComplianceFlag(message) {
   const text  = lower(message);
   const trimmed = text.trim();
@@ -607,9 +650,14 @@ function detectComplianceFlag(message) {
   // Exact keyword match (entire message is the keyword)
   if (COMPLIANCE_EXACT.has(trimmed)) return "stop_texting";
 
-  // Message starts with a carrier keyword (e.g., "STOP please")
+  // Message starts with a carrier keyword (e.g., "STOP please"). The
+  // channel-preference carve applies here too: "Stop calling me, text me
+  // instead" starts with "stop" but is a TEXT preference, not an opt-out.
+  // The guard requires an explicit text affirmative with no text/contact
+  // prohibition, so "stop calling and texting" stays a full opt-out.
   for (const kw of COMPLIANCE_EXACT) {
     if (trimmed.startsWith(kw + " ") || trimmed.startsWith(kw + ",")) {
+      if (matchesTextChannelPreference(text)) break;
       return "stop_texting";
     }
   }
@@ -636,8 +684,18 @@ function detectComplianceFlag(message) {
     return "stop_texting";
   }
 
-  // Phrase-intent match
-  if (includesAny(text, COMPLIANCE_PHRASES)) return "stop_texting";
+  // Phrase-intent match. Channel-preference carve: when the seller explicitly
+  // affirms the text channel and prohibits only CALLS, the call-only phrases
+  // must not read as a texting opt-out.
+  if (includesAny(text, COMPLIANCE_PHRASES)) {
+    if (matchesTextChannelPreference(text)) {
+      const non_call_only_hit = COMPLIANCE_PHRASES.some(
+        (p) => !CALL_ONLY_PROHIBITIONS.includes(p) && includesAny(text, [p])
+      );
+      if (!non_call_only_hit) return null;
+    }
+    return "stop_texting";
+  }
 
   return null;
 }
@@ -4289,7 +4347,11 @@ function resolveIntents(
     ]) ||
     /^(stop|stop\.|quit|end|cancel|remove)[\s!.]*$/i.test(text.trim()) ||
     (/\bstop\b/i.test(text) &&
-      includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]));
+      includesAny(text, ["text", "message", "messaging", "list", "contact", "call", "harass"]) &&
+      // "Stop calling me, text me instead" is a channel preference, not an
+      // opt-out (see matchesTextChannelPreference — text prohibitions never
+      // pass the guard, so real opt-outs are unaffected).
+      !matchesTextChannelPreference(text));
 
   if (is_opt_out && !is_true_wrong && !is_ownership_disconnect) {
     matched_rule_ids.push("opt_out_terminal");
@@ -5106,11 +5168,23 @@ function resolveIntents(
 
   // 15. WHO IS THIS
   if (normalized_objection === "who_is_this" || includesAny(text, [
-    "who is this", "who's this", "whos this", "who be this", "how do you know my name", 
+    "who is this", "who's this", "whos this", "who be this", "how do you know my name",
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
-    "identification", "identify", "porque", "por que", "why",
+    "identification", "identify",
   ])) {
+    intents.push("who_is_this");
+  } else if (
+    // Bare interrogative ("Why?" / "Porque?") is an identity challenge — but a
+    // longer why-question riding alongside a stronger business intent
+    // ("Why do you want to buy it? Yes it's mine") is not: who_is_this sits at
+    // priority #3 and would hijack the ownership confirmation (audit
+    // misroute #7). Only infer identity-challenge from "why" when the message
+    // is short and no other intent matched.
+    includesAny(text, ["why", "porque", "por que"]) &&
+    wordCount(text) <= 3 &&
+    intents.length === 0
+  ) {
     intents.push("who_is_this");
   }
 
@@ -5745,6 +5819,22 @@ function deriveAutomationDecision({
       "llc_corporation",
     ].includes(intent)
   ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
+    };
+  }
+
+  // Sensitive-circumstance objections (audit misroutes #2/#3): probate /
+  // deceased-owner language and foreclosure-clock financial distress must reach
+  // the empathetic / time-critical HUMAN lane — never a templated auto-reply,
+  // never suppression. The ontology (probate_estate, foreclosure_urgency)
+  // declares these human-only; previously the ownership/condition intents they
+  // ride on landed them in the auto-reply lane.
+  if (["probate", "financial_distress"].includes(normalized_objection)) {
     return {
       auto_reply_allowed: false,
       queue_action: "none",

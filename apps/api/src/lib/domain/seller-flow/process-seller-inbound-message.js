@@ -1,6 +1,9 @@
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
-import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
+import {
+  executeInboundAutomationDecision,
+  resolveSafeFallbackClarifierDispatch,
+} from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import { runInboundIntelligencePhase } from "@/lib/domain/seller-flow/run-inbound-intelligence-phase.js";
 import {
   buildIntelligenceMessageEventPatch,
@@ -76,6 +79,7 @@ const defaultDeps = {
   buildConversationContext,
   runInboundIntelligencePhase,
   executeInboundAutomationDecision,
+  resolveSafeFallbackClarifierDispatch,
   persistInboundIntelligenceSnapshot,
   persistSellerContactReferral,
   executeReferralAutomation,
@@ -112,16 +116,25 @@ export function resolveV2ReplyWithhold({
   conversation_state = null,
   response_strategy = null,
 } = {}) {
+  // Ambiguity-only carve: when classification ambiguity is the SOLE review
+  // driver (no suppression / identity / conflict / authority / hostile — see
+  // resolve-seller-conversation-state), the turn stays live so the executor's
+  // stage-aware safe-fallback clarifier can answer it. The executor still
+  // fail-closes: if the clarifier gate declines (protected reason, language,
+  // suppression lookup, duplicate), the decision remains review and nothing
+  // queues. Every non-ambiguity withhold below is unchanged.
+  const ambiguity_only =
+    conversation_state?.safety?.ambiguity_only_review === true;
   const conversation_safety_withholds = Boolean(
     conversation_state?.safety?.suppression_required === true ||
-      conversation_state?.safety?.human_review_required === true ||
-      conversation_state?.safety?.no_reply_required === true
+      conversation_state?.safety?.no_reply_required === true ||
+      (conversation_state?.safety?.human_review_required === true && !ambiguity_only)
   );
   const strategy_withholds = Boolean(
     response_strategy &&
-      (response_strategy.no_reply ||
-        response_strategy.human_review_required ||
-        response_strategy.suppression_required)
+      (response_strategy.suppression_required ||
+        ((response_strategy.no_reply || response_strategy.human_review_required) &&
+          !ambiguity_only))
   );
   return strategy_withholds || conversation_safety_withholds;
 }
@@ -525,6 +538,94 @@ export function resolveEffectiveStageBefore({
     return persisted;
   }
   return supplied;
+}
+
+/**
+ * Price-objection protected lane (audit misroute #5).
+ *
+ * A price accompanied by rejection language ("too low, I want 300k") BELOW the
+ * negotiation stage is an objection to a perceived offer, not a fresh asking
+ * price — but the classifier is stage-blind and labels it
+ * asking_price_provided + need_more_money, which would silently run the
+ * fresh-price flow. At S5+ the negotiation router owns the turn (counters,
+ * concession ladder), so this directive only fires when NO negotiation
+ * strategy decision exists and the resolved stage is below the offer stage.
+ * It reuses the strategyDirective review mechanism: the executor marks human
+ * review and withholds the reply; the price fact still persists.
+ */
+export function resolvePriceObjectionDirective({
+  classification = null,
+  negotiation = null,
+  stageAfter = null,
+} = {}) {
+  if (negotiation?.strategy_decision) return null;
+  const intent = String(
+    classification?.primary_intent || classification?.detected_intent || ""
+  ).trim();
+  const objection = String(classification?.objection || "").trim();
+  if (intent !== "asking_price_provided" || objection !== "need_more_money") {
+    return null;
+  }
+  const stage_number = lifecycleStageNumber(normalizeLifecycleStage(stageAfter));
+  if (Number(stage_number) >= 5) return null;
+  return {
+    review_required: true,
+    review_reason: "price_objection_below_negotiation",
+    reason_code: "price_objection_below_negotiation",
+  };
+}
+
+/**
+ * Lifecycle template authority — advancing AND fact-redundant hold turns
+ * (activation-hardening item 3).
+ *
+ * Historically the resolver's required_template_use_case reached the executor
+ * only when the lifecycle ADVANCED; every non-advancing turn fell back to the
+ * stage-blind intent profile, which re-asked questions the deal record already
+ * answered (ownership re-confirmed at S3+ got the S2 interest question;
+ * interest at S4+ re-asked a KNOWN price; "make me an offer" held at S3
+ * re-asked the declined price). The resolver computes the stage's outstanding
+ * question on EVERY turn, so extend its authority to hold turns for the
+ * fact-carrying / re-confirmation intents below. Lateral conversational
+ * intents (who_is_this, callback_requested, info_request, requests_email,
+ * language_switch) are deliberately NOT in this set — they keep conversational
+ * routing. Review, contactability, and V2-withhold guards are unchanged.
+ */
+const HOLD_DIRECTIVE_INTENTS = new Set([
+  "ownership_confirmed",
+  "seller_interested",
+  "latent_interest",
+  "asks_offer",
+  "asking_price_provided",
+  "condition_disclosed",
+]);
+
+export function resolveTransitionDirective({
+  transition = null,
+  v2_withholds_reply = false,
+  response_strategy = null,
+  turn_intent = null,
+} = {}) {
+  if (
+    !transition ||
+    transition.review_required ||
+    transition.contactability_patch ||
+    v2_withholds_reply
+  ) {
+    return null;
+  }
+  const intent = clean(turn_intent).toLowerCase();
+  const eligible =
+    transition.advanced === true ||
+    (HOLD_DIRECTIVE_INTENTS.has(intent) &&
+      Boolean(clean(transition.required_template_use_case)));
+  if (!eligible) return null;
+  return {
+    required_template_use_case:
+      response_strategy?.template_use_case || transition.required_template_use_case,
+    stage_after: transition.stage_after,
+    reasoning_code: response_strategy?.reason_code || transition.reasoning_code,
+  };
 }
 
 /**
@@ -1032,9 +1133,26 @@ export async function processSellerInboundMessage({
 
   const canonical_decision =
     intelligence?.canonical_decision || intelligence_snapshot?.canonical_decision || null;
+  // Safe-fallback clarifier queue authority: the canonical decision for an
+  // ambiguous turn is review (should_queue_reply=false), which previously
+  // revoked queue authority BEFORE the executor could convert the turn into a
+  // clarifier send — the clarifier rendered and dropped. Grant authority when
+  // the fail-closed clarifier gate says the turn is convertible; the executor
+  // re-runs the same gate plus suppression lookup, dedup, render guards, and
+  // mode/allowlist authority, so this widens exactly one path and only as far
+  // as the executor's own gates allow.
+  const clarifier_eligible = Boolean(
+    runtimeDeps.resolveSafeFallbackClarifierDispatch({
+      decision: canonical_decision,
+      classification,
+      message,
+      stage: effective_stage_before,
+    })
+  );
   const should_queue_live = Boolean(
     execution_allowed &&
-      (canonical_decision?.should_queue_reply ?? legacy_plan?.should_queue_reply)
+      ((canonical_decision?.should_queue_reply ?? legacy_plan?.should_queue_reply) ||
+        clarifier_eligible)
   );
 
   // ── Monetary understanding (spec §3): classify every number BEFORE any
@@ -1390,7 +1508,14 @@ export async function processSellerInboundMessage({
             review_reason: negotiation.strategy_decision.review_reason,
             monetary_amount: authorized_amount,
           }
-        : null,
+        : // Below the negotiation stage, a price wrapped in rejection language
+          // ("too low, I want 300k") is a price OBJECTION — protected human
+          // lane, never the silent fresh-price flow (audit misroute #5).
+          resolvePriceObjectionDirective({
+            classification,
+            negotiation,
+            stageAfter: transition?.stage_after ?? effective_stage_before,
+          }),
     // Template authority for next-action selection. The directive applies under
     // EXACTLY the pre-existing condition (the lifecycle advanced, is not in
     // review, and is not a contactability change) — lateral intents such as
@@ -1408,19 +1533,17 @@ export async function processSellerInboundMessage({
     // unsafe to answer. Falling back would let the withheld turn name an
     // offer-bearing template downstream — the exact widening this layer is
     // forbidden to do.
-    transitionDirective:
-      transition &&
-      transition.advanced &&
-      !transition.review_required &&
-      !transition.contactability_patch &&
-      !v2_withholds_reply
-        ? {
-            required_template_use_case:
-              response_strategy?.template_use_case || transition.required_template_use_case,
-            stage_after: transition.stage_after,
-            reasoning_code: response_strategy?.reason_code || transition.reasoning_code,
-          }
-        : null,
+    transitionDirective: resolveTransitionDirective({
+      transition,
+      v2_withholds_reply,
+      response_strategy,
+      turn_intent:
+        intelligence_snapshot?.canonical_intent ||
+        contract?.normalized_intent ||
+        classification?.primary_intent ||
+        null,
+    }),
+    effectiveStageBefore: transition?.stage_after ?? effective_stage_before,
     supabaseClient: supabase,
     getSystemValue,
   });

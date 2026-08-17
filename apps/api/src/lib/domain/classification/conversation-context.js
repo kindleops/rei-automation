@@ -377,6 +377,24 @@ export function applyContextualShortReply(messageText, validated) {
         ...base,
       };
     }
+    if (useCase === 'condition_check' || qType === 'condition') {
+      // "No" answering "does it need repairs?" is CONDITION information
+      // (nothing needs fixing), never disinterest. Without this branch the
+      // bare-no fallback classified it not_interested@0.92 and shelved a
+      // good-condition seller for 30 days. Bind fail-closed to clarification.
+      return {
+        applied: true,
+        primary_intent: 'unclear',
+        labels: ['unclear_condition_acknowledgement'],
+        rule_id: 'ctx_no_after_condition',
+        force_unclear: true,
+        confidence: 0.6,
+        rationale: 'short_no_after_condition_question_is_condition_info_not_disinterest',
+        evidence_span: String(messageText).trim(),
+        human_review: true,
+        ...base,
+      };
+    }
   }
 
   return { applied: false };
