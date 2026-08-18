@@ -1,3 +1,5 @@
+import crypto from 'node:crypto'
+
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, withCors, handleOptionsResponse } from '../../_shared.js'
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
@@ -1178,7 +1180,19 @@ export async function POST(request) {
     let stoppedAt = null
     try {
       result = await processSendQueue({ queue_row: row }, {
-        processing_run_id: `send-one-${queue_row_id}-${Date.now()}`,
+        // queue_atomic_claim_send_row declares p_processing_run_id as UUID.
+        // This previously passed a label -- `send-one-${queue_row_id}-${Date.now()}`
+        // -- which Postgres rejected with "invalid input syntax for type uuid",
+        // failing the claim before any provider submission. send_one_queue_row
+        // was therefore broken for every row, not just one.
+        //
+        // crypto.randomUUID() matches what run-send-queue.js and
+        // run-scoped-campaign-canary.js already generate, so the run id stays a
+        // real UUID and hasCurrentProcessingRun() can still verify claim
+        // ownership. (Omitting it would also work -- the RPC does
+        // COALESCE(p_processing_run_id, gen_random_uuid()) -- but then the
+        // caller never learns the id and cannot verify it owns the claim.)
+        processing_run_id: crypto.randomUUID(),
         getSystemValue: async (key) => {
           if (key === 'queue_processor_mode') return 'live'
           if (key === 'queue_emergency_stop_at') return ''
