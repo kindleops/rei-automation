@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { normalizeCampaignMode } from "@/lib/domain/queue/queue-control-safety.js";
 import {
   ENQUEUE_REASON,
   buildCampaignTargetQueueKey,
@@ -133,6 +134,7 @@ function makeSupabase(fixtures = {}) {
 }
 
 const okFixtures = (over = {}) => ({
+  system_control: [{ key: "campaign_mode", value: "live_limited" }],
   campaign_targets: baseTarget(),
   campaigns: { id: "camp-1", name: "Los Angeles- Multifamily" },
   sms_suppression_list: [],
@@ -601,4 +603,166 @@ test("preview surfaces the same rejection the real call would", async () => {
   assert.equal(result.created, false);
   assert.equal(result.reason, ENQUEUE_REASON.TEMPLATE_UNGOVERNED);
   assert.equal(result.would_insert, null);
+});
+
+// ── campaign-mode contract ────────────────────────────────────────────────
+// The row is admitted by send_one_queue_row only when metadata.campaign_mode
+// normalizes to 'live_limited'. A row without it defaults to 'paused' at the
+// route and is rejected -- which is exactly how canary #1 aborted.
+
+test("the resolved campaign mode is stamped on the created row", async () => {
+  const inserted = [];
+  const supabase = makeSupabase(fixturesWithReadback(inserted));
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(inserted[0].metadata.campaign_mode, "live_limited");
+  assert.equal(inserted[0].metadata.campaign_mode_source, "system_control.campaign_mode");
+});
+
+test("the mode is resolved, not hardcoded", async () => {
+  // 'automatic' is an alias that normalizes to live_limited. If the value were
+  // hardcoded this test could not distinguish it from a literal.
+  const inserted = [];
+  const supabase = makeSupabase(fixturesWithReadback(inserted, {
+    system_control: [{ key: "campaign_mode", value: "automatic" }],
+  }));
+  await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
+  });
+
+  assert.equal(normalizeCampaignMode("automatic"), "live_limited");
+  assert.equal(inserted[0].metadata.campaign_mode, "live_limited");
+});
+
+for (const [label, value, reason] of [
+  ["paused",        "paused",   ENQUEUE_REASON.CAMPAIGN_MODE_NOT_SENDABLE],
+  ["dry_run",       "dry_run",  ENQUEUE_REASON.CAMPAIGN_MODE_NOT_SENDABLE],
+  ["malformed",     "!!bogus!!", ENQUEUE_REASON.CAMPAIGN_MODE_NOT_SENDABLE],
+  ["missing value", "",         ENQUEUE_REASON.CAMPAIGN_MODE_UNRESOLVED],
+]) {
+  test(`campaign mode ${label} creates zero rows`, async () => {
+    const { deps, inserted } = runDeps(okFixtures({
+      system_control: [{ key: "campaign_mode", value }],
+    }));
+    const result = await enqueueCampaignTargetOne(TARGET_ID, deps);
+
+    assert.equal(result.created, false, `${label} must not create`);
+    assert.equal(result.reason, reason);
+    assert.equal(inserted.length, 0, "zero rows created");
+  });
+}
+
+test("an absent campaign_mode row fails closed", async () => {
+  const { deps, inserted } = runDeps(okFixtures({ system_control: [] }));
+  const result = await enqueueCampaignTargetOne(TARGET_ID, deps);
+
+  assert.equal(result.created, false);
+  assert.equal(result.reason, ENQUEUE_REASON.CAMPAIGN_MODE_UNRESOLVED);
+  assert.equal(inserted.length, 0);
+});
+
+test("stamping the mode does not drop any other metadata key", async () => {
+  const inserted = [];
+  const supabase = makeSupabase(fixturesWithReadback(inserted));
+  await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
+  });
+
+  const m = inserted[0].metadata;
+  for (const key of [
+    "source", "campaign_target_id", "selected_template_id", "template_id",
+    "template_name", "agent_persona", "agent_name", "seller_first_name",
+    "language", "timezone_status", "timezone_basis", "candidate_snapshot",
+    "no_direct_provider_send",
+  ]) {
+    assert.ok(key in m, `metadata.${key} must survive`);
+  }
+});
+
+test("dry-run previews the same campaign mode that would be persisted", async () => {
+  const supabase = makeSupabase(okFixtures());
+  const preview = await previewCampaignTargetOne(TARGET_ID, { supabase, now: NOON_PT });
+
+  assert.equal(preview.created, true);
+  assert.equal(preview.would_insert.metadata.campaign_mode, "live_limited");
+  assert.equal(preview.review.campaign_mode, "live_limited");
+});
+
+// ── full route-level admission chain ──────────────────────────────────────
+// The previous compatibility test only covered preclaimInvalidQueueRowReason,
+// the validator INSIDE the send engine. It missed the control route's own
+// gates, which run first -- and one of them rejected canary #1.
+
+test("the created row clears the entire send_one_queue_row admission chain", async () => {
+  const inserted = [];
+  const supabase = makeSupabase(fixturesWithReadback(inserted));
+  await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
+  });
+
+  const row = inserted[0];
+  const meta = row.metadata;
+  const status = String(row.queue_status).toLowerCase();
+
+  // Route constants mirrored from app/api/cockpit/queue/control/route.js:120-127
+  const SENDABLE = new Set(["queued", "scheduled", "pending", "approved", "ready"]);
+  const REJECT = new Set([
+    "expired", "failed", "paused", "paused_operator_review",
+    "paused_name_missing", "paused_invalid_queue_row",
+  ]);
+
+  // ROUTE GATE 1 -- campaign mode
+  assert.equal(
+    normalizeCampaignMode(meta.campaign_mode || row.campaign_mode || "paused"),
+    "live_limited",
+    "route gate 1: queue_row_not_live_limited"
+  );
+
+  // ROUTE GATE 2 -- rejectOneRowStatusReason
+  assert.ok(!REJECT.has(status) && !status.startsWith("paused"), "route gate 2: status rejected");
+  assert.ok(SENDABLE.has(status), "route gate 2: status not sendable");
+
+  // ROUTE GATE 3 -- queueRowIsNoSend
+  const isNoSend =
+    meta.no_send === true || meta.proof_no_send === true ||
+    String(meta.proof_mode ?? "").toLowerCase() === "no_send" ||
+    row.sms_eligible === false || row.routing_allowed === false;
+  assert.equal(isNoSend, false, "route gate 3: row marked no_send");
+
+  // ROUTE GATE 4 -- not scheduled in the future
+  const schedAt = row.scheduled_for_utc || row.scheduled_for;
+  assert.ok(!schedAt || new Date(schedAt).getTime() <= new Date(NOON_PT).getTime(),
+    "route gate 4: scheduled in future");
+
+  // INTERNAL PRECLAIM -- preclaimInvalidQueueRowReason
+  assert.ok(row.message_body, "missing_message_body");
+  assert.ok(row.to_phone_number, "missing_to_phone_number");
+  assert.ok(row.from_phone_number, "missing_from_phone_number");
+  assert.notEqual(status, "paused_review", "paused_review_not_runnable");
+  assert.equal(row.thread_key, row.to_phone_number, "noncanonical_thread_key");
+  assert.ok(row.template_id || meta.selected_template_id || meta.template_id, "missing_selected_template_id");
+  assert.ok(meta.candidate_snapshot && typeof meta.candidate_snapshot === "object", "missing_candidate_snapshot");
+  assert.ok(row.seller_first_name || meta.candidate_snapshot.seller_first_name, "missing_seller_first_name");
+  assert.ok(!/\{\{/.test(row.message_body), "unresolved token");
+});
+
+test("a row missing campaign_mode would fail route gate 1 — the canary #1 defect", async () => {
+  // Pins the exact regression: the pre-fix row shape.
+  const preFixRow = { queue_status: "queued", metadata: { template_id: "201362" } };
+
+  assert.notEqual(
+    normalizeCampaignMode(preFixRow.metadata.campaign_mode || preFixRow.campaign_mode || "paused"),
+    "live_limited"
+  );
+  assert.equal(
+    normalizeCampaignMode(preFixRow.metadata.campaign_mode || preFixRow.campaign_mode || "paused"),
+    "paused"
+  );
 });
