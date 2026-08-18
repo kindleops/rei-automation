@@ -107,11 +107,27 @@ function makeSupabase(fixtures = {}) {
     return api;
   };
 
+  const updates = [];
+
   return {
     touched,
+    updates,
     from(table) {
       touched.push(table);
-      return { select: (...a) => make(table).select(...a) };
+      return {
+        select: (...a) => make(table).select(...a),
+        update(patch) {
+          const record = { table, patch, filters: {} };
+          const api = {
+            eq(column, value) {
+              record.filters[column] = value;
+              updates.push(record);
+              return Promise.resolve({ data: null, error: null });
+            },
+          };
+          return api;
+        },
+      };
     },
   };
 }
@@ -201,6 +217,57 @@ test("requested target always equals created row target", async () => {
   assert.equal(inserted[0].campaign_target_id, TARGET_ID);
 });
 
+// ── non-throwing insert outcomes ──────────────────────────────────────────
+// insertSupabaseSendQueueRow signals duplicates and failures by RETURN VALUE
+// as well as by throwing. Treating any returned id as success would report
+// creation for a row this call did not create, or whose insert failed.
+
+test("an idempotent replay is reported as already_queued, not created", async () => {
+  const supabase = makeSupabase(okFixtures());
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async () => ({
+      ok: true, idempotent_replay: true, reason: "idempotent_replay", queue_row_id: "pre-existing",
+    }),
+  });
+
+  assert.equal(result.created, false, "a replay is not a creation");
+  assert.equal(result.reason, ENQUEUE_REASON.ALREADY_QUEUED);
+  assert.equal(result.queue_row_id, "pre-existing");
+});
+
+test("duplicate_blocked returned without throwing maps to already_queued", async () => {
+  const supabase = makeSupabase(okFixtures({
+    send_queue: (state) =>
+      state.filters.queue_key === buildCampaignTargetQueueKey(TARGET_ID, 1)
+        ? [{ id: "winner-row", campaign_target_id: TARGET_ID, queue_key: buildCampaignTargetQueueKey(TARGET_ID, 1) }]
+        : [],
+  }));
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async () => ({ ok: false, reason: "duplicate_blocked", queue_row_id: null }),
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.reason, ENQUEUE_REASON.ALREADY_QUEUED);
+  assert.equal(result.queue_row_id, "winner-row");
+});
+
+test("a failed insert that still returns an id is not reported as created", async () => {
+  const supabase = makeSupabase(okFixtures());
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async () => ({ ok: false, reason: "insert_rejected", queue_row_id: "half-written" }),
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.reason, ENQUEUE_REASON.INSERT_FAILED);
+  // And the row it may have left behind is cancelled.
+  const cancel = supabase.updates.find((u) => u.filters.id === "half-written");
+  assert.ok(cancel, "a row left by a failed insert must be neutralized");
+  assert.equal(cancel.patch.queue_status, "cancelled");
+});
+
 test("an invariant violation is fatal and creates nothing usable", async () => {
   // Simulate the row coming back bound to a different target.
   const inserted = [];
@@ -220,6 +287,51 @@ test("an invariant violation is fatal and creates nothing usable", async () => {
   assert.equal(result.reason, ENQUEUE_REASON.INVARIANT_VIOLATION);
   assert.equal(result.fatal, true);
   assert.equal(result.resulting_campaign_target_id, "SOME-OTHER-TARGET");
+
+  // The committed row must be cancelled, not merely reported. Left as
+  // 'queued' the processor would dispatch a message bound to another target
+  // -- the exact failure this primitive exists to prevent.
+  assert.equal(result.neutralized, true);
+  const cancel = supabase.updates.find((u) => u.table === "send_queue" && u.filters.id === "qr-1");
+  assert.ok(cancel, "invariant-violating row must be neutralized");
+  assert.equal(cancel.patch.queue_status, "cancelled");
+  assert.match(cancel.patch.blocked_reason, /campaign_target_id_mismatch/);
+});
+
+test("a read-back failure neutralizes the row instead of throwing", async () => {
+  // The insert already committed; throwing would leave a runnable row the
+  // caller never learns about.
+  const supabase = makeSupabase(okFixtures());
+  const original = supabase.from.bind(supabase);
+  supabase.from = (table) => {
+    const b = original(table);
+    if (table !== "send_queue") return b;
+    return {
+      ...b,
+      select: (cols) => {
+        const inner = b.select(cols);
+        return {
+          ...inner,
+          eq: (col, val) => {
+            const e = inner.eq(col, val);
+            if (col !== "id") return e;
+            return { ...e, maybeSingle: async () => ({ data: null, error: new Error("readback boom") }) };
+          },
+        };
+      },
+    };
+  };
+
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    supabase, now: NOON_PT,
+    insertQueueImpl: async () => ({ ok: true, queue_row_id: "qr-1" }),
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.neutralized, true);
+  assert.equal(result.queue_row_id, "qr-1", "caller must still learn the row id");
+  const cancel = supabase.updates.find((u) => u.filters.id === "qr-1");
+  assert.equal(cancel.patch.queue_status, "cancelled");
 });
 
 // ── rejection matrix ──────────────────────────────────────────────────────

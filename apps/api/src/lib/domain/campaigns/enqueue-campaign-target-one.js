@@ -121,6 +121,44 @@ export function buildCampaignTargetQueueKey(campaignTargetId, touchNumber = 1) {
 }
 
 /**
+ * Make a committed queue row permanently non-runnable.
+ *
+ * Used only on the paths where an insert has already landed but the row must
+ * never be dispatched — an invariant violation, or a read-back we could not
+ * complete. `cancelled` is terminal rather than paused: a row bound to the
+ * wrong target should not be resumable by any operator action.
+ *
+ * Best-effort by design. If the cancel itself fails we still report the
+ * violation to the caller with the row id, because a loud failure carrying an
+ * auditable id beats a silent throw that loses track of a live row.
+ */
+async function neutralizeQueueRow(supabase, queueRowId, reason) {
+  try {
+    const { error } = await supabase
+      .from('send_queue')
+      .update({
+        queue_status: 'cancelled',
+        blocked_reason: `enqueue_campaign_target_one:${reason}`,
+        paused_reason: `enqueue_campaign_target_one:${reason}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', queueRowId)
+    if (error) {
+      logger.error('enqueue_campaign_target_one.neutralize_failed', {
+        queue_row_id: queueRowId, reason, error: clean(error.message),
+      })
+      return false
+    }
+    return true
+  } catch (err) {
+    logger.error('enqueue_campaign_target_one.neutralize_exception', {
+      queue_row_id: queueRowId, reason, error: clean(err?.message),
+    })
+    return false
+  }
+}
+
+/**
  * Select a sender for the target's market.
  *
  * Deliberately narrow: active, healthy, with remaining daily capacity, and
@@ -413,7 +451,46 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     return fail(ENQUEUE_REASON.INSERT_FAILED, message)
   }
 
+  // insertSupabaseSendQueueRow signals duplicates and failures by RETURN VALUE
+  // as well as by throwing, so the id alone cannot be read as success:
+  //   { ok: true,  idempotent_replay: true, queue_row_id }  -> pre-existing row
+  //   { ok: false, reason: 'duplicate_blocked', queue_row_id: null }
+  //   { ok: false, queue_row_id: <id> }                     -> failed, id present
+  // Treating any returned id as "created" would report success for a row this
+  // call did not create, and for one whose insert failed.
   const queueRowId = insert?.queue_row_id || insert?.item_id || insert?.id || null
+
+  if (insert?.idempotent_replay === true || clean(insert?.reason) === 'idempotent_replay') {
+    return {
+      created: false,
+      reason: ENQUEUE_REASON.ALREADY_QUEUED,
+      queue_row_id: queueRowId,
+      requested_campaign_target_id: requestedId,
+      resulting_campaign_target_id: requestedId,
+    }
+  }
+
+  if (clean(insert?.reason) === 'duplicate_blocked') {
+    const { data: existing } = await supabase
+      .from('send_queue')
+      .select('id, campaign_target_id')
+      .eq('queue_key', queueKey)
+      .maybeSingle()
+    return {
+      created: false,
+      reason: ENQUEUE_REASON.ALREADY_QUEUED,
+      queue_row_id: existing?.id ?? queueRowId,
+      requested_campaign_target_id: requestedId,
+      resulting_campaign_target_id: existing?.campaign_target_id ?? null,
+    }
+  }
+
+  if (insert?.ok === false) {
+    // A failed insert that still reports an id may have left a row behind.
+    if (queueRowId) await neutralizeQueueRow(supabase, queueRowId, 'insert_reported_failure')
+    return fail(ENQUEUE_REASON.INSERT_FAILED, clean(insert?.reason) || 'insert_not_ok')
+  }
+
   if (!queueRowId) return fail(ENQUEUE_REASON.INSERT_FAILED, 'no queue_row_id returned')
 
   // ── 13. The invariant ───────────────────────────────────────────────────
@@ -426,14 +503,39 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     .select('id, campaign_target_id, queue_status, to_phone_number, from_phone_number')
     .eq('id', queueRowId)
     .maybeSingle()
-  if (readErr) throw readErr
+
+  if (readErr) {
+    // The insert already committed. Throwing here would leave a runnable row
+    // the caller never learns about, and the processor would dispatch it.
+    // Neutralize first, then report with the id so it can be audited.
+    await neutralizeQueueRow(supabase, queueRowId, 'readback_failed')
+    logger.error('enqueue_campaign_target_one.readback_failed', {
+      queue_row_id: queueRowId,
+      error: clean(readErr.message),
+    })
+    return {
+      created: false,
+      reason: ENQUEUE_REASON.INSERT_FAILED,
+      detail: `readback_failed:${clean(readErr.message)}`,
+      queue_row_id: queueRowId,
+      requested_campaign_target_id: requestedId,
+      resulting_campaign_target_id: null,
+      neutralized: true,
+    }
+  }
 
   const resultingId = clean(readback?.campaign_target_id)
   if (resultingId !== requestedId) {
+    // The row is ALREADY COMMITTED. Returning created:false is not enough --
+    // it would sit in send_queue as 'queued' and the processor would dispatch
+    // a message bound to a different target, which is the exact failure this
+    // primitive exists to prevent. Cancel it before returning.
+    const neutralized = await neutralizeQueueRow(supabase, queueRowId, 'campaign_target_id_mismatch')
     logger.error('enqueue_campaign_target_one.invariant_violation', {
       requested: requestedId,
       resulting: resultingId || null,
       queue_row_id: queueRowId,
+      neutralized,
     })
     return {
       created: false,
@@ -442,6 +544,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       requested_campaign_target_id: requestedId,
       resulting_campaign_target_id: resultingId || null,
       fatal: true,
+      neutralized,
     }
   }
 

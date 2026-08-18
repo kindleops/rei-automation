@@ -79,10 +79,12 @@ async function handle(request) {
       { status: 200 }
     );
   } catch (err) {
-    const message = err?.message || String(err);
-    logger.error("enqueue_target_one.exception", { error: message });
+    // Log the detail, return a stable code. Postgres errors carry table,
+    // column and constraint names, and this route is reachable by anything
+    // holding the internal secret — no reason to hand schema back over HTTP.
+    logger.error("enqueue_target_one.exception", { error: err?.message || String(err) });
     return NextResponse.json(
-      { ok: false, error: "enqueue_target_one_exception", message },
+      { ok: false, error: "enqueue_target_one_exception" },
       { status: 500 }
     );
   }
