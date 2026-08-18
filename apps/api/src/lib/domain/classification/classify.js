@@ -371,7 +371,11 @@ const COMPLIANCE_EXACT = new Set([
   "stop", "end", "cancel", "quit", "unsubscribe", "stopall",
   "opt out", "optout", "opt-out",
   // Spanish
-  "para", "detente", "basta", "cancela",
+  // "pare" is the usted imperative and the word on Spanish stop signs — the
+  // most direct equivalent of STOP, and it was missing while "para" (tú form)
+  // was present. Exact-match only, like the others, so ordinary sentence use
+  // cannot trip it.
+  "para", "pare", "paren", "detente", "deténgase", "detengase", "basta", "cancela",
   // Portuguese
   "parar", "cancelar", "sair",
   // Italian
@@ -469,6 +473,12 @@ const COMPLIANCE_PHRASES = [
   "no quiero mensajes", "no quiero más mensajes",
   "no me llames", "no vuelvas a llamarme",
   "me tienes harto", "me tienes harta",
+  // Common usted-form and idiomatic refusals that were absent. The list
+  // already carried the tú-form ("no me escribas") but not the formal
+  // register, which is what an older owner is more likely to use.
+  "no me escriba", "no me contacte", "no me moleste", "no me molestes",
+  "dejame en paz", "déjame en paz", "dejeme en paz", "déjeme en paz",
+  "no me mande mensajes", "deje de escribirme", "deje de contactarme",
   "esto es acoso", "me estás acosando",
   "voy a reportarte", "te voy a reportar",
   "agrégame al no llamar", "ponme en la lista de no llamar",
@@ -647,8 +657,22 @@ function detectComplianceFlag(message) {
   const text  = lower(message);
   const trimmed = text.trim();
 
+  // Strip surrounding punctuation before keyword comparison.
+  //
+  // Only TRAILING punctuation was handled (see the final-token logic below), so
+  // a message OPENING with a mark never matched: "¡stop!" stayed "¡stop" and
+  // fell through to "unclear". Spanish keyboards emit the inverted opening mark
+  // by default, which makes "¡PARE!" the normal shape of a Spanish opt-out
+  // rather than an edge case — measured: "¡STOP!", "!STOP" and "¡PARE!" all
+  // classified as unclear, i.e. a Spanish speaker asking to stop was not
+  // opted out.
+  //
+  // Applied only to the keyword comparisons. Phrase matching below still runs
+  // against the original text so internal punctuation is preserved.
+  const bare = trimmed.replace(/^[^\p{L}\p{N}]+/u, "").replace(/[^\p{L}\p{N}]+$/u, "");
+
   // Exact keyword match (entire message is the keyword)
-  if (COMPLIANCE_EXACT.has(trimmed)) return "stop_texting";
+  if (COMPLIANCE_EXACT.has(trimmed) || COMPLIANCE_EXACT.has(bare)) return "stop_texting";
 
   // Message starts with a carrier keyword (e.g., "STOP please"). The
   // channel-preference carve applies here too: "Stop calling me, text me
@@ -656,7 +680,10 @@ function detectComplianceFlag(message) {
   // The guard requires an explicit text affirmative with no text/contact
   // prohibition, so "stop calling and texting" stays a full opt-out.
   for (const kw of COMPLIANCE_EXACT) {
-    if (trimmed.startsWith(kw + " ") || trimmed.startsWith(kw + ",")) {
+    if (
+      trimmed.startsWith(kw + " ") || trimmed.startsWith(kw + ",") ||
+      bare.startsWith(kw + " ") || bare.startsWith(kw + ",")
+    ) {
       if (matchesTextChannelPreference(text)) break;
       return "stop_texting";
     }
