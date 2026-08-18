@@ -58,6 +58,8 @@ import {
 import { renderTemplateBody } from '@/lib/domain/campaigns/template-render-validation.js'
 import { buildOutboundMergeValues } from '@/lib/domain/campaigns/outbound-agent-identity.js'
 import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
+import { normalizeCampaignMode } from '@/lib/domain/queue/queue-control-safety.js'
+import { getSystemValueFresh } from '@/lib/system-control.js'
 import { child } from '@/lib/logging/logger.js'
 
 const logger = child({ module: 'domain.campaigns.enqueue_campaign_target_one' })
@@ -71,6 +73,20 @@ const LIVE_QUEUE_STATUSES = [
 
 /** Terminal statuses that still count as "this target was already contacted". */
 const CONSUMED_QUEUE_STATUSES = ['sent', 'delivered']
+
+/**
+ * Campaign modes under which it is meaningful to create a real outbound row.
+ *
+ * `send_one_queue_row` admits a row only when its metadata.campaign_mode
+ * normalizes to 'live_limited'. Creating a row under 'paused' or 'dry_run'
+ * would produce something that can never be dispatched -- a queue row that
+ * looks sendable and is not.
+ *
+ * The mode is RESOLVED from system_control, never assumed: stamping a literal
+ * 'live_limited' would make the row claim an authority the system had not
+ * granted, which is the same class of untruth as omitting it entirely.
+ */
+const SENDABLE_CAMPAIGN_MODES = new Set(['live_limited', 'live'])
 
 /** Contact window — the operator setting, not a value invented here. */
 const WINDOW_START_HOUR = 8
@@ -98,6 +114,8 @@ export const ENQUEUE_REASON = {
   TZ_UNRESOLVED: 'timezone_unresolved',
   OUTSIDE_WINDOW: 'outside_contact_window',
   INSERT_FAILED: 'queue_insert_failed',
+  CAMPAIGN_MODE_UNRESOLVED: 'campaign_mode_unresolved',
+  CAMPAIGN_MODE_NOT_SENDABLE: 'campaign_mode_not_sendable',
   INVARIANT_VIOLATION: 'campaign_target_id_invariant_violation',
 }
 
@@ -118,6 +136,42 @@ const fail = (reason, detail) => ({ created: false, reason, ...(detail ? { detai
  */
 export function buildCampaignTargetQueueKey(campaignTargetId, touchNumber = 1) {
   return `campaign_target_one:${clean(campaignTargetId)}:t${Number(touchNumber) || 1}`
+}
+
+/**
+ * Resolve the canonical campaign mode from the control plane.
+ *
+ * Uses the UNCACHED reader. getSystemValue memoizes, and an operator who
+ * pauses campaigns seconds before an attended enqueue must not have that
+ * change served from a stale cache while a real outbound row is written.
+ *
+ * Fails closed on every uncertainty: a missing row, an unreadable value, or a
+ * mode outside the sendable set all produce zero rows rather than a row
+ * carrying a mode the system did not authorize.
+ */
+async function resolveCampaignMode(supabase) {
+  let raw
+  try {
+    raw = await getSystemValueFresh('campaign_mode', { supabase })
+  } catch (err) {
+    logger.error('enqueue_campaign_target_one.campaign_mode_read_failed', {
+      error: clean(err?.message),
+    })
+    return { ok: false, reason: ENQUEUE_REASON.CAMPAIGN_MODE_UNRESOLVED, detail: 'read_failed' }
+  }
+
+  // normalizeCampaignMode falls back to 'paused' for null/unknown input, so an
+  // absent value cannot silently become a sendable mode.
+  if (!clean(raw)) {
+    return { ok: false, reason: ENQUEUE_REASON.CAMPAIGN_MODE_UNRESOLVED, detail: 'not_set' }
+  }
+
+  const mode = normalizeCampaignMode(raw)
+  if (!SENDABLE_CAMPAIGN_MODES.has(mode)) {
+    return { ok: false, reason: ENQUEUE_REASON.CAMPAIGN_MODE_NOT_SENDABLE, detail: mode }
+  }
+
+  return { ok: true, mode }
 }
 
 /**
@@ -362,7 +416,14 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   const senderPhone = clean(sender.phone_number)
   if (senderPhone === recipient) return fail(ENQUEUE_REASON.SENDER_IS_RECIPIENT)
 
-  // ── 11. Build exactly one row ───────────────────────────────────────────
+  // ── 11. Canonical campaign mode ─────────────────────────
+  // Resolved immediately before the write so the value stamped on the row
+  // reflects the control plane at the moment of creation, not at the start of
+  // a long validation pass.
+  const campaignMode = await resolveCampaignMode(supabase)
+  if (!campaignMode.ok) return fail(campaignMode.reason, campaignMode.detail)
+
+  // ── 12. Build exactly one row ───────────────────────────────────────────
   const touchNumber = Number(target.touch_number) || 1
   const queueKey = buildCampaignTargetQueueKey(requestedId, touchNumber)
 
@@ -400,6 +461,9 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     source: 'campaign_target_one',
     metadata: {
       source: 'enqueue_campaign_target_one',
+      // Required by the send_one_queue_row admission gate, which reads
+      // metadata.campaign_mode and defaults to 'paused' when absent.
+      campaign_mode: campaignMode.mode,
       campaign_target_id: requestedId,
       selected_template_id: templateId,
       template_id: templateId,
@@ -408,6 +472,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       agent_name: merge.values.agent_name,
       seller_first_name: merge.values.seller_first_name,
       language: clean(target.language),
+      campaign_mode_source: 'system_control.campaign_mode',
       timezone_status: tz.status,
       timezone_basis: tz.basis,
       // Required by the pre-claim validator (getCandidateSnapshot).
@@ -566,6 +631,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       agent_name: merge.values.agent_name,
       timezone: tz.timezone,
       timezone_status: tz.status,
+      campaign_mode: campaignMode.mode,
       rendered_body: rendered.body,
       suppression_status: clean(target.suppression_status),
       queue_status: clean(readback?.queue_status) || 'queued',
