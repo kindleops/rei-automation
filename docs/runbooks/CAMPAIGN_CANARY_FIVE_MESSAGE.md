@@ -38,7 +38,32 @@ Auto-enqueue is not a canary mechanism. It is not used below.
 
 ---
 
-## 1. The mechanism: `queue_one`
+## 1. The mechanism: `enqueue_campaign_target_one` (NOT `queue_one`)
+
+**`queue_one` cannot be used for this canary.** It takes a
+`campaign_session_id` plus market/state and resolves its recipient through
+`runSupabaseCandidateFeeder` against `v_feeder_candidates_fast` — a legacy
+property/prospect view with **no campaign linkage at all**. Measured:
+20,738 rows, **zero** of the frozen five present, and `market ilike '%Los
+Angeles%'` matches **0** rows. Invoking it would text one of 3,456 unrelated
+CA sellers.
+
+The correct mechanism is the target-addressed primitive:
+
+    POST /api/internal/campaigns/enqueue-target-one
+    { "campaign_target_id": "<uuid>", "dry_run": false }
+
+- `dry_run` defaults to **true**; writing requires explicitly passing `false`
+- exactly one named target in, zero or one queue row out
+- never invokes the feeder (asserted by test)
+- verifies `created_row.campaign_target_id === requested id` and treats a
+  mismatch as fatal
+- duplicate-proof via the UNIQUE index on `send_queue.queue_key`, keyed
+  `campaign_target_one:<target>:t<touch>`
+- creates a `queued` row; it does **not** send. Dispatch stays with
+  `send_one_queue_row`.
+
+### Legacy `queue_one` preconditions (retained for reference)
 
 `app/api/cockpit/queue/control/route.js` already implements a purpose-built
 one-shot path. `oneRowQueueSafetyFailure` refuses to run unless **all** of:
