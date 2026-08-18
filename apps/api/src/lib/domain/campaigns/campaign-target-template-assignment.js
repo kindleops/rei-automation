@@ -7,6 +7,12 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage, templateCatalogLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { expandTemplatePropertyScopes } from '@/lib/sms/property_scope.js'
+import { loadTemplatePool } from '@/lib/domain/campaigns/template-pool-pagination.js'
+import { applyGovernance, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
+import {
+  TEMPLATE_STATE,
+  templateStatusForState,
+} from '@/lib/domain/campaigns/template-status-semantics.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -24,16 +30,19 @@ function increment(bucket, key, amount = 1) {
   bucket[key] = Number(bucket[key] || 0) + amount
 }
 
+/**
+ * Load the governed, completely-paginated, canonically-ordered template pool.
+ *
+ * The previous implementation used `.limit(5000)` on a bare select. PostgREST
+ * clamps that to max-rows (1,000), so the default ownership_check/S1 pool of
+ * 4,638 templates was silently cut to its first ~22% — and with no ORDER BY,
+ * *which* 22% was left to the planner.
+ */
 async function loadOwnershipTemplates(supabase, useCase, stageCode) {
-  const { data, error } = await supabase
-    .from('sms_templates')
-    .select('*')
-    .eq('is_active', true)
-    .eq('use_case', useCase)
-    .eq('stage_code', stageCode)
-    .limit(5000)
-  if (error) throw error
-  return Array.isArray(data) ? data : []
+  const pool = await loadTemplatePool(supabase, useCase, stageCode)
+  const governanceById = await loadGovernance(supabase)
+  const { eligible, rejected, governed } = applyGovernance(pool, governanceById, useCase)
+  return { pool, eligible, rejected, governed, governanceById }
 }
 
 function templatesForLanguage(templates, language) {
@@ -57,6 +66,19 @@ function templatesForPropertyScopes(templates, scopes = []) {
   return relaxed
 }
 
+/**
+ * Deterministic selection over a canonically ordered pool.
+ *
+ * The hash was always deterministic; the POOL was not. Selection indexes into
+ * an ordered list, so if the list order or membership can move between runs,
+ * the same target resolves to a different template. Two things guarantee
+ * stability now: the pool is loaded completely (no server-side truncation) and
+ * sorted by a total order whose final key, template_id, is unique.
+ *
+ * The sort here is retained as a defensive re-assertion — `canonicalTemplateOrder`
+ * already ordered the governed pool, but this function is reachable with any
+ * candidate array and must not depend on its caller having done that.
+ */
 function pickDeterministicTemplate(candidates, seed) {
   const sorted = [...candidates].sort((left, right) => {
     const leftId = clean(left.template_id || left.id)
@@ -69,7 +91,7 @@ function pickDeterministicTemplate(candidates, seed) {
   return sorted[index]
 }
 
-function assignTemplateForTargetFast(target, campaign, templateCatalog) {
+function assignTemplateForTargetFast(target, campaign, templateCatalog, governedPool = false) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
@@ -82,7 +104,8 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
       excluded: true,
       reason: 'unsupported_language',
       language: languageRaw,
-      template_status: 'blocked',
+      template_state: TEMPLATE_STATE.BLOCKED,
+      template_status: templateStatusForState(TEMPLATE_STATE.BLOCKED),
       block_reason: `unsupported_language:${languageRaw}`,
     }
   }
@@ -117,14 +140,23 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
   const templateId = clean(selected?.template_id || selected?.id)
 
   if (!templateId) {
+    // Fail closed. The pool reaching this point is already governance-filtered,
+    // so "nothing matched" can mean the language/scope genuinely has no
+    // template OR that every candidate was paused. Both block; the distinction
+    // is carried in the reason so operators can tell them apart.
+    const state = governedPool
+      ? TEMPLATE_STATE.GOVERNANCE_BLOCKED
+      : TEMPLATE_STATE.MISSING_TEMPLATE
     return {
       ok: false,
       excluded: false,
-      reason: 'no_template_for_language_scope',
+      reason: 'no_governed_template_for_language_scope',
       language: canonicalLanguage,
-      template_status: 'blocked',
-      block_reason: 'no_template_for_language_scope',
+      template_state: state,
+      template_status: templateStatusForState(state),
+      block_reason: 'no_governed_template_for_language_scope',
       property_scopes: propertyScopes,
+      assignment_seed: seed,
     }
   }
 
@@ -133,11 +165,54 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog) {
     excluded: false,
     language: canonicalLanguage,
     template_id: templateId,
-    template_status: 'ready',
+    template_state: TEMPLATE_STATE.ASSIGNED,
+    template_status: templateStatusForState(TEMPLATE_STATE.ASSIGNED),
     template_name: selected?.template_name || null,
+    template_body: selected?.template_body || null,
+    template_version: selected?.version ?? null,
+    stage_code: stageCode,
     property_type_scope: selected?.property_type_scope || propertyScopes[0] || null,
     block_reason: null,
+    // Provenance: the exact seed the selection hashed. Re-running the hash
+    // against the same governed pool must reproduce this template, which is
+    // what makes an assignment auditable rather than merely recorded.
+    assignment_seed: seed,
+    eligible_pool_size: scopedMatches.length,
   }
+}
+
+/**
+ * Page through a campaign's targets.
+ *
+ * The previous `.limit(50000)` had the same defect as the template pool: it is
+ * clamped to PostgREST max-rows, so assignment silently skipped every target
+ * past the first 1,000. No campaign is that large today (largest is 802), which
+ * is precisely why it would have gone unnoticed until one was.
+ *
+ * Deliberately self-contained rather than importing the shared paginator from
+ * the campaign-truncation branch — these PRs must stay independently
+ * mergeable, and a shared import would couple them.
+ */
+async function fetchAllCampaignTargetsForAssignment(supabase, campaignId) {
+  const PAGE = 1000
+  const rows = []
+
+  for (let page = 0; page < 200; page += 1) {
+    const from = page * PAGE
+    const { data, error } = await supabase
+      .from('campaign_targets')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+
+    if (error) throw error
+    const batch = Array.isArray(data) ? data : []
+    rows.push(...batch)
+    if (batch.length < PAGE) break
+  }
+
+  return rows
 }
 
 export async function repairCampaignStageMetadata(campaign = {}, deps = {}) {
@@ -189,14 +264,11 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
   const templateUseCase = clean(
     campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check'
   ) || 'ownership_check'
-  const templateCatalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  const catalog = await loadOwnershipTemplates(supabase, templateUseCase, stageCode)
+  const templateCatalog = catalog.eligible
+  const governedPool = catalog.governed
 
-  const { data: targets, error: targetErr } = await supabase
-    .from('campaign_targets')
-    .select('*')
-    .eq('campaign_id', campaignId)
-    .limit(50000)
-  if (targetErr) throw targetErr
+  const targets = await fetchAllCampaignTargetsForAssignment(supabase, campaignId)
 
   const assignedByLanguage = {}
   const unsupportedLanguages = {}
@@ -216,7 +288,7 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
       continue
     }
 
-    const result = assignTemplateForTargetFast(target, campaign, templateCatalog)
+    const result = assignTemplateForTargetFast(target, campaign, templateCatalog, governedPool)
     const lang = result.language || 'Unknown'
 
     if (result.excluded) {
@@ -224,10 +296,16 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
       increment(unsupportedLanguages, lang)
       updates.push({
         id: target.id,
-        template_status: 'blocked',
+        template_status: result.template_status,
         block_reason: result.block_reason,
         metadata: {
           ...metadataObject(target.metadata),
+          // Clear any stale assignment. A target that is now blocked must not
+          // keep a template_id from a previous run — that is exactly how
+          // "ready with no template" and "ready with a paused template" got
+          // written in the first place.
+          template_id: null,
+          template_state: result.template_state,
           template_assignment: {
             excluded: true,
             reason: result.reason,
@@ -239,22 +317,34 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
       continue
     }
 
-    if (result.ok && result.template_status === 'ready') {
+    if (result.ok && result.template_state === TEMPLATE_STATE.ASSIGNED) {
       assigned += 1
       increment(assignedByLanguage, lang)
       updates.push({
         id: target.id,
-        template_status: 'ready',
+        template_status: result.template_status,
         block_reason: null,
         metadata: {
           ...metadataObject(target.metadata),
           template_id: result.template_id,
+          template_state: result.template_state,
           template_use_case: templateUseCase,
           template_name: result.template_name,
+          template_version: result.template_version,
           property_type_scope: result.property_type_scope,
           template_assignment: {
             template_id: result.template_id,
+            template_name: result.template_name,
+            template_version: result.template_version,
             language: lang,
+            stage_code: result.stage_code,
+            use_case: templateUseCase,
+            // Provenance sufficient to reconstruct the decision: re-hashing
+            // this seed over the same governed pool must yield the same
+            // template.
+            assignment_seed: result.assignment_seed,
+            eligible_pool_size: result.eligible_pool_size,
+            governed: governedPool,
             assigned_at: new Date().toISOString(),
           },
         },
@@ -265,14 +355,17 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     awaitingTemplate += 1
     updates.push({
       id: target.id,
-      template_status: 'blocked',
+      template_status: result.template_status,
       block_reason: result.block_reason || result.reason || 'template_assignment_failed',
       metadata: {
         ...metadataObject(target.metadata),
+        template_id: null,
+        template_state: result.template_state,
         template_assignment: {
           reason: result.reason,
           language: lang,
           property_scopes: result.property_scopes || null,
+          governed: governedPool,
           assigned_at: new Date().toISOString(),
         },
       },
@@ -297,7 +390,12 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     skipped,
     assigned_by_language: assignedByLanguage,
     unsupported_by_language: unsupportedLanguages,
+    // Both numbers matter: the raw pool proves truncation is gone, the eligible
+    // count shows what governance actually permits.
+    template_pool_count: catalog.pool.length,
     template_catalog_count: templateCatalog.length,
+    template_governance_applied: governedPool,
+    template_governance_rejected: catalog.rejected.length,
   }
 }
 
