@@ -68,23 +68,37 @@ trade-off to accept knowingly, not a side effect to discover mid-run.
 
 ---
 
-## 2. Frozen candidate set
+## 2. Frozen candidate set — five, fully resolved
 
-Campaign **Los Angeles- Multifamily** (single campaign, all CA/Pacific, all
-touch 1). Frozen at preparation time:
+Campaign **Los Angeles- Multifamily**. One campaign, one language (Spanish),
+one reply path, all CA/Pacific, all touch 1, all templates `testing` with
+cap 20 and 0 used.
 
-| # | target id | recipient | property | template | first name |
+| # | target id | recip | property | tmpl | persona |
 |---|---|---|---|---|---|
-| 1 | `0cc25ba6-353f-4fa8-beeb-d0471c324a79` | ••••0295 | 618 Hoefner Ave, LA 90022 | 201362 | Rodolfo |
-| 2 | `11959319-83ad-4327-b6c1-f41f1fa77814` | ••••6598 | 1347 W 99th St, LA 90044 | 200002 | Veronica |
-| 3 | `143e4c36-c66e-416a-87f2-5458e0554f0d` | ••••2380 | 1928 Browning Blvd, LA 90062 | 200002 | Elsie |
-| 4 | `19340c21-8618-4d66-9da7-6ce15431bc2c` | ••••8722 | 1026 E 57th St, LA 90011 | 201362 | Juan |
-| 5 | `19acb69e-1a5b-4f42-89f5-694004d48b92` | ••••6180 | 1051 Westside Dr, LA 90022 | 201362 | David |
+| 1 | `0cc25ba6-353f-4fa8-beeb-d0471c324a79` | ••0295 | 618 Hoefner Ave, LA 90022 | 201362 | Carmen Rivera |
+| 2 | `11959319-83ad-4327-b6c1-f41f1fa77814` | ••6598 | 1347 W 99th St, LA 90044 | 200002 | Carlos Mendez |
+| 3 | `143e4c36-c66e-416a-87f2-5458e0554f0d` | ••2380 | 1928 Browning Blvd, LA 90062 | 200002 | Carmen Rivera |
+| 4 | `19340c21-8618-4d66-9da7-6ce15431bc2c` | ••8722 | 1026 E 57th St, LA 90011 | 201362 | Carlos Mendez |
+| 5 | `19acb69e-1a5b-4f42-89f5-694004d48b92` | ••6180 | 1051 Westside Dr, LA 90022 | 201362 | Carmen Rivera |
 
-Sender pool (Los Angeles, CA): `••••9881` (LOS ANGELES-#4) and `••••4544`
-(LOS ANGELES-#1). Both active, health 1.0, 800/day limit, 1 and 3 used today.
+**Exact outbound text** (must match the queued body byte-for-byte):
 
-**All five are BLOCKED on the `{{agent_name}}` defect in §4.**
+1. `Hola Rodolfo, Carmen aqui. Pregunta rapida. Sigues siendo el dueno de 618 Hoefner Ave, Los Angeles, Ca 90022?`
+2. `Hola Veronica, soy Carlos. Todavia eres el dueno de 1347 W 99th St, Los Angeles, Ca 90044?`
+3. `Hola Elsie, soy Carmen. Todavia eres el dueno de 1928 Browning Blvd, Los Angeles, Ca 90062?`
+4. `Hola Juan, Carlos aqui. Pregunta rapida. Sigues siendo el dueno de 1026 E 57th St, Los Angeles, Ca 90011?`
+5. `Hola David, Carmen aqui. Pregunta rapida. Sigues siendo el dueno de 1051 Westside Dr, Los Angeles, Ca 90022?`
+
+Sender pool (Los Angeles, CA): `••9881` (LOS ANGELES-#4), `••4544`
+(LOS ANGELES-#1). Both active, health 1.0, 800/day. **Pin one sender for all
+five** so attribution is unambiguous.
+
+Contact window: **08:00–21:00 America/Los_Angeles**.
+
+**Opt-out disclosure:** operator decision on 2026-08-17 — no STOP language in
+outbound messages. Verified: none of the five bodies contains it. Inbound
+STOP/opt-out handling remains fully active and is unaffected.
 
 ---
 
@@ -129,31 +143,53 @@ select count(*) as live_rows from send_queue
 
 ---
 
-## 4. BLOCKER — do not proceed past this line
+## 4. Identity — RESOLVED
 
-All five templates require `{{agent_name}}`. `agent_name` resolves through a
-fallback chain (build-send-queue-item.js:707-725) terminating in `""`, sourced
-partly from Podio, which has been unavailable since early August. **Every LA
-row ever sent carries `agent_name = NULL` (66/66).**
+`{{agent_name}}` now resolves from **`master_owners.agent_persona`**, first name
+only. That contract was derived from production, not chosen: across all 423
+historical sends carrying both fields, `send_queue.agent_name` equals
+`split_part(agent_persona, ' ', 1)` — 423/423.
 
-The pre-claim validator (sms-engine.js:769-794) checks `seller_first_name` but
-**never inspects body content for unresolved tokens**, so this ships as:
+It binds to the OWNER, so a seller contacted twice hears from the same person.
+It is measurably not sender-bound (number ••9881 alone has introduced itself as
+six different names). It is language-aligned via `agent_family`, so the Spanish
+canary draws Spanish personas.
 
-> "Hola Rodolfo,  aqui. Pregunta rapida. Sigues siendo el dueno de 618 Hoefner Ave?"
+Coverage: 2,156 of 2,161 ready targets. No persona → no send, fail closed.
 
-`template-render-validation.js` (this branch) now fails closed on exactly this.
-**Resolve `agent_name` to a real value, or select templates that do not
-reference it, before any canary send.**
-
-Separately: these five templates carry **no opt-out disclosure**, while every
-recently-sent ownership_check message ended "Reply STOP to opt out." Confirm
-that is intentional before sending.
+Preflight and send-time call the same `buildOutboundMergeValues()` over the same
+rows, so the previewed body cannot differ from the queued body.
 
 ---
 
+## 4b. Reply leg — Spanish opt-out defect FIXED
+
+Measured before the fix, these all classified as `unclear` rather than
+`opt_out`:
+
+| input | before | after |
+|---|---|---|
+| `¡STOP!` `!STOP` | unclear | **opt_out** |
+| `PARE` `¡PARE!` | unclear | **opt_out** |
+| `déjame en paz` | unclear | **opt_out** |
+| `no me moleste` | unclear | **opt_out** |
+
+Root cause: `detectComplianceFlag` stripped only TRAILING non-letters, so a
+message opening with `¡` never matched — and Spanish keyboards emit that mark
+by default. Separately, `pare` (the word on Spanish stop signs) was absent while
+`para` was present.
+
+A Spanish seller asking to stop was not being opted out. Fixed, with
+non-regression cover for `bus stop`, `don't stop` and the
+"stop calling me, text me instead" channel-preference carve.
+
+The known Spanish **monetary** defect ("mil" read as million) lives in S3
+asking-price parsing and is unreachable from an S1 ownership question; a
+tripwire test pins that boundary.
+
 ## 5. Execution — five separate authorizations
 
-Only after §4 is resolved. **One message at a time.** For each of the five:
+**One message at a time. No loop.** For each of the five:
 
 1. Set controls (first message only):
    `queue_auto_send_enabled=false`, `queue_processor_mode=off`,
