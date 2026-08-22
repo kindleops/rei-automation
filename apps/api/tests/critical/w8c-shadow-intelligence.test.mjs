@@ -476,6 +476,19 @@ test('W8C never uses PostgREST and touches only the six approved views', () => {
 });
 
 // 23 ────────────────────────────────────────────────────────────────────────
+/**
+ * The only modules permitted to import the W8C shadow layer. An explicit
+ * allowlist rather than a path heuristic: adding a W8C consumer must be a
+ * deliberate, reviewed act, and every entry here is a read-only surface.
+ */
+const SANCTIONED_W8C_CONSUMERS = [
+  'src/lib/intel/w8c-buyer-intelligence.js',                       // the layer itself
+  'src/lib/intel/w8c-shadow-comparison.js',                        // property comparison
+  'src/lib/intel/w8c-panel-projection.js',                         // sanitized panel projection
+  'src/app/api/internal/intel/w8c-buyer-intelligence/route.js',    // internal debug surface
+  'src/app/api/intel/buyer-intelligence/route.js',                 // property panel surface
+];
+
 test('W8C cannot influence existing buyer ranking or any decision system', () => {
   // Structural: no existing REI module may import the W8C shadow layer. If one
   // ever does, W8C has stopped being observational.
@@ -488,8 +501,7 @@ test('W8C cannot influence existing buyer ranking or any decision system', () =>
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!/\.(js|mjs)$/.test(entry.name)) continue;
-      if (full.includes('w8c-')) continue;                       // the layer itself
-      if (full.includes('internal/intel/w8c-')) continue;        // its debug route
+      if (SANCTIONED_W8C_CONSUMERS.some((allowed) => full.endsWith(allowed))) continue;
       const src = fs.readFileSync(full, 'utf8');
       if (/w8c-buyer-intelligence|w8c-shadow-comparison/.test(src)) offenders.push(full);
     }
