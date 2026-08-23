@@ -485,6 +485,8 @@ const SANCTIONED_W8C_CONSUMERS = [
   'src/lib/intel/w8c-buyer-intelligence.js',                       // the layer itself
   'src/lib/intel/w8c-shadow-comparison.js',                        // property comparison
   'src/lib/intel/w8c-panel-projection.js',                         // sanitized panel projection
+  'src/lib/intel/w8c-fit-candidates.js',                           // eligible-candidate loader
+  'src/lib/intel/w8c-buyer-fit-evaluator.js',                      // pure scoring (imports nothing)
   'src/app/api/internal/intel/w8c-buyer-intelligence/route.js',    // internal debug surface
   'src/app/api/intel/buyer-intelligence/route.js',                 // property panel surface
 ];

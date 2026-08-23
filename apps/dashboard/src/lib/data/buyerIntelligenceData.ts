@@ -113,6 +113,40 @@ export interface BuyerIntelligenceComparisonRow {
   } | null
 }
 
+export interface ObservedBuyboxFit {
+  buyerRef: string
+  displayName: string | null
+  entityType: string
+  geographyFit: number | null
+  geographyTier: string
+  assetFit: number | null
+  assetTier: string
+  robustPriceFit: number | null
+  robustPriceTier: string
+  characteristicsFit: number | null
+  characteristicsTier: string
+  evidenceConfidence: number
+  evidenceDepth: number | null
+  observedBuyboxFitScore: number
+  label: string
+  evaluable: boolean
+  reasons: string[]
+}
+
+export interface ObservedFitsSection {
+  available: boolean
+  reason?: string
+  eligibleCandidates?: number
+  subject?: {
+    state: string | null
+    county: string | null
+    zip: string | null
+    assetFamily: string | null
+    referencePrice: number | null
+  }
+  fits: ObservedBuyboxFit[]
+}
+
 export interface BuyerIntelligencePanel {
   source: string
   label: string
@@ -131,6 +165,7 @@ export interface BuyerIntelligencePanel {
   buyerCount?: number
   buyersWithBuybox?: number
   buyers: BuyerIntelligenceBuyer[]
+  observedFits?: ObservedFitsSection
   reiComparison?: {
     available: boolean
     candidateCount: number

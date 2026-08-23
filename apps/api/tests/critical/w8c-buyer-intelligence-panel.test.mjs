@@ -47,6 +47,10 @@ function fixtureQuery({ historicalRows = null, reiRows = null, ambiguity = null 
   const calls = [];
   const fn = async (sql, params = []) => {
     calls.push({ sql, params });
+    // Enrichment reads are batched (`= ANY($1::text[])`), so a fixture must
+    // answer for a SET of ids, not one.
+    const requested = Array.isArray(params[0]) ? params[0] : [params[0]];
+    const pick = (byId) => ({ rows: requested.map((k) => byId[k]).filter(Boolean) });
     const id = params[0];
 
     if (/buyer_intelligence_version/.test(sql)) return { rows: [RUN] };
@@ -68,17 +72,18 @@ function fixtureQuery({ historicalRows = null, reiRows = null, ambiguity = null 
     if (/WITH n\(name\)/.test(sql)) return { rows: ambiguity ?? [] };
 
     if (/reivesti\.buyer_summary/.test(sql)) {
-      if (id === COMPANY) return { rows: [{ buyer_entity_id: COMPANY, entity_type: 'company',
-        display_name: 'STONE OAK PARTNERS LLC', identity_confidence: '1.0000',
-        identity_method: 'exact_registry_company_identity', has_buybox: true }] };
-      if (id === PERSON_RAW) return { rows: [{ buyer_entity_id: PERSON_RAW, entity_type: 'person',
-        display_name: null, identity_confidence: '0.9400',
-        identity_method: 'transaction_linked_contact_evidence', has_buybox: false }] };
-      return { rows: [] };
+      return pick({
+        [COMPANY]: { buyer_entity_id: COMPANY, entity_type: 'company',
+          display_name: 'STONE OAK PARTNERS LLC', identity_confidence: '1.0000',
+          identity_method: 'exact_registry_company_identity', has_buybox: true },
+        [PERSON_RAW]: { buyer_entity_id: PERSON_RAW, entity_type: 'person',
+          display_name: null, identity_confidence: '0.9400',
+          identity_method: 'transaction_linked_contact_evidence', has_buybox: false },
+      });
     }
 
     if (/reivesti\.buyer_behavior/.test(sql)) {
-      if (id === COMPANY) return { rows: [{
+      const COMPANY_BEHAVIOR = {
         buyer_entity_id: COMPANY, acquisition_count: 72, disposition_count: 7,
         last_acquisition: '2026-05-24', days_since_last: 30, trailing_365d: 71,
         activity_status: 'active', activity_score: '88.0', archetype: 'institutional_high_volume_buyer',
@@ -92,26 +97,25 @@ function fixtureQuery({ historicalRows = null, reiRows = null, ambiguity = null 
         price_profile: { recent_365d: { median: 2260000 }, lifetime: { p50: 2260000 }, cash_share: 0.8611,
           provenance: ['comp_canonical_transactions.price'] },
         portfolio_state: null, evidence_count: 72, evidence_coverage: '1.0000', confidence: '1.0000',
-      }] };
-      if (id === PERSON_RAW) return { rows: [{
+      };
+      const PERSON_BEHAVIOR = {
         buyer_entity_id: PERSON_RAW, acquisition_count: 2, last_acquisition: '2026-05-28',
         activity_status: 'active', activity_score: '41.0', archetype: 'low_volume_buyer',
         portfolio_state: 'empty', portfolio_property_count: 0,
         evidence_count: 2, evidence_coverage: '0.5000', confidence: '0.6100',
-      }] };
-      return { rows: [] };
+      };
+      return pick({ [COMPANY]: COMPANY_BEHAVIOR, [PERSON_RAW]: PERSON_BEHAVIOR });
     }
 
     if (/reivesti\.buyer_buybox/.test(sql)) {
-      if (id === COMPANY) return { rows: [{
+      return pick({ [COMPANY]: {
         buyer_entity_id: COMPANY, evidence_depth: 72,
         preferred_counties: ['CA|Riverside'], acceptable_states: ['CA'], preferred_asset_families: ['sfr'],
         price_low: 1633000, price_high: 2898000,
         price_robust_low: 0, price_robust_high: 4795500,
         price_basis: 'trailing_365d_p25_p75', recency_weighting_applied: true, confidence: '1.0000',
         building_sqft_p25: 1200, building_sqft_p75: 2400,
-      }] };
-      return { rows: [] }; // person: below the three-acquisition bar
+      } }); // person absent: below the three-acquisition bar
     }
 
     if (/buyer_match_candidates/.test(sql)) {

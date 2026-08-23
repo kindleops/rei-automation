@@ -6,6 +6,7 @@ import {
   loadBuyerIntelligence,
   type BuyerIntelligenceBuyer,
   type BuyerIntelligencePanel as PanelData,
+  type ObservedBuyboxFit,
 } from '../../lib/data/buyerIntelligenceData'
 import type { PropertyRecord } from './property.types'
 
@@ -199,6 +200,43 @@ const BuyerBlock = ({ buyer }: { buyer: BuyerIntelligenceBuyer }) => {
   )
 }
 
+const TIER_TONE: Record<string, 'neutral' | 'evidence' | 'caution'> = {
+  zip: 'evidence', county: 'evidence', match: 'evidence', inside: 'evidence',
+  state: 'neutral', compatible: 'neutral', partial: 'neutral', unknown: 'neutral',
+  mismatch: 'caution', above: 'caution', below: 'caution',
+}
+
+const fitLabelTone = (label: string): 'neutral' | 'evidence' | 'caution' =>
+  label.startsWith('strong') ? 'evidence' : label.startsWith('partial') ? 'neutral' : 'caution'
+
+/**
+ * One observed fit. Deliberately no action affordance — this reports what W8C
+ * has observed, it does not propose contacting anyone.
+ */
+const FitRow = ({ fit }: { fit: ObservedBuyboxFit }) => {
+  const name = fit.entityType === 'company' && fit.displayName
+    ? fit.displayName
+    : `Individual · ${fit.buyerRef.replace('person:anon_', '')}`
+  return (
+    <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '7px 0' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 11, minWidth: 34, fontVariantNumeric: 'tabular-nums' }}>
+          {Math.round(fit.observedBuyboxFitScore)}
+        </strong>
+        <span style={{ fontSize: 11, flex: 1, minWidth: 120 }}>{name}</span>
+        <Chip tone={fitLabelTone(fit.label)}>{fit.label}</Chip>
+      </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+        <Chip tone={TIER_TONE[fit.geographyTier] ?? 'neutral'}>geo {fit.geographyTier}</Chip>
+        <Chip tone={TIER_TONE[fit.assetTier] ?? 'neutral'}>asset {fit.assetTier}</Chip>
+        <Chip tone={TIER_TONE[fit.robustPriceTier] ?? 'neutral'}>price {fit.robustPriceTier}</Chip>
+        <Chip tone="neutral">evidence {Math.round(fit.evidenceConfidence * 100)}% · {fit.evidenceDepth ?? '—'}</Chip>
+      </div>
+      <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.38)', marginTop: 3 }}>{fit.reasons.join(' · ')}</div>
+    </div>
+  )
+}
+
 export const BuyerIntelligencePanel = ({ property }: BuyerIntelligencePanelProps) => {
   const propertyId = property.propertyId ?? null
   // Single state object tagged with the id it belongs to. Deriving `loading`
@@ -290,6 +328,36 @@ export const BuyerIntelligencePanel = ({ property }: BuyerIntelligencePanelProps
       {panel.buyers.map((buyer) => (
         <BuyerBlock key={buyer.buyerRef} buyer={buyer} />
       ))}
+
+      {panel.observedFits ? (
+        <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+            <span style={{ fontSize: 10, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)' }}>
+              OBSERVED BUYBOX FITS
+            </span>
+            <Chip tone="caution">Shadow — does not affect buyer ranking</Chip>
+          </div>
+          {panel.observedFits.available && panel.observedFits.fits.length ? (
+            <>
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.32)', marginBottom: 2 }}>
+                {panel.observedFits.eligibleCandidates} buyers with a derived buybox evaluated · ranked by observed
+                fit, not likelihood to purchase
+              </div>
+              {panel.observedFits.fits.map((fit) => (
+                <FitRow key={fit.buyerRef} fit={fit} />
+              ))}
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+              {panel.observedFits.reason === 'insufficient_subject_data'
+                ? 'Not evaluable — insufficient subject data.'
+                : panel.observedFits.available
+                  ? 'No defensible buybox fits for this property.'
+                  : 'Buybox fits unavailable.'}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {comparison?.available && comparison.candidateCount > 0 ? (
         <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>

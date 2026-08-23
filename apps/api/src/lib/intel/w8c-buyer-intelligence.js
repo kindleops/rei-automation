@@ -256,6 +256,24 @@ export function createW8cClient(deps = {}) {
     };
   }
 
+  /**
+   * Batched lookups keyed by buyer id.
+   *
+   * These exist so a property panel costs a FIXED number of statements. Fetching
+   * summary/behavior/buybox per buyer was an N+1: a property with 4 canonical
+   * buyers issued 12 statements just for enrichment. Set-oriented reads make it
+   * 3 regardless of buyer count, with byte-identical output.
+   */
+  async function fetchByIds(view, ids) {
+    if (!ids.length) return new Map();
+    const res = await run(
+      `SELECT * FROM ${SCHEMA}.${view} WHERE buyer_entity_id = ANY($1::text[])`,
+      [ids],
+    );
+    if (!res.ok) return null; // unavailable, distinct from "found nothing"
+    return new Map(res.rows.map((row) => [row.buyer_entity_id, row]));
+  }
+
   /** Everything W8C knows about one property, as a single labelled envelope. */
   async function getShadowIntelligenceForProperty(propertyId, { limit = 25 } = {}) {
     const version = await getVersion();
@@ -267,23 +285,32 @@ export function createW8cClient(deps = {}) {
       return { source: W8C_SOURCE, available: false, reason: historical.reason, version, propertyId: String(propertyId ?? ""), buyers: [] };
     }
     const ids = [...new Set(historical.buyers.map((b) => b.buyerEntityId))];
-    const buyers = await Promise.all(
-      ids.map(async (id) => {
-        const [summary, behavior, buybox] = await Promise.all([
-          getBuyerSummary(id),
-          getBuyerBehavior(id),
-          getBuyerBuybox(id),
-        ]);
-        return {
-          buyerEntityId: id,
-          summary: summary.available ? summary : null,
-          behavior: behavior.available ? behavior : null,
-          buybox: buybox.available ? buybox : null,
-          buyboxStatus: buybox.available ? "derived" : (buybox.reason ?? "unavailable"),
-          acquisitions: historical.buyers.filter((b) => b.buyerEntityId === id),
-        };
-      }),
-    );
+    const [summaries, behaviors, buyboxes] = await Promise.all([
+      fetchByIds(W8C_VIEWS.summary, ids),
+      fetchByIds(W8C_VIEWS.behavior, ids),
+      fetchByIds(W8C_VIEWS.buybox, ids),
+    ]);
+
+    const buyers = ids.map((id) => {
+      const summaryRow = summaries?.get(id);
+      const behaviorRow = behaviors?.get(id);
+      const buyboxRow = buyboxes?.get(id);
+      // A missing buybox ROW means insufficient evidence; a failed READ means
+      // unavailable. The two must not collapse into one another.
+      const buyboxStatus = buyboxRow
+        ? "derived"
+        : buyboxes === null
+          ? "w8c_unavailable"
+          : "insufficient_evidence";
+      return {
+        buyerEntityId: id,
+        summary: summaryRow ? { available: true, source: W8C_SOURCE, ...mapSummary(summaryRow) } : null,
+        behavior: behaviorRow ? { available: true, source: W8C_SOURCE, ...mapBehavior(behaviorRow) } : null,
+        buybox: buyboxRow ? { available: true, source: W8C_SOURCE, hasBuybox: true, ...mapBuybox(buyboxRow) } : null,
+        buyboxStatus,
+        acquisitions: historical.buyers.filter((b) => b.buyerEntityId === id),
+      };
+    });
     return {
       source: W8C_SOURCE,
       available: true,

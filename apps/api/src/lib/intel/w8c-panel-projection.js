@@ -23,6 +23,8 @@
 
 import { compareBuyerIntelligenceForProperty } from "./w8c-shadow-comparison.js";
 import { W8C_SOURCE } from "./w8c-buyer-intelligence.js";
+import { loadFitCandidates, loadSubjectProperty } from "./w8c-fit-candidates.js";
+import { normalizeSubject, rankBuyerFits } from "./w8c-buyer-fit-evaluator.js";
 
 export const PANEL_LABEL = "Buyer Intelligence — Shadow";
 
@@ -219,6 +221,54 @@ function projectComparison(comparison, w8cBuyersById) {
 }
 
 /**
+ * Observed Buybox Fits: which evidenced W8C buyers best match this subject.
+ *
+ * Shadow ranking only — it orders nothing outside this payload. Returns a
+ * labelled unavailable/not-evaluable state rather than an empty list when the
+ * subject or candidate population cannot support an evaluation.
+ */
+export async function buildObservedFits(propertyId, deps = {}) {
+  const limit = deps.fitLimit ?? 8;
+  const [subjectRes, candidateRes] = await Promise.all([
+    loadSubjectProperty(propertyId, deps),
+    loadFitCandidates(deps),
+  ]);
+
+  if (!candidateRes.available) {
+    return { available: false, reason: candidateRes.reason ?? "w8c_unavailable", fits: [] };
+  }
+  if (!subjectRes.available) {
+    return { available: false, reason: subjectRes.reason ?? "subject_unavailable", fits: [] };
+  }
+
+  const subject = normalizeSubject(subjectRes.subject);
+  // Geography is the dominant dimension; without a state nothing defensible
+  // can be ranked, so say so rather than emitting a meaningless ordering.
+  if (!subject.state) {
+    return { available: false, reason: "insufficient_subject_data", fits: [], eligibleCandidates: candidateRes.candidates.length };
+  }
+
+  const fits = rankBuyerFits(subject, candidateRes.candidates, { limit });
+  return {
+    available: true,
+    source: W8C_SOURCE,
+    observationalOnly: true,
+    eligibleCandidates: candidateRes.candidates.length,
+    evaluatedCandidates: candidateRes.candidates.length,
+    subject: {
+      state: subject.state,
+      county: subject.county,
+      zip: subject.zip,
+      assetFamily: subject.assetFamily,
+      referencePrice: subject.referencePrice,
+      buildingSqft: subject.buildingSqft,
+      units: subject.units,
+    },
+    fits,
+  };
+}
+
+/**
  * Build the sanitized panel payload for a property.
  * Never throws: any failure resolves to an `unavailable` panel.
  */
@@ -255,6 +305,9 @@ export async function buildBuyerIntelligencePanel(propertyId, deps = {}) {
 
   const buyers = (w8c.buyers ?? []).map(projectBuyer);
   const byId = new Map((w8c.buyers ?? []).map((b) => [b.w8cBuyerEntityId, b]));
+  const observedFits = await buildObservedFits(propertyId, deps).catch(() => ({
+    available: false, reason: "w8c_unavailable", fits: [],
+  }));
 
   const version = w8c.version ?? {};
   return {
@@ -272,6 +325,7 @@ export async function buildBuyerIntelligencePanel(propertyId, deps = {}) {
     buyerCount: buyers.length,
     buyersWithBuybox: buyers.filter((b) => b.buybox).length,
     buyers,
+    observedFits,
     reiComparison: projectComparison(comparison, byId),
   };
 }
