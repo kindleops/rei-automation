@@ -426,13 +426,22 @@ export async function runSendQueue(
   });
 
   if (!dry_run) {
-    const heartbeatAt = new Date().toISOString();
-    await setSystemValues({
-      queue_processor_heartbeat_at: heartbeatAt,
-      queue_processor_last_claimed_at: rows.length > 0 ? heartbeatAt : await get_system_value("queue_processor_last_claimed_at"),
-      queue_processor_last_sent_count: String(sent_count),
-      queue_processor_last_claimed_count: String(rows.length),
-    }, { supabase });
+    // Telemetry only — a heartbeat-write failure must never abort the run
+    // AFTER rows were dispatched (that lost sent_count/results and returned
+    // 500 to the cron even though the sends were terminal and correct).
+    try {
+      const heartbeatAt = new Date().toISOString();
+      await setSystemValues({
+        queue_processor_heartbeat_at: heartbeatAt,
+        queue_processor_last_claimed_at: rows.length > 0 ? heartbeatAt : await get_system_value("queue_processor_last_claimed_at"),
+        queue_processor_last_sent_count: String(sent_count),
+        queue_processor_last_claimed_count: String(rows.length),
+      }, { supabase });
+    } catch (heartbeat_error) {
+      log_warn("queue.heartbeat_write_failed", {
+        error: heartbeat_error?.message || "unknown_error",
+      });
+    }
   }
 
   return {

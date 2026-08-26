@@ -211,11 +211,11 @@ const RAW = {
   },
   sold_property: {
     category: "ownership_authority",
-    description: "Seller reports the property has already been sold. Terminal for this opportunity; suppress the pairing.",
-    terminal_hint: "suppressed_wrong_number",
-    reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: false, objective: "Suppress; the property has already sold." },
+    description: "Seller reports the property has already been sold. Terminal for this opportunity; close the seller×property pairing — the CONTACT stays reachable (they may own or sell other properties).",
+    terminal_hint: "no_reply_required",
+    reply_policy: { reply_required: false, reply_permitted: false, escalate_to_human: false, objective: "Close the seller×property pairing; never suppress the person or phone." },
     state_hints: { lifecycle_stage: null, operational_status: "paused", lead_temperature: "cold", disposition: "sold", automation: "stop" },
-    classifier_aliases: ["already_sold", "sold_it"],
+    classifier_aliases: ["sold_property", "already_sold", "sold_it"],
     compliance: NO_COMPLIANCE,
   },
   authority_question: {

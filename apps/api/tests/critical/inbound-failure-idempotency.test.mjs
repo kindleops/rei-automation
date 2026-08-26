@@ -85,6 +85,24 @@ function happyPathDeps() {
 
 // ─── Tests ──────────────────────────────────────────────────────────────
 
+
+// Closure pass 2026-08-26: the three step-failure tests below inject throws
+// into PODIO-lane steps (logInboundMessageEvent, updateMasterOwnerAfterInbound,
+// findLatestOpenOffer). Production runs with podio_sync_enabled=false, so the
+// throwing dep never fires and processing correctly completes. Each contract is
+// now pinned in BOTH worlds: flag ON → the legacy lane still fails closed and
+// marks the ledger failed; flag OFF (production) → the dep is never invoked
+// and the record completes.
+function podioLaneOn() {
+  return {
+    getSystemValue: async (key) => {
+      if (key === "podio_sync_enabled") return "true";
+      if (key === "auto_reply_mode") return "disabled";
+      return null;
+    },
+  };
+}
+
 test("brain_lookup failure marks idempotency record as failed", async (t) => {
   const ledger = createInMemoryIdempotencyLedger();
 
@@ -107,12 +125,13 @@ test("brain_lookup failure marks idempotency record as failed", async (t) => {
   assert.equal(failedEntry.status, "failed");
 });
 
-test("message_event_create failure marks idempotency record as failed", async (t) => {
+test("message_event_create failure marks idempotency record as failed (podio lane ON)", async (t) => {
   const ledger = createInMemoryIdempotencyLedger();
 
   __setTextgridInboundTestDeps({
     ...baseDeps(ledger),
     ...happyPathDeps(),
+    ...podioLaneOn(),
     logInboundMessageEvent: async () => { throw new Error("event_create_boom"); },
   });
 
@@ -126,6 +145,29 @@ test("message_event_create failure marks idempotency record as failed", async (t
   const entries = [...ledger.records.values()];
   const failedEntry = entries.find((e) => e.status === "failed");
   assert.ok(failedEntry, "idempotency record must be marked as failed after message_event_create failure");
+});
+
+test("flags OFF (production): the podio event writer is never invoked and processing completes", async (t) => {
+  const ledger = createInMemoryIdempotencyLedger();
+  let podio_writer_calls = 0;
+
+  __setTextgridInboundTestDeps({
+    ...baseDeps(ledger),
+    ...happyPathDeps(),
+    logInboundMessageEvent: async () => {
+      podio_writer_calls += 1;
+      throw new Error("event_create_boom");
+    },
+  });
+
+  t.after(() => __resetTextgridInboundTestDeps());
+
+  const result = await handleTextgridInboundWebhook(INBOUND_PAYLOAD);
+
+  assert.equal(podio_writer_calls, 0, "flag-gated dep must not run in production posture");
+  assert.equal(result.ok, true);
+  const completed = [...ledger.records.values()].find((e) => e.status === "completed");
+  assert.ok(completed, "record completes on the live lane");
 });
 
 test("conversation_resolution failure degrades to manual review and completes idempotency record", async (t) => {
@@ -195,6 +237,7 @@ test("prospect_resolution failure marks idempotency record as failed", async (t)
   __setTextgridInboundTestDeps({
     ...baseDeps(ledger),
     ...happyPathDeps(),
+    ...podioLaneOn(),
     updateMasterOwnerAfterInbound: async () => { throw new Error("prospect_boom"); },
   });
 
@@ -216,6 +259,7 @@ test("market_resolution failure marks idempotency record as failed", async (t) =
   __setTextgridInboundTestDeps({
     ...baseDeps(ledger),
     ...happyPathDeps(),
+    ...podioLaneOn(),
     findLatestOpenOffer: async () => { throw new Error("market_boom"); },
   });
 

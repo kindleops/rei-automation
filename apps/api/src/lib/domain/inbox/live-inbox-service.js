@@ -1877,6 +1877,12 @@ export function rememberInboxBootSnapshot(threads = []) {
   };
 }
 
+/** Test-only hook: clears the module-level boot snapshot so initial-boot tests
+ * cannot be contaminated by threads remembered from earlier tests. */
+export function __resetInboxBootSnapshotForTests() {
+  inboxBootSnapshot = { capturedAt: 0, threads: [], source: BOOT_FAST_THREAD_SOURCE };
+}
+
 export function loadInboxBootSnapshot(maxAgeMs = INBOX_BOOT_SNAPSHOT_TTL_MS) {
   if (Date.now() - inboxBootSnapshot.capturedAt > maxAgeMs) return null;
   if (!inboxBootSnapshot.threads.length) return null;

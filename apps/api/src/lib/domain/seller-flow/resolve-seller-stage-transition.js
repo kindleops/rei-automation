@@ -305,7 +305,12 @@ const BLOCKING_INTENTS = Object.freeze({
   // may still be valid for a different property, so this halts and routes to
   // review rather than fully blocking the contact.
   property_specific_non_owner: {
-    contactability: CONTACTABILITY_CODES.DO_NOT_TEXT,
+    // PROPERTY-scoped claim: resolve-inbound-relationship.js classifies this
+    // as suppression_scope "property" with should_suppress_contact false.
+    // Writing DO_NOT_TEXT here blocked the PHONE for every property — the
+    // exact wrong-scope suppression this hold exists to avoid. The hold and
+    // review stay; contactability is not touched.
+    contactability: null,
     disposition: DISPOSITION_CODES.UNQUALIFIED,
     operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
     next_action: NEXT_ACTIONS.HUMAN_REVIEW,
@@ -319,7 +324,24 @@ const BLOCKING_INTENTS = Object.freeze({
   // property, no longer owns it). Distinct disposition from a bare not-owner
   // claim for accurate telemetry/dashboard reporting.
   former_owner_respondent: {
-    contactability: CONTACTABILITY_CODES.DO_NOT_TEXT,
+    // Same scope rule as property_specific_non_owner: sold is terminal for
+    // the seller×property pairing, never for the phone/person ("I sold 123
+    // Main, but I own 456 Oak" must stay reachable).
+    contactability: null,
+    disposition: DISPOSITION_CODES.SOLD,
+    operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
+    next_action: NEXT_ACTIONS.HUMAN_REVIEW,
+    cancel_followups: true,
+    review_required: true,
+    review_reason: "former_owner_property_sold",
+    reasoning_code: "HOLD_FORMER_OWNER_PROPERTY_SOLD_REVIEW",
+    workflow_event: "AUTOMATION_NEEDS_REVIEW",
+  },
+  // Live classifier label for a sold/transferred report ("already sold").
+  // Identical treatment to former_owner_respondent — callers may pass either
+  // the raw label or the canonical respondent class.
+  sold_property: {
+    contactability: null,
     disposition: DISPOSITION_CODES.SOLD,
     operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
     next_action: NEXT_ACTIONS.HUMAN_REVIEW,
@@ -480,12 +502,18 @@ export function resolveSellerStageTransition({
       operational_status: blocking.operational_status,
       lead_temperature: normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED),
       disposition: blocking.disposition || current_disposition || null,
-      contactability_patch: { contactability_status: blocking.contactability },
+      // Property-scoped holds carry no contactability write at all — a null
+      // patch (not {contactability_status: null}) so nothing downstream can
+      // clear or set phone-level state from a property-level claim.
+      contactability_patch: blocking.contactability
+        ? { contactability_status: blocking.contactability }
+        : null,
       ownership_patch:
         intentKey === "wrong_number" ||
         intentKey === "wrong_person" ||
         intentKey === "property_specific_non_owner" ||
-        intentKey === "former_owner_respondent"
+        intentKey === "former_owner_respondent" ||
+        intentKey === "sold_property"
           ? { ownership_status: "not_owner" }
           : null,
       next_action: blocking.next_action,

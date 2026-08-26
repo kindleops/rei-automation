@@ -185,7 +185,7 @@ test("processSendQueueItem skips TextGrid send when destination phone is invalid
   assert.equal(updates.at(-1)?.payload?.failed_reason, "invalid_phone_number");
 });
 
-test("processSendQueueItem never calls TextGrid with a blank destination when phone_hidden can be normalized", async () => {
+test("processSendQueueItem never calls TextGrid with a blank destination when phone_hidden can be normalized", { skip: "legacy Podio dispatch path (processLegacyQueueItem) has zero production callers and is doubly blocked (missing_dispatch_claim_token + missing_recipient_phone); the live-path guard is pinned below" }, async () => {
   let send_args = null;
 
   const queue_item = createPodioItem(5002, {
@@ -209,4 +209,32 @@ test("processSendQueueItem never calls TextGrid with a blank destination when ph
   assert.equal(result.sent, true);
   assert.equal(send_args?.to, "+18175341269");
   assert.notEqual(send_args?.to, "");
+});
+
+// ── Live-path replacement for the retired legacy guard test above ───────────
+// (closure pass 2026-08-26): the production dispatch path is
+// processSupabaseQueueItem; its blank-destination protection is the preclaim
+// eligibility gate — a row whose destination cannot resolve to a phone is
+// refused BEFORE claim/dispatch, so TextGrid can never be called with a blank
+// destination.
+test("live path: a Supabase row with a blank/HTML-polluted destination is preclaim-refused (missing_to_phone_number)", async () => {
+  const { shouldRunSendQueueRow, resolveQueueDestinationPhone } = await import(
+    "../../src/lib/supabase/sms-engine.js"
+  );
+  for (const to of ["", null, "<p></p>", "   "]) {
+    const row = {
+      id: "sq-blank-dest",
+      queue_status: "queued",
+      message_body: "Hello there",
+      to_phone_number: to,
+      from_phone_number: "+16128060495",
+      metadata: {},
+    };
+    const verdict = shouldRunSendQueueRow(row, "2026-05-01T12:00:00.000Z");
+    assert.equal(verdict.ok, false, JSON.stringify(to));
+    assert.equal(verdict.reason, "missing_to_phone_number", JSON.stringify(to));
+  }
+  // HTML-wrapped but normalizable numbers DO resolve — normalization, not loss.
+  const normalized = resolveQueueDestinationPhone({ to_phone_number: "<p>8175341269</p>" });
+  assert.ok(String(normalized.phone || "").includes("8175341269"));
 });

@@ -23,14 +23,40 @@ function revisionSkipResult(queue_row_id) {
   };
 }
 
+
+// Batch dedupe (0733f5f2) collapses rows sharing owner:phone:touch — every
+// multi-row fixture needs a DISTINCT identity per row or the second row is
+// (correctly) suppressed as a within-batch duplicate.
+function distinctIdentity(id) {
+  return {
+    master_owner_id: `mo_${id}`,
+    to_phone_number: `+1500555${String(id).slice(-4)}`,
+    phone_id: `ph_${id}`,
+    best_phone_id: `ph_${id}`,
+    metadata: {
+      selected_template_id: "200194",
+      candidate_snapshot: {
+        master_owner_id: `mo_${id}`,
+        property_id: `prop_${id}`,
+        seller_first_name: "John",
+        phone_id: `ph_${id}`,
+        best_phone_id: `ph_${id}`,
+        touch_number: 1,
+      },
+    },
+  };
+}
+
 test("runSendQueue skips revision-capped queue items and continues later work", async () => {
   const poisoned = buildSupabaseQueueRow(3281484514, {
     scheduled_for: NOW,
     scheduled_for_utc: NOW,
+    ...distinctIdentity(3281484514),
   });
   const healthy = buildSupabaseQueueRow(3281484515, {
     scheduled_for: NOW,
     scheduled_for_utc: NOW,
+    ...distinctIdentity(3281484515),
   });
   const processed_ids = [];
 
@@ -68,6 +94,7 @@ test("runSendQueue succeeds when later items are healthy after revision-limit sk
     buildSupabaseQueueRow(id, {
       scheduled_for: NOW,
       scheduled_for_utc: NOW,
+      ...distinctIdentity(id),
     })
   );
   const { deps } = makeRunSendQueueDeps({
@@ -98,10 +125,12 @@ test("runSendQueue skips first item at process phase and processes second item",
   const poisoned = buildSupabaseQueueRow(3281484514, {
     scheduled_for: NOW,
     scheduled_for_utc: NOW,
+    ...distinctIdentity(3281484514),
   });
   const healthy = buildSupabaseQueueRow(3281484517, {
     scheduled_for: NOW,
     scheduled_for_utc: NOW,
+    ...distinctIdentity(3281484517),
   });
   const processed_ids = [];
   const { deps } = makeRunSendQueueDeps({

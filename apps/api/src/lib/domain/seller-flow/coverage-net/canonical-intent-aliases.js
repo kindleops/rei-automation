@@ -164,7 +164,10 @@ const INTENT_ALIASES = Object.freeze({
 
   // ── listed / unavailable folds onto not_interested for routing ───────────
   listed_or_unavailable: "not_interested",
-  already_sold: "wrong_number",
+  // Sold is a PROPERTY-scoped disposition (former-owner respondent class),
+  // never the wrong_number contact-scope suppression lane.
+  already_sold: "former_owner_respondent",
+  sold_property: "former_owner_respondent",
   under_contract: "not_interested",
   listed_with_agent: "not_interested",
 

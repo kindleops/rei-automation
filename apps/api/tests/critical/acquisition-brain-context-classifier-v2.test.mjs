@@ -221,7 +221,8 @@ test("ownership neighbors never false owner", async () => {
     ["My brother owns it", "unclear"],
     ["My wife owns it", "unclear"],
     ["Property manager here", "tenant_occupied"],
-    ["Sold it years ago", "wrong_number"],
+    // Certification pass 2026-08-25: sold → property-scoped sold_property.
+    ["Sold it years ago", "sold_property"],
     ["Never owned it", "wrong_number"],
     ["Wrong number", "wrong_number"],
     ["Stop texting me", "opt_out"],
@@ -240,7 +241,9 @@ test("proposal request neighbors not false proposal", async () => {
     ["What do you want from me?", null], // unclear or who_is_this ok
     ["Not interested in a proposal", "not_interested"],
     ["My agent handles proposals", "not_interested"],
-    ["Already under contract", "info_request"],
+    // Contract re-pin (closure pass 2026-08-26): a declarative under-contract
+    // disclosure is the not_interested nurture lane, never an info auto-reply.
+    ["Already under contract", "not_interested"],
     ["Stop", "opt_out"],
   ];
   for (const [text, exp] of cases) {
@@ -306,7 +309,9 @@ test("terminal safety: opt-out and wrong-number never ownership", async () => {
     const c = await classify(text, null, { heuristicOnly: true });
     if (c.primary_intent === "ownership_confirmed") unsafe++;
     assert.ok(
-      ["opt_out", "wrong_number"].includes(c.primary_intent),
+      // sold_property is equally terminal-safe: never ownership, never a
+      // reply lane (certification pass 2026-08-25).
+      ["opt_out", "wrong_number", "sold_property"].includes(c.primary_intent),
       `${text} -> ${c.primary_intent}`
     );
   }
@@ -376,8 +381,9 @@ test("v3 collection spec present and empty of predictions", () => {
   assert.equal(tmpl.example_count, 0);
   assert.equal(tmpl.predictions, null);
   assert.equal(tmpl.prediction_results_forbidden_in_pr41, true);
-  assert.equal(existsSync(join(v3Dir, "gold-labels.jsonl")), false);
-  assert.equal(existsSync(join(v3Dir, "calibration-report.json")), false);
+  // Contract re-pin: PR-41 freeze window closed — the v3 corpus (gold labels /
+  // calibration report) was intentionally added by 946b1df8, so their absence
+  // is no longer part of the collection-spec contract.
 });
 
 test("applyContextualShortReply requires validated context", () => {

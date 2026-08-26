@@ -674,7 +674,7 @@ async function buildProductionCoordinator({ supabase, policy, worker_id, method 
   const [
     { createSellerInboundBurstCoordinator, activationScopeFromDescriptor },
     { processSellerInboundMessage },
-    { cancelSupabasePendingOutbound },
+    { cancelSupabasePendingOutbound, CANCELLATION_POLICIES },
     { cancelPendingFollowUpsForThread },
     { loadContextWithFallback },
     { loadContext },
@@ -725,6 +725,15 @@ async function buildProductionCoordinator({ supabase, policy, worker_id, method 
           reason: args.reason,
           inbound_event_id: args.inbound_event_id,
           cancelled_by: "seller_inbound_burst_flush",
+          // Scope-correct policy: safety latches cancel everything; a benign
+          // flush supersession cancels only automated reply/follow-up rows.
+          // Omitting the policy fell through to the compliance default and
+          // cancelled unrelated campaign touches.
+          policy:
+            args.policy === "compliance_terminal"
+              ? CANCELLATION_POLICIES.COMPLIANCE_TERMINAL
+              : CANCELLATION_POLICIES.INBOUND_TAKEOVER,
+          inbound_received_at: args.inbound_received_at || null,
         },
         { supabase }
       ),

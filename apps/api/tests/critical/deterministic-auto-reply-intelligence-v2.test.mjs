@@ -733,7 +733,11 @@ test("authority block yields a single coherent decision across all layers", asyn
   assert.equal(objectiveWithholdsOffer, true);
   assert.notEqual(turn.transition.next_action, NEXT_ACTIONS.GENERATE_OFFER);
   assert.notEqual(turn.transition.required_template_use_case, "offer_reveal_cash");
-  assert.equal(turn.response_strategy.template_use_case, null);
+  // Certification pass 2026-08-25: "I'd take $300,000" now parses as a
+  // qualified stated price, so the strategy may propose a NON-OFFER discovery
+  // template (e.g. ask_timeline) instead of none. The invariant is that no
+  // offer-bearing template can surface while authority is blocked.
+  assert.notEqual(turn.response_strategy.template_use_case, "offer_reveal_cash");
   assert.equal(turn.response_strategy.offer_allowed, false);
   assert.equal(turn.response_strategy.price_mention_allowed, false);
   assert.equal(turn.transition.review_required, true);

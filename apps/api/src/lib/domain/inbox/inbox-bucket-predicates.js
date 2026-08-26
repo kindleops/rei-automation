@@ -43,8 +43,11 @@ export function isArchivedThread(row = {}) {
 
 export function isSuppressedContact(row = {}) {
   if (row.is_suppressed === true || row.opt_out === true) return true;
-  const disposition = lower(row.disposition);
-  if (disposition === "not_interested") return true;
+  // Closure pass 2026-08-26 (M2): disposition=not_interested is a SOFT
+  // seller/property disposition, not a communication suppression. Treating it
+  // as suppressed-contact hid a re-engaging seller's NEW reply from the
+  // New Replies view (the sticky decline outranked the fresh inbound). Hard
+  // suppression = is_suppressed/opt_out/suppression_status/suppressed bucket.
   return lower(row.suppression_status) === "suppressed" || lower(row.inbox_bucket) === "suppressed";
 }
 

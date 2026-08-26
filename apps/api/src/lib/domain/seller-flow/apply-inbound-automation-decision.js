@@ -281,6 +281,7 @@ function buildDecisionResult({
   allowed_template_stages = [],
   next_action = "none",
   audit_reason = "none",
+  compound_opportunity = null,
 } = {}) {
   return {
     should_queue_reply: Boolean(should_queue_reply),
@@ -294,6 +295,55 @@ function buildDecisionResult({
     allowed_template_stages: uniq(allowed_template_stages),
     next_action,
     audit_reason: buildAuditReason(audit_reason),
+    // Compound-message payload: positive second-clause intents and extracted
+    // address candidates that survived a leading negative intent. Persisted
+    // in decision snapshots so review lanes see the full message meaning.
+    compound_opportunity: compound_opportunity || null,
+  };
+}
+
+// Positive second-clause intents that must survive a leading negative intent
+// ("not for sale, but what would you pay for 456 Oak Ave?"). A message whose
+// first clause is negative and whose remainder carries one of these — or a
+// street-address candidate — is a compound opportunity, never a bare decline.
+const COMPOUND_POSITIVE_INTENTS = new Set([
+  "seller_interested",
+  "latent_interest",
+  "asks_offer",
+  "asking_price_provided",
+]);
+
+function resolveCompoundOpportunitySignal(classification = {}) {
+  const matched = Array.isArray(classification.matched_intents)
+    ? classification.matched_intents
+    : [];
+  const secondary = Array.isArray(classification.secondary_intents)
+    ? classification.secondary_intents
+    : [];
+  const positive_intents = [...new Set([...matched, ...secondary])].filter((intent) =>
+    COMPOUND_POSITIVE_INTENTS.has(intent)
+  );
+  const address_signals = Array.isArray(classification.address_signals)
+    ? classification.address_signals
+    : [];
+  const high_confidence_addresses = address_signals.filter(
+    (candidate) => candidate?.confidence === "high"
+  );
+  const low_confidence_addresses = address_signals.filter(
+    (candidate) => candidate?.confidence === "low"
+  );
+  // A suffix-bearing address stands on its own; a bare "<number> <word>" pair
+  // only counts alongside an explicit positive intent, so noise can never
+  // divert a clean decline into the opportunity lane.
+  const has_alternate_address =
+    high_confidence_addresses.length > 0 ||
+    (low_confidence_addresses.length > 0 && positive_intents.length > 0);
+  return {
+    positive_intents,
+    address_candidates: address_signals,
+    has_positive_signal: positive_intents.length > 0,
+    has_alternate_address,
+    is_compound_opportunity: positive_intents.length > 0 || has_alternate_address,
   };
 }
 
@@ -370,7 +420,50 @@ function computeInboundAutomationDecisionRaw({
     });
   }
 
+  // Property sold — terminal for the seller×property PAIRING only. The
+  // contact is never suppressed: a former owner of one property is a
+  // legitimate seller of others ("I sold 123 Main, but I own 456 Oak").
+  if (primary_intent === "sold_property" || primary_intent === "former_owner_respondent") {
+    const compound = resolveCompoundOpportunitySignal(classification);
+    if (compound.is_compound_opportunity) {
+      return buildDecisionResult({
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: "sold_with_new_opportunity",
+        route_hint,
+        stage_hint,
+        allowed_template_stages,
+        next_action: "mark_human_review",
+        audit_reason: "sold_with_new_opportunity",
+        compound_opportunity: compound,
+      });
+    }
+    return buildDecisionResult({
+      should_suppress_contact: false,
+      reply_mode: "none",
+      next_action: "disposition_property_sold",
+      audit_reason: "property_sold",
+    });
+  }
+
   if (primary_intent === "wrong_number") {
+    // "Wrong person, but 456 Oak Street might be for sale" — an explicit
+    // seller signal or extracted address must reach a human, not vanish
+    // behind the archive. A bare wrong-number still archives at phone scope.
+    const compound = resolveCompoundOpportunitySignal(classification);
+    if (compound.is_compound_opportunity) {
+      return buildDecisionResult({
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: "wrong_person_with_seller_signal",
+        route_hint,
+        stage_hint,
+        allowed_template_stages,
+        next_action: "mark_human_review",
+        audit_reason: "wrong_person_with_seller_signal",
+        compound_opportunity: compound,
+      });
+    }
     return buildDecisionResult({
       should_suppress_contact: true,
       reply_mode: "none",
@@ -473,12 +566,50 @@ function computeInboundAutomationDecisionRaw({
   }
 
   if (primary_intent === "not_interested") {
+    const compound = resolveCompoundOpportunitySignal(classification);
+    // "That house isn't for sale, but I might sell 123 Oak Street" — the
+    // second clause names a DIFFERENT property. Extraction + review, never a
+    // silent decline: the decline applies to the campaign property only.
+    if (compound.has_alternate_address) {
+      return buildDecisionResult({
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        human_review_reason: "new_property_opportunity",
+        route_hint,
+        stage_hint,
+        allowed_template_stages,
+        next_action: "mark_human_review",
+        audit_reason: "new_property_opportunity",
+        compound_opportunity: compound,
+      });
+    }
+    // "Not for sale. But what would you pay?" — same property, the seller
+    // invited an offer conversation. The decline clause must not erase the
+    // question: route as asks_offer when the classification is confident;
+    // execution-time mode/scope/window gates still apply downstream.
+    if (compound.positive_intents.includes("asks_offer")) {
+      const auto_reply_allowed = confidence >= 0.85 && compliance_flag !== "stop_texting";
+      const asks_offer_profile = ROUTE_PROFILES.asks_offer;
+      return buildDecisionResult({
+        should_queue_reply: auto_reply_allowed,
+        should_mark_human_review: !auto_reply_allowed,
+        reply_mode: auto_reply_allowed ? "auto" : "manual_review",
+        human_review_reason: auto_reply_allowed ? null : "declined_but_asks_offer",
+        route_hint: asks_offer_profile.route_hint,
+        stage_hint,
+        allowed_template_stages: asks_offer_profile.allowed_template_stages,
+        next_action: auto_reply_allowed ? "queue_auto_reply" : "mark_human_review",
+        audit_reason: "declined_but_asks_offer",
+        compound_opportunity: compound,
+      });
+    }
     return buildDecisionResult({
       route_hint,
       stage_hint,
       allowed_template_stages,
       next_action: "do_not_reply",
       audit_reason: "not_interested",
+      compound_opportunity: compound.is_compound_opportunity ? compound : null,
     });
   }
 
@@ -581,6 +712,13 @@ function computeInboundAutomationDecisionRaw({
  * introduced — only owned-workflow + fallback metadata are attached.
  */
 function applyOwnershipProbeOverlay(decision = {}, args = {}) {
+  // A compound message ("not for sale, but what would you pay for 456 Oak?")
+  // must never be flattened to the silent advance-with-followup outcome —
+  // the base decision already routed the positive clause (reply or review).
+  // This overlay only applies to a PURE property-specific decline.
+  const compound = resolveCompoundOpportunitySignal(args.classification || {});
+  if (compound.is_compound_opportunity) return decision;
+
   const ownership_probe = resolveOwnershipProbeDisinterestTransition({
     classification: args.classification || {},
     messageEvent: {
@@ -2081,6 +2219,39 @@ export async function executeInboundAutomationDecision({
         brain_stage: null,
       },
     };
+  }
+
+  // Sold-property pairing closure (closure pass 2026-08-26): the property is
+  // factually gone, so pending CAMPAIGN touches for THAT property are
+  // cancelled (property_disposition scope). The CONTACT is never suppressed;
+  // campaign touches for the owner's other properties survive. Deliberate
+  // no-reply outcome with the durable property_sold reason.
+  if (
+    base_decision.next_action === "disposition_property_sold" &&
+    !dryRun &&
+    supabase &&
+    propertyId
+  ) {
+    try {
+      await cancelSupabasePendingOutbound(
+        {
+          thread_key: threadKey || inboundFrom,
+          to_phone_number: inboundFrom || threadKey,
+          property_id: propertyId,
+          policy: CANCELLATION_POLICIES.PROPERTY_DISPOSITION,
+          reason: "property_sold",
+          inbound_event_id: inboundEventId,
+          inbound_received_at: inboundReceivedAt || null,
+          cancelled_by: "inbound_automation_decision_sold",
+        },
+        { supabase }
+      );
+    } catch (sold_cancel_error) {
+      warn("inbound.sold_property_cancel_failed", {
+        thread_key: threadKey || inboundFrom,
+        error: sold_cancel_error?.message || "unknown_error",
+      });
+    }
   }
 
   // Stage-aware safe-fallback clarifier: convert the safe-ambiguous review

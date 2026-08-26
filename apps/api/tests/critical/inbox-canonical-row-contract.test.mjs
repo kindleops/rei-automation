@@ -140,7 +140,9 @@ test("initial boot uses canonical row contract without skip flags", () => {
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_counts\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /skip_delivery\s*=\s*'true'/);
   assert.doesNotMatch(LIVE_ROUTE_SRC, /initial_boot_safe/);
-  assert.match(INBOX_PAGE_SRC, /resolveCanonicalThreadStateKey/);
+  // Contract re-pin: the InboxPage thread-state write path now routes through
+  // resolveDealDeskWritableThreadKey (canonical-thread-reference write contract).
+  assert.match(INBOX_PAGE_SRC, /resolveDealDeskWritableThreadKey/);
 });
 
 test("deal desk opens 25/50/25 by default", () => {

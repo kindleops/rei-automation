@@ -66,7 +66,12 @@ function __normalizeInboundReplayExampleBody(example = null) {
 
 function verifyAuth(request) {
   const secret = process.env.INTERNAL_API_SECRET;
-  if (!secret) return true; // No secret configured = dev mode
+  if (!secret) {
+    // Fail CLOSED in production: this route replays the classify/route/plan
+    // chain and must never be publicly reachable because a secret is unset.
+    // Local development (non-production) keeps the no-secret convenience.
+    return process.env.NODE_ENV !== "production";
+  }
   const auth = request.headers.get("x-api-secret") || request.headers.get("authorization")?.replace("Bearer ", "");
   return auth === secret;
 }

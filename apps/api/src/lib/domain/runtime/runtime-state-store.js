@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const RUNTIME_STATE_ROOT = "/tmp/real-estate-automation-runtime-state";
+// Overridable for test isolation: the hardcoded shared /tmp root leaked
+// runtime state (system-control caches, per-instance ledgers) ACROSS test
+// processes and sessions, producing order-dependent claim-containment
+// results. Production behavior is unchanged when the env var is unset.
+const RUNTIME_STATE_ROOT =
+  process.env.RUNTIME_STATE_ROOT || "/tmp/real-estate-automation-runtime-state";
 
 function clean(value) {
   return String(value ?? "").trim();

@@ -340,6 +340,15 @@ export function createSellerInboundBurstCoordinator({
 
     // Immediate pending-reply cancellation for safety OR any new inbound
     // (stale auto-reply supersession). Fail open on cancel errors.
+    //
+    // Policy scope matters: a safety latch cancels EVERYTHING
+    // (compliance_terminal), but a benign new inbound must cancel only the
+    // automated reply/follow-up rows (inbound_takeover) — the old
+    // "superseded_by_newer_inbound" policy string was not a member of
+    // CANCELLATION_POLICIES, fell through to the compliance default, and
+    // cancelled unrelated campaign touches on every fragment.
+    // inbound_received_at arms the supersession guard so a slow older
+    // inbound can never cancel a newer inbound's queued reply.
     let cancel_result = { ok: true, cancelled: 0, reason: "not_attempted" };
     if (typeof cancelPendingOutbound === "function") {
       try {
@@ -349,7 +358,8 @@ export function createSellerInboundBurstCoordinator({
             ? `burst_safety_${safety.kind || "terminal"}`
             : "superseded_by_newer_inbound",
           inbound_event_id: event_id || provider_message_id,
-          policy: safety.latch ? "compliance_terminal" : "superseded_by_newer_inbound",
+          policy: safety.latch ? "compliance_terminal" : "inbound_takeover",
+          inbound_received_at: message.received_at,
         });
       } catch (err) {
         cancel_result = {

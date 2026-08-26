@@ -97,6 +97,43 @@ export function classifyTextGridProviderError(error = {}, context = {}) {
     };
   }
 
+  // Ambiguous accept: the provider responded without a message SID. The SMS
+  // may have been delivered anyway, so a retry risks a DUPLICATE seller
+  // message. Terminal + manual review — never the 5-minute retry loop.
+  const is_ambiguous_no_sid =
+    error?.no_sid_ambiguous_send === true ||
+    lower(error?.message).includes("send failed - no sid");
+  if (is_ambiguous_no_sid) {
+    return {
+      provider_code,
+      provider_message: provider_message || "Provider response carried no message SID",
+      provider_payload: ensureObject(error.data) || null,
+      failure_class: "provider_ambiguous_accept",
+      failure_bucket: "provider_no_sid",
+      normalized_reason: "provider_response_missing_sid",
+      non_retryable_reason: "provider_response_missing_sid_manual_review",
+      retryable: false,
+      is_terminal: true,
+      compliance_related: false,
+      queue_disposition: "failed",
+      suppression_action: null,
+      sentry_level: "warning",
+      operator_reason:
+        "Provider accepted the request but returned no SID — possible duplicate on retry; verify delivery manually",
+      no_sender_rotation: true,
+      no_alternate_number_retry: true,
+      no_campaign_reenqueue: true,
+      metrics: {
+        event: "queue.send.ambiguous_no_sid",
+        reason: "provider_response_missing_sid",
+        campaign_id: context.campaign_id || null,
+        market: context.market || null,
+        sender_hash: context.sender_hash || null,
+        destination_hash: context.destination_hash || null,
+      },
+    };
+  }
+
   if (normalized.failure_class === "recipient_opted_out") {
     return {
       provider_code,

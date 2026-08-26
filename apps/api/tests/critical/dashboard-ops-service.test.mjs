@@ -174,21 +174,23 @@ test('live inbox exposes cursor pagination, filters, keyword matches, and map pi
     market: 'Test Market',
   }));
   const supabase = makeLiveInboxSupabaseStub(rows);
+  // Contract re-pin: getLiveInbox is thread-first — rows live on page.threads
+  // (page.messages is always [] in the thread-view contract).
   const page = await getLiveInbox({ limit: '100', direction: 'all', map: 'true' }, { supabase });
-  assert.strictEqual(page.messages.length, 100);
+  assert.strictEqual(page.threads.length, 100);
   assert.ok(page.pagination.has_more);
   assert.ok(page.pagination.next_cursor);
   assert.ok(page.mapPins.length >= 1);
 
   const inbound = await getLiveInbox({ limit: '100', direction: 'inbound' }, { supabase });
-  assert.ok(inbound.messages.every((m) => m.direction === 'inbound'));
+  assert.ok(inbound.threads.every((m) => m.direction === 'inbound'));
 
   const keyword = await getLiveInbox({ limit: '10', q: 'interested' }, { supabase });
-  assert.ok(keyword.messages[0].matched_keywords.includes('interested'));
+  assert.ok(keyword.threads[0].matched_keywords.includes('interested'));
 
   const hot = await getLiveInbox({ limit: '10', filter: 'positive_hot' }, { supabase });
-  assert.ok(hot.messages.some((m) => m.flags.positive_hot));
+  assert.ok(hot.threads.some((m) => m.flags.positive_hot));
 
   const needsReply = await getLiveInbox({ limit: '10', filter: 'needs_reply' }, { supabase });
-  assert.ok(needsReply.messages.every((m) => m.direction === 'inbound'));
+  assert.ok(needsReply.threads.every((m) => m.direction === 'inbound'));
 });

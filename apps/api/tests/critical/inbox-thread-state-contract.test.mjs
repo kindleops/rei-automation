@@ -19,15 +19,20 @@ test("schema select fields exclude non-production columns", () => {
   assert.match(INBOX_THREAD_STATE_SELECT_FIELDS, /follow_up_at/);
 });
 
-test("historical outbound-only null row becomes cold after 24h without reply", () => {
-  const bucket = resolveCanonicalInboxBucket({
+test("historical outbound-only null row stays bucketless with cold_reactivation lane after 24h", () => {
+  // Contract re-pin: cold is no longer an inbox_bucket — the 24h outbound-only
+  // row resolves inbox_bucket=null and cold routing lives on the
+  // automation_lane=cold_reactivation instead (inbox_bucket single-source split).
+  const row = {
     inbox_bucket: null,
     latest_direction: "outbound",
     last_outbound_at: "2025-01-01T00:00:00.000Z",
     last_inbound_at: null,
     automation_lane: "cold_reactivation",
-  });
-  assert.equal(bucket, "cold");
+  };
+  const bucket = resolveCanonicalInboxBucket(row);
+  assert.equal(bucket, null);
+  assert.equal(row.automation_lane, "cold_reactivation");
 });
 
 test("workflow waiting persists beyond grace window when follow-up scheduled", () => {

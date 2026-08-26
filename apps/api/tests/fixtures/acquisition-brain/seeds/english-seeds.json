@@ -53,7 +53,7 @@
   {
     "family": "sold",
     "text": "I sold it years ago",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "sold_property",
     "stage": "ownership_check",
     "terminal": true
   },
@@ -218,7 +218,7 @@
   {
     "family": "under_contract",
     "text": "We are already under contract",
-    "expected_primary_intent": "info_request",
+    "expected_primary_intent": "not_interested",
     "stage": "actual_proposal"
   },
   {
@@ -230,7 +230,7 @@
   {
     "family": "llc",
     "text": "The LLC owns the property",
-    "expected_primary_intent": "ownership_confirmed",
+    "expected_primary_intent": "llc_corporation",
     "stage": "formal_contract"
   },
   {

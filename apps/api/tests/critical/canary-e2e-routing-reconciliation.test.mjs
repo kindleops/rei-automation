@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { classify } from "@/lib/domain/classification/classify.js";
+import { CONTEXT_VERSION } from "@/lib/domain/classification/conversation-context.js";
 import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
 import { resolveCanonicalInboundThreadKey } from "@/lib/domain/inbox/resolve-canonical-inbound-thread.js";
 import {
@@ -28,6 +29,25 @@ const SENDER = "+16128060495";
 const THREAD_ID = "542f27d2-0271-4ddc-94b3-efee76cf74ae";
 const SID = "SMO8VxnJAOWsNa926YKkFtS5w==";
 const HIST_21610 = "5940278f-ca2b-47b7-9255-573079e33ddd";
+
+// Contract re-pin (bare-affirmative 0.72 context cap): a bare "Yeah" only binds
+// to the delivered ownership question through a valid conversation_context_v1
+// payload (0.88 contextual); context-less short replies cap at 0.72 by design.
+function ownershipCheckConversationContext(thread = CANARY) {
+  return {
+    context_version: CONTEXT_VERSION,
+    canonical_thread: thread,
+    inbound_thread: thread,
+    last_outbound_message_id: SID,
+    last_outbound_use_case: "ownership_check",
+    last_outbound_question_type: "ownership",
+    last_outbound_delivered_at: new Date(Date.now() - 3600e3).toISOString(),
+    current_inbound_received_at: new Date().toISOString(),
+    intervening_outbound_count: 0,
+    intervening_inbound_count: 0,
+    unanswered_question: true,
+  };
+}
 
 // ── 1. E.164 inbound normalization ──────────────────────────────────────────
 
@@ -119,20 +139,29 @@ test("successful retry aggregate patch preserves prior 21610 under audit key", (
 // ── 3. Classification: proposal request ─────────────────────────────────────
 
 test('classify: "Yeah" is ownership_confirmed without proposal request', async () => {
-  const result = await classify("Yeah");
+  // Contract re-pin: valid ownership_check conversation_context yields the 0.88
+  // contextual binding; the context-less 0.72 cap is the pinned contract.
+  const result = await classify("Yeah", null, {
+    conversation_context: ownershipCheckConversationContext(),
+  });
   assert.equal(result.primary_intent, "ownership_confirmed");
   assert.notEqual(result.primary_intent, "asks_offer");
-  assert.ok(result.confidence >= 0.9);
+  assert.ok(result.confidence >= 0.85);
 });
 
 test('classify: "Yes, what\'s the proposal?" is asks_offer (Stage 3)', async () => {
   const result = await classify("Yes, what's the proposal?");
   assert.equal(result.primary_intent, "asks_offer");
-  assert.equal(result.seller_state?.ownership_confirmed, true);
-  assert.ok(
-    result.secondary_intent === "ownership_confirmed" ||
-      result.seller_state?.ownership_confirmed === true
-  );
+  // Contract re-pin: classify no longer infers ownership from message text alone
+  // (message_text_only_ownership suppression); ownership is inferred via the
+  // stage transition an asks_offer reply drives past the ownership stage.
+  const next_stage = resolveNextSellerStage({
+    message_body: "Yes, what's the proposal?",
+    classification: result,
+    current_stage: "ownership_confirmation",
+    conversation_context: { summary: { conversation_stage: "ownership_confirmation" } },
+  });
+  assert.equal(next_stage, "asking_price");
 });
 
 test("asks_offer auto-reply plan advances to ASKING_PRICE / seller_asking_price", () => {

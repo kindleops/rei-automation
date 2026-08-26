@@ -2472,6 +2472,22 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
   }
 
   for (const row of expired_leases) {
+    // Closure-pass certification fixes (2026-08-26):
+    // P2 — a processing row that ALREADY SENT (provider id / sent_at) must
+    // reconcile to sent/delivered via the send-evidence producer, never be
+    // misclassified expired (that corrupted sent-count/delivery accounting).
+    if (rowHasSendEvidence(row)) continue;
+    // P1 — a row the runtime brakes decided to HOLD (emergency stop) must
+    // stay held; the lease-expiry patch was overwriting the hold marker so
+    // brake recovery could never restore the row (lost seller touch).
+    if (
+      shouldHoldRowFromStaleExpiration(row, {
+        brakeState,
+        campaignStatus: campaignStatusById.get(rowCampaignId(row)) || null,
+      })
+    ) {
+      continue;
+    }
     updates.push({
       id: row.id,
       patch: {
@@ -2491,9 +2507,15 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
     });
   }
 
-  const deduped_updates = Array.from(
-    new Map(updates.map((entry) => [String(entry.id), entry])).values()
-  );
+  // First-write-wins: producer order is the explicit precedence order
+  // (send-evidence reconcile > brake hold > … > lease expiry). Last-write-wins
+  // let the LAST producer silently override earlier, higher-priority patches.
+  const deduped_map = new Map();
+  for (const entry of updates) {
+    const key = String(entry.id);
+    if (!deduped_map.has(key)) deduped_map.set(key, entry);
+  }
+  const deduped_updates = Array.from(deduped_map.values());
 
   let blocked_expiration_count = 0;
   let applied_patch_count = 0;

@@ -10,6 +10,11 @@ import {
   applyContextualShortReply,
   CONTEXT_VERSION,
 } from "@/lib/domain/classification/conversation-context.js";
+import {
+  extractAddressCandidates,
+  findHighConfidenceAddressSpans,
+  isIndexInsideAddressSpan,
+} from "@/lib/domain/classification/extract-address-signals.js";
 
 /**
  * Provenance identifier recorded on every state mutation this classifier's
@@ -679,10 +684,16 @@ function detectComplianceFlag(message) {
   // instead" starts with "stop" but is a TEXT preference, not an opt-out.
   // The guard requires an explicit text affirmative with no text/contact
   // prohibition, so "stop calling and texting" stays a full opt-out.
+  // Sentence punctuation counts as a separator too: "STOP. Also I own 456
+  // Oak Ave" is a leading standalone STOP sentence — a true opt-out whose
+  // extra content routes to review via the compound lanes, never a reason to
+  // skip compliance.
+  const KEYWORD_SEPARATORS = [" ", ",", ".", "!", ";", ":", "\n"];
   for (const kw of COMPLIANCE_EXACT) {
     if (
-      trimmed.startsWith(kw + " ") || trimmed.startsWith(kw + ",") ||
-      bare.startsWith(kw + " ") || bare.startsWith(kw + ",")
+      KEYWORD_SEPARATORS.some(
+        (sep) => trimmed.startsWith(kw + sep) || bare.startsWith(kw + sep)
+      )
     ) {
       if (matchesTextChannelPreference(text)) break;
       return "stop_texting";
@@ -2161,6 +2172,12 @@ const OBJECTION_MAP = [
 function detectObjection(message) {
   const text = lower(message);
   if (matchesPropertyTypeCorrection(text)) return "property_correction";
+  // Sold/transferred outranks the wrong_number objection fold: the sold
+  // phrases inside OBJECTION_MAP.wrong_number would otherwise stamp a
+  // phone-scope objection onto a property-scoped disposition.
+  if (matchesSoldTransfer(text) && !matchesTrueWrongNumber(text)) {
+    return "already_sold";
+  }
   for (const obj of OBJECTION_MAP) {
     if (obj.key === "property_correction") continue;
     if (includesAny(text, obj.phrases)) return obj.key;
@@ -3404,6 +3421,10 @@ const ASKING_PRICE_PATTERNS = [
   /\bbetween\s+(?:\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,})\s+and\s+\$?\s*[\d,.]+|\$?\s*[\d,.]+\s+and\s+\$?\s*(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million|hundred|kilo)\b|\d{1,3}(?:,\d{3})+\b|\d{3,}))/i,
   /\blooking\s+for\s+\$?\s*\d[\d,.]*/i,
   /\bbottom\s+line\s+(?:for\s+me\s+)?is\s+\$?\s*\d[\d,.]*/i,
+  // "I'd take 250,000" / "we would take 250k" — a stated acceptance price.
+  // The number must look like money ($, scale suffix, thousands separator or
+  // 4+ digits) so "take 5" (minutes) can never qualify.
+  /\b(?:i'?d|i\s+would|we'?d|we\s+would|will|would)\s+take\s+(?:\$\s*\d[\d,.]*|\d[\d,.]*\s*(?:k|thousand|m|mil|million)\b|\d{1,3}(?:,\d{3})+\b|\d{4,})/i,
   /\bmi\s+precio\s+es\b/i,
   /\balrededor\s+de\s+\$?\s*\d/i,
 ];
@@ -3545,6 +3566,33 @@ export function parseSellerAskingPrice(message) {
     };
   }
 
+  // Street addresses are the loudest non-price number source in seller SMS:
+  // "123 Main is not for sale" read the street number as $123M, and
+  // "I live at 1503 Maple Drive" satisfied the "at <4+ digits>" money cue.
+  // When every digit in the message sits inside a high-confidence address
+  // span and no dollar sign appears outside one, the number is an address.
+  const address_spans = findHighConfidenceAddressSpans(raw);
+  if (address_spans.length > 0) {
+    let has_number_outside_address = false;
+    const digit_re = /\$?\d/g;
+    let digit_match;
+    while ((digit_match = digit_re.exec(text)) !== null) {
+      if (!isIndexInsideAddressSpan(address_spans, digit_match.index)) {
+        has_number_outside_address = true;
+        break;
+      }
+    }
+    if (!has_number_outside_address) {
+      return {
+        ...empty,
+        evidence_span: raw,
+        semantic_role: "street_address",
+        confidence: 0.9,
+        price_rule_id: "price_reject_address",
+      };
+    }
+  }
+
   // Seller asking-price positives
   let ruleId = null;
   let qualifier = null;
@@ -3552,7 +3600,10 @@ export function parseSellerAskingPrice(message) {
   let value = null;
   let evidence = null;
 
-  const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
+  // Spanish "entre X y Y" is the same range construction (closure pass
+  // 2026-08-26 — without it the multi-price ambiguity guard read a Spanish
+  // range's two numbers as two distinct asking prices).
+  const between = text.match(/\b(?:between|entre)\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+(?:and|y)\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
   // This parser is a THIRD, independent consumer of the price signal: it sets
   // price_parse without consulting ASKING_PRICE_PATTERNS, so "between 3 and 4"
   // — a time window — was still read as a $3 asking price after that gate was
@@ -3573,8 +3624,11 @@ export function parseSellerAskingPrice(message) {
       looks_like_clock_side(between[3], between[4])
   );
   if (between && !between_is_clock_range) {
-    const lo = scalePriceToken(between[1], between[2]);
-    const hi = scalePriceToken(between[3], between[4]);
+    // One-sided scale suffix distributes across the range: "between 240 and
+    // 260k" and "entre 240 y 260 mil" both mean 240k-260k.
+    const shared_suffix = between[2] || between[4] || null;
+    const lo = scalePriceToken(between[1], between[2] || shared_suffix);
+    const hi = scalePriceToken(between[3], between[4] || shared_suffix);
     if (lo != null && hi != null) {
       range = { low: lo, high: hi };
       value = lo;
@@ -3623,9 +3677,46 @@ export function parseSellerAskingPrice(message) {
 
   if (!ruleId && matchesAnyPattern(text, ASKING_PRICE_PATTERNS)) {
     // Require at least one digit in the amount token (avoid matching bare ".")
-    const m =
-      text.match(/\$?\s*(\d[\d,.]*)\s*(k|thousand|m|mil|million)?\b/i) ||
-      text.match(/\b(\d{2,3})\s*k\b/i);
+    // and skip amounts that are street numbers inside an address span, so
+    // "I want 150k for 123 Main St" reads 150k and never 123.
+    //
+    // Closure pass 2026-08-26 (multi-price attribution safety):
+    //  * a token attached to a NON-ask referent (paid/bought/owe/balance) is
+    //    never a candidate — "I paid 100k but I'd sell for 190" must not bind
+    //    the purchase price as the ask;
+    //  * TWO OR MORE distinct candidate amounts (outside address spans) make
+    //    the message price-ambiguous — "180k for Oak and 250k for Maple" must
+    //    never fabricate one global seller price. Candidates survive as
+    //    evidence; the message routes to clarification/review.
+    const NON_ASK_PRECEDING_RE = /\b(paid|bought|purchased|owe|owed|owing|balance|mortgage)\s*(it\s+|about\s+|around\s+)?$/i;
+    const candidates = [];
+    const amount_re = /\$?\s*(\d[\d,.]*)\s*(k|thousand|m|mil|million)?\b/gi;
+    let amount_match;
+    while ((amount_match = amount_re.exec(text)) !== null) {
+      const digit_index = amount_match.index + amount_match[0].indexOf(amount_match[1]);
+      if (isIndexInsideAddressSpan(address_spans, digit_index)) continue;
+      if (NON_ASK_PRECEDING_RE.test(text.slice(Math.max(0, digit_index - 16), digit_index))) continue;
+      candidates.push(amount_match);
+    }
+    const distinct_values = new Set(
+      candidates.map((c) => scalePriceToken(c[1], c[2] || (/\d{2,3}k/i.test(c[0]) ? "k" : null)))
+    );
+    if (distinct_values.size > 1) {
+      return {
+        ...empty,
+        evidence_span: raw,
+        semantic_role: "multi_price_ambiguous",
+        confidence: 0.85,
+        price_rule_id: "price_reject_multi_price",
+      };
+    }
+    let m = candidates[0] || null;
+    if (!m) {
+      const short_k = text.match(/\b(\d{2,3})\s*k\b/i);
+      if (short_k && !isIndexInsideAddressSpan(address_spans, short_k.index)) {
+        m = short_k;
+      }
+    }
     if (m) {
       value = scalePriceToken(m[1], m[2] || (/\d{2,3}k/i.test(m[0]) ? "k" : null));
       evidence = m[0];
@@ -3705,6 +3796,11 @@ function scalePriceToken(numStr, suffix) {
 export const INTENT_PRIORITY = Object.freeze([
   "opt_out",
   "wrong_number",
+  // Property transfer — "already sold" is a property-scoped disposition, not
+  // a phone-identity disconnect. It must never route to wrong_number's
+  // contact-scope suppression (ontology: sold_property suppresses the
+  // seller×property PAIRING only).
+  "sold_property",
   "who_is_this",
   "hostile_or_legal",
   "not_interested",
@@ -3902,6 +3998,40 @@ function matchesOwnershipDisconnect(text = "") {
 
 function matchesWrongNumberDisconnect(text = "") {
   return matchesTrueWrongNumber(text) || matchesOwnershipDisconnect(text);
+}
+
+/**
+ * Sold / transferred — a PROPERTY-scoped disposition, distinct from a
+ * phone-identity disconnect. "I already sold that house" ends the
+ * seller×property pairing; the person remains a legitimate contact who may
+ * own (and sell) other properties. Routing this into wrong_number was the
+ * root of contact-scope suppression for former owners.
+ */
+const SOLD_TRANSFER_PHRASES = [
+  "i sold it", "we sold it", "already sold", "allready sold", "alredy sold",
+  "been sold", "sold that property", "sold that house", "sold the property",
+  "sold the house", "sold my house", "sold my property", "it sold",
+  "no it sold", "sold it", "sold last week", "sold yrs ago",
+  "sold years ago", "sold it already", "sold it awhile ago", "that was sold",
+  "sold long ago", "that sold",
+  // Spanish sold
+  "ya lo vendí", "ya lo vendi", "ya la vendí", "ya la vendi",
+  "vendí esa casa", "vendi esa casa", "vendimos la propiedad",
+];
+
+const SOLD_NEGATION_RE =
+  /\b(?:haven'?t|havent|hasn'?t|hasnt|never|not|didn'?t|didnt|won'?t|wont|isn'?t|isnt)\b[^.!?\n]{0,16}\bsold\b/i;
+
+function matchesSoldTransfer(text = "") {
+  const normalized = lower(text);
+  if (!/\bsold\b|vend(?:[íi]|imos)/i.test(normalized)) return false;
+  if (SOLD_NEGATION_RE.test(normalized)) return false;
+  if (includesAny(normalized, SOLD_TRANSFER_PHRASES)) return true;
+  if (/\b(?:i|we)\s+sold\b/.test(normalized)) return true;
+  if (/\bsold\b[^.!?\n]{0,50}?\b(?:yrs?|years?|months?|weeks?|days?)\s+ago\b/.test(normalized)) return true;
+  if (/\b(no|nah|nope)\b[\s\S]{0,24}\bsold\b/.test(normalized)) return true;
+  if (/\b(?:ya\s+)?(?:la|lo)\s+vend(?:[íi]|imos)(?![a-z0-9À-ſ])/i.test(normalized)) return true;
+  return false;
 }
 
 function matchesPropertyTypeCorrection(text = "") {
@@ -4171,7 +4301,12 @@ const COMPOUND_INTENT_FAMILIES = Object.freeze({
     "requests_email",
     "language_switch",
   ],
-  property_facts: ["tenant_occupied", "condition_disclosed", "property_correction"],
+  property_facts: [
+    "tenant_occupied",
+    "condition_disclosed",
+    "property_correction",
+    "sold_property",
+  ],
 });
 
 function countCompoundFamilies(unique_intents = []) {
@@ -4420,10 +4555,30 @@ function resolveIntents(
     });
   }
 
-  // 2. WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
-  // Production routing: sold/never_owned/not_owner map to wrong_number for suppression.
-  if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect) {
+  // 2. SOLD / TRANSFERRED — property-scoped disposition, checked BEFORE the
+  // wrong-number fold so "already sold" can never become a contact-scope
+  // suppression. A true wrong-person claim at this phone still outranks.
+  const is_sold_transfer = matchesSoldTransfer(text);
+  if (is_sold_transfer && !is_true_wrong) {
+    intents.push("sold_property");
+  } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect) {
+    // WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
+    // (never-owned / not-owner identity disconnects stay phone-scoped).
     intents.push("wrong_number");
+  }
+
+  // 2.4 UNDER CONTRACT / PENDING SALE (closure pass 2026-08-26): a
+  // DECLARATIVE listing-status disclosure routes to the not_interested
+  // nurture lane (ontology: under_contract → not_interested). Interrogative
+  // process questions ("how long until we're under contract?") are excluded.
+  if (
+    /\b(under\s+contract|in\s+escrow|sale\s+pending|pending\s+sale|accepted\s+an?\s+offer|offer\s+accepted|bajo\s+contrato)\b/i.test(text) &&
+    !/\b(how|when|what|until|before)\b[^.!?]{0,24}\b(under\s+contract|escrow|contract)\b/i.test(text) &&
+    !intents.includes("wrong_number") &&
+    !intents.includes("sold_property")
+  ) {
+    if (!intents.includes("not_interested")) intents.push("not_interested");
+    matched_rule_ids.push("under_contract_disclosure");
   }
 
   // 2.5 PROPERTY CORRECTION (type/address only — not sold/disownership)
@@ -4473,9 +4628,12 @@ function resolveIntents(
       "no me interesa", "no quiero vender", "no está en venta", "no esta en venta",
     ])
   ) {
-    // Check for "unless" or "but" which might indicate price or latent interest
+    // Check for "unless" or "but" which might indicate price or latent interest.
+    // The structured parse (not the raw pattern list) decides whether a number
+    // is really a price, so "not for sale but I'm at 1503 Maple Drive" cannot
+    // become an asking price.
     if (includesAny(text, ["unless", "but", "except", "if you", "pero"])) {
-       if (matchesAnyPattern(text, ASKING_PRICE_PATTERNS)) {
+       if (parseSellerAskingPrice(text).qualifies_as_seller_asking_price) {
          intents.push("asking_price_provided");
        } else {
          intents.push("not_interested");
@@ -4866,7 +5024,10 @@ function resolveIntents(
       OWNERSHIP_TRANSFER_YEARS_AGO_RE.test(text)) &&
     !/\bstill\b/i.test(text)
   ) {
-    if (!intents.includes("wrong_number")) intents.push("wrong_number");
+    // A SOLD transfer is the property-scoped sold_property lane; other
+    // disconnects (moved out, lost it, was mine) keep the wrong_number fold.
+    const former_owner_intent = matchesSoldTransfer(text) ? "sold_property" : "wrong_number";
+    if (!intents.includes(former_owner_intent)) intents.push(former_owner_intent);
     matched_rule_ids.push("former_owner_disconnect");
   }
 
@@ -5244,8 +5405,9 @@ function resolveIntents(
       "how fast can you close",
       "how fast could you close",
       "how quickly can you close",
-      "under contract",
-      "bajo contrato",
+      // "under contract"/"bajo contrato" removed (closure pass 2026-08-26):
+      // a declarative "it's under contract already" is a listing-status
+      // disclosure (not_interested nurture lane), not a process question.
       "say a price",
       "giving a price",
       "not giving a price",
@@ -5483,6 +5645,7 @@ function computeHeuristicConfidence({
   const FIXED_CONFIDENCE = {
     // Objections
     wrong_number:       0.97,
+    sold_property:      0.95,
     not_interested:     0.92,
     already_listed:     0.92,
     financial_distress: 0.91,
@@ -5691,6 +5854,10 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
     calibrated_rule_family_id: intents.calibrated_rule_family_id || null,
     confidence_rationale: intents.confidence_rationale || null,
     price_parse: intents.price_parse || null,
+    // Street-address candidates (deterministic). The decision layer uses these
+    // to preserve the second clause of compound messages — a new-property
+    // signal must survive a leading negative intent.
+    address_signals: extractAddressCandidates(message),
     classifier_version: CLASSIFY_VERSION,
   };
 }
@@ -5715,21 +5882,11 @@ export function detectInboundIntent(message, brain_item = null) {
 // SELLER STATE ENGINE
 // ══════════════════════════════════════════════════════════════════════════
 
-function extractPrice(message) {
-  const text = lower(message);
-  // Match common price patterns like $500,600, 150k, 2.1 million
-  const match = text.match(/\$?\s*(\d[\d,.]*(?:\.\d+)?)\s*(k|thousand|m|mil|million|hundred|kilo)?/i);
-  if (!match) return null;
-
-  let val = parseFloat(match[1].replace(/,/g, ""));
-  const suffix = (match[2] ?? "").toLowerCase();
-
-  if (suffix.startsWith("k") || suffix.startsWith("thou")) val *= 1000;
-  if (suffix.startsWith("m")) val *= 1000000;
-  if (suffix.startsWith("h")) val *= 100;
-
-  return isNaN(val) ? null : val;
-}
+// extractPrice() was removed: it matched any bare number with a boundary-free
+// suffix guess ("123 Main" → $123M, "call at 5:30" → $5) and fed
+// seller_state.price_mentioned in contradiction of the structured
+// parseSellerAskingPrice parse. price_mentioned now derives from the
+// qualified parse only (see computeSellerState).
 
 function computeSellerState({
   message,
@@ -5740,6 +5897,7 @@ function computeSellerState({
   motivation_score,
   positive_signals,
   confidence,
+  price_parse = null,
 }) {
   const text = lower(message);
 
@@ -5776,6 +5934,7 @@ function computeSellerState({
   let next_best_action = "await_human";
   if (primary_intent === "opt_out") next_best_action = "stop_all_outreach";
   if (primary_intent === "wrong_number") next_best_action = "update_contact_and_archive";
+  if (primary_intent === "sold_property") next_best_action = "close_property_pairing";
   if (seller_interest === "high") next_best_action = "immediate_call_back";
   if (primary_intent === "asks_offer" || primary_intent === "asking_price_provided") next_best_action = "generate_offer_and_send";
   if (primary_intent === "callback_requested") next_best_action = "schedule_call";
@@ -5785,7 +5944,13 @@ function computeSellerState({
     seller_interest,
     motivation_level,
     emotional_state: emotion,
-    price_mentioned: extractPrice(message),
+    // Single price truth: only a qualified seller asking-price parse may set
+    // a monetary value. The old naive extractPrice() read street numbers,
+    // clock times, years and phone fragments as prices ("123 Main" → $123M).
+    price_mentioned:
+      price_parse && price_parse.qualifies_as_seller_asking_price
+        ? price_parse.value ?? null
+        : null,
     tenant_occupied: primary_intent === "tenant_occupied" || secondary_intent === "tenant_occupied" || objection === "tenant_issue",
     timeline,
     creative_finance_open,
@@ -5811,6 +5976,19 @@ function deriveAutomationDecision({
       suppression_action: "opt_out",
       human_review_required: false,
       risk_level: "high",
+    };
+  }
+
+  // Property sold: terminal for the seller×property pairing only. No reply
+  // required, NO suppression action — the contact remains reachable for
+  // other properties and future opportunities (ontology: sold_property).
+  if (intent === "sold_property") {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "medium",
     };
   }
 
@@ -5931,7 +6109,7 @@ function deriveAutomationDecision({
 // ══════════════════════════════════════════════════════════════════════════
 
 const VALID_LANGUAGES   = new Set(["English","Spanish","Portuguese","Italian","Hebrew","Mandarin","Korean","Vietnamese","Polish","Arabic","Hindi","French","Russian","Japanese","Farsi","German","Greek","Thai","Pashto"]);
-const VALID_OBJECTIONS  = new Set(["wrong_number","who_is_this","not_interested","already_listed","need_more_money","need_time","need_family_ok","send_offer_first","tenant_issue","condition_bad","probate","divorce","financial_distress","has_other_buyer","wants_retail","needs_call","needs_email","wants_written_offer","wants_proof_of_funds","null",null]);
+const VALID_OBJECTIONS  = new Set(["wrong_number","already_sold","who_is_this","not_interested","already_listed","need_more_money","need_time","need_family_ok","send_offer_first","tenant_issue","condition_bad","probate","divorce","financial_distress","has_other_buyer","wants_retail","needs_call","needs_email","wants_written_offer","wants_proof_of_funds","null",null]);
 const VALID_EMOTIONS    = new Set(["calm","skeptical","guarded","frustrated","curious","motivated","tired_landlord","overwhelmed","grieving"]);
 const VALID_STAGES      = new Set(["Ownership","Offer","Q/A","Contract","Follow-Up"]);
 const VALID_COMPLIANCE  = new Set(["stop_texting","null",null]);
@@ -5974,7 +6152,7 @@ Return ONLY valid JSON. No markdown. No explanation outside the JSON object.
 
 {
   "language": "English|Spanish|Portuguese|...|Thai",
-  "primary_intent": "opt_out|wrong_number|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|info_request|unclear",
+  "primary_intent": "opt_out|wrong_number|sold_property|hostile_or_legal|asking_price_provided|asks_offer|callback_requested|not_interested|need_time|ownership_confirmed|latent_interest|tenant_occupied|condition_disclosed|who_is_this|info_request|unclear",
   "secondary_intent": "opt_out|...|null",
   "objection": "wrong_number|...|null",
   "emotion": "calm|skeptical|guarded|frustrated|curious|motivated|tired_landlord|overwhelmed|grieving",

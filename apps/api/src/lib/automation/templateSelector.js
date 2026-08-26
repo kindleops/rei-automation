@@ -1,3 +1,11 @@
+/**
+ * @deprecated QUARANTINED — NOT ON THE LIVE INBOUND PATH (closure pass
+ * 2026-08-26). Zero production callers; the canonical engine is
+ * processSellerInboundMessage → applyInboundAutomationDecision. Kept only for
+ * its historical tests. Do NOT wire this module into any route/cron/flow —
+ * the import-boundary guard (canonical-engine-import-boundary.test.mjs) will
+ * fail the build if the canonical engine ever imports it.
+ */
 // ─── templateSelector.js ──────────────────────────────────────────────────
 import { supabase } from "@/lib/supabase/client.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";

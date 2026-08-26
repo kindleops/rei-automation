@@ -23,7 +23,6 @@ import { transferDealToUnderwriting } from "@/lib/domain/underwriting/transfer-t
 import { maybeCreateContractFromAcceptedOffer } from "@/lib/domain/contracts/maybe-create-contract-from-accepted-offer.js";
 import { isOfferStageTrigger, runOfferStageAI, buildOfferStageMetadata, shouldSkipOfferStageAI } from "@/lib/domain/offers/offer-stage-ai-integration.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
-import { processAutonomousSellerReply } from "@/lib/domain/seller-flow/autonomous-seller-reply.js";
 import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 import {
   activationScopeFromDescriptor,
@@ -46,7 +45,7 @@ import {
   SELLER_FLOW_STAGES,
 } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { updateMasterOwnerAfterInbound } from "@/lib/domain/master-owners/update-master-owner-after-inbound.js";
-import { isNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
+import { isNegativeReply, classifyNegativeReply } from "@/lib/domain/classification/is-negative-reply.js";
 import { cancelPendingQueueItemsForOwner } from "@/lib/domain/queue/cancel-pending-queue-items.js";
 import {
   cancelSupabasePendingOutbound,
@@ -102,13 +101,13 @@ const defaultDeps = {
   transferDealToUnderwriting,
   maybeCreateContractFromAcceptedOffer,
   syncPipelineState,
-  processAutonomousSellerReply,
   processSellerInboundMessage,
   createSellerInboundBurstCoordinator,
   isSellerInboundBurstEnabled,
   cancelPendingFollowUpsForThread,
   updateMasterOwnerAfterInbound,
   isNegativeReply,
+  classifyNegativeReply,
   cancelPendingQueueItemsForOwner,
   cancelSupabasePendingOutbound,
   extractUnderwritingSignals,
@@ -1862,30 +1861,47 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
 
       if (inbound_is_negative && (master_owner_id || phone_item_id || inbound_from)) {
         const supabase_client = runtimeDeps.getSupabaseClient?.() || null;
+        // Phase 8 scope split (operator-directed, 2026-08-26): a HARD negative
+        // (STOP/opt-out/wrong number) sweeps everything, owner-wide fallback
+        // included. A SOFT business negative ("not interested",
+        // "not for sale") does NOT end communication — the seller flow
+        // schedules the nurture follow-up. The fast path only supersedes the
+        // stale queued auto-reply/follow-up (INBOUND_TAKEOVER), which the
+        // flow immediately replaces; campaign touches and the owner's other
+        // properties are untouched.
+        const negative_class = runtimeDeps.classifyNegativeReply
+          ? runtimeDeps.classifyNegativeReply(message_body)
+          : "hard";
+        const hard_negative = negative_class !== "soft";
         const supabase_queue_cancellation = supabase_client
           ? await runtimeDeps.cancelSupabasePendingOutbound(
               {
                 thread_key: inbound_from,
                 to_phone_number: inbound_from,
                 phone_id: phone_item_id,
-                master_owner_id,
+                master_owner_id: hard_negative ? master_owner_id : null,
                 property_id,
-                prospect_id,
-                policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL,
+                prospect_id: hard_negative ? prospect_id : null,
+                policy: hard_negative
+                  ? CANCELLATION_POLICIES.COMPLIANCE_TERMINAL
+                  : CANCELLATION_POLICIES.INBOUND_TAKEOVER,
                 reason: "inbound_negative_reply",
                 suppression_reason: "inbound_negative_reply",
                 inbound_event_id: inbound_message_event_id || extracted.message_id,
+                inbound_received_at: extracted.received_at || payload?.http_received_at || null,
                 cancelled_by: "textgrid_inbound_negative_fast_path",
               },
               { supabase: supabase_client }
             )
           : { ok: false, cancelled: 0, reason: "missing_supabase_client" };
 
-        queue_cancellation = await runtimeDeps.cancelPendingQueueItemsForOwner({
-          master_owner_id,
-          phone_item_id,
-          reason: "inbound_negative_reply",
-        });
+        queue_cancellation = hard_negative
+          ? await runtimeDeps.cancelPendingQueueItemsForOwner({
+              master_owner_id,
+              phone_item_id,
+              reason: "inbound_negative_reply",
+            })
+          : { ok: true, canceled_count: 0, items_checked: 0, reason: "soft_negative_property_scoped" };
 
         safeInfo("textgrid.inbound_negative_reply_queue_canceled", {
           message_id: extracted.message_id,
@@ -2274,10 +2290,19 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
                 reason: args.reason,
                 inbound_event_id: args.inbound_event_id,
                 cancelled_by: "seller_inbound_burst",
+                // Scope-correct policy mapping: safety latches cancel every
+                // outbound type (compliance_terminal); a benign new inbound
+                // cancels only automated reply/follow-up rows
+                // (inbound_takeover). The old `undefined` fall-through landed
+                // on the compliance default and cancelled unrelated campaign
+                // touches on every inbound fragment.
                 policy:
                   args.policy === "compliance_terminal"
                     ? CANCELLATION_POLICIES.COMPLIANCE_TERMINAL
-                    : undefined,
+                    : CANCELLATION_POLICIES.INBOUND_TAKEOVER,
+                // Arms the supersession guard: never cancel a reply that was
+                // queued for a NEWER inbound than the one cancelling.
+                inbound_received_at: args.inbound_received_at || null,
               },
               { supabase: supabase_for_burst }
             );

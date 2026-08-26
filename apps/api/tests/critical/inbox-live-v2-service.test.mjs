@@ -1,8 +1,18 @@
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { degradedLiveResponse, degradedThreadMessagesPayload } from "../../src/lib/domain/inbox/degraded-read-responses.js";
-import { getLiveInbox, getThreadMessages } from "../../src/lib/domain/inbox/live-inbox-service.js";
+import {
+  getLiveInbox,
+  getThreadMessages,
+  __resetInboxBootSnapshotForTests,
+} from "../../src/lib/domain/inbox/live-inbox-service.js";
+
+// The service remembers a module-level boot snapshot after any successful list;
+// reset it so no test is served threads captured by an earlier test.
+beforeEach(() => {
+  __resetInboxBootSnapshotForTests();
+});
 import {
   buildInboxCountRowFromThreads,
   makeLiveInboxThreadSupabase,
@@ -186,7 +196,7 @@ function createCanonicalInboxSupabase(seed = {}) {
   };
 }
 
-function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
+function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}, options = {}) {
   return {
     from(table) {
       if (
@@ -219,7 +229,7 @@ function createFallbackEnrichedSupabase(enrichedRows = [], trackers = {}) {
       }
 
       if (table === "inbox_thread_state") {
-        return makeLiveInboxThreadSupabase([], { stateRows: [] }).from(table);
+        return makeLiveInboxThreadSupabase([], { stateRows: options.stateRows || [] }).from(table);
       }
 
       if (table === "message_events" || table === "send_queue") {
@@ -857,7 +867,11 @@ test("visible thread rows floor stale zero count rows", async () => {
   assert.match(result.diagnostics?.countsSource || "", /visible_rows_floor/);
 });
 
-test("initial boot fallback returns threads without exact-counting v_inbox_enriched and marks counts degraded", async () => {
+test("initial boot serves boot-fast inbox_thread_state rows without touching v_inbox_enriched", async () => {
+  // Contract re-pin (boot-fast contract, live-inbox-service.js:1866-2000):
+  // initial boot now reads the inbox_thread_state boot-fast source directly —
+  // v_inbox_enriched is never consulted, counts are skipped by request, and the
+  // boot_fast source key reports fallback_used=true (key !== "primary").
   const trackers = {
     fallbackExactCountRequested: false,
     fallbackCountQueryRequested: false,
@@ -887,7 +901,27 @@ test("initial boot fallback returns threads without exact-counting v_inbox_enric
       created_at: "2026-05-29T12:40:00.000Z",
       updated_at: "2026-05-29T12:45:00.000Z",
     },
-  ], trackers);
+  ], trackers, {
+    // Boot-fast reads inbox_thread_state — the fixture row lives there now.
+    stateRows: [
+      {
+        thread_key: "+15550000099",
+        seller_phone: "+15550000099",
+        canonical_e164: "+15550000099",
+        inbox_bucket: "priority",
+        latest_message_body: "Interested in selling",
+        latest_message_at: "2026-05-29T12:45:00.000Z",
+        latest_direction: "inbound",
+        latest_message_direction: "inbound",
+        is_read: false,
+        is_suppressed: false,
+        unread_count: 1,
+        market: "Dallas",
+        property_id: "p-99",
+        master_owner_id: "mo-99",
+      },
+    ],
+  });
 
   const result = await getLiveInbox(
     { filter: "all", timeout_mode: "initial_boot" },
@@ -897,7 +931,7 @@ test("initial boot fallback returns threads without exact-counting v_inbox_enric
 
   assert.equal(result.threads.length, 1);
   assert.equal(result.pagination.limit, 25);
-  assert.equal(result.source, "v_inbox_enriched");
+  assert.equal(result.source, "inbox_thread_state");
   assert.equal(result.fallback_used, true);
   assert.equal(result.countsSource, "skipped");
   assert.equal(result.diagnostics?.count_preserved_reason, "counts_skipped_by_request");

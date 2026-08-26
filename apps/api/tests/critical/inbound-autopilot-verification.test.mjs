@@ -353,11 +353,15 @@ test("stage map: all ownership_check transitions are deterministic", () => {
   assert.equal(stage_policy.wrong_person.next_stage, "terminal");
   assert.equal(stage_policy.wrong_person.safety, SELLER_FLOW_SAFETY_TIERS.AUTO_SEND);
 
+  // opt_out MUST stay terminal + SUPPRESS — compliance contract, never weaken.
   assert.equal(stage_policy.opt_out.next_stage, "terminal");
   assert.equal(stage_policy.opt_out.safety, SELLER_FLOW_SAFETY_TIERS.SUPPRESS);
 
-  assert.equal(stage_policy.not_interested.next_stage, "terminal");
-  assert.equal(stage_policy.not_interested.safety, SELLER_FLOW_SAFETY_TIERS.SUPPRESS);
+  // S1 ownership-probe overlay: not_interested at ownership_check advances to
+  // consider_selling with a scheduled follow-up under REVIEW (not terminal).
+  assert.equal(stage_policy.not_interested.next_stage, "consider_selling");
+  assert.equal(stage_policy.not_interested.template, "consider_selling_follow_up");
+  assert.equal(stage_policy.not_interested.safety, SELLER_FLOW_SAFETY_TIERS.REVIEW);
 
   assert.equal(stage_policy.unclear.next_stage, "ownership_check");
   assert.equal(stage_policy.unclear.safety, SELLER_FLOW_SAFETY_TIERS.REVIEW);

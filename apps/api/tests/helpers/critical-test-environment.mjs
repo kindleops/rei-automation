@@ -2,7 +2,13 @@
  * Shared critical-test environment contract.
  * - Blocks unmocked external network by default
  * - Resets env snapshot between test files
+ * - Isolates the on-disk runtime-state store per test process
  */
+// MUST run before any src/ module resolves the runtime-state root: the shared
+// /tmp root leaked system-control caches and per-instance ledgers across test
+// processes, producing order-dependent claim-containment results.
+process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
 import { after, before, beforeEach } from 'node:test'
 import {
   clearSystemControlCache,

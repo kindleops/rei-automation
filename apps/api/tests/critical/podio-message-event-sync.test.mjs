@@ -488,20 +488,26 @@ test("sync route auth: rejects request with no x-internal-api-secret header", ()
 // ─── 6. SMS send path does NOT block on Podio sync ─────────────────────────
 
 test("writeOutboundSuccessMessageEvent: payload does not contain podio_sync_status (relies on DB default)", async () => {
-  // Capture the payload that would be written to Supabase.
-  let captured_payload = null;
+  // Contract re-pin: the writer now upserts THREE tables (contact_outreach_state,
+  // message_events, inbox_thread_state) — capture per-table and assert against
+  // the message_events payload only.
+  const captured = {};
 
   const fakeSupabase = {
-    from: () => ({
-      upsert: (payload) => {
-        captured_payload = payload;
-        return {
-          select: () => ({
-            maybeSingle: () => ({ data: payload, error: null }),
-          }),
-        };
-      },
-    }),
+    from: (table) => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        update: () => query,
+        upsert: (payload) => {
+          captured[table] = payload;
+          return query;
+        },
+        maybeSingle: async () => ({ data: captured[table] || null, error: null }),
+        then: (resolve) => resolve({ data: null, error: null }),
+      };
+      return query;
+    },
   };
 
   const queue_row = {
@@ -535,19 +541,19 @@ test("writeOutboundSuccessMessageEvent: payload does not contain podio_sync_stat
     now: "2026-04-19T12:00:00.000Z",
   });
 
-  assert.ok(captured_payload, "Supabase upsert must have been called");
+  assert.ok(captured.message_events, "Supabase message_events upsert must have been called");
 
   // The write payload must NOT include podio_sync_status — the column default
   // ('pending') is applied by Postgres on INSERT, keeping the send path clean.
   assert.equal(
-    captured_payload.podio_sync_status,
+    captured.message_events.podio_sync_status,
     undefined,
     "SMS send must not write podio_sync_status (DB column default handles it)"
   );
 
   // Confirm it's an outbound event.
-  assert.equal(captured_payload.direction, "outbound");
-  assert.equal(captured_payload.event_type, "outbound_send");
+  assert.equal(captured.message_events.direction, "outbound");
+  assert.equal(captured.message_events.event_type, "outbound_send");
 });
 
 // ─── 7. loaded_count and first_10_event_keys in result ─────────────────────

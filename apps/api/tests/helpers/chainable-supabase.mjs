@@ -219,6 +219,12 @@ function rowMatchesOrClause(row = {}, clause = "") {
     if (operator === "eq") return cleanInboxValue(row?.[column]) === cleanInboxValue(value);
     if (operator === "neq") return cleanInboxValue(row?.[column]) !== cleanInboxValue(value);
     if (operator === "lt") return asInboxTime(row?.[column]) < asInboxTime(value);
+    // Contract re-pin: getLiveInbox keyword search issues `.or("col.ilike.%q%")`
+    // clauses — mirror PostgREST ilike (case-insensitive contains) in the stub.
+    if (operator === "ilike") {
+      const needle = String(value || "").replace(/%/g, "").toLowerCase();
+      return String(row?.[column] ?? "").toLowerCase().includes(needle);
+    }
     return false;
   };
 

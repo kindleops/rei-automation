@@ -346,9 +346,151 @@ test("emergency-stop recovery does not expire held runnable rows", async () => {
     queue_processor_mode: "off",
   });
 
-  assert.ok(result.brake_held_rows >= 1);
-  assert.ok(updates.some((entry) => entry.patch?.metadata?.send_brake_hold === true));
+  // Contract strengthened by 6a5b739a: scheduled/queued rows are excluded from
+  // stale expiration BEFORE brake evaluation — they are never touched at all,
+  // which is stronger than the old "held" expectation.
+  assert.equal(result.brake_held_rows, 0);
   assert.equal(updates.some((entry) => entry.patch?.queue_status === "expired"), false);
+  assert.equal(updates.length, 0, "scheduled rows are never touched by stale expiration");
+});
+
+// ── P1 regression (closure pass 2026-08-26): a PROCESSING row the runtime
+// brakes hold during an emergency stop must STAY held — the lease-expiry
+// producer used to overwrite the hold patch with queue_status='expired'
+// (last-write-wins), so brake recovery could never restore the row.
+test("emergency stop: brake-held processing row with an expired lease is held, never expired", async () => {
+  const updates = [];
+  const row = {
+    id: "row-p1",
+    queue_status: "processing",
+    is_locked: false,
+    lock_token: null,
+    created_at: "2026-06-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+    locked_at: "2026-05-31T23:00:00.000Z",
+    sms_eligible: true,
+    campaign_id: "camp-1",
+    metadata: { processing_timeout_at: "2026-05-31T23:10:00.000Z" },
+    retry_count: 0,
+    max_retries: 3,
+  };
+  const supabase = {
+    from(table) {
+      if (table === "send_queue") {
+        return {
+          select: () => ({
+            in: () => ({
+              order: () => ({ limit: async () => ({ data: [row], error: null }) }),
+            }),
+            eq: () => ({
+              in: () => ({
+                order: () => ({ limit: async () => ({ data: [], error: null }) }),
+              }),
+            }),
+          }),
+          update: (patch) => ({
+            eq: async (col, id) => {
+              updates.push({ id, patch });
+              return { data: null, error: null };
+            },
+          }),
+        };
+      }
+      if (table === "campaigns") {
+        return {
+          select: () => ({
+            in: async () => ({ data: [{ id: "camp-1", status: "active" }], error: null }),
+          }),
+        };
+      }
+      return makeTerminalQuery();
+    },
+  };
+
+  const result = await reconcileCanonicalQueueLifecycle({
+    supabase,
+    now: "2026-06-01T00:30:00.000Z",
+    stale_minutes: 180,
+    lease_minutes: 10,
+    queue_emergency_stop_at: "2026-05-30T00:00:00.000Z",
+    queue_processor_mode: "off",
+  });
+
+  assert.ok(result.brake_held_rows >= 1, JSON.stringify(result));
+  assert.ok(updates.some((entry) => entry.patch?.metadata?.send_brake_hold === true));
+  assert.equal(
+    updates.some((entry) => entry.patch?.queue_status === "expired"),
+    false,
+    "the lease-expiry producer must never override an emergency-stop hold"
+  );
+});
+
+// ── P2 regression (closure pass 2026-08-26): a processing row that ALREADY
+// SENT (provider id / sent_at) reconciles to sent, never to expired — the
+// lease-expiry producer used to misclassify real sends as
+// processing_lease_expired_manual_review.
+test("a processing row with send evidence reconciles to sent, never expired", async () => {
+  const updates = [];
+  const row = {
+    id: "row-p2",
+    queue_status: "processing",
+    is_locked: false,
+    lock_token: null,
+    created_at: "2026-06-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+    locked_at: "2026-05-31T23:00:00.000Z",
+    sent_at: "2026-05-31T23:05:00.000Z",
+    provider_message_id: "SM-real-send",
+    sms_eligible: true,
+    metadata: { processing_timeout_at: "2026-05-31T23:10:00.000Z" },
+    retry_count: 0,
+    max_retries: 3,
+  };
+  const supabase = {
+    from(table) {
+      if (table === "send_queue") {
+        return {
+          select: () => ({
+            in: () => ({
+              order: () => ({ limit: async () => ({ data: [row], error: null }) }),
+            }),
+            eq: () => ({
+              in: () => ({
+                order: () => ({ limit: async () => ({ data: [], error: null }) }),
+              }),
+            }),
+          }),
+          update: (patch) => ({
+            eq: async (col, id) => {
+              updates.push({ id, patch });
+              return { data: null, error: null };
+            },
+          }),
+        };
+      }
+      if (table === "campaigns") {
+        return { select: () => ({ in: async () => ({ data: [], error: null }) }) };
+      }
+      return makeTerminalQuery();
+    },
+  };
+
+  await reconcileCanonicalQueueLifecycle({
+    supabase,
+    now: "2026-06-01T00:30:00.000Z",
+    stale_minutes: 180,
+    lease_minutes: 10,
+  });
+
+  assert.equal(
+    updates.some((entry) => entry.patch?.queue_status === "expired"),
+    false,
+    "send evidence outranks lease expiry"
+  );
+  assert.ok(
+    updates.some((entry) => entry.patch?.queue_status === "sent"),
+    JSON.stringify(updates)
+  );
 });
 
 test("reconcile does not expire future-scheduled LA-style rows at reconcile time", async () => {

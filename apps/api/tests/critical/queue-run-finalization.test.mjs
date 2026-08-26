@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
 import { finalizeClaimedSendQueueRows, loadRunnableSendQueueRows } from "@/lib/supabase/sms-engine.js";
-import { makeSendQueueRowsSupabase } from "../helpers/queue-run-test-harness.js";
+import { makeSendQueueRowsSupabase, makeLiveQueueSystemValue } from "../helpers/queue-run-test-harness.js";
 
 const NOW = "2026-04-28T15:00:00.000Z";
 
@@ -52,7 +52,9 @@ function makeHarness(initial_rows = [], overrides = {}) {
 
   const deps = {
     getSystemFlag: async () => true,
-    getSystemValue: async () => null,
+    // Fail-closed lockdown (020c9f24): unset execution mode normalizes to
+    // 'stopped'. Live-mode values open the gate the way production does.
+    getSystemValue: makeLiveQueueSystemValue(),
     reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
     supabaseClient: makeSendQueueRowsSupabase(() => [...rows.values()]),
     withRunLock: async ({ fn }) => fn(),
@@ -246,7 +248,9 @@ function makePreclaimHarness(initial_rows = [], overrides = {}) {
 
   const deps = {
     getSystemFlag: async () => true,
-    getSystemValue: async () => null,
+    // Fail-closed lockdown (020c9f24): unset execution mode normalizes to
+    // 'stopped'. Live-mode values open the gate the way production does.
+    getSystemValue: makeLiveQueueSystemValue(),
     reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
     withRunLock: async ({ fn }) => fn(),
     info: () => {},

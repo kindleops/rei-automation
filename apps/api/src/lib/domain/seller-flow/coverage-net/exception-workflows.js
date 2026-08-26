@@ -186,6 +186,13 @@ const REASON_TO_WORKFLOW = Object.freeze({
   identity_unclear: "identity_clarification",
   property_correction: "conflicting_property_identity",
   conflicting_property: "conflicting_property_identity",
+  // compound second-clause opportunities: a negative first clause plus a new
+  // property/seller signal — a human resolves the property identity and
+  // continues the conversation; nothing is suppressed.
+  new_property_opportunity: "conflicting_property_identity",
+  sold_with_new_opportunity: "conflicting_property_identity",
+  wrong_person_with_seller_signal: "identity_clarification",
+  declined_but_asks_offer: "ambiguous_context",
   // ambiguous
   unclear: "ambiguous_context",
   unclear_low_confidence: "ambiguous_context",
