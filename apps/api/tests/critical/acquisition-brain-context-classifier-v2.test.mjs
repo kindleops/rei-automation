@@ -221,7 +221,8 @@ test("ownership neighbors never false owner", async () => {
     ["My brother owns it", "unclear"],
     ["My wife owns it", "unclear"],
     ["Property manager here", "tenant_occupied"],
-    ["Sold it years ago", "wrong_number"],
+    // Certification pass 2026-08-25: sold → property-scoped sold_property.
+    ["Sold it years ago", "sold_property"],
     ["Never owned it", "wrong_number"],
     ["Wrong number", "wrong_number"],
     ["Stop texting me", "opt_out"],
@@ -306,7 +307,9 @@ test("terminal safety: opt-out and wrong-number never ownership", async () => {
     const c = await classify(text, null, { heuristicOnly: true });
     if (c.primary_intent === "ownership_confirmed") unsafe++;
     assert.ok(
-      ["opt_out", "wrong_number"].includes(c.primary_intent),
+      // sold_property is equally terminal-safe: never ownership, never a
+      // reply lane (certification pass 2026-08-25).
+      ["opt_out", "wrong_number", "sold_property"].includes(c.primary_intent),
       `${text} -> ${c.primary_intent}`
     );
   }

@@ -23,7 +23,7 @@
   {
     "family": "es_v2_sold",
     "text": "Ya lo vendí el año pasado",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "sold_property",
     "language": "es",
     "development_after_blind_evaluation": true
   },

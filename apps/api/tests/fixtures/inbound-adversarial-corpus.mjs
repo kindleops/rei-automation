@@ -242,15 +242,15 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "contradiction",
     message_body: "I sold that property already but I do have another rental I'd maybe let go of.",
     expected: {
-      intent_any_of: ["wrong_number", "seller_interested", "latent_interest"],
+      // Certification pass 2026-08-25: sold is the property-scoped
+      // sold_property lane, and the second-clause opportunity is preserved —
+      // the compound routes to human review (sold_with_new_opportunity) with
+      // the contact NEVER suppressed.
+      intent_any_of: ["sold_property", "seller_interested", "latent_interest"],
       must_not_auto_reply: false,
-      // suppressed_wrong_number is the engine's CURRENT deterministic outcome:
-      // the sold-property leg wins intent precedence and suppresses the
-      // phone-property pairing; the new-opportunity leg is a known human-
-      // recovery gap (compound_intent), not an auto-reply lane.
-      disposition_any_of: ["human_review_required", "reply_sent", "reply_deferred_compliance", "suppressed_wrong_number"],
+      disposition_any_of: ["human_review_required", "reply_sent", "reply_deferred_compliance"],
     },
-    notes: "Sold-the-target-property plus a new opportunity; the sold leg suppresses this phone-property pairing today, and the second-property opportunity requires human recovery (compound-intent gap).",
+    notes: "Sold-the-target-property plus a new opportunity: property-A pairing closes (disposition sold), the seller stays reachable, and the new-opportunity clause reaches a human with the compound payload.",
   }),
 
   // ── short_reply ───────────────────────────────────────────────────────────
@@ -464,11 +464,13 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "spanish",
     message_body: "Ya la vendí",
     expected: {
-      intent_any_of: ["wrong_number", "unclear"],
+      // Certification pass 2026-08-25: Spanish sold reports land on the
+      // property-scoped sold_property lane; the phone is never suppressed.
+      intent_any_of: ["sold_property", "unclear"],
       must_not_auto_reply: true,
-      disposition_any_of: ["suppressed_wrong_number", "human_review_required", "no_reply_required"],
+      disposition_any_of: ["no_reply_required", "human_review_required"],
     },
-    notes: "Spanish 'already sold it' (feminine object, near-miss for the 'ya lo vendí' phrase list); ownership disconnect either way.",
+    notes: "Spanish 'already sold it' (feminine object); property-scoped sold disposition, contact stays reachable.",
   }),
 
   // ── language_switch ───────────────────────────────────────────────────────
@@ -628,11 +630,14 @@ export const ADVERSARIAL_INBOUND_CASES = [
     category: "wrong_number",
     message_body: "I sold that house last year",
     expected: {
-      intent_any_of: ["wrong_number"],
+      // Certification pass 2026-08-25: right person, sold property —
+      // sold_property closes the pairing (deliberate no-reply with durable
+      // reason) and never suppresses the contact.
+      intent_any_of: ["sold_property"],
       must_not_auto_reply: true,
-      disposition_any_of: ["suppressed_wrong_number", "no_reply_required"],
+      disposition_any_of: ["no_reply_required", "human_review_required"],
     },
-    notes: "Sold-property ownership disconnect: right person, stale lead; must not keep marketing the sold property.",
+    notes: "Sold-property report: property pairing closes; the person remains a legitimate contact for other properties.",
   }),
   makeCase({
     case_id: "wrong-number-closed-in-march",

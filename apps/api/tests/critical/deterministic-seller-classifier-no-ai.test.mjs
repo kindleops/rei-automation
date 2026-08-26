@@ -140,7 +140,9 @@ const CANONICAL_CORPUS = [
   { label: "wrong_number", text: "Wrong number", primary_intent: "wrong_number" },
   { label: "not_owner", text: "I don't own that house", primary_intent: "wrong_number" },
   { label: "never_owned", text: "I've never owned that property", primary_intent: "wrong_number" },
-  { label: "former_owner", text: "I sold that house last year", primary_intent: "wrong_number" },
+  // Certification pass 2026-08-25: sold is the property-scoped sold_property
+  // lane, never the wrong_number contact-suppression fold.
+  { label: "former_owner", text: "I sold that house last year", primary_intent: "sold_property" },
 
   // seller interest / offer
   { label: "seller_requests_offer", text: "Just make me an offer", primary_intent: "asks_offer" },

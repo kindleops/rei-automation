@@ -121,7 +121,9 @@ test("wrong-number dominance", async () => {
 
 test("sold dominance", async () => {
   const c = await classify("Yes but I sold it", null, { heuristicOnly: true });
-  assert.equal(c.primary_intent, "wrong_number");
+  // Certification pass 2026-08-25: the sold report still dominates the
+  // affirmative, on the property-scoped sold_property lane.
+  assert.equal(c.primary_intent, "sold_property");
 });
 
 test("tenant not ownership", async () => {

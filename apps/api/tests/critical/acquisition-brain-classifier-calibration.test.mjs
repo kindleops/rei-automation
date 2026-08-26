@@ -123,7 +123,8 @@ test("Stage 1 outcomes covered", async () => {
     ["Yes I own it", "ownership_confirmed"],
     ["Wrong number", "wrong_number"],
     ["I never owned that property", "wrong_number"],
-    ["I sold it years ago", "wrong_number"],
+    // Certification pass 2026-08-25: sold → property-scoped sold_property.
+    ["I sold it years ago", "sold_property"],
     ["I am just a tenant on a lease", "tenant_occupied"],
     ["STOP", "opt_out"],
   ];
@@ -191,7 +192,9 @@ test("multi-label secondary intents present", async () => {
 
 test("negation: sold not ownership", async () => {
   const c = await classify("I sold it years ago", null, { heuristicOnly: true });
-  assert.equal(c.primary_intent, "wrong_number");
+  // Certification pass 2026-08-25: sold is the property-scoped sold_property
+  // lane (never ownership, never the wrong_number contact-suppression fold).
+  assert.equal(c.primary_intent, "sold_property");
 });
 
 test("agent not ownership_confirmed", async () => {

@@ -142,7 +142,10 @@ test("KNOWN LIMITATION applies regardless of fragment order", async () => {
 for (const [message, expected] of [
   ["Yeah\nSTOP", "opt_out"],
   ["Yeah\nnot interested", "not_interested"],
-  ["Yeah\nactually I already sold it", "wrong_number"],
+  // sold is the property-scoped sold_property lane (certification pass
+  // 2026-08-25) — still terminal for the pairing, still beats the
+  // affirmative, never the wrong_number contact-suppression fold.
+  ["Yeah\nactually I already sold it", "sold_property"],
 ]) {
   test(`a terminal signal in a burst still wins: ${JSON.stringify(message)}`, async () => {
     const result = await classifyWithContext(message);

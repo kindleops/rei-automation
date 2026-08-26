@@ -356,6 +356,9 @@ test("recovery worker reprocesses incomplete inbound rows through canonical orch
           gte() {
             return this;
           },
+          lte() {
+            return this;
+          },
           order() {
             return this;
           },
@@ -448,6 +451,9 @@ test("recovery worker can target Yes ownership inbound via body_contains filter"
             return this;
           },
           gte() {
+            return this;
+          },
+          lte() {
             return this;
           },
           order() {

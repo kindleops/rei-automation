@@ -102,7 +102,10 @@ test("not-the-owner and sold-the-property halt automation, mark ownership not_ow
   });
   assert.equal(notOwner.ownership_patch?.ownership_status, "not_owner");
   assert.equal(notOwner.review_required, true);
-  assert.equal(notOwner.contactability_patch.contactability_status, CONTACTABILITY_CODES.DO_NOT_TEXT);
+  // Certification pass 2026-08-25 (M1): property-scoped claims carry NO
+  // contactability write — writing phone-level do_not_text for "not the
+  // owner of THAT property" was the wrong-scope suppression defect.
+  assert.equal(notOwner.contactability_patch, null);
 
   const sold = resolveSellerStageTransition({
     stage_before: "ownership_confirmation",
@@ -112,5 +115,6 @@ test("not-the-owner and sold-the-property halt automation, mark ownership not_ow
   assert.equal(sold.ownership_patch?.ownership_status, "not_owner");
   assert.equal(sold.review_required, true);
   assert.equal(sold.disposition, "sold");
-  assert.equal(sold.contactability_patch.contactability_status, CONTACTABILITY_CODES.DO_NOT_TEXT);
+  // Same M1 scope rule: sold ends the pairing, never the phone.
+  assert.equal(sold.contactability_patch, null);
 });
