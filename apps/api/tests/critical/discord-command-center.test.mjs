@@ -1088,6 +1088,7 @@ test("feeder auto scan ranks best offset correctly", async () => {
 
 test("feeder auto scan ignores ok=false and queued_count=0 bands", async () => {
   let edited_payload = null;
+  const interaction = makeComponentInteraction({ custom_id: "feeder:auto_scan" });
 
   __setActionRouterDeps({
     supabase_override: makeSupabaseMock({ discord_command_events: { rows: [] } }),
@@ -1099,13 +1100,13 @@ test("feeder auto scan ignores ok=false and queued_count=0 bands", async () => {
       return { ok: true, data: { ok: true, queued_count: 0 } };
     },
     editInteractionResponse_override: async (payload) => {
-      edited_payload = payload;
+      if (payload?.token === interaction.token) edited_payload = payload;
     },
   });
 
   try {
-    await routeDiscordInteraction(makeComponentInteraction({ custom_id: "feeder:auto_scan" }));
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await routeDiscordInteraction(interaction);
+    await waitForDeferred(() => edited_payload);
 
     const launch_id = componentIdsFromPayload(edited_payload).find((id) => id.startsWith("feeder:launch:"));
     assert.ok(launch_id, "should still expose launch for the valid non-zero band");
@@ -1119,6 +1120,7 @@ test("feeder auto scan ignores ok=false and queued_count=0 bands", async () => {
 test("feeder launch button converts dry_run to false and preserves params", async () => {
   let captured_body = null;
   let edited_payload = null;
+  let interaction = null;
   const payload = encodeFeederPayloadForCustomId({
     candidate_offset: 350,
     limit: 60,
@@ -1146,15 +1148,18 @@ test("feeder launch button converts dry_run to false and preserves params", asyn
         },
       };
     },
-    editInteractionResponse_override: async (payload) => {
-      edited_payload = payload;
+    editInteractionResponse_override: async (edit_payload) => {
+      if (edit_payload?.token === interaction.token) edited_payload = edit_payload;
     },
   });
 
   try {
-    const response = await routeDiscordInteraction(makeComponentInteraction({ custom_id: `feeder:launch:${payload}` }));
-    assert.equal(response.type, 5, "live launch is deferred");
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    interaction = makeComponentInteraction({ custom_id: `feeder:launch:${payload}` });
+    interaction_response_check: {
+      const interaction_response = await routeDiscordInteraction(interaction);
+      assert.equal(interaction_response.type, 5, "live launch is deferred");
+    }
+    await waitForDeferred(() => edited_payload);
 
     assert.equal(captured_body.dry_run, false);
     assert.equal(captured_body.candidate_offset, 350);
@@ -1196,7 +1201,9 @@ test("feeder payload decoding cannot inject arbitrary URL params", async () => {
 
   try {
     await routeDiscordInteraction(makeComponentInteraction({ custom_id: `feeder:launch:${malicious_payload}` }));
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    // Synchronize on the deferred handler's observable effect (its stubbed
+    // callInternal capture) instead of a fixed sleep.
+    await waitForDeferred(() => captured_body);
 
     assert.equal(captured_body.dry_run, false, "button handler owns dry_run mode");
     assert.equal(captured_body.candidate_source, "v_sms_ready_contacts", "source is fixed by the cockpit");
@@ -1209,6 +1216,7 @@ test("feeder payload decoding cannot inject arbitrary URL params", async () => {
 
 test("feeder cockpit responses do not expose INTERNAL_API_SECRET or CRON_SECRET", async () => {
   let edited_payload = null;
+  const interaction = makeComponentInteraction({ custom_id: "feeder:auto_scan" });
   __setActionRouterDeps({
     supabase_override: makeSupabaseMock({ discord_command_events: { rows: [] } }),
     callInternal_override: async () => ({
@@ -1216,13 +1224,13 @@ test("feeder cockpit responses do not expose INTERNAL_API_SECRET or CRON_SECRET"
       error: `boom ${process.env.INTERNAL_API_SECRET} ${process.env.CRON_SECRET}`,
     }),
     editInteractionResponse_override: async (payload) => {
-      edited_payload = payload;
+      if (payload?.token === interaction.token) edited_payload = payload;
     },
   });
 
   try {
-    await routeDiscordInteraction(makeComponentInteraction({ custom_id: "feeder:auto_scan" }));
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await routeDiscordInteraction(interaction);
+    await waitForDeferred(() => edited_payload);
     const full = JSON.stringify(edited_payload);
     assert.ok(!full.includes(process.env.INTERNAL_API_SECRET), "must not expose internal secret");
     assert.ok(!full.includes(process.env.CRON_SECRET), "must not expose cron secret");
