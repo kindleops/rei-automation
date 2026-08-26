@@ -166,7 +166,20 @@ export async function cancelSupabasePendingOutbound(
     property_id,
   };
   const scope_key = buildScopeKey(scope);
-  const type_filter = POLICY_TYPE_FILTERS[policy] ?? POLICY_TYPE_FILTERS[CANCELLATION_POLICIES.COMPLIANCE_TERMINAL];
+  // Fail NARROW on unknown policies: an unrecognized string must never widen
+  // to the everything-cancelling compliance filter. The historical
+  // "superseded_by_newer_inbound" fall-through landed on the compliance
+  // default and cancelled unrelated campaign touches on every inbound
+  // fragment; unknown → inbound_takeover (reply/follow-up rows only) + warn.
+  if (!Object.values(CANCELLATION_POLICIES).includes(policy)) {
+    warn("compliance.cancel_unknown_policy", {
+      requested_policy: String(policy ?? "missing"),
+      applied_policy: CANCELLATION_POLICIES.INBOUND_TAKEOVER,
+      scope_key,
+    });
+    policy = CANCELLATION_POLICIES.INBOUND_TAKEOVER;
+  }
+  const type_filter = POLICY_TYPE_FILTERS[policy];
 
   if (!supabase) {
     return { ok: false, cancelled: 0, reason: "missing_supabase_client", scope_key };

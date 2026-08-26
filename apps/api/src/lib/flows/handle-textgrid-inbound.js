@@ -2274,10 +2274,19 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
                 reason: args.reason,
                 inbound_event_id: args.inbound_event_id,
                 cancelled_by: "seller_inbound_burst",
+                // Scope-correct policy mapping: safety latches cancel every
+                // outbound type (compliance_terminal); a benign new inbound
+                // cancels only automated reply/follow-up rows
+                // (inbound_takeover). The old `undefined` fall-through landed
+                // on the compliance default and cancelled unrelated campaign
+                // touches on every inbound fragment.
                 policy:
                   args.policy === "compliance_terminal"
                     ? CANCELLATION_POLICIES.COMPLIANCE_TERMINAL
-                    : undefined,
+                    : CANCELLATION_POLICIES.INBOUND_TAKEOVER,
+                // Arms the supersession guard: never cancel a reply that was
+                // queued for a NEWER inbound than the one cancelling.
+                inbound_received_at: args.inbound_received_at || null,
               },
               { supabase: supabase_for_burst }
             );

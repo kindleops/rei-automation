@@ -7,12 +7,15 @@ import assert from "node:assert/strict";
 import { classify } from "@/lib/domain/classification/classify.js";
 
 const TRUTH_TABLE = [
-  // wrong_number — disconnected contact / sold / not owner at this number
+  // wrong_number — disconnected contact / not owner at this number
   { label: "wrong_number", text: "Wrong number", lang: "English" },
   { label: "wrong_number", text: "You have the wrong person", lang: "English" },
   { label: "wrong_number", text: "I don't own that house", lang: "English" },
-  { label: "wrong_number", text: "Sold it 10 yrs ago", lang: "English" },
-  { label: "wrong_number", text: "No It sold", lang: "English" },
+
+  // sold_property — property transfer: terminal for the seller×property
+  // pairing only; NEVER the wrong_number contact-scope suppression lane.
+  { label: "sold_property", text: "Sold it 10 yrs ago", lang: "English" },
+  { label: "sold_property", text: "No It sold", lang: "English" },
   { label: "wrong_number", text: "No la Mia es 2711 Degen Dr. Bonita CA 91902", lang: "Spanish" },
 
   // wrong_person / identity mismatch (mapped to wrong_number in routing)

@@ -4,9 +4,11 @@
 // house", "esa no es mi casa", "My mother owns it, not me") must NEVER
 // resolve to ownership_confirmed, and must land on the correct distinct
 // production label instead:
-//   * not owner / never owned / former owner / sold → wrong_number
-//     (classify.js routes every ownership disconnect to wrong_number for
-//     phone-level suppression — see matchesOwnershipDisconnect);
+//   * not owner / never owned → wrong_number (phone-scoped identity
+//     disconnect — see matchesOwnershipDisconnect);
+//   * sold / transferred → sold_property (PROPERTY-scoped disposition — the
+//     contact stays reachable; see matchesSoldTransfer). Routing sold into
+//     wrong_number's contact-scope suppression was a certified P0 defect;
 //   * property mismatch ("Wrong house.") → property_correction;
 //   * family decision-maker without an explicit not-me denial → unclear
 //     (classify.js deliberately keeps family-only language out of both
@@ -79,14 +81,14 @@ const NEGATION_CASES = [
   { text: "i never owned anything there", any_of: ["wrong_number"] },
 
   // ── Former owner / sold ────────────────────────────────────────────────────
-  { text: "I sold that property.", any_of: ["wrong_number"] },
-  { text: "I sold that house last year", any_of: ["wrong_number"] },
-  { text: "sold it years ago", any_of: ["wrong_number"] },
-  { text: "We sold the house.", any_of: ["wrong_number"] },
-  { text: "already sold it", any_of: ["wrong_number"] },
-  { text: "That was sold in 2022", any_of: ["wrong_number"] },
-  { text: "sold my house in March", any_of: ["wrong_number"] },
-  { text: "It sold last month", any_of: ["wrong_number"] },
+  { text: "I sold that property.", any_of: ["sold_property"] },
+  { text: "I sold that house last year", any_of: ["sold_property"] },
+  { text: "sold it years ago", any_of: ["sold_property"] },
+  { text: "We sold the house.", any_of: ["sold_property"] },
+  { text: "already sold it", any_of: ["sold_property"] },
+  { text: "That was sold in 2022", any_of: ["sold_property"] },
+  { text: "sold my house in March", any_of: ["sold_property"] },
+  { text: "It sold last month", any_of: ["sold_property"] },
   { text: "no longer own that place", any_of: ["wrong_number"] },
   { text: "I used to own it but not anymore", any_of: ["wrong_number"] },
   { text: "was mine years ago", any_of: ["wrong_number"] },
@@ -102,12 +104,12 @@ const NEGATION_CASES = [
   { text: "no soy dueña", any_of: ["wrong_number"] },
   { text: "No soy la propietaria", any_of: ["wrong_number"] },
   { text: "no soy propietario", any_of: ["wrong_number"] },
-  { text: "La vendí", any_of: ["wrong_number"] },
-  { text: "la vendi", any_of: ["wrong_number"] },
-  { text: "Ya la vendí", any_of: ["wrong_number"] },
-  { text: "ya lo vendi", any_of: ["wrong_number"] },
-  { text: "La vendimos el año pasado", any_of: ["wrong_number"] },
-  { text: "vendí esa casa", any_of: ["wrong_number"] },
+  { text: "La vendí", any_of: ["sold_property"] },
+  { text: "la vendi", any_of: ["sold_property"] },
+  { text: "Ya la vendí", any_of: ["sold_property"] },
+  { text: "ya lo vendi", any_of: ["sold_property"] },
+  { text: "La vendimos el año pasado", any_of: ["sold_property"] },
+  { text: "vendí esa casa", any_of: ["sold_property"] },
   { text: "número equivocado", any_of: ["wrong_number"] },
 
   // ── Property mismatch (wrong property, not wrong person) ───────────────────
@@ -132,7 +134,7 @@ const NEGATION_CASES = [
   { text: "Yes I got your text but that's not my house", any_of: ["wrong_number"] },
   { text: "Yes, I know the house, but I do not own it", any_of: ["wrong_number"] },
   { text: "I own the one next door, but that's not my property", any_of: ["wrong_number"] },
-  { text: "no, sold that property already", any_of: ["wrong_number"] },
+  { text: "no, sold that property already", any_of: ["sold_property"] },
 
   // ── Genuinely ambiguous — unclear, never a guessed ownership ───────────────
   { text: "It's complicated right now", any_of: ["unclear"] },
