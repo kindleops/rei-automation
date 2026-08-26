@@ -43,6 +43,40 @@ function buildContext({ brain_item = null } = {}) {
   };
 }
 
+// V2 orchestration stub shaped like processSellerInboundMessage's return —
+// the handler consumes seller_stage_reply / execution / follow_up /
+// intelligence_snapshot from it (resolveSellerAutoReplyPlan and
+// executeInboundAutomationDecision are no longer handler-injectable).
+function buildSellerOrchestrationResult({
+  queued = false,
+  queue_row_id = null,
+  brain_stage = null,
+  plan = { selected_use_case: null, detected_intent: null },
+  preview_result = undefined,
+  queue_result = undefined,
+} = {}) {
+  return {
+    ok: true,
+    decision: null,
+    execution: queued
+      ? { queued: true, queue_row_id, queue_result: { raw: {} } }
+      : { queued: false },
+    follow_up: { ok: true, skipped: true, reason: "not_attempted" },
+    intelligence_snapshot: null,
+    seller_stage_reply: {
+      ok: true,
+      handled: Boolean(queued || plan?.selected_use_case),
+      queued,
+      ...(queue_row_id ? { queue_row_id } : {}),
+      ...(brain_stage ? { brain_stage } : {}),
+      ...(queued ? {} : { reason: "seller_flow_not_handled" }),
+      plan,
+      ...(preview_result ? { preview_result } : {}),
+      ...(queue_result ? { queue_result } : {}),
+    },
+  };
+}
+
 function installInboundDeps({
   context = buildContext(),
   resolveRoute = () => ({
@@ -50,24 +84,16 @@ function installInboundDeps({
     use_case: "ownership_check",
     seller_profile: null,
   }),
-  resolveSellerAutoReplyPlan = async () => ({
-    handled: false,
-    should_queue_reply: false,
-    reason: "seller_flow_not_handled",
-    selected_use_case: null,
-    detected_intent: null,
-  }),
-  executeInboundAutomationDecision = async () => ({
-    ok: true,
-    queued: false,
-    seller_stage_reply: {
-      ok: true,
-      handled: false,
-      queued: false,
-      reason: "seller_flow_not_handled",
-      plan: { selected_use_case: null, detected_intent: null },
-    },
-  }),
+  processSellerInboundMessage = async () => buildSellerOrchestrationResult(),
+  // The Podio business-write lane is flag-gated off in production
+  // (podio_sync_enabled). These tests enable it explicitly so the flag-on
+  // lane's brain/pipeline lifecycle + rehydrated message-event contract stays
+  // covered.
+  getSystemValue = async (key) => {
+    if (key === "podio_sync_enabled") return "true";
+    return key === "auto_reply_mode" ? "live_limited" : null;
+  },
+  routeInboundOffer = async () => ({ ok: true, offer_route: null, reason: null, meta: {} }),
   createBrain = async () => null,
   updateBrainAfterInbound = async () => ({ ok: true }),
   updateBrainStage = async () => ({ ok: true }),
@@ -91,11 +117,12 @@ function installInboundDeps({
 
   __setTextgridInboundTestDeps({
     ...makeInboundWebhookBaseDeps({
-      resolveSellerAutoReplyPlan,
-      executeInboundAutomationDecision,
+      getSystemValue,
       getSupabaseClient,
       logInboundMessageEventSupabase,
     }),
+    processSellerInboundMessage,
+    routeInboundOffer,
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -163,13 +190,13 @@ test("inbound webhook passes create_brain_if_missing: true to loadContext", asyn
   });
 
   assert.equal(result.ok, true);
-  // Brain creation is now delegated to loadContext via create_brain_if_missing: true.
-  // The handler no longer gates brain creation to Stage 1 — loadContext creates
-  // the brain eagerly when the phone record resolves to a master owner.
+  // Brain creation is delegated to loadContext via create_brain_if_missing,
+  // which the handler derives from podio_business_writes_enabled — true here
+  // because the fixture enables the flag-gated Podio lane.
   assert.equal(load_context_calls[0]?.create_brain_if_missing, true);
   // The mock loadContext doesn't actually call createBrain, and the mock context
   // has no brain, so shouldCreateBrainForInbound controls the post-queue create.
-  // For "Who is this?" the plan now matches the expanded brain creation criteria.
+  // The route use_case (ownership_check) matches the brain creation criteria.
   assert.equal(create_brain_count, 1);
   assert.equal(sync_pipeline_args?.create_if_missing, false);
 });
@@ -182,29 +209,18 @@ test("inbound webhook creates the brain only after Stage 1 owner confirmation an
 
   const result = await (async () => {
     installInboundDeps({
-      resolveSellerAutoReplyPlan: async () => ({
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "consider_selling",
-        detected_intent: "Ownership Confirmed",
-        brain_stage: "consider_selling",
-      }),
-      executeInboundAutomationDecision: async () => ({
-        ok: true,
-        queued: true,
-        queue_row_id: "queue-stage-1",
-        seller_stage_reply: {
-          ok: true,
-          handled: true,
+      processSellerInboundMessage: async () =>
+        buildSellerOrchestrationResult({
           queued: true,
+          queue_row_id: "queue-stage-1",
           brain_stage: "consider_selling",
           plan: {
             selected_use_case: "consider_selling",
             detected_intent: "Ownership Confirmed",
+            should_queue_reply: true,
           },
           queue_result: { rendered_message_text: "Stage 2 reply" },
-        },
-      }),
+        }),
       createBrain: async (args) => {
         created_brain_args = args;
         return createPodioItem(77);
@@ -262,28 +278,17 @@ test("inbound webhook allows pipeline creation only after Stage 2 offer-interest
       use_case: "consider_selling",
       seller_profile: null,
     }),
-    resolveSellerAutoReplyPlan: async () => ({
-      handled: true,
-      should_queue_reply: true,
-      selected_use_case: "asking_price",
-      detected_intent: "Open to Selling",
-      brain_stage: "asking_price",
-    }),
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      queued: true,
-      queue_row_id: "queue-stage-2",
-      seller_stage_reply: {
-        ok: true,
-        handled: true,
+    processSellerInboundMessage: async () =>
+      buildSellerOrchestrationResult({
         queued: true,
+        queue_row_id: "queue-stage-2",
         brain_stage: "asking_price",
         plan: {
           selected_use_case: "asking_price",
           detected_intent: "Open to Selling",
+          should_queue_reply: true,
         },
-      },
-    }),
+      }),
     createBrain: async () => {
       create_brain_count += 1;
       return createPodioItem(88);
@@ -317,48 +322,32 @@ test("inbound webhook allows pipeline creation only after Stage 2 offer-interest
 });
 
 test("inbound webhook defaults to delayed autopilot and still posts Discord control card", async () => {
-  const plan_calls = [];
-  const automation_calls = [];
+  const v2_calls = [];
   const card_calls = [];
   const logged_events = [];
 
   installInboundDeps({
-    resolveSellerAutoReplyPlan: async (args) => {
-      plan_calls.push(args);
-      return {
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "ownership_check",
-        detected_intent: "Ownership Confirmed",
-        brain_stage: "ownership_check",
-      };
-    },
-    executeInboundAutomationDecision: async (args) => {
-      automation_calls.push(args);
-      return {
-        ok: true,
+    processSellerInboundMessage: async (args) => {
+      v2_calls.push(args);
+      return buildSellerOrchestrationResult({
         queued: true,
         queue_row_id: "queue-1",
-        seller_stage_reply: {
-          ok: true,
-          handled: true,
-          queued: true,
-          preview_result: {
-            rendered_message_text: "Suggested review reply",
-            template_id: "ownership-template-1",
-            selected_template_source: "seller_flow",
-          },
-          queue_result: {
-            rendered_message_text: "Suggested review reply",
-            template_id: "ownership-template-1",
-            selected_template_source: "seller_flow",
-          },
-          plan: {
-            selected_use_case: "ownership_check",
-            detected_intent: "Ownership Confirmed",
-          },
+        plan: {
+          selected_use_case: "ownership_check",
+          detected_intent: "Ownership Confirmed",
+          should_queue_reply: true,
         },
-      };
+        preview_result: {
+          rendered_message_text: "Suggested review reply",
+          template_id: "ownership-template-1",
+          selected_template_source: "seller_flow",
+        },
+        queue_result: {
+          rendered_message_text: "Suggested review reply",
+          template_id: "ownership-template-1",
+          selected_template_source: "seller_flow",
+        },
+      });
     },
     logInboundMessageEvent: async (args) => {
       logged_events.push(args);
@@ -379,9 +368,8 @@ test("inbound webhook defaults to delayed autopilot and still posts Discord cont
   });
 
   assert.equal(result.ok, true);
-  assert.equal(plan_calls.length, 1);
-  assert.equal(automation_calls.length, 1);
-  assert.equal(automation_calls[0].dryRun, false);
+  assert.equal(v2_calls.length, 1);
+  assert.equal(v2_calls[0].dryRun, false);
   assert.equal(result.seller_stage_reply?.queued, true);
   assert.equal(card_calls.length, 1);
   assert.equal(card_calls[0].autopilot_enabled, true);
@@ -392,39 +380,28 @@ test("inbound webhook defaults to delayed autopilot and still posts Discord cont
 });
 
 test("inbound webhook skips delayed queue and marks manual review when autopilot is disabled", async () => {
-  const seller_reply_calls = [];
   const card_calls = [];
   const logged_events = [];
 
   installInboundDeps({
-    resolveSellerAutoReplyPlan: async (args) => {
-      seller_reply_calls.push(args);
-      return {
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "consider_selling",
-        detected_intent: "Open to Selling",
-      };
-    },
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      queued: false,
-      seller_stage_reply: {
-        ok: true,
-        handled: true,
+    processSellerInboundMessage: async () =>
+      buildSellerOrchestrationResult({
         queued: false,
+        plan: {
+          selected_use_case: "consider_selling",
+          detected_intent: "Open to Selling",
+          should_queue_reply: false,
+        },
         preview_result: {
           rendered_message_text: "Autopilot reply",
           template_id: "template-auto-1",
           selected_template_source: "seller_flow",
         },
-        plan: {
-          selected_use_case: "consider_selling",
-          detected_intent: "Open to Selling",
-        },
-      },
-    }),
-    getSystemValue: async (key) => (key === "auto_reply_mode" ? "disabled" : null),
+      }),
+    getSystemValue: async (key) => {
+      if (key === "podio_sync_enabled") return "true";
+      return key === "auto_reply_mode" ? "disabled" : null;
+    },
     logInboundMessageEvent: async (args) => {
       logged_events.push(args);
       return { item_id: args.record_item_id || "msg-event-2" };
@@ -449,7 +426,6 @@ test("inbound webhook skips delayed queue and marks manual review when autopilot
   );
 
   assert.equal(result.ok, true);
-  assert.equal(seller_reply_calls.length, 1);
   assert.equal(result.seller_stage_reply?.queued, false);
   assert.equal(card_calls.length, 1);
   assert.equal(card_calls[0].autopilot_enabled, false);
@@ -463,23 +439,6 @@ test("inbound webhook still posts Discord review card when classification degrad
     resolveRoute: () => {
       throw new Error("route resolution failed");
     },
-    resolveSellerAutoReplyPlan: async () => ({
-      handled: true,
-      should_queue_reply: false,
-      selected_use_case: null,
-      detected_intent: null,
-    }),
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      queued: false,
-      seller_stage_reply: {
-        ok: true,
-        handled: true,
-        queued: false,
-        preview_result: { rendered_message_text: "Fallback suggested reply" },
-        plan: { selected_use_case: null, detected_intent: null },
-      },
-    }),
     logInboundMessageEvent: async (args) => ({ item_id: args.record_item_id || "msg-event-3" }),
     postInboundSmsDiscordCard: async (args) => {
       card_calls.push(args);
@@ -506,28 +465,21 @@ test("discord post failure does not block delayed autopilot queueing", async () 
   const logged_events = [];
 
   installInboundDeps({
-    resolveSellerAutoReplyPlan: async () => ({
-      handled: true,
-      should_queue_reply: true,
-      selected_use_case: "ownership_check",
-      detected_intent: "Ownership Confirmed",
-    }),
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      queued: true,
-      queue_row_id: "queue-card-fail",
-      seller_stage_reply: {
-        ok: true,
-        handled: true,
+    processSellerInboundMessage: async () =>
+      buildSellerOrchestrationResult({
         queued: true,
-        plan: { selected_use_case: "ownership_check", detected_intent: "Ownership Confirmed" },
+        queue_row_id: "queue-card-fail",
+        plan: {
+          selected_use_case: "ownership_check",
+          detected_intent: "Ownership Confirmed",
+          should_queue_reply: true,
+        },
         queue_result: {
           rendered_message_text: "Queued despite card failure",
           template_id: "tmpl-card-fail",
           selected_template_source: "seller_flow",
         },
-      },
-    }),
+      }),
     logInboundMessageEvent: async (args) => {
       logged_events.push(args);
       return { item_id: args.record_item_id || "msg-event-card-fail" };
@@ -545,6 +497,7 @@ test("discord post failure does not block delayed autopilot queueing", async () 
     status: "received",
   });
 
+  // Card failure must never block the queued autopilot reply.
   assert.equal(result.ok, true);
   assert.equal(result.seller_stage_reply?.queued, true);
   assert.equal(logged_events.at(-1)?.metadata?.autopilot_reply, true);
@@ -552,31 +505,23 @@ test("discord post failure does not block delayed autopilot queueing", async () 
 });
 
 test("idempotent replay does not duplicate autopilot queue or Discord card", async () => {
-  const seller_reply_calls = [];
+  const v2_calls = [];
   const card_calls = [];
 
   installInboundDeps({
-    resolveSellerAutoReplyPlan: async (args) => {
-      seller_reply_calls.push(args);
-      return {
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "ownership_check",
-        detected_intent: "Ownership Confirmed",
-      };
-    },
-    executeInboundAutomationDecision: async () => ({
-      ok: true,
-      queued: true,
-      queue_row_id: "queue-replay-safe",
-      seller_stage_reply: {
-        ok: true,
-        handled: true,
+    processSellerInboundMessage: async (args) => {
+      v2_calls.push(args);
+      return buildSellerOrchestrationResult({
         queued: true,
-        plan: { selected_use_case: "ownership_check", detected_intent: "Ownership Confirmed" },
+        queue_row_id: "queue-replay-safe",
+        plan: {
+          selected_use_case: "ownership_check",
+          detected_intent: "Ownership Confirmed",
+          should_queue_reply: true,
+        },
         queue_result: { rendered_message_text: "Replay-safe reply" },
-      },
-    }),
+      });
+    },
     logInboundMessageEvent: async (args) => ({ item_id: args.record_item_id || "msg-event-replay-1" }),
     postInboundSmsDiscordCard: async (args) => {
       card_calls.push(args);
@@ -597,6 +542,7 @@ test("idempotent replay does not duplicate autopilot queue or Discord card", asy
 
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
-  assert.equal(seller_reply_calls.length, 1);
+  assert.equal(second.duplicate, true);
+  assert.equal(v2_calls.length, 1);
   assert.equal(card_calls.length, 1);
 });

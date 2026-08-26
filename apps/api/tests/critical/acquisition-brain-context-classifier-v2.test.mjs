@@ -241,7 +241,9 @@ test("proposal request neighbors not false proposal", async () => {
     ["What do you want from me?", null], // unclear or who_is_this ok
     ["Not interested in a proposal", "not_interested"],
     ["My agent handles proposals", "not_interested"],
-    ["Already under contract", "info_request"],
+    // Contract re-pin (closure pass 2026-08-26): a declarative under-contract
+    // disclosure is the not_interested nurture lane, never an info auto-reply.
+    ["Already under contract", "not_interested"],
     ["Stop", "opt_out"],
   ];
   for (const [text, exp] of cases) {

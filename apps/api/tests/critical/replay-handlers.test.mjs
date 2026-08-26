@@ -378,7 +378,7 @@ test("replay rendered_message_text is sanitized before returning output", async 
   );
 });
 
-test("replay offer request without verified ownership gates back to ownership_check", async () => {
+test("replay offer request without verified ownership routes to the seller_asking_price probe", async () => {
   process.env.INTERNAL_API_SECRET = "replay_test_secret";
 
   const {
@@ -393,7 +393,7 @@ test("replay offer request without verified ownership gates back to ownership_ch
       confidence: 0.99,
     }),
     loadTemplate: async ({ use_case }) => ({
-      text: use_case === "ownership_check" ? "Just to confirm, are you the owner of the property?" : "wrong",
+      text: use_case === "seller_asking_price" ? "Do you have a price in mind for the property?" : "wrong",
       template_id: "tmpl_ownership_gate",
       item_id: "tmpl_ownership_gate",
       language: "English",
@@ -417,11 +417,13 @@ test("replay offer request without verified ownership gates back to ownership_ch
 
   assert.equal(response.status, 200);
   assert.equal(json.ok, true);
-  assert.equal(json.selected_use_case, "asking_price");
-  assert.equal(json.template_lookup_use_case, "asking_price");
+  // Contract rename: the asking-price template use case is now
+  // "seller_asking_price"; the canonical stage remains "asking_price".
+  assert.equal(json.selected_use_case, "seller_asking_price");
+  assert.equal(json.template_lookup_use_case, "seller_asking_price");
   assert.equal(json.next_stage, "asking_price");
   assert.equal(json.would_queue_reply, true);
-  assert.equal(json.selected_template_use_case, "asking_price");
+  assert.equal(json.selected_template_use_case, "seller_asking_price");
   assert.ok(json.rendered_message_text);
   assert.equal(json.safety?.queue_created, false);
 });
@@ -622,7 +624,14 @@ test("inbound webhook ignores replay after first completion", async () => {
   let createOfferCount = 0;
 
   __setTextgridInboundTestDeps({
-    ...makeInboundWebhookBaseDeps(),
+    ...makeInboundWebhookBaseDeps({
+      // The Podio business-write lane is flag-gated off in production; enable
+      // it explicitly so the flag-on lane's replay contract stays covered.
+      getSystemValue: async (key) => {
+        if (key === "podio_sync_enabled") return "true";
+        return key === "auto_reply_mode" ? "live_limited" : null;
+      },
+    }),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -714,22 +723,27 @@ test("inbound webhook suppresses underwriting follow-up when seller-stage reply 
         followup_enabled: true,
         outbound_sms_enabled: true,
       }),
-      resolveSellerAutoReplyPlan: async () => ({
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "consider_selling",
-        brain_stage: "consider_selling",
-      }),
-      executeInboundAutomationDecision: async () => ({
+      // Podio brain-stage writes are flag-gated off in production; enable the
+      // lane so the stage_updates contract stays covered.
+      getSystemValue: async (key) => {
+        if (key === "podio_sync_enabled") return "true";
+        return key === "auto_reply_mode" ? "live_limited" : null;
+      },
+      // V2 orchestration entrypoint (resolveSellerAutoReplyPlan /
+      // executeInboundAutomationDecision are no longer handler-injectable).
+      processSellerInboundMessage: async () => ({
         ok: true,
-        queued: true,
-        queue_row_id: "queue-seller-stage",
+        decision: null,
+        execution: { queued: true, queue_row_id: "queue-seller-stage", queue_result: { raw: {} } },
+        follow_up: { ok: true, skipped: true, reason: "not_attempted" },
+        intelligence_snapshot: null,
         seller_stage_reply: {
           ok: true,
           queued: true,
           handled: true,
+          queue_row_id: "queue-seller-stage",
           brain_stage: "consider_selling",
-          plan: { selected_use_case: "consider_selling" },
+          plan: { selected_use_case: "consider_selling", should_queue_reply: true },
         },
       }),
     }),
@@ -814,7 +828,14 @@ test("inbound webhook does not run a second offer pass when the initial offer al
   const create_offer_calls = [];
 
   __setTextgridInboundTestDeps({
-    ...makeInboundWebhookBaseDeps(),
+    ...makeInboundWebhookBaseDeps({
+      // Podio offer writes are flag-gated off in production; enable the lane
+      // so the single-offer-pass contract stays covered.
+      getSystemValue: async (key) => {
+        if (key === "podio_sync_enabled") return "true";
+        return key === "auto_reply_mode" ? "live_limited" : null;
+      },
+    }),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,
@@ -902,15 +923,20 @@ test("inbound webhook runs a single ungated second offer pass only after underwr
         followup_enabled: true,
         outbound_sms_enabled: true,
       }),
-      resolveSellerAutoReplyPlan: async () => ({
-        handled: true,
-        should_queue_reply: false,
-        selected_use_case: "offer_reveal_cash",
-        detected_intent: "Offer Request",
-      }),
-      executeInboundAutomationDecision: async () => ({
+      // Podio offer writes are flag-gated off in production; enable the lane
+      // so the ungated second-pass contract stays covered.
+      getSystemValue: async (key) => {
+        if (key === "podio_sync_enabled") return "true";
+        return key === "auto_reply_mode" ? "live_limited" : null;
+      },
+      // V2 orchestration entrypoint (resolveSellerAutoReplyPlan /
+      // executeInboundAutomationDecision are no longer handler-injectable).
+      processSellerInboundMessage: async () => ({
         ok: true,
-        queued: false,
+        decision: null,
+        execution: { queued: false },
+        follow_up: { ok: true, skipped: true, reason: "not_attempted" },
+        intelligence_snapshot: null,
         seller_stage_reply: {
           ok: true,
           handled: true,
@@ -918,6 +944,7 @@ test("inbound webhook runs a single ungated second offer pass only after underwr
           plan: {
             selected_use_case: "offer_reveal_cash",
             detected_intent: "Offer Request",
+            should_queue_reply: false,
           },
         },
       }),

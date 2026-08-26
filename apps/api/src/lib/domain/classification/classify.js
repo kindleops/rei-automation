@@ -3600,7 +3600,10 @@ export function parseSellerAskingPrice(message) {
   let value = null;
   let evidence = null;
 
-  const between = text.match(/\bbetween\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+and\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
+  // Spanish "entre X y Y" is the same range construction (closure pass
+  // 2026-08-26 — without it the multi-price ambiguity guard read a Spanish
+  // range's two numbers as two distinct asking prices).
+  const between = text.match(/\b(?:between|entre)\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?\s+(?:and|y)\s+\$?\s*([\d,.]+)\s*(k|thousand|m|mil|million)?/i);
   // This parser is a THIRD, independent consumer of the price signal: it sets
   // price_parse without consulting ASKING_PRICE_PATTERNS, so "between 3 and 4"
   // — a time window — was still read as a $3 asking price after that gate was
@@ -3621,8 +3624,11 @@ export function parseSellerAskingPrice(message) {
       looks_like_clock_side(between[3], between[4])
   );
   if (between && !between_is_clock_range) {
-    const lo = scalePriceToken(between[1], between[2]);
-    const hi = scalePriceToken(between[3], between[4]);
+    // One-sided scale suffix distributes across the range: "between 240 and
+    // 260k" and "entre 240 y 260 mil" both mean 240k-260k.
+    const shared_suffix = between[2] || between[4] || null;
+    const lo = scalePriceToken(between[1], between[2] || shared_suffix);
+    const hi = scalePriceToken(between[3], between[4] || shared_suffix);
     if (lo != null && hi != null) {
       range = { low: lo, high: hi };
       value = lo;

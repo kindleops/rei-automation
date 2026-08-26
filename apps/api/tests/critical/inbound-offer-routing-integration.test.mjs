@@ -84,6 +84,7 @@ function installDeps({
   const calls = {
     maybeCreateOfferFromContext: [],
     executeInboundAutomationDecision: [],
+    processSellerInboundMessage: [],
     routeInboundOffer: [],
     transferDealToUnderwriting: [],
   };
@@ -110,40 +111,38 @@ function installDeps({
     logInboundMessageEvent: async () => ({ item_id: 901 }),
     logInboundMessageEventSupabase: async () => ({ ok: true, id: "evt-901" }),
     getSystemFlags: async () => ({ auto_reply_enabled: true, followup_enabled: false }),
-    getSystemValue: async (key) => (key === "auto_reply_mode" ? "dry_run" : null),
-    resolveSellerAutoReplyPlan: async () => ({
-      inbound_intent: "asks_offer",
-      should_queue_reply: true,
-      selected_use_case,
-      selected_language: "English",
-      safety: {},
-    }),
+    // The Podio business-write lane (deferred offer create + underwriting
+    // transfer) is flag-gated off in production; enable it explicitly so the
+    // flag-on lane's offer-routing contract stays covered.
+    getSystemValue: async (key) => {
+      if (key === "podio_sync_enabled") return "true";
+      return key === "auto_reply_mode" ? "dry_run" : null;
+    },
     scheduleFollowUp: async () => ({ ok: false, skipped: true }),
-    executeInboundAutomationDecision: async (args) => {
-      calls.executeInboundAutomationDecision.push(args);
+    // V2 orchestration entrypoint (resolveSellerAutoReplyPlan /
+    // executeInboundAutomationDecision are no longer handler-injectable). The
+    // plan below echoes the fixture's route-derived use case; tests must not
+    // treat that echo as proof of ADE use-case selection.
+    processSellerInboundMessage: async (args) => {
+      calls.processSellerInboundMessage.push(args);
       return {
         ok: true,
-        queued: true,
-        queue_row_id: "queue-901",
+        decision: null,
+        execution: { queued: true, queue_row_id: "queue-901", queue_result: { raw: {} } },
+        follow_up: { ok: true, skipped: true, reason: "not_attempted" },
+        intelligence_snapshot: null,
         seller_stage_reply: {
           ok: true,
           handled: true,
           queued: true,
           reason: "seller_flow_reply_queued",
+          queue_row_id: "queue-901",
           plan: {
             selected_use_case,
             detected_intent: "Offer Request",
+            should_queue_reply: true,
           },
           brain_stage: selected_use_case,
-        },
-        queue_result: {
-          raw: {
-            metadata: {
-              offer_route,
-              cash_offer_snapshot_id: offerRouting?.meta?.snapshot_id ?? null,
-              cash_offer_amount: offerRouting?.meta?.cash_offer ?? null,
-            },
-          },
         },
       };
     },
@@ -236,10 +235,15 @@ test("how much would you pay + SFH snapshot queues offer_reveal_cash and include
   assert.equal(result.ok, true);
   assert.equal(result.offer_routing.offer_route, "sfh_cash_preview");
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(calls.executeInboundAutomationDecision.length, 1);
-  assert.equal(result.seller_stage_reply.plan.selected_use_case, "offer_reveal_cash");
+  assert.equal(calls.processSellerInboundMessage.length, 1);
+  // V2 contract: the offer_reveal_cash use case is selected inside
+  // processSellerInboundMessage's ADE lane, so queueing it cannot be asserted
+  // from a stubbed orchestration without fabricating the result. Assert the
+  // handler's own routing passthrough + deferred-offer safety half instead.
   assert.equal(result.offer_routing.meta.snapshot_id, "snap-123");
   assert.equal(result.offer_routing.meta.cash_offer, 215000);
+  assert.equal(result.offer?.created, false);
+  assert.match(result.offer?.reason || "", /deferred/);
 });
 
 test("offer message does not create Podio Offer immediately", async () => {
@@ -257,7 +261,9 @@ test("offer message does not create Podio Offer immediately", async () => {
   assert.equal(result.ok, true);
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
   assert.equal(result.offer?.created, false);
-  assert.match(result.offer?.reason || "", /deferred/);
+  // Flag-on lane defers ("offer_route_*_deferred"); flag-off lane reports
+  // "podio_sync_disabled". Either way no immediate Offer write happens.
+  assert.match(result.offer?.reason || "", /deferred|podio_sync_disabled/);
 });
 
 test("sent offer path still defers Offer creation to the post-send sync hook path", async () => {
@@ -273,8 +279,13 @@ test("sent offer path still defers Offer creation to the post-send sync hook pat
   const result = await sendInbound("how much can you pay");
 
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(result.seller_stage_reply.plan.selected_use_case, "offer_reveal_cash");
+  // V2 contract: use-case selection lives inside processSellerInboundMessage's
+  // ADE lane; assert the handler's routing passthrough + deferred-offer
+  // contract instead of a stub-fabricated plan.
+  assert.equal(result.offer_routing.offer_route, "sfh_cash_preview");
   assert.equal(result.offer_routing.meta.snapshot_id, "snap-sync");
+  assert.equal(result.offer?.created, false);
+  assert.match(result.offer?.reason || "", /deferred/);
 });
 
 test("8 units routes to underwriting and never queues cash offer", async () => {
@@ -328,8 +339,12 @@ test("no snapshot + property known queues condition clarifier", async () => {
   const result = await sendInbound("what is your offer");
 
   assert.equal(result.ok, true);
+  assert.equal(result.offer_routing.offer_route, "condition_clarifier");
+  assert.equal(result.offer_routing.reason, "no_snapshot_property_id_present");
   assert.equal(calls.maybeCreateOfferFromContext.length, 0);
-  assert.equal(calls.executeInboundAutomationDecision.length, 1);
+  assert.equal(calls.processSellerInboundMessage.length, 1);
+  // Passthrough of the stubbed orchestration plan (the real clarifier use case
+  // is selected inside processSellerInboundMessage's ADE lane).
   assert.equal(result.seller_stage_reply.plan.selected_use_case, "ask_condition_clarifier");
 });
 
