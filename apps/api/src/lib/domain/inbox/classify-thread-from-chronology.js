@@ -235,7 +235,13 @@ export function patchToInboxThreadState(patch = {}, overrides = {}) {
     inbox_bucket: patch.inbox_bucket ?? null,
     automation_lane: patch.automation_lane ?? overrides.automation_lane ?? null,
     last_intent: patch.detected_intent || patch.reply_intent || patch.primary_intent || overrides.last_intent,
-    is_suppressed: patch.inbox_bucket === "suppressed" || patch.opt_out === true || overrides.is_suppressed,
+    // Suppression evidence only: the inbox bucket is a PRESENTATION value and
+    // must never mint the semi-binding is_suppressed flag on its own (the
+    // 2026-08-04 audit found 114 suppressed threads with no durable evidence,
+    // written through exactly this kind of gate bypass). Real opt-out
+    // evidence or an explicit caller override still sets it; the bucket may
+    // still DISPLAY as suppressed either way.
+    is_suppressed: patch.opt_out === true || overrides.is_suppressed,
     disposition: patch.disposition ?? overrides.disposition ?? null,
     updated_at: patch.updated_at || new Date().toISOString(),
   };

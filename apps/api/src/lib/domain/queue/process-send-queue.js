@@ -1191,7 +1191,14 @@ async function processLegacyQueueItem(resolved_queue_row, deps = {}) {
 
     const provider_message_sid = getConfirmedProviderMessageSid(send_result);
     if (!provider_message_sid) {
-      throw new Error("SEND FAILED - NO SID");
+      // Ambiguous accept: the provider may have taken the message even though
+      // no SID came back — a retry risks a DUPLICATE seller SMS. The marker
+      // routes the failure classifier to a terminal manual-review disposition
+      // instead of the 5-minute retry loop.
+      const ambiguous_error = new Error("SEND FAILED - NO SID");
+      ambiguous_error.no_sid_ambiguous_send = true;
+      ambiguous_error.retryable = false;
+      throw ambiguous_error;
     }
 
     const finalized = await finalizeSuccessfulQueueSend(
@@ -1960,7 +1967,14 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
     const provider_message_sid = getConfirmedProviderMessageSid(send_result);
     if (!provider_message_sid) {
-      throw new Error("SEND FAILED - NO SID");
+      // Ambiguous accept: the provider may have taken the message even though
+      // no SID came back — a retry risks a DUPLICATE seller SMS. The marker
+      // routes the failure classifier to a terminal manual-review disposition
+      // instead of the 5-minute retry loop.
+      const ambiguous_error = new Error("SEND FAILED - NO SID");
+      ambiguous_error.no_sid_ambiguous_send = true;
+      ambiguous_error.retryable = false;
+      throw ambiguous_error;
     }
 
     info("queue.textgrid_send_success", {

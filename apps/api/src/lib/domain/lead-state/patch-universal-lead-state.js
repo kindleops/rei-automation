@@ -343,6 +343,19 @@ export async function patchUniversalLeadState({
   // Operators (change_source=manual) may still move a lead anywhere.
   const stageGuards = [];
   const changeSource = meta.change_source || STATE_SOURCE_CODES.MANUAL;
+  // Temperature lock mirror of the stage guard: the lock was written on
+  // every manual temperature change but never READ, so automated scoring
+  // silently overwrote operator-set temperatures. Operators (and an explicit
+  // resume_automatic_scoring release) still pass.
+  if (
+    'lead_temperature' in canonicalPatch &&
+    changeSource !== STATE_SOURCE_CODES.MANUAL &&
+    meta.resume_automatic_scoring !== true &&
+    previous?.manual_temperature_lock === true
+  ) {
+    delete canonicalPatch.lead_temperature;
+    stageGuards.push('manual_temperature_lock_blocked_temperature_write');
+  }
   if ('lifecycle_stage' in canonicalPatch && changeSource !== STATE_SOURCE_CODES.MANUAL) {
     if (previous?.manual_stage_lock === true) {
       delete canonicalPatch.lifecycle_stage;

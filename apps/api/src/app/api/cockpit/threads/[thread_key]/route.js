@@ -79,15 +79,43 @@ export async function PATCH(request, { params }) {
 
   try {
     const { thread_key } = params
-    const updates = await request.json()
-    
+    const body = await request.json()
+
+    // Field allowlist: deal_thread_state's opt_out / universal_status /
+    // inbox_bucket are read as HARD send blocks by
+    // evaluateCanonicalContactability. A raw update(body) let any caller set
+    // or clear compliance state (and any other column) with no vocabulary
+    // check — the only unguarded writer to a send-authoritative table.
+    const PATCHABLE_THREAD_FIELDS = new Set([
+      'universal_status',
+      'universal_stage',
+      'inbox_bucket',
+      'lead_temperature',
+      'needs_review',
+      'not_interested',
+      'follow_up_at',
+      'notes',
+    ])
+    const updates = {}
+    const rejected_fields = []
+    for (const [key, value] of Object.entries(body || {})) {
+      if (PATCHABLE_THREAD_FIELDS.has(key)) updates[key] = value
+      else rejected_fields.push(key)
+    }
+    if (!Object.keys(updates).length) {
+      return NextResponse.json(
+        { ok: false, error: 'no_patchable_fields', rejected_fields },
+        { status: 400, headers: cors },
+      )
+    }
+
     // Fetch current state
     const { data: currentState, error: fetchError } = await supabase
       .from('deal_thread_state')
       .select('universal_status, universal_stage')
       .eq('thread_key', thread_key)
       .single()
-      
+
     if (fetchError) throw fetchError
 
     // Mark as manually overridden if status or stage is changed

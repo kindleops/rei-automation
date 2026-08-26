@@ -14,6 +14,9 @@ import { info, warn } from "@/lib/logging/logger.js";
 
 const RECOVERY_LOOKBACK_HOURS = 72;
 const STALE_REPLY_WINDOW_HOURS = 4;
+// Live webhook processing (incl. a full 90s burst window + flush) completes
+// well inside this; anything younger may still be mid-flight.
+const RECOVERY_PROCESSING_GRACE_MINUTES = 5;
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -137,11 +140,21 @@ export async function recoverUnprocessedInboundMessages({
     candidates = targeted.data ? [targeted.data] : [];
     error = targeted.error;
   } else {
+    // Processing-grace window: this cron does NOT take the
+    // claim_inbound_processing claim, so a message whose webhook handling is
+    // still in flight (persisted but classification/decision metadata not yet
+    // written) would look "unprocessed" and be double-run. Messages younger
+    // than the grace window are left to the live path; a targeted
+    // messageEventId (operator-driven) bypasses the window.
+    const grace_cutoff = new Date(
+      Date.now() - RECOVERY_PROCESSING_GRACE_MINUTES * 60 * 1000
+    ).toISOString();
     const scanned = await supabase
       .from("message_events")
       .select(select_fields)
       .eq("direction", "inbound")
       .gte("received_at", since)
+      .lte("received_at", grace_cutoff)
       .order("received_at", { ascending: false })
       .limit(Math.max(Number(limit) * 8, 100));
     candidates = scanned.data;
