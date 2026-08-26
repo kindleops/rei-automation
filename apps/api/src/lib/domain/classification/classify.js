@@ -3673,16 +3673,38 @@ export function parseSellerAskingPrice(message) {
     // Require at least one digit in the amount token (avoid matching bare ".")
     // and skip amounts that are street numbers inside an address span, so
     // "I want 150k for 123 Main St" reads 150k and never 123.
-    let m = null;
+    //
+    // Closure pass 2026-08-26 (multi-price attribution safety):
+    //  * a token attached to a NON-ask referent (paid/bought/owe/balance) is
+    //    never a candidate — "I paid 100k but I'd sell for 190" must not bind
+    //    the purchase price as the ask;
+    //  * TWO OR MORE distinct candidate amounts (outside address spans) make
+    //    the message price-ambiguous — "180k for Oak and 250k for Maple" must
+    //    never fabricate one global seller price. Candidates survive as
+    //    evidence; the message routes to clarification/review.
+    const NON_ASK_PRECEDING_RE = /\b(paid|bought|purchased|owe|owed|owing|balance|mortgage)\s*(it\s+|about\s+|around\s+)?$/i;
+    const candidates = [];
     const amount_re = /\$?\s*(\d[\d,.]*)\s*(k|thousand|m|mil|million)?\b/gi;
     let amount_match;
     while ((amount_match = amount_re.exec(text)) !== null) {
       const digit_index = amount_match.index + amount_match[0].indexOf(amount_match[1]);
-      if (!isIndexInsideAddressSpan(address_spans, digit_index)) {
-        m = amount_match;
-        break;
-      }
+      if (isIndexInsideAddressSpan(address_spans, digit_index)) continue;
+      if (NON_ASK_PRECEDING_RE.test(text.slice(Math.max(0, digit_index - 16), digit_index))) continue;
+      candidates.push(amount_match);
     }
+    const distinct_values = new Set(
+      candidates.map((c) => scalePriceToken(c[1], c[2] || (/\d{2,3}k/i.test(c[0]) ? "k" : null)))
+    );
+    if (distinct_values.size > 1) {
+      return {
+        ...empty,
+        evidence_span: raw,
+        semantic_role: "multi_price_ambiguous",
+        confidence: 0.85,
+        price_rule_id: "price_reject_multi_price",
+      };
+    }
+    let m = candidates[0] || null;
     if (!m) {
       const short_k = text.match(/\b(\d{2,3})\s*k\b/i);
       if (short_k && !isIndexInsideAddressSpan(address_spans, short_k.index)) {
@@ -4539,6 +4561,20 @@ function resolveIntents(
     intents.push("wrong_number");
   }
 
+  // 2.4 UNDER CONTRACT / PENDING SALE (closure pass 2026-08-26): a
+  // DECLARATIVE listing-status disclosure routes to the not_interested
+  // nurture lane (ontology: under_contract → not_interested). Interrogative
+  // process questions ("how long until we're under contract?") are excluded.
+  if (
+    /\b(under\s+contract|in\s+escrow|sale\s+pending|pending\s+sale|accepted\s+an?\s+offer|offer\s+accepted|bajo\s+contrato)\b/i.test(text) &&
+    !/\b(how|when|what|until|before)\b[^.!?]{0,24}\b(under\s+contract|escrow|contract)\b/i.test(text) &&
+    !intents.includes("wrong_number") &&
+    !intents.includes("sold_property")
+  ) {
+    if (!intents.includes("not_interested")) intents.push("not_interested");
+    matched_rule_ids.push("under_contract_disclosure");
+  }
+
   // 2.5 PROPERTY CORRECTION (type/address only — not sold/disownership)
   if (
     normalized_objection === "property_correction" ||
@@ -5363,8 +5399,9 @@ function resolveIntents(
       "how fast can you close",
       "how fast could you close",
       "how quickly can you close",
-      "under contract",
-      "bajo contrato",
+      // "under contract"/"bajo contrato" removed (closure pass 2026-08-26):
+      // a declarative "it's under contract already" is a listing-status
+      // disclosure (not_interested nurture lane), not a process question.
       "say a price",
       "giving a price",
       "not giving a price",

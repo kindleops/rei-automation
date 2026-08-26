@@ -196,40 +196,36 @@ test("claimSendQueueRow: concurrent claims on same row — second attempt return
   let claim_count = 0;
   const first_lock_token = "lock-token-first-claimer";
 
-  // First claimer: succeeds, row now has lock_token set
+  // First claimer: succeeds via the DB-atomic claim RPC (1e50ee2c replaced the
+  // optimistic UPDATE with queue_atomic_claim_send_row — the STRONGER guarantee).
   const client_first = {
-    from: () => ({
-      update: () => ({
-        eq: () => ({
-          in: () => ({
-            is: () => ({
-              select: () => ({
-                maybeSingle: async () => {
-                  claim_count += 1;
-                  return {
-                    data: {
-                      id: "row-1",
-                      queue_status: "processing",
-                      is_locked: true,
-                      lock_token: first_lock_token,
-                      locked_at: new Date().toISOString(),
-                      metadata: {},
-                      to_phone_number: "+15005550001",
-                      from_phone_number: "+15005550002",
-                      message_body: "Hi Jane, ready to talk?",
-                      message_text: "Hi Jane, ready to talk?",
-                      seller_first_name: "Jane",
-                      updated_at: new Date().toISOString(),
-                    },
-                    error: null,
-                  };
-                },
-              }),
-            }),
-          }),
-        }),
-      }),
-    }),
+    rpc: async (fn) => {
+      assert.equal(fn, "queue_atomic_claim_send_row");
+      claim_count += 1;
+      return {
+        data: {
+          ok: true,
+          claimed: true,
+          reason: "claimed",
+          claim_token: first_lock_token,
+          row: {
+            id: "row-1",
+            queue_status: "processing",
+            is_locked: true,
+            lock_token: first_lock_token,
+            locked_at: new Date().toISOString(),
+            metadata: {},
+            to_phone_number: "+15005550001",
+            from_phone_number: "+15005550002",
+            message_body: "Hi Jane, ready to talk?",
+            message_text: "Hi Jane, ready to talk?",
+            seller_first_name: "Jane",
+            updated_at: new Date().toISOString(),
+          },
+        },
+        error: null,
+      };
+    },
   };
 
   const first = await claimSendQueueRow(
@@ -251,18 +247,9 @@ test("claimSendQueueRow: concurrent claims on same row — second attempt return
   // Second claimer: row is now locked by first claimer (is_locked=true, lock_token set)
   // The .is("lock_token", null) filter will not match → returns null → conflict
   const client_second = {
-    from: () => ({
-      update: () => ({
-        eq: () => ({
-          in: () => ({
-            is: () => ({
-              select: () => ({
-                maybeSingle: async () => ({ data: null, error: null }),
-              }),
-            }),
-          }),
-        }),
-      }),
+    rpc: async () => ({
+      data: { ok: false, claimed: false, reason: "queue_item_claim_conflict" },
+      error: null,
     }),
   };
 

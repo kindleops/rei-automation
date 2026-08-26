@@ -89,7 +89,10 @@ describe("Classification Bucket Resolution", () => {
     };
     const bucket = resolveInboxBucketFromClassification({}, { direction: "outbound", sent_at: staleOutbound }, existingState);
     const lane = resolveAutomationLaneFromClassification({}, { direction: "outbound", sent_at: staleOutbound }, existingState, bucket);
-    assert.strictEqual(bucket, "cold");
+    // Contract re-pin: cold is no longer an inbox_bucket — a stale outbound-only
+    // thread resolves inbox_bucket=null while the automation lane still routes
+    // cold_reactivation (inbox_bucket single-source split).
+    assert.strictEqual(bucket, null);
     assert.strictEqual(lane, "cold_reactivation");
   });
 

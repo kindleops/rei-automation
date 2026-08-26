@@ -116,4 +116,40 @@ export function isNegativeReply(message_body) {
   return false;
 }
 
+// ── Hard vs soft negatives (closure pass 2026-08-26, Phase 8) ───────────────
+// HARD = compliance-terminal communication refusal or phone-identity
+// disconnect: cancellation may sweep every pending outbound type, including
+// the owner-wide fallback.
+// SOFT = a business disposition about the conversation/property ("no",
+// "not interested", "not for sale", "wrong house", "who is this"): pending
+// automated replies/follow-ups and CURRENT-property campaign touches stop,
+// but unrelated-property outreach for the same owner must survive.
+const HARD_NEGATIVE_PATTERNS = [
+  /^(stop|quit|end|cancel|unsubscribe|remove)$/i,
+  /\bstop\s+(texting|messaging|calling|contact(ing)?)\b/i,
+  /\bplease\s+stop\b/i,
+  /\bdon'?t\s+(contact|text|call|message)\s*(me)?\b/i,
+  /\bdo\s+not\s+(contact|text|call|message)\s*(me)?\b/i,
+  /\bopt[\s-]?out\b/i,
+  /\bunsubscribe\b/i,
+  /\bremove\s+(me|my\s+number)\b/i,
+  /\bleave\s+(me|us|my\s+family|my\s+wife|my\s+husband)\s+alone\b/i,
+  /\bgo\s+away\b/i,
+  /\bwrong\s+(number|person)\b/i,
+  /\bincorrect\s+number\b/i,
+];
+
+/**
+ * Classify a negative reply's cancellation scope.
+ * @returns {"hard"|"soft"|null} null when the message is not negative at all.
+ */
+export function classifyNegativeReply(message_body) {
+  if (!isNegativeReply(message_body)) return null;
+  const normalized = normalizeBody(message_body);
+  for (const pattern of HARD_NEGATIVE_PATTERNS) {
+    if (pattern.test(normalized)) return "hard";
+  }
+  return "soft";
+}
+
 export default isNegativeReply;

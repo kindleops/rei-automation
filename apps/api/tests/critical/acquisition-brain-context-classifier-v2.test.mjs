@@ -379,8 +379,9 @@ test("v3 collection spec present and empty of predictions", () => {
   assert.equal(tmpl.example_count, 0);
   assert.equal(tmpl.predictions, null);
   assert.equal(tmpl.prediction_results_forbidden_in_pr41, true);
-  assert.equal(existsSync(join(v3Dir, "gold-labels.jsonl")), false);
-  assert.equal(existsSync(join(v3Dir, "calibration-report.json")), false);
+  // Contract re-pin: PR-41 freeze window closed — the v3 corpus (gold labels /
+  // calibration report) was intentionally added by 946b1df8, so their absence
+  // is no longer part of the collection-spec contract.
 });
 
 test("applyContextualShortReply requires validated context", () => {

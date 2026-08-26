@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildWorkflowStudioContext } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
+import { CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 
 const BASE = {
   decision: {
@@ -44,7 +45,9 @@ test("studio context carries the full canonical automation story", () => {
   assert.equal(ctx.transition_reason, "S1_TO_S3_ASKING_PRICE_PROVIDED");
   assert.equal(ctx.classifier.intent, "asking_price_provided");
   assert.equal(ctx.classifier.confidence, 0.91);
-  assert.ok(ctx.classifier.version.startsWith("classify_js_v1"));
+  // Contract re-pin: classifier version advanced to CLASSIFY_VERSION
+  // (classify_js_context_v2); pin to the exported constant, not a literal.
+  assert.ok(ctx.classifier.version.startsWith(CLASSIFY_VERSION));
   assert.deepEqual(ctx.extraction.fact_keys, ["asking_price", "timeline"]);
   assert.equal(ctx.extraction.extractor_version, "seller_fact_extractor_v1");
   assert.equal(ctx.temperature.floor, "hot");

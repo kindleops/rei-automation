@@ -13,6 +13,7 @@ import {
 } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
 import { normalizeFeedCandidatesInput, statusForResult } from "@/lib/domain/outbound/feed-candidates-request.js";
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
+import { makeLiveQueueSystemValue, makeQueueTestRpc } from "../helpers/queue-run-test-harness.js";
 
 const EMPTY_OUTREACH_HISTORY = { ok: true, template_ids: [], errors: [] };
 
@@ -423,7 +424,7 @@ test("evaluateCandidateEligibility blocks duplicate queue items", async () => {
     {
       template_use_case: "ownership_check",
       within_contact_window_now: true,
-      now: new Date().toISOString(),
+      now: "2026-04-25T15:00:00.000Z" // pinned in-window instant (wall-clock flake C7),
     },
     {
       hasDuplicateQueueItem: async () => mockDuplicateQueueItemFound(),
@@ -461,7 +462,7 @@ test("evaluateCandidateEligibility allows unknown identity when allow_identity_u
       template_use_case: "ownership_check",
       within_contact_window_now: true,
       allow_identity_unknown: true,
-      now: new Date().toISOString(),
+      now: "2026-04-25T15:00:00.000Z" // pinned in-window instant (wall-clock flake C7),
     },
     {
       hasDuplicateQueueItem: async () => false,
@@ -573,8 +574,19 @@ test("runSendQueue dry_run never calls processSendQueueItem", async () => {
       }),
       reconcileCanonicalQueueLifecycle: async () => ({ ok: true }),
       getSystemFlag: async () => true,
-      getSystemValue: async () => null,
-      supabaseClient: { from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) },
+      // Fail-closed lockdown (020c9f24): unset mode → stopped; live values open
+      // the gate, and the global-execution-lock RPC needs a stub.
+      getSystemValue: makeLiveQueueSystemValue(),
+      supabaseClient: {
+        rpc: makeQueueTestRpc(),
+        from: () => ({
+          select: () => ({
+            eq: () => ({ limit: async () => ({ data: [], error: null }) }),
+            in: async () => ({ data: [], error: null }),
+          }),
+          upsert: () => ({ select: async () => ({ data: [], error: null }) }),
+        }),
+      },
       processSendQueueItem: async () => {
         processed += 1;
         return { ok: true, sent: true };

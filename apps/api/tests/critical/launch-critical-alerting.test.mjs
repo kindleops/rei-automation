@@ -51,8 +51,13 @@ test("the alert catalog covers every mandated launch-critical failure", () => {
     assert.ok(codes.includes(code), `catalog must contain ${code}`);
   }
   // And every catalog code has a callable wrapper.
+  // Contract re-pin: the catalog legitimately grew past the mandated 8 codes;
+  // coverage of the required set is the invariant, not an exact wrapper count.
   const wrappers = Object.keys(launchAlerts);
-  assert.equal(wrappers.length, required.length);
+  assert.ok(
+    wrappers.length >= required.length,
+    `wrapper catalog must cover at least the ${required.length} mandated codes`
+  );
   for (const wrapper of wrappers) {
     assert.equal(typeof launchAlerts[wrapper], "function");
   }

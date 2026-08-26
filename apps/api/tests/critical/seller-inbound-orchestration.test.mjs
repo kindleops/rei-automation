@@ -13,6 +13,7 @@ import {
 } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 import { recoverUnprocessedInboundMessages } from "@/lib/domain/seller-flow/recover-unprocessed-inbound-messages.js";
 import { runSellerInboundProofCases } from "@/lib/domain/seller-flow/run-seller-inbound-proof-cases.js";
+import { CONTEXT_VERSION } from "@/lib/domain/classification/conversation-context.js";
 import { makeSellerOrchestrationSupabase } from "../helpers/seller-orchestration-test-supabase.mjs";
 
 afterEach(() => {
@@ -40,6 +41,26 @@ function baseContext(overrides = {}) {
   };
 }
 
+// Contract re-pin (bare-affirmative 0.72 context cap): classify only binds a bare
+// affirmative to the delivered ownership question through a valid
+// conversation_context_v1 payload (0.88 contextual); without it confidence caps
+// at 0.72 by design (2026-08-03 incident contract).
+function ownershipCheckConversationContext(thread = "+15551234567") {
+  return {
+    context_version: CONTEXT_VERSION,
+    canonical_thread: thread,
+    inbound_thread: thread,
+    last_outbound_message_id: "SM-outbound-1",
+    last_outbound_use_case: "ownership_check",
+    last_outbound_question_type: "ownership",
+    last_outbound_delivered_at: new Date(Date.now() - 3600e3).toISOString(),
+    current_inbound_received_at: new Date().toISOString(),
+    intervening_outbound_count: 0,
+    intervening_inbound_count: 0,
+    unanswered_question: true,
+  };
+}
+
 function installIoBoundaryMocks(overrides = {}) {
   const supabase = overrides.supabase || makeSellerOrchestrationSupabase();
   __setSellerInboundOrchestratorDeps({
@@ -61,7 +82,12 @@ function installIoBoundaryMocks(overrides = {}) {
 }
 
 test("classify.js connects: Yes → ownership_confirmed", async () => {
-  const result = await classify("Yes", null, { heuristicOnly: true });
+  // Contract re-pin: valid ownership_check conversation_context binds the bare
+  // affirmative (0.88 contextual); the context-less 0.72 cap is the pinned contract.
+  const result = await classify("Yes", null, {
+    heuristicOnly: true,
+    conversation_context: ownershipCheckConversationContext(),
+  });
   assert.equal(result.primary_intent, "ownership_confirmed");
   assert.ok(result.confidence >= 0.8);
   assert.equal(result.automation_decision?.auto_reply_allowed, true);
@@ -72,13 +98,23 @@ test("classify.js connects: Not for sale!!!! → not_interested", async () => {
   assert.equal(result.primary_intent, "not_interested");
 });
 
-test("classify.js connects: Yes, he's the owner → ownership_confirmed", async () => {
+test("classify.js connects: Yes, he's the owner → human review (text-only ownership suppressed)", async () => {
+  // Contract re-pin: classify no longer infers ownership from message text alone
+  // (message_text_only_ownership suppression); a third-party "he's the owner"
+  // statement fails closed to human review instead of auto-confirming ownership.
   const result = await classify("Yes, he's the owner.", null, { heuristicOnly: true });
-  assert.equal(result.primary_intent, "ownership_confirmed");
+  assert.equal(result.primary_intent, "unclear");
+  assert.equal(result.automation_decision?.auto_reply_allowed, false);
+  assert.equal(result.automation_decision?.human_review_required, true);
 });
 
 test("normalizeClassificationContract maps ownership and review fields", async () => {
-  const classification = await classify("Yes", null, { heuristicOnly: true });
+  // Contract re-pin: classification built WITH valid conversation_context so the
+  // contextual 0.88 binding applies and ambiguity review is not required.
+  const classification = await classify("Yes", null, {
+    heuristicOnly: true,
+    conversation_context: ownershipCheckConversationContext(),
+  });
   const { ok, contract } = normalizeClassificationContract({
     classification,
     message: "Yes",
@@ -125,7 +161,12 @@ test("S1 not-for-sale applies ownership-probe overlay in automation decision", (
 test("processSellerInboundMessage runs real intelligence + execution for ownership confirmation", async () => {
   installIoBoundaryMocks();
 
-  const classification = await classify("Yes", null, { heuristicOnly: true });
+  // Contract re-pin: valid conversation_context yields the 0.88 contextual binding
+  // required to clear the 0.82 automation gate (context-less cap is 0.72).
+  const classification = await classify("Yes", null, {
+    heuristicOnly: true,
+    conversation_context: ownershipCheckConversationContext(),
+  });
   const result = await processSellerInboundMessage({
     message: "Yes",
     threadKey: "+15551234567",
@@ -140,6 +181,12 @@ test("processSellerInboundMessage runs real intelligence + execution for ownersh
     inboundTo: "+15559876543",
     inboundEventId: "evt-yes-1",
     autoReplyMode: "live_limited",
+    // Contract re-pin: live_limited execution scope requires a configured
+    // auto_reply_eligibility_cutoff_at AND the inbound's received-at; without
+    // both the decision fails closed (auto_reply_cutoff_not_configured).
+    inboundReceivedAt: new Date().toISOString(),
+    getSystemValue: async (key) =>
+      key === "auto_reply_eligibility_cutoff_at" ? "2020-01-01T00:00:00.000Z" : null,
     executionAllowed: true,
     dryRun: true,
   });
@@ -301,10 +348,23 @@ test("buildSellerFlowDecision returns standardized shape", () => {
 test("runSellerInboundProofCases exercises representative Yes and Not-for-sale flows", async () => {
   installIoBoundaryMocks();
 
+  // Contract re-pin: the proof harness accepts a per-case pre-bound classification;
+  // the Yes case needs the conversation_context binding to clear the 0.82 gate.
   const proof = await runSellerInboundProofCases({
     dryRun: true,
     proofRun: true,
     autoReplyMode: "live_limited",
+    cases: [
+      {
+        proof_case: "ownership_confirmed_yes",
+        message: "Yes",
+        classification: await classify("Yes", null, {
+          heuristicOnly: true,
+          conversation_context: ownershipCheckConversationContext(),
+        }),
+      },
+      { proof_case: "s1_not_for_sale", message: "Not for sale!!!!" },
+    ],
   });
 
   assert.equal(proof.ok, true);
@@ -317,7 +377,17 @@ test("runSellerInboundProofCases exercises representative Yes and Not-for-sale f
   assert.ok(yes_case);
   assert.equal(yes_case.normalized_intent, "ownership_confirmed");
   assert.equal(yes_case.decision.stage_after, "offer_interest");
-  assert.equal(yes_case.execution.automation_decision.should_queue_reply, true);
+  // Contract re-pin: the live_limited execution scope gate is fail-closed — the
+  // proof harness supplies no inbound received-at, so the executed automation
+  // decision withholds the queue with an explicit scope-denial audit reason
+  // while the dry-run plan below still records queued/queue_planned.
+  assert.equal(yes_case.execution.automation_decision.should_queue_reply, false);
+  assert.ok(
+    ["auto_reply_inbound_timestamp_missing", "auto_reply_cutoff_not_configured"].includes(
+      yes_case.execution.automation_decision.audit_reason
+    ),
+    `live_limited scope must fail closed, got: ${yes_case.execution.automation_decision.audit_reason}`
+  );
   assert.equal(yes_case.queued, true);
   assert.equal(yes_case.execution.queued, true);
   assert.equal(yes_case.queue_row_created, false);
@@ -434,7 +504,15 @@ test("recovery worker can target Yes ownership inbound via body_contains filter"
       message_body: "Yes",
       received_at: new Date().toISOString(),
       detected_intent: null,
-      metadata: {},
+      // Contract re-pin: recovery replays consume metadata.classification; the Yes
+      // row carries the conversation_context-bound classification (0.88) so the
+      // ownership confirmation clears the automation gate.
+      metadata: {
+        classification: await classify("Yes", null, {
+          heuristicOnly: true,
+          conversation_context: ownershipCheckConversationContext(),
+        }),
+      },
       master_owner_id: "mo-21",
       prospect_id: "pros-31",
       property_id: "prop-227",

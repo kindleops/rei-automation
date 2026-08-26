@@ -2221,6 +2221,39 @@ export async function executeInboundAutomationDecision({
     };
   }
 
+  // Sold-property pairing closure (closure pass 2026-08-26): the property is
+  // factually gone, so pending CAMPAIGN touches for THAT property are
+  // cancelled (property_disposition scope). The CONTACT is never suppressed;
+  // campaign touches for the owner's other properties survive. Deliberate
+  // no-reply outcome with the durable property_sold reason.
+  if (
+    base_decision.next_action === "disposition_property_sold" &&
+    !dryRun &&
+    supabase &&
+    propertyId
+  ) {
+    try {
+      await cancelSupabasePendingOutbound(
+        {
+          thread_key: threadKey || inboundFrom,
+          to_phone_number: inboundFrom || threadKey,
+          property_id: propertyId,
+          policy: CANCELLATION_POLICIES.PROPERTY_DISPOSITION,
+          reason: "property_sold",
+          inbound_event_id: inboundEventId,
+          inbound_received_at: inboundReceivedAt || null,
+          cancelled_by: "inbound_automation_decision_sold",
+        },
+        { supabase }
+      );
+    } catch (sold_cancel_error) {
+      warn("inbound.sold_property_cancel_failed", {
+        thread_key: threadKey || inboundFrom,
+        error: sold_cancel_error?.message || "unknown_error",
+      });
+    }
+  }
+
   // Stage-aware safe-fallback clarifier: convert the safe-ambiguous review
   // subset into a prepared clarifier send (see
   // resolveSafeFallbackClarifierDispatch — every protected review lane and

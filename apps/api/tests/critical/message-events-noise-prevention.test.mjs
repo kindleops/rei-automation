@@ -120,25 +120,30 @@ test("inbound webhook rehydrates the same seller event after late brain creation
 
   __setTextgridInboundTestDeps({
     ...makeInboundWebhookBaseDeps({
-      resolveSellerAutoReplyPlan: async () => ({
-        handled: true,
-        should_queue_reply: true,
-        selected_use_case: "consider_selling",
-        detected_intent: "Ownership Confirmed",
-        brain_stage: "consider_selling",
-      }),
-      executeInboundAutomationDecision: async () => ({
+      // The Podio message-event lane is flag-gated off in production; enable it
+      // explicitly so this test keeps covering the legacy rehydrate contract.
+      getSystemValue: async (key) => {
+        if (key === "podio_sync_enabled") return "true";
+        return key === "auto_reply_mode" ? "live_limited" : null;
+      },
+      // V2 orchestration entrypoint (resolveSellerAutoReplyPlan /
+      // executeInboundAutomationDecision are no longer handler-injectable).
+      processSellerInboundMessage: async () => ({
         ok: true,
-        queued: true,
-        queue_row_id: "queue-late-brain",
+        decision: { automation_decision: { should_queue_reply: true } },
+        execution: { queued: false },
+        follow_up: { ok: true, skipped: true, reason: "not_attempted" },
+        intelligence_snapshot: null,
         seller_stage_reply: {
           ok: true,
           handled: true,
           queued: true,
+          queue_row_id: "queue-late-brain",
           brain_stage: "consider_selling",
           plan: {
             detected_intent: "Ownership Confirmed",
             selected_use_case: "consider_selling",
+            should_queue_reply: true,
           },
         },
       }),

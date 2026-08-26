@@ -207,6 +207,11 @@ export function makeSendQueueRowsSupabase(getRows = () => []) {
           },
         }
       },
+      // Run heartbeat telemetry (setSystemValues → system_control upsert),
+      // added to runSendQueue in c4f887ba — accepted and discarded.
+      upsert() {
+        return { select: async () => ({ data: [], error: null }) }
+      },
     }
     return query
   }
@@ -235,6 +240,10 @@ export function makeCampaignsSupabase(liveIds = []) {
           },
           update() {
             return { eq() { return { lt() { return { select: async () => ({ data: [], error: null }) } } } } }
+          },
+          // Heartbeat telemetry upsert (see makeSendQueueQuery note).
+          upsert() {
+            return { select: async () => ({ data: [], error: null }) }
           },
         }
       }

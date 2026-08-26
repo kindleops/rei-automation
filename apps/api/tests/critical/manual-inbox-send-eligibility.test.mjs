@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runSendQueue } from "../../src/lib/domain/queue/run-send-queue.js";
+import { makeLiveQueueSystemValue, makeQueueTestRpc } from "../helpers/queue-run-test-harness.js";
 
 const NOW = "2026-05-01T12:00:00Z";
 
@@ -24,6 +25,24 @@ function makeStubs() {
       processSendQueueItem: async () => ({ ok: true, sent: true }),
       withRunLock: async ({ fn }) => fn(),
       getSystemFlag: async () => true,
+      // Fail-closed lockdown (020c9f24): without live system values the run
+      // stops at the execution-mode gate; without an injected client, every
+      // un-stubbed Supabase call burns the placeholder-URL retry backoff.
+      getSystemValue: makeLiveQueueSystemValue(),
+      reconcileCanonicalQueueLifecycle: async () => ({ ok: true, reconciled_count: 0 }),
+      supabaseClient: {
+        rpc: makeQueueTestRpc(),
+        from: () => ({
+          select: () => ({
+            eq: () => ({ limit: async () => ({ data: [], error: null }) }),
+            in: async () => ({ data: [], error: null }),
+          }),
+          update: () => ({
+            eq: () => ({ lt: () => ({ select: async () => ({ data: [], error: null }) }) }),
+          }),
+          upsert: () => ({ select: async () => ({ data: [], error: null }) }),
+        }),
+      },
       evaluateContactWindow: () => ({ allowed: true }),
       info: () => {},
       warn: () => {},

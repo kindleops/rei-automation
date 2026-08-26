@@ -130,37 +130,41 @@ test("scheduleFollowUp: idempotent replay returns duplicate_followup_exists", as
 });
 
 test("scheduleFollowUp: blocks 21610-suppressed recipient", async () => {
+  // Contract re-pin: the canonical sms_suppression_list read is now
+  // select(...).eq("phone_e164", …) resolving row objects (see
+  // suppression-21610-canonical-precedence) — an ACTIVE recipient-wide 21610
+  // row must block the follow-up enqueue fail-closed.
   const supabase = {
     from(table) {
-      if (table === "send_queue") {
-        return {
-          select: (_cols, opts = {}) => {
-            const chain = {
-              eq: function () {
-                return chain;
-              },
-              ilike: async () => ({ count: opts.head ? 1 : 0, error: null }),
-            };
-            return chain;
-          },
-        };
-      }
-      if (table === "sms_suppression_list") {
-        return {
-          select: () => ({
-            eq: () => ({
-              ilike: async () => ({ count: 0, error: null }),
-            }),
-          }),
-        };
-      }
-      return {
-        select: () => ({
-          eq: () => ({
-            ilike: async () => ({ count: 0, error: null }),
-          }),
-        }),
+      const chain = {
+        select() { return chain; },
+        eq() { return chain; },
+        ilike() { return chain; },
+        or() { return chain; },
+        then(resolve) {
+          if (table === "sms_suppression_list") {
+            resolve({
+              data: [
+                {
+                  id: "sup-21610-1",
+                  phone_e164: "+15550009999",
+                  is_active: true,
+                  sender_phone_e164: null,
+                  suppression_type: "blacklist_pair",
+                  reason:
+                    'TextGrid HTTP failure: {"status":"400","code":"21610","message":"blacklist"}',
+                  suppression_reason:
+                    'TextGrid HTTP failure: {"status":"400","code":"21610","message":"blacklist"}',
+                },
+              ],
+              error: null,
+            });
+            return;
+          }
+          resolve({ data: [], error: null, count: 0 });
+        },
       };
+      return chain;
     },
   };
 

@@ -22,8 +22,14 @@ export const COMPLIANCE_TERMINAL_INTENTS = Object.freeze(
     "hostile_legal",
     "not_owner",
     "never_owned",
-    "former_owner",
-    "sold_it",
+    // Closure pass 2026-08-26 (M5): "former_owner" and "sold_it" removed —
+    // sold/transferred is a PROPERTY-scoped disposition (ontology:
+    // sold_property suppresses the pairing only). Keeping them here made the
+    // send-time terminal-intent scan (last-50 message_events, no property
+    // filter) block the PHONE globally: "I sold 123 Main, but I own 456 Oak"
+    // could never be contacted about 456 Oak again. Phone-identity
+    // disconnects (not_owner / never_owned / wrong_person / wrong_number)
+    // remain terminal.
     "invalid_number",
   ])
 );

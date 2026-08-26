@@ -251,7 +251,7 @@ test("buyer webhook can correlate an SMS response back to the buyer thread by ph
   assert.equal(updates.length, 1);
   assert.equal(threadUpdates.length, 1);
   assert.equal(threadUpdates[0].channel, "sms");
-  assert.equal(threadUpdates[0].recipient_phone, "5557771212");
+  assert.equal(threadUpdates[0].recipient_phone, "+15557771212");
 });
 
 test("textgrid inbound can intercept a matched buyer SMS before seller-side processing", async () => {

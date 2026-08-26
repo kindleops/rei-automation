@@ -612,10 +612,16 @@ export function resolveDispositionFromClassification(
     return ownershipProbeTransition.disposition;
   }
 
-  if (flags.not_interested) return "not_interested";
+  // Closure pass 2026-08-26 (M2): an ATTENTION bucket outranks the sticky
+  // decline. flags.not_interested merges the EXISTING state (line ~601), so a
+  // re-engaging seller ("actually, let's talk") kept disposition
+  // not_interested forever and the fresh reply was hidden from New Replies.
+  // A fresh decline still lands not_interested below (its own bucket is
+  // follow_up/cold, never an attention bucket).
   if (["priority", "new_replies", "needs_review", "waiting"].includes(lower(inbox_bucket))) {
     return null;
   }
+  if (flags.not_interested) return "not_interested";
   return existingState.disposition || null;
 }
 

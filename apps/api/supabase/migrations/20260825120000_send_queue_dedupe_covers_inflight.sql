@@ -56,4 +56,13 @@ CREATE UNIQUE INDEX uq_send_queue_active_dedupe_key
     )
     AND dedupe_key IS NOT NULL;
 
+-- Production audit 2026-08-26: the ENTIRE 20260428 harden set is absent from
+-- the live database (broken migration history) — including provider-message
+-- uniqueness. Zero existing collisions verified read-only before this ships;
+-- the idempotent-send short-circuit and delivery reconciliation currently
+-- rely on application-level checks alone without it.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_send_queue_provider_message_id
+  ON public.send_queue (provider_message_id)
+  WHERE provider_message_id IS NOT NULL;
+
 COMMIT;

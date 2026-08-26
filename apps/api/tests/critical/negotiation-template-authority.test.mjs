@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { executeInboundAutomationDecision } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
+import { AUTO_REPLY_CUTOFF_KEY } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { makeSellerOrchestrationSupabase } from "../helpers/seller-orchestration-test-supabase.mjs";
 
 const OFFER_TEMPLATE = {
@@ -46,7 +47,13 @@ function baseArgs(overrides = {}) {
     inboundEventId: "evt-auth-1",
     enableQueueInsert: true,
     dryRun: false,
-    autoReplyMode: "live_all",
+    // Contract re-pin: live_limited is the live mode and its scope gate is
+    // fail-closed — a configured auto_reply_eligibility_cutoff_at plus the
+    // inbound's received-at are required for the §12 assertions to execute.
+    autoReplyMode: "live_limited",
+    inboundReceivedAt: new Date().toISOString(),
+    getSystemValue: async (key) =>
+      key === AUTO_REPLY_CUTOFF_KEY ? "2020-01-01T00:00:00.000Z" : null,
     ...overrides,
   };
 }

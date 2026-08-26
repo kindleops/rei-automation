@@ -41,20 +41,30 @@ function makeRow(overrides = {}) {
 }
 
 function makeUpsertSupabase(captured) {
-  // Captures the upsert payload for assertion; always returns success.
-  const query = {
-    update() { return query; },
-    upsert(payload) {
-      captured.payload = payload;
+  // Contract re-pin: the writer now upserts THREE tables (contact_outreach_state,
+  // message_events, inbox_thread_state) — capture per-table so assertions read
+  // captured.message_events instead of whichever upsert happened last.
+  return {
+    from(table) {
+      const query = {
+        update() { return query; },
+        eq() { return query; },
+        upsert(payload) {
+          captured[table] = payload;
+          return query;
+        },
+        select() { return query; },
+        async maybeSingle() {
+          return {
+            data: captured[table] ? { id: "new-event-id", ...captured[table] } : null,
+            error: null,
+          };
+        },
+        // Direct `await supabase.from(t).upsert(...)` chains resolve here.
+        then(resolve) { resolve({ data: null, error: null }); },
+      };
       return query;
     },
-    select() { return query; },
-    async maybeSingle() {
-      return { data: { id: "new-event-id", ...captured.payload }, error: null };
-    },
-  };
-  return {
-    from() { return query; },
   };
 }
 
@@ -79,13 +89,14 @@ test("writeOutboundSuccessMessageEvent payload includes auto_reply_status and au
     upsertInboxThreadState: async () => ({ ok: true }),
   });
 
-  assert.ok("auto_reply_status" in captured.payload,
+  // Contract re-pin: assert the message_events payload specifically (three-table writer).
+  assert.ok("auto_reply_status" in captured.message_events,
     "auto_reply_status must be in the upsert payload");
-  assert.ok("auto_reply_queue_id" in captured.payload,
+  assert.ok("auto_reply_queue_id" in captured.message_events,
     "auto_reply_queue_id must be in the upsert payload");
-  assert.equal(captured.payload.auto_reply_status, null,
+  assert.equal(captured.message_events.auto_reply_status, null,
     "auto_reply_status must be null for non-auto-reply type");
-  assert.equal(captured.payload.auto_reply_queue_id, null,
+  assert.equal(captured.message_events.auto_reply_queue_id, null,
     "auto_reply_queue_id must be null for non-auto-reply type");
 });
 
@@ -98,8 +109,9 @@ test("writeOutboundSuccessMessageEvent sets auto_reply_status=sent for auto_repl
     upsertInboxThreadState: async () => ({ ok: true }),
   });
 
-  assert.equal(captured.payload.auto_reply_status, "sent");
-  assert.equal(captured.payload.auto_reply_queue_id, String(row.id));
+  // Contract re-pin: assert the message_events payload specifically (three-table writer).
+  assert.equal(captured.message_events.auto_reply_status, "sent");
+  assert.equal(captured.message_events.auto_reply_queue_id, String(row.id));
 });
 
 test("writeOutboundSuccessMessageEvent returns the upserted event row on success", async () => {

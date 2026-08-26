@@ -10,15 +10,25 @@ import {
 const SEND_QUEUE_TABLE = "send_queue";
 
 export const CANCELLATION_POLICIES = Object.freeze({
-  /** Opt-out, wrong-number, hostile, negative — cancel every unsent outbound type. */
+  /** Opt-out, wrong-number, hostile — cancel every unsent outbound type. */
   COMPLIANCE_TERMINAL: "compliance_terminal",
   /** Seller replied — cancel only automated reply rows, not unrelated campaign touches. */
   INBOUND_TAKEOVER: "inbound_takeover",
+  /**
+   * Soft business negative ("not interested", "not for sale") — cancel
+   * automated replies/follow-ups plus campaign touches for the CURRENT
+   * property only; outreach about the owner's OTHER properties survives
+   * (closure pass 2026-08-26, Phase 8).
+   */
+  PROPERTY_DISPOSITION: "property_disposition",
 });
 
 const POLICY_TYPE_FILTERS = Object.freeze({
   [CANCELLATION_POLICIES.COMPLIANCE_TERMINAL]: null,
   [CANCELLATION_POLICIES.INBOUND_TAKEOVER]: new Set(["followup", "auto_reply"]),
+  // PROPERTY_DISPOSITION uses a composite predicate (type OR same-property),
+  // applied in the eligibility filter below — no flat type filter here.
+  [CANCELLATION_POLICIES.PROPERTY_DISPOSITION]: new Set(["followup", "auto_reply"]),
 });
 
 function clean(value) {
@@ -223,7 +233,18 @@ export async function cancelSupabasePendingOutbound(
   const eligible = candidates.filter((row) => {
     if (TERMINAL_QUEUE_OUTCOMES.has(lower(row.queue_status))) return false;
     const row_type = lower(row.type || row.message_type);
-    if (type_filter && !type_filter.has(row_type)) return false;
+    if (policy === CANCELLATION_POLICIES.PROPERTY_DISPOSITION) {
+      // Composite predicate: automated reply/follow-up rows OR any row for
+      // the CURRENT property. Campaign touches for the owner's OTHER
+      // properties survive a soft business negative.
+      const same_property =
+        clean(scope.property_id) &&
+        clean(row.property_id) &&
+        clean(row.property_id) === clean(scope.property_id);
+      if (!type_filter.has(row_type) && !same_property) return false;
+    } else if (type_filter && !type_filter.has(row_type)) {
+      return false;
+    }
 
     const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
     const row_inbound =
@@ -239,7 +260,8 @@ export async function cancelSupabasePendingOutbound(
     // Auto-reply supersession: only cancel rows created before this inbound
     // arrived. A slow older inbound must not cancel a newer inbound's reply.
     if (
-      policy === CANCELLATION_POLICIES.INBOUND_TAKEOVER &&
+      (policy === CANCELLATION_POLICIES.INBOUND_TAKEOVER ||
+        policy === CANCELLATION_POLICIES.PROPERTY_DISPOSITION) &&
       (row_type === "auto_reply" || row_type === "autopilot" || meta.source === "auto_reply") &&
       Number.isFinite(inbound_ts)
     ) {

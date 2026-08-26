@@ -188,3 +188,70 @@ test("a row owned by the cancelling inbound event itself is never cancelled", as
   assert.equal(result.cancelled, 0);
   assert.equal(rows[0].queue_status, "queued");
 });
+
+// ── Phase 8 (closure pass 2026-08-26, operator-directed) ────────────────────
+// OPERATOR RULE: "not interested" / "not for sale" does NOT cancel further
+// communication — the seller flow schedules the nurture follow-up. Soft
+// negatives therefore run INBOUND_TAKEOVER (supersede the stale queued
+// auto-reply/follow-up, which the flow replaces) and never touch campaign
+// rows. PROPERTY_DISPOSITION below is reserved for a SOLD property (factually
+// terminal): its campaign touches stop, the owner's other properties survive,
+// the contact is never suppressed.
+test("PROPERTY_DISPOSITION (sold pairing): cancels replies/follow-ups + SOLD-property campaign touches; other properties survive", async () => {
+  const rows = [
+    makeRow("r-reply", { type: "auto_reply", property_id: "prop-A" }),
+    makeRow("r-follow", { type: "followup", property_id: "prop-A" }),
+    makeRow("r-camp-A", { type: "initial_outreach", message_type: "Campaign", property_id: "prop-A" }),
+    makeRow("r-camp-B", { type: "initial_outreach", message_type: "Campaign", property_id: "prop-B" }),
+  ];
+  const result = await cancelSupabasePendingOutbound(
+    {
+      thread_key: THREAD,
+      property_id: "prop-A",
+      policy: CANCELLATION_POLICIES.PROPERTY_DISPOSITION,
+      reason: "inbound_negative_reply",
+      inbound_event_id: "evt-soft-1",
+      now: NOW,
+    },
+    { supabase: makeSupabase(rows) }
+  );
+  assert.equal(result.cancelled, 3);
+  assert.equal(rows[0].queue_status, "cancelled");
+  assert.equal(rows[1].queue_status, "cancelled");
+  assert.equal(rows[2].queue_status, "cancelled", "current-property campaign touch stops");
+  assert.equal(rows[3].queue_status, "queued", "the owner's OTHER property keeps its valid outreach");
+});
+
+test("classifyNegativeReply: hard vs soft vocabulary", async () => {
+  const { classifyNegativeReply } = await import(
+    "../../src/lib/domain/classification/is-negative-reply.js"
+  );
+  for (const hard of ["STOP", "stop texting me", "unsubscribe", "remove me", "wrong number", "don't contact me again"]) {
+    assert.equal(classifyNegativeReply(hard), "hard", hard);
+  }
+  for (const soft of ["not interested", "not for sale", "no thanks", "wrong house", "not selling"]) {
+    assert.equal(classifyNegativeReply(soft), "soft", soft);
+  }
+  assert.equal(classifyNegativeReply("sounds good, tell me more"), null);
+});
+
+test("PROPERTY_DISPOSITION honors the newer-inbound supersession guard", async () => {
+  const inbound_received_at = "2026-08-25T17:30:00.000Z";
+  const rows = [
+    makeRow("newer-reply", { type: "auto_reply", property_id: "prop-A", created_at: "2026-08-25T17:45:00.000Z" }),
+  ];
+  const result = await cancelSupabasePendingOutbound(
+    {
+      thread_key: THREAD,
+      property_id: "prop-A",
+      policy: CANCELLATION_POLICIES.PROPERTY_DISPOSITION,
+      reason: "inbound_negative_reply",
+      inbound_event_id: "evt-old-soft",
+      inbound_received_at,
+      now: NOW,
+    },
+    { supabase: makeSupabase(rows) }
+  );
+  assert.equal(result.cancelled, 0);
+  assert.equal(rows[0].queue_status, "queued", "a newer inbound's reply survives an older soft negative");
+});
