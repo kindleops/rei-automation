@@ -42,7 +42,7 @@
   {
     "family": "es_sold",
     "text": "Ya lo vendí hace años",
-    "expected_primary_intent": "wrong_number",
+    "expected_primary_intent": "sold_property",
     "stage": "ownership_check",
     "terminal": true
   },
@@ -133,7 +133,7 @@
   {
     "family": "es_contract",
     "text": "Ya estamos bajo contrato",
-    "expected_primary_intent": "info_request",
+    "expected_primary_intent": "not_interested",
     "stage": "actual_proposal"
   },
   {
