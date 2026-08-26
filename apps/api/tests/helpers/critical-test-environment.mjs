@@ -7,7 +7,7 @@
 // MUST run before any src/ module resolves the runtime-state root: the shared
 // /tmp root leaked system-control caches and per-instance ledgers across test
 // processes, producing order-dependent claim-containment results.
-process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}`
+process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 import { after, before, beforeEach } from 'node:test'
 import {
