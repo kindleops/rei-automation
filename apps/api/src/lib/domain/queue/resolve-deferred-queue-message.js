@@ -191,4 +191,91 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
   return { ok: false, resolved: false, intent, reason: "no_renderable_followup_template" };
 }
 
+/**
+ * Same-stage transport failover template rotation.
+ *
+ * Given a send-queue row whose send failed (e.g. content-filter blocked), select
+ * and render a DIFFERENT active + safe_for_auto_reply template for the SAME
+ * use_case, excluding any already-tried template ids. Reuses the exact selection
+ * + rendering path as deferred resolution (fetchCandidateTemplates +
+ * buildRowPersonalization + personalizeTemplate + prepareRenderedSmsForQueue) —
+ * this is NOT a second engine, just the rotation entry point the retry path
+ * lacked. Stage is preserved by construction: it never changes use_case.
+ *
+ * Returns { ok, resolved, message_body, template_id, use_case } when a distinct
+ * alternate renders, or { resolved:false } so the caller falls through to its
+ * existing terminal / same-body behavior. Never sends; never returns a blank
+ * body (rendering that leaves placeholders empty is skipped).
+ */
+export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
+  const supabase = deps.supabase || deps.supabaseClient || getDefaultSupabaseClient();
+  if (!supabase) return { ok: false, resolved: false, reason: "missing_supabase" };
+
+  const meta = queue_row?.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+  const use_case = lower(
+    meta.followup_use_case ||
+      queue_row.use_case_template ||
+      meta.selected_template_use_case ||
+      meta.template_use_case ||
+      ""
+  );
+  if (!use_case) return { ok: false, resolved: false, reason: "rotation_use_case_missing" };
+
+  const exclude = new Set(
+    (Array.isArray(deps.excludeTemplateIds) ? deps.excludeTemplateIds : [])
+      .map((id) => clean(id))
+      .filter(Boolean)
+  );
+
+  let templates = [];
+  try {
+    templates = await fetchCandidateTemplates(supabase, [use_case], clean(queue_row.language));
+  } catch (error) {
+    warn("[ROTATION_TEMPLATE_LOOKUP_FAILED]", {
+      queue_row_id: queue_row.id || null,
+      use_case,
+      error: error?.message || "template_lookup_failed",
+    });
+    return { ok: false, resolved: false, reason: "template_lookup_failed" };
+  }
+
+  const rowLanguage = lower(queue_row.language) || "english";
+  const ordered = [
+    ...templates.filter((t) => lower(t.language) === rowLanguage),
+    ...templates.filter((t) => lower(t.language) !== rowLanguage),
+  ].filter((t) => !exclude.has(clean(t.template_id || t.id)));
+
+  const personalization = buildRowPersonalization(queue_row);
+
+  for (const template of ordered) {
+    if (!clean(template.template_body)) continue;
+    const rendered = personalizeTemplate(template.template_body, personalization);
+    if (!rendered.ok || !clean(rendered.text)) continue;
+    const prepared = prepareRenderedSmsForQueue({
+      rendered_message_text: rendered.text,
+      template_id: template.template_id || template.id || null,
+      template_source: "sms_templates",
+    });
+    if (!prepared.ok || !clean(prepared.text)) continue;
+
+    info("[ROTATION_TEMPLATE_RESOLVED]", {
+      queue_row_id: queue_row.id || null,
+      use_case,
+      template_id: template.template_id || template.id || null,
+      excluded: exclude.size,
+    });
+    return {
+      ok: true,
+      resolved: true,
+      message_body: prepared.text,
+      template_id: clean(template.template_id || template.id) || null,
+      use_case: clean(template.use_case) || use_case,
+      language: clean(template.language) || null,
+      reason: "rotation_template_resolved",
+    };
+  }
+
+  return { ok: true, resolved: false, use_case, reason: "no_alternate_template" };
+}
+
 export default resolveDeferredQueueMessage;
