@@ -43,13 +43,13 @@ export const FOLLOWUP_POLICY_BY_STAGE = Object.freeze({
   }),
   [C.ASKING_PRICE]: Object.freeze({
     enabled: true,
-    no_reply_delay_days: 4,
+    no_reply_delay_days: 3,
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),
   [C.PROPERTY_CONDITION]: Object.freeze({
     enabled: true,
-    no_reply_delay_days: 4,
+    no_reply_delay_days: 3,
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),
@@ -61,7 +61,7 @@ export const FOLLOWUP_POLICY_BY_STAGE = Object.freeze({
   }),
   [C.FORMAL_CONTRACT]: Object.freeze({
     enabled: true,
-    no_reply_delay_days: 2,
+    no_reply_delay_days: 1,
     max_automated_followups: 2,
     requires_delivery_confirmation: true,
   }),

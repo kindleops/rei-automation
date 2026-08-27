@@ -169,6 +169,25 @@ test("follow-up policy: conversation stages allow capped, delivery-confirmed fol
   assert.deepEqual(resolveFollowUpPolicyForStage(null).policy, s1);
 });
 
+test("follow-up cadence tightens monotonically as the seller advances (never loosens)", () => {
+  // Business rule (mission Phase 6): the further along the lifecycle, the
+  // shorter (or equal) the no-reply follow-up delay. This permanent guard stops
+  // a future edit from reintroducing a cadence hump (discovery slower than a
+  // later stage) or an inverted curve.
+  let prev = Infinity;
+  let prevStage = "(start)";
+  for (const stage of LIFECYCLE_STAGE_ORDER) {
+    const { policy } = resolveFollowUpPolicyForStage(stage);
+    if (!policy.enabled || policy.no_reply_delay_days == null) continue;
+    assert.ok(
+      policy.no_reply_delay_days <= prev,
+      `cadence loosened at ${stage} (${policy.no_reply_delay_days}d) vs prior enabled stage ${prevStage} (${prev}d)`
+    );
+    prev = policy.no_reply_delay_days;
+    prevStage = stage;
+  }
+});
+
 // ── Temperature signal model ─────────────────────────────────────────────────
 
 test("temperature: explicit 'not interested' stays cold despite fast, deep engagement", () => {
