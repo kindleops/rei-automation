@@ -30,6 +30,10 @@ test("phrase-anchored / slang conditional interest advances autonomously (latent
     "mite sell depends payin", // slang: possible sale + conditional price
     "open to an offer",
     "could be interested",
+    // Sell-framed re-engagement (renewed selling interest)
+    "reconsidering selling",
+    "still open to selling",
+    "changed my mind about selling",
   ];
   for (const text of autonomous) {
     const r = await c(text);
@@ -51,6 +55,23 @@ test("bare hedges stay below the autonomy gate (ambiguity gate NOT weakened)", a
     assert.ok(
       r.confidence < 0.82,
       `bare hedge "${text}" must stay < 0.82, got ${r.confidence} (intent ${r.primary_intent})`
+    );
+  }
+});
+
+test("buyer-directed meta-questions do NOT inflate into seller latent_interest", async () => {
+  // "Are you still buying?" is a question TO us, not the seller's own renewed
+  // interest. It must not become latent_interest (mission re-engagement rule).
+  for (const text of [
+    "You still buying houses?",
+    "are you guys still purchasing",
+    "do you still buy in this area",
+  ]) {
+    const r = await c(text);
+    assert.notEqual(
+      r.primary_intent,
+      "latent_interest",
+      `buyer-directed "${text}" must not be latent_interest, got ${r.primary_intent}`
     );
   }
 });

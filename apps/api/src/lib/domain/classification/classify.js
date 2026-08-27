@@ -4943,6 +4943,14 @@ function resolveIntents(
       "me interesa", "si el precio", "if the price",
       "might sell", "mite sell", "may sell", "could sell", "consider selling",
       "let go of", "let it go", "willing to let go",
+      // Re-engagement toward SELLING (sell-framed only): a warm reopen of the
+      // seller's own interest. Buyer-directed meta-questions ("you still
+      // buying?") are deliberately NOT here — they are a different intent and
+      // must not inflate into seller latent_interest. Bare direction-less
+      // "changed my mind" / "reconsidering" stay unclear -> clarifier (which
+      // way did they change?).
+      "reconsidering selling", "reconsider selling", "still open to selling",
+      "changed my mind about selling", "thinking about selling now",
       "for the right price", "depends on the offer", "depends on price",
     ]) ||
     conditional_sale_interest_re.test(text)
