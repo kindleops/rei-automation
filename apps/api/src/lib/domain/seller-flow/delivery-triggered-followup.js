@@ -20,6 +20,7 @@ import { getSystemValue } from "@/lib/system-control.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { BLOCKING_CONTACTABILITY } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { resolveFollowUpPolicyForStage } from "@/lib/domain/seller-flow/followup-policy-registry.js";
+import { warn } from "@/lib/logging/logger.js";
 
 const DELIVERED_STATUSES = new Set(["delivered", "delivery_confirmed", "confirmed"]);
 // Registry blocking codes (opted_out/dnc/provider_blacklisted/invalid_number/
@@ -35,6 +36,10 @@ function clean(value) {
 
 function lower(value) {
   return clean(value).toLowerCase();
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 // ── Explicit follow-up activation gate ─────────────────────────────────────
@@ -170,22 +175,113 @@ async function threadHasEventAfter(supabase, { thread_key, direction, after_iso,
   return rows.length > 0;
 }
 
-async function pendingFollowupExists(supabase, thread_key) {
+async function loadPendingFollowups(supabase, thread_key) {
   const { data, error } = await supabase
     .from("send_queue")
-    .select("id")
+    .select("id,use_case_template,metadata")
     .eq("thread_key", thread_key)
     .in("queue_status", ["scheduled", "queued"])
     .in("type", ["followup"])
-    .limit(1);
+    .limit(10);
   if (error) throw error;
-  return (data || []).length > 0;
+  return Array.isArray(data) ? data : [];
 }
 
-async function countAutomatedFollowUps(supabase, thread_key) {
-  // Lifetime cap input: every automated follow-up row that was not cancelled.
-  // Fetches a bounded page and filters locally — the caps are single digits,
-  // so 50 rows is already far past any policy ceiling.
+function followupRowUseCase(row = {}) {
+  const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return lower(row?.use_case_template || meta.followup_use_case || "");
+}
+
+// Pure stage-aware supersession decision (Phase 6 Gap 1). Given the pending
+// follow-up rows on a thread and the use case of the just-delivered outbound,
+// classify each pending row:
+//   - DIFFERENT, classifiable use case  -> stale prior-stage (supersede/cancel)
+//   - SAME use case                     -> duplicate (blocks scheduling)
+//   - unclassifiable (no use case)      -> fails safe: blocks scheduling
+// Returns { stale_prior_stage, pending, target_use_case }. `pending` is true
+// when any non-stale pending row remains — i.e. the caller must not schedule a
+// duplicate. With no target use case (unknown current stage) nothing is
+// superseded and any pending row blocks, matching the prior conservative gate.
+export function resolvePendingFollowupSupersession({
+  pending_rows = [],
+  outbound_use_case = null,
+} = {}) {
+  const rows = Array.isArray(pending_rows) ? pending_rows : [];
+  const target = lower(outbound_use_case);
+  const stale_prior_stage = target
+    ? rows.filter((r) => {
+        const uc = followupRowUseCase(r);
+        return uc && uc !== target;
+      })
+    : [];
+  const superseded_ids = new Set(stale_prior_stage.map((r) => r.id));
+  const pending = rows.some((r) => !superseded_ids.has(r.id));
+  return { stale_prior_stage, pending, target_use_case: target || null };
+}
+
+// Cancel prior-stage pending follow-ups that a stage advance has made stale.
+// A plain queue_status flip to "cancelled" (with an audit stamp on metadata)
+// on the specific stale row ids — never the whole thread, so a legitimate
+// same-stage pending follow-up is left intact. Best-effort: a supersession
+// failure must not block the current stage's follow-up from scheduling.
+export async function supersedePriorStageFollowups(
+  supabase,
+  { rows = [], thread_key = null, superseded_by_use_case = null } = {}
+) {
+  const superseded_at = nowIso();
+  for (const row of rows) {
+    const id = clean(row?.id);
+    if (!id) continue;
+    try {
+      const meta = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+      const { error } = await supabase
+        .from("send_queue")
+        .update({
+          queue_status: "cancelled",
+          updated_at: superseded_at,
+          metadata: {
+            ...meta,
+            superseded_by_stage_advance: true,
+            superseded_at,
+            superseded_by_use_case,
+            superseded_from_use_case: followupRowUseCase(row) || null,
+          },
+        })
+        .eq("id", id)
+        .in("queue_status", ["scheduled", "queued"])
+        .in("type", ["followup"]);
+      if (error) throw error;
+    } catch (error) {
+      warn("[FOLLOWUP_SUPERSEDE_FAILED]", {
+        thread_key,
+        queue_row_id: id,
+        error: error?.message || "supersede_failed",
+      });
+    }
+  }
+}
+
+// A transport-FAILED follow-up never reached the seller, so it must not burn an
+// automated-attempt from the lifetime cap (a failed send is not a successful
+// follow-up attempt). Count only rows that reached, or are in-flight to, the
+// seller (scheduled/queued/sent/delivered). Cancelled and terminal
+// never-delivered statuses do not consume the cap. (Phase 8 rotates a
+// content-filter block in place to 'queued', so it stays a single attempt.)
+const NON_ATTEMPT_FOLLOWUP_STATUSES = new Set([
+  "cancelled",
+  "failed",
+  "failed_transport",
+  "undelivered",
+  "invalid_number",
+  "carrier_blocked",
+  "blocked",
+]);
+
+export async function countAutomatedFollowUps(supabase, thread_key) {
+  // Lifetime cap input: every automated follow-up row that actually counts as an
+  // attempt (see NON_ATTEMPT_FOLLOWUP_STATUSES). Fetches a bounded page and
+  // filters locally — the caps are single digits, so 50 rows is far past any
+  // policy ceiling.
   const { data, error } = await supabase
     .from("send_queue")
     .select("id,queue_status")
@@ -193,7 +289,9 @@ async function countAutomatedFollowUps(supabase, thread_key) {
     .in("type", ["followup"])
     .limit(50);
   if (error) throw error;
-  return (data || []).filter((row) => lower(row?.queue_status) !== "cancelled").length;
+  return (data || []).filter(
+    (row) => !NON_ATTEMPT_FOLLOWUP_STATUSES.has(lower(row?.queue_status))
+  ).length;
 }
 
 async function loadLeadStateGuards(supabase, thread_key) {
@@ -293,7 +391,7 @@ export async function maybeScheduleFollowUpAfterDelivery({
       clean(provenance.followup_intent) || clean(event_metadata.followup_intent) || null;
 
     const sent_at = outbound.sent_at || outbound.event_timestamp;
-    const [inbound_after, outbound_after, pending, lead_state] = await Promise.all([
+    const [inbound_after, outbound_after, pending_rows, lead_state] = await Promise.all([
       threadHasEventAfter(supabase, {
         thread_key: outbound.thread_key,
         direction: "inbound",
@@ -306,7 +404,7 @@ export async function maybeScheduleFollowUpAfterDelivery({
         after_iso: sent_at,
         exclude_event_id: outbound.id,
       }),
-      pendingFollowupExists(supabase, outbound.thread_key),
+      loadPendingFollowups(supabase, outbound.thread_key),
       loadLeadStateGuards(supabase, outbound.thread_key),
     ]);
 
@@ -323,6 +421,26 @@ export async function maybeScheduleFollowUpAfterDelivery({
     // fabricated seller intent: the seller has said nothing yet.
     const outbound_use_case =
       clean(provenance.template_use_case) || clean(event_metadata.template_use_case) || null;
+
+    // Stage-aware supersession (Phase 6 Gap 1). A pending follow-up scheduled
+    // for a PRIOR lifecycle stage must not block — nor outlive — the current
+    // stage's follow-up. The pure resolver flags any pending follow-up whose
+    // use case differs from this delivered outbound's as stale (the thread has
+    // advanced); those are cancelled here and NOT counted as a duplicate that
+    // blocks scheduling. A pending follow-up for the SAME use case still blocks
+    // (no duplicate same-stage follow-up), and any row we cannot classify fails
+    // safe by still blocking. This only fires on real stage advance and never
+    // touches the inbound turn's own fresh same-stage follow-up.
+    const { stale_prior_stage, pending, target_use_case } =
+      resolvePendingFollowupSupersession({ pending_rows, outbound_use_case });
+    if (stale_prior_stage.length > 0) {
+      await supersedePriorStageFollowups(supabase, {
+        rows: stale_prior_stage,
+        thread_key: outbound.thread_key,
+        superseded_by_use_case: target_use_case,
+      });
+    }
+
     const stage_no_reply_days = Number(stage_policy.policy.no_reply_delay_days);
     const stage_plan_available = Boolean(
       stage_policy.policy.enabled &&
