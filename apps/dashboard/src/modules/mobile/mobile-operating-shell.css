@@ -834,10 +834,31 @@ html.is-mobile-layout {
     min-height: 0 !important;
   }
 
+  /* Top clearance is owned by ONE element: the stage.
+     .nx-premium-inbox was absolutely positioned with `inset: 0`. An absolutely
+     positioned box resolves against its containing block's *padding box*, so
+     `top: 0` lands at the stage's outer edge and skips the reservation entirely.
+     Inbox happened to look right only because it re-added the same padding on
+     its own inner .nx-inbox-shell; Pipeline shares the outer shell but has no
+     such inner element, so its header rendered underneath the global top dock.
+     Keeping every app shell in normal flow makes the one stage reservation
+     govern every route instead of each route re-deriving it. */
+  .nx-os.is-mobile-os .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell {
+    position: relative !important;
+    inset: auto !important;
+  }
+
   /* Content clearance below top command menu */
-  .nx-inbox-shell.is-mobile-inbox,
   .nx-os.is-mobile-os .nx-stage {
     padding-top: var(--nx-mobile-chrome-top) !important;
+  }
+
+  /* ...and the inbox shell must NOT add it a second time now that it inherits
+     the stage's reservation through normal flow. */
+  .nx-inbox-shell.is-mobile-inbox {
+    padding-top: 0 !important;
   }
 
   /* Bottom clearance is owned by ONE element: the scrolling app shell inside the

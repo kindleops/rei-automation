@@ -35,30 +35,92 @@
 
 const HTML_ATTR = 'data-nx-viewport-runtime'
 
+/**
+ * Installed / Home-Screen app, as opposed to a tab in Safari.
+ *
+ * This is the whole point of the check: the bottom gap below only ever means
+ * "browser chrome is overlaying the layout viewport". A standalone app has no
+ * browser chrome, so any delta reported there is measurement noise — on iOS
+ * standalone `visualViewport.height` can come back short of the layout viewport
+ * by roughly the home-indicator band. Feeding that into the dock's `bottom`
+ * lifted it ~100px off the bottom of the display and opened a black strip.
+ */
+function isStandalone(): boolean {
+  const displayMode =
+    typeof window.matchMedia === 'function' &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches)
+  // iOS Safari's own non-standard flag, still the reliable signal on iOS.
+  const iosStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return Boolean(displayMode || iosStandalone)
+}
+
+/** Last measurement, exposed for on-device diagnostics. */
+export type ViewportDebug = {
+  standalone: boolean
+  displayModeStandalone: boolean
+  navigatorStandalone: boolean
+  innerHeight: number
+  clientHeight: number
+  visualViewportHeight: number | null
+  visualViewportOffsetTop: number | null
+  rawGap: number
+  appliedGap: number
+  vvh: number
+}
+
+let lastDebug: ViewportDebug | null = null
+export function getViewportDebug(): ViewportDebug | null {
+  return lastDebug
+}
+
 function publish(): void {
   const el = document.documentElement
   const vv = window.visualViewport
+  const standalone = isStandalone()
 
   // Layout viewport height — what `100dvh` and `position: fixed` resolve to.
   const layoutH = el.clientHeight || window.innerHeight || 0
 
   // Visible height. Fall back to the layout viewport where visualViewport is
   // unavailable, which makes every value below collapse to today's behaviour.
-  const visibleH = Math.round(vv?.height ?? layoutH)
-
-  // On iOS the visual viewport can be both offset from and shorter than the
-  // layout viewport. The bottom gap is the part of the layout viewport that is
-  // hidden underneath the browser's own chrome.
+  const measuredH = Math.round(vv?.height ?? layoutH)
   const offsetTop = Math.round(vv?.offsetTop ?? 0)
-  const rawGap = layoutH - (visibleH + offsetTop)
+  const rawGap = layoutH - (measuredH + offsetTop)
 
   // Clamp: a negative gap means the visible region is taller than the layout
   // viewport (mid-collapse), which needs no correction. An absurd gap means we
   // measured during an animation frame and should not shove the dock offscreen.
-  const bottomGap = Math.max(0, Math.min(rawGap, Math.round(layoutH * 0.4)))
+  const browserGap = Math.max(0, Math.min(rawGap, Math.round(layoutH * 0.4)))
 
-  if (visibleH > 0) el.style.setProperty('--nx-vvh', `${visibleH}px`)
-  el.style.setProperty('--nx-vv-bottom-gap', `${bottomGap}px`)
+  // In standalone there is no toolbar to compensate for, so the correction is
+  // unconditionally zero and the app root is the full layout viewport. Applying
+  // the visualViewport delta here would be correcting for chrome that does not
+  // exist.
+  const appliedGap = standalone ? 0 : browserGap
+  const vvh = standalone ? layoutH : measuredH
+
+  if (vvh > 0) el.style.setProperty('--nx-vvh', `${vvh}px`)
+  el.style.setProperty('--nx-vv-bottom-gap', `${appliedGap}px`)
+  el.setAttribute('data-nx-display-mode', standalone ? 'standalone' : 'browser')
+
+  lastDebug = {
+    standalone,
+    displayModeStandalone:
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches,
+    navigatorStandalone:
+      (navigator as Navigator & { standalone?: boolean }).standalone === true,
+    innerHeight: window.innerHeight,
+    clientHeight: el.clientHeight,
+    visualViewportHeight: vv ? Math.round(vv.height) : null,
+    visualViewportOffsetTop: vv ? Math.round(vv.offsetTop) : null,
+    rawGap,
+    appliedGap,
+    vvh,
+  }
+  // Readable from the device via Safari remote inspector or the settings sheet.
+  ;(window as Window & { __nxViewport?: ViewportDebug }).__nxViewport = lastDebug
 }
 
 let started = false
@@ -89,16 +151,26 @@ export function startViewportRuntime(): () => void {
   vv?.addEventListener('resize', schedule)
   vv?.addEventListener('scroll', schedule)
   window.addEventListener('resize', schedule)
-  window.addEventListener('orientationchange', schedule)
   // The chrome animates after orientation change settles; re-measure once more.
-  window.addEventListener('orientationchange', () => setTimeout(publish, 350))
+  const onOrientation = () => {
+    schedule()
+    setTimeout(publish, 350)
+  }
+  window.addEventListener('orientationchange', onOrientation)
+
+  // Launching from the Home Screen vs opening the same URL in Safari changes
+  // whether the bottom gap means anything at all, so react to the transition.
+  const standaloneQuery =
+    typeof window.matchMedia === 'function' ? window.matchMedia('(display-mode: standalone)') : null
+  standaloneQuery?.addEventListener?.('change', schedule)
 
   return () => {
     if (frame) cancelAnimationFrame(frame)
     vv?.removeEventListener('resize', schedule)
     vv?.removeEventListener('scroll', schedule)
     window.removeEventListener('resize', schedule)
-    window.removeEventListener('orientationchange', schedule)
+    window.removeEventListener('orientationchange', onOrientation)
+    standaloneQuery?.removeEventListener?.('change', schedule)
     started = false
     document.documentElement.removeAttribute(HTML_ATTR)
   }

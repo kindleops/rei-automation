@@ -180,9 +180,12 @@
   box-shadow: none;
 }
 
-/* The global PinnedAppDock occupies the last 30px of the viewport. The action
-   bar has to sit ABOVE it, not under it — they were overlapping exactly. */
+/* The contextual action bar sits ABOVE the global PinnedAppDock. Expressed with
+   the same variables the dock reservation uses rather than a hard-coded 34px so
+   the two cannot drift apart, and with --nx-mobile-safe-bottom rather than a
+   second raw env(): the home-indicator inset is already owned by the dock
+   beneath it, and re-adding it here is a duplicate reservation. */
 .ccc--mobile-campaign-detail .ccc-mobile-dock {
-  bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 6px);
   padding-bottom: 7px;
 }

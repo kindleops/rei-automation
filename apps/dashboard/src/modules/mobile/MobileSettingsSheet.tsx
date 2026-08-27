@@ -9,6 +9,7 @@ import {
 } from '../../shared/settings'
 import { formatBuildIdentityLine, resolveBuildIdentity } from '../../lib/build-identity'
 import { useBreakpoint } from './useBreakpoint'
+import { getViewportDebug } from './viewport-runtime'
 
 const THEME_OPTIONS: Array<{ id: NexusTheme; label: string }> = [
   { id: 'dark', label: 'Dark' },
@@ -71,6 +72,28 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
             <span>Viewport</span>
             <code>
               {viewport.layoutWidth}×{viewport.layoutHeight} layout · {viewport.width}×{viewport.height} effective · mobile={viewport.isMobile ? 'yes' : 'no'}
+            </code>
+            {/* Readable on the physical handset. These are the exact inputs the
+                dock anchoring uses, so a wrong dock position can be diagnosed
+                from the device rather than inferred from desktop emulation. */}
+            <span>Shell</span>
+            <code>
+              {(() => {
+                const d = getViewportDebug()
+                if (!d) return 'viewport runtime not started'
+                return [
+                  `mode=${d.standalone ? 'standalone' : 'browser'}`,
+                  `displayMode=${d.displayModeStandalone ? 'y' : 'n'}`,
+                  `navStandalone=${d.navigatorStandalone ? 'y' : 'n'}`,
+                  `inner=${d.innerHeight}`,
+                  `client=${d.clientHeight}`,
+                  `vv=${d.visualViewportHeight ?? '-'}`,
+                  `vvTop=${d.visualViewportOffsetTop ?? '-'}`,
+                  `rawGap=${d.rawGap}`,
+                  `appliedGap=${d.appliedGap}`,
+                  `vvh=${d.vvh}`,
+                ].join(' · ')
+              })()}
             </code>
           </div>
         </div>

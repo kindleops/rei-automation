@@ -165,13 +165,13 @@ const GlobalNotificationShell = ({
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
   const showGlobalBell = routePath !== '/inbox' && !isMobile
-  // Campaigns owns its own mobile chrome: a native large-title bar with search
-  // and New. Stacking the seven-icon portable rail above it made the screen read
-  // as internal tooling and cost 60px before any content. The bottom PinnedAppDock
-  // still renders, so global navigation is unchanged.
-  // '/campaigns' is an alias; the resolved route path is '/campaign-command'.
-  const routeOwnsMobileChrome = routePath === '/campaign-command' || routePath === '/campaigns'
-  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath) && !routeOwnsMobileChrome
+  // Campaigns used to opt out of the portable rail and render only its own
+  // large-title bar. On a real handset that read as a separate application, and
+  // with no global top chrome the Campaign Detail title sat under the Dynamic
+  // Island. Campaigns now uses the same global mobile chrome as every other
+  // route, so the shared stage reservation gives it the same
+  // safe-top -> global app switcher -> route content order.
+  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
 
   return (
     <>
