@@ -2879,6 +2879,7 @@ const POSITIVE_SIGNAL_MAP = [
     phrases: [
       // English
       "vacant", "empty", "nobody living there", "no one lives there",
+      "nobody lives there", "nobody lives in it", "no one living",
       "no one there", "unoccupied", "sitting empty", "been empty",
       "vacant for", "no tenants", "no one in it",
       "abandoned", "sitting vacant",
@@ -5268,6 +5269,19 @@ function resolveIntents(
       "techo nuevo",
     ]) ||
     (/\broof\b/i.test(text) && /\b(cost|costs|quote|estimate)\b/i.test(text))
+  ) {
+    intents.push("condition_disclosed");
+  }
+
+  // 12.4b OCCUPANCY: VACANT / ABSENTEE disclosure. A disclosed vacancy is a
+  // property fact that advances underwriting the same way tenancy and condition
+  // do (tenant_occupied already covers the OCCUPIED case). It is a strong buy
+  // signal, so route it to the autonomous condition/next-fact path instead of
+  // letting it fall to unclear -> review. Signal-anchored (vacant/empty/abandoned
+  // /absentee), and only wins as primary when no stronger intent is present.
+  if (
+    positive_signals.includes("vacant_property") ||
+    positive_signals.includes("absentee_owner")
   ) {
     intents.push("condition_disclosed");
   }
