@@ -55,6 +55,10 @@ const BOOT_FAST_SOURCE_CONFIG = {
 // Minimal columns verified on inbox_thread_state — PostgREST rejects the whole
 // select if any listed column is missing on a lagging production project.
 const BOOT_FAST_THREAD_FIELDS = [
+  "lifecycle_stage",
+  "lead_temperature",
+  "operational_status",
+  "is_archived",
   "thread_key",
   "seller_phone",
   "canonical_e164",
@@ -92,6 +96,12 @@ function compactBootThreadRow(row = {}) {
     conversation_thread_id: conversationThreadId,
     conversationThreadId,
     thread_key: threadKey,
+    // Canonical operator-editable state must survive boot compaction, otherwise a
+    // reopened thread renders the S1/unscored fallback over a persisted override.
+    lifecycle_stage: row.lifecycle_stage ?? null,
+    lead_temperature: row.lead_temperature ?? null,
+    operational_status: row.operational_status ?? null,
+    is_archived: row.is_archived === true,
     canonical_thread_key: row.canonical_thread_key || threadKey,
     canonical_e164: row.canonical_e164 || row.normalized_phone || null,
     normalized_phone: row.normalized_phone || row.canonical_e164 || null,
@@ -1455,6 +1465,18 @@ function toSupabaseBoolean(value) {
 }
 
 function applyInboxThreadStateBucketFilter(query, normalized) {
+  // Archived is its own terminal bucket: it is the ONLY filter that returns archived
+  // conversations, and every operational bucket excludes them. This mirrors the counts
+  // path (which already excludes is_archived) so list and counts agree.
+  if (normalized === "archived") {
+    return query.eq("is_archived", true);
+  }
+  // NOT a second .or() — several buckets below use .or() for their own membership, and
+  // stacking two or-clauses is fragile. `not is true` covers both false and NULL.
+  if (typeof query.not === "function") {
+    query = query.not("is_archived", "is", true);
+  }
+
   switch (normalized) {
     case "priority":
       query = query.eq("inbox_bucket", "priority");
@@ -1693,6 +1715,12 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
 }
 
 const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
+  "lifecycle_stage",
+  "lead_temperature",
+  "operational_status",
+  "is_archived",
+  "archive_scope",
+  "archived_at",
   "thread_key",
   "seller_phone",
   "canonical_e164",
@@ -1790,8 +1818,12 @@ function mapAuthoritativeInboxRow(row = {}) {
     reply_intent: row.last_intent,
     inbox_category: row.inbox_bucket,
     automation_lane: row.automation_lane,
-    conversation_stage: row.seller_stage || row.conversation_stage || null,
-    universal_stage: row.seller_stage || row.universal_stage || null,
+    lifecycle_stage: row.lifecycle_stage || row.seller_stage || row.conversation_stage || null,
+    lead_temperature: row.lead_temperature ?? null,
+    operational_status: row.operational_status || null,
+    is_archived: row.is_archived === true,
+    conversation_stage: row.lifecycle_stage || row.seller_stage || row.conversation_stage || null,
+    universal_stage: row.lifecycle_stage || row.seller_stage || row.universal_stage || null,
   };
 }
 
@@ -1940,6 +1972,11 @@ async function queryFastInboxThreadRows(params = {}, {
       .not("thread_key", "is", null)
       .neq("thread_key", "");
 
+    // "All Threads" means all NON-archived operational conversations.
+    if (typeof query.not === "function") {
+      query = query.not("is_archived", "is", true);
+    }
+
     if (params.direction && params.direction !== "all") {
       query = query.eq("latest_direction", normalizeDirection(params.direction));
     }
@@ -2036,7 +2073,7 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
 
   // Boot fast path only supports filter=all. Bucket tabs must use authoritative
   // inbox_thread_state SQL — returning empty here was blanking Priority/New Replies.
-  if (!advancedActive && (isInitialBoot || isFastBucket) && isAllFilter) {
+  if (!advancedActive && (isInitialBoot || isFastBucket) && isAllFilter && normalizedFilter !== "archived") {
     const bootResult = await queryFastInboxThreadRows(params, {
       supabase,
       limit,
@@ -2255,8 +2292,18 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
 
   if (unlinkedError) throw unlinkedError;
 
+  // Authoritative archived total — an exact head-count over the whole table, so the
+  // Archived chip is correct regardless of pagination.
+  const { count: archivedCount, error: archivedError } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key", { count: "exact", head: true })
+    .eq("is_archived", true);
+
+  if (archivedError) throw archivedError;
+
   counts.all = Number(allCount || 0);
   counts.unlinked = Number(unlinkedCount || 0);
+  counts.archived = Number(archivedCount || 0);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
@@ -2270,6 +2317,26 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   counts.waiting_on_seller = counts.waiting;
 
   return counts;
+}
+
+/**
+ * The pre-aggregated count view has no archived column, so the Archived chip rendered 0
+ * even with archived rows present. This attaches an exact, authoritative archived total
+ * (a single head-count over the whole table — never a loaded page length) to whichever
+ * counts payload we return.
+ */
+async function attachAuthoritativeArchivedCount(supabase, counts) {
+  try {
+    const { count, error } = await supabase
+      .from("inbox_thread_state")
+      .select("thread_key", { count: "exact", head: true })
+      .eq("is_archived", true);
+    if (error) throw error;
+    return { ...counts, archived: Number(count || 0) };
+  } catch (error) {
+    console.warn("[INBOX_ARCHIVED_COUNT_FAILED]", error?.message || error);
+    return counts;
+  }
 }
 
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
@@ -2290,7 +2357,7 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
 
         const row = Array.isArray(data) ? data[0] : null;
         if (row && hasConcreteCountRow(row)) {
-          const counts = countFromRow(row);
+          const counts = await attachAuthoritativeArchivedCount(supabase, countFromRow(row));
           console.log("[INBOX_COUNTS_UPDATED]", counts);
           return {
             counts,
@@ -2364,9 +2431,11 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const wantsMap = bool(params.map);
   const skipCounts = bool(params.skip_counts) || fastBucketMode || initialBootSafeMode || deps.skipCounts === true || options.skipCounts === true;
   const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootSafeMode || options.skipDelivery === true;
-  // Keep linked-context hydration on bucket tab switches so list rows show owner/address.
-  // Initial boot still skips it for sub-second first paint.
-  const skipLinkedContextHydration = initialBootMode || options.listOnly === true;
+  // Linked-context hydration is what puts owner name / property address / market onto a
+  // list row. Every list fetch must run it — including initial boot. Skipping it on boot
+  // meant a cold load painted phone-number rows with "No Address" and no Street View,
+  // and only an unrelated later fetch (bucket switch / auto refresh) repaired them.
+  const skipLinkedContextHydration = options.listOnly === true;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2399,15 +2468,14 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   });
   const threadQueryMs = elapsedMs(threadQueryStartedAt);
 
-  const bucketByThreadKey = initialBootMode
-    ? new Map()
-    : await fetchInboxBucketsByThreadKeys(
-      supabase,
-      (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
-    );
+  // Authoritative bucket resolution also runs on initial boot so the cold-load rows carry
+  // the same inbox_bucket/inbox_category as every later fetch.
+  const bucketByThreadKey = await fetchInboxBucketsByThreadKeys(
+    supabase,
+    (rawRows || []).map((row) => row.thread_key || row.canonical_thread_key),
+  );
   const rows = (rawRows || []).map((row) => {
     const normalized = normalizeThreadRow(row, params);
-    if (initialBootMode) return normalized;
     const threadKey = clean(normalized.thread_key || normalized.canonical_thread_key);
     const authoritativeBucket = threadKey ? bucketByThreadKey.get(threadKey) : null;
     const effectiveBucket = authoritativeBucket

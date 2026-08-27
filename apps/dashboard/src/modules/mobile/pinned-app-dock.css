@@ -33,7 +33,13 @@ html.is-mobile-layout {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    /* `position: fixed` resolves against the *layout* viewport. On iOS Safari
+       the layout viewport continues underneath the browser's own chrome, so a
+       plain `bottom: 0` is not the bottom of what the user can actually see.
+       --nx-vv-bottom-gap is that measured difference, and is 0 on every browser
+       that does not overlay its chrome — so this reads as "bottom of the
+       visible viewport" everywhere instead of only on desktop. */
+    bottom: var(--nx-vv-bottom-gap, 0px);
     z-index: 160;
     pointer-events: none;
     padding: 0 12px calc(4px + var(--nx-mobile-safe-bottom, 0px));
@@ -444,11 +450,17 @@ html.is-mobile-layout {
     height: 40px;
   }
 
-  /* Reserve bottom space for collapsed line or open dock — except fullscreen map */
+  /* Reserve bottom space for collapsed line or open dock — except fullscreen map.
+     .nx-stage is deliberately NOT in this list. The three shells below all render
+     *inside* .nx-stage (routes.tsx wraps every route in FullscreenAppShell), so
+     listing the stage as well applied the identical reservation twice in one box
+     chain. With a zero inset that reads as 2x32px and is easy to miss; on a
+     notched iPhone it is 2x(26+34+6) = 132px, which is what pushed app content
+     up off the bottom of the display and opened the dead band under the dock.
+     Clearance is owned by the scrolling app shell, once. */
   .nx-os.is-mobile-os .nx-premium-inbox,
   .nx-os.is-mobile-os .nx-fullscreen-app-shell,
-  .nx-os.is-mobile-os .nx-route-redirect-shell,
-  .nx-os.is-mobile-os .nx-stage {
+  .nx-os.is-mobile-os .nx-route-redirect-shell {
     padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
   }
 

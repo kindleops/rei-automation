@@ -4,6 +4,10 @@ import {
   resolveOutboundReplyState,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { isStaleExplicitInboxBucket } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
+import {
+  OPERATIONAL_STATUS_CODES,
+  normalizeOperationalStatus,
+} from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -619,6 +623,47 @@ export function resolveDispositionFromClassification(
   return existingState.disposition || null;
 }
 
+/**
+ * The missing `not_contacted` exit.
+ *
+ * `not_contacted` means "we have never exchanged a message on this thread". Any
+ * real message in either direction falsifies that. But nothing on the ordinary
+ * message path wrote `operational_status` — only the ownership-probe branch in
+ * `buildThreadStatePatchFromClassification` did — so threads stayed
+ * `not_contacted` indefinitely while `inbox_bucket` correctly flipped to
+ * `new_replies`. That disagreement is what surfaced on the Pipeline board:
+ * a lead reading "Not Contacted" with a visible seller reply.
+ *
+ * Deliberately narrow. It fires ONLY when the current status is still
+ * `not_contacted`, so it can never overwrite a status some other resolver
+ * legitimately advanced (waiting_on_seller, follow_up_due, paused, …).
+ *
+ * @returns the canonical status to move to, or null to leave the row alone.
+ */
+export function resolveContactTransition({ direction, messageEvent = {}, existingState = {} }) {
+  // An operator-set status is authoritative. `status_source === 'manual'` is the
+  // explicit signal; `manual_override` covers the older flag.
+  if (lower(existingState.status_source) === "manual") return null;
+  if (existingState.manual_override === true) return null;
+
+  const raw = clean(existingState.operational_status || existingState.conversation_status || "");
+  // An empty status is treated as not-yet-contacted, which is what the column
+  // defaults to; a populated one must normalize to not_contacted to qualify.
+  if (raw && normalizeOperationalStatus(raw) !== OPERATIONAL_STATUS_CODES.NOT_CONTACTED) return null;
+
+  const dir = lower(direction);
+  if (dir === "inbound") return OPERATIONAL_STATUS_CODES.NEW_REPLY;
+
+  if (dir === "outbound") {
+    // A send that never landed is not contact. Counting it would mark the lead
+    // contacted on the strength of a message the seller never received.
+    if (isFailedDeliveryStatus(messageEvent.delivery_status || messageEvent.provider_delivery_status)) return null;
+    return OPERATIONAL_STATUS_CODES.WAITING_ON_SELLER;
+  }
+
+  return null;
+}
+
 export function buildThreadStatePatchFromClassification({ messageEvent = {}, classification = {}, existingState = {}, now = Date.now() }) {
   const direction = clean(messageEvent.direction).toLowerCase();
   const is_inbound = direction === "inbound";
@@ -685,6 +730,11 @@ export function buildThreadStatePatchFromClassification({ messageEvent = {}, cla
     existingState,
     bucket,
   );
+
+  // Applied before the ownership-probe branch so that branch still wins when it
+  // fires — it carries a more specific status than "we have made contact".
+  const contactTransition = resolveContactTransition({ direction, messageEvent, existingState });
+  if (contactTransition) patch.operational_status = contactTransition;
 
   const ownershipProbeTransition = is_inbound
     ? resolveOwnershipProbeDisinterestTransition({ classification, messageEvent, existingState })

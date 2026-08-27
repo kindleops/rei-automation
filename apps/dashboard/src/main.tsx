@@ -10,10 +10,15 @@ import './styles/nx-glass-system.css'
 import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
 import { applyThemeToDOM } from './shared/settings'
+import { startViewportRuntime } from './modules/mobile/viewport-runtime'
 import App from './App.tsx'
 
 // Apply persisted theme+accent to <html> before React renders (prevents FOUC)
 applyThemeToDOM()
+
+// Publish the true visible viewport (--nx-vvh / --nx-vv-bottom-gap) before first
+// paint so the shell and the bottom dock never lay out against a stale height.
+startViewportRuntime()
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   let reloadScheduled = false

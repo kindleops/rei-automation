@@ -37,6 +37,7 @@ import {
   transitionCampaignStatus,
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
+import { normalizePhone, isValidUsPhone } from '@/lib/utils/phones.js'
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import {
@@ -2040,6 +2041,7 @@ const FULL_REACH_PHONE_SELECT = [
 ].join(',')
 const FULL_REACH_GRAPH_FILTER_COLUMNS = Object.freeze({
   'properties.property_id': 'property_id',
+  'properties.master_owner_id': 'master_owner_id',
   'properties.property_address_city': 'property_address_city',
   'properties.property_state': 'property_state',
   'properties.property_address_state': 'property_state',
@@ -3475,6 +3477,8 @@ const CAMPAIGN_TARGET_GRAPH_SELECT = [
   'last_inbound_at',
   'routing_tier',
   'identity_alignment',
+  // Canonical seller person/entity key — the identity readiness now gates on.
+  'seller_person_key',
   'acquisition_score',
   'podio_tags',
   'matching_flags',
@@ -3836,8 +3840,27 @@ function applyCampaignGraphLegacyFilters(query, filters = {}) {
   return query
 }
 
+/**
+ * True when the operator's own filter set already constrains market.
+ *
+ * options.market is a LEGACY single-market scope derived from
+ * firstArrayValue(mergedFilters.markets). When the catalog filters already carry
+ * an explicit market condition, additionally applying .eq('market', firstMarket)
+ * INTERSECTS with it and silently collapses a multi-market campaign to its first
+ * market: a 4-market slice previewed 11,756 (Miami alone) instead of 22,632,
+ * while the UI correctly showed all four selected. The preview must not narrow
+ * an audience the operator did not narrow.
+ */
+function catalogFiltersConstrainMarket(options = {}) {
+  const supported = options.catalog_filters?.supported || []
+  return supported.some((filter) => {
+    const key = clean(filter?.field_key || filter?.key).toLowerCase()
+    return key === 'properties.market' || key.endsWith('.market') || key === 'market'
+  })
+}
+
 function applyCampaignGraphFilters(query, options = {}, warnings = [], { requireQueueEligible = false } = {}) {
-  if (options.market) query = query.eq('market', options.market)
+  if (options.market && !catalogFiltersConstrainMarket(options)) query = query.eq('market', options.market)
   if (options.state) query = query.eq('state', normalizeState(options.state))
   query = applyCampaignGraphLegacyFilters(query, options.filters || {})
   for (const filter of options.catalog_filters?.supported || []) {
@@ -3956,7 +3979,9 @@ async function countAddressableProperties({ supabase, options }) {
   let query = supabase
     .from('properties')
     .select('property_id', { count: 'exact', head: true })
-  if (options.market) query = query.eq('market', options.market)
+  // Same legacy single-market narrowing as applyCampaignGraphFilters — skip it
+  // when the operator's filters already express market.
+  if (options.market && !catalogFiltersConstrainMarket(options)) query = query.eq('market', options.market)
   if (options.state) query = query.eq('property_address_state', normalizeState(options.state))
 
   let approximate = false
@@ -3978,7 +4003,193 @@ async function countAddressableProperties({ supabase, options }) {
   return { ok: true, count: Number(count || 0), approximate, warnings: [] }
 }
 
+// --- Sender coverage truth ---------------------------------------------------
+// campaign_target_graph.sender_covered is written by the refresh pipeline under
+// `health_safe_exact_then_approved_state_fallback`, and in practice it is set on
+// rows whose market AND state have no provisioned sender at all (measured
+// 2026-08-24: 44,091 of the 78,678 "routable" rows). Trusting the column
+// overstates the sendable audience by ~56%, so coverage is re-derived at read
+// time from the live sender inventory instead.
+//
+// Tiers, in precedence order:
+//   exact          - a usable sender exists in the row's own market
+//   state_fallback - no sender in-market, but one exists elsewhere in the state
+//                    (permitted while allow_regional_fallback_for_first_touch)
+//   uncovered      - no sender in market or state; NOT sendable
+const SENDER_UNUSABLE_STATUSES = Object.freeze(['disabled', 'inactive', 'failed', 'blocked', 'retired'])
+
+function stateFromSenderMarket(market) {
+  const match = /,\s*([A-Za-z]{2})\s*$/.exec(clean(market))
+  return match ? match[1].toUpperCase() : null
+}
+
+/**
+ * Live canonical routing verdict per market, straight from
+ * resolve_campaign_safe_sender_route() via campaign_preview_sender_route_map().
+ *
+ * Replaces the old inventory-derived guess, which treated "a live number exists
+ * in this market" as exact coverage and "a live number exists somewhere in the
+ * SAME state" as fallback coverage. That is not our routing policy — ours is the
+ * approved CROSS-STATE table — so a market served entirely by an approved
+ * out-of-state sender was reported as uncovered and could not be launched.
+ */
+async function loadCanonicalSenderRouteMap(supabase) {
+  const { data, error } = await supabase.rpc('campaign_preview_sender_route_map')
+  if (error) {
+    return {
+      ok: false,
+      unroutedMarkets: [],
+      coveredMarkets: 0,
+      warnings: [`canonical_sender_route_map_unavailable:${errorMessage(error)}`],
+    }
+  }
+  // The map is keyed by (market, state), and the graph contains rows where a
+  // market is paired with the wrong state — 'Philadelphia, PA' also appears with
+  // state 'GA'. Collapsing to market level naively let that one uncovered pair
+  // mark the whole market unrouted, which zeroed a market that routes fine.
+  // A market only counts as unrouted when EVERY pair for it is uncovered; the
+  // per-row routing_tier column still resolves each individual row correctly.
+  const coveredByMarket = new Map()
+  for (const row of data || []) {
+    const market = clean(row.market)
+    if (!market) continue
+    const covered = row.sender_covered === true
+    coveredByMarket.set(market, (coveredByMarket.get(market) || false) || covered)
+  }
+  const unroutedMarkets = []
+  let coveredMarkets = 0
+  for (const [market, covered] of coveredByMarket) {
+    if (covered) coveredMarkets += 1
+    else unroutedMarkets.push(market)
+  }
+  return { ok: true, unroutedMarkets, coveredMarkets, warnings: [] }
+}
+
+async function loadSenderCoverageScope(supabase) {
+  const { data, error } = await supabase
+    .from('textgrid_numbers')
+    .select('market,phone_number,status')
+  if (error) {
+    return {
+      ok: false,
+      markets: [],
+      states: [],
+      warnings: [`sender_coverage_scope_unavailable:${errorMessage(error)}`],
+    }
+  }
+  const markets = new Set()
+  const states = new Set()
+  for (const row of data || []) {
+    if (!clean(row.phone_number)) continue
+    if (SENDER_UNUSABLE_STATUSES.includes(lower(row.status || 'active'))) continue
+    const market = clean(row.market)
+    if (!market) continue
+    markets.add(market)
+    const state = stateFromSenderMarket(market)
+    if (state) states.add(state)
+  }
+  return { ok: true, markets: [...markets], states: [...states], warnings: [] }
+}
+
+// Every non-ready row carries exactly one queue_block_reason, chosen by the
+// refresh pipeline's own precedence (no_phone > suppressed > prior_touch >
+// sender_coverage). The blockedCounts above are INDEPENDENT counts of the same
+// rows, so a row that is both suppressed and prior-touch is counted twice and the
+// chips never sum to the funnel drop. This returns the exclusive partition, which
+// does sum: ready + sum(reasons) == matched.
+//
+// Both are reported. Independent counts answer "how many rows are affected by X";
+// the exclusive partition answers "why is this row not going out". Presenting only
+// the first is what produced 'prior touch 4,888 / sender gap 2,258' against an
+// actual attribution of 4,742 / 1,817.
+// The exclusive partition written by refresh_campaign_target_graph_sender_coverage
+// (migration 20260824140000). Read-only mirror of the frozen operator-locked
+// precedence:
+//   missing_phone > wrong_number > non_sms_capable > suppressed
+//     > pending_prior_touch > active_queue_item > no_sender_coverage > ready
+//
+// The previous list was the PRE-BRIDGE vocabulary and still counted
+// 'sms_ineligible', a value the graph no longer writes. It therefore reported 0
+// for that bucket while every missing_phone and non_sms_capable row went
+// uncounted — for Miami, FL that silently dropped 2,672 of 11,756 rows and made
+// the partition fail to reconcile. Vendor DNC is metadata and never appears here.
+const EXCLUSIVE_BLOCK_REASONS = Object.freeze([
+  'missing_phone',
+  'wrong_number',
+  'non_sms_capable',
+  'suppressed',
+  'pending_prior_touch',
+  'active_queue_item',
+  'no_sender_coverage',
+])
+
+// Canonical sender-routing tiers as written to campaign_target_graph.routing_tier.
+// Cross-state routing is normal healthy routing under the approved routing table,
+// not a warning condition.
+const CANONICAL_ROUTING_TIERS = Object.freeze([
+  'exact_market_match',
+  'approved_state_fallback',
+  'no_sender_route',
+])
+
+async function countCanonicalRoutingTiers({ supabase, options }) {
+  const results = await Promise.all(
+    CANONICAL_ROUTING_TIERS.map((tier) =>
+      countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('routing_tier', tier) })
+        .then((result) => [tier, result]),
+    ),
+  )
+  const counts = {}
+  const warnings = []
+  let ok = true
+  for (const [tier, result] of results) {
+    counts[tier] = result.count
+    if (result.ok === false) ok = false
+    warnings.push(...(result.warnings || []))
+  }
+  return { ok, counts, warnings }
+}
+
+async function countExclusiveBlockReasons({ supabase, options }) {
+  const results = await Promise.all(
+    EXCLUSIVE_BLOCK_REASONS.map((reason) =>
+      countCampaignGraphRows({ supabase, options, extra: (query) => query.eq('queue_block_reason', reason) })
+        .then((result) => [reason, result]),
+    ),
+  )
+  const counts = {}
+  const warnings = []
+  let ok = true
+  for (const [reason, result] of results) {
+    counts[reason] = result.count
+    if (result.ok === false) ok = false
+    warnings.push(...(result.warnings || []))
+  }
+  return { ok, counts, warnings }
+}
+
 async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueueEligibleRows = false }) {
+  const routeMap = await loadCanonicalSenderRouteMap(supabase)
+  // Clean = SMS-eligible, not suppressed, not a known wrong number. Coverage
+  // tiers partition this set using campaign_target_graph.routing_tier, which is
+  // written by refresh_campaign_target_graph_sender_coverage from the same
+  // authority — so preview, graph and queue cannot disagree about what "routed"
+  // means.
+  const applyClean = (query) => query
+    .eq('sms_eligible', true)
+    .eq('true_post_contact_suppression', false)
+    .eq('wrong_number', false)
+  // Freshness guard: markets the authority no longer routes LIVE are excluded
+  // even if the graph still records a tier for them, so a sender going dark
+  // between refreshes can never inflate launchable inventory. The set is small
+  // (markets with no route at all), so this stays a bounded filter.
+  const staleUnroutedMarkets = routeMap.ok ? routeMap.unroutedMarkets : []
+  const excludeUnrouted = (query) => (
+    staleUnroutedMarkets.length > 0
+      ? query.not('market', 'in', `(${staleUnroutedMarkets.map((m) => `"${m}"`).join(',')})`)
+      : query
+  )
+  const hasSenderScope = routeMap.ok
   const [
     total,
     linkedMasterOwners,
@@ -3995,6 +4206,12 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     pendingPriorTouch,
     activeQueue,
     noSenderCoverage,
+    senderExact,
+    senderStateFallback,
+    readyExact,
+    readyStateFallback,
+    exclusiveBlockReasons,
+    canonicalRoutingTiers,
     rows,
     addressable,
   ] = await Promise.all([
@@ -4025,6 +4242,43 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       options,
       extra: (query) => query.eq('sms_eligible', true).eq('true_post_contact_suppression', false).eq('wrong_number', false).eq('sender_covered', false),
     }),
+    // Coverage tiers re-derived from live sender inventory. When the inventory
+    // read fails we return null counts rather than silently falling back to the
+    // untrustworthy sender_covered column.
+    hasSenderScope
+      ? countCampaignGraphRows({
+        supabase,
+        options,
+        extra: (query) => excludeUnrouted(applyClean(query)).eq('routing_tier', 'exact_market_match'),
+      })
+      : Promise.resolve({ ok: false, count: null, warnings: routeMap.warnings }),
+    // Approved cross-state routing is normal, healthy routing — counted as
+    // covered exactly as the graph counts it, never treated as degradation.
+    hasSenderScope
+      ? countCampaignGraphRows({
+        supabase,
+        options,
+        extra: (query) => excludeUnrouted(applyClean(query)).eq('routing_tier', 'approved_state_fallback'),
+      })
+      : Promise.resolve({ ok: false, count: null, warnings: [] }),
+    hasSenderScope
+      ? countCampaignGraphRows({
+        supabase,
+        options,
+        requireQueueEligible: true,
+        extra: (query) => excludeUnrouted(query).eq('routing_tier', 'exact_market_match'),
+      })
+      : Promise.resolve({ ok: false, count: null, warnings: [] }),
+    hasSenderScope
+      ? countCampaignGraphRows({
+        supabase,
+        options,
+        requireQueueEligible: true,
+        extra: (query) => excludeUnrouted(query).eq('routing_tier', 'approved_state_fallback'),
+      })
+      : Promise.resolve({ ok: false, count: null, warnings: [] }),
+    countExclusiveBlockReasons({ supabase, options }),
+    countCanonicalRoutingTiers({ supabase, options }),
     fetchCampaignGraphRows({
       supabase,
       options,
@@ -4105,6 +4359,35 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
   checkMonotonic('sms_eligible', smsEligible.count, 'clean', cleanTargets.count)
   checkMonotonic('clean', cleanTargets.count, 'sender_covered', senderCovered.count)
 
+  // --- Truthful sender coverage ---------------------------------------------
+  // Reported coverage/readiness use the live-inventory tiers. The graph's own
+  // sender_covered / queue_eligible values are retained under *_graph_claimed so
+  // diagnostics can show the size of the overstatement.
+  const senderCoverageResolved = hasSenderScope && senderExact.ok !== false
+  const exactCount = senderCoverageResolved ? Number(senderExact.count || 0) : null
+  const stateFallbackCount = senderCoverageResolved ? Number(senderStateFallback.count || 0) : null
+  const routableCount = senderCoverageResolved ? exactCount + stateFallbackCount : senderCovered.count
+  const readyExactCount = senderCoverageResolved ? Number(readyExact.count || 0) : null
+  const readyStateFallbackCount = senderCoverageResolved ? Number(readyStateFallback.count || 0) : null
+  const readyCount = senderCoverageResolved
+    ? readyExactCount + readyStateFallbackCount
+    : readyToQueue.count
+  const uncoveredCount = senderCoverageResolved
+    ? Math.max(0, Number(cleanTargets.count || 0) - routableCount)
+    : noSenderCoverage.count
+  const senderCoverageWarnings = []
+  // Both sides now come from the same authority, so a gap means the graph has
+  // not been refreshed since sender inventory changed — a freshness signal, not
+  // a routing disagreement.
+  if (senderCoverageResolved && Number(senderCovered.count || 0) > routableCount) {
+    senderCoverageWarnings.push(
+      `sender_coverage_stale_vs_live_routing:graph_claimed=${senderCovered.count}:live_authority=${routableCount}:unrouted_markets=${staleUnroutedMarkets.length}`,
+    )
+  }
+  if (!senderCoverageResolved) {
+    senderCoverageWarnings.push('sender_coverage_unverified:falling_back_to_graph_sender_covered_column')
+  }
+
   return {
     ok: allResults.every((result) => result.ok !== false),
     warnings: uniqueClean([
@@ -4112,6 +4395,8 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       ...(addressable.warnings || []),
       ...addressableInvariantWarnings,
       ...invariantWarnings,
+      ...senderCoverageWarnings,
+      ...(canonicalRoutingTiers.warnings || []),
       ...(graphRefreshStatus.warnings || []),
     ]),
     graphRefreshStatus,
@@ -4124,8 +4409,45 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
     reachableContacts: reachableContacts.count,
     smsEligible: smsEligible.count,
     cleanTargets: cleanTargets.count,
-    senderCovered: senderCovered.count,
-    readyToQueue: readyToQueue.count,
+    senderCovered: routableCount,
+    readyToQueue: readyCount,
+    senderCoverage: {
+      resolved: senderCoverageResolved,
+      source: senderCoverageResolved
+        ? 'resolve_campaign_safe_sender_route'
+        : 'campaign_target_graph.sender_covered',
+      routed_markets: routeMap.coveredMarkets ?? null,
+      unrouted_markets: staleUnroutedMarkets.length,
+      exact: exactCount,
+      state_fallback: stateFallbackCount,
+      uncovered: uncoveredCount,
+      routable: routableCount,
+      ready_exact: readyExactCount,
+      ready_state_fallback: readyStateFallbackCount,
+      ready: readyCount,
+      graph_claimed_sender_covered: senderCovered.count,
+      graph_claimed_ready: readyToQueue.count,
+      // Canonical split straight off campaign_target_graph.routing_tier, over the
+      // same filtered set. The fields above are measured against LIVE sender
+      // inventory and are scoped to clean targets, so `uncovered` there is 0
+      // whenever every clean row routes; these account for the whole matched
+      // universe instead. Cross-state is healthy routing, not a warning.
+      canonical: {
+        ok: canonicalRoutingTiers.ok,
+        source: 'campaign_target_graph.routing_tier',
+        exact_market_match: canonicalRoutingTiers.counts.exact_market_match ?? null,
+        approved_state_fallback: canonicalRoutingTiers.counts.approved_state_fallback ?? null,
+        no_sender_route: canonicalRoutingTiers.counts.no_sender_route ?? null,
+        matched: matchedPropertyCount,
+        reconciles:
+          canonicalRoutingTiers.ok &&
+          CANONICAL_ROUTING_TIERS.reduce(
+            (sum, key) => sum + Number(canonicalRoutingTiers.counts[key] || 0),
+            0,
+          ) === matchedPropertyCount,
+      },
+    },
+    // Independent (overlapping) counts — "how many rows are affected by X".
     blockedCounts: {
       NO_PHONE: missingPhone.count,
       SMS_INELIGIBLE: smsBlocked.count,
@@ -4133,7 +4455,20 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
       wrong_number: wrongNumber.count,
       PENDING_PRIOR_TOUCH: pendingPriorTouch.count,
       ACTIVE_QUEUE_ITEM: activeQueue.count,
-      routing_blocked: noSenderCoverage.count,
+      routing_blocked: uncoveredCount,
+    },
+    // Exclusive partition — "why is this row not going out". Sums with ready to
+    // the matched total, so a waterfall built from it reconciles exactly.
+    exclusiveBlockReasons: {
+      ok: exclusiveBlockReasons.ok,
+      counts: exclusiveBlockReasons.counts,
+      ready: readyToQueue.count,
+      matched: matchedPropertyCount,
+      reconciles:
+        exclusiveBlockReasons.ok &&
+        Number(readyToQueue.count || 0) +
+          EXCLUSIVE_BLOCK_REASONS.reduce((sum, key) => sum + Number(exclusiveBlockReasons.counts[key] || 0), 0) ===
+          matchedPropertyCount,
     },
     rows: rows.rows || [],
   }
@@ -4168,9 +4503,23 @@ function graphDistributionCounts(rows = []) {
 // (evaluatePreSendEligibility -> isIdentityEligibleForLiveOutbound) so the
 // two layers cannot silently drift apart.
 function resolveCampaignTargetReadiness(row = {}) {
+  // Canonical identity contract (operator-locked 2026-08-26).
+  //
+  // seller.* owns identity/contact truth; campaign owns targeting/queue
+  // semantics. The seller schema's identity currency is individual_key +
+  // master_owner_id — it has no prospect_id/phone_id at all, so requiring those
+  // blocked 100% of the corpus on missing_identity_linkage. Requiring
+  // master_owner_id additionally capped readiness at the 22% of properties that
+  // happen to carry one.
+  //
+  // A recipient is identity-hydratable when it has canonical property identity,
+  // a canonical seller person/entity key, and a validated destination phone.
+  // master_owner_id is carried when available but must not gate. prospect_id /
+  // phone_id remain nullable legacy provenance.
   const hasLinkage = Boolean(
-    clean(row.master_owner_id) && clean(row.prospect_id || row.canonical_prospect_id) &&
-    clean(row.phone_id) && clean(row.canonical_e164)
+    clean(row.property_id) &&
+    clean(row.seller_person_key) &&
+    clean(row.canonical_e164)
   )
   const hasTimezone = Boolean(clean(row.timezone))
   const ambiguousPhone = Boolean(row.ambiguous_phone_ownership)
@@ -4196,7 +4545,9 @@ function resolveCampaignTargetReadiness(row = {}) {
 
 function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
+  // Legacy provenance only — carried when present, never required.
   const prospectId = clean(row.prospect_id || row.canonical_prospect_id) || null
+  const sellerPersonKey = clean(row.seller_person_key) || null
   const readiness = resolveCampaignTargetReadiness(row)
   return {
     campaign_id: campaignId,
@@ -4234,6 +4585,9 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
       graph_id: row.graph_id || null,
       graph_source: row.graph_source || CAMPAIGN_TARGET_GRAPH_TABLE,
       property_export_id: row.property_export_id || null,
+      // Canonical identity, carried onto the snapshot so reply attribution and
+      // seller navigation resolve without the legacy IDs.
+      seller_person_key: sellerPersonKey,
       prospect_id: row.prospect_id || null,
       canonical_prospect_id: row.canonical_prospect_id || null,
       sender_covered: Boolean(row.sender_covered),
@@ -4545,10 +4899,21 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const audienceFunnel = [
     { key: 'addressable', label: 'Addressable properties', count: graph.addressableProperties, approximate: Boolean(graph.addressableApproximate) },
     { key: 'matched_properties', label: 'Matched properties', count: graph.totalMatched },
-    { key: 'reachable', label: 'With reachable phone', count: graph.reachableContacts },
-    { key: 'sms_eligible', label: 'SMS-eligible', count: graph.smsEligible },
-    { key: 'clean', label: 'Clean (not suppressed / wrong number)', count: graph.cleanTargets },
-    { key: 'sender_covered', label: 'Sender-covered', count: graph.senderCovered },
+    // These are PROPERTY counts, not contact counts — one graph row is one
+    // property. Labels say so explicitly; the distinct-phone figure is reported
+    // separately under sender_coverage//reach rather than conflated here.
+    { key: 'reachable', label: 'Properties with a phone', count: graph.reachableContacts },
+    // Currently identical to `reachable` (sms_eligible is set iff a canonical
+    // phone exists), so it is flagged redundant and the UI collapses it rather
+    // than showing a funnel step that never deducts anything.
+    {
+      key: 'sms_eligible',
+      label: 'SMS-eligible',
+      count: graph.smsEligible,
+      redundant: Number(graph.smsEligible) === Number(graph.reachableContacts),
+    },
+    { key: 'clean', label: 'Compliant (not suppressed / wrong number)', count: graph.cleanTargets },
+    { key: 'sender_covered', label: 'Sender-covered (exact market + state fallback)', count: graph.senderCovered },
     { key: 'ready_to_queue', label: 'Ready to queue', count: graph.readyToQueue },
     { key: 'queueable_today', label: 'Queueable today', count: queueableToday },
   ]
@@ -4663,6 +5028,21 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
       cleanTargets: graph.cleanTargets,
       readyToQueue: graph.readyToQueue,
       queueableToday,
+    },
+    sender_coverage: graph.senderCoverage || null,
+    exclusive_block_reasons: graph.exclusiveBlockReasons || null,
+    // The universe -> matched step is a data-freshness loss, not a targeting
+    // decision: these properties exist but the target graph has not been rebuilt
+    // since they were imported. Named explicitly so the operator never sees an
+    // unattributed drop at the top of the funnel.
+    universe_gap: {
+      addressable: graph.addressableProperties,
+      in_target_graph: graph.totalMatched,
+      not_in_target_graph: Number.isFinite(Number(graph.addressableProperties))
+        ? Math.max(0, Number(graph.addressableProperties) - Number(graph.totalMatched || 0))
+        : null,
+      reason: 'campaign_target_graph_not_refreshed_since_import',
+      graph_generated_at: graphRefreshStatus.latest_generated_at || null,
     },
     addressable_properties: graph.addressableProperties,
     addressable_properties_approximate: Boolean(graph.addressableApproximate),
@@ -5398,6 +5778,41 @@ async function cancelPendingCampaignQueueRows(supabase, campaignId) {
   return data?.length || 0
 }
 
+/**
+ * A campaign's geography, derived from its own saved targeting filters.
+ *
+ * The campaign row has no market column — market is a targeting filter — and the
+ * list summary deliberately does not ship raw `metadata` to the client. Without
+ * this the mobile command screen showed "No market set" on every campaign, which
+ * is precisely the market-blindness that screen exists to remove.
+ * Falls back market -> state -> city.
+ */
+function deriveCampaignMarketLabel(campaign = {}) {
+  const groups = campaign?.metadata?.target_filters
+  const properties = Array.isArray(groups?.properties) ? groups.properties : []
+  if (!properties.length) return null
+
+  const pick = (suffix) => {
+    for (const row of properties) {
+      if (!row || typeof row !== 'object') continue
+      const key = String(row.fieldKey ?? row.field_key ?? '')
+      if (!key.endsWith(suffix)) continue
+      const raw = row.value
+      const list = Array.isArray(raw) ? raw : raw == null ? [] : [raw]
+      const cleaned = list.map((v) => String(v ?? '').trim()).filter(Boolean)
+      if (cleaned.length) return cleaned
+    }
+    return []
+  }
+
+  const values = pick('.market').length ? pick('.market')
+    : pick('property_address_state').length ? pick('property_address_state')
+    : pick('property_address_city')
+
+  if (!values.length) return null
+  return values.length === 1 ? values[0] : `${values[0]} +${values.length - 1}`
+}
+
 function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null, executionProof = null) {
   const status = clean(campaign.status || 'draft')
   const counts = countBucket?.statuses ? { ...countBucket.statuses } : {}
@@ -5426,6 +5841,7 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   return {
     id: campaign.id,
     campaign_name: campaign.name,
+    market_label: deriveCampaignMarketLabel(campaign),
     name: campaign.name,
     description: campaign.description,
     status,
@@ -5472,14 +5888,42 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   }
 }
 
+/**
+ * Execution proof for every campaign in the list.
+ *
+ * fetchCampaignExecutionProof issues 2 send_queue reads per campaign. Awaiting it
+ * inside a for-loop made 35 campaigns cost 70 SEQUENTIAL round-trips — measured
+ * 6,844ms of a 7,211ms request (95%), enough for the dashboard fetch to time out
+ * and render an empty campaign list.
+ *
+ * The per-campaign computation is unchanged; only the scheduling is. Concurrency
+ * is capped so a large campaign table cannot open an unbounded number of
+ * simultaneous connections against the pool.
+ */
+const EXECUTION_PROOF_CONCURRENCY = 8
+
 async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
   const proofByCampaign = new Map()
-  const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean)
-  if (!campaignIds.length) return proofByCampaign
+  const list = (campaigns || []).filter((campaign) => campaign?.id)
+  if (!list.length) return proofByCampaign
 
-  for (const campaign of campaigns) {
-    proofByCampaign.set(campaign.id, await fetchCampaignExecutionProof(supabase, campaign.id, campaign))
+  let cursor = 0
+  const worker = async () => {
+    for (;;) {
+      const index = cursor
+      cursor += 1
+      if (index >= list.length) return
+      const campaign = list[index]
+      proofByCampaign.set(
+        campaign.id,
+        await fetchCampaignExecutionProof(supabase, campaign.id, campaign),
+      )
+    }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(EXECUTION_PROOF_CONCURRENCY, list.length) }, worker),
+  )
   return proofByCampaign
 }
 
@@ -5497,14 +5941,19 @@ export async function listCampaigns(deps = {}) {
   let proofByCampaign = new Map()
   if (ids.length) {
     const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
-    countMap = await fetchCampaignTargetStatusCounts(ids, deps)
-    proofByCampaign = await fetchExecutionProofByCampaign(supabase, campaigns || [])
-    const windowRes = await supabase
-      .from('campaign_send_windows')
-      .select('*')
-      .in('campaign_id', ids)
-      .order('window_start_utc', { ascending: true })
-      .limit(1000)
+    // These three reads are independent; sequencing them added their latencies.
+    const [countsResult, proofResult, windowRes] = await Promise.all([
+      fetchCampaignTargetStatusCounts(ids, deps),
+      fetchExecutionProofByCampaign(supabase, campaigns || []),
+      supabase
+        .from('campaign_send_windows')
+        .select('*')
+        .in('campaign_id', ids)
+        .order('window_start_utc', { ascending: true })
+        .limit(1000),
+    ])
+    countMap = countsResult
+    proofByCampaign = proofResult
     if (!windowRes.error) windows = windowRes.data || []
   }
   const { deriveOperatorState, operatorStateLabel, operatorModeLabel } = await import('@/lib/domain/campaigns/campaign-operator-state.js')
@@ -5599,31 +6048,62 @@ export async function createCampaign(payload = {}, deps = {}) {
 
 export async function getCampaign(campaignId, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const { data: campaign, error } = await supabase.from('campaigns').select('*').eq('id', campaignId).single()
+  const startedAt = Date.now()
+  const phases = []
+  const timed = async (phase, run) => {
+    const t0 = Date.now()
+    try { return await run() } finally { phases.push({ phase, ms: Date.now() - t0 }) }
+  }
+
+  const { data: campaign, error } = await timed('campaign_row', () =>
+    supabase.from('campaigns').select('*').eq('id', campaignId).single())
   if (error) throw error
   const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
   const { computeCampaignRecipientMetrics } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
   const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
-  const countMap = await fetchCampaignTargetStatusCounts([campaignId], deps)
-  const [{ data: filters }, { data: windows }, { data: events }, recipientMetrics, launchReadiness] = await Promise.all([
-    supabase.from('campaign_filters').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: true }),
-    supabase.from('campaign_send_windows').select('*').eq('campaign_id', campaignId).order('window_start_utc', { ascending: true }).limit(200),
-    supabase.from('campaign_events').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(100),
-    computeCampaignRecipientMetrics(campaignId, deps),
-    evaluateCampaignLaunchReadiness(campaignId, deps),
+  const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
+
+  // Was four sequential stages: target-status counts, then a parallel block,
+  // then execution proof, then command summary — each waiting on the one before
+  // it despite none of them consuming the previous result. Only mapCampaignSummary
+  // needs them, and it needs all of them, so they are gathered in one pass.
+  const [
+    countMap,
+    { data: filters },
+    { data: windows },
+    { data: events },
+    recipientMetrics,
+    launchReadiness,
+    executionProof,
+    commandSummaryResult,
+  ] = await Promise.all([
+    timed('target_status_counts', () => fetchCampaignTargetStatusCounts([campaignId], deps)),
+    timed('filters', () => supabase.from('campaign_filters').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: true })),
+    timed('send_windows', () => supabase.from('campaign_send_windows').select('*').eq('campaign_id', campaignId).order('window_start_utc', { ascending: true }).limit(200)),
+    timed('events', () => supabase.from('campaign_events').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(100)),
+    timed('recipient_metrics', () => computeCampaignRecipientMetrics(campaignId, deps)),
+    timed('launch_readiness', () => evaluateCampaignLaunchReadiness(campaignId, deps)),
+    timed('execution_proof', () => fetchCampaignExecutionProof(supabase, campaignId, campaign)),
+    timed('command_summary', () => buildCampaignCommandSummary(campaignId, deps).catch((err) => ({ ok: false, error: err }))),
   ])
-  const executionProof = await fetchCampaignExecutionProof(supabase, campaignId, campaign)
+
+  console.log('[COCKPIT_TIMING] campaign-detail', {
+    route: 'campaign-detail',
+    campaign_id: campaignId,
+    totalMs: Date.now() - startedAt,
+    phases: phases.sort((a, b) => b.ms - a.ms),
+  })
   const summary = mapCampaignSummary(campaign, [], windows || [], countMap.get(campaignId) || null, executionProof)
   summary.recipient_metrics = recipientMetrics.ok ? recipientMetrics : null
   summary.launch_readiness = launchReadiness.ok ? launchReadiness.launch_readiness : 'unknown'
   summary.launch_blockers = launchReadiness.blockers || []
   summary.launch_blocker_codes = launchReadiness.blocker_codes || []
 
-  let commandSummary = null
+  // Already gathered above; the try/catch is retained so a malformed summary
+  // degrades the detail payload rather than failing the request.
+  let commandSummary = commandSummaryResult
   try {
-    const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
-    commandSummary = await buildCampaignCommandSummary(campaignId, deps)
-    if (commandSummary.ok) {
+    if (commandSummary && commandSummary.ok) {
       summary.operator_state = commandSummary.state
       summary.operator_state_label = commandSummary.state_label
       summary.mode = commandSummary.mode
@@ -6228,13 +6708,32 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     snapshot.owner_name,
     metadata.owner_name
   )
-  const languageRaw = firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English')
+  // 'auto' is a policy placeholder meaning "no explicit preference", not a
+  // language. campaign_target_graph.language is NULL on every row (the seller
+  // contact bridge does not populate it), so buildTargetSnapshotFromGraphRow
+  // writes 'auto' — which is truthy and therefore short-circuited this fallback
+  // chain, reaching resolveLanguage() as a literal language, failing as
+  // unsupported, and returning NO_TEMPLATE for 100% of campaign targets.
+  // Placeholders must fall through to the campaign policy and then English.
+  const LANGUAGE_PLACEHOLDERS = new Set(['auto', 'unknown', 'none', 'default', 'n/a'])
+  const explicitLanguage = (value) => {
+    const cleaned = clean(value)
+    return cleaned && !LANGUAGE_PLACEHOLDERS.has(cleaned.toLowerCase()) ? cleaned : ''
+  }
+  const languageRaw = firstNonEmpty(
+    explicitLanguage(target.language),
+    explicitLanguage(snapshot.language),
+    explicitLanguage(campaign.language_policy),
+    'English',
+  )
   const languageResolved = resolveLanguage(languageRaw)
   const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
   const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
   const propertyType = firstNonEmpty(snapshot.property_type, target.asset_type)
   return {
     master_owner_id: firstNonEmpty(target.master_owner_id, snapshot.master_owner_id),
+    // Canonical seller person/entity key — the identity queue hydration gates on.
+    seller_person_key: firstNonEmpty(metadata.seller_person_key, snapshot.seller_person_key),
     prospect_id: prospectId,
     canonical_prospect_id: firstNonEmpty(snapshot.canonical_prospect_id, prospectId),
     property_id: firstNonEmpty(target.property_id, snapshot.property_id),
@@ -6441,6 +6940,27 @@ function groupLaunchItemsByWindow(items = []) {
 }
 
 export function buildQueueRowForLaunch({ campaign, target, candidate, routing, rendered, scheduledFor, window, caps, input, noSend = false }) {
+  // QUEUE CONTRACT: to_phone_number is validated canonical US E.164 (+1XXXXXXXXXX)
+  // at persist time, never at send time.
+  //
+  // campaign_target_graph.canonical_e164 holds NATIONAL format (10 digits)
+  // despite its name, and this builder wrote it through verbatim — so every
+  // campaign queue row carried `7862825839` while every historically-sent row
+  // used `+17862825839`. Relying on provider-side normalization would leave the
+  // stored row non-canonical and make dedupe/attribution keys inconsistent.
+  //
+  // normalizePhone is shape-validated first, so an encrypted or alphanumeric
+  // value rejects closed rather than being salvaged into a plausible number.
+  const destinationE164 = normalizePhone(clean(candidate.canonical_e164))
+  if (!isValidUsPhone(destinationE164)) {
+    // Defensive: the plan loop already skips these per-row, so reaching here
+    // means a caller bypassed that gate. Fail closed rather than persist a
+    // non-canonical destination.
+    const err = new Error('INVALID_DESTINATION_PHONE: destination is not valid US E.164')
+    err.code = 'INVALID_DESTINATION_PHONE'
+    err.campaign_target_id = target?.id || null
+    throw err
+  }
   const scheduledDate = new Date(scheduledFor)
   const scheduledIso = scheduledDate.toISOString()
   const local = localScheduleSnapshot(scheduledDate, candidate.timezone || window.timezone)
@@ -6452,7 +6972,7 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
   const dedupeKey = buildSendQueueDedupeKey({
     master_owner_id: candidate.master_owner_id,
     property_id: candidate.property_id,
-    to_phone_number: candidate.canonical_e164,
+    to_phone_number: destinationE164,
     template_use_case: candidate.template_use_case || campaign.objective || 'ownership_check',
     touch_number: candidate.touch_number || 1,
     campaign_session_id: campaignSessionId,
@@ -6478,6 +6998,12 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     candidate_snapshot: candidateSnapshotForMetadata(candidate),
     target_snapshot: targetSnapshotForMetadata(target, candidate),
     campaign_target_metadata: metadataObject(target.metadata),
+    // Canonical seller identity carried graph -> targets -> send_queue, so reply
+    // attribution and seller navigation survive without legacy prospect/phone IDs.
+    seller_person_key: clean(
+      candidate.seller_person_key
+      || metadataObject(target.metadata).seller_person_key
+    ) || null,
     routing_snapshot: {
       selected_textgrid_number_id: senderId,
       selected_textgrid_number: senderNumber,
@@ -6536,7 +7062,7 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     message_body: messageBody,
     message_text: messageBody,
     rendered_message: messageBody,
-    to_phone_number: candidate.canonical_e164,
+    to_phone_number: destinationE164,
     from_phone_number: senderNumber,
     textgrid_number_id: senderId,
     textgrid_number: senderNumber,
@@ -6767,8 +7293,93 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     }
   }
 
+  /**
+   * Dry-run render prefetch (bounded concurrency).
+   *
+   * The plan loop awaits renderOutboundTemplate once per candidate at ~0.68s.
+   * Charlotte has an 85% lint-failure rate, so it must render ~410 candidates to
+   * find 50 schedulable — 4m40s serially, which makes the LAUNCH schedulability
+   * preflight unusable.
+   *
+   * Template selection is seeded by stableHash([stage_code, use_case, language,
+   * touch_number, thread_key, contact_id]) — a pure function of the candidate,
+   * not of call order — and a dry run writes nothing, so every render observes
+   * identical state regardless of when it executes. Rendering is therefore
+   * order-independent and safe to overlap.
+   *
+   * SEMANTICS ARE PRESERVED EXACTLY:
+   *   - the loop below still runs strictly sequentially, in the same order
+   *   - every skip/cap/dedup decision is made in the same sequence
+   *   - chooseTextgridNumber stays sequential, so sender rotation is unchanged
+   *   - the effective_limit break is unchanged, so the same candidates are chosen
+   *   - prefetched renders for candidates the loop never reaches are discarded
+   *     without recording a skip, so skipped_counts_by_reason is identical
+   *
+   * LIVE PATH IS UNTOUCHED: prefetch only engages when dryRun === true.
+   */
+  const PREFETCH_WIDTH = 40
+  const renderCache = new Map()
+  const routeCache = new Map()
+  // Prefetch applies to the live write too.
+  //
+  // Semantic equivalence was proven against the serial baseline (Charlotte:
+  // total_ready_targets 425, planned_target_count 50, skipped_counts_by_reason
+  // {TEMPLATE_RENDER_LINT_FAILURE: 360}, identical template/sender/routing
+  // distributions). Rendering and sender selection are pure functions of the
+  // candidate — template choice is seeded by stableHash([stage_code, use_case,
+  // language, touch_number, thread_key, contact_id]) and the campaign path
+  // passes no rotation_key — and neither performs writes, so overlapping them
+  // cannot change what is planned.
+  //
+  // Gating it to dry runs meant Schedule re-rendered serially after the operator
+  // tapped, taking minutes to confirm a set the preflight had already computed.
+  // The decision loop itself remains strictly sequential either way.
+  const prefetchEnabled = true
+
+  // Sender selection is deterministic for a dry run too: the campaign path
+  // passes no rotation_key, so rotateCandidate returns items[0], and the
+  // candidate sort is driven by sender utilisation the dry run never mutates.
+  // Per-sender / per-market CAP ACCOUNTING stays strictly sequential in the loop
+  // below — only the selection call itself is overlapped.
+  const primeWindow = (fromIndex) => {
+    if (!prefetchEnabled) return
+    for (let i = fromIndex; i < Math.min(fromIndex + PREFETCH_WIDTH, readyTargets.length); i += 1) {
+      const t = readyTargets[i]
+      const key = t?.id
+      if (!key || renderCache.has(key)) continue
+      let c
+      try { c = launchCandidateFromTarget(t, campaign) } catch { continue }
+      // Failures are captured, never thrown, so one bad candidate cannot reject
+      // the window; the loop re-awaits and handles it identically.
+      renderCache.set(key, renderOutboundTemplate(c, launchOptions, deps).catch(() => null))
+      routeCache.set(key, chooseTextgridNumber(c, launchOptions, deps).catch(() => null))
+    }
+  }
+
+  const renderFor = async (target, candidate) => {
+    if (prefetchEnabled && target?.id && renderCache.has(target.id)) {
+      const cached = await renderCache.get(target.id)
+      if (cached) return cached
+    }
+    return renderOutboundTemplate(candidate, launchOptions, deps)
+  }
+
+  const routeFor = async (target, candidate) => {
+    if (prefetchEnabled && target?.id && routeCache.has(target.id)) {
+      const cached = await routeCache.get(target.id)
+      if (cached) return cached
+    }
+    return chooseTextgridNumber(candidate, launchOptions, deps)
+  }
+
   let planLoopCounter = 0
+  let planIndex = -1
+  primeWindow(0)
   for (const target of readyTargets) {
+    planIndex += 1
+    // Keep the window filled ahead of the cursor so renders overlap the
+    // sequential decision work rather than blocking it.
+    primeWindow(planIndex + 1)
     if (plannedItems.length >= caps.effective_limit) break
     // Keep the execution lease alive across long planning passes (per-target
     // routing + template render are async and can exceed the lease TTL).
@@ -6781,16 +7392,30 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('missing_to_phone_number', target)
       continue
     }
-    if (!candidate.master_owner_id) {
-      recordSkip('missing_master_owner_id', target)
+    // Queue contract: the destination must already be valid US E.164 before the
+    // row is persisted. normalizePhone validates shape before extracting digits,
+    // so encrypted/alphanumeric values reject closed instead of being salvaged.
+    if (!isValidUsPhone(normalizePhone(phone))) {
+      recordSkip('invalid_destination_phone', target)
       continue
     }
-    if (!candidate.prospect_id) {
-      recordSkip('missing_prospect_id', target)
-      continue
-    }
-    if (!candidate.phone_id) {
-      recordSkip('missing_phone_id', target)
+    // Canonical identity contract (operator-locked 2026-08-26).
+    //
+    // This gate previously required master_owner_id AND prospect_id AND
+    // phone_id. Those are legacy public.phones concepts that do not exist in
+    // the seller schema at all, and master_owner_id covers only 22% of the
+    // corpus — so every campaign skipped 100% of its ready targets here with
+    // missing_prospect_id and hydrated zero queue rows, even after target
+    // readiness was migrated to canonical identity. Same legacy contract, one
+    // layer deeper.
+    //
+    // A recipient is hydratable with canonical property identity, a canonical
+    // seller person/entity key and a validated destination phone. The legacy
+    // IDs remain provenance and are still carried onto the queue row when
+    // present. Ownership/identity verification itself is unchanged and runs
+    // immediately below via evaluatePreSendEligibility.
+    if (!candidate.seller_person_key) {
+      recordSkip('missing_canonical_identity', target)
       continue
     }
     // Canonical owner/identity verification — the same deterministic,
@@ -6851,7 +7476,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       }
     }
 
-    const routing = await chooseTextgridNumber(candidate, launchOptions, deps)
+    const routing = await routeFor(target, candidate)
     if (!routing.ok) {
       recordSkip(routing.reason_code || routing.routing_block_reason || 'routing_blocked', target, {
         routing_block_reason: routing.routing_block_reason || null,
@@ -6874,7 +7499,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       continue
     }
 
-    const rendered = await renderOutboundTemplate(candidate, launchOptions, deps)
+    const rendered = await renderFor(target, candidate)
     const templateId = renderedTemplateId(rendered)
     const messageBody = renderedMessageBody(rendered)
     if (!rendered.ok || !templateId || !messageBody) {
@@ -7196,12 +7821,15 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     template_missing: Number(skippedCounts.template_render_failed || 0),
     sender_missing: Number(skippedCounts.missing_selected_sender_number || 0) + Number(skippedCounts.routing_blocked || 0),
     outside_contact_window: Number(skippedCounts.schedule_window_full || 0),
-    blocked_identity: Number(skippedCounts.missing_master_owner_id || 0) + Number(skippedCounts.missing_prospect_id || 0),
+    blocked_identity: Number(skippedCounts.missing_canonical_identity || 0)
+      + Number(skippedCounts.missing_master_owner_id || 0)
+      + Number(skippedCounts.missing_prospect_id || 0),
     other_failed: Object.entries(skippedCounts)
       .filter(([key]) => ![
         'active_queue_row_exists', 'duplicate_phone_in_launch_batch', 'graph_suppression_or_queue_block',
         'prior_contacted_suppression', 'template_render_failed', 'missing_selected_sender_number',
-        'routing_blocked', 'schedule_window_full', 'missing_master_owner_id', 'missing_prospect_id',
+        'routing_blocked', 'schedule_window_full', 'missing_canonical_identity',
+        'missing_master_owner_id', 'missing_prospect_id',
       ].includes(key))
       .reduce((sum, [, count]) => sum + Number(count || 0), 0),
   }

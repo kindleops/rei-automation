@@ -3,6 +3,8 @@
  * Primary enrichment: inbox_threads_hydrated → properties → entity tables.
  */
 import { supabase } from '../supabase/client.js'
+import { normalizePhone as normalizePhoneE164 } from '../utils/phones.js'
+import { readThroughCache } from '../dashboard/ops-cache.js'
 import {
   normalizeAssetClass,
   normalizeMarket,
@@ -49,7 +51,8 @@ const PROPERTY_SELECT = [
   'sale_date', 'saleprice', 'document_type', 'last_sale_doc_type', 'recording_date', 'default_date',
   'total_loan_amt', 'total_loan_payment', 'tax_amt', 'tax_delinquent', 'active_lien',
   'lot_acreage', 'lot_square_feet', 'stories', 'avg_sqft_per_unit', 'beds_per_unit',
-  'assd_improvement_value', 'assd_land_value', 'assd_total_value',
+  'assd_improvement_value', 'assd_land_value', 'assd_total_value', 'assd_year',
+  'offer_vs_loan', 'market_status_value',
   'rehab_level', 'construction_type', 'air_conditioning', 'basement', 'exterior_walls',
   'floor_cover', 'garage', 'heating_fuel_type', 'heating_type', 'interior_walls', 'pool',
   'porch', 'patio', 'deck', 'driveway', 'roof_cover', 'roof_type', 'sewer', 'water', 'zoning',
@@ -269,6 +272,7 @@ function buildPropertySnapshot(propertyRow, hydrated, property) {
     total_loan_amount: num(pick(propertyRow?.total_loan_amt, hydrated?.total_loan_amt)),
     total_loan_payment: num(propertyRow?.total_loan_payment),
     tax_amount: num(propertyRow?.tax_amt),
+    tax_year: num(pick(propertyRow?.tax_year, hydrated?.tax_year)),
     repair_estimate: num(property?.repair_estimate),
     building_condition: property?.condition,
     last_sale_date: lastSaleDate,
@@ -296,8 +300,11 @@ function buildPropertyDetailGroups(propertyRow, hydrated, property) {
       assessed_improvement_value: num(propertyRow?.assd_improvement_value),
       assessed_land_value: num(propertyRow?.assd_land_value),
       assessed_total_value: num(propertyRow?.assd_total_value),
+      assessed_year: num(propertyRow?.assd_year),
       repair_estimate: num(property?.repair_estimate),
-
+      // 100%-populated plain-English summaries that were never projected.
+      debt_position: pick(propertyRow?.offer_vs_loan),
+      market_status: pick(propertyRow?.market_status_value),
     },
     sale_recording: {
       last_sale_date: pick(propertyRow?.sale_date),
@@ -515,26 +522,52 @@ async function selectNegotiationOpportunityRow({ threadKey, propertyId = null, a
   return rows.reduce((best, row) => (rank(row) > rank(best) ? row : best), rows[0])
 }
 
+/**
+ * `inbox_threads_hydrated` is a 193-column view whose DISTINCT ON CTEs run over
+ * the whole thread set, so a single-row lookup costs ~1.2s no matter how narrow
+ * the filter is. Two things follow:
+ *
+ *  1. The view keys threads in E.164 (`+16512603774`) while callers hand us the
+ *     `inbox_thread_state.thread_key` spelling, which is often bare digits
+ *     (`6512603774`). The bare key never matched, so every dossier build paid
+ *     for the thread_key lookup AND the property_id fallback — ~2.6s serial.
+ *     We now match on both spellings in one `in` filter.
+ *  2. The property_id fallback runs concurrently rather than after a miss, so
+ *     the stage costs one view materialization instead of two.
+ */
 async function queryHydratedThread({ thread_key, property_id }, abortSignal) {
-  if (thread_key) {
-    let query = supabase.from('inbox_threads_hydrated').select('*').eq('thread_key', thread_key).limit(1)
-    if (abortSignal) query = query.abortSignal(abortSignal)
+  // Progressive loading asks for the summary and the full dossier back to back,
+  // and both need this row. Memoizing it keeps the pair at one view
+  // materialization instead of two. `readThroughCache` also collapses the
+  // in-flight case, so concurrent summary+full share a single query.
+  //
+  // The loader deliberately ignores `abortSignal`: the promise is shared, so one
+  // caller aborting must not reject it for the other. It is a bounded read.
+  return readThroughCache(
+    `deal-dossier:hydrated:${clean(thread_key) || ''}:${clean(property_id) || ''}`,
+    15_000,
+    () => loadHydratedThread({ thread_key, property_id }),
+  )
+}
+
+async function loadHydratedThread({ thread_key, property_id }) {
+  const key = clean(thread_key)
+  const e164 = key ? normalizePhoneE164(key) : ''
+  const keyCandidates = [...new Set([key, e164].filter(Boolean))]
+
+  const runQuery = async (build) => {
+    const query = build(supabase.from('inbox_threads_hydrated').select('*')).limit(1)
     const { data, error } = await query
-    if (!error) {
-      const row = Array.isArray(data) ? data[0] : data
-      if (row) return row
-    }
+    if (error) return null
+    return (Array.isArray(data) ? data[0] : data) || null
   }
-  if (property_id) {
-    let query = supabase.from('inbox_threads_hydrated').select('*').eq('property_id', property_id).limit(1)
-    if (abortSignal) query = query.abortSignal(abortSignal)
-    const { data, error } = await query
-    if (!error) {
-      const row = Array.isArray(data) ? data[0] : data
-      if (row) return row
-    }
-  }
-  return null
+
+  const [byThreadKey, byPropertyId] = await Promise.all([
+    keyCandidates.length ? runQuery((q) => q.in('thread_key', keyCandidates)) : null,
+    property_id ? runQuery((q) => q.eq('property_id', property_id)) : null,
+  ])
+
+  return byThreadKey || byPropertyId || null
 }
 
 async function resolveIdentity({
@@ -1159,12 +1192,24 @@ export function buildBaselineScores(propertyRow, hydrated) {
   }
 }
 
-function buildConversationIntelligence(hydrated, acquisition, compliance) {
+const THREAD_WORKFLOW_SELECT =
+  'lifecycle_stage, operational_status, lead_temperature, is_starred, is_pinned, is_archived, ' +
+  'snoozed_until, snooze_reason, manual_stage_lock, manual_temperature_lock'
+
+function buildConversationIntelligence(hydrated, acquisition, compliance, workflowRow) {
   const fields = {
+    lifecycle_stage: pick(workflowRow?.lifecycle_stage),
+    operational_status: pick(workflowRow?.operational_status),
+    is_starred: workflowRow?.is_starred ?? hydrated?.is_starred ?? null,
+    is_pinned: workflowRow?.is_pinned ?? hydrated?.is_pinned ?? null,
+    is_archived: workflowRow?.is_archived ?? hydrated?.is_archived ?? null,
+    snoozed_until: pick(workflowRow?.snoozed_until),
+    manual_stage_lock: workflowRow?.manual_stage_lock ?? null,
+    manual_temperature_lock: workflowRow?.manual_temperature_lock ?? null,
     latest_intent: pick(hydrated?.reply_intent, hydrated?.latest_intent, hydrated?.detected_intent),
     reply_intent: pick(hydrated?.reply_intent),
     seller_state: pick(hydrated?.universal_stage, hydrated?.stage),
-    lead_temperature: pick(hydrated?.lead_temperature),
+    lead_temperature: pick(workflowRow?.lead_temperature, hydrated?.lead_temperature),
     sentiment: pick(hydrated?.sentiment, hydrated?.latest_sentiment),
     motivation_signal: pick(hydrated?.motivation_signal, hydrated?.structured_motivation_score),
     language: pick(hydrated?.best_language, hydrated?.language_preference),
@@ -1296,7 +1341,7 @@ function normalizeProperty(propertyRow, hydrated, location) {
     market: location.market,
     property_type: pick(propertyRow?.property_type, hydrated?.property_type),
     property_class: pick(propertyRow?.property_class, hydrated?.property_class),
-    normalized_asset_class: pick(propertyRow?.normalized_asset_class, propertyRow?.asset_class, hydrated?.property_class),
+    normalized_asset_class: pick(propertyRow?.normalized_asset_class, propertyRow?.asset_class),
     units: num(pick(propertyRow?.units_count, hydrated?.units_count)),
     bedrooms: num(pick(propertyRow?.total_bedrooms, hydrated?.total_bedrooms)),
     bathrooms: num(pick(propertyRow?.total_baths, hydrated?.total_baths)),
@@ -1537,6 +1582,30 @@ function buildDecisionSnapshot({ property, baseline, acquisition, buyerMarket, c
   }
 }
 
+/**
+ * Stage timer for the dossier build. Always collected (cost is a few Date.now()
+ * calls) so a slow profile can be explained from the response instead of a
+ * bisect: the route emits it as a `Server-Timing` header, and `debug=true`
+ * returns it in the body.
+ */
+function createStageTimer() {
+  const started = Date.now()
+  const stages = []
+  return {
+    async measure(name, run) {
+      const at = Date.now()
+      try {
+        return await run()
+      } finally {
+        stages.push({ stage: name, ms: Date.now() - at })
+      }
+    },
+    result() {
+      return { total_ms: Date.now() - started, stages }
+    },
+  }
+}
+
 export async function buildDealIntelligenceDossier({
   thread_key,
   property_id,
@@ -1547,9 +1616,11 @@ export async function buildDealIntelligenceDossier({
   summary_only = false,
   abortSignal,
 }) {
-  const hydrated = await queryHydratedThread({ thread_key, property_id }, abortSignal)
+  const timer = createStageTimer()
+  const hydrated = await timer.measure('hydrated_thread', () =>
+    queryHydratedThread({ thread_key, property_id }, abortSignal))
 
-  const identity = await resolveIdentity({
+  const identity = await timer.measure('resolve_identity', () => resolveIdentity({
     thread_key,
     property_id,
     prospect_id,
@@ -1557,7 +1628,17 @@ export async function buildDealIntelligenceDossier({
     canonical_e164,
     hydrated,
     abortSignal,
-  })
+  }))
+
+  // Negotiation state needs only the resolved identity, so it starts here and
+  // overlaps the core batch instead of trailing the whole build serially.
+  const negotiationPromise = identity.thread_key
+    ? timer.measure('negotiation_opportunity', () => selectNegotiationOpportunityRow({
+      threadKey: identity.thread_key,
+      propertyId: identity.property_id || null,
+      abortSignal,
+    }))
+    : Promise.resolve(null)
 
   const [
     propertyRow,
@@ -1567,7 +1648,8 @@ export async function buildDealIntelligenceDossier({
     phoneRow,
     acquisitionRow,
     suppressions,
-  ] = await Promise.all([
+    threadWorkflowRow,
+  ] = await timer.measure('core_batch', () => Promise.all([
     identity.property_id
       ? queryMaybe('properties', PROPERTY_SELECT, { property_id: identity.property_id }, abortSignal)
       : null,
@@ -1589,7 +1671,10 @@ export async function buildDealIntelligenceDossier({
     identity.canonical_e164
       ? supabase.from('sms_suppression_list').select('phone_number, reason, suppressed_at, suppression_type').eq('phone_number', identity.canonical_e164).then((r) => r.data || [])
       : [],
-  ])
+    identity.thread_key
+      ? queryMaybe('inbox_thread_state', THREAD_WORKFLOW_SELECT, { thread_key: identity.thread_key }, abortSignal)
+      : null,
+  ]))
 
   const location = resolveCanonicalLocation({ propertyRow, hydrated, identity })
   identity.zip = location.zip
@@ -1600,28 +1685,30 @@ export async function buildDealIntelligenceDossier({
 
   const property = normalizeProperty(propertyRow, hydrated, location)
 
-  const censusRow = !summary_only && location.zip
-    ? await queryMaybe(
+  const censusPromise = !summary_only && location.zip
+    ? timer.measure('census', () => queryMaybe(
       'census_geo_metrics',
       'geo_level,geoid,name,median_household_income,total_population,total_households,total_housing_units,vacancy_rate,renter_rate,owner_occupancy_rate,median_year_built,acquisition_pressure_score',
       { geo_level: 'zcta', geoid: location.zip },
       abortSignal,
-    )
-    : null
+    ))
+    : Promise.resolve(null)
 
   const propertySnapshot = buildPropertySnapshot(propertyRow, hydrated, property)
   const propertyDetail = summary_only ? null : buildPropertyDetailGroups(propertyRow, hydrated, property)
 
-  const [comps, buyerMarket, buyerMatches, activity] = summary_only
-    ? [
+  const [comps, buyerMarket, buyerMatches, activity, censusRow, opportunityRow] = summary_only
+    ? await Promise.all([
       { status: 'lazy', label: 'Open comps panel to load', records: [] },
       { status: 'lazy', label: 'Buyer market loads on expand', geographic_level_used: null, data_freshness: null },
       { status: 'lazy', label: 'Buyer matches load on expand', matched_buyer_count: 0, matched_buyers: [] },
       { status: 'lazy', label: 'Activity loads on expand', events: [] },
-    ]
+      censusPromise,
+      negotiationPromise,
+    ])
     : await Promise.all([
-      fetchCompsSection(property, location, propertyRow, abortSignal),
-      fetchBuyerGeoRollup({
+      timer.measure('comps', () => fetchCompsSection(property, location, propertyRow, abortSignal)),
+      timer.measure('buyer_market', () => fetchBuyerGeoRollup({
         zip: location.zip,
         county: location.county,
         market: location.market,
@@ -1629,15 +1716,19 @@ export async function buildDealIntelligenceDossier({
         city: location.city,
         normalized_asset_class: property.normalized_asset_class,
         property_type: property.property_type,
-      }, abortSignal),
-      identity.property_id ? fetchBuyerMatches(identity.property_id, abortSignal) : { status: 'market_pool_only', label: 'Market Buyer Pool', matched_buyer_count: 0, matched_buyers: [] },
-      fetchActivityTimeline({
+      }, abortSignal)),
+      identity.property_id
+        ? timer.measure('buyer_matches', () => fetchBuyerMatches(identity.property_id, abortSignal))
+        : { status: 'market_pool_only', label: 'Market Buyer Pool', matched_buyer_count: 0, matched_buyers: [] },
+      timer.measure('activity_timeline', () => fetchActivityTimeline({
         thread_key: identity.thread_key,
         canonical_e164: identity.canonical_e164,
         property_id: identity.property_id,
         hydrated,
         abortSignal,
-      }),
+      })),
+      censusPromise,
+      negotiationPromise,
     ])
 
   const acquisition = normalizeAcquisitionDecision(acquisitionRow)
@@ -1653,17 +1744,10 @@ export async function buildDealIntelligenceDossier({
     is_suppressed: Array.isArray(suppressions) && suppressions.length > 0,
   }
   const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164, ownerRow, compliance)
-  const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance)
+  const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance, threadWorkflowRow)
 
   // Negotiation Intelligence (spec §15) — persisted negotiation state on the
-  // canonical deal record, projected read-only.
-  const opportunityRow = identity.thread_key
-    ? await selectNegotiationOpportunityRow({
-      threadKey: identity.thread_key,
-      propertyId: identity.property_id || null,
-      abortSignal,
-    })
-    : null
+  // canonical deal record, projected read-only. Resolved in the batch above.
   const negotiation_intelligence = buildNegotiationIntelligence(opportunityRow)
 
   const census = summary_only
@@ -1744,6 +1828,8 @@ export async function buildDealIntelligenceDossier({
         _metadata: DEAL_DOSSIER_SCHEMA,
       }
 
+  dossier._timings = timer.result()
+
   if (debug) {
     dossier.raw_sources_debug = {
       identity,
@@ -1815,7 +1901,7 @@ async function loadPropertyRowForEngine(propertyId, threadKey) {
       longitude: hydrated.longitude,
       property_type: hydrated.property_type,
       property_class: hydrated.property_class,
-      normalized_asset_class: hydrated.property_class,
+      normalized_asset_class: hydrated.normalized_asset_class || null,
       units_count: hydrated.units_count,
       total_bedrooms: hydrated.total_bedrooms,
       total_baths: hydrated.total_baths,

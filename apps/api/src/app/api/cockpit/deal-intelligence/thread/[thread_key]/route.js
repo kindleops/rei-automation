@@ -60,12 +60,22 @@ async function handleRequest(request, params, isPost = false) {
       summary_only: summaryOnly,
     }))
 
+    const timings = dossier?._timings
+    const headers = { ...cors }
+    if (timings) {
+      // Server-Timing so a slow open is explainable from the network panel
+      // (and from curl) without re-running the build with debug=true.
+      headers['Server-Timing'] = [
+        ...(timings.stages || []).map((s) => `${s.stage};dur=${s.ms}`),
+        `total;dur=${timings.total_ms}`,
+      ].join(', ')
+    }
     return NextResponse.json(
       {
         ok: true,
         data: dossier
       },
-      { status: 200, headers: cors }
+      { status: 200, headers }
     )
   } catch (error) {
     console.error('[DEAL_DOSSIER_ERROR]', error)

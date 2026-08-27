@@ -267,7 +267,10 @@ export async function findDueScheduledCampaigns(deps = {}) {
   const now = new Date().toISOString()
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id,name,status,scheduled_for,activation_attempt_count')
+    // batch_max / daily_cap / total_cap are required by
+    // buildScheduledActivationRequest — without them every scheduled activation
+    // silently fell back to a hardcoded batch of 5.
+    .select('id,name,status,scheduled_for,activation_attempt_count,batch_max,daily_cap,total_cap')
     .eq('status', 'scheduled')
     .lte('scheduled_for', now)
     .order('scheduled_for', { ascending: true })
@@ -286,7 +289,10 @@ export function buildScheduledActivationRequest(campaign = {}) {
     scheduled_for: scheduledFor,
     first_scheduled_at: scheduledFor,
     first_scheduled_at_utc: scheduledFor,
-    batch_max: campaign.batch_max ?? 5,
+    // A scheduled activation must hydrate the campaign's own configured batch,
+    // not a 5-row debug default. Falling back to 5 meant every campaign the
+    // scheduler activated sent five messages and looked "done".
+    batch_max: campaign.batch_max ?? campaign.daily_cap ?? campaign.total_cap ?? null,
     confirm_live: true,
     no_send: false,
   }

@@ -144,8 +144,8 @@
    ────────────────────────────────────────────────────────────────────────── */
 html {
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
   overflow: hidden;
   font-size: 16px;
 }
@@ -153,8 +153,8 @@ body {
   margin: 0;
   background: #000;
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -162,8 +162,8 @@ body {
 }
 #root {
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
 }
 a {
   color: inherit;
@@ -200,8 +200,8 @@ h3 { font-size: 0.8125rem; }
   gap: 0;
   padding: 0;
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
   min-height: 100dvh;
   overflow: hidden;
   position: relative;
@@ -4214,8 +4214,8 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
   overflow: hidden;
   position: relative;
   background: var(--ix-bg-base);
@@ -7058,8 +7058,8 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: -webkit-fill-available;
   height: 100dvh;
+  height: var(--nx-vvh, 100dvh);
 }
 .nx-buyer__body {
   display: grid;
@@ -9318,6 +9318,37 @@ components removed from render tree */
   animation: nx-toast-enter 320ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
 }
 .nx-toast.is-info { border-left: 3px solid var(--nexus-accent); }
+
+/* ── Mobile toast placement ────────────────────────────────────────────────
+   The base stack is pinned at a flat `top: 16px`, which on a handset puts it
+   underneath the status bar / Dynamic Island and behind the app's own top
+   chrome. There was no mobile override anywhere, so every surface inherited
+   that. This is the single shared correction — deliberately not per-app.
+
+   --nx-mobile-chrome-top already resolves to the top rail plus
+   env(safe-area-inset-top), so anchoring to it clears the Dynamic Island and
+   the global chrome in one term with no second safe-area addition. The stack
+   keeps its column direction, so multiple alerts continue to stack downward
+   rather than overlap, and each keeps its own dismiss control.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .nx-toasts {
+    top: calc(var(--nx-mobile-chrome-top, 50px) + 8px);
+    left: 8px;
+    right: 8px;
+    max-width: none;
+    /* Above the dock (160) and app chrome, below full-screen modals. */
+    z-index: 170;
+  }
+  .nx-toast {
+    gap: 8px;
+    padding: 9px 11px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
+  .nx-toast__title { font-size: 13px; }
+  .nx-toast__detail { font-size: 11.5px; }
+}
 .nx-toast.is-success { border-left: 3px solid #2cb87a; }
 .nx-toast.is-warning { border-left: 3px solid #d89530; }
 .nx-toast.is-critical { border-left: 3px solid #d4404c; }

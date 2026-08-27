@@ -5,7 +5,14 @@
 
 :root {
   --nx-mobile-safe-top: env(safe-area-inset-top, 0px);
-  --nx-mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Clamped on purpose. The physical bottom inset on every iPhone is the 34px
+     home indicator; anything larger reported by `env()` is the browser
+     reserving room for its own chrome (iOS Safari's bottom address bar), not
+     device hardware. Honouring that inflated value is what pushed the dock far
+     above the display bottom and opened a dead band beneath it. Clamping keeps
+     the real hardware inset and refuses the browser reservation, which is the
+     contract: intended visual margin + safe-area only. */
+  --nx-mobile-safe-bottom: min(env(safe-area-inset-bottom, 0px), 34px);
   /* Top command rail. Buttons stay 44px; only the chrome around them is trimmed. */
   --nx-dock-height: 44px;
   --nx-dock-pad-top: 1px;
@@ -446,7 +453,7 @@ html.is-mobile-layout {
 
   .nx-mobile-sheet.is-height-compact { max-height: 38vh; }
   .nx-mobile-sheet.is-height-half { max-height: 52vh; }
-  .nx-mobile-sheet.is-height-full { max-height: calc(100dvh - var(--nx-mobile-chrome-top) - var(--nx-mobile-safe-bottom) - 8px); }
+  .nx-mobile-sheet.is-height-full { max-height: calc(var(--nx-vvh, 100dvh) - var(--nx-mobile-chrome-top) - var(--nx-mobile-safe-bottom) - 8px); }
   .nx-mobile-sheet.is-height-auto { max-height: 62vh; }
 
   .nx-mobile-sheet__handle {
@@ -792,13 +799,18 @@ html.is-mobile-layout {
   .nx-os.is-mobile-os {
     display: flex !important;
     flex-direction: column !important;
-    height: 100dvh !important;
+    height: var(--nx-vvh, 100dvh) !important;
     min-height: 0 !important;
     overflow: hidden !important;
   }
 
   .nx-os.is-mobile-os .nx-stage {
-    flex: 1 1 auto !important;
+    /* Basis 0, not auto. With `auto` the basis is the content height, so a tall
+       route measured taller than the space available and the stage overflowed
+       the bottom of its parent instead of being bounded by it. Basis 0 makes the
+       stage exactly the free space left by the chrome above it. */
+    flex: 1 1 0% !important;
+    height: auto !important;
     min-height: 0 !important;
     display: flex !important;
     flex-direction: column !important;
@@ -806,7 +818,7 @@ html.is-mobile-layout {
   }
 
   .nx-os.is-mobile-os .nx-stage > * {
-    flex: 1 1 auto !important;
+    flex: 1 1 0% !important;
     min-height: 0 !important;
   }
 
@@ -816,13 +828,13 @@ html.is-mobile-layout {
     padding-top: var(--nx-mobile-chrome-top) !important;
   }
 
-  /* Bottom clearance is owned by ONE element. The dock reservation on .nx-stage /
-     .nx-premium-inbox (pinned-app-dock.css) already includes the home-indicator
-     inset, so the inbox shell must not add safe-bottom a second time — doing so
-     left a full safe-area band of dead black space under the list on notched
-     devices while headless/desktop viewports (inset 0) looked fine. */
+  /* Bottom clearance is owned by ONE element: the scrolling app shell inside the
+     stage (see pinned-app-dock.css). The stage itself reserves nothing, so it can
+     occupy the full height between the top chrome and the bottom of the viewport.
+     It previously added safe-bottom here *as well as* the dock reservation, which
+     was a second and third helping of the same inset. */
   .nx-os.is-mobile-os .nx-stage {
-    padding-bottom: var(--nx-mobile-safe-bottom) !important;
+    padding-bottom: 0 !important;
   }
 
   .nx-inbox-shell.is-mobile-inbox {
@@ -1542,9 +1554,9 @@ html.is-mobile-layout {
   .nx-os.is-mobile-os .nx-fullscreen-app-shell.is-view-command_map,
   .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-command_map {
     padding-bottom: 0 !important;
-    height: 100dvh !important;
-    min-height: 100dvh !important;
-    max-height: 100dvh !important;
+    height: var(--nx-vvh, 100dvh) !important;
+    min-height: var(--nx-vvh, 100dvh) !important;
+    max-height: var(--nx-vvh, 100dvh) !important;
     overflow: hidden !important;
   }
 
@@ -1854,7 +1866,7 @@ html.is-mobile-layout {
   }
 
   .nx-icm.is-mobile-map .nx-icm__controls-popover {
-    max-height: calc(100dvh - var(--nx-mobile-chrome-top) - 72px) !important;
+    max-height: calc(var(--nx-vvh, 100dvh) - var(--nx-mobile-chrome-top) - 72px) !important;
     width: calc(100vw - 20px) !important;
   }
 

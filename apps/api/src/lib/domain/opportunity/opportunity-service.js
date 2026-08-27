@@ -25,6 +25,8 @@ import {
 import { emitOpportunityWorkflowEvent } from '@/lib/domain/opportunity/opportunity-workflow-bridge.js';
 import { buildOpportunityActivityTimeline } from '@/lib/domain/opportunity/opportunity-activity-timeline.js';
 import { batchHydrateOpportunityProperties } from '@/lib/domain/opportunity/opportunity-property-hydration.js';
+import { hydrateCanonicalWorkflowState } from '@/lib/domain/opportunity/opportunity-canonical-state.js';
+import { isNewReplyLead } from '@/lib/domain/opportunity/new-reply-contract.js';
 import { applyRegistryFilters, applyRegistrySorts } from '@/lib/domain/opportunity/pipeline-query-builder.js';
 import { patchUniversalLeadState } from '@/lib/domain/lead-state/patch-universal-lead-state.js';
 import {
@@ -278,6 +280,8 @@ export async function listOpportunities(params = {}, deps = {}) {
   const hydrateFollowUpEnabled = truthy(params.hydrate_follow_up);
   const normalized = (data ?? []).map((raw) => normalizeOpportunityRow(raw)).filter(Boolean);
   let rows = await batchHydrateOpportunityProperties(client, normalized);
+  // Pipeline shows the same workflow truth as Inbox and Seller Detail.
+  rows = await hydrateCanonicalWorkflowState(client, rows);
   if (hydrateFollowUpEnabled) {
     const hydrated = [];
     for (const row of rows) {
@@ -300,6 +304,7 @@ export async function getOpportunityById(id, deps = {}) {
   if (!data) return null;
   let row = normalizeOpportunityRow(data);
   [row] = await batchHydrateOpportunityProperties(client, [row]);
+  [row] = await hydrateCanonicalWorkflowState(client, [row]);
   row = await hydrateFollowUp(client, row);
 
   const historyRes = await client
@@ -316,19 +321,25 @@ export async function getOpportunityById(id, deps = {}) {
 export async function getPipelineMetrics(params = {}, deps = {}) {
   const client = db(deps);
   let query = client.from(TABLE).select(
-    'id,acquisition_stage,universal_status,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker,acquisition_engine_run_id,temperature,last_activity_at',
+    // `primary_thread_key` is required to join canonical workflow state; without
+    // it the KPI could only see the opportunity's own drifted columns.
+    'id,primary_thread_key,acquisition_stage,universal_status,opportunity_status,conversation_state,workflow_state,latest_intent,next_action_due,stage_entered_at,aos,automation_state,blocker,acquisition_engine_run_id,temperature,last_activity_at',
   );
   query = applyFilters(query, params);
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = (data ?? []).map(normalizeOpportunityRow);
+  let rows = (data ?? []).map(normalizeOpportunityRow);
+  // Same canonical overlay the board reads, so the KPI counts the state the
+  // operator is actually looking at rather than a stale opportunity column.
+  rows = await hydrateCanonicalWorkflowState(client, rows);
   const now = Date.now();
   const metrics = {
     active_leads: 0,
     active_opportunities: 0,
     priority: 0,
     new_replies: 0,
+    new_replies_recent: 0,
     qualified: 0,
     offer_ready: 0,
     negotiating: 0,
@@ -370,6 +381,13 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
       metrics.active_opportunities += 1;
     }
     if (universalStatus === UNIVERSAL_STATUS_CODES.PRIORITY) metrics.priority += 1;
+    // `new_replies` is the canonical state contract shared with the mobile
+    // board — see `new-reply-contract.js`. The previous 7-day recency window
+    // reported 2 where the board showed 63, because a lead that replied nine
+    // days ago is still owed a reply. The recency figure is kept separately for
+    // anyone who wants "what came in this week".
+    if (isNewReplyLead(row)) metrics.new_replies += 1;
+
     const lastActivityMs = row.last_activity_at ? new Date(row.last_activity_at).getTime() : 0;
     const recentReplyWindowMs = 7 * 86400000;
     const isRecentReply = lastActivityMs > 0 && (Date.now() - lastActivityMs) <= recentReplyWindowMs;
@@ -377,7 +395,7 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
       row.conversation_state === 'needs_reply'
       || (row.conversation_state === 'seller_replied' && isRecentReply && !['dead', 'suppressed', 'archived'].includes(status))
     ) {
-      metrics.new_replies += 1;
+      metrics.new_replies_recent += 1;
     }
     if (stage === UNIVERSAL_STAGE_CODES.OFFER_INTEREST && ['active', 'waiting'].includes(status)) metrics.qualified += 1;
     if (stage === UNIVERSAL_STAGE_CODES.OFFER) {
