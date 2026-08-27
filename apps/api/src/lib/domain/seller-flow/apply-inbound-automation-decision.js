@@ -2061,6 +2061,23 @@ export async function executeInboundAutomationDecision({
         audit_reason: strategyDirective.reason_code || "negotiation_strategy_review",
       };
     } else if (clean(strategyDirective.template_use_case)) {
+      // A non-review strategy directive selected a concrete outbound template
+      // (e.g. OCCUPANCY_DISCOVERY -> occupancy_probe). For an immediate-send
+      // action this is an autonomous SEND, so it must AUTHORIZE the queue —
+      // otherwise should_queue_reply keeps the base intent value (false once
+      // ownership is already confirmed) and the send is silently dropped at the
+      // `!should_queue_reply` guard below, before the template selector runs.
+      // Review strategies are handled in the branch above; schedule_follow_up
+      // (FUTURE_NURTURE) intentionally defers to the follow-up scheduler and is
+      // NOT queued as an immediate reply here. Suppression/opt-out never reach
+      // this block (guarded by !should_suppress_contact), and every downstream
+      // gate (creation brake, auto_reply_mode scope, fail-closed template
+      // selection, V2 safety withhold) still applies.
+      const strategy_is_immediate_send = [
+        "send_message_now",
+        "generate_offer",
+        "collect_contract_facts",
+      ].includes(clean(strategyDirective.next_action));
       base_decision = {
         ...base_decision,
         route_hint: clean(strategyDirective.template_use_case),
@@ -2070,6 +2087,14 @@ export async function executeInboundAutomationDecision({
         ]).filter(Boolean),
         negotiation_strategy: strategyDirective.strategy || null,
         audit_reason: strategyDirective.reason_code || base_decision.audit_reason,
+        ...(strategy_is_immediate_send
+          ? {
+              should_queue_reply: true,
+              should_mark_human_review: false,
+              reply_mode: "auto",
+              next_action: "queue_auto_reply",
+            }
+          : {}),
       };
     }
   }
