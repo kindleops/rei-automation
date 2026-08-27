@@ -861,6 +861,13 @@ html.is-mobile-layout {
     padding-top: 0 !important;
   }
 
+  /* Map opts out of the top reservation entirely — it is full-bleed and the
+     chrome floats over it. Every other route keeps reserving normally. */
+  .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-stage,
+  .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-stage {
+    padding-top: 0 !important;
+  }
+
   /* Bottom clearance is owned by ONE element: the scrolling app shell inside the
      stage (see pinned-app-dock.css). The stage itself reserves nothing, so it can
      occupy the full height between the top chrome and the bottom of the viewport.
@@ -1612,9 +1619,17 @@ html.is-mobile-layout {
     background: transparent !important;
   }
 
+  /* Map is the deliberate full-bleed exception to the route shell.
+     This was inset from the top by --nx-mobile-chrome-top, which reserved the
+     rail *and* the iOS safe-area as solid app-owned space above the canvas —
+     the white band behind the status bar / Dynamic Island. Safe-area padding
+     belongs to interactive chrome, not to the map surface: the canvas now runs
+     edge to edge and the global top rail and the map toolbar float over it
+     (.nx-icm__toolbar already offsets itself by --nx-mobile-chrome-top, so the
+     controls still sit below the rail rather than under the status bar). */
   .nx-icm.is-mobile-map {
     position: fixed !important;
-    inset: var(--nx-mobile-chrome-top) 0 0 0 !important;
+    inset: 0 !important;
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;

@@ -30,6 +30,59 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
   const build = resolveBuildIdentity()
   const viewport = useBreakpoint()
 
+  // Resolved once on open: the manifest and service-worker scope have to be
+  // read asynchronously, and they are the two things that decide whether an
+  // installed icon launches standalone.
+  const [installInfo, setInstallInfo] = useState('resolving…')
+  useEffect(() => {
+    let live = true
+    const parts: string[] = [`host=${window.location.host}`]
+    const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
+    parts.push(`manifestLink=${link ? 'y' : 'n'}`)
+
+    const swScope = navigator.serviceWorker?.controller
+      ? 'controlled'
+      : navigator.serviceWorker
+        ? 'registered?'
+        : 'unsupported'
+
+    const finish = (extra: string[]) => {
+      if (!live) return
+      setInstallInfo([...parts, ...extra, `sw=${swScope}`, `sha=${build.gitSha}`].join(' · '))
+    }
+
+    void (async () => {
+      const extra: string[] = []
+      try {
+        const res = await fetch(link?.href || '/manifest.webmanifest', { credentials: 'include' })
+        extra.push(`manifest=${res.status}`, `ct=${(res.headers.get('content-type') || '?').split(';')[0]}`)
+        if (res.ok) {
+          const m = (await res.json()) as Record<string, unknown>
+          // start_url may legitimately carry a bypass param; show only its path
+          // and whether the bypass is present, never the token itself.
+          const start = String(m.start_url ?? '')
+          const [path, query = ''] = start.split('?')
+          extra.push(
+            `start=${path}`,
+            `bypass=${query.includes('x-vercel-protection-bypass') ? 'y' : 'n'}`,
+            `display=${String(m.display ?? '-')}`,
+            `scope=${String(m.scope ?? '-')}`,
+            `id=${String(m.id ?? '-')}`,
+          )
+        }
+      } catch {
+        extra.push('manifest=fetch-failed')
+      }
+      try {
+        const reg = await navigator.serviceWorker?.getRegistration()
+        if (reg) extra.push(`swScope=${new URL(reg.scope).pathname}`)
+      } catch { /* registration lookup is best-effort */ }
+      finish(extra)
+    })()
+
+    return () => { live = false }
+  }, [build.gitSha])
+
   useEffect(() => {
     return subscribeSettings(() => setTheme(loadSettings().nexusTheme))
   }, [])
@@ -95,6 +148,11 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
                 ].join(' · ')
               })()}
             </code>
+            {/* Install contract. If a Home-Screen icon opens in browser mode
+                this is what distinguishes "wrong host / wrong start_url" from
+                "standalone detection failed". */}
+            <span>Install</span>
+            <code>{installInfo}</code>
           </div>
         </div>
       </aside>
