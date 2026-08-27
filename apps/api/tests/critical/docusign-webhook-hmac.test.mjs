@@ -206,6 +206,16 @@ function buildWebhookDeps({
 } = {}) {
   const ledger = createInMemoryIdempotencyLedger();
   __setDocusignWebhookTestDeps({
+    // Lifecycle tests exercise the AUTHORIZED execution boundary (closing
+    // execution enabled) so signature propagation runs; the dormant containment
+    // behaviour is covered by docusign-webhook-containment.test.mjs.
+    featureFlags: {
+      ENABLE_AUTO_CONTRACT_SEND: true,
+      ENABLE_AUTO_TITLE_ROUTING: true,
+      ENABLE_AUTO_CLOSING_FLOW: true,
+      ENABLE_AUTO_TITLE_INTRO: true,
+      ENABLE_AUTO_BUYER_MATCH: true,
+    },
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,

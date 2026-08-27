@@ -794,6 +794,10 @@ function normalizeRecipient(recipient = {}, index = 0) {
     role_name: clean(recipient.role_name) || role,
     routing_order: clean(recipient.routing_order) || String(index + 1),
     recipient_type,
+    // Per-deal DocuSign tabs (prefilled text tabs for price/address/closing/EMD).
+    // A hosted server template carries only static values, so per-deal terms are
+    // injected as recipient tabs. Passed through verbatim when present.
+    tabs: recipient.tabs && typeof recipient.tabs === "object" ? recipient.tabs : null,
   };
 }
 
@@ -896,6 +900,7 @@ function buildEnvelopeDefinition({
         name: recipient.name,
         roleName: recipient.role_name || recipient.role,
         routingOrder: recipient.routing_order,
+        ...(recipient.tabs ? { tabs: recipient.tabs } : {}),
       })),
       customFields: custom_fields,
     };
@@ -909,6 +914,7 @@ function buildEnvelopeDefinition({
       recipientId: recipient.id,
       routingOrder: recipient.routing_order,
       roleName: recipient.role_name || recipient.role,
+      ...(recipient.tabs ? { tabs: recipient.tabs } : {}),
     }));
 
   const carbonCopies = normalized_recipients

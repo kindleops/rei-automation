@@ -146,6 +146,21 @@ export function __resetTextgridInboundTestDeps() {
   runtimeDeps = { ...defaultDeps };
 }
 
+// Containment invariant (made explicit). Podio BUSINESS writes — contract
+// creation, pipeline sync, brain creation, underwriting persistence — are
+// enabled ONLY when Podio sync is on AND the thread is NOT under seller-inbound
+// burst / internal-proof containment. Burst/proof mode DELIBERATELY suppresses
+// every Podio business write: an accepted offer in that mode advances lead
+// STATE but writes no contract record, so live contract/closing artifacts can
+// never originate from a contained proof run. This is the single rule behind
+// `podio_business_writes_enabled`; the contract-creation call site consumes it.
+export function resolvePodioBusinessWritesEnabled({
+  podio_sync_enabled = false,
+  seller_burst_enabled = false,
+} = {}) {
+  return Boolean(podio_sync_enabled) && !seller_burst_enabled;
+}
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -1198,7 +1213,10 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   // bounds, because a bare global assertion in that mode would admit any open
   // generation on the pinned thread — including one predating the session.
   let seller_burst_activation_scope = null;
-  let podio_business_writes_enabled = podio_sync_enabled && !seller_burst_enabled;
+  let podio_business_writes_enabled = resolvePodioBusinessWritesEnabled({
+    podio_sync_enabled,
+    seller_burst_enabled,
+  });
   const system_emergency_stop_at = await runtimeDeps.getSystemValue("queue_emergency_stop_at");
   const auto_reply_mode_resolution = isEmergencyStopActive(system_emergency_stop_at)
     ? { mode: "disabled", source: "queue_emergency_stop" }
@@ -2701,6 +2719,12 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
         existing_offer?.item_id ||
         null;
 
+      // Burst/proof containment (see resolvePodioBusinessWritesEnabled): under
+      // burst/internal-proof, `podio_business_writes_enabled` is false, so an
+      // accepted offer advances lead STATE but creates NO contract record —
+      // deliberate, so a contained proof run never emits a live closing artifact.
+      // Outside containment the DRAFT contract record is created but NOT sent
+      // (auto_send:false keeps live contract sending dormant).
       contract = podio_business_writes_enabled
         ? await runtimeDeps.maybeCreateContractFromAcceptedOffer({
             offer_item: existing_offer || null,
