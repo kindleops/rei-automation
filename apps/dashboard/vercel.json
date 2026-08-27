@@ -64,7 +64,7 @@
     },
     {
       "source": "/api/cockpit/health",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/health"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/health?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/campaigns",
@@ -84,91 +84,91 @@
     },
     {
       "source": "/api/cockpit/seller-automation",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/seller-automation"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/seller-automation?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/seller-automation/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/seller-automation/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/seller-automation/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/workflows",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/workflows"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/workflows?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/workflows/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/workflows/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/workflows/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/templates",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/templates"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/templates?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/templates/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/templates/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/templates/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/metrics",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/metrics"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/metrics?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/metrics/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/metrics/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/metrics/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/email",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/email"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/email?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/email/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/email/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/email/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/calendar",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/calendar"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/calendar?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/calendar/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/calendar/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/calendar/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/threads",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/threads"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/threads?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/threads/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/threads/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/threads/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/lead-state",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/lead-state"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/lead-state?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/lead-state/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/lead-state/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/lead-state/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/notifications",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/notifications"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/notifications?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/notifications/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/notifications/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/notifications/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/queue",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/queue"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/queue?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/queue/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/queue/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/queue/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/ops",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/ops"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/ops?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/ops/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/ops/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/ops/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/deal-intelligence",
@@ -180,11 +180,11 @@
     },
     {
       "source": "/api/cockpit/deal-context",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/deal-context"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/deal-context?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/deal-context/:path*",
-      "destination": "https://api-steel-three-96.vercel.app/api/cockpit/deal-context/:path*"
+      "destination": "https://api-o0nf9hieh-real-estate-automation.vercel.app/api/cockpit/deal-context/:path*?x-vercel-protection-bypass=dfEL0QhP0hRccAYT0LOluvLnDlqbTyBj"
     },
     {
       "source": "/api/cockpit/entity-graph",
