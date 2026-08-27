@@ -13,11 +13,11 @@
 .cmk {
   /* Four explicit levels. The previous ramp bottomed out at 0.30, so labels,
      units and no-data all collapsed into the same unreadable grey. */
-  --k-ink:     #f6f8fc;   /* L1 identity / live numbers        */
+  --k-ink:     var(--nx-text, #f6f8fc);   /* L1 identity / live numbers        */
   --k-ink-2:   rgba(228, 234, 246, 0.72);  /* L2 operational   */
   --k-ink-3:   rgba(228, 234, 246, 0.50);  /* L3 metadata      */
   --k-ink-4:   rgba(228, 234, 246, 0.32);  /* L4 no data       */
-  --k-rule:    rgba(148, 163, 184, 0.15);
+  --k-rule:    var(--nx-border, rgba(148, 163, 184, 0.15));
   --k-panel:   rgba(255, 255, 255, 0.038);
   --k-live:    #30d158;
   --k-hold:    #ff9f0a;
@@ -28,7 +28,7 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--k-ink);
   -webkit-font-smoothing: antialiased;
 }

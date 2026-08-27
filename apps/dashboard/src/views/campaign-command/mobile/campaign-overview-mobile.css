@@ -10,17 +10,17 @@
  */
 
 .cov {
-  --o-ink:   #f6f8fc;
+  --o-ink:   var(--nx-text, #f6f8fc);
   --o-ink-2: rgba(228, 234, 246, 0.72);
   --o-ink-3: rgba(228, 234, 246, 0.50);
   --o-ink-4: rgba(228, 234, 246, 0.32);
-  --o-rule:  rgba(148, 163, 184, 0.15);
+  --o-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --o-live:  #30d158;
   --o-hold:  #ff9f0a;
   --o-bad:   #ff453a;
   --o-pad:   16px;
 
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--o-ink);
   padding-bottom: 118px;     /* clears the action bar + the global dock */
 }
@@ -90,7 +90,7 @@
 .ccc--mobile-campaign-detail .ccc__detail-tabs--mobile,
 .ccc--mobile-campaign-detail .ccc-detail-tab-filter,
 .ccc--mobile-campaign-detail .ccc-detail-tab-filter .occ-liquid-filter__trigger {
-  background: #000;
+  background: var(--nx-bg, #000);
   background-image: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -100,7 +100,7 @@
 /* ── Kill the inherited panel chrome under the switcher ───────────────── */
 .ccc--mobile-campaign-detail .ccc__detail-body,
 .ccc--mobile-campaign-detail .ccc__detail-body--glass {
-  background: #000;
+  background: var(--nx-bg, #000);
   padding: 0;
   border: 0;
 }
@@ -172,7 +172,7 @@
    `.is-sticky` ties on specificity and lands later, so it has to be named. */
 .ccc--mobile-campaign-detail .ccc-mobile-detail-chrome,
 .ccc--mobile-campaign-detail .ccc-mobile-detail-chrome.is-sticky {
-  background: #000;
+  background: var(--nx-bg, #000);
   background-image: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;

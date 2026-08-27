@@ -8,10 +8,10 @@
   --bg-panel-solid: var(--nx-card-bg,       #0a0e17);
   --border:         var(--nx-border,        rgba(255,255,255,0.06));
   --border-strong:  var(--nx-border-strong, rgba(255,255,255,0.12));
-  --accent:         var(--nx-accent,        #3ecf8e);
+  --accent:         var(--nexus-accent, var(--nx-accent, #3ecf8e));
   --accent-soft:    rgba(62, 207, 142, 0.10);
-  --accent-blue:    #007aff;
-  --accent-blue-soft: rgba(0, 122, 255, 0.10);
+  --accent-blue:    var(--nexus-accent, #007aff);
+  --accent-blue-soft: rgba(var(--nexus-accent-rgb, 0, 122, 255), 0.10);
   --text-0:         var(--nx-text,          #f4f4f5);
   --text-1:         var(--nx-text-muted,    #a1a1aa);
   --text-2:         var(--nx-text-muted,    #71717a);
@@ -4965,10 +4965,10 @@
   --bg-panel-solid: #ffffff;
   --border:         #e2e8f0;
   --border-strong:  #cbd5e1;
-  --accent:         #007aff;
+  --accent:         var(--nexus-accent, #007aff);
   --accent-soft:    rgba(0, 122, 255, 0.10);
-  --accent-blue:    #007aff;
-  --accent-blue-soft: rgba(0, 122, 255, 0.10);
+  --accent-blue:    var(--nexus-accent, #007aff);
+  --accent-blue-soft: rgba(var(--nexus-accent-rgb, 0, 122, 255), 0.10);
   --text-0:         #000000;
   --text-1:         #475569;
   --text-2:         #636366;

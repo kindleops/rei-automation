@@ -20,11 +20,11 @@
  */
 
 .ccc--mobile-campaign-detail {
-  --d-ink:   #f6f8fc;
+  --d-ink:   var(--nx-text, #f6f8fc);
   --d-ink-2: rgba(228, 234, 246, 0.72);
   --d-ink-3: rgba(228, 234, 246, 0.50);
   --d-ink-4: rgba(228, 234, 246, 0.32);
-  --d-rule:  rgba(148, 163, 184, 0.15);
+  --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --d-hair:  rgba(148, 163, 184, 0.08);
   --d-live:  #30d158;
   --d-hold:  #ff9f0a;
@@ -340,7 +340,7 @@
  * Detail bands so it stops reading as a separate embedded dashboard.
  */
 .ccc--mobile-campaign-detail .ccc-exec {
-  background: #000;
+  background: var(--nx-bg, #000);
   border: 0;
   border-radius: 0;
   box-shadow: none;

@@ -19,29 +19,29 @@
      not inside that root, so an unresolved var() collapsed every band's gutter
      to zero and content sat flush against the screen edge. Same tokens, defined
      where the creator can see them. */
-  --d-ink:   #f6f8fc;
+  --d-ink:   var(--nx-text, #f6f8fc);
   --d-ink-2: rgba(228, 234, 246, 0.72);
   --d-ink-3: rgba(228, 234, 246, 0.50);
   --d-ink-4: rgba(228, 234, 246, 0.32);
-  --d-rule:  rgba(148, 163, 184, 0.15);
+  --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --d-hair:  rgba(148, 163, 184, 0.08);
   --d-live:  #30d158;
   --d-hold:  #ff9f0a;
   --d-bad:   #ff453a;
   --d-pad:   16px;
 
-  --c-ink:   #f6f8fc;
+  --c-ink:   var(--nx-text, #f6f8fc);
   --c-ink-2: rgba(228, 234, 246, 0.72);
   --c-ink-3: rgba(228, 234, 246, 0.50);
   --c-ink-4: rgba(228, 234, 246, 0.32);
-  --c-rule:  rgba(148, 163, 184, 0.15);
+  --c-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --c-hair:  rgba(148, 163, 184, 0.08);
   --c-live:  #30d158;
   --c-hold:  #ff9f0a;
   --c-pad:   16px;
 }
 
-.cbx { background: #000; color: var(--c-ink); }
+.cbx { background: var(--nx-bg, #000); color: var(--c-ink); }
 
 /* Campaign identity — a real field, not a boxed input. */
 .cbx__name {
@@ -268,7 +268,7 @@
   z-index: 1300;
   display: flex;
   flex-direction: column;
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--c-ink);
   animation: ccs-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -361,7 +361,7 @@
    subtitle about the field catalog, and the campaign-setup card was a rounded
    box above the first band. Both belong to the old creator. */
 .cmp-studio--mobile .cmp-studio-header {
-  background: #000;
+  background: var(--nx-bg, #000);
   border-bottom: 1px solid var(--d-rule);
   padding: 0 6px 0 var(--d-pad);
   min-height: 48px;
@@ -411,10 +411,10 @@
 .cmp-studio-overlay--mobile,
 .cmp-studio--mobile,
 .cmp-studio--mobile .cmp-studio-workspace {
-  background: #000;
+  background: var(--nx-bg, #000);
 }
 
-.cmp-studio--mobile .cmp-studio-content { padding: 0; background: #000; }
+.cmp-studio--mobile .cmp-studio-content { padding: 0; background: var(--nx-bg, #000); }
 
 /* ══ REACH ════════════════════════════════════════════════════════════════
  * The contraction is ONE CONNECTED SILHOUETTE. A single SVG polygon spans the
@@ -436,10 +436,10 @@
  *     cross-state is normal routing and must never look degraded.
  */
 .crx {
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--d-ink);
 
-  --crx-a: var(--nx-accent-rgb, 56, 189, 248);
+  --crx-a: var(--nexus-accent-rgb, var(--nx-accent-rgb, 56, 189, 248));
   --crx-warm: 226, 178, 134;
 }
 
@@ -777,10 +777,10 @@
  * cards, no vanity metric.
  */
 .clx {
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--d-ink);
 
-  --crx-a: var(--nx-accent-rgb, 56, 189, 248);
+  --crx-a: var(--nexus-accent-rgb, var(--nx-accent-rgb, 56, 189, 248));
 }
 
 .clx__answer {

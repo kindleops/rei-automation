@@ -9,17 +9,17 @@
  */
 
 .cdx {
-  --d-ink:   #f6f8fc;
+  --d-ink:   var(--nx-text, #f6f8fc);
   --d-ink-2: rgba(228, 234, 246, 0.72);
   --d-ink-3: rgba(228, 234, 246, 0.50);
   --d-ink-4: rgba(228, 234, 246, 0.32);
-  --d-rule:  rgba(148, 163, 184, 0.15);
+  --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --d-live:  #30d158;
   --d-hold:  #ff9f0a;
   --d-bad:   #ff453a;
   --d-pad:   16px;
 
-  background: #000;
+  background: var(--nx-bg, #000);
   color: var(--d-ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -262,13 +262,13 @@
 .ccc--mobile-campaign-detail .ccc-mobile-detail-chrome {
   padding: 0;
   border: 0;
-  background: #000;
+  background: var(--nx-bg, #000);
 }
 
 .ccc--mobile-campaign-detail .ccc__detail-panel--glass {
   padding: 0;
   border: 0;
-  background: #000;
+  background: var(--nx-bg, #000);
 }
 
 /* The page root keeps desktop padding and its own surface colour while a mobile
@@ -285,7 +285,7 @@
   flex-direction: column;
   padding: 0;
   gap: 0;
-  background: #000;
+  background: var(--nx-bg, #000);
   border: 0;
   overflow: hidden;
 }
