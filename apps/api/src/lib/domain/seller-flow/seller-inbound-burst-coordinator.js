@@ -790,6 +790,19 @@ export function createSellerInboundBurstCoordinator({
       process_error = err?.message || "process_failed";
     }
 
+    // Phase 11 (no silent dead-end): gate COMPLETED finalization on a genuinely
+    // successful orchestration. A top-level orchestration result that returns
+    // ok:false is unprocessable (e.g. a classification-contract failure) and
+    // must NOT finalize as a clean COMPLETED carrying no reply, review, or
+    // fallback. Fold it into the SAME process_error path so it inherits the
+    // existing bounded at-least-once retry and, on exhaustion, becomes a
+    // VISIBLE FAILED — no new error lifecycle. Scoped strictly to the top-level
+    // orchestration result's own `ok` flag; nested helper ok:false values
+    // inside the orchestrator are unaffected.
+    if (!process_error && orchestration && orchestration.ok === false) {
+      process_error = clean(orchestration.reason) || "orchestration_not_ok";
+    }
+
     // Re-check safety after processing (race: STOP arrived during claim).
     const openAfter = typeof burstStore.getOpen === "function"
       ? await burstStore.getOpen(burst.thread_key)
