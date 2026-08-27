@@ -2879,6 +2879,7 @@ const POSITIVE_SIGNAL_MAP = [
     phrases: [
       // English
       "vacant", "empty", "nobody living there", "no one lives there",
+      "nobody lives there", "nobody lives in it", "no one living",
       "no one there", "unoccupied", "sitting empty", "been empty",
       "vacant for", "no tenants", "no one in it",
       "abandoned", "sitting vacant",
@@ -4929,13 +4930,27 @@ function resolveIntents(
   // Conditional-sale language requires a sell/offer/price frame so bare hedges
   // ("maybe", "possibly") stay unclear via the short-utterance guard above.
   const conditional_sale_interest_re =
-    /\b(?:(?:i|we)\s+)?(?:might|may|could)\s+(?:sell|be\s+interested)|(?:i'?d|i\s+would|we\s+would|i'?ll|i\s+will)\s+consider\s+(?:selling|it)|(?:maybe|possibly)\s+(?:i|we|i'?d)\s+(?:would\s+)?(?:sell|consider)|for\s+the\s+right\s+price|if\s+the\s+(?:price|offer)\s+is\s+right|depends\s+on\s+(?:the\s+)?(?:price|offer)|open\s+to\s+(?:selling|an\s+offer|offers)|could\s+be\s+interested\b/i;
+    /\b(?:(?:i|we)\s+)?(?:might|may|could|mite)\s+(?:sell|be\s+interested)|(?:i'?d|i\s+would|we\s+would|i'?ll|i\s+will)\s+consider\s+(?:selling|it)|(?:maybe|possibly)\s+(?:i|we|i'?d)\s+(?:would\s+)?(?:sell|consider)|for\s+the\s+right\s+price|if\s+the\s+(?:price|offer)\s+is\s+right|depends\s+on\s+(?:the\s+)?(?:price|offer)|open\s+to\s+(?:selling|an\s+offer|offers)|could\s+be\s+interested\b/i;
   if (
     includesAny(text, [
-      "interested", "depends", "depending", "maybe", "possibly",
+      // Phrase-anchored conditional-sale interest only. Bare hedges ("maybe",
+      // "possibly", "depends", "depending") are intentionally excluded so they
+      // stay unclear -> clarifier rather than triggering an autonomous
+      // ask-price. The regex catches phrase and slang forms ("might/mite sell",
+      // "depends on the offer").
+      "interested",
       "if the price is right", "enough money", "make it worth it",
       "me interesa", "si el precio", "if the price",
-      "might sell", "may sell", "could sell", "consider selling",
+      "might sell", "mite sell", "may sell", "could sell", "consider selling",
+      "let go of", "let it go", "willing to let go",
+      // Re-engagement toward SELLING (sell-framed only): a warm reopen of the
+      // seller's own interest. Buyer-directed meta-questions ("you still
+      // buying?") are deliberately NOT here — they are a different intent and
+      // must not inflate into seller latent_interest. Bare direction-less
+      // "changed my mind" / "reconsidering" stay unclear -> clarifier (which
+      // way did they change?).
+      "reconsidering selling", "reconsider selling", "still open to selling",
+      "changed my mind about selling", "thinking about selling now",
       "for the right price", "depends on the offer", "depends on price",
     ]) ||
     conditional_sale_interest_re.test(text)
@@ -5262,6 +5277,19 @@ function resolveIntents(
       "techo nuevo",
     ]) ||
     (/\broof\b/i.test(text) && /\b(cost|costs|quote|estimate)\b/i.test(text))
+  ) {
+    intents.push("condition_disclosed");
+  }
+
+  // 12.4b OCCUPANCY: VACANT / ABSENTEE disclosure. A disclosed vacancy is a
+  // property fact that advances underwriting the same way tenancy and condition
+  // do (tenant_occupied already covers the OCCUPIED case). It is a strong buy
+  // signal, so route it to the autonomous condition/next-fact path instead of
+  // letting it fall to unclear -> review. Signal-anchored (vacant/empty/abandoned
+  // /absentee), and only wins as primary when no stronger intent is present.
+  if (
+    positive_signals.includes("vacant_property") ||
+    positive_signals.includes("absentee_owner")
   ) {
     intents.push("condition_disclosed");
   }
@@ -5654,6 +5682,13 @@ function computeHeuristicConfidence({
     // Intents
     ownership_confirmed: 0.90,
     seller_interested:  0.90,
+    // Conditional-sale interest is phrase-anchored (see the LATENT INTEREST
+    // detector: regex + explicit phrases; bare hedges excluded). Analogous to
+    // condition_disclosed / tenant_occupied so it clears the 0.82 autonomy gate
+    // and advances to ask-price instead of falling to human review. Safe to
+    // raise now that the staleness invariant is chronology-driven (a stale
+    // positive can no longer reopen automation regardless of confidence).
+    latent_interest:    0.85,
     asking_price_provided: 0.88,
     asks_offer:         0.88,
     info_request:       0.86,

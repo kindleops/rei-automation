@@ -43,6 +43,19 @@ function collapseWhitespace(value) {
     .trim();
 }
 
+// SMS style rule (permanent): no em dash (U+2014) or en dash (U+2013) ever
+// reaches a seller. Replace with a natural comma pause and tidy the resulting
+// punctuation. This is defense in depth at the final-body prep; authored
+// templates and code-authored SMS bodies are additionally validated dash-free
+// by test (no-em-dash-sms.test.mjs).
+function replaceLongDashes(value) {
+  return clean(value)
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/,\s*,/g, ", ")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*([.!?])/g, "$1");
+}
+
 export function sanitizeSmsTextValue(value) {
   let sanitized = value == null ? "" : String(value);
 
@@ -54,7 +67,7 @@ export function sanitizeSmsTextValue(value) {
     sanitized = next;
   }
 
-  return collapseWhitespace(sanitized);
+  return collapseWhitespace(replaceLongDashes(sanitized));
 }
 
 export function sanitizeSmsTextMap(input = {}) {
