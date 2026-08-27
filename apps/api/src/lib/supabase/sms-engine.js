@@ -2045,8 +2045,46 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
         ? "provider_blacklist_pair"
         : null);
 
-  const terminal_queue_status =
-    is_final_failure && !classified.retryable
+  // Same-stage transport failover: rotate to a DIFFERENT same-use_case template
+  // instead of blindly re-sending the identical body. A content-filter block
+  // re-blocks on the same body (it must never blind-retry), and other retryable
+  // transport failures benefit from an alternate. Rotation is intra-use_case, so
+  // the stage is preserved by construction. Only while attempts remain; if no
+  // distinct template renders we fall through to the existing terminal /
+  // same-body behavior. Idempotency is content-keyed, so the rotated body is a
+  // fresh key that still cannot duplicate the original blocked body.
+  const rotation_failure_class = classified.failure_class || normalized_failure.failure_class || null;
+  const rotation_eligible =
+    next_retry_count <= normalized.max_retries &&
+    (rotation_failure_class === "content_filter_blocked" || classified.retryable === true);
+  const tried_template_ids = [
+    ...(Array.isArray(normalized.metadata?.tried_template_ids)
+      ? normalized.metadata.tried_template_ids
+      : []),
+    clean(normalized.template_id || normalized.selected_template_id),
+  ].filter(Boolean);
+  let rotation = null;
+  if (rotation_eligible) {
+    try {
+      const { resolveRotationTemplate } = await import(
+        "@/lib/domain/queue/resolve-deferred-queue-message.js"
+      );
+      const result = await resolveRotationTemplate(normalized, {
+        excludeTemplateIds: tried_template_ids,
+        supabase: options.supabase || options.supabaseClient,
+      });
+      if (result?.resolved) rotation = result;
+    } catch (rotation_error) {
+      info("queue_failover_rotation_error", {
+        queue_id: normalized.id,
+        message: rotation_error?.message || "rotation_failed",
+      });
+    }
+  }
+
+  const terminal_queue_status = rotation
+    ? "queued"
+    : is_final_failure && !classified.retryable
       ? (classified.queue_disposition || "failed")
       : is_final_failure
         ? "failed"
@@ -2056,13 +2094,42 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     queue_status: terminal_queue_status,
     failed_reason: error_message,
     retry_count: next_retry_count,
-    next_retry_at: is_final_failure ? null : addMinutesIso(now, 5),
+    next_retry_at: rotation || !is_final_failure ? addMinutesIso(now, 5) : null,
     is_locked: false,
     locked_at: null,
     lock_token: null,
     updated_at: now,
+    ...(rotation
+      ? {
+          message_body: rotation.message_body,
+          message_text: rotation.message_body,
+          rendered_message: rotation.message_body,
+          template_id: rotation.template_id,
+          selected_template_id: rotation.template_id,
+          character_count: rotation.message_body.length,
+          // The blocked attempt already holds a provider SID (TextGrid accepted
+          // then filtered). Clear it so the SID idempotency short-circuit does
+          // not treat the rotated body as "already sent" and skip it.
+          provider_message_id: null,
+          textgrid_message_id: null,
+        }
+      : {}),
     metadata: {
       ...normalized.metadata,
+      ...(rotation
+        ? {
+            tried_template_ids,
+            rotated_from_template_id:
+              clean(normalized.template_id || normalized.selected_template_id) || null,
+            rotated_to_template_id: rotation.template_id,
+            blocked_provider_message_id: clean(normalized.provider_message_id) || null,
+            // Clear the metadata SID mirror too (the third source the send-time
+            // idempotency short-circuit reads) so the rotated body actually sends.
+            provider_message_sid: null,
+            same_stage_failover: true,
+            same_stage_failover_at: now,
+          }
+        : {}),
       provider_error: {
         message: error_message,
         status: error?.status || null,
