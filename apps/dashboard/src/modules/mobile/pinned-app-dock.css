@@ -464,6 +464,22 @@ html.is-mobile-layout {
     padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
   }
 
+  /* ...and only the OUTERMOST of them reserves. These shells nest — Pipeline
+     renders .nx-fullscreen-app-shell inside .nx-premium-inbox — so without this
+     the clearance is charged once per level again, which is the same 2x66px
+     that pushed content off the bottom of the display. Clearance is a property
+     of the screen, not of each shell that happens to wrap it. */
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-route-redirect-shell,
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-route-redirect-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell .nx-premium-inbox {
+    padding-bottom: 0 !important;
+  }
+
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-premium-inbox,
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-fullscreen-app-shell,
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-route-redirect-shell,
