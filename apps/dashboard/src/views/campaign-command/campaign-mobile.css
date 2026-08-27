@@ -554,3 +554,21 @@
 [data-nexus-theme='light'] .ccc-mobile-intel__tile {
   background: color-mix(in srgb, #ffffff 88%, transparent);
 }
+/* Creator entry point. Deliberately a labelled control rather than a sheet item:
+   opening an existing campaign's targeting is a primary job on mobile, and it
+   had no entry point at all before. */
+.ccc-mobile-dock__setup {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}

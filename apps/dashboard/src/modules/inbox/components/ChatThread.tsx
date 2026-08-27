@@ -655,7 +655,7 @@ export const ChatThread = ({
         onClick={() => onToggleArchive?.()}
       >
         <Icon name="archive" />
-        {withLabels && <span>{thread.isArchived ? 'Unarchive' : 'Archive'}</span>}
+        {withLabels && <span>{thread.isArchived ? 'Restore' : 'Archive'}</span>}
       </button>
     </>
   )

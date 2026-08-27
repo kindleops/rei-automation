@@ -1,0 +1,540 @@
+/*
+ * Campaign Command — mobile, 393pt.
+ *
+ * Lead Command family: true black, tracked caps for system labels, dense
+ * operational rows, accent used only where it carries state.
+ *
+ * The critical structural rule: the KPI rail, the inventory ladder and the
+ * market strip are ONE panel with internal rules — not three stacked cards.
+ * Stacking them as separate rounded boxes is what made earlier versions read as
+ * a SaaS dashboard.
+ */
+
+.cmk {
+  /* Four explicit levels. The previous ramp bottomed out at 0.30, so labels,
+     units and no-data all collapsed into the same unreadable grey. */
+  --k-ink:     #f6f8fc;   /* L1 identity / live numbers        */
+  --k-ink-2:   rgba(228, 234, 246, 0.72);  /* L2 operational   */
+  --k-ink-3:   rgba(228, 234, 246, 0.50);  /* L3 metadata      */
+  --k-ink-4:   rgba(228, 234, 246, 0.32);  /* L4 no data       */
+  --k-rule:    rgba(148, 163, 184, 0.15);
+  --k-panel:   rgba(255, 255, 255, 0.038);
+  --k-live:    #30d158;
+  --k-hold:    #ff9f0a;
+  --k-warn:    #ff453a;
+  --k-pad:     16px;
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: var(--k-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── A · Header ────────────────────────────────────────────────────────── */
+.cmk__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 8px 0 var(--k-pad);
+}
+
+.cmk__brand { display: flex; align-items: baseline; gap: 5px; }
+
+.cmk__brand-a,
+.cmk__brand-b {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.cmk__brand-a { color: var(--k-ink); }
+.cmk__brand-b { color: var(--k-ink-3); }
+.cmk__brand-slash { color: var(--k-ink-3); font-size: 12px; }
+
+.cmk__bar-actions { display: flex; align-items: center; gap: 2px; }
+
+.cmk__ico {
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 9px;
+  background: none; color: var(--k-ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cmk__ico:active { background: rgba(255, 255, 255, 0.08); }
+.cmk__ico.is-on { color: var(--k-live); }
+
+/* ── B · Canonical operating posture ──────────────────────────────────── */
+.cmk__posture {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  /* Sat hard against the header baseline. The canonical posture is its own
+     band of information and needs to read as one. */
+  padding: 3px var(--k-pad) 15px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.085em;
+  line-height: 1.5;
+  color: var(--k-ink-3);
+}
+
+.cmk__posture-sep { opacity: 0.5; }
+
+.cmk__posture-mode {
+  color: var(--k-hold);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+.cmk__posture-mode.is-normal { color: var(--k-live); }
+.cmk__posture-mode.is-stopped,
+.cmk__posture-mode.is-paused { color: var(--k-warn); }
+.cmk__posture-mode.is-unknown { color: var(--k-ink-3); }
+
+.cmk__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-bottom: 112px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 100px), transparent calc(100% - 38px));
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 100px), transparent calc(100% - 38px));
+}
+
+/* ── C+D+E · ONE command surface ──────────────────────────────────────── */
+.cmk__panel {
+  /* Full-bleed and near-square: the 12px radius + inset margin read as a large
+     rounded container, which is the SaaS-card feeling this screen avoids. It is
+     an instrument surface, so it spans the width and is bounded by rules. */
+  margin: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--k-rule);
+  border-bottom: 1px solid var(--k-rule);
+  background: var(--k-panel);
+  overflow: hidden;
+}
+
+/* C · KPI rail — 2×3, hairline grid, no cards */
+.cmk__kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Armed and idle, not disabled: a zero cell keeps its slot and label but gives
+   up height and weight, so a single live metric automatically dominates the
+   rail without the grid moving. */
+.cmk__kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px var(--k-pad) 10px;
+  position: relative;
+  transition: padding 0.2s ease;
+}
+
+.cmk__kpi.is-idle { padding-top: 7px; padding-bottom: 7px; }
+
+.cmk__kpi:not(:nth-child(3n))::after {
+  content: '';
+  position: absolute;
+  right: 0; top: 8px; bottom: 8px;
+  width: 1px;
+  background: var(--k-rule);
+}
+
+.cmk__kpi:nth-child(n + 4) { border-top: 1px solid var(--k-rule); }
+
+.cmk__kpi-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.085em;
+  color: var(--k-ink-3);
+  white-space: nowrap;
+}
+
+.cmk__kpi-value {
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  color: var(--k-ink);
+  line-height: 1.05;
+}
+
+/* Zero is idle, not broken — it recedes instead of shouting. */
+/* When a metric is idle the ZERO is not the information — the fact that we are
+   watching that metric is. So the label gains presence and the zero recedes.
+   The moment a value lands it outranks its own label again, with no layout
+   shift because the grid slot is unchanged. */
+.cmk__kpi-value.is-zero {
+  color: var(--k-ink-4);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.cmk__kpi.is-idle .cmk__kpi-label {
+  color: var(--k-ink-2);
+  font-weight: 700;
+}
+.cmk__kpi-value.is-live { color: var(--k-live); }
+.cmk__kpi-value.is-good { color: var(--k-live); }
+.cmk__kpi-value.is-warn { color: var(--k-hold); }
+
+/* D · Inventory ladder */
+.cmk__ladder {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px var(--k-pad);
+  border: 0;
+  border-top: 1px solid var(--k-rule);
+  background: none;
+  color: var(--k-ink-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cmk__ladder-key {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--k-ink-3);
+  flex: none;
+}
+
+.cmk__ladder-main { flex: 1; min-width: 0; font-size: 12.5px; color: var(--k-ink-3); }
+.cmk__ladder-main strong {
+  color: var(--k-ink);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.cmk__ladder-main em { font-style: normal; color: var(--k-ink-4); margin-left: 6px; }
+
+.cmk__rungs { border-top: 1px solid var(--k-rule); padding: 4px var(--k-pad) 8px; }
+
+.cmk__rung {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 5px 0;
+  font-size: 12px;
+  color: var(--k-ink-2);
+}
+
+.cmk__rung strong {
+  color: var(--k-ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.cmk__rung.is-route strong { font-size: 11px; color: var(--k-ink-2); font-weight: 500; }
+
+/* E · Markets */
+.cmk__markets { border-top: 1px solid var(--k-rule); padding: 9px 0 10px; }
+
+.cmk__markets-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 var(--k-pad) 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--k-ink-3);
+}
+
+/* Scope is stated, never implied. */
+.cmk__markets-head em {
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.cmk__markets-scroll {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  /* Was clipping the first reading: the strip had an 11px gutter against the
+     screen's 16px, and proximity snapping pulled it off its start position. */
+  padding: 0 var(--k-pad);
+  scroll-padding-left: var(--k-pad);
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  /* A partially visible market should read as "more to the right", not as a
+     clipped element. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 34px), transparent);
+}
+
+.cmk__markets-scroll::-webkit-scrollbar { display: none; }
+
+/* Readings on a strip, divided by rules — not four mini cards. */
+.cmk__market {
+  flex: none;
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 14px 2px 0;
+  margin-right: 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  border-right: 1px solid var(--k-rule);
+  scroll-snap-align: start;
+}
+
+.cmk__market:last-child { border-right: 0; }
+
+.cmk__market-name {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--k-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmk__market-ready {
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--k-ink);
+}
+
+/* Cross-state is healthy, approved routing — same neutral treatment as local.
+   Only a market with no route at all reads as a problem. */
+.cmk__market-route {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--k-ink-4);
+}
+.cmk__market-route.is-no-route { color: var(--k-hold); }
+
+.cmk__market.is-ghost { height: 50px; border-right: 0; }
+
+/* ── Search / filter ──────────────────────────────────────────────────── */
+.cmk__find { padding: 12px var(--k-pad) 2px; display: flex; flex-direction: column; gap: 9px; }
+
+.cmk__find-field {
+  display: flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--k-ink-3);
+}
+
+.cmk__find-field input {
+  flex: 1; min-width: 0;
+  border: 0; outline: 0; background: none;
+  color: var(--k-ink); font-size: 16px; letter-spacing: -0.01em;
+}
+
+.cmk__find-field input::placeholder { color: var(--k-ink-3); }
+
+.cmk__find-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.cmk__find-chip {
+  border: 0; border-radius: 999px;
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--k-ink-2);
+  font-size: 13px; cursor: pointer;
+}
+
+.cmk__find-chip.is-on { background: var(--k-ink); color: #000; font-weight: 600; }
+
+/* ── F · Campaign rows ────────────────────────────────────────────────── */
+.cmk__list { display: flex; flex-direction: column; margin-top: 14px; }
+
+.cmk__row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 12px var(--k-pad) 13px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cmk__row::after {
+  content: '';
+  position: absolute;
+  left: var(--k-pad); right: 0; bottom: 0;
+  height: 1px;
+  background: var(--k-rule);
+}
+
+.cmk__row:active { background: rgba(255, 255, 255, 0.045); }
+
+.cmk__row-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+
+.cmk__row-name {
+  flex: 1; min-width: 0;
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  color: var(--k-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cmk__row-state {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--k-ink-3);
+}
+
+.cmk__row-state.is-running   { color: var(--k-live); }
+.cmk__row-state.is-paused    { color: var(--k-hold); }
+.cmk__row-state.is-test      { color: #bf5af2; }
+.cmk__row-state.is-scheduled { color: var(--k-ink-2); }
+
+/* Geography — a campaign is an operation somewhere, so say where. */
+.cmk__row-geo {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--k-ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cmk__row-geo em { font-style: normal; color: var(--k-ink-4); }
+
+/* Geography is L2 when known. */
+.cmk__geo { color: var(--k-ink-2); font-weight: 500; }
+
+/* Absent market is unavailable metadata, styled neutrally — never as a fault. */
+.cmk__geo.is-absent { color: var(--k-ink-4); font-weight: 400; font-style: italic; }
+
+.cmk__row-auto {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--k-ink-3);
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* Five readings on a FIXED grid so the columns line up down the whole list —
+   with flex + gap each row set its own column positions and the eye could not
+   scan vertically. READY leads, pace second, everything else recedes. */
+.cmk__row-metrics {
+  display: grid;
+  /* Columns sized to their actual labels ("replies" is the widest) so the five
+     readings sit apart at 393 without shrinking any type. */
+  grid-template-columns: 1.05fr 0.78fr 0.98fr 1.06fr 0.83fr;
+  align-items: baseline;
+  gap: 0 4px;
+  margin-top: 3px;
+  /* Reclaim the row gutter for the strip only — the readings run to the edge
+     while names and copy keep the screen's margin. */
+  margin-right: -6px;
+}
+
+.cmk__m { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
+
+.cmk__m strong {
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--k-ink-2);
+}
+
+.cmk__m em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--k-ink-3);
+  white-space: nowrap;
+}
+
+/* READY is the reading the operator scans for. */
+.cmk__m.is-lead strong { font-size: 18px; color: var(--k-ink); }
+
+/* Pace is second: it is the only other number that describes behaviour. */
+.cmk__m.is-pace strong { font-size: 15px; color: var(--k-ink-2); }
+
+.cmk__m.is-good strong { color: var(--k-live); }
+
+/* A zero reading is present but tertiary — it never competes with a live one. */
+.cmk__m.is-nil strong { color: var(--k-ink-4); font-weight: 560; }
+.cmk__m.is-nil em { color: var(--k-ink-4); }
+
+.cmk__row-foot { font-size: 12.5px; }
+.cmk__row-next { color: var(--k-ink-3); }
+
+.cmk__row-alert {
+  display: inline-block;
+  color: var(--k-hold);
+  padding-left: 9px;
+  position: relative;
+}
+
+.cmk__row-alert::before {
+  content: '';
+  position: absolute; left: 0; top: 3px; bottom: 3px;
+  width: 2px; border-radius: 2px;
+  background: var(--k-hold);
+}
+
+/* Drafts recede to two quiet lines. */
+.cmk__row.is-dormant { gap: 2px; padding: 11px var(--k-pad); opacity: 0.55; }
+.cmk__row.is-dormant .cmk__row-name { font-size: 14px; font-weight: 500; }
+.cmk__row-quiet { font-size: 11.5px; letter-spacing: 0.06em; color: var(--k-ink-4); }
+
+.cmk__row.is-skeleton {
+  height: 92px;
+  background: linear-gradient(100deg,
+    rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.07) 45%, rgba(255,255,255,0.03) 70%);
+  background-size: 220% 100%;
+  animation: cmk-sweep 1.3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes cmk-sweep {
+  0%   { background-position: 180% 0; }
+  100% { background-position: -60% 0; }
+}
+
+/* Only motion on the screen: sending is happening right now. */
+.cmk__pulse {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--k-live);
+  animation: cmk-pulse 2s ease-in-out infinite;
+}
+
+@keyframes cmk-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+.cmk__empty {
+  margin: 0; padding: 36px var(--k-pad);
+  text-align: center; font-size: 14px; color: var(--k-ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmk__pulse, .cmk__row.is-skeleton { animation: none; }
+}

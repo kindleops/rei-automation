@@ -300,6 +300,18 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* Hero waits on the Street View metadata verdict; the pulse distinguishes
+   "still checking" from "confirmed no imagery" without changing hero geometry. */
+.smc-image.is-placeholder.is-loading span {
+  animation: smc-hero-pulse 1.4s ease-in-out infinite;
+}
+@keyframes smc-hero-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+}
+.smc-shell.is-reduced-motion .smc-image.is-placeholder.is-loading span {
+  animation: none;
+}
 
 .smc-close,
 .smc-icon-btn {
@@ -1172,13 +1184,17 @@
 }
 
 /* Mobile peek hero — full-bleed streetview with glass priority ring */
+/* The handle's tap-target de-inflation now lives in the shared sheet styles
+   (mobile-operating-shell.css); only the collapsed-over-hero treatment below
+   is map-specific. */
+
 .smc-mobile-bottom-sheet.is-collapsed .nx-mobile-bottom-sheet__handle {
   position: absolute;
   top: 7px;
   left: 50%;
   z-index: 6;
-  width: 30px;
-  height: 3px;
+  width: 30px !important;
+  height: 3px !important;
   margin: 0;
   transform: translateX(-50%);
   background: rgba(255, 255, 255, 0.5);
@@ -1775,4 +1791,163 @@
 
 .smc-shell:not(.is-mobile) .smc-image.is-peek + .smc-body--peek-dense {
   padding-top: 8px;
+}
+
+/* ── Visual polish pass ───────────────────────────────────────────────────── */
+
+/* No imagery is a fact, not a missing photo: collapse the hero to a compact band
+   instead of reserving photographic height for something that will never load. */
+.smc-image.is-placeholder.is-peek,
+.smc-image.is-placeholder.is-focus {
+  height: 52px;
+}
+.smc-image__empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(233, 240, 255, 0.42);
+}
+.smc-image__empty svg {
+  width: 15px;
+  height: 15px;
+  opacity: 0.75;
+}
+.smc-image__empty em {
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.smc-image.is-placeholder .smc-close {
+  top: 11px;
+  right: 10px;
+}
+
+/* The sheet must own the CTA area and the bottom safe area outright — map labels
+   and rounded map chrome were previously visible beneath the sticky footer. */
+.smc-mobile-bottom-sheet .smc-actions--sticky {
+  background: var(--smc-sheet-bg, #0b1220);
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+.smc-mobile-bottom-sheet {
+  background: var(--smc-sheet-bg, #0b1220);
+}
+.smc-mobile-bottom-sheet::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: env(safe-area-inset-bottom, 0px);
+  background: var(--smc-sheet-bg, #0b1220);
+  pointer-events: none;
+}
+
+
+/* Status chips are context, not actions — quieten them so the owner name leads. */
+.smc-shell.is-mobile .smc-badge {
+  padding: 3px 9px;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  border-color: rgba(255, 255, 255, 0.13);
+  color: rgba(233, 240, 255, 0.72);
+}
+.smc-shell.is-mobile .smc-badge--score,
+.smc-shell.is-mobile .smc-badge--temp {
+  color: inherit;
+}
+/* Owner name leads the sheet; address and fact line step down from it. */
+.smc-shell.is-mobile .smc-identity__name {
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+.smc-shell.is-mobile .smc-identity__address {
+  font-size: 12.5px;
+  opacity: 0.72;
+}
+.smc-shell.is-mobile .smc-identity__asset-line {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+
+/* Final authority: the sheet previously stopped short of the viewport edge
+   (bottom: dock-collapsed + safe-bottom), leaving bare map and the rounded dock
+   glass visible beneath the CTA. The sheet owns the bottom band; the inset moves
+   into the footer so the CTA keeps its position and clears the dock. */
+@media (max-width: 768px) {
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
+    bottom: 0 !important;
+  }
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet .smc-actions--sticky {
+    padding-bottom: calc(10px + var(--nx-pinned-dock-collapsed, 14px) + var(--nx-mobile-safe-bottom, 0px)) !important;
+  }
+}
+
+/* Extending the sheet to the viewport edge moved the dock inset into the footer,
+   which ate content height and clipped the metrics row. Give the scroll area that
+   height back so Peek still shows a complete metrics row. */
+@media (max-width: 768px) {
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet.is-collapsed {
+    max-height: calc(42vh + var(--nx-pinned-dock-collapsed, 14px)) !important;
+  }
+}
+
+
+/* ── Liquid glass: property sheet adopts the canonical nx-glass system ──────
+   Uses the shell glass tokens (the MAP COMMAND treatment) rather than a bespoke
+   flat fill, so the sheet reads as the same material as the rest of the product. */
+@media (max-width: 768px) {
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
+    background:
+      var(--nx-shell-glass-accent-radial),
+      linear-gradient(180deg, var(--nx-shell-glass-fill-top), var(--nx-shell-glass-fill-bottom)) !important;
+    backdrop-filter: blur(var(--nx-shell-glass-blur, 56px)) saturate(var(--nx-shell-glass-saturate, 2)) !important;
+    -webkit-backdrop-filter: blur(var(--nx-shell-glass-blur, 56px)) saturate(var(--nx-shell-glass-saturate, 2)) !important;
+    border: 1px solid var(--nx-shell-glass-border) !important;
+    border-bottom: none !important;
+    box-shadow: var(--nx-shell-glass-shadow) !important;
+  }
+
+  /* Footer is a distinct glass stratum, not an opaque slab. */
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet .smc-actions--sticky {
+    background: var(--nx-glass-tinted-footer, rgba(9, 13, 22, 0.44)) !important;
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.03) inset;
+  }
+
+  /* Chips as glass pills with a top inner highlight instead of flat outlines. */
+  .smc-shell.is-mobile .smc-badge {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025));
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 1px 2px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(10px) saturate(1.3);
+    -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  }
+
+  /* Metric tiles pick up the same material so the row stops reading as a table. */
+  .smc-shell.is-mobile .smc-metric {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+    border: 1px solid rgba(255, 255, 255, 0.085);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  /* Over a bright Street View photo the pill vanished and the image squared off
+     the sheet's rounded top. */
+  .smc-mobile-bottom-sheet.is-collapsed .nx-mobile-bottom-sheet__handle {
+    background: rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+  .smc-shell.is-mobile .smc-image.is-peek,
+  .smc-shell.is-mobile .smc-image.is-focus {
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    overflow: hidden;
+  }
 }

@@ -1,0 +1,660 @@
+/**
+ * Mobile Pipeline board.
+ *
+ * Scoped under `.plm`, mounted only on portrait phones.
+ *
+ * Tokens derive from the same `--nx-contract-*` surface the Seller Detail
+ * rebuild uses, so True Black stays genuinely black and every accent works.
+ * No navy literals — the previous board hardcoded them, which is why it stayed
+ * blue under True Black.
+ *
+ * Rules: one accent; semantic colour only for temperature and urgency; section
+ * separation from spacing and type, never from per-element hues.
+ */
+
+.plm {
+  --plm-accent: var(--nx-contract-accent, var(--nx-accent, #5b9dff));
+  --plm-bg: var(--nx-contract-bg, #0a0c10);
+  --plm-surface: var(--nx-contract-surface, #11141b);
+  --plm-tint: #ffffff;
+  --plm-raise: color-mix(in srgb, var(--plm-tint) 5%, var(--plm-surface));
+  --plm-line: var(--nx-contract-border, color-mix(in srgb, var(--plm-tint) 8%, transparent));
+  --plm-text: var(--nx-contract-text, #eef1f6);
+  --plm-dim: var(--nx-contract-text-muted, #9aa3b2);
+  --plm-faint: color-mix(in srgb, var(--plm-dim) 70%, transparent);
+
+  --plm-hot: #f2564f;
+  --plm-warm: #e8a33d;
+  --plm-cold: #5aa9e8;
+  --plm-due: #e8a33d;
+
+  --p1: 4px; --p2: 8px; --p3: 12px; --p4: 16px; --p5: 22px;
+  --r1: 8px; --r2: 12px;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--plm-bg);
+  color: var(--plm-text);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+.plm > * { flex: 0 0 auto; }
+
+[data-nexus-theme="light"] .plm { --plm-tint: #0b1220; --plm-hot: #c62f28; --plm-warm: #a86612; --plm-cold: #1f6fb0; --plm-due: #a86612; }
+
+/* ── command bar ─────────────────────────────────────────────────────────── */
+
+.plm-bar {
+  position: sticky;
+  top: 6px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: var(--p3);
+  padding: var(--p3) var(--p4) var(--p3);
+  background: color-mix(in srgb, var(--plm-bg) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border-bottom: 1px solid var(--plm-line);
+}
+
+.plm-bar__top { display: flex; align-items: baseline; gap: var(--p3); }
+.plm-bar__title { margin: 0; font-size: 19px; font-weight: 640; letter-spacing: -0.02em; }
+.plm-bar__total { flex: 1 1 auto; display: flex; align-items: baseline; gap: 5px; font-size: 12px; }
+.plm-bar__total strong { font-size: 15px; font-weight: 620; }
+.plm-bar__total em { font-style: normal; color: var(--plm-faint); }
+
+.plm-icon-btn {
+  appearance: none; border: 1px solid var(--plm-line); background: var(--plm-surface);
+  color: var(--plm-dim); border-radius: var(--r1);
+  width: 32px; height: 32px; display: grid; place-items: center; cursor: pointer; flex: none;
+}
+.plm-icon-btn svg { width: 15px; height: 15px; }
+.plm-icon-btn.is-on { color: var(--plm-accent); border-color: color-mix(in srgb, var(--plm-accent) 34%, transparent); }
+
+/* Only what demands action gets colour. */
+.plm-bar__signals { display: flex; gap: var(--p2); flex-wrap: wrap; }
+.plm-signal {
+  appearance: none; border: 0; cursor: pointer;
+  background: none; padding: 0;
+  font-size: 12px; color: var(--plm-dim);
+  display: inline-flex; align-items: baseline; gap: 5px;
+}
+.plm-signal strong { font-size: 13px; font-weight: 660; }
+.plm-signal.is-urgent strong { color: var(--plm-hot); }
+.plm-signal.is-due strong { color: var(--plm-due); }
+.plm-signal + .plm-signal { padding-left: var(--p2); border-left: 1px solid var(--plm-line); }
+
+.plm-search {
+  appearance: none; width: 100%;
+  border: 1px solid var(--plm-line); background: var(--plm-surface);
+  color: var(--plm-text); border-radius: var(--r1);
+  padding: 9px var(--p3); font-size: 13px;
+}
+.plm-search:focus-visible { outline: 2px solid color-mix(in srgb, var(--plm-accent) 60%, transparent); outline-offset: 1px; }
+
+.plm-bar__scopes {
+  display: flex; align-items: center; gap: var(--p1);
+  overflow-x: auto; scrollbar-width: none; margin: 0 calc(var(--p4) * -1); padding: 0 var(--p4);
+}
+.plm-bar__scopes::-webkit-scrollbar { display: none; }
+.plm-bar__spacer { flex: 1 0 var(--p2); }
+
+.plm-scope {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  color: var(--plm-faint);
+  font-size: 11.5px; font-weight: 560; white-space: nowrap;
+  padding: 5px var(--p2); border-radius: var(--r1);
+  position: relative;
+  flex: 0 0 auto;   /* was shrinking and overlapping its neighbours */
+}
+.plm-scope.is-active { color: var(--plm-text); background: var(--plm-raise); }
+.plm-scope--filter { display: inline-flex; align-items: center; gap: 4px; }
+.plm-scope--filter svg { width: 13px; height: 13px; }
+.plm-scope--filter.is-active { color: var(--plm-accent); }
+.plm-scope__badge {
+  font-size: 9px; font-weight: 700; min-width: 14px; height: 14px;
+  border-radius: 7px; display: grid; place-items: center;
+  background: var(--plm-accent); color: var(--plm-bg);
+}
+
+/* ── stage spine ─────────────────────────────────────────────────────────── */
+/* Bar height encodes each stage's share, so a jammed stage is visible without
+   reading a number. This is the one place the board spends any boldness. */
+
+.plm-spine {
+  display: flex; align-items: stretch; gap: 2px;
+  overflow-x: auto; scrollbar-width: none;
+  padding: var(--p3) var(--p4) var(--p2);
+  border-bottom: 1px solid var(--plm-line);
+}
+.plm-spine::-webkit-scrollbar { display: none; }
+
+.plm-stage {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  flex: 0 0 66px; width: 66px;
+  display: grid;
+  grid-template-rows: auto auto 34px auto;  /* fixed bar track = shared baseline */
+  gap: 3px;
+  padding: var(--p1) 5px var(--p2);
+  border-radius: var(--r1);
+  color: var(--plm-faint);
+  text-align: left;
+}
+.plm-stage__ord { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; }
+.plm-stage__count { font-size: 15px; font-weight: 640; color: var(--plm-dim); line-height: 1; }
+.plm-stage__bar {
+  align-self: end;                       /* grow upward from a common floor */
+  width: 100%;
+  height: max(2px, var(--plm-fill, 0%));
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--plm-dim) 34%, transparent);
+}
+.plm-stage__label {
+  font-size: 9.5px; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.plm-stage.is-active { background: var(--plm-raise); color: var(--plm-text); }
+.plm-stage.is-active .plm-stage__count { color: var(--plm-accent); }
+.plm-stage.is-active .plm-stage__bar { background: var(--plm-accent); }
+.plm-stage.is-empty .plm-stage__count { color: var(--plm-faint); }
+.plm-stage:focus-visible { outline: 2px solid color-mix(in srgb, var(--plm-accent) 60%, transparent); outline-offset: -2px; }
+
+/* ── rows ────────────────────────────────────────────────────────────────── */
+
+.plm-list { display: flex; flex-direction: column; }
+
+.plm-row {
+  display: flex; align-items: stretch;
+  border-bottom: 1px solid var(--plm-line);
+}
+.plm-row.is-selected { background: var(--plm-raise); }
+
+.plm-row__main {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: flex-start; gap: var(--p3);
+  padding: var(--p3) var(--p2) var(--p3) var(--p4);
+  text-align: left; color: inherit;
+}
+.plm-row__temp { width: 3px; align-self: stretch; border-radius: 2px; flex: none; background: var(--plm-line); }
+.plm-row__temp.is-hot { background: var(--plm-hot); }
+.plm-row__temp.is-warm { background: var(--plm-warm); }
+.plm-row__temp.is-cold { background: var(--plm-cold); }
+
+.plm-row__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.plm-row__line1 { display: flex; align-items: baseline; gap: var(--p2); }
+.plm-row__seller {
+  font-size: 14px; font-weight: 600; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plm-row__age { font-size: 11px; color: var(--plm-faint); flex: none; }
+.plm-row__age.is-stale { color: var(--plm-warm); }
+.plm-row__addr {
+  font-size: 12px; color: var(--plm-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plm-row__meta { display: flex; gap: var(--p2); font-size: 11px; color: var(--plm-faint); }
+.plm-row__meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plm-row__next { color: var(--plm-dim); }
+
+/* One 44px gutter holding both actions stacked, instead of a 48px gutter for a
+   single icon — same width, twice the utility. */
+.plm-row__gutter {
+  display: flex; flex-direction: column; flex: none;
+  border-left: 1px solid var(--plm-line);
+}
+.plm-row__act {
+  appearance: none; border: 0; background: none; color: var(--plm-dim);
+  width: 44px; flex: 1 1 0; min-height: 36px;
+  display: grid; place-items: center; cursor: pointer;
+}
+.plm-row__act + .plm-row__act { border-top: 1px solid var(--plm-line); }
+.plm-row__act svg { width: 15px; height: 15px; }
+.plm-row__act:active { background: var(--plm-raise); }
+
+/* ── states ──────────────────────────────────────────────────────────────── */
+
+.plm-empty { padding: var(--p5) var(--p4); display: flex; flex-direction: column; gap: 5px; }
+.plm-empty strong { font-size: 14px; font-weight: 600; }
+.plm-empty span { font-size: 12.5px; color: var(--plm-dim); line-height: 1.45; }
+
+.plm-skeleton { display: flex; flex-direction: column; }
+.plm-skeleton span {
+  height: 62px; border-bottom: 1px solid var(--plm-line);
+  background: linear-gradient(90deg, transparent 25%, color-mix(in srgb, var(--plm-tint) 5%, transparent) 37%, transparent 63%);
+  background-size: 400% 100%;
+  animation: plm-shimmer 1.4s ease infinite;
+}
+@keyframes plm-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .plm-skeleton span { animation: none; } }
+
+.plm-error { margin: var(--p4); padding: var(--p4); border: 1px solid var(--plm-line); border-radius: var(--r2); background: var(--plm-surface); }
+.plm-error strong { display: block; font-size: 14px; font-weight: 620; margin-bottom: 3px; }
+.plm-error span { display: block; font-size: 12.5px; color: var(--plm-dim); margin-bottom: var(--p3); }
+.plm-error button {
+  appearance: none; border: 0; border-radius: var(--r1); cursor: pointer;
+  background: var(--plm-accent); color: var(--plm-bg);
+  font-size: 13px; font-weight: 620; padding: 9px var(--p4);
+}
+.plm-error code { font-size: 11px; color: var(--plm-faint); display: block; margin-top: var(--p2); }
+
+.plm-safe { height: calc(64px + env(safe-area-inset-bottom, 0px)); }
+
+@media (max-width: 380px) {
+  .plm-bar { padding-left: var(--p3); padding-right: var(--p3); }
+  .plm-bar__scopes { margin: 0 calc(var(--p3) * -1); padding: 0 var(--p3); }
+  .plm-row__main { padding-left: var(--p3); }
+  .plm-stage { flex-basis: 58px; width: 58px; }
+}
+@media (min-width: 415px) {
+  .plm-bar { padding-left: 20px; padding-right: 20px; }
+  .plm-bar__scopes { margin: 0 -20px; padding: 0 20px; }
+  .plm-row__main { padding-left: 20px; }
+}
+
+/* ── workflow sheet ──────────────────────────────────────────────────────── */
+/* Bottom-pinned rather than flex-aligned, same as the Seller Detail picker. */
+.plm-sheet-root { position: fixed; inset: 0; height: 100dvh; z-index: 1200; }
+.plm-sheet-scrim { position: absolute; inset: 0; border: 0; background: color-mix(in srgb, #000 55%, transparent); }
+.plm-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: color-mix(in srgb, var(--plm-tint) 3%, var(--plm-surface));
+  border-top-left-radius: 20px; border-top-right-radius: 20px;
+  padding: 10px var(--p4) calc(var(--p4) + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: var(--p3);
+}
+.plm-sheet__grip { width: 36px; height: 4px; border-radius: 2px; background: var(--plm-line); margin: 0 auto 4px; }
+.plm-sheet__title {
+  margin: 0; font-size: 14px; font-weight: 620;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plm-sheet__done {
+  appearance: none; border: 0; border-radius: var(--r1); cursor: pointer;
+  background: var(--plm-raise); color: var(--plm-text);
+  font-size: 13.5px; font-weight: 600; min-height: 44px;
+}
+/*
+ * `MobileWorkflowControls` is the canonical Seller Detail control and styles
+ * itself from the `--msc-*` token set defined on `.msc-root`. Mounting it here
+ * left it half-styled (STATUS/TEMP had borders, STAGE did not). Alias the token
+ * set onto Pipeline's own theme-derived values rather than copying a palette,
+ * so the control renders identically and still follows the theme contract.
+ */
+.plm-sheet {
+  --msc-accent: var(--plm-accent);
+  --msc-bg: var(--plm-bg);
+  --msc-surface: var(--plm-surface);
+  --msc-surface-2: var(--plm-raise);
+  --msc-tint: var(--plm-tint);
+  --msc-line: var(--plm-line);
+  --msc-line-strong: color-mix(in srgb, var(--plm-tint) 16%, transparent);
+  --msc-text: var(--plm-text);
+  --msc-text-dim: var(--plm-dim);
+  --msc-text-faint: var(--plm-faint);
+  --msc-good: #34c98a;
+  --msc-warn: var(--plm-warm);
+  --msc-bad: var(--plm-hot);
+  --msc-on-accent: var(--plm-bg);
+  --s1: var(--p1); --s2: var(--p2); --s3: var(--p3); --s4: var(--p4);
+  --r-sm: var(--r1); --r-md: var(--r2); --r-lg: 18px;
+}
+.plm-sheet .msc-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--p2); }
+
+/* ── scope rail + filter trigger ─────────────────────────────────────────── */
+/*
+ * The rail scrolls rather than wrapping. Six scopes cannot fit 375px at a
+ * readable size, and shrinking type to force them in is the failure mode this
+ * replaces. A mask fades the trailing edge so it is visibly continuable, and
+ * the selected scope is scrolled into view by the component.
+ */
+.plm-bar__scopes {
+  display: flex; align-items: center; gap: var(--p2);
+  overflow: visible; margin: 0; padding: 0;
+}
+.plm-scoperail {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center; gap: var(--p1);
+  overflow-x: auto; scrollbar-width: none;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent 100%);
+}
+.plm-scoperail::-webkit-scrollbar { display: none; }
+.plm-scope { min-height: 32px; display: inline-flex; align-items: center; }
+
+.plm-filterbtn {
+  flex: none; position: relative; cursor: pointer;
+  appearance: none; border: 1px solid var(--plm-line); background: var(--plm-surface);
+  color: var(--plm-dim); border-radius: var(--r1);
+  width: 34px; height: 32px; display: grid; place-items: center;
+}
+.plm-filterbtn svg { width: 15px; height: 15px; }
+.plm-filterbtn.is-active { color: var(--plm-accent); border-color: color-mix(in srgb, var(--plm-accent) 34%, transparent); }
+.plm-filterbtn__badge {
+  position: absolute; top: -5px; right: -5px;
+  font-size: 9px; font-weight: 700; min-width: 14px; height: 14px;
+  border-radius: 7px; display: grid; place-items: center;
+  background: var(--plm-accent); color: var(--plm-bg);
+}
+
+/* Selected quick filters have to be unmistakable — they silently change what
+   every other number on the screen means. */
+.plm-signal { border-radius: var(--r1); }
+.plm-signal.is-on {
+  background: color-mix(in srgb, var(--plm-accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plm-accent) 40%, transparent);
+  color: var(--plm-text);
+}
+.plm-signal.is-on svg { width: 12px; height: 12px; opacity: 0.7; margin-left: 2px; }
+
+.plm-bar__sort {
+  margin: var(--p1) 0 0; font-size: 10.5px; color: var(--plm-faint);
+}
+
+.plm-empty__clear {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  color: var(--plm-accent); font-size: 12.5px; font-weight: 580; padding: 4px 0;
+}
+
+/* Continuation cue for the stage spine, matching the scope rail. */
+.plm-spine { mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent 100%); }
+
+/* ── filters sheet ───────────────────────────────────────────────────────── */
+
+.plmf-root { position: fixed; inset: 0; z-index: 1320; }
+.plmf-scrim {
+  position: absolute; inset: 0; border: 0;
+  background: color-mix(in srgb, #000 60%, transparent);
+}
+.plmf-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  max-height: 78dvh; display: flex; flex-direction: column;
+  background: var(--plm-bg); color: var(--plm-text);
+  border-top: 1px solid var(--plm-line);
+  border-top-left-radius: 20px; border-top-right-radius: 20px;
+  animation: plmf-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes plmf-in { from { transform: translateY(14%); opacity: 0.75; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .plmf-sheet { animation: none; } }
+
+.plmf-grip {
+  width: 36px; height: 4px; border-radius: 2px; flex: none;
+  background: var(--plm-line-strong, rgba(255,255,255,0.18)); margin: 9px auto 2px;
+}
+.plmf-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 4px var(--p4) 0;
+}
+.plmf-head h2 { margin: 0; font-size: 17px; font-weight: 640; }
+.plmf-clear {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  color: var(--plm-accent); font-size: 12.5px; font-weight: 580;
+}
+
+.plmf-scroll { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding-bottom: var(--p3); }
+
+.plmf-facet { padding: var(--p3) var(--p4) 0; }
+.plmf-facet h3 {
+  margin: 0 0 var(--p2); font-size: 10px; font-weight: 660;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--plm-faint);
+}
+.plmf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.plmf-chip {
+  appearance: none; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--plm-line); background: var(--plm-surface);
+  color: var(--plm-dim); border-radius: 999px;
+  min-height: 34px; padding: 0 11px;
+  font-size: 12.5px; font-weight: 560;
+}
+.plmf-chip em {
+  font-style: normal; font-size: 10.5px; font-weight: 640;
+  color: var(--plm-faint);
+}
+.plmf-chip.is-on {
+  color: var(--plm-text);
+  background: color-mix(in srgb, var(--plm-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--plm-accent) 45%, transparent);
+}
+.plmf-chip.is-on em { color: var(--plm-accent); }
+
+.plmf-sorts { display: flex; flex-direction: column; }
+.plmf-sort {
+  appearance: none; border: 0; background: none; cursor: pointer; text-align: left;
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  gap: 2px var(--p2); min-height: 46px; padding: 6px 0;
+  border-bottom: 1px solid var(--plm-line); color: var(--plm-text);
+}
+.plmf-sort:last-child { border-bottom: 0; }
+.plmf-sort span { font-size: 13.5px; font-weight: 560; }
+.plmf-sort em {
+  grid-column: 1; font-style: normal; font-size: 11px; color: var(--plm-faint);
+}
+.plmf-sort svg { grid-row: 1 / span 2; grid-column: 2; width: 16px; height: 16px; color: var(--plm-accent); }
+.plmf-sort.is-on span { color: var(--plm-accent); }
+
+.plmf-foot {
+  flex: none; padding: var(--p2) var(--p4) calc(58px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--plm-line); background: var(--plm-bg);
+}
+.plmf-apply {
+  appearance: none; width: 100%; cursor: pointer; border: 0;
+  border-radius: var(--r2, 12px); min-height: 46px;
+  background: var(--plm-accent); color: var(--plm-bg);
+  font-size: 14px; font-weight: 640;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DENSITY PASS
+   ───────────────────────────────────────────────────────────────────────────
+   Measured before this block: the command bar was 213px and the spine 107px,
+   so the first lead began at y=359 on an 852px phone — 42% of the screen was
+   chrome. Four bands separated by identical 12px gaps meant nothing grouped;
+   the bar read as loose strips rather than one instrument.
+
+   The board is a book of leads. Chrome earns two tight lines and a spine; the
+   leads get everything else.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.plm-bar {
+  /* Grouped rhythm: the title and its attention chips belong together, the
+     scope rail is a separate register. Uniform gaps are what flattened it. */
+  gap: 7px;
+  padding: 9px var(--p4) 10px;
+}
+
+.plm-bar__top { min-height: 30px; align-items: center; }
+.plm-bar__title { font-size: 17px; }
+.plm-bar__total strong { font-size: 16px; }
+.plm-bar__total { gap: 6px; }
+.plm-icon-btn { width: 30px; height: 30px; }
+
+/*
+ * Attention chips.
+ *
+ * These were 44px tall for a single 12px line, and the divider between them was
+ * a `border-left` on a stretch-aligned flex row — so it hung 30px below the
+ * text into empty space. That hairline was the single most obviously unfinished
+ * thing on the screen. Real pills instead: the boundary is the shape, so no
+ * divider is needed and the selected state has something to fill.
+ */
+.plm-bar__signals { gap: 6px; align-items: center; }
+.plm-signal {
+  min-height: 0; height: 27px; padding: 0 10px;
+  border: 1px solid var(--plm-line); border-radius: 999px;
+  background: var(--plm-surface);
+  align-items: center; gap: 6px;
+  font-size: 11.5px;
+}
+.plm-signal strong { font-size: 12px; }
+.plm-signal + .plm-signal { padding-left: 10px; border-left: 0; }
+
+.plm-bar__scopes { gap: 6px; }
+.plm-scope { min-height: 28px; font-size: 12px; padding: 4px 9px; }
+
+/* Filter + sort as one control: the trigger states what the list is sorted by,
+   which removes a whole orphan band that only restated a menu value. */
+.plm-filterbtn {
+  width: auto; height: 28px; padding: 0 9px;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.plm-filterbtn__sort {
+  font-size: 10.5px; font-weight: 560; white-space: nowrap;
+  max-width: 88px; overflow: hidden; text-overflow: ellipsis;
+}
+.plm-filterbtn__badge { top: -4px; right: -4px; }
+
+/* ── spine ───────────────────────────────────────────────────────────────── */
+/*
+ * 107px -> ~74px. The ordinal and count shared a column but not a line, and the
+ * label wrapped to two lines at 9.5px, which left a ragged bottom edge and type
+ * too small to read anyway. One head line, one bar, one truncated label.
+ */
+.plm-spine { padding: 8px var(--p4) 9px; gap: 3px; }
+
+.plm-stage {
+  grid-template-rows: auto 26px auto;
+  gap: 5px;
+  padding: 5px 6px 6px;
+  flex-basis: 62px; width: 62px;
+  border-radius: 0;
+  background: none;
+}
+.plm-stage__head { display: flex; align-items: baseline; gap: 4px; }
+.plm-stage__ord { font-size: 9px; opacity: 0.75; }
+.plm-stage__count { font-size: 13.5px; }
+.plm-stage__bar { border-radius: 2px; }
+.plm-stage__label {
+  font-size: 10px; line-height: 1.2;
+  -webkit-line-clamp: 1; line-clamp: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: block;
+}
+
+/* Selected reads as a floor, not a filled button. Rounded tinted rectangles
+   made every stage look like a control that had been left switched on. */
+.plm-stage.is-active { background: none; }
+.plm-stage.is-active .plm-stage__label { color: var(--plm-text); }
+.plm-stage.is-active .plm-stage__bar {
+  box-shadow: 0 2px 0 0 var(--plm-accent);
+}
+
+/* ── rows ────────────────────────────────────────────────────────────────── */
+
+.plm-row__main { padding: 10px var(--p2) 10px var(--p4); gap: 10px; }
+.plm-row__body { gap: 1px; }
+.plm-row__seller { font-size: 14.5px; }
+
+/*
+ * Age is information, not an alarm. Amber on every lead older than two weeks
+ * meant three of four visible rows were coloured, so the colour stopped
+ * carrying meaning — and it put a third hue on a screen that already has an
+ * accent and a temperature rail. Stale now reads through weight.
+ */
+.plm-row__age.is-stale { color: var(--plm-dim); font-weight: 600; }
+
+/*
+ * The gutter was two bordered boxes per row, which stacked into a ladder of
+ * rectangles down the right edge and framed the actions more heavily than the
+ * lead itself. One hairline, quiet icons, same touch targets.
+ */
+.plm-row__gutter { border-left: 0; }
+.plm-row__act { width: 40px; opacity: 0.5; }
+.plm-row__act + .plm-row__act { border-top: 0; }
+.plm-row__act:active { opacity: 1; background: var(--plm-raise); border-radius: var(--r1); }
+
+@media (max-width: 380px) {
+  .plm-stage { flex-basis: 56px; width: 56px; }
+  .plm-filterbtn__sort { display: none; }
+}
+
+/* ── touch targets without the 44px tax ──────────────────────────────────── */
+/*
+ * `mobile-responsive.css` forces `min-height/min-width: 44px !important` on
+ * every `button` under 768px. It is the right instinct and the wrong mechanism:
+ * applied to a text chip like "63 need a reply" it produced a 44px-tall band for
+ * one 12px line, which is most of why the command bar measured 213px.
+ *
+ * The board opts out of the blunt rule and pays the target back properly — each
+ * compact control keeps a 44px-tall hit area via an overlay, so the pill renders
+ * at 27px while the finger still gets its full target. Density and
+ * accessibility, rather than one at the cost of the other.
+ */
+@media (max-width: 768px) {
+  .plm button,
+  .plm [role="button"] {
+    min-height: 0 !important;
+    min-width: 0 !important;
+  }
+}
+
+.plm-signal,
+.plm-scope,
+.plm-filterbtn,
+.plm-icon-btn { position: relative; }
+
+.plm-signal::after,
+.plm-scope::after,
+.plm-filterbtn::after,
+.plm-icon-btn::after {
+  content: '';
+  position: absolute;
+  left: -3px; right: -3px;
+  top: 50%; transform: translateY(-50%);
+  height: 44px;
+  /* Hit area only — never paints, never intercepts layout. */
+}
+
+/* The spine cells and row actions are already tall enough to be their own
+   targets; they only needed releasing from the forced min-width. */
+.plm-stage { min-width: 0; }
+
+/* ── corrections from the first density pass ─────────────────────────────── */
+
+/* Trimming the top padding pushed the title under the global floating dock.
+   The board starts below it, not behind it. */
+.plm-bar { padding-top: 22px; }
+
+/*
+ * Stage names: named where you are, numbered everywhere else.
+ *
+ * Two-line wrapping left a ragged bottom edge; one-line truncation was worse —
+ * "Owners…", "Property…" and "Asking P…" are unreadable, and the spec is right
+ * that a clipped label is a mystery label. But every cell does not need its
+ * name: S1–S10 is a real sequence, so the ordinal and the count carry the
+ * navigation and the distribution on their own. Only the stage you are standing
+ * in has to say what it is, and that one gets the room to say it in full.
+ */
+.plm-stage__label { display: none; }
+.plm-stage.is-active {
+  flex: 0 0 auto; width: auto; min-width: 62px;
+  padding-right: 11px;
+}
+.plm-stage.is-active .plm-stage__label {
+  display: block;
+  white-space: nowrap; overflow: visible; text-overflow: clip;
+  font-size: 10.5px; font-weight: 560; color: var(--plm-text);
+}
+/* Without labels the cells can be narrower, which puts more of the pipeline
+   on screen at once. */
+.plm-stage { flex-basis: 52px; width: 52px; }
+@media (max-width: 380px) { .plm-stage { flex-basis: 48px; width: 48px; } }
+
+/* Keep the sort word from crowding the scope rail. */
+.plm-filterbtn__sort { max-width: 62px; font-size: 10px; }
+
+/*
+ * The bar is the measurement; the cell is just where it sits.
+ *
+ * Letting the active cell widen to fit its name also stretched its bar, so S1
+ * (24 leads) drew a bar three times wider than S2 (194). Width was encoding how
+ * long the stage was called. Bars stay a fixed width so only height — the sqrt
+ * of the share — carries the number, and the name overflows the cell instead.
+ */
+.plm-stage.is-active .plm-stage__bar { width: 46px; }
+.plm-stage.is-active .plm-stage__head,
+.plm-stage.is-active .plm-stage__label { justify-self: start; }

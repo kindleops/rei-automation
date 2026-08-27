@@ -6763,6 +6763,8 @@ center+right hidden */
   right: 0;
   width: min(420px, 100vw);
   height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr;
   border-left: 1px solid var(--map-glass-border, rgba(171, 205, 255, 0.16));

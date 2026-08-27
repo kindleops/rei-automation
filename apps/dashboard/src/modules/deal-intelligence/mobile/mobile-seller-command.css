@@ -1,0 +1,738 @@
+/**
+ * Mobile Seller Command Center.
+ *
+ * Scoped entirely under `.msc-root`, which only mounts on portrait phones, so
+ * nothing here can reach the desktop panel.
+ *
+ * Design rules this sheet holds to:
+ *  - ONE accent (--msc-accent). Semantic colour is reserved for good/warn/bad.
+ *  - Section separation comes from spacing and type, not from per-section hues,
+ *    glows or nested borders.
+ *  - One spacing scale. No 11/14/17px one-offs.
+ *  - Glass on the sticky header only; content surfaces stay calm and opaque.
+ */
+
+/*
+ * Theming.
+ *
+ * Everything derives from the canonical `--nx-contract-*` / `--nx-accent`
+ * surface written by `applyThemeToDOM` (settings.ts) and defined in
+ * nexus-theme-contract.css, so all 10 themes — including light and red_ops —
+ * and all 12 accent palettes come through without a per-theme block here.
+ * The literals are fallbacks only, for the case where the contract sheet has
+ * not loaded.
+ *
+ * `--msc-tint` is the sign of the theme's surface treatment: white overlays on
+ * dark themes, black on light. It is what keeps hairlines and elevated
+ * surfaces from disappearing when the background inverts.
+ */
+.msc-root,
+.msc-sheet-root {
+  --msc-accent: var(--nx-contract-accent, var(--nx-accent, #5b9dff));
+
+  --msc-bg: var(--nx-contract-bg, #0a0c10);
+  --msc-surface: var(--nx-contract-surface, #11141b);
+  --msc-tint: #ffffff;
+  --msc-surface-2: color-mix(in srgb, var(--msc-tint) 4%, var(--msc-surface));
+  --msc-line: var(--nx-contract-border, color-mix(in srgb, var(--msc-tint) 7%, transparent));
+  --msc-line-strong: color-mix(in srgb, var(--msc-tint) 12%, transparent);
+
+  --msc-text: var(--nx-contract-text, #eef1f6);
+  --msc-text-dim: var(--nx-contract-text-muted, #9aa3b2);
+  --msc-text-faint: color-mix(in srgb, var(--msc-text-dim) 72%, transparent);
+
+  /* Text that sits on top of the accent fill. */
+  --msc-on-accent: #06090f;
+
+  --msc-good: #34c98a;
+  --msc-warn: #e8a33d;
+  --msc-bad: #f2564f;
+
+  /* one scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+
+  background: var(--msc-bg);
+  color: var(--msc-text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-height: 100%;
+  padding: 0 var(--s4) var(--s4);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * The host scroll container (`.nx-intel-scroll-body`) has a fixed height, so
+ * without this every column child is a flex item free to shrink — which
+ * collapsed all eight collapsible sections to 0px. Children must keep their
+ * content height and let the parent scroll.
+ */
+.msc-root > * { flex: 0 0 auto; }
+
+/*
+ * Light theme. Only the things that cannot be derived: the overlay tint has to
+ * flip to black, and the semantic trio needs darker values to stay legible on
+ * white. The theme attribute lives on an ancestor, so these are descendant
+ * selectors rather than a nested block.
+ */
+[data-nexus-theme="light"] .msc-root,
+[data-nexus-theme="light"] .msc-sheet-root {
+  --msc-tint: #0b1220;
+  --msc-surface-2: color-mix(in srgb, var(--msc-tint) 4%, var(--msc-surface));
+  --msc-line-strong: color-mix(in srgb, var(--msc-tint) 16%, transparent);
+  --msc-good: #0f8f5c;
+  --msc-warn: #a86612;
+  --msc-bad: #c62f28;
+  --msc-on-accent: #ffffff;
+}
+
+/* The card surfaces are pure white in light mode, so the page behind them
+   needs to recede rather than match. */
+[data-nexus-theme="light"] .msc-root {
+  --msc-bg: color-mix(in srgb, var(--msc-tint) 4%, var(--nx-contract-bg, #fbfcff));
+}
+
+.msc-root--boot { padding-top: var(--s5); }
+
+/* ── type scale ─────────────────────────────────────────────────────────── */
+
+.msc-root h1,
+.msc-root h2,
+.msc-root h3,
+.msc-root h4 { margin: 0; letter-spacing: -0.01em; }
+
+/* ── command header ─────────────────────────────────────────────────────── */
+
+.msc-header {
+  position: sticky;
+  /* The shell's floating top bar is 51px and sits above this in z-order; the
+     scroll port resolves ~4px higher than the bar's lower edge, so a small
+     offset keeps the seller name clear of it while stuck. */
+  top: 6px;
+  z-index: 20;
+  margin: 0 calc(var(--s4) * -1);
+  padding: var(--s4) var(--s4) var(--s3);
+  background: color-mix(in srgb, var(--msc-bg) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-bottom: 1px solid var(--msc-line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.msc-header__identity {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.msc-header__name {
+  font-size: 22px;
+  font-weight: 640;
+  line-height: 1.15;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.msc-header__address {
+  margin: -4px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--msc-text-dim);
+  display: flex;
+  flex-direction: column;
+}
+
+.msc-header__locality { color: var(--msc-text-faint); font-size: 12px; }
+
+.msc-contactability {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--msc-text-dim);
+  white-space: nowrap;
+}
+.msc-contactability__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.msc-contactability.is-good { color: var(--msc-good); }
+.msc-contactability.is-warn { color: var(--msc-warn); }
+.msc-contactability.is-bad { color: var(--msc-bad); }
+
+/* ── workflow controls ──────────────────────────────────────────────────── */
+
+.msc-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--s2); }
+
+.msc-ctrl {
+  /* The hue arrives inline as `--msc-ctrl-raw`; the usable colour is derived
+     here so each theme can adjust it. */
+  --msc-ctrl-color: var(--msc-ctrl-raw, var(--msc-accent));
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--msc-ctrl-color) 26%, transparent);
+  background: color-mix(in srgb, var(--msc-ctrl-color) 10%, var(--msc-surface));
+  border-radius: var(--r-sm);
+  padding: var(--s2) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  min-height: 52px;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.msc-ctrl:active { transform: scale(0.98); }
+.msc-ctrl.is-pending { opacity: 0.55; }
+.msc-ctrl.is-error { border-color: color-mix(in srgb, var(--msc-bad) 40%, transparent); }
+
+.msc-ctrl__label { font-size: 9.5px; font-weight: 620; color: var(--msc-text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+/* Stage labels are things like "S2 Interest Probe"; at 393px a single nowrap
+   line clipped them to "S2 Interest Prob". Two lines fit the full label. */
+.msc-ctrl__value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--msc-ctrl-color);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.22;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.msc-ctrl__lock { width: 10px; height: 10px; opacity: 0.7; vertical-align: -1px; margin-left: 3px; }
+
+/* The temperature hue comes from the shared lead-state registry, which is tuned
+   for dark surfaces. On light it has to be pulled down to stay legible. */
+[data-nexus-theme="light"] .msc-ctrl {
+  --msc-ctrl-color: color-mix(in srgb, var(--msc-ctrl-raw, var(--msc-accent)) 62%, #000);
+}
+
+/* ── primary actions ────────────────────────────────────────────────────── */
+
+/* Three real actions. Ownership Check is deliberately absent: it is bound to
+   the Map card's live-send state machine and fires an immediate SMS, so it is
+   not something to surface here unwired. */
+.msc-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2); }
+
+.msc-action {
+  appearance: none;
+  border: 1px solid var(--msc-line);
+  background: var(--msc-surface);
+  border-radius: var(--r-sm);
+  color: var(--msc-text);
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 560;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.msc-action > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msc-action svg { width: 17px; height: 17px; color: var(--msc-text-dim); }
+.msc-action:active { background: var(--msc-surface-2); }
+.msc-action.is-disabled { opacity: 0.38; pointer-events: none; }
+.msc-action--more.is-open { border-color: color-mix(in srgb, var(--msc-accent) 34%, transparent); }
+
+.msc-overflow {
+  border: 1px solid var(--msc-line);
+  background: var(--msc-surface);
+  border-radius: var(--r-md);
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+/* The reused desktop action row, retuned for touch targets. */
+.msc-overflow .nx-di25-header-actions { display: flex; gap: var(--s2); justify-content: space-between; }
+.msc-overflow .nx-di25-header-action {
+  flex: 1 1 0;
+  min-height: 44px;
+  border-radius: var(--r-sm);
+  background: var(--msc-surface-2);
+  border: 1px solid var(--msc-line);
+  color: var(--msc-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.msc-overflow .nx-di25-header-action svg { width: 16px; height: 16px; }
+/* The reused desktop row ends with its own "More" toggle, which is redundant
+   inside this overflow (it only surfaced lock state, already shown on the
+   pills). Decorative here, so it does not render. */
+.msc-overflow .nx-di25-header-action:last-child { display: none; }
+.msc-overflow .nx-di25-header-action.is-active { color: var(--msc-accent); border-color: color-mix(in srgb, var(--msc-accent) 32%, transparent); }
+.msc-overflow__item {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--msc-text);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 11px var(--s3);
+  font-size: 13px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.msc-overflow__item svg { width: 15px; height: 15px; color: var(--msc-text-dim); }
+.msc-overflow__item:active { background: var(--msc-surface-2); }
+.msc-overflow__note {
+  margin: var(--s1) var(--s3) var(--s2);
+  font-size: 10.5px;
+  color: var(--msc-text-faint);
+}
+
+/* ── deal snapshot ──────────────────────────────────────────────────────── */
+
+.msc-snapshot {
+  background: var(--msc-surface);
+  border-radius: var(--r-lg);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.msc-snapshot__hero { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.msc-snapshot__label {
+  flex: 1 0 100%;
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--msc-text-faint);
+}
+.msc-snapshot__value { font-size: 30px; font-weight: 660; line-height: 1.05; letter-spacing: -0.02em; }
+.msc-snapshot__equity { font-size: 13px; font-weight: 580; color: var(--msc-good); }
+
+.msc-snapshot__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+.msc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.msc-metric span { font-size: 10px; color: var(--msc-text-faint); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.msc-metric strong { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+
+.msc-snapshot__next {
+  margin: 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--msc-line);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12.5px;
+  color: var(--msc-text-dim);
+}
+.msc-snapshot__next svg { width: 14px; height: 14px; color: var(--msc-accent); flex: none; }
+
+/* ── acquisition decision ───────────────────────────────────────────────── */
+
+.msc-decision {
+  /*
+   * Deliberately NOT `overflow-anchor: none`. Measured: opting this subtree out
+   * of scroll anchoring made a content swap here jump the scroller to 0, where
+   * leaving anchoring on holds it within ~15px. Anchoring is doing the right
+   * thing; the height freeze in the component handles the rest.
+   */
+  background: var(--msc-surface);
+  border-radius: var(--r-lg);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.msc-decision__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.msc-decision__head h2 { font-size: 13px; font-weight: 620; }
+.msc-decision__age { font-size: 10.5px; color: var(--msc-text-faint); }
+
+.msc-decision__lead { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.msc-decision__label {
+  display: block;
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--msc-text-faint);
+  margin-bottom: 2px;
+}
+.msc-decision__strategy { font-size: 19px; font-weight: 620; line-height: 1.15; color: var(--msc-accent); }
+.msc-decision__confidence { text-align: right; }
+.msc-decision__confidence strong { font-size: 19px; font-weight: 620; }
+
+.msc-decision__offers { display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--s2); }
+.msc-offer {
+  background: var(--msc-surface-2);
+  border-radius: var(--r-sm);
+  padding: 10px var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.msc-offer span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--msc-text-faint); font-weight: 600; }
+.msc-offer strong { font-size: 17px; font-weight: 640; }
+.msc-offer.is-primary strong { color: var(--msc-good); }
+
+.msc-decision__range { margin: 0; font-size: 12px; color: var(--msc-text-dim); }
+.msc-decision__range em { font-style: normal; color: var(--msc-text-faint); }
+.msc-decision__angle {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--msc-text-dim);
+  padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--msc-accent) 40%, transparent);
+}
+
+.msc-decision__expand,
+.msc-decision__rerun,
+.msc-link-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--msc-accent);
+  font-size: 12.5px;
+  font-weight: 580;
+  padding: var(--s2) 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.msc-decision__expand svg { width: 13px; height: 13px; }
+.msc-decision__rerun { color: var(--msc-text-faint); }
+
+.msc-decision__cta { display: flex; flex-direction: column; gap: var(--s2); }
+.msc-decision__cta h2 { font-size: 13px; font-weight: 620; }
+.msc-decision__cta p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--msc-text-dim); }
+
+.msc-primary-btn {
+  appearance: none;
+  margin-top: var(--s1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--msc-accent);
+  color: var(--msc-on-accent);
+  font-size: 13.5px;
+  font-weight: 640;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  cursor: pointer;
+}
+.msc-primary-btn svg { width: 15px; height: 15px; }
+
+/* running state — the one place a bit of cinema is warranted */
+.msc-engine-run { display: flex; flex-direction: column; gap: var(--s3); }
+.msc-engine-run__title { font-size: 13px; font-weight: 620; }
+.msc-engine-run__stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.msc-engine-stage {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: 12.5px;
+  color: var(--msc-text-faint);
+  transition: color 200ms ease;
+}
+.msc-engine-stage__dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--msc-line-strong);
+  flex: none;
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+.msc-engine-stage.is-running { color: var(--msc-text); }
+.msc-engine-stage.is-running .msc-engine-stage__dot {
+  background: var(--msc-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--msc-accent) 18%, transparent);
+  animation: msc-pulse 1.2s ease-in-out infinite;
+}
+.msc-engine-stage.is-done { color: var(--msc-text-dim); }
+.msc-engine-stage.is-done .msc-engine-stage__dot { background: var(--msc-good); }
+.msc-engine-stage.is-error .msc-engine-stage__dot { background: var(--msc-bad); }
+
+@keyframes msc-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--msc-accent) 20%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--msc-accent) 6%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msc-engine-stage.is-running .msc-engine-stage__dot { animation: none; }
+}
+
+/* ── sections ───────────────────────────────────────────────────────────── */
+
+.msc-section { background: var(--msc-surface); border-radius: var(--r-lg); overflow: hidden; }
+
+.msc-section__head {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--msc-text);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s4);
+  min-height: 54px;
+  cursor: pointer;
+  text-align: left;
+}
+.msc-section__icon { width: 15px; height: 15px; color: var(--msc-text-faint); flex: none; }
+.msc-section__title { font-size: 13px; font-weight: 600; flex: none; }
+.msc-section__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--msc-text-faint);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msc-section__caret {
+  width: 14px; height: 14px; flex: none;
+  color: var(--msc-text-faint);
+  transition: transform 180ms ease;
+}
+.msc-section.is-open .msc-section__caret { transform: rotate(180deg); }
+
+.msc-section__body {
+  padding: 0 var(--s4) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.msc-subhead {
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--msc-text-faint);
+  padding-top: var(--s2);
+}
+.msc-section__body > .msc-subhead:first-child { padding-top: 0; }
+
+/* ── fields ─────────────────────────────────────────────────────────────── */
+
+.msc-fields { margin: 0; display: flex; flex-direction: column; gap: 0; }
+.msc-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 9px 0;
+  border-bottom: 1px solid var(--msc-line);
+}
+.msc-field:last-child { border-bottom: 0; padding-bottom: 0; }
+.msc-field dt { font-size: 12px; color: var(--msc-text-faint); flex: none; }
+.msc-field dd { margin: 0; font-size: 13px; font-weight: 560; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.msc-field.is-warn dd { color: var(--msc-warn); }
+.msc-field.is-good dd { color: var(--msc-good); }
+
+/* ── identities ─────────────────────────────────────────────────────────── */
+
+.msc-identities { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.msc-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s3);
+  background: var(--msc-surface-2);
+  border-radius: var(--r-sm);
+}
+.msc-identity__role {
+  font-size: 9.5px;
+  font-weight: 660;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--msc-accent);
+}
+.msc-identity__name { font-size: 14px; font-weight: 600; }
+.msc-identity__detail { font-size: 12px; color: var(--msc-text-dim); }
+.msc-identity__hint { font-size: 11px; color: var(--msc-text-faint); line-height: 1.4; margin-top: 2px; }
+
+/* ── timeline ───────────────────────────────────────────────────────────── */
+
+.msc-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.msc-timeline__item {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: var(--s3);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--msc-line);
+  align-items: baseline;
+}
+.msc-timeline__item:last-child { border-bottom: 0; padding-bottom: 0; }
+.msc-timeline__when { font-size: 11px; color: var(--msc-text-faint); }
+.msc-timeline__item strong { font-size: 12.5px; font-weight: 560; display: block; }
+.msc-timeline__detail { font-size: 11.5px; color: var(--msc-text-dim); display: block; margin-top: 2px; }
+
+/* ── comps ──────────────────────────────────────────────────────────────── */
+
+.msc-comps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.msc-comp { background: var(--msc-surface-2); border-radius: var(--r-sm); padding: var(--s3); }
+.msc-comp__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.msc-comp__row strong { font-size: 15px; font-weight: 620; }
+.msc-comp__row span { font-size: 11px; color: var(--msc-text-faint); }
+.msc-comp__addr { margin: 3px 0 0; font-size: 12px; color: var(--msc-text-dim); }
+.msc-comp__meta { margin: 3px 0 0; font-size: 11px; color: var(--msc-text-faint); }
+
+.msc-reasons { font-size: 12px; }
+.msc-reasons summary { color: var(--msc-accent); font-weight: 560; cursor: pointer; padding: var(--s2) 0; }
+.msc-reasons ul { list-style: none; margin: 0; padding: 0; }
+.msc-reasons li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--msc-line);
+  color: var(--msc-text-dim);
+}
+.msc-reasons li:last-child { border-bottom: 0; }
+.msc-reasons li strong { color: var(--msc-text); font-weight: 600; }
+
+/* ── option sheet ───────────────────────────────────────────────────────── */
+
+/* `inset: 0` alone resolved against a transformed ancestor rather than the
+   viewport, which left the picker anchored to the top of the screen. Pinning
+   the dynamic viewport height keeps it bottom-anchored and in thumb reach. */
+.msc-sheet-root {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-end;
+}
+.msc-sheet-scrim { position: absolute; inset: 0; border: 0; background: color-mix(in srgb, #000 55%, transparent); backdrop-filter: blur(2px); }
+.msc-sheet {
+  /* Pinned rather than flex-aligned: the flex-end alignment was not surviving
+     the surrounding cascade, and bottom anchoring is not negotiable on a phone. */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-height: 72vh;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--msc-tint) 3%, var(--msc-surface));
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  padding: 10px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  animation: msc-sheet-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes msc-sheet-in { from { transform: translateY(14%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .msc-sheet { animation: none; } }
+
+.msc-sheet__grip { width: 36px; height: 4px; border-radius: 2px; background: var(--msc-line-strong); margin: 0 auto 14px; }
+.msc-sheet__title { font-size: 12px; font-weight: 620; color: var(--msc-text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+.msc-sheet__options { display: flex; flex-direction: column; }
+.msc-sheet__option {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--msc-line);
+  color: var(--msc-text);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 4px;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.msc-sheet__option:last-child { border-bottom: 0; }
+.msc-sheet__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.msc-sheet__label { flex: 1 1 auto; }
+.msc-sheet__check { width: 16px; height: 16px; color: var(--msc-accent); }
+.msc-sheet__option.is-selected .msc-sheet__label { font-weight: 620; }
+
+/* ── misc ───────────────────────────────────────────────────────────────── */
+
+.msc-quote {
+  margin: 0;
+  padding: var(--s3);
+  background: var(--msc-surface-2);
+  border-radius: var(--r-sm);
+}
+.msc-quote figcaption {
+  font-size: 9.5px;
+  font-weight: 660;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--msc-text-faint);
+  margin-bottom: 5px;
+}
+.msc-quote blockquote {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--msc-text-dim);
+}
+
+.msc-empty { margin: 0; font-size: 12.5px; color: var(--msc-text-faint); }
+.msc-note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--msc-text-faint); }
+.msc-error { margin: 0; font-size: 12px; color: var(--msc-bad); }
+.msc-tail-status { margin: 0; padding: var(--s2) 0; font-size: 11.5px; color: var(--msc-text-faint); text-align: center; }
+
+.msc-boot { display: flex; flex-direction: column; gap: var(--s4); }
+.msc-boot__name { font-size: 20px; font-weight: 620; line-height: 1.2; }
+
+.msc-skeleton { display: flex; flex-direction: column; gap: 10px; }
+.msc-skeleton span {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--msc-surface-2) 25%, color-mix(in srgb, var(--msc-tint) 9%, transparent) 37%, var(--msc-surface-2) 63%);
+  background-size: 400% 100%;
+  animation: msc-shimmer 1.4s ease infinite;
+}
+.msc-skeleton span:nth-child(2) { width: 78%; }
+.msc-skeleton span:nth-child(3) { width: 54%; }
+@keyframes msc-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .msc-skeleton span { animation: none; } }
+
+/* Bottom chrome must not sit on top of content. */
+.msc-safe-bottom { height: calc(64px + env(safe-area-inset-bottom, 0px)); flex: none; }
+
+/* 375px — the tightest supported width. */
+@media (max-width: 380px) {
+  .msc-root { padding-left: var(--s3); padding-right: var(--s3); }
+  .msc-header { margin: 0 calc(var(--s3) * -1); padding-left: var(--s3); padding-right: var(--s3); }
+  .msc-header__name { font-size: 20px; }
+  .msc-snapshot__value { font-size: 27px; }
+  .msc-action { min-height: 48px; font-size: 10px; }
+  .msc-ctrl__value { font-size: 11.5px; }
+  .msc-timeline__item { grid-template-columns: 64px 1fr; }
+}
+
+/* 430px — use the extra width for breathing room, not for more columns. */
+@media (min-width: 415px) {
+  .msc-root { padding-left: 20px; padding-right: 20px; }
+  .msc-header { margin: 0 -20px; padding-left: 20px; padding-right: 20px; }
+  .msc-header__name { font-size: 24px; }
+  .msc-snapshot__value { font-size: 33px; }
+}

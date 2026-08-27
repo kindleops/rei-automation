@@ -741,6 +741,8 @@ export const getInboxViewCounts = (threads: InboxWorkflowThread[]): Record<strin
 
 export const getSavedPresetConfig = (preset: InboxSavedFilterPreset): Partial<InboxFilterState> => {
   if (preset === 'all_messages') return { view: 'all_conversations' }
+  // Archived is a terminal bucket; the server returns archived rows only for this view.
+  if (preset === 'archived') return { view: 'archived' }
   if (preset === 'waiting') return { view: 'waiting' }
   if (preset === 'inbound_only') return { view: 'inbound' }
   if (preset === 'outbound_only') return { view: 'outbound' }

@@ -1,4 +1,5 @@
 export type InboxSavedFilterPreset =
+  | 'archived'
   | 'my_priority'
   | 'new_inbounds'
   | 'offer_needed'

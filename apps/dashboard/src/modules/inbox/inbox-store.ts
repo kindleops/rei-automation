@@ -471,7 +471,15 @@ export function inboxReducer(state: InboxStoreState, action: InboxStoreAction): 
     case 'SET_VIEW_COUNTS': {
       // Counts are fully isolated from bucket rows — a counts fetch failure
       // only affects this field, never touches buckets or messagesByThreadKey.
-      if (!action.preserveExisting) return { ...state, viewCounts: action.counts }
+      // Producers differ in completeness: refreshAuthoritativeViewCounts sends a COMPLETE
+      // payload (every canonical key, zeros included), while a live-response commit sends a
+      // SPARSE one carrying only what that model knows. A blind replace let the sparse
+      // payload delete keys it never had — which is how the authoritative Archived count
+      // was reset to 0 moments after being fetched. Overwrite what the payload carries;
+      // keep what it omits. An intentional zero still arrives as an explicit key.
+      if (!action.preserveExisting) {
+        return { ...state, viewCounts: { ...state.viewCounts, ...action.counts } }
+      }
       const next = { ...state.viewCounts }
       for (const [key, value] of Object.entries(action.counts)) {
         if (!Number.isFinite(value) || value < 0) continue

@@ -53,6 +53,17 @@ export type EntitySearchResult = {
   details?: {
     mailingAddress?: string
     marketLabel?: string
+    /** Canonical market key; carries the `Unmapped · ` prefix when off-zone. */
+    marketKey?: string
+    /** True when the locality is outside the configured sending zones. */
+    isUnmappedMarket?: boolean
+    /** `linked_person` when the owner came from the prospect graph rather than
+     *  `properties.master_owner_id` (null on ~75% of property rows). */
+    ownerVia?: 'linked_person'
+    bestPersonName?: string
+    bestPersonIsLikelyOwner?: boolean
+    /** The selected source columns verbatim, for the table's column picker. */
+    row?: Record<string, unknown>
     locality?: string
     county?: string
     state?: string
@@ -100,6 +111,8 @@ export type EntityGraphPagination = {
   hasMore: boolean
   nextCursor: number | null
   previousCursor?: number | null
+  /** Adapter caveats that change what `total` counts, e.g. `score_order_excludes_unscored`. */
+  notes?: string[]
 }
 
 export type EntityGraphListResponse = {

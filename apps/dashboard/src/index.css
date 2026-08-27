@@ -130,25 +130,40 @@
   margin: 0;
   padding: 0;
 }
+/* ── Viewport contract ─────────────────────────────────────────────────────
+   On real iOS the three viewport sizes differ: svh (URL bar expanded) is
+   ~60-90px shorter than lvh, and percentage heights resolve against the
+   layout viewport. Sizing the shell in `%` or `svh` therefore ends it above
+   the physical bottom of the screen and lets the body background show through
+   as a dead band. Desktop emulation collapses svh == lvh == dvh, so that
+   class of defect is invisible there and only appears on a handset.
+
+   `dvh` is the only unit that tracks the visible viewport as the URL bar
+   shows and hides. The cascade below degrades safely: `vh` for anything
+   without dvh, `-webkit-fill-available` for iOS 15 and earlier, then `dvh`.
+   ────────────────────────────────────────────────────────────────────────── */
 html {
-  height: 100%;
-  min-height: 100dvh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   overflow: hidden;
   font-size: 16px;
 }
 body {
   margin: 0;
   background: #000;
-  height: 100%;
-  min-height: 100dvh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 #root {
-  height: 100%;
-  min-height: 100dvh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
 }
 a {
   color: inherit;
@@ -184,8 +199,10 @@ h3 { font-size: 0.8125rem; }
   flex-direction: column;
   gap: 0;
   padding: 0;
-  height: 100svh;
-  min-height: 100svh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
+  min-height: 100dvh;
   overflow: hidden;
   position: relative;
 }
@@ -4196,7 +4213,9 @@ non‑Home surfaces only ──────────────────�
 
   display: flex;
   flex-direction: column;
-  height: 100svh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
   background: var(--ix-bg-base);
@@ -7038,7 +7057,9 @@ non‑Home surfaces only ──────────────────�
 .nx-buyer {
   display: flex;
   flex-direction: column;
-  height: 100svh;
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
 }
 .nx-buyer__body {
   display: grid;

@@ -4,7 +4,9 @@
 
 :root {
   --nx-pinned-dock-height: 88px;
-  --nx-pinned-dock-collapsed: 14px;
+  /* Visible height of the collapsed command shelf. Content reserves this exact
+     amount, so no inbox row can hide underneath the dock. */
+  --nx-pinned-dock-collapsed: 26px;
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 
@@ -106,9 +108,22 @@ html.is-mobile-layout {
     touch-action: none;
   }
 
+  /* Collapsed = slim command shelf. The glass is only 26px tall, but the handle
+     stays a full 44px touch target by extending invisibly above the shelf. */
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    overflow: visible;
+    height: var(--nx-pinned-dock-collapsed);
+  }
+
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle {
-    min-height: 14px;
-    padding: 5px 0;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 0 11px;
+    align-content: end;
   }
 
   .nx-pinned-app-dock__handle i {
@@ -121,7 +136,8 @@ html.is-mobile-layout {
   }
 
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle i {
-    width: 64px;
+    width: 56px;
+    height: 4px;
     background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
     box-shadow:
       0 0 12px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.22),
@@ -160,12 +176,21 @@ html.is-mobile-layout {
     opacity: 1;
   }
 
+  /* Expanded (and mid-drag from the docked state) must fit the unpin zone — the
+     shared 120px cap clipped "drag apps here to remove from dock" to a sliver.
+     Scoped to open phases so a collapsed dock can never pop the panel open. */
+  .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__panel,
+  .nx-pinned-app-dock.is-docked.is-reordering .nx-pinned-app-dock__panel {
+    max-height: 168px;
+  }
+
   .nx-pinned-app-dock__panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 0 12px 4px;
+    min-height: 34px;
+    padding: 0 12px 2px;
   }
 
   .nx-pinned-app-dock__panel-head strong {
@@ -179,7 +204,9 @@ html.is-mobile-layout {
   .nx-pinned-app-dock__customize {
     border: 0;
     border-radius: 999px;
-    padding: 4px 10px;
+    min-height: 32px !important;
+    min-width: 64px !important;
+    padding: 4px 12px;
     font-size: 10px;
     font-weight: 700;
     color: var(--tone-primary, #5eead4);
@@ -271,6 +298,14 @@ html.is-mobile-layout {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Uniform cells in the dock track so labels truncate on a consistent grid.
+     The catalog sheet keeps its own grid sizing. */
+  .nx-pinned-app-dock__track .nx-pinned-app-dock__app {
+    width: 68px;
+    min-width: 68px;
+    max-width: 68px;
   }
 
   .nx-pinned-app-dock__app:active {

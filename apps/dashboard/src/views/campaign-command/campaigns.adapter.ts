@@ -110,11 +110,47 @@ export const launchCampaign = async (
   throw new Error(res.message || res.error)
 }
 
+/**
+ * A campaign's geography, derived from its saved targeting.
+ *
+ * CampaignSummary carries no market column — market lives in the campaign's own
+ * filters (metadata.target_filters.properties). Without this every mobile row
+ * read "No market set", which is exactly the market-blindness the command
+ * screen is meant to remove. Falls back through market -> state -> city.
+ */
+export function deriveCampaignMarketLabel(metadata: unknown): string | null {
+  const groups = (metadata as { target_filters?: Record<string, unknown> } | null)?.target_filters
+  const properties = (groups as Record<string, unknown> | undefined)?.properties
+  if (!Array.isArray(properties)) return null
+
+  const pick = (suffix: string): string[] => {
+    for (const entry of properties) {
+      if (!entry || typeof entry !== 'object') continue
+      const row = entry as Record<string, unknown>
+      const key = String(row.fieldKey ?? row.field_key ?? '')
+      if (!key.endsWith(suffix)) continue
+      const value = row.value
+      const list = Array.isArray(value) ? value : value == null ? [] : [value]
+      const cleaned = list.map((v) => String(v ?? '').trim()).filter(Boolean)
+      if (cleaned.length) return cleaned
+    }
+    return []
+  }
+
+  const values = pick('.market').length ? pick('.market')
+    : pick('property_address_state').length ? pick('property_address_state')
+    : pick('property_address_city')
+
+  if (!values.length) return null
+  return values.length === 1 ? values[0] : `${values[0]} +${values.length - 1}`
+}
+
 function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>): CampaignSummary {
   const recipientMetrics = row.recipient_metrics as CampaignSummary['recipient_metrics']
   return {
       id: row.id,
       campaign_name: row.campaign_name ?? row.name ?? '',
+      market_label: (row.market_label as string | null) ?? deriveCampaignMarketLabel(row.metadata),
       status: row.status as CampaignSummary['status'],
       total_targets: Number(row.total_targets ?? 0),
       ready_targets: Number(row.ready_targets ?? 0),
@@ -212,13 +248,20 @@ async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
   const client = getSupabaseClient()
   const { data: campaigns, error } = await client
     .from('campaigns')
-    .select('id, name, status, created_at, updated_at, metadata, auto_send_enabled, send_interval_seconds, send_window_start, send_window_end')
+    .select('id, name, status, created_at, updated_at, metadata, auto_send_enabled, send_interval_seconds, contact_window_start, contact_window_end')
     .order('created_at', { ascending: false })
     .limit(200)
   if (error) {
     const msg = error.message || String(error)
-    if (error.code === '42P01' || /does not exist|relation/i.test(msg)) {
+    // 42P01 = undefined_table (a genuinely missing view/relation, non-retryable).
+    // 42703 = undefined_column, which is a query defect on our side, NOT a missing
+    // view. Conflating them rendered a hard non-retryable empty state for what was
+    // really a bad column name.
+    if (error.code === '42P01' || /relation .* does not exist/i.test(msg)) {
       throw Object.assign(new Error('missing_view'), { code: 'missing_view' })
+    }
+    if (error.code === '42703') {
+      throw Object.assign(new Error(`campaign_query_column_error: ${msg}`), { code: 'query_error' })
     }
     throw error
   }
@@ -245,6 +288,7 @@ async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
     return {
       id: String(row.id),
       campaign_name: String(row.name ?? ''),
+      market_label: deriveCampaignMarketLabel(row.metadata),
       status: row.status as CampaignSummary['status'],
       total_targets: counts.total,
       ready_targets: counts.ready,
@@ -267,8 +311,14 @@ async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
       next_send_at: null,
       last_send_at: null,
       send_interval_seconds: Number(row.send_interval_seconds ?? 900),
-      send_window_start: row.send_window_start ?? null,
-      send_window_end: row.send_window_end ?? null,
+      // campaigns has contact_window_* ; send_window_* has never existed. Selecting
+      // the wrong name failed the whole fallback with a missing-COLUMN error that
+      // was then mislabelled 'missing_view' and blanked the entire screen.
+      // public.campaigns has contact_window_* ; send_window_* has never existed.
+      // Selecting the wrong name failed the whole fallback with a missing-COLUMN
+      // error that was mislabelled 'missing_view' and blanked the entire screen.
+      send_window_start: row.contact_window_start ?? null,
+      send_window_end: row.contact_window_end ?? null,
       auto_queue_enabled: false,
       auto_send_enabled: Boolean(row.auto_send_enabled ?? false),
       blocked_reason_counts: {},

@@ -6,9 +6,10 @@
 :root {
   --nx-mobile-safe-top: env(safe-area-inset-top, 0px);
   --nx-mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --nx-dock-height: 52px;
-  --nx-dock-pad-top: 3px;
-  --nx-dock-inner-pad-y: 4px;
+  /* Top command rail. Buttons stay 44px; only the chrome around them is trimmed. */
+  --nx-dock-height: 44px;
+  --nx-dock-pad-top: 1px;
+  --nx-dock-inner-pad-y: 5px;
   --nx-mobile-chrome-top: calc(
     var(--nx-dock-pad-top) + var(--nx-dock-height) + var(--nx-dock-inner-pad-y) + var(--nx-mobile-safe-top)
   );
@@ -97,7 +98,7 @@ html.is-mobile-layout {
     right: 0;
     top: 0;
     z-index: 150;
-    padding: calc(3px + var(--nx-mobile-safe-top)) 10px 0;
+    padding: calc(var(--nx-dock-pad-top) + var(--nx-mobile-safe-top)) 10px 0;
     pointer-events: none;
     animation: nx-dock-mount 380ms cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -111,9 +112,9 @@ html.is-mobile-layout {
     justify-content: space-between;
     gap: 1px;
     min-height: var(--nx-dock-height);
-    max-height: 56px;
-    padding: 4px 6px 6px;
-    border-radius: 0 0 18px 18px;
+    max-height: 50px;
+    padding: 2px 6px 3px;
+    border-radius: 0 0 16px 16px;
     border: 1px solid rgba(255, 255, 255, 0.11);
     border-top: none;
     background: rgba(6, 10, 18, 0.68);
@@ -456,6 +457,13 @@ html.is-mobile-layout {
     background: rgba(255, 255, 255, 0.22);
     border: none;
     flex-shrink: 0;
+    /* The handle is a decorative <button> (aria-hidden, tabIndex -1). The
+       blanket `button { min-height: 44px; min-width: 44px }` tap-target rule in
+       styles/mobile-responsive.css was inflating it into a 44px grey circle at
+       the top of every sheet in the app. Class specificity beats the element
+       selector, so this wins regardless of stylesheet order. */
+    min-height: 5px !important;
+    min-width: 44px !important;
   }
 
   .nx-mobile-sheet__header {
@@ -806,10 +814,21 @@ html.is-mobile-layout {
   .nx-inbox-shell.is-mobile-inbox,
   .nx-os.is-mobile-os .nx-stage {
     padding-top: var(--nx-mobile-chrome-top) !important;
+  }
+
+  /* Bottom clearance is owned by ONE element. The dock reservation on .nx-stage /
+     .nx-premium-inbox (pinned-app-dock.css) already includes the home-indicator
+     inset, so the inbox shell must not add safe-bottom a second time — doing so
+     left a full safe-area band of dead black space under the list on notched
+     devices while headless/desktop viewports (inset 0) looked fine. */
+  .nx-os.is-mobile-os .nx-stage {
     padding-bottom: var(--nx-mobile-safe-bottom) !important;
   }
 
-  .nx-inbox-shell.is-mobile-inbox:has(.nx-workspace-pane.is-view-command_map),
+  .nx-inbox-shell.is-mobile-inbox {
+    padding-bottom: 0 !important;
+  }
+
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-stage {
     padding-bottom: 0 !important;
   }
@@ -824,19 +843,52 @@ html.is-mobile-layout {
     z-index: 12;
   }
 
+  /* Single-line prospect bar: name | flags | linked-count, all on one row.
+     Stacked it cost 99px directly above the composer — a third of the viewport
+     went to bottom chrome before the operator saw any of the conversation. */
   .nx-inbox-shell.is-mobile-inbox .nx-active-prospect {
-    padding: 6px 10px 4px !important;
+    padding: 3px 10px 2px !important;
   }
 
   .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__card {
-    padding: 8px 10px !important;
-    gap: 6px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    padding: 5px 10px !important;
+    gap: 8px !important;
     border-radius: 10px !important;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__head {
+    display: contents;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__identity {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* The card's own context makes the eyebrow redundant on a one-line bar. */
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__eyebrow {
+    display: none;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__meta-row {
+    order: 2;
+    flex: 0 0 auto;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__actions {
+    order: 3;
+    flex: 0 0 auto;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__expand {
+    min-height: 32px !important;
   }
 
   .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__name {
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.2;
@@ -2192,9 +2244,22 @@ html.is-mobile-layout {
     min-height: 0;
   }
 
-  /* Map-context sheet backdrop — map stays visible, no dim layer */
-  .nx-mobile-sheet-backdrop.is-map-context {
-    display: none !important;
+  /* The map seller card keeps the map visible by passing showBackdrop={false},
+     so it never renders a backdrop at all. The old
+     `.nx-mobile-sheet-backdrop.is-map-context { display: none !important }`
+     rule was therefore dead for its intended target — but the class was
+     hardcoded on EVERY MobileBottomSheet backdrop, which silently removed the
+     backdrop app-wide. Backdrop suppression is a prop now, not a class. */
+
+  /* Bottom-sheet backdrop sits between the dock and the sheet. */
+  .nx-mobile-sheet-backdrop.is-bottom-sheet {
+    z-index: var(--nx-shell-z-sheet-backdrop, 169);
+  }
+
+  /* Non-dismissible sheets still dim, but the tap is inert. */
+  .nx-mobile-sheet-backdrop.is-bottom-sheet.is-inert {
+    cursor: default;
+    pointer-events: none;
   }
 
   /* Seller + shared draggable map sheets */
@@ -2415,13 +2480,18 @@ html.is-mobile-layout {
     padding-bottom: 12px;
   }
 
-  /* Reusable bottom sheet */
+  /* ── Reusable bottom sheet ────────────────────────────────────────────────
+   * Layering is claimed from the documented shell stack in
+   * nexus-theme-contract.css. The sheet sits ABOVE the pinned app dock (160),
+   * so no product surface has to pad itself away from the dock; it covers it,
+   * the way a modal sheet should. Safe-area inset is handled here once.
+   * The map seller card overrides both of these deliberately. */
   .nx-mobile-bottom-sheet {
     position: fixed;
     left: 0;
     right: 0;
     bottom: var(--nx-mobile-safe-bottom);
-    z-index: 140;
+    z-index: var(--nx-shell-z-sheet, 170);
     display: flex;
     flex-direction: column;
     background: rgba(10, 14, 22, 0.98);
@@ -2433,15 +2503,62 @@ html.is-mobile-layout {
     transition: max-height 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
+  /* The handle is a <div role="button">, so the global tap-target rule
+     (`button, [role="button"] { min-height: 44px !important }`) inflated this
+     44x5 pill into a 44x44 circle. Opt the painted box out here — once, in the
+     shared component — and pay the target back with an ::after hit region so
+     the accessibility rule is honoured, not weakened. */
   .nx-mobile-bottom-sheet__handle {
-    width: 44px;
-    height: 5px;
+    position: relative;
+    width: 38px !important;
+    height: 4px !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     margin: 10px auto 6px;
+    padding: 0 !important;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.22);
     border: none;
     cursor: grab;
     flex-shrink: 0;
+    touch-action: none;
+  }
+
+  .nx-mobile-bottom-sheet__handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 88px;
+    height: 44px;
+    border-radius: 999px;
+  }
+
+  .nx-mobile-bottom-sheet__handle:focus-visible {
+    outline: 2px solid var(--nx-accent, #38bdf8);
+    outline-offset: 6px;
+  }
+
+  &[data-nexus-theme='light'] .nx-mobile-bottom-sheet__handle {
+    background: rgba(15, 23, 42, 0.22);
+  }
+
+  /* The sheet surface was hardcoded dark, so a light-theme sheet rendered dark
+     text on a dark panel. Consume the theme contract instead.
+     NOTE the `&[data-nexus-theme=...]` form: this file is CSS-nested inside
+     `html.is-mobile-layout`, so a bare `[data-nexus-theme='light'] .x` compiles
+     to `html.is-mobile-layout [data-nexus-theme='light'] .x` — a DESCENDANT
+     match that can never hit the attribute, which lives on <html> itself.
+     `&[…]` compounds onto the same element and actually matches. */
+  &[data-nexus-theme='light'] .nx-mobile-bottom-sheet {
+    background: var(--nx-contract-surface, #ffffff);
+    border-color: var(--nx-contract-border, rgba(15, 23, 42, 0.10));
+    box-shadow: 0 -12px 40px rgba(15, 23, 42, 0.18);
+  }
+
+  &[data-nexus-theme='light'] .nx-mobile-sheet-backdrop.is-bottom-sheet {
+    background: rgba(15, 23, 42, 0.34);
   }
 
   .nx-mobile-bottom-sheet__title {
@@ -2588,4 +2705,239 @@ html.is-mobile-layout {
 .nx-os:not(.is-mobile-os) .nx-mobile-command-dock,
 .nx-os:not(.is-mobile-os) .nx-conv-back {
   display: none !important;
+}
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE DENSITY PASS — Inbox header stack + list footer
+   Phase 1 shell stabilization. Mobile portrait only (class-gated, so Safari
+   "Request Desktop Website" still gets the mobile shell and desktop is untouched).
+   Touch targets stay at 44px everywhere except the two secondary text links in
+   the saved-filter row, which are wide, low-frequency, and keep a 34px target.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout {
+  /* Header shell — reclaim the padding ring, keep the glass treatment */
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-inbox-header-shell {
+    margin-top: 2px;
+    margin-bottom: 2px;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-inbox-header-shell__inner {
+    padding-top: 2px;
+  }
+
+  /* Search + filter row — 44px controls, no trailing gutter */
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-sidebar-rebuilt__search-top {
+    gap: 5px;
+    padding-bottom: 1px;
+  }
+
+  /* Category rail — tighter cells, same three-line grammar (icon / label / count) */
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-cat-nav {
+    min-height: 0;
+    padding-top: 1px;
+    margin-bottom: 2px;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-cat-nav__item {
+    gap: 1px;
+    padding: 3px 4px 4px;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-cat-nav__icon {
+    width: 14px;
+    height: 14px;
+    font-size: 12px;
+  }
+
+  /* Saved-filter row — secondary text links, not a 60px band */
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-sidebar-rebuilt__secondary-controls {
+    gap: 14px;
+    padding: 3px 12px;
+  }
+
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-sidebar-rebuilt__secondary-controls button {
+    min-height: 34px !important;
+    min-width: 0 !important;
+    padding: 0;
+  }
+
+  /* ⌘ Quick Actions is the only home for Polish / Translate / Schedule / Voice on
+     mobile now, so give it the full width and height it needs to be usable. */
+  .nx-qap-anchor.nx-quick-actions-popover {
+    width: calc(100vw - 20px) !important;
+    max-width: none !important;
+    left: 10px !important;
+    right: 10px !important;
+    max-height: min(70vh, 560px) !important;
+  }
+
+  /* Load More — was a permanent 66px footer eating the bottom of the viewport */
+  .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-sidebar-rebuilt__load-more {
+    padding: 4px 16px 6px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHASE 2A — MAP CANVAS AS THE PRIMARY SURFACE
+   The map is the product; command UI is temporary chrome around it.
+   Baseline at 393x852 measured 306px of permanent chrome (36%): top rail 51 +
+   nx-icm__toolbar 108 + Live Activity 117 + dock 30. The toolbar stacked a
+   "Live Map · N" badge over two full-width two-line buttons. Collapsed here into a
+   single-row floating cluster; all three controls and their active states are kept.
+   Mobile portrait only — desktop Map is untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout {
+  .nx-icm.is-mobile-map .nx-icm__toolbar,
+  .nx-icm--compact .nx-icm__toolbar {
+    padding: 6px 10px 0 !important;
+    gap: 6px !important;
+  }
+
+  /* One row: [Live Map · N] [Advanced Filters] [Map Controls] */
+  .nx-icm .nx-icm__header {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    padding: 0 !important;
+  }
+
+  .nx-icm .nx-icm__header-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 34px;
+    padding: 0 10px !important;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .nx-icm .nx-icm__header-badge span { font-size: 9px !important; letter-spacing: 0.06em; }
+  .nx-icm .nx-icm__header-badge strong { font-size: 13px !important; }
+
+  .nx-icm .nx-icm__header-actions {
+    flex: 1 1 auto;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px !important;
+    min-width: 0;
+  }
+
+  /* Compact pills — single line, no wrap, no clipping at 375px */
+  .nx-icm .nx-icm__header-actions .nx-icm__mode-tab {
+    flex: 0 1 auto;
+    min-height: 34px !important;
+    min-width: 0 !important;
+    padding: 0 11px !important;
+    border-radius: 999px !important;
+    font-size: 10px !important;
+    line-height: 1 !important;
+    letter-spacing: 0.03em;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* ── Live Activity zero-state (mobile) ───────────────────────────────────────
+   A full glass panel permanently consumed 117px of an 852px viewport just to say
+   "0 in flow / No live events in scope". At zero, collapse to a compact pill; the
+   operator can still tap it open, and the moment real events arrive `is-empty`
+   drops and the normal rail returns. Only the zero state is affected. */
+html.is-mobile-layout {
+  .nx-icm-activity.is-mobile.is-empty.is-minimal {
+    left: auto !important;
+    right: 12px !important;
+    width: auto !important;
+    max-width: 62vw;
+    padding: 0 !important;
+    border-radius: 999px !important;
+    gap: 0 !important;
+    /* The rail carries a 112px min-height for its normal panel form. */
+    min-height: 0 !important;
+  }
+
+  /* The ticker body carries the empty-state card — nothing to show at zero. */
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__ticker {
+    display: none !important;
+  }
+
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__header {
+    display: flex !important;
+    align-items: center !important;
+    min-height: 0 !important;
+    height: 40px !important;
+    padding: 0 6px 0 10px !important;
+    margin: 0 !important;
+    gap: 6px !important;
+  }
+
+  /* The ✕ / ⚙ buttons carry a 44px tap target that alone out-sized the pill. */
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__icon-btn {
+    min-height: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    width: 32px !important;
+  }
+
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__title-block > *:not(.nx-icm-activity__meta) {
+    display: none !important;
+  }
+
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__meta {
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
+
+  .nx-icm-activity.is-mobile.is-empty.is-minimal .nx-icm-activity__scope {
+    display: none !important;
+  }
+}
+
+
+/* ── Map toolbar: three primary controls must fit 375 without clipping ─────── */
+@media (max-width: 768px) {
+  .nx-icm__header-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .nx-icm__header-actions .nx-icm__mode-tab {
+    padding: 7px 11px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    min-height: 0;
+  }
+  /* Status chips read as one quiet row rather than four competing pills. */
+  .smc-shell.is-mobile .smc-badges {
+    gap: 5px;
+  }
+  .smc-shell.is-mobile .smc-badge {
+    padding: 3px 8px;
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+}
+
+
+/* The property sheet must own the bottom band. It previously stopped at
+   --nx-mobile-safe-bottom, leaving the pinned dock and bare map visible beneath the
+   CTA. Extend it to the viewport edge and move that inset into the footer padding so
+   the CTA keeps its position and still clears the dock / home indicator. */
+@media (max-width: 768px) {
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
+    bottom: 0;
+  }
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet .smc-actions--sticky {
+    background: rgba(10, 14, 22, 0.98);
+    padding-bottom: calc(10px + var(--nx-mobile-safe-bottom, 0px));
+  }
 }

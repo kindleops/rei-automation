@@ -10,6 +10,11 @@ import {
 } from '../../../../lib/data/templateIntelligenceData'
 import { useTemplateIntelligenceFilters } from '../../hooks/useTemplateIntelligenceFilters'
 import { OccTemplateFilterMenu } from './OccTemplateFilterMenu'
+import { TemplatesMobileList } from '../mobile/TemplatesMobileList'
+import { TemplateMobileDossier } from '../mobile/TemplateMobileDossier'
+import { TemplateMobileFilters } from '../mobile/TemplateMobileFilters'
+import { templateFilterCount } from '../mobile/template-mobile-filter-count'
+import { Icon } from '../../../../shared/icons'
 import { TemplateDetailModal } from './TemplateDetailModal'
 import { TemplateFiltersBar } from './TemplateFiltersBar'
 import { TemplateInsightStrip } from './TemplateInsightStrip'
@@ -53,6 +58,7 @@ export function TemplateIntelligenceModule({
   const [dossier, setDossier] = useState<Record<string, unknown> | null>(null)
   const [dossierLoading, setDossierLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
@@ -132,6 +138,71 @@ export function TemplateIntelligenceModule({
   }
 
   const stageCode = filters.stage && filters.stage !== 'all' ? filters.stage : selectedRow?.identity.stage_code
+
+  if (isMobileLayout) {
+    const activeFilters = templateFilterCount(filters, preset)
+    return (
+      <div className="qm-tpl">
+        <div className="qm-bar">
+          <button type="button" className="qm-bar__filters" onClick={() => setMobileFiltersOpen(true)}>
+            <Icon name="filter" size={13} />
+            <span className="qm-bar__filters-label">
+              {filters.stage ? `${filters.stage} templates` : 'All templates'}
+            </span>
+            {activeFilters > 0 && <span className="qm-bar__badge">{activeFilters}</span>}
+            <Icon name="chevron-down" size={12} />
+          </button>
+          <span className="qm-bar__range">{filters.range}</span>
+        </div>
+
+        <TemplatesMobileList
+          rows={rows}
+          loading={loading}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
+
+        {(matchingCount > pageSize) && (
+          <div className="qm-pager">
+            <span className="qm-pager__count">
+              {matchingCount.toLocaleString()} templates · page {page + 1} of {totalPages}
+            </span>
+            <div className="qm-pager__nav">
+              {page > 0 && (
+                <button type="button" className="qm-pager__btn" onClick={() => setPage(p => p - 1)}>Prev</button>
+              )}
+              {page < totalPages - 1 && (
+                <button type="button" className="qm-pager__btn is-next" onClick={() => setPage(p => p + 1)}>Next</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {selectedRow && (
+          <TemplateMobileDossier
+            row={selectedRow}
+            rows={rows}
+            dossier={dossier}
+            loading={dossierLoading}
+            onClose={() => setSelectedId(null)}
+            onNavigate={setSelectedId}
+            onViewQueueRows={onViewQueueRows}
+          />
+        )}
+
+        <TemplateMobileFilters
+          open={mobileFiltersOpen}
+          filters={filters}
+          preset={preset}
+          matchingCount={matchingCount}
+          onClose={() => setMobileFiltersOpen(false)}
+          onFiltersChange={(patch) => { setPage(0); updateFilters(patch) }}
+          onPresetChange={setPreset}
+          onReset={() => { setPage(0); resetFilters() }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={cls('occ-tpl-intel-layout', isMobileLayout && 'is-mobile-layout')}>

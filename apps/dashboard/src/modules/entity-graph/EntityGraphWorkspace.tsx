@@ -37,6 +37,7 @@ import { EntityGraphInspector } from './EntityGraphInspector'
 import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
 import { EntityGraphTableView } from './EntityGraphTableView'
 import { useBreakpoint } from '../mobile/useBreakpoint'
+import { EntityGraphMobile } from './mobile/EntityGraphMobile'
 import './entity-graph.css'
 
 type LayoutMode = 'peek' | 'explorer' | 'workspace' | 'command'
@@ -74,7 +75,30 @@ function ResultSkeleton({ count = 6 }: { count?: number }) {
   )
 }
 
-export function EntityGraphWorkspace({
+/**
+ * Portrait phones get a purpose-built shell rather than a squeezed command
+ * center. Branching at this level (instead of inside the desktop component)
+ * keeps the desktop list/dossier effects from firing alongside the mobile
+ * ones — otherwise every mobile page load issues each request twice.
+ */
+export function EntityGraphWorkspace(props: EntityGraphWorkspaceProps) {
+  const { isMobile } = useBreakpoint()
+
+  if (isMobile) {
+    return (
+      <EntityGraphMobile
+        themeMode={props.themeMode}
+        universalContext={props.universalContext}
+        onUniversalContextChange={props.onUniversalContextChange}
+        onAction={props.onAction}
+      />
+    )
+  }
+
+  return <EntityGraphDesktopWorkspace {...props} />
+}
+
+function EntityGraphDesktopWorkspace({
   paneWidth = '100',
   themeMode = 'dark',
   universalContext,

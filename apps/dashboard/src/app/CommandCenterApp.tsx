@@ -3,6 +3,7 @@ import { pushRoutePath, replaceRoutePath, useRoutePath } from './router'
 import { resolveRoute } from './routes'
 import { useCommandGrammar, type CommandBinding } from '../shared/command-grammar'
 import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../shared/copilot'
+import { isCopilotSurfaceEnabled } from '../shared/copilot/copilot-availability'
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
 import { NotificationToasts } from '../shared/NotificationToast'
 import { NotificationIntelligenceProvider, useNotificationIntelligence } from '../domain/notifications/useNotificationIntelligence'
@@ -164,7 +165,13 @@ const GlobalNotificationShell = ({
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
   const showGlobalBell = routePath !== '/inbox' && !isMobile
-  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
+  // Campaigns owns its own mobile chrome: a native large-title bar with search
+  // and New. Stacking the seven-icon portable rail above it made the screen read
+  // as internal tooling and cost 60px before any content. The bottom PinnedAppDock
+  // still renders, so global navigation is unchanged.
+  // '/campaigns' is an alias; the resolved route path is '/campaign-command'.
+  const routeOwnsMobileChrome = routePath === '/campaign-command' || routePath === '/campaigns'
+  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath) && !routeOwnsMobileChrome
 
   return (
     <>
@@ -626,16 +633,18 @@ export const CommandCenterApp = () => {
 
           <NotificationToasts />
 
-          <CopilotShell
-            open={copilotOpen}
-            context={copilotContext}
-            onClose={() => setCopilotOpen(false)}
-            onToggle={() => setCopilotOpen((previous) => {
-              if (!previous) playSound('copilot-wake')
-              return !previous
-            })}
-            onAction={handleCopilotAction}
-          />
+          {isCopilotSurfaceEnabled(isMobile) ? (
+            <CopilotShell
+              open={copilotOpen}
+              context={copilotContext}
+              onClose={() => setCopilotOpen(false)}
+              onToggle={() => setCopilotOpen((previous) => {
+                if (!previous) playSound('copilot-wake')
+                return !previous
+              })}
+              onAction={handleCopilotAction}
+            />
+          ) : null}
 
           <BriefingPanel
             open={briefingOpen}

@@ -158,6 +158,11 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     else setRefreshing(true)
     setError(null)
     setErrorType(null)
+    // A superseded request returns early below without writing any result. On a
+    // first load that used to leave rows=[] / total=0 / error=null — an abort
+    // wearing the costume of a legitimate empty pipeline. `settled` records
+    // whether THIS request actually produced an outcome.
+    let settled = false
     try {
       const surface = await loadPipelineBoardSurface({
         limit: 500,
@@ -173,6 +178,7 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
           // Preserve stale rows with warning — do not wipe board on refresh failure.
           return
         }
+        settled = true
         setOpportunities([])
         setTotal(0)
         setMetrics(null)
@@ -180,6 +186,7 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
         return
       }
       const { list, metrics: metricData, globalMetrics, views } = surface.data
+      settled = true
       setOpportunities(list.rows)
       setTotal(list.total)
       setMetrics(metricData)
@@ -194,8 +201,13 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
       setRetryable(true)
     } finally {
       if (requestId !== requestSeq.current) return
-      setLoading(false)
-      setRefreshing(false)
+      // Never drop out of loading on an unsettled (aborted/superseded) request:
+      // that is what rendered a confident "0 leads" for a load that never
+      // delivered. Stay in loading so the retry/refresh path can take over.
+      if (settled) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [enabled, scopeParams, viewState.scope])
 

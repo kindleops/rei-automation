@@ -1,0 +1,188 @@
+/*
+ * Campaign Detail — Overview body, mobile.
+ *
+ * Continues the frozen header grammar so there is no seam where the new screen
+ * becomes the old one: same True Black ground, same 16px gutter, same four-level
+ * ramp, same hairline bands, same instrument rows.
+ *
+ * Explicitly not here: panel backgrounds, nested rounded cards, decorative
+ * accent progress bars, oversized empty-state containers.
+ */
+
+.cov {
+  --o-ink:   #f6f8fc;
+  --o-ink-2: rgba(228, 234, 246, 0.72);
+  --o-ink-3: rgba(228, 234, 246, 0.50);
+  --o-ink-4: rgba(228, 234, 246, 0.32);
+  --o-rule:  rgba(148, 163, 184, 0.15);
+  --o-live:  #30d158;
+  --o-hold:  #ff9f0a;
+  --o-bad:   #ff453a;
+  --o-pad:   16px;
+
+  background: #000;
+  color: var(--o-ink);
+  padding-bottom: 118px;     /* clears the action bar + the global dock */
+}
+
+/* ── Single-line statements ───────────────────────────────────────────── */
+.cov__line {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--o-ink);
+}
+
+.cov__line.is-blocked { color: var(--o-hold); }
+.cov__line.is-warn { color: var(--o-hold); }
+
+.cov__sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--o-ink-4);
+}
+
+/* An operational meter, not a progress-bar demo: one hairline track, neutral
+   fill, no accent colour and no rounded capsule. */
+.cov__meter {
+  flex: 1;
+  min-width: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.cov__meter-fill {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Rates ────────────────────────────────────────────────────────────── */
+.cov__rates {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0 4px;
+}
+
+.cov__rate { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.cov__rate-value {
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--o-ink);
+}
+
+.cov__rate-value.is-good { color: var(--o-live); }
+.cov__rate-value.is-warn { color: var(--o-hold); }
+.cov__rate-value.is-bad  { color: var(--o-bad); }
+
+.cov__rate-label { font-size: 10.5px; color: var(--o-ink-3); }
+
+.cov__rate.is-nil .cov__rate-value { color: var(--o-ink-4); font-weight: 500; }
+
+/* The switcher band kept the app's panel fill, which read as a different blue
+   ground immediately below the frozen header. */
+.ccc--mobile-campaign-detail .ccc__detail-tabs,
+.ccc--mobile-campaign-detail .ccc__detail-tabs--glass,
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile,
+.ccc--mobile-campaign-detail .ccc-detail-tab-filter,
+.ccc--mobile-campaign-detail .ccc-detail-tab-filter .occ-liquid-filter__trigger {
+  background: #000;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* ── Kill the inherited panel chrome under the switcher ───────────────── */
+.ccc--mobile-campaign-detail .ccc__detail-body,
+.ccc--mobile-campaign-detail .ccc__detail-body--glass {
+  background: #000;
+  padding: 0;
+  border: 0;
+}
+
+/* ── Slim native action bar ───────────────────────────────────────────────
+   The tray was a tall rounded capsule floating over content. Same actions and
+   the same 44pt hit targets, rebuilt as a bar that sits on the ground plane and
+   respects the home indicator.
+
+   The dock lives outside .cov, so these rules must not reference .cov's custom
+   properties — an unresolved var() voids the whole declaration, which is what
+   silently dropped the padding on the first attempt. */
+.ccc--mobile-campaign-detail .ccc-mobile-dock {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 7px 16px calc(7px + env(safe-area-inset-bottom, 0px));
+  gap: 8px;
+  border: 0;
+  border-top: 1px solid var(--o-rule);
+  border-radius: 0;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  box-shadow: none;
+}
+
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__primary,
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__primary.is-primary,
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__primary.is-blue {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 0;
+  background: #f6f8fc;
+  color: #000;
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  box-shadow: none;
+}
+
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__primary.is-danger {
+  background: var(--o-bad);
+  color: #fff;
+}
+
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__setup {
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--o-ink-2);
+  font-size: 13.5px;
+  font-weight: 560;
+}
+
+.ccc--mobile-campaign-detail .ccc-mobile-dock .ccc-mobile-dock__more {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--o-ink-3);
+}
+
+/* The sticky chrome wrapper carries the app's panel fill AND a radial accent
+   gradient. `.cdx` paints over it, so it only showed through on the switcher
+   row — reading as a different blue ground immediately below the frozen header.
+   `.is-sticky` ties on specificity and lands later, so it has to be named. */
+.ccc--mobile-campaign-detail .ccc-mobile-detail-chrome,
+.ccc--mobile-campaign-detail .ccc-mobile-detail-chrome.is-sticky {
+  background: #000;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 0;
+  box-shadow: none;
+}
+
+/* The global PinnedAppDock occupies the last 30px of the viewport. The action
+   bar has to sit ABOVE it, not under it — they were overlapping exactly. */
+.ccc--mobile-campaign-detail .ccc-mobile-dock {
+  bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: 7px;
+}

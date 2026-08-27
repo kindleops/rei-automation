@@ -54,6 +54,8 @@
     "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed",
     "typecheck": "tsc --noEmit",
     "proof:dev-runtime": "npx tsx scripts/proof/dev-runtime-diagnostics-proof.ts",
+    "proof:street-view-gate": "node scripts/proof/street-view-gate.mjs",
+    "proof:render-family-ownership": "node scripts/proof/render-family-ownership.mjs",
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
     "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api"
   },

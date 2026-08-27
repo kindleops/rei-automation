@@ -45,6 +45,8 @@ export interface CampaignRecipientMetrics {
 }
 
 export interface CampaignSummary {
+  /** Geography derived from the campaign's own saved targeting filters. */
+  market_label?: string | null
   id: string
   campaign_name: string
   status: CampaignStatus

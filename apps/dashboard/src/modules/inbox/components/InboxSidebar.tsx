@@ -77,7 +77,9 @@ interface InboxSidebarProps {
 }
 
 type BucketConfig = {
-  bucket: CanonicalBucket
+  // 'archived' is a terminal, non-operational bucket: it is a valid sidebar
+  // filter but deliberately not part of the operational CanonicalBucket set.
+  bucket: CanonicalBucket | 'archived'
   view: InboxViewSelectValue
   label: string
   shortLabel: string
@@ -97,6 +99,10 @@ const BUCKETS: BucketConfig[] = [
   { bucket: 'dead', view: 'dead', label: 'Dead', shortLabel: 'Dead', icon: '💀', description: 'Not interested / wrong number', accentClass: 'is-dead', countKey: 'dead' },
   { bucket: 'suppressed', view: 'suppressed', label: 'Suppressed', shortLabel: 'DNC', icon: '🚫', description: 'Opt-out / DNC', accentClass: 'is-dnc', countKey: 'suppressed' },
   { bucket: 'all_messages', view: 'all_conversations', label: 'All Threads', shortLabel: 'All', icon: '📦', description: 'Canonical thread universe', accentClass: 'is-neutral', countKey: 'all_messages' },
+  // Archived is a terminal, non-operational bucket. The server returns archived rows ONLY
+  // for this filter and excludes them from every other bucket, so it never inflates the
+  // working inbox. It exists so archiving is recoverable rather than one-way.
+  { bucket: 'archived', view: 'archived', label: 'Archived', shortLabel: 'Archived', icon: '🗄️', description: 'Archived conversations — restorable', accentClass: 'is-neutral', countKey: 'archived' },
 ]
 
 const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
@@ -105,6 +111,7 @@ const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
   BUCKETS[2],
   BUCKETS[3],
   BUCKETS[8],
+  BUCKETS[9], // Archived — the mobile entry point for restore
 ]
 
 type LocalSavedFilter = {
@@ -1679,6 +1686,7 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
   if (view === 'cold' || view === 'cold_no_response' || view === 'not_contacted') return 'missing_context'
   if (view === 'dead' || view === 'wrong_number') return 'wrong_numbers'
   if (view === 'suppressed' || view === 'dnc_opt_out') return 'suppressed'
+  if (view === 'archived') return 'archived'
   return 'all_messages'
 }
 

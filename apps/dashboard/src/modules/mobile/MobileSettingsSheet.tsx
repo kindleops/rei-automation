@@ -12,6 +12,7 @@ import { useBreakpoint } from './useBreakpoint'
 
 const THEME_OPTIONS: Array<{ id: NexusTheme; label: string }> = [
   { id: 'dark', label: 'Dark' },
+  { id: 'true_black', label: 'True Black' },
   { id: 'light', label: 'Light' },
   { id: 'midnight-glass', label: 'Midnight' },
   { id: 'tactical-blue', label: 'Tactical' },

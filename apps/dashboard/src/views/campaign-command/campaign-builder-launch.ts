@@ -100,10 +100,18 @@ export function isInsideContactWindow(
   return nowMin >= startMin && nowMin < endMin
 }
 
+/**
+ * @param isUpdate  When updating an existing campaign, lifecycle status is NOT
+ *   written. This payload hard-set `status: 'draft'`, so every autosave demoted
+ *   a campaign the preflight had just driven to `built` — and Schedule then
+ *   failed with campaign_status_not_queueable while the operator was looking at
+ *   a valid "50 SCHEDULABLE". Autosaving targeting must not rewind lifecycle.
+ */
 export function buildCampaignPersistPayload(
   draft: CampaignWizardDraft,
   launch: LaunchPersistSettings,
   serializeFilterGroups: (groups: CampaignFilterGroups) => Record<string, unknown>,
+  isUpdate = false,
 ): Record<string, unknown> {
   const { market, state } = extractMarketFromFilterDraft(draft)
   const timezone = resolveCampaignTimezone(market)
@@ -114,7 +122,7 @@ export function buildCampaignPersistPayload(
   return {
     name: draft.name.trim(),
     description: draft.description.trim(),
-    status: 'draft',
+    ...(isUpdate ? {} : { status: 'draft' }),
     campaign_type: 'outbound_sms',
     template_use_case: draft.template_use_case,
     stage_code: draft.stage_code,
