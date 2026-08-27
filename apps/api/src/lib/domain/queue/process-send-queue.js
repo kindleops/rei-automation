@@ -54,7 +54,7 @@ import { addSentryBreadcrumb } from "@/lib/monitoring/sentry.js";
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { syncOfferRecord } from "@/lib/domain/offers/sync-offer-record.js";
 import { sanitizeSmsTextValue } from "@/lib/sms/sanitize.js";
-import { isManualInboxSend } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isManualInboxSend, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import {
   isDeferredQueueRow,
   resolveDeferredQueueMessage,
@@ -1329,6 +1329,9 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
   let queue_row = normalizeSendQueueRow(resolved_queue_row);
   const queue_row_id = getQueueRowId(queue_row);
   const manual_inbox_send = isManualInboxSend(queue_row);
+  // Immediate reply to a consumer-initiated inbound → exempt from quiet hours,
+  // but only while still fresh (aged/backlogged replies respect the window).
+  const inbound_auto_reply = isImmediateInboundAutoReply(queue_row, now);
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
 
   const acquisition_operation = acquisitionQueueOperation(queue_row);
@@ -1445,12 +1448,13 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       row_id: queue_row_id,
       allowed: contact_window.allowed,
       manual_inbox_send,
+      inbound_auto_reply,
       reason: contact_window.reason,
       timezone: contact_window.timezone,
       valid_window: contact_window.valid_window,
     });
 
-    if (!contact_window.allowed && !manual_inbox_send) {
+    if (!contact_window.allowed && !manual_inbox_send && !inbound_auto_reply) {
       // Bounded internal-proof bypass: an exact-conjunction check (scoped
       // canary + single-row authorization + pinned internal session row) that
       // no real seller row can satisfy. Any failure falls through to the

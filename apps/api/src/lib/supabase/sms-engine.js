@@ -9,7 +9,7 @@ import { captureRouteException, addSentryBreadcrumb } from "@/lib/monitoring/sen
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
 import { info, warn } from "@/lib/logging/logger.js";
-import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
+import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
@@ -1000,7 +1000,16 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
 
     const contact_window = evaluate_contact_window(decision.row, { ...deps, now });
     const manual_inbox_send = isManualInboxSend(decision.row);
-    if (contact_window && contact_window.allowed === false && !manual_inbox_send) {
+    // Immediate replies to a consumer-initiated inbound are exempt from the
+    // outbound quiet-hours window (same rationale as manual inbox sends), but
+    // only while still FRESH — an aged/backlogged reply must respect the window.
+    const inbound_auto_reply = isImmediateInboundAutoReply(decision.row, now);
+    if (
+      contact_window &&
+      contact_window.allowed === false &&
+      !manual_inbox_send &&
+      !inbound_auto_reply
+    ) {
       preclaim_outside_window_excluded_count += 1;
       skipped.push({
         id: decision.row?.id || null,
