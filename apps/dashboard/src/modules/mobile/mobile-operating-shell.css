@@ -815,6 +815,18 @@ html.is-mobile-layout {
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
+
+    /* The decorative `stage-enter` keyframe runs with `animation-fill-mode:
+       both`, so the stage holds a transform for the whole session: the
+       from-state translateY(8px) while it plays — which offsets the stage and
+       makes it overflow the bottom by 8px — and translateY(0) afterwards. A
+       transform of ANY value, including an identity one, makes the element the
+       containing block for every `position: fixed` descendant. That silently
+       re-anchors app-level fixed chrome to the stage box instead of the
+       viewport, which is why fixed elements inside a route did not land on the
+       bottom of the display. Motion here is decoration; anchoring is not. */
+    animation: none !important;
+    transform: none !important;
   }
 
   .nx-os.is-mobile-os .nx-stage > * {
