@@ -13,7 +13,7 @@
 //
 // These are PREPARED replies (suggested_text). Whether they actually dispatch is
 // still governed by the existing auto-reply gates in apply-inbound-automation-
-// decision.js / handle-textgrid-inbound.js — this module never sends.
+// decision.js / handle-textgrid-inbound.js, this module never sends.
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -74,52 +74,52 @@ function resolveStageBucket(stage = null) {
 // placeholder is optional and rendered downstream; falls back gracefully.
 const FALLBACK_MATRIX = Object.freeze({
   identity: {
-    ownership: "Just so I reach the right person — are you the owner of the property, or should I be speaking with someone else?",
-    consider_selling: "Quick check before we go further — is this property something you own, or are you helping someone who does?",
+    ownership: "Just so I reach the right person, are you the owner of the property, or should I be speaking with someone else?",
+    consider_selling: "Quick check before we go further, is this property something you own, or are you helping someone who does?",
     asking_price: "Before I talk numbers, can you confirm you're the owner (or authorized to discuss a sale)?",
-    condition: "So I have the right contact — are you the owner, or the person managing the property?",
-    offer: "Want to make sure I'm presenting this to the right person — are you the owner or authorized to make a decision?",
+    condition: "So I have the right contact, are you the owner, or the person managing the property?",
+    offer: "Want to make sure I'm presenting this to the right person, are you the owner or authorized to make a decision?",
     negotiation_close: "Before we move toward paperwork, can you confirm you're the owner or have authority to sign?",
   },
   intent: {
     ownership: "Thanks for getting back to me. Are you open to a quick conversation about the property, or would you rather I not reach out?",
-    consider_selling: "Appreciate the reply — would you be open to an offer on the property, or is it not something you'd consider right now?",
-    asking_price: "Got it — are you looking to sell, and if so, do you have a number in mind?",
-    condition: "Thanks — to make sure I help the right way, are you still considering an offer, or just answering questions?",
-    offer: "Want to be respectful of your time — are you still open to the offer, or should I hold off?",
-    negotiation_close: "Just making sure we're aligned — are you wanting to move forward, or still thinking it over?",
+    consider_selling: "Appreciate the reply, would you be open to an offer on the property, or is it not something you'd consider right now?",
+    asking_price: "Got it, are you looking to sell, and if so, do you have a number in mind?",
+    condition: "Thanks, to make sure I help the right way, are you still considering an offer, or just answering questions?",
+    offer: "Want to be respectful of your time, are you still open to the offer, or should I hold off?",
+    negotiation_close: "Just making sure we're aligned, are you wanting to move forward, or still thinking it over?",
   },
   price: {
-    asking_price: "Thanks — just to make sure I read that right, is that the number you'd want for the property?",
-    condition: "Want to confirm I have the right figure — what number are you hoping to get?",
-    offer: "Appreciate that — is that a counter to my offer, or the price you'd need to make it work?",
-    negotiation_close: "Got it — is that your firm number, or is there some room to find middle ground?",
+    asking_price: "Thanks, just to make sure I read that right, is that the number you'd want for the property?",
+    condition: "Want to confirm I have the right figure, what number are you hoping to get?",
+    offer: "Appreciate that, is that a counter to my offer, or the price you'd need to make it work?",
+    negotiation_close: "Got it, is that your firm number, or is there some room to find middle ground?",
     ownership: "Before we talk price, are you the owner I should be working with?",
-    consider_selling: "Sounds like there may be a number in mind — what would you want to see for the property?",
+    consider_selling: "Sounds like there may be a number in mind, what would you want to see for the property?",
   },
   condition: {
-    condition: "Thanks for that — is the property currently occupied or vacant, and does it need any major work?",
+    condition: "Thanks for that, is the property currently occupied or vacant, and does it need any major work?",
     offer: "To finalize the number, can you tell me roughly what kind of shape the property is in?",
-    asking_price: "Helpful — before I respond on price, what condition is the property in right now?",
-    negotiation_close: "Almost there — any major repairs or access issues I should know about before we proceed?",
-    ownership: "First things first — are you the owner of the property we'd be discussing?",
-    consider_selling: "Good to know — is the property something you'd consider selling as-is?",
+    asking_price: "Helpful, before I respond on price, what condition is the property in right now?",
+    negotiation_close: "Almost there, any major repairs or access issues I should know about before we proceed?",
+    ownership: "First things first, are you the owner of the property we'd be discussing?",
+    consider_selling: "Good to know, is the property something you'd consider selling as-is?",
   },
   offer: {
-    offer: "Want to make sure I understand — are you accepting the offer, countering, or wanting me to revisit the number?",
-    negotiation_close: "Just to confirm where we are — are we good to move toward paperwork, or is there something to adjust first?",
-    asking_price: "Understood — should I put together a written offer based on that?",
-    condition: "Thanks — with that in mind, would you like me to send over a number?",
+    offer: "Want to make sure I understand, are you accepting the offer, countering, or wanting me to revisit the number?",
+    negotiation_close: "Just to confirm where we are, are we good to move toward paperwork, or is there something to adjust first?",
+    asking_price: "Understood, should I put together a written offer based on that?",
+    condition: "Thanks, with that in mind, would you like me to send over a number?",
     ownership: "Before I send anything over, can you confirm you're the owner?",
     consider_selling: "Would it help if I put an offer together for you to look at?",
   },
   contract: {
-    negotiation_close: "Happy to help with next steps — do you have a question about the agreement, or are you ready to move forward?",
-    offer: "Want to get this right — is your question about the offer terms or the paperwork itself?",
+    negotiation_close: "Happy to help with next steps, do you have a question about the agreement, or are you ready to move forward?",
+    offer: "Want to get this right, is your question about the offer terms or the paperwork itself?",
     condition: "Before paperwork, is there anything about the property we still need to sort out?",
-    asking_price: "Sure — are we aligned on price so I can prep the agreement?",
+    asking_price: "Sure, are we aligned on price so I can prep the agreement?",
     ownership: "Before any documents, can you confirm you're the owner or authorized signer?",
-    consider_selling: "Glad you're open to it — want me to walk you through how the process works?",
+    consider_selling: "Glad you're open to it, want me to walk you through how the process works?",
   },
   language: {
     ownership: "¿Prefiere que le escriba en español? / Would you prefer I write in Spanish? Happy to continue either way.",
@@ -132,7 +132,7 @@ const FALLBACK_MATRIX = Object.freeze({
 });
 
 const GENERIC_SAFE_FALLBACK =
-  "Thanks for the reply — just want to make sure I help the right way. Could you tell me a little more about what you're looking for?";
+  "Thanks for the reply, just want to make sure I help the right way. Could you tell me a little more about what you're looking for?";
 
 /**
  * Build a stage- and uncertainty-aware safe fallback plan.
