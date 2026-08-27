@@ -21,9 +21,9 @@
 
 .ccc--mobile-campaign-detail {
   --d-ink:   var(--nx-text, #f6f8fc);
-  --d-ink-2: rgba(228, 234, 246, 0.72);
-  --d-ink-3: rgba(228, 234, 246, 0.50);
-  --d-ink-4: rgba(228, 234, 246, 0.32);
+  --d-ink-2: color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);
+  --d-ink-3: color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);
+  --d-ink-4: color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);
   --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --d-hair:  rgba(148, 163, 184, 0.08);
   --d-live:  #30d158;

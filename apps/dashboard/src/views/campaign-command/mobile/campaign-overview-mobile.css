@@ -11,9 +11,9 @@
 
 .cov {
   --o-ink:   var(--nx-text, #f6f8fc);
-  --o-ink-2: rgba(228, 234, 246, 0.72);
-  --o-ink-3: rgba(228, 234, 246, 0.50);
-  --o-ink-4: rgba(228, 234, 246, 0.32);
+  --o-ink-2: color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);
+  --o-ink-3: color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);
+  --o-ink-4: color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);
   --o-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
   --o-live:  #30d158;
   --o-hold:  #ff9f0a;

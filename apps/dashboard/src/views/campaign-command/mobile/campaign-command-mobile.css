@@ -14,9 +14,9 @@
   /* Four explicit levels. The previous ramp bottomed out at 0.30, so labels,
      units and no-data all collapsed into the same unreadable grey. */
   --k-ink:     var(--nx-text, #f6f8fc);   /* L1 identity / live numbers        */
-  --k-ink-2:   rgba(228, 234, 246, 0.72);  /* L2 operational   */
-  --k-ink-3:   rgba(228, 234, 246, 0.50);  /* L3 metadata      */
-  --k-ink-4:   rgba(228, 234, 246, 0.32);  /* L4 no data       */
+  --k-ink-2:   color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);  /* L2 operational   */
+  --k-ink-3:   color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);  /* L3 metadata      */
+  --k-ink-4:   color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);  /* L4 no data       */
   --k-rule:    var(--nx-border, rgba(148, 163, 184, 0.15));
   --k-panel:   rgba(255, 255, 255, 0.038);
   --k-live:    #30d158;
