@@ -743,3 +743,43 @@ test("sequence: a stale reordered positive can never reopen the newer decline", 
     "automation must not resume from a stale reopen"
   );
 });
+
+// Chronology beats confidence: the protection above must NOT depend on the
+// stale message being low-confidence. A high-confidence positive (0.94) sent
+// out of order must still be blocked from reopening automation over the newer
+// decline. Before the staleness guard at the single-writer merge, this
+// message's confidence flipped operational_status to active_communication.
+test("sequence: a stale HIGH-confidence positive still cannot reopen (chronology, not confidence)", async () => {
+  const { store, log } = freshHarness();
+
+  const decline = await runTurn(store, log, {
+    body: "Actually forget it, we're not selling.",
+    received_at: T2,
+    event_id: "evt-newer-decline-hc",
+  });
+  assert.equal(decline.result.ok, true);
+  assert.equal(threadRow(store).disposition, "not_interested");
+  threadRow(store).last_inbound_at = T2;
+
+  const staleHc = await runTurn(store, log, {
+    body: "Yes I want to sell it, I own it free and clear",
+    received_at: T0, // chronologically OLDER than the decline
+    summary: { last_inbound_at: T2 },
+    event_id: "evt-stale-hc-positive",
+  });
+  assert.equal(staleHc.result.ok, true);
+  assert.ok(
+    (staleHc.classification.confidence ?? 0) >= 0.7,
+    `fixture must be high-confidence to be meaningful, got ${staleHc.classification.confidence}`
+  );
+  assert.notEqual(
+    staleHc.result.execution?.queued,
+    true,
+    "a stale positive must not trigger a pitch over the newer decline"
+  );
+  assert.notEqual(
+    threadRow(store).operational_status,
+    "active_communication",
+    "a stale HIGH-confidence positive must not reopen automation (chronology beats confidence)"
+  );
+});

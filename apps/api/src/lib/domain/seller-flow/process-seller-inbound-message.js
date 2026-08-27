@@ -1654,6 +1654,21 @@ export async function processSellerInboundMessage({
       }
     }
 
+    // Staleness invariant (chronology, not confidence): a message that predates
+    // the newest recorded inbound must never (re)open active automation over the
+    // newer state, no matter how confident the classifier is about it. The base
+    // transition resolver is chronology-agnostic and sets active_communication
+    // purely on sentiment+confidence, so we downgrade it here — the one seam
+    // where the base patch and the chronology verdict coexist. Downgrade only
+    // (active -> review); suppression/opt-out and forward progress untouched.
+    if (
+      precedence?.message_is_stale === true &&
+      patch.operational_status === "active_communication"
+    ) {
+      patch.operational_status = "needs_review";
+      patch.next_action = NEXT_ACTIONS.HUMAN_REVIEW;
+    }
+
     if (Object.keys(patch).length > 0) {
       try {
         universal_state_patch = await runtimeDeps.patchUniversalLeadState({

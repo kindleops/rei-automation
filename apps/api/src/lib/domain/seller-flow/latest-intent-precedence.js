@@ -186,6 +186,12 @@ export function resolveLatestIntentPrecedence({
     clear_soft_suppression: false,
     blocked_by_binding_suppression: false,
     human_review_required: false,
+    // Chronology verdict, exposed explicitly (not only as a reason code) so the
+    // single-writer merge can suppress a reopen INDEPENDENT of classifier
+    // confidence. Staleness answers "may this message supersede the current
+    // state?", which is separate from confidence ("how sure are we what it
+    // means?"). A stale high-confidence positive stays stale.
+    message_is_stale: message_is_stale === true,
     reason_codes: [],
     evidence: null,
     confidence: 0,
