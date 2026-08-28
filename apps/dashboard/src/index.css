@@ -131,39 +131,46 @@
   padding: 0;
 }
 /* ── Viewport contract ─────────────────────────────────────────────────────
-   On real iOS the three viewport sizes differ: svh (URL bar expanded) is
-   ~60-90px shorter than lvh, and percentage heights resolve against the
-   layout viewport. Sizing the shell in `%` or `svh` therefore ends it above
-   the physical bottom of the screen and lets the body background show through
-   as a dead band. Desktop emulation collapses svh == lvh == dvh, so that
-   class of defect is invisible there and only appears on a handset.
+   `height: 100%` with `min-height: 100dvh` as the floor. Do NOT "modernise"
+   this to `height: 100dvh`.
 
-   `dvh` is the only unit that tracks the visible viewport as the URL bar
-   shows and hides. The cascade below degrades safely: `vh` for anything
-   without dvh, `-webkit-fill-available` for iOS 15 and earlier, then `dvh`.
+   In an installed iOS web app, `100dvh` is computed as though browser chrome
+   were present, so it resolves SHORTER than the window: the shell ends above
+   the physical bottom of the display and the body background shows through as
+   a black band under the dock. `height: 100%` on the root resolves against the
+   initial containing block, which in standalone IS the full screen, so it is
+   the only one of the two that fills a Home-Screen app. `min-height: 100dvh`
+   remains as the floor for ordinary browser tabs, where dvh tracks the URL bar
+   correctly. Neither desktop emulation nor Safari-on-device shows the
+   difference — only an installed PWA does.
+
+   Verified by diffing the production build (this contract, renders full-screen
+   on-device) against a preview that used `100dvh` and clipped.
+
+   Only html/body/#root take the dvh floor — they are the viewport-level boxes.
+   App shells nested inside the padded stage use `height: 100%` with
+   `min-height: 0`, because a viewport-relative floor there pushes them past
+   their parent's content box by the height of the top chrome.
    ────────────────────────────────────────────────────────────────────────── */
 html {
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 100dvh;
   overflow: hidden;
   font-size: 16px;
 }
 body {
   margin: 0;
   background: #000;
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 100dvh;
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 #root {
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 100dvh;
 }
 a {
   color: inherit;
@@ -199,10 +206,8 @@ h3 { font-size: 0.8125rem; }
   flex-direction: column;
   gap: 0;
   padding: 0;
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   position: relative;
 }
@@ -4213,9 +4218,8 @@ non‑Home surfaces only ──────────────────�
 
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   position: relative;
   background: var(--ix-bg-base);
@@ -7057,9 +7061,8 @@ non‑Home surfaces only ──────────────────�
 .nx-buyer {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 0;
 }
 .nx-buyer__body {
   display: grid;
