@@ -861,7 +861,7 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
             {isHot && <span className="nx-thread-card-rebuilt__hot-icon">🔥</span>}
           </div>
         </div>
-        <div className="nx-thread-card-rebuilt__metadata">
+        <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
           {stageNum && <><span>{stageNum}</span><span className="nx-thread-card-rebuilt__dot">•</span></>}
           <span>{market}</span><span className="nx-thread-card-rebuilt__dot">•</span>
           <span>{pTypeShort}</span>
@@ -870,26 +870,33 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
           {intelTags.length > 0 && <><span className="nx-thread-card-rebuilt__dot">•</span><span style={{color: '#a1a1aa'}}>{intelTags[0]}</span></>}
         </div>
         <div className="nx-thread-card-rebuilt__preview">{latestMessageBody}</div>
-        <div className="nx-thread-card-rebuilt__metadata">{badges}</div>
-        <div className="nx-thread-card-rebuilt__metadata">
+        {/* Mobile reads identity -> latest message -> address, so the address
+            repeats here and the header copy is hidden at mobile widths. Desktop
+            keeps the header placement; this element is display:none there. */}
+        <span className="nx-thread-card-rebuilt__address nx-thread-card-rebuilt__address--below">{address}</span>
+        <div className="nx-thread-card-rebuilt__metadata nx-thread-card-rebuilt__signals">{badges}</div>
+        {/* Underwriting detail: valuable on desktop, but on a phone it is four
+            more lines of small grey text between one conversation and the next.
+            Mobile collapses these to the thread detail — see is-detail-meta. */}
+        <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
           <span>Offer {formatMoneyCompact(cashOffer)}</span>
           <span className="nx-thread-card-rebuilt__dot">•</span>
           <span>Value {formatMoneyCompact(estimatedValue)}</span>
           <span className="nx-thread-card-rebuilt__dot">•</span>
           <span>Equity {formatMoneyCompact(equityAmount)} / {formatPercentCompact(equityPercent)}</span>
         </div>
-        <div className="nx-thread-card-rebuilt__metadata">
+        <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
           <span>Repairs {formatMoneyCompact(estimatedRepairCost)}</span>
           <span className="nx-thread-card-rebuilt__dot">•</span>
           <span>Score {finalAcquisitionScore ?? '—'}</span>
           <span className="nx-thread-card-rebuilt__dot">•</span>
           <span>Contact {contactStatus}</span>
         </div>
-        <div className="nx-thread-card-rebuilt__metadata">
+        <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
           <span>Tags {tagSummary.length > 0 ? tagSummary.join(', ') : '—'}</span>
         </div>
         {contactFlags.length > 0 && (
-          <div className="nx-thread-card-rebuilt__metadata">
+          <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
             {contactFlags.map((flag) => renderBadge(flag, `flag-${flag}`))}
           </div>
         )}
