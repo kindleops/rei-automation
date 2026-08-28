@@ -1887,10 +1887,106 @@
 
 /* Extending the sheet to the viewport edge moved the dock inset into the footer,
    which ate content height and clipped the metrics row. Give the scroll area that
-   height back so Peek still shows a complete metrics row. */
+   height back so Peek still shows a complete metrics row.
+
+   48vh, not 42vh: the hero below is now the visual lead at ~200px, and at 42vh
+   that left under 190px for identity, metrics, signals and the action row
+   combined. The sheet still occupies under half the screen, so meaningful map
+   context remains above it — this stays a peek, not a detail view. */
 @media (max-width: 768px) {
   .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet.is-collapsed {
-    max-height: calc(42vh + var(--nx-pinned-dock-collapsed, 14px)) !important;
+    max-height: calc(48vh + var(--nx-pinned-dock-collapsed, 14px)) !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MAP PEEK — image-led hierarchy (mobile only)
+
+   Priority is: property image -> owner/address -> key numbers -> signals ->
+   actions. The hero was 72px, so it read as a thumbnail pinned to a block of
+   chips rather than as the subject of the card. The image becomes the hero and
+   every text/chip/metric band tightens to pay for it. Scoped to
+   .smc-mobile-bottom-sheet so the desktop card is untouched. No behaviour,
+   selection semantics, data or actions change here.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* 1 · HERO. Full-width crop (object-fit: cover) and the rounded top corners
+     are already owned by the .smc-shell.is-mobile rule; only height changes. */
+  .smc-mobile-bottom-sheet .smc-image.is-peek,
+  .smc-mobile-bottom-sheet .smc-image.is-mobile-hero {
+    height: 200px;
+  }
+
+  /* 2 · STATUS CHIPS — ~25% less vertical padding, one step down in type. */
+  .smc-mobile-bottom-sheet .smc-badge {
+    padding: 1.5px 5.5px;
+    font-size: 8px;
+  }
+  .smc-mobile-bottom-sheet .smc-state-row {
+    max-height: 32px;
+    gap: 4px;
+  }
+
+  /* 3 · OWNER / ADDRESS / SPEC — tighter leading and vertical rhythm. */
+  .smc-mobile-bottom-sheet .smc-sticky-summary { gap: 5px; }
+  .smc-mobile-bottom-sheet .smc-identity__name {
+    font-size: 14.5px;
+    line-height: 1.15;
+  }
+  .smc-mobile-bottom-sheet .smc-identity__address {
+    margin-top: 1px;
+    font-size: 10.5px;
+    line-height: 1.25;
+  }
+  .smc-mobile-bottom-sheet .smc-identity__asset-line {
+    margin-top: 1px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  /* 4 · KEY NUMBERS — a settled 60-66px band. The label wrapped in a four-up
+     grid at 393px, which is what made these cards ragged in height. */
+  .smc-mobile-bottom-sheet .smc-metrics,
+  .smc-mobile-bottom-sheet .smc-metrics--dense { gap: 4px; }
+  .smc-mobile-bottom-sheet .smc-metrics--dense .smc-metric,
+  .smc-mobile-bottom-sheet .smc-metric {
+    min-height: 60px;
+    padding: 6px 7px;
+  }
+  .smc-mobile-bottom-sheet .smc-metric span {
+    font-size: 7.5px;
+    line-height: 1.1;
+  }
+  .smc-mobile-bottom-sheet .smc-metric strong {
+    margin-top: 3px;
+    font-size: 12.5px;
+    line-height: 1.15;
+  }
+
+  /* 5 · SIGNALS — distress pills compact enough to read as a row, not blocks. */
+  .smc-mobile-bottom-sheet .smc-flags { gap: 4px; }
+  .smc-mobile-bottom-sheet .smc-flag {
+    padding: 2px 6px;
+    font-size: 7.5px;
+  }
+
+  /* 6 · ACTIONS — slimmer band, tap target intact. Buttons stay at the 44px
+     global mobile minimum; the row sheds its surplus padding instead, landing
+     the whole band at ~56px. */
+  .smc-mobile-bottom-sheet .smc-action {
+    height: 44px;
+    font-size: 11.5px;
+  }
+  .smc-mobile-bottom-sheet .smc-actions {
+    gap: 6px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  /* 7 · SECTION RHYTHM — remove the slack between bands. */
+  .smc-mobile-bottom-sheet .smc-body {
+    padding: 8px 12px 10px;
+    gap: 6px;
   }
 }
 
