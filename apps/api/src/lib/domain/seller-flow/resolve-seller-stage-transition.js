@@ -363,7 +363,7 @@ const NURTURE_DAYS = Object.freeze({
 
 // ─── Stage → outstanding-question policy (positive path) ────────────────────
 
-const STAGE_PROMPTS = Object.freeze({
+export const STAGE_PROMPTS = Object.freeze({
   [LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION]: {
     template_use_case: "ownership_check",
     next_action: NEXT_ACTIONS.SEND_MESSAGE_NOW,

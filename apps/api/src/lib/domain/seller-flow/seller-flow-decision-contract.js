@@ -35,7 +35,7 @@ function mapUniversalStage(stage = null) {
   return map[normalized] || normalized || LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION;
 }
 
-function deriveOperationalStatus({
+export function deriveOperationalStatus({
   ownership_probe = null,
   automation_decision = null,
   execution = null,

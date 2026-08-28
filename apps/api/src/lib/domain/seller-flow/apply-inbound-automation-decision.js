@@ -44,7 +44,7 @@ const ACTIVE_AUTO_REPLY_STATUSES = new Set([
   "sending",
 ]);
 const HIGH_RISK_OBJECTIONS = new Set(["financial_distress", "probate", "divorce"]);
-const REVIEW_ONLY_OBJECTIONS = new Set(["wants_proof_of_funds", "property_correction"]);
+export const REVIEW_ONLY_OBJECTIONS = new Set(["wants_proof_of_funds", "property_correction"]);
 // Legal/authority intents (classify.js legal tier): always a human lane.
 const LEGAL_AUTHORITY_REVIEW_INTENTS = new Set([
   "title_issue",
@@ -54,7 +54,7 @@ const LEGAL_AUTHORITY_REVIEW_INTENTS = new Set([
   "llc_corporation",
 ]);
 
-const ROUTE_PROFILES = Object.freeze({
+export const ROUTE_PROFILES = Object.freeze({
   ownership_confirmed: {
     route_hint: "consider_selling",
     allowed_template_stages: ["consider_selling", "stage_2_consider_selling"],
@@ -924,7 +924,7 @@ function compareTemplateRank(left = {}, right = {}) {
 // §12 negotiation use cases that may auto-reply from the local registry when
 // no sms_templates row exists yet. Deliberately excludes first-touch/cold
 // outbound use cases — this fallback can never widen cold outreach.
-const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
+export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "condition_probe",
   "occupancy_probe",
   "repair_clarification",
@@ -1002,7 +1002,7 @@ const CLARIFIER_REVIEW_REASONS = new Set([
   "ambiguous_context",
   "automation_review_required",
 ]);
-const CLARIFIER_INTENTS = new Set(["unclear", "reaction_only", "acknowledgement"]);
+export const CLARIFIER_INTENTS = new Set(["unclear", "reaction_only", "acknowledgement"]);
 
 // The clarifier converts LOW-INFORMATION ambiguity ("hmm", "ok?", "maybe"),
 // never unparsed CONTENT. A longer unclear message ("we closed on it in
