@@ -88,20 +88,20 @@ function publish(): void {
   const offsetTop = Math.round(vv?.offsetTop ?? 0)
   const rawGap = layoutH - (measuredH + offsetTop)
 
-  // Clamp: a negative gap means the visible region is taller than the layout
-  // viewport (mid-collapse), which needs no correction. An absurd gap means we
-  // measured during an animation frame and should not shove the dock offscreen.
-  const browserGap = Math.max(0, Math.min(rawGap, Math.round(layoutH * 0.4)))
-
-  // In standalone there is no toolbar to compensate for, so the correction is
-  // unconditionally zero and the app root is the full layout viewport. Applying
-  // the visualViewport delta here would be correcting for chrome that does not
-  // exist.
-  const appliedGap = standalone ? 0 : browserGap
+  // This runtime is DIAGNOSTIC ONLY — it deliberately publishes no layout
+  // input. It was originally added to offset the dock by the visualViewport
+  // delta, on the assumption that `position: fixed` needed correcting on iOS.
+  // That assumption was wrong: the real defect was a duplicated dock
+  // reservation, and once that was fixed the offset only lifted the dock off
+  // the bottom edge and opened a black band under it on a real handset. A
+  // JS-measured pixel height is also always one frame staler than what the
+  // engine already knows, so the shell uses plain `100dvh` instead.
+  //
+  // appliedGap is reported as 0 to record that nothing is applied, while
+  // rawGap keeps the measurement itself for diagnosis.
+  const appliedGap = 0
   const vvh = standalone ? layoutH : measuredH
 
-  if (vvh > 0) el.style.setProperty('--nx-vvh', `${vvh}px`)
-  el.style.setProperty('--nx-vv-bottom-gap', `${appliedGap}px`)
   el.setAttribute('data-nx-display-mode', standalone ? 'standalone' : 'browser')
 
   lastDebug = {

@@ -33,13 +33,12 @@ html.is-mobile-layout {
     position: fixed;
     left: 0;
     right: 0;
-    /* `position: fixed` resolves against the *layout* viewport. On iOS Safari
-       the layout viewport continues underneath the browser's own chrome, so a
-       plain `bottom: 0` is not the bottom of what the user can actually see.
-       --nx-vv-bottom-gap is that measured difference, and is 0 on every browser
-       that does not overlay its chrome — so this reads as "bottom of the
-       visible viewport" everywhere instead of only on desktop. */
-    bottom: var(--nx-vv-bottom-gap, 0px);
+    /* Plain `bottom: 0`. iOS already pins fixed elements to the bottom of the
+       visible viewport, so no correction term belongs here. An earlier
+       visualViewport-derived offset was added while the real defect was the
+       duplicated dock reservation; with that fixed, the offset only ever lifted
+       the dock off the bottom edge and opened a black band beneath it. */
+    bottom: 0;
     z-index: 160;
     pointer-events: none;
     padding: 0 12px calc(4px + var(--nx-mobile-safe-bottom, 0px));

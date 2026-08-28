@@ -145,7 +145,7 @@
 html {
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
   overflow: hidden;
   font-size: 16px;
 }
@@ -154,7 +154,7 @@ body {
   background: #000;
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -163,7 +163,7 @@ body {
 #root {
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
 }
 a {
   color: inherit;
@@ -201,7 +201,7 @@ h3 { font-size: 0.8125rem; }
   padding: 0;
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
   position: relative;
@@ -4215,7 +4215,7 @@ non‑Home surfaces only ──────────────────�
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
   overflow: hidden;
   position: relative;
   background: var(--ix-bg-base);
@@ -7059,7 +7059,7 @@ non‑Home surfaces only ──────────────────�
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
-  height: var(--nx-vvh, 100dvh);
+  height: 100dvh;
 }
 .nx-buyer__body {
   display: grid;
