@@ -164,6 +164,17 @@ body {
   height: -webkit-fill-available;
   height: 100dvh;
 }
+
+/* Height reconciliation. viewport-runtime.ts adds .nx-h-locked ONLY when the
+   root actually rendered at a different height than window.innerHeight — the
+   case where the shell comes back short after a refresh. When the CSS above is
+   already correct this never applies, so the first-load path that works is
+   left exactly as it is. */
+html.nx-h-locked,
+html.nx-h-locked body,
+html.nx-h-locked #root {
+  height: var(--nx-app-h) !important;
+}
 a {
   color: inherit;
   text-decoration: none;

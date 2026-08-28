@@ -145,6 +145,9 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
                   `rawGap=${d.rawGap}`,
                   `appliedGap=${d.appliedGap}`,
                   `vvh=${d.vvh}`,
+                  `rendered=${d.renderedHeight}`,
+                  `drift=${d.drift}`,
+                  `locked=${d.locked ? 'y' : 'n'}`,
                 ].join(' · ')
               })()}
             </code>

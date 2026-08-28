@@ -67,8 +67,14 @@ export type ViewportDebug = {
   rawGap: number
   appliedGap: number
   vvh: number
-  /** window.innerHeight, reported for diagnosis only — not used for layout. */
+  /** window.innerHeight — the target the root is reconciled against. */
   appHeight: number
+  /** What the root actually rendered at. */
+  renderedHeight: number
+  /** appHeight - renderedHeight; non-zero means the CSS height was wrong. */
+  drift: number
+  /** True when the explicit pixel height had to be pinned. */
+  locked: boolean
 }
 
 let lastDebug: ViewportDebug | null = null
@@ -104,10 +110,28 @@ function publish(): void {
   const appliedGap = 0
   const vvh = standalone ? layoutH : measuredH
 
-  // Measured for diagnostics only — the stylesheets do NOT consume this. Sizing
-  // the root from window.innerHeight was tried on-device and still left a band,
-  // so the shell uses the CSS values from the known-good build instead.
+  // ── Self-correction ────────────────────────────────────────────────────
+  //
+  // The shell renders full-screen on first load and has been observed to come
+  // back short after a refresh, which means the CSS height is right at least
+  // some of the time — so this deliberately does NOT override it up front.
+  // Instead it reconciles: measure what the root actually rendered, compare it
+  // against the window, and only pin an explicit pixel height when the two
+  // disagree by more than a rounding error.
+  //
+  // `window.innerHeight` is the window by definition, so the corrected value
+  // cannot be wrong in the way a viewport unit can. When the CSS is already
+  // correct the lock never engages and nothing changes.
   const appHeight = Math.round(window.innerHeight || layoutH)
+  const rendered = Math.round(el.getBoundingClientRect().height)
+  const drift = appHeight - rendered
+
+  if (appHeight > 0 && Math.abs(drift) > 1) {
+    el.style.setProperty('--nx-app-h', `${appHeight}px`)
+    el.classList.add('nx-h-locked')
+  } else {
+    el.classList.remove('nx-h-locked')
+  }
 
   el.setAttribute('data-nx-display-mode', standalone ? 'standalone' : 'browser')
 
@@ -126,6 +150,9 @@ function publish(): void {
     appliedGap,
     vvh,
     appHeight,
+    renderedHeight: rendered,
+    drift,
+    locked: el.classList.contains('nx-h-locked'),
   }
   // Readable from the device via Safari remote inspector or the settings sheet.
   ;(window as Window & { __nxViewport?: ViewportDebug }).__nxViewport = lastDebug
@@ -152,6 +179,12 @@ export function startViewportRuntime(): () => void {
   }
 
   publish()
+  // A refresh (and a bfcache restore) is exactly where the shell has been seen
+  // coming back short, so re-measure after the load settles rather than trusting
+  // the first frame.
+  window.addEventListener('pageshow', schedule)
+  window.addEventListener('load', () => { publish(); setTimeout(publish, 250) })
+  setTimeout(publish, 300)
 
   const vv = window.visualViewport
   // `scroll` matters as much as `resize`: iOS reports URL-bar collapse by
