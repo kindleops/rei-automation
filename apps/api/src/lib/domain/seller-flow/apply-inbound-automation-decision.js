@@ -942,6 +942,13 @@ export const LOCAL_NEGOTIATION_AUTO_REPLY_USE_CASES = new Set([
   "seller_finance_probe",
   "future_nurture",
   "contract_information_request",
+  // Closing lane: the seller conversation continues autonomously THROUGH
+  // closing rather than stopping at signature.
+  "request_signer_email",
+  "contract_sent_notice",
+  "contract_signed_confirmation",
+  "title_opened_update",
+  "closing_scheduled_update",
 ]);
 
 async function selectLocalNegotiationTemplate(allowed_matches = [], { strategy = null } = {}) {

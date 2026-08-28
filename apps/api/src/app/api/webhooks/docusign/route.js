@@ -5,6 +5,7 @@ import { handleDocusignWebhook } from "@/lib/domain/contracts/handle-docusign-we
 import { reconcileClosingCaseFromEnvelope } from "@/lib/domain/closings/reconcile-closing-case-from-envelope.js";
 import { verifyDocusignConnectHmac } from "@/lib/security/docusign-hmac.js";
 import { ENV } from "@/lib/config/env.js";
+import { FEATURE_FLAGS } from "@/lib/config/feature-flags.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,7 +82,13 @@ export async function POST(request) {
     // resolved by envelope id. This is the production system of record.
     let closing = null;
     try {
-      closing = await reconcileClosingCaseFromEnvelope({ payload });
+      closing = await reconcileClosingCaseFromEnvelope({
+        payload,
+        // Same closing-execution boundary that gates the legacy downstream:
+        // signature state always reconciles, outward seller messaging does not
+        // fire until closing execution is authorized.
+        allowExternalEffects: Boolean(FEATURE_FLAGS.ENABLE_AUTO_CONTRACT_SEND),
+      });
     } catch (error) {
       logger.error("docusign_webhook.closing_reconcile_failed", { error });
       closing = { ok: false, reconciled: false, reason: "closing_reconcile_threw" };

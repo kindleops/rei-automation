@@ -927,6 +927,54 @@ export const LOCAL_TEMPLATE_CANDIDATES = Object.freeze([
     text:
       "That works — {{offer_price}} for {{property_address}}, purchased directly and as-is, no repairs on your end, and we handle the customary closing costs. To get the paperwork right, I just need a few details from you.",
   }),
+  // ── Closing lane (Supabase-native closing chain) ────────────────────────────
+  // Written dash-free at the source. The send-path sanitizer also strips long
+  // dashes, but closing copy should never depend on that safety net.
+  createLocalTemplate({
+    item_id: "local-template:request_signer_email:v1",
+    use_case: "request_signer_email",
+    variant_group: "Closing, Signer Email Request",
+    sequence_position: "V1",
+    category_secondary: "Closing",
+    text:
+      "Great, {{seller_first_name}}. What is the best email for you? I will send the purchase agreement for {{property_address}} there for your electronic signature.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:contract_sent_notice:v1",
+    use_case: "contract_sent_notice",
+    variant_group: "Closing, Contract Sent",
+    sequence_position: "V1",
+    category_secondary: "Closing",
+    text:
+      "The purchase agreement for {{property_address}} is on its way to your email for electronic signature. Let me know if it does not show up and I will resend it.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:contract_signed_confirmation:v1",
+    use_case: "contract_signed_confirmation",
+    variant_group: "Closing, Signature Confirmed",
+    sequence_position: "V1",
+    category_secondary: "Closing",
+    text:
+      "Thank you {{seller_first_name}}, the agreement for {{property_address}} is fully signed. Next we open title and I will keep you posted at each step.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:title_opened_update:v1",
+    use_case: "title_opened_update",
+    variant_group: "Closing, Title Opened",
+    sequence_position: "V1",
+    category_secondary: "Closing",
+    text:
+      "Quick update on {{property_address}}: title is open and the file is moving. Nothing is needed from you right now.",
+  }),
+  createLocalTemplate({
+    item_id: "local-template:closing_scheduled_update:v1",
+    use_case: "closing_scheduled_update",
+    variant_group: "Closing, Closing Scheduled",
+    sequence_position: "V1",
+    category_secondary: "Closing",
+    text:
+      "Good news on {{property_address}}: closing is scheduled. I will confirm the exact time and place with you before the day.",
+  }),
   createLocalTemplate({
     item_id: "local-template:seller_finance_probe:v1",
     use_case: "seller_finance_probe",
@@ -1051,6 +1099,34 @@ export const LOCAL_NEGOTIATION_AUTO_REPLY_APPROVALS = Object.freeze({
     stage_code: "S5",
     allowed_strategies: ["accept_seller_terms"],
     content_hash: "31f6d2b63d22edbfdbd927ff4e704456d5a67869313e4d3eeddb425ff9b2e86e",
+  }),
+  // ── Closing lane (S6+): the conversation continues autonomously through
+  // closing. Copy is dash-free at source and hash-pinned like every other
+  // auto-reply-eligible local template.
+  "local-template:request_signer_email:v1": negotiationApproval({
+    stage_code: "S6",
+    allowed_strategies: ["request_signer_email"],
+    content_hash: "68210d2145967b44572186f9734738ec98f56103b98274add418bca95c829a13",
+  }),
+  "local-template:contract_sent_notice:v1": negotiationApproval({
+    stage_code: "S6",
+    allowed_strategies: ["contract_sent_notice"],
+    content_hash: "b7d1411556f7b0913cb8f61dd963577b8ef636f7add78c9903c31a09aa1f5ef4",
+  }),
+  "local-template:contract_signed_confirmation:v1": negotiationApproval({
+    stage_code: "S8",
+    allowed_strategies: ["contract_signed_confirmation"],
+    content_hash: "f5f75a27c201cb95f0081b17a91ab921c38b94c1c8bf1a51e01c6b1111c84a0f",
+  }),
+  "local-template:title_opened_update:v1": negotiationApproval({
+    stage_code: "S8",
+    allowed_strategies: ["title_opened_update"],
+    content_hash: "c59663ea1545e2a50e8ed3046adfbb041236b98a9fb658a394a4a0261914119f",
+  }),
+  "local-template:closing_scheduled_update:v1": negotiationApproval({
+    stage_code: "S9",
+    allowed_strategies: ["closing_scheduled_update"],
+    content_hash: "59b2531e37695a0d24087f9ceacb5dc2623c3453d89f71e7bb71c24d2eff83a1",
   }),
   "local-template:novation_probe:v1": negotiationApproval({
     stage_code: "S5",

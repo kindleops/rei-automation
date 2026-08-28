@@ -81,6 +81,10 @@ export function resolveClosingStatusTransition({
  */
 export async function reconcileClosingCaseFromEnvelope({
   payload = {},
+  // Closing-execution boundary. State reconciliation ALWAYS runs; outward
+  // effects (the seller closing SMS the workflow earns) only run when the
+  // caller is authorized. Defaults to the dormant, contained posture.
+  allowExternalEffects = false,
   supabase: injected = null,
 } = {}) {
   const supabase = injected || getDefaultSupabaseClient();
@@ -208,11 +212,40 @@ export async function reconcileClosingCaseFromEnvelope({
     return { ok: false, reconciled: false, closing_case_id, reason: "update_failed" };
   }
 
+  // A FULLY EXECUTED signature is the authoritative event that starts the
+  // closing workflow. The workflow's own milestone key makes this idempotent,
+  // so a replayed completion cannot double-advance or double-message. External
+  // effects stay gated by the closing-execution boundary.
+  let workflow = null;
+  if (normalized_status === "Completed") {
+    try {
+      const { advanceClosingWorkflow, CLOSING_EVENTS } = await import(
+        "@/lib/domain/closings/advance-closing-workflow.js"
+      );
+      workflow = await advanceClosingWorkflow({
+        closing_case: updated || closing_case,
+        event_type: CLOSING_EVENTS.CONTRACT_FULLY_EXECUTED,
+        event_at: patch.contract_signed_date,
+        source_event_id: clean(extracted.event_id) || envelope_id,
+        detail: { envelope_id },
+        allowExternalEffects,
+        supabase,
+      });
+    } catch (error) {
+      warn("[CLOSING_WORKFLOW_ADVANCE_FAILED]", {
+        closing_case_id,
+        envelope_id,
+        error: error?.message || "workflow_advance_failed",
+      });
+    }
+  }
+
   info("[CLOSING_CASE_RECONCILED]", {
     closing_case_id,
     envelope_id,
     normalized_status,
     contract_status: transition.target.contract_status,
+    workflow_advanced: Boolean(workflow?.advanced),
   });
 
   return {
@@ -223,6 +256,7 @@ export async function reconcileClosingCaseFromEnvelope({
     normalized_status,
     contract_status: transition.target.contract_status,
     closing_case: updated || null,
+    workflow,
     reason: "reconciled",
   };
 }
