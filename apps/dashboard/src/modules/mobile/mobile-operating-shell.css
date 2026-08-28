@@ -799,7 +799,7 @@ html.is-mobile-layout {
   .nx-os.is-mobile-os {
     display: flex !important;
     flex-direction: column !important;
-    height: 100% !important;
+    height: 100dvh !important;
     min-height: 0 !important;
     overflow: hidden !important;
   }
@@ -1594,9 +1594,9 @@ html.is-mobile-layout {
   .nx-os.is-mobile-os .nx-fullscreen-app-shell.is-view-command_map,
   .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-command_map {
     padding-bottom: 0 !important;
-    height: 100% !important;
-    min-height: 0 !important;
-    max-height: none !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
     overflow: hidden !important;
   }
 
