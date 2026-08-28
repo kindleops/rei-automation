@@ -1,0 +1,52 @@
+-- ════════════════════════════════════════════════════════════════════════
+-- TEMPLATE — title company + market route seed.  NOT DATA. DO NOT RUN AS-IS.
+--
+-- WHY THIS IS A TEMPLATE AND NOT A SEED
+-- The original title-company vendor records lived ONLY in the Podio "Title
+-- Companies" app, which is not in service. The routing ARCHITECTURE was
+-- recovered and reimplemented (canonical markets from lib/config/markets.js +
+-- MARKET_ALIASES, and the original Podio field shape: name / contact manager /
+-- new-order email / phone). The vendor DATA was searched for and is NOT
+-- recoverable:
+--   * no CSV / JSON / SQL export in the repo or its full git history
+--   * no title / escrow / vendor table anywhere in the production database
+--     (wire_accounts holds our OWN bank accounts, not vendors)
+--   * Podio has no production credentials and cannot be queried
+-- Company names and contacts are therefore NOT reproduced from memory: doing so
+-- would fabricate vendor relationships and could send a real purchase agreement
+-- to a wrong or nonexistent party. Until an operator seeds the real records,
+-- routing correctly fails closed with `title_route_unavailable`.
+--
+-- HOW TO USE
+-- 1. Replace every <ANGLE_BRACKET> placeholder with a real vendor value.
+-- 2. `market` MUST be the CANONICAL market label (post-alias), e.g. use
+--    'Dallas, TX' not 'Fort Worth, TX', and 'Riverside, CA' not
+--    'San Bernardino, CA'. See MARKET_ALIASES in lib/config/market-sending-zones.js.
+-- 3. route_rank 1 = primary, 2 = backup. At most ONE active company per
+--    (market, rank) is enforced by uq_title_route_market_rank.
+-- 4. new_order_email is REQUIRED — a company without it is skipped and the
+--    backup is used instead.
+-- ════════════════════════════════════════════════════════════════════════
+
+-- INSERT INTO public.title_companies
+--   (title_company_key, name, contact_manager, new_order_email, phone, source_system, source_version)
+-- VALUES
+--   ('<company_key>', '<Company Name>', '<Contact Name>', '<orders@company.com>', '<555-555-5555>', 'operator_seed', 'v1')
+-- ON CONFLICT (title_company_key) DO UPDATE SET
+--   name            = EXCLUDED.name,
+--   contact_manager = EXCLUDED.contact_manager,
+--   new_order_email = EXCLUDED.new_order_email,
+--   phone           = EXCLUDED.phone,
+--   updated_at      = now();
+
+-- INSERT INTO public.title_company_market_routes
+--   (market, title_company_key, route_rank, route_version)
+-- VALUES
+--   ('<Canonical Market, ST>', '<primary_company_key>', 1, 'v1'),
+--   ('<Canonical Market, ST>', '<backup_company_key>',  2, 'v1');
+
+-- Verify after seeding:
+--   select r.market, r.route_rank, c.name, c.new_order_email
+--   from public.title_company_market_routes r
+--   join public.title_companies c using (title_company_key)
+--   where r.is_active order by r.market, r.route_rank;
