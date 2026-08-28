@@ -67,7 +67,7 @@ export type ViewportDebug = {
   rawGap: number
   appliedGap: number
   vvh: number
-  /** The px height published to --nx-app-h and used by html/body/#root. */
+  /** window.innerHeight, reported for diagnosis only — not used for layout. */
   appHeight: number
 }
 
@@ -104,20 +104,10 @@ function publish(): void {
   const appliedGap = 0
   const vvh = standalone ? layoutH : measuredH
 
-  // ── The one layout value this runtime does publish: the app root height ──
-  //
-  // Every CSS viewport unit is an approximation of the window and each is wrong
-  // somewhere on iOS — svh is short while the URL bar is hidden, lvh overshoots
-  // while it is shown, and in an installed PWA dvh does not agree with the
-  // window either. Rather than keep guessing which one the engine resolves
-  // correctly, take the number iOS actually reports for the window.
-  //
-  // `window.innerHeight` is that number: in a Home-Screen app it is the full
-  // screen, and in a browser tab it is the visible area excluding chrome. It is
-  // used as a definite pixel height for html/body/#root, with `100%` as the
-  // pre-hydration fallback so first paint is never unstyled.
+  // Measured for diagnostics only — the stylesheets do NOT consume this. Sizing
+  // the root from window.innerHeight was tried on-device and still left a band,
+  // so the shell uses the CSS values from the known-good build instead.
   const appHeight = Math.round(window.innerHeight || layoutH)
-  if (appHeight > 0) el.style.setProperty('--nx-app-h', `${appHeight}px`)
 
   el.setAttribute('data-nx-display-mode', standalone ? 'standalone' : 'browser')
 

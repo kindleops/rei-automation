@@ -131,46 +131,38 @@
   padding: 0;
 }
 /* ── Viewport contract ─────────────────────────────────────────────────────
-   html/body/#root are sized from `--nx-app-h`, which viewport-runtime.ts sets
-   to `window.innerHeight`. `100%` is the pre-hydration fallback.
+   html/body/#root: `height: 100vh` then `height: 100dvh`. This is exactly what
+   the build that renders full-screen on a physical installed PWA uses. It has
+   been verified by diffing that build's deployed CSS against this one.
 
-   This is deliberate and hard-won: every CSS viewport unit is an approximation
-   of the window, and on iOS each is wrong somewhere. `svh` is short while the
-   URL bar is hidden. `lvh` overshoots while it is shown. In an INSTALLED PWA
-   `dvh` does not agree with the window either, and because the root is
-   `overflow: hidden`, a value that over-resolves clips the bottom while one
-   that under-resolves shows the body's black — the two failures look identical
-   on a handset. Both `height: 100dvh` and `height: 100%; min-height: 100dvh`
-   were tried and both left a black band on a physical device.
-
-   `window.innerHeight` is the number iOS actually reports for the window: the
-   full screen in a Home-Screen app, the visible area in a browser tab. Using it
-   removes the guess entirely. It is re-measured on resize, orientation change
-   and display-mode change.
-
-   Do not replace this with a viewport unit without confirming on a physical
-   installed PWA — neither desktop emulation nor Safari-on-device can tell the
-   formulations apart.
+   Do not change it. `height: 100%` with a `min-height: 100dvh` floor, and a
+   JS-measured `window.innerHeight`, were both tried on-device and both left a
+   band at the bottom. Emulation cannot tell any of these formulations apart —
+   only a physical installed PWA can — so a change here is not verifiable
+   without a device pass.
    ────────────────────────────────────────────────────────────────────────── */
 html {
-  height: 100%;
-  height: var(--nx-app-h, 100%);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   overflow: hidden;
   font-size: 16px;
 }
 body {
   margin: 0;
   background: #000;
-  height: 100%;
-  height: var(--nx-app-h, 100%);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 #root {
-  height: 100%;
-  height: var(--nx-app-h, 100%);
+  height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
 }
 a {
   color: inherit;
@@ -207,7 +199,7 @@ h3 { font-size: 0.8125rem; }
   gap: 0;
   padding: 0;
   height: 100vh;
-  height: 100dvh;
+  height: -webkit-fill-available;
   height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
@@ -4221,7 +4213,7 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: 100dvh;
+  height: -webkit-fill-available;
   height: 100dvh;
   overflow: hidden;
   position: relative;
@@ -7065,7 +7057,7 @@ non‑Home surfaces only ──────────────────�
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: 100dvh;
+  height: -webkit-fill-available;
   height: 100dvh;
 }
 .nx-buyer__body {
