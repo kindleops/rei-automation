@@ -170,7 +170,11 @@ export function startViewportRuntime(): () => void {
   document.documentElement.setAttribute(HTML_ATTR, 'on')
 
   let frame = 0
+  // Measure synchronously first, then refine on the next frame. rAF alone is
+  // not enough: it is throttled in a backgrounded or freshly-restored page,
+  // which is exactly when a refresh needs the height reconciled.
   const schedule = () => {
+    publish()
     if (frame) return
     frame = requestAnimationFrame(() => {
       frame = 0
