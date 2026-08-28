@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
 import { handleDocusignWebhook } from "@/lib/domain/contracts/handle-docusign-webhook.js";
+import { reconcileClosingCaseFromEnvelope } from "@/lib/domain/closings/reconcile-closing-case-from-envelope.js";
 import { verifyDocusignConnectHmac } from "@/lib/security/docusign-hmac.js";
 import { ENV } from "@/lib/config/env.js";
 
@@ -76,15 +77,39 @@ export async function POST(request) {
       payload = {};
     }
 
-    const result = await handleDocusignWebhook(payload);
+    // CANONICAL path: reconcile the signature into the Supabase closing case,
+    // resolved by envelope id. This is the production system of record.
+    let closing = null;
+    try {
+      closing = await reconcileClosingCaseFromEnvelope({ payload });
+    } catch (error) {
+      logger.error("docusign_webhook.closing_reconcile_failed", { error });
+      closing = { ok: false, reconciled: false, reason: "closing_reconcile_threw" };
+    }
+
+    // LEGACY path: the Podio contract mirror. Podio is not in service in
+    // production (no credentials; podio business writes are disabled), so this
+    // is inert there — it is retained only so a Podio-enabled environment keeps
+    // its existing behavior. A legacy failure must never fail the webhook when
+    // the canonical Supabase reconciliation succeeded.
+    let result = null;
+    try {
+      result = await handleDocusignWebhook(payload);
+    } catch (error) {
+      logger.error("docusign_webhook.legacy_handler_failed", { error });
+      result = { ok: false, reason: "legacy_handler_threw" };
+    }
+
+    const ok = closing?.ok !== false || result?.ok !== false;
 
     return NextResponse.json(
       {
-        ok: result?.ok !== false,
+        ok,
         route: "webhooks/docusign",
+        closing,
         result,
       },
-      { status: result?.ok === false ? 400 : 200 }
+      { status: ok ? 200 : 400 }
     );
   } catch (error) {
     logger.error("docusign_webhook.failed", { error });
