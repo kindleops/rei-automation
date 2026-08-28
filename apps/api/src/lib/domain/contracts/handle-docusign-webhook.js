@@ -17,6 +17,7 @@ import { createBuyerMatchFlow } from "@/lib/flows/create-buyer-match-flow.js";
 import { syncPipelineState } from "@/lib/domain/pipelines/sync-pipeline-state.js";
 import { updateBrainFromExecution } from "@/lib/domain/brain/update-brain-from-execution.js";
 import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
+import { FEATURE_FLAGS } from "@/lib/config/feature-flags.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 function clean(value) {
@@ -48,6 +49,7 @@ const defaultDeps = {
   createBuyerMatchFlow,
   syncPipelineState,
   updateBrainFromExecution,
+  featureFlags: FEATURE_FLAGS,
   info,
   warn,
 };
@@ -585,7 +587,27 @@ export async function handleDocusignWebhook(payload = {}) {
       await runtimeDeps.updateContractItem(contract_item.item_id, update_payload);
     }
 
-    const title_routing = await runtimeDeps.maybeCreateTitleRoutingFromSignedContract({
+    // ── Closing-execution containment boundary (dormant-preserving) ─────────
+    // The contract signature status above is ALWAYS reconciled (it records the
+    // truth the webhook reported); so are the internal pipeline + brain writes
+    // below. What must NOT fire outside the intended execution boundary are the
+    // EXTERNAL-EFFECT steps — creating title-routing / closing / buyer-match
+    // Podio artifacts and sending the title-intro EMAIL. `ENABLE_AUTO_CONTRACT_SEND`
+    // is that boundary: the same authorization that lets the system send a
+    // contract for signature governs autonomously acting on its completion.
+    // Default-deny keeps those effects dormant even if a stray, manual, or
+    // replayed envelope webhook arrives; when propagation IS authorized each step
+    // still honors its own per-step flag. This never activates a send on its own
+    // — it only adds a gate; the flags remain operator-controlled.
+    const flags = runtimeDeps.featureFlags || FEATURE_FLAGS;
+    const downstream_authorized = Boolean(flags.ENABLE_AUTO_CONTRACT_SEND);
+    const downstreamSkip = (reason) =>
+      Object.freeze({ skipped: true, ok: true, created: false, sent: false, reason });
+    const stepAllowed = (perStepFlag) => downstream_authorized && perStepFlag !== false;
+    const boundarySkipReason = downstream_authorized ? null : "closing_execution_dormant";
+
+    const title_routing = stepAllowed(flags.ENABLE_AUTO_TITLE_ROUTING)
+      ? await runtimeDeps.maybeCreateTitleRoutingFromSignedContract({
       contract_item,
       contract_item_id: contract_item.item_id,
       contract_status: update_payload[CONTRACT_FIELDS.contract_status] || null,
@@ -595,7 +617,8 @@ export async function handleDocusignWebhook(payload = {}) {
         envelope_id: extracted.envelope_id,
       },
       source: "DocuSign Webhook",
-    });
+        })
+      : downstreamSkip(boundarySkipReason || "auto_title_routing_disabled");
 
     const resolved_title_routing_item_id =
       title_routing?.title_routing_item_id ||
@@ -607,20 +630,22 @@ export async function handleDocusignWebhook(payload = {}) {
       title_routing?.result?.raw ||
       null;
 
-    const closing = await runtimeDeps.maybeCreateClosingFromTitleRouting({
+    const closing = stepAllowed(flags.ENABLE_AUTO_CLOSING_FLOW)
+      ? await runtimeDeps.maybeCreateClosingFromTitleRouting({
       title_routing_item_id: resolved_title_routing_item_id,
       title_routing_item: resolved_title_routing_item,
       title_routing_result: title_routing,
       contract_item_id: contract_item.item_id,
       source: "DocuSign Webhook",
-    });
+        })
+      : downstreamSkip(boundarySkipReason || "auto_closing_flow_disabled");
 
     const resolved_closing_item_id =
       closing?.closing_item_id ||
       closing?.result?.closing_item_id ||
       null;
     const buyer_match =
-      normalized_status === "Completed"
+      normalized_status === "Completed" && stepAllowed(flags.ENABLE_AUTO_BUYER_MATCH)
         ? await runtimeDeps.createBuyerMatchFlow({
             contract_id: contract_item.item_id,
             closing_id: resolved_closing_item_id,
@@ -629,12 +654,19 @@ export async function handleDocusignWebhook(payload = {}) {
     const resolved_buyer_match_item_id =
       buyer_match?.buyer_match_item_id || null;
 
-    const title_intro = await runtimeDeps.maybeSendTitleIntro({
+    const title_intro = stepAllowed(flags.ENABLE_AUTO_TITLE_INTRO)
+      ? await runtimeDeps.maybeSendTitleIntro({
       title_routing_item_id: resolved_title_routing_item_id,
       closing_item_id: resolved_closing_item_id,
       contract_item_id: contract_item.item_id,
       dry_run: false,
-    });
+        })
+      : downstreamSkip(boundarySkipReason || "auto_title_intro_disabled");
+    // Pipeline + brain are INTERNAL reconciliation of the signature truth (like
+    // the contract-status update above) — they record WHAT HAPPENED into deal
+    // tracking, they do not create an external artifact or send a message. They
+    // always run so a signature is never invisible, even while external
+    // propagation (title/closing/buyer/email) is contained.
     const pipeline = await runtimeDeps.syncPipelineState({
       contract_item_id: contract_item.item_id,
       title_routing_item_id: resolved_title_routing_item_id,
@@ -655,6 +687,8 @@ export async function handleDocusignWebhook(payload = {}) {
       envelope_id: extracted.envelope_id,
       normalized_status,
       contract_status: update_payload[CONTRACT_FIELDS.contract_status] || null,
+      downstream_authorized,
+      downstream_skip_reason: boundarySkipReason,
       title_routing_created: Boolean(title_routing?.created),
       title_routing_item_id: resolved_title_routing_item_id,
       closing_created: Boolean(closing?.created),
@@ -677,6 +711,8 @@ export async function handleDocusignWebhook(payload = {}) {
       normalized_status,
       contract_status: update_payload[CONTRACT_FIELDS.contract_status] || null,
       update_payload,
+      downstream_authorized,
+      downstream_skip_reason: boundarySkipReason,
       title_routing,
       closing,
       buyer_match,

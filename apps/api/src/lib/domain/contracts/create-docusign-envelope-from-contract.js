@@ -40,6 +40,44 @@ function buildDefaultSubject(contract_item) {
   );
 }
 
+// DocuSign text-tab labels for per-deal terms. A single hosted server template
+// carries only STATIC field values, so the per-deal terms (price/address/
+// closing/EMD) are injected as prefilled text tabs keyed by tabLabel. These
+// labels MUST match the tabLabels on the production DocuSign purchase-agreement
+// template; they are env-overridable so the template can be aligned WITHOUT a
+// code change. This is the one bounded reconnect the closing trace identified —
+// NOT a document/PDF generator, which DocuSign's hosted template already provides.
+const DEAL_TERM_TAB_LABELS = Object.freeze({
+  purchase_price: clean(process.env.DOCUSIGN_TAB_PURCHASE_PRICE) || "purchase_price",
+  property_address: clean(process.env.DOCUSIGN_TAB_PROPERTY_ADDRESS) || "property_address",
+  closing_date: clean(process.env.DOCUSIGN_TAB_CLOSING_DATE) || "closing_date",
+  earnest_money: clean(process.env.DOCUSIGN_TAB_EARNEST_MONEY) || "earnest_money",
+});
+
+// Build the per-deal text tabs from the contract's own fields, with optional
+// caller overrides (property_address is a Podio reference, not text, so the
+// caller supplies the resolved address). Only populated terms become tabs;
+// returns null when there is nothing to inject.
+export function buildDealTermTabs(contract_item, deal_terms = {}) {
+  const overrides = deal_terms && typeof deal_terms === "object" ? deal_terms : {};
+  const values = {
+    purchase_price:
+      clean(overrides.purchase_price) ||
+      clean(getFieldValue(contract_item, CONTRACT_FIELDS.purchase_price_final)),
+    property_address: clean(overrides.property_address),
+    closing_date:
+      clean(overrides.closing_date) ||
+      clean(getFieldValue(contract_item, CONTRACT_FIELDS.closing_date_target)),
+    earnest_money:
+      clean(overrides.earnest_money) ||
+      clean(getFieldValue(contract_item, CONTRACT_FIELDS.emd_amount)),
+  };
+  const textTabs = Object.entries(values)
+    .filter(([, value]) => value)
+    .map(([key, value]) => ({ tabLabel: DEAL_TERM_TAB_LABELS[key], value }));
+  return textTabs.length ? { textTabs } : null;
+}
+
 function normalizeDocuments(documents = []) {
   return safeArray(documents)
     .map((doc, index) => ({
@@ -147,6 +185,7 @@ export async function createDocusignEnvelopeFromContract({
   template_id = null,
   email_blurb = "",
   metadata = {},
+  deal_terms = {},
   dry_run = false,
 } = {}) {
   let resolved_contract_item = contract_item || null;
@@ -177,6 +216,17 @@ export async function createDocusignEnvelopeFromContract({
     buyer_recipient,
     internal_cc,
   });
+
+  // Inject the per-deal terms as prefilled text tabs on the SELLER signer (the
+  // recipient who reviews and signs the purchase agreement). Static hosted
+  // templates cannot carry per-deal values; this is where price/address/closing/
+  // EMD are bound to the envelope. No-op when there is nothing to inject.
+  const deal_term_tabs = buildDealTermTabs(resolved_contract_item, deal_terms);
+  if (deal_term_tabs) {
+    for (const recipient of normalized_recipients) {
+      if (recipient.role === "seller") recipient.tabs = deal_term_tabs;
+    }
+  }
 
   if (!normalized_documents.length && !clean(template_id)) {
     return {
