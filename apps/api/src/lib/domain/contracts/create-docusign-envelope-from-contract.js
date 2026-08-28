@@ -54,13 +54,32 @@ const DEAL_TERM_TAB_LABELS = Object.freeze({
   earnest_money: clean(process.env.DOCUSIGN_TAB_EARNEST_MONEY) || "earnest_money",
 });
 
-// Build the per-deal text tabs from the contract's own fields, with optional
-// caller overrides (property_address is a Podio reference, not text, so the
-// caller supplies the resolved address). Only populated terms become tabs;
-// returns null when there is nothing to inject.
+// SOURCE-AGNOSTIC tab builder. Takes already-resolved term VALUES and produces
+// the DocuSign textTabs payload. This is the shared core so that any record
+// source (a Supabase closing case, or the legacy Podio contract item below) can
+// populate the same hosted template without duplicating the mapping. Only
+// populated terms become tabs; returns null when there is nothing to inject.
+export function buildDealTermTabsFromValues(values = {}) {
+  const resolved = {
+    purchase_price: clean(values.purchase_price),
+    property_address: clean(values.property_address),
+    closing_date: clean(values.closing_date),
+    earnest_money: clean(values.earnest_money),
+  };
+  const textTabs = Object.entries(resolved)
+    .filter(([, value]) => value)
+    .map(([key, value]) => ({ tabLabel: DEAL_TERM_TAB_LABELS[key], value }));
+  return textTabs.length ? { textTabs } : null;
+}
+
+// LEGACY Podio adapter: reads the term values off a Podio contract item, with
+// optional caller overrides (property_address is a Podio reference, not text,
+// so the caller supplies the resolved address), then delegates to the shared
+// builder. Retained for the legacy path; the canonical production source is the
+// Supabase closing case.
 export function buildDealTermTabs(contract_item, deal_terms = {}) {
   const overrides = deal_terms && typeof deal_terms === "object" ? deal_terms : {};
-  const values = {
+  return buildDealTermTabsFromValues({
     purchase_price:
       clean(overrides.purchase_price) ||
       clean(getFieldValue(contract_item, CONTRACT_FIELDS.purchase_price_final)),
@@ -71,11 +90,7 @@ export function buildDealTermTabs(contract_item, deal_terms = {}) {
     earnest_money:
       clean(overrides.earnest_money) ||
       clean(getFieldValue(contract_item, CONTRACT_FIELDS.emd_amount)),
-  };
-  const textTabs = Object.entries(values)
-    .filter(([, value]) => value)
-    .map(([key, value]) => ({ tabLabel: DEAL_TERM_TAB_LABELS[key], value }));
-  return textTabs.length ? { textTabs } : null;
+  });
 }
 
 function normalizeDocuments(documents = []) {

@@ -184,7 +184,7 @@ function extractWebhookRecipients(payload = {}) {
   ];
 }
 
-function extractWebhookPayload(payload = {}) {
+export function extractWebhookPayload(payload = {}) {
   const summary = getEnvelopeSummary(payload);
   const recipients = extractWebhookRecipients(payload);
   const event_id =
@@ -270,7 +270,7 @@ function buildDocusignIdempotencyKey(extracted = {}) {
   );
 }
 
-function normalizeDocusignStatus({
+export function normalizeDocusignStatus({
   status = "",
   recipient_status = "",
   recipients = [],
