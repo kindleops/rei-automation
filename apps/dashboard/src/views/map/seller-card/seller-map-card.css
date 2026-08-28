@@ -1982,9 +1982,13 @@
     padding-top: 5px;
     padding-bottom: 5px;
   }
-  /* The sticky footer keeps its own dock clearance (set !important elsewhere);
-     only the non-sticky band is trimmed here. */
-  .smc-mobile-bottom-sheet .smc-actions:not(.smc-actions--sticky) {
+  /* Specificity note: mobile-operating-shell.css sets padding-bottom on
+     `.smc-mobile-bottom-sheet .smc-actions` and is imported later, so an equal
+     (0,2,0) selector loses to it. Qualifying with .nx-mobile-bottom-sheet wins
+     on specificity instead of reaching for !important. The sticky footer keeps
+     its own dock clearance, which is set !important elsewhere. */
+  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet .smc-actions:not(.smc-actions--sticky) {
+    padding-top: 5px;
     padding-bottom: 5px;
   }
 
