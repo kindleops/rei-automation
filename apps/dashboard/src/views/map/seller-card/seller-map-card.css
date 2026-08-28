@@ -1979,8 +1979,13 @@
   }
   .smc-mobile-bottom-sheet .smc-actions {
     gap: 6px;
-    padding-top: 6px;
-    padding-bottom: 6px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  /* The sticky footer keeps its own dock clearance (set !important elsewhere);
+     only the non-sticky band is trimmed here. */
+  .smc-mobile-bottom-sheet .smc-actions:not(.smc-actions--sticky) {
+    padding-bottom: 5px;
   }
 
   /* 7 · SECTION RHYTHM — remove the slack between bands. */
