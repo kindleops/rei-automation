@@ -67,6 +67,8 @@ export type ViewportDebug = {
   rawGap: number
   appliedGap: number
   vvh: number
+  /** The px height published to --nx-app-h and used by html/body/#root. */
+  appHeight: number
 }
 
 let lastDebug: ViewportDebug | null = null
@@ -97,10 +99,25 @@ function publish(): void {
   // JS-measured pixel height is also always one frame staler than what the
   // engine already knows, so the shell uses plain `100dvh` instead.
   //
-  // appliedGap is reported as 0 to record that nothing is applied, while
+  // appliedGap is reported as 0 to record that no dock offset is applied, while
   // rawGap keeps the measurement itself for diagnosis.
   const appliedGap = 0
   const vvh = standalone ? layoutH : measuredH
+
+  // ── The one layout value this runtime does publish: the app root height ──
+  //
+  // Every CSS viewport unit is an approximation of the window and each is wrong
+  // somewhere on iOS — svh is short while the URL bar is hidden, lvh overshoots
+  // while it is shown, and in an installed PWA dvh does not agree with the
+  // window either. Rather than keep guessing which one the engine resolves
+  // correctly, take the number iOS actually reports for the window.
+  //
+  // `window.innerHeight` is that number: in a Home-Screen app it is the full
+  // screen, and in a browser tab it is the visible area excluding chrome. It is
+  // used as a definite pixel height for html/body/#root, with `100%` as the
+  // pre-hydration fallback so first paint is never unstyled.
+  const appHeight = Math.round(window.innerHeight || layoutH)
+  if (appHeight > 0) el.style.setProperty('--nx-app-h', `${appHeight}px`)
 
   el.setAttribute('data-nx-display-mode', standalone ? 'standalone' : 'browser')
 
@@ -118,6 +135,7 @@ function publish(): void {
     rawGap,
     appliedGap,
     vvh,
+    appHeight,
   }
   // Readable from the device via Safari remote inspector or the settings sheet.
   ;(window as Window & { __nxViewport?: ViewportDebug }).__nxViewport = lastDebug

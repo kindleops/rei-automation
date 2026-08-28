@@ -131,39 +131,46 @@
   padding: 0;
 }
 /* ── Viewport contract ─────────────────────────────────────────────────────
-   On real iOS the three viewport sizes differ: svh (URL bar expanded) is
-   ~60-90px shorter than lvh, and percentage heights resolve against the
-   layout viewport. Sizing the shell in `%` or `svh` therefore ends it above
-   the physical bottom of the screen and lets the body background show through
-   as a dead band. Desktop emulation collapses svh == lvh == dvh, so that
-   class of defect is invisible there and only appears on a handset.
+   html/body/#root are sized from `--nx-app-h`, which viewport-runtime.ts sets
+   to `window.innerHeight`. `100%` is the pre-hydration fallback.
 
-   `dvh` is the only unit that tracks the visible viewport as the URL bar
-   shows and hides. The cascade below degrades safely: `vh` for anything
-   without dvh, `-webkit-fill-available` for iOS 15 and earlier, then `dvh`.
+   This is deliberate and hard-won: every CSS viewport unit is an approximation
+   of the window, and on iOS each is wrong somewhere. `svh` is short while the
+   URL bar is hidden. `lvh` overshoots while it is shown. In an INSTALLED PWA
+   `dvh` does not agree with the window either, and because the root is
+   `overflow: hidden`, a value that over-resolves clips the bottom while one
+   that under-resolves shows the body's black — the two failures look identical
+   on a handset. Both `height: 100dvh` and `height: 100%; min-height: 100dvh`
+   were tried and both left a black band on a physical device.
+
+   `window.innerHeight` is the number iOS actually reports for the window: the
+   full screen in a Home-Screen app, the visible area in a browser tab. Using it
+   removes the guess entirely. It is re-measured on resize, orientation change
+   and display-mode change.
+
+   Do not replace this with a viewport unit without confirming on a physical
+   installed PWA — neither desktop emulation nor Safari-on-device can tell the
+   formulations apart.
    ────────────────────────────────────────────────────────────────────────── */
 html {
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  height: var(--nx-app-h, 100%);
   overflow: hidden;
   font-size: 16px;
 }
 body {
   margin: 0;
   background: #000;
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  height: var(--nx-app-h, 100%);
   overflow: hidden;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 #root {
-  height: 100vh;
-  height: 100dvh;
-  height: 100dvh;
+  height: 100%;
+  height: var(--nx-app-h, 100%);
 }
 a {
   color: inherit;
