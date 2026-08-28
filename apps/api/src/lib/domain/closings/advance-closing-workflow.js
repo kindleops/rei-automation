@@ -233,10 +233,49 @@ export async function advanceClosingWorkflow({
     }
   }
 
+  // A fully-executed contract is what earns title routing. Routing itself is an
+  // INTERNAL decision (a deterministic DB selection), so it always runs; the
+  // title-intro EMAIL is an external effect and stays gated. Both are
+  // idempotent, so a replay that somehow reaches here still cannot double-route
+  // or double-email.
+  let title_route = null;
+  let title_intro = null;
+  if (step.milestone_type === "contract_fully_executed") {
+    try {
+      const { routeTitleCompanyForClosingCase } = await import(
+        "@/lib/domain/title/route-title-company.js"
+      );
+      title_route = await routeTitleCompanyForClosingCase({
+        closing_case_id: case_id,
+        supabase,
+      });
+
+      if (title_route?.ok && (title_route.routed || title_route.already_routed)) {
+        const { sendTitleIntroFromClosingCase } = await import(
+          "@/lib/domain/title/send-title-intro-from-closing-case.js"
+        );
+        title_intro = await sendTitleIntroFromClosingCase({
+          closing_case_id: case_id,
+          allowExternalEffects,
+          dry_run: !allowExternalEffects,
+          supabase,
+        });
+      }
+    } catch (error) {
+      warn("[TITLE_ROUTING_STEP_FAILED]", {
+        closing_case_id: case_id,
+        error: error?.message || "title_routing_failed",
+      });
+    }
+  }
+
   info("[CLOSING_WORKFLOW_ADVANCED]", {
     closing_case_id: case_id,
     milestone_type: step.milestone_type,
     seller_message_queued,
+    title_routed: Boolean(title_route?.routed),
+    title_route_status: title_route?.status || null,
+    title_intro_sent: Boolean(title_intro?.sent),
     external_effects_allowed: Boolean(allowExternalEffects),
   });
 
@@ -247,6 +286,8 @@ export async function advanceClosingWorkflow({
     milestone_type: step.milestone_type,
     patch,
     seller_message_queued,
+    title_route,
+    title_intro,
     reason: "advanced",
   };
 }

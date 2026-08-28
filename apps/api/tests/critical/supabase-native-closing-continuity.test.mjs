@@ -399,12 +399,28 @@ test("an unknown envelope changes nothing and is not an error", async () => {
 test("a REPLAYED webhook is idempotent (no duplicate reconciliation)", async () => {
   const supabase = makeSupabase({ cases: [{ ...ENVELOPED_CASE }] });
   const first = await reconcileClosingCaseFromEnvelope({ payload: completedPayload("evt-9"), supabase });
+  const after_first = supabase._state.events.length;
   const second = await reconcileClosingCaseFromEnvelope({ payload: completedPayload("evt-9"), supabase });
 
   assert.equal(first.reconciled, true);
   assert.equal(second.reconciled, false);
   assert.equal(second.reason, "duplicate_event");
-  assert.equal(supabase._state.events.length, 1, "exactly one audit event");
+
+  // Exactly ONE docusign claim event: that is the idempotency gate. (A completion
+  // also earns a separate title_route audit event downstream, so counting ALL
+  // events would conflate "replay wrote nothing" with "one completion writes one
+  // event".)
+  assert.equal(
+    supabase._state.events.filter((e) => e.event_type === "docusign_status").length,
+    1,
+    "exactly one docusign claim event"
+  );
+  // The replay must write NOTHING at all — stricter than the old total count.
+  assert.equal(
+    supabase._state.events.length,
+    after_first,
+    "the replay added no audit events of any kind"
+  );
 });
 
 test("a lower-signal event never regresses a fully-executed contract", () => {
