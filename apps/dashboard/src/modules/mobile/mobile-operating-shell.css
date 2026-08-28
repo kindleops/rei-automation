@@ -5,14 +5,11 @@
 
 :root {
   --nx-mobile-safe-top: env(safe-area-inset-top, 0px);
-  /* Clamped on purpose. The physical bottom inset on every iPhone is the 34px
-     home indicator; anything larger reported by `env()` is the browser
-     reserving room for its own chrome (iOS Safari's bottom address bar), not
-     device hardware. Honouring that inflated value is what pushed the dock far
-     above the display bottom and opened a dead band beneath it. Clamping keeps
-     the real hardware inset and refuses the browser reservation, which is the
-     contract: intended visual margin + safe-area only. */
-  --nx-mobile-safe-bottom: min(env(safe-area-inset-bottom, 0px), 34px);
+  /* Plain env(), never clamped. A min(env(...), 34px) clamp was tried here and
+     it is the only difference in the whole vertical chain between the build
+     that renders full-screen on-device and the ones that do not. Do not
+     reintroduce it. */
+  --nx-mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
   /* Top command rail. Buttons stay 44px; only the chrome around them is trimmed. */
   --nx-dock-height: 44px;
   --nx-dock-pad-top: 1px;
