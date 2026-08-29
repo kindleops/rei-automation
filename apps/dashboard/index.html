@@ -25,6 +25,7 @@
         var ENTRY = '__NEXUS_MAIN_ENTRY__'
         var CSS = '__NEXUS_MAIN_CSS__'
         var loaded = false
+        var DIAG_KEY = 'nexus:diag-armed'
 
         // Storage access throws when cookies are blocked (iOS private mode). A
         // bootstrap that throws never mounts the app, so every access is guarded
@@ -80,8 +81,48 @@
         // not a debug overlay on the product — it is a URL you have to ask for.
         // It exists because the handset is the only place these numbers are
         // real, and a Mac + Web Inspector is not always available.
-        function diagRequested() {
-          try { return new URL(location.href).searchParams.get('diag') === '1' } catch (e) { return false }
+        // 'show' render now · 'arm' set the one-shot flag · 'off' do nothing.
+        // The installed PWA has no address bar and always launches at its fixed
+        // start_url, so it can never be given ?diag=1. Arming from Safari writes
+        // a flag on the shared origin that the next PWA launch consumes exactly
+        // once — that is the only way to measure standalone geometry.
+        function diagMode() {
+          var param = null
+          try { param = new URL(location.href).searchParams.get('diag') } catch (e) { /* opaque URL */ }
+          if (param === '1') return 'show'
+          if (param === 'arm') return 'arm'
+          try {
+            if (localStorage.getItem(DIAG_KEY) === '1') {
+              localStorage.removeItem(DIAG_KEY)
+              return 'show'
+            }
+          } catch (e) { /* storage blocked */ }
+          return 'off'
+        }
+
+        function diagBox(text) {
+          var box = document.createElement('pre')
+          box.id = 'nx-diag'
+          box.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:2147483647',
+            'margin:0', 'padding:14px', 'overflow:auto',
+            'background:#000', 'color:#7CFFB2',
+            'font:11px/1.5 ui-monospace,Menlo,monospace',
+            'white-space:pre-wrap', 'word-break:break-all',
+            '-webkit-user-select:text', 'user-select:text',
+          ].join(';')
+          box.textContent = text
+          box.addEventListener('click', function () { box.remove() })
+          document.body.appendChild(box)
+          return box
+        }
+
+        function armDiagnostics() {
+          var ok = false
+          try { localStorage.setItem(DIAG_KEY, '1'); ok = true } catch (e) { /* blocked */ }
+          diagBox(ok
+            ? 'DIAGNOSTICS ARMED\n\nNow open NEXUS from your Home Screen icon.\nThe readout appears once, then disarms itself.\n\n(tap to dismiss)'
+            : 'COULD NOT ARM\n\nStorage is blocked in this browser, so the flag\ncould not be written.\n\n(tap to dismiss)')
         }
 
         function pad(label) {
@@ -158,19 +199,7 @@
         }
 
         function renderDiagnostics() {
-          var box = document.createElement('pre')
-          box.id = 'nx-diag'
-          box.style.cssText = [
-            'position:fixed', 'inset:0', 'z-index:2147483647',
-            'margin:0', 'padding:14px', 'overflow:auto',
-            'background:#000', 'color:#7CFFB2',
-            'font:11px/1.5 ui-monospace,Menlo,monospace',
-            'white-space:pre-wrap', 'word-break:break-all',
-            '-webkit-user-select:text', 'user-select:text',
-          ].join(';')
-          box.textContent = diagText() + '\n\n(tap to dismiss)'
-          box.addEventListener('click', function () { box.remove() })
-          document.body.appendChild(box)
+          var box = diagBox(diagText() + '\n\n(tap to dismiss)')
 
           // Worker/cache state resolves asynchronously; appended once known.
           var extra = []
@@ -195,7 +224,9 @@
         }
 
         function scheduleDiagnostics() {
-          if (!diagRequested()) return
+          var mode = diagMode()
+          if (mode === 'off') return
+          if (mode === 'arm') { armDiagnostics(); return }
           // Poll until the shell has mounted so #root and the dock report real
           // geometry instead of a pre-mount zero.
           var tries = 0
