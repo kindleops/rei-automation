@@ -73,6 +73,143 @@
           document.head.appendChild(link)
         }
 
+
+        // ── Diagnostics readout ───────────────────────────────────────────
+        //
+        // Renders ONLY for ?diag=1. The normal app never sees it, so this is
+        // not a debug overlay on the product — it is a URL you have to ask for.
+        // It exists because the handset is the only place these numbers are
+        // real, and a Mac + Web Inspector is not always available.
+        function diagRequested() {
+          try { return new URL(location.href).searchParams.get('diag') === '1' } catch (e) { return false }
+        }
+
+        function pad(label) {
+          var out = label
+          while (out.length < 7) out += ' '
+          return out + ' '
+        }
+
+        function rectLine(label, node) {
+          if (!node) return pad(label) + 'ABSENT'
+          var b = node.getBoundingClientRect()
+          return pad(label) + 'h' + Math.round(b.height) +
+            '  top ' + Math.round(b.top) +
+            '  bot ' + Math.round(b.bottom) +
+            '  w' + Math.round(b.width)
+        }
+
+        function safeAreaBottom() {
+          try {
+            var probe = document.createElement('div')
+            probe.style.cssText = 'position:fixed;left:-9999px;top:0;padding-bottom:env(safe-area-inset-bottom,0px)'
+            document.body.appendChild(probe)
+            var v = window.getComputedStyle(probe).paddingBottom
+            document.body.removeChild(probe)
+            return v
+          } catch (e) { return '?' }
+        }
+
+        function firstMatch(list, re) {
+          for (var i = 0; i < list.length; i++) if (re.test(list[i])) return list[i]
+          return 'none'
+        }
+
+        function diagText() {
+          var names = []
+          try {
+            names = performance.getEntriesByType('resource').map(function (e) { return e.name })
+              .filter(function (n) { return n.indexOf(location.origin) === 0 })
+              .map(function (n) { return n.split('/').pop() })
+          } catch (e) { /* timeline unavailable */ }
+
+          var modes = ['standalone', 'fullscreen', 'minimal-ui', 'browser']
+          var dm = 'unknown'
+          for (var i = 0; i < modes.length; i++) {
+            if (window.matchMedia('(display-mode: ' + modes[i] + ')').matches) { dm = modes[i]; break }
+          }
+          var meta = document.querySelector('meta[name="nx-build-sha"]')
+          var vv = window.visualViewport
+
+          return [
+            'NEXUS SHELL DIAGNOSTICS',
+            '',
+            pad('SHA') + (meta ? meta.content : 'NO-META'),
+            pad('JS') + firstMatch(names, /^main-.*\.js/),
+            pad('CSS') + firstMatch(names, /^main-.*\.css/),
+            pad('files') + names.length,
+            '',
+            pad('mode') + dm + '   navStandalone=' + navigator.standalone,
+            pad('href') + location.href,
+            '',
+            pad('inner') + window.innerHeight +
+              '   client ' + document.documentElement.clientHeight +
+              '   screen ' + screen.height,
+            pad('vv') + (vv ? Math.round(vv.height) + '   offsetTop ' + Math.round(vv.offsetTop) : 'n/a'),
+            pad('safeB') + safeAreaBottom(),
+            '',
+            rectLine('html', document.documentElement),
+            rectLine('body', document.body),
+            rectLine('#root', document.getElementById('root')),
+            rectLine('dock', document.querySelector('.nx-pinned-app-dock')),
+            '',
+            pad('vvRun') + JSON.stringify(window.__nxViewport || null),
+          ].join('\n')
+        }
+
+        function renderDiagnostics() {
+          var box = document.createElement('pre')
+          box.id = 'nx-diag'
+          box.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:2147483647',
+            'margin:0', 'padding:14px', 'overflow:auto',
+            'background:#000', 'color:#7CFFB2',
+            'font:11px/1.5 ui-monospace,Menlo,monospace',
+            'white-space:pre-wrap', 'word-break:break-all',
+            '-webkit-user-select:text', 'user-select:text',
+          ].join(';')
+          box.textContent = diagText() + '\n\n(tap to dismiss)'
+          box.addEventListener('click', function () { box.remove() })
+          document.body.appendChild(box)
+
+          // Worker/cache state resolves asynchronously; appended once known.
+          var extra = []
+          var done = 0
+          var finish = function () {
+            if (++done < 2) return
+            box.textContent = diagText() + '\n\n' + extra.join('\n') + '\n\n(tap to dismiss)'
+          }
+          try {
+            navigator.serviceWorker.getRegistrations().then(function (r) {
+              extra.push(pad('sw') + r.length + ' registration(s)   controller=' +
+                (navigator.serviceWorker.controller ? 'YES' : 'none'))
+              finish()
+            }, finish)
+          } catch (e) { finish() }
+          try {
+            caches.keys().then(function (k) {
+              extra.push(pad('caches') + (k.length ? k.join(', ') : 'none'))
+              finish()
+            }, finish)
+          } catch (e) { finish() }
+        }
+
+        function scheduleDiagnostics() {
+          if (!diagRequested()) return
+          // Poll until the shell has mounted so #root and the dock report real
+          // geometry instead of a pre-mount zero.
+          var tries = 0
+          var tick = function () {
+            tries++
+            if (document.querySelector('.nx-pinned-app-dock') || tries > 24) {
+              renderDiagnostics()
+              return
+            }
+            setTimeout(tick, 250)
+          }
+          setTimeout(tick, 500)
+        }
+
         function loadApp() {
           if (loaded) return
           loaded = true
@@ -82,6 +219,7 @@
           script.crossOrigin = 'anonymous'
           script.src = ENTRY
           document.body.appendChild(script)
+          scheduleDiagnostics()
         }
 
         stripBuster()
