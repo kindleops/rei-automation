@@ -9,6 +9,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NEXUS" />
+    <!-- Build identity, readable before React mounts. Lets a handset be
+         identified from the document alone when the app fails to boot. -->
+    <meta name="nx-build-sha" content="__NEXUS_BUILD_SHA__" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" crossorigin href="__NEXUS_MAIN_CSS__" id="nexus-main-css" />
     <title>NEXUS Command Center</title>
@@ -18,9 +21,46 @@
     <script>
       (function () {
         var KEY = 'nexus:sw-recovery-generation'
-        var GEN = '5'
+        var GEN = '6'
         var ENTRY = '__NEXUS_MAIN_ENTRY__'
         var CSS = '__NEXUS_MAIN_CSS__'
+        var loaded = false
+
+        // Storage access throws when cookies are blocked (iOS private mode). A
+        // bootstrap that throws never mounts the app, so every access is guarded
+        // and a failure degrades to "clean up, but never reload".
+        function readMark() {
+          try {
+            return localStorage.getItem(KEY) || sessionStorage.getItem(KEY)
+          } catch (e) { return null }
+        }
+
+        function writeMark() {
+          var ok = false
+          try { localStorage.setItem(KEY, GEN); ok = true } catch (e) { /* blocked */ }
+          try { sessionStorage.setItem(KEY, GEN); ok = true } catch (e) { /* blocked */ }
+          return ok
+        }
+
+        // The cache-buster is a transient reload argument, never part of the
+        // installed start URL. Scope matching is path-based, so adding and
+        // removing a query param cannot knock the PWA out of standalone.
+        function stripBuster() {
+          try {
+            var u = new URL(location.href)
+            if (!u.searchParams.has('nxsw')) return
+            u.searchParams.delete('nxsw')
+            history.replaceState(null, '', u.pathname + (u.search || '') + u.hash)
+          } catch (e) { /* cosmetic only */ }
+        }
+
+        function reloadFresh() {
+          try {
+            var u = new URL(location.href)
+            u.searchParams.set('nxsw', GEN)
+            location.replace(u.toString())
+          } catch (e) { location.reload() }
+        }
 
         function ensureMainStylesheet() {
           if (!CSS || CSS.indexOf('__NEXUS_') === 0) return
@@ -34,6 +74,8 @@
         }
 
         function loadApp() {
+          if (loaded) return
+          loaded = true
           ensureMainStylesheet()
           var script = document.createElement('script')
           script.type = 'module'
@@ -42,13 +84,15 @@
           document.body.appendChild(script)
         }
 
-        if (localStorage.getItem(KEY) === GEN) {
+        stripBuster()
+
+        if (readMark() === GEN) {
           loadApp()
           return
         }
 
         if (!('serviceWorker' in navigator)) {
-          localStorage.setItem(KEY, GEN)
+          writeMark()
           loadApp()
           return
         }
@@ -59,19 +103,31 @@
           return Promise.all(regs.map(function (reg) { return reg.unregister() })).then(function () {
             return regs.length > 0 || hadController
           })
-        }).then(function (hadServiceWorker) {
-          if (!('caches' in window)) return hadServiceWorker
+        }).then(function (hadWorker) {
+          if (!('caches' in window)) return hadWorker
+          // Every CacheStorage entry on this origin was created by the retired
+          // worker — this build ships none and registers none, so there is no
+          // cache worth keeping. Cookies, localStorage, sessionStorage and user
+          // preferences are deliberately untouched.
           return caches.keys().then(function (keys) {
-            return Promise.all(keys.filter(function (key) {
-              return key.indexOf('nexus-shell') === 0
-            }).map(function (key) { return caches.delete(key) }))
-          }).then(function () { return hadServiceWorker })
-        }).then(function (hadServiceWorker) {
-          localStorage.setItem(KEY, GEN)
-          if (hadServiceWorker) {
-            location.reload()
+            if (!keys.length) return hadWorker
+            return Promise.all(keys.map(function (key) {
+              return caches.delete(key)
+            })).then(function () { return true })
+          })
+        }).then(function (hadWorker) {
+          var marked = writeMark()
+          // Reload only when stale state was actually found AND the marker
+          // persisted. Without a durable marker a reload would loop forever, so
+          // the unmarkable case mounts the app on the assets it already has.
+          if (hadWorker && marked) {
+            reloadFresh()
             return
           }
+          loadApp()
+        }).catch(function () {
+          // Cleanup is best-effort. The app must mount either way.
+          writeMark()
           loadApp()
         })
       })()

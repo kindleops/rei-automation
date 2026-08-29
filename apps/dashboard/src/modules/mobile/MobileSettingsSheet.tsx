@@ -7,7 +7,12 @@ import {
   updateSetting,
   type NexusTheme,
 } from '../../shared/settings'
-import { formatBuildIdentityLine, resolveBuildIdentity } from '../../lib/build-identity'
+import {
+  formatBuildIdentityLine,
+  resolveBuildIdentity,
+  resolveRuntimeShellReport,
+  type RuntimeShellReport,
+} from '../../lib/build-identity'
 import { useBreakpoint } from './useBreakpoint'
 import { getViewportDebug } from './viewport-runtime'
 
@@ -34,6 +39,18 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
   // read asynchronously, and they are the two things that decide whether an
   // installed icon launches standalone.
   const [installInfo, setInstallInfo] = useState('resolving…')
+
+  // Measured when the sheet opens, never at module scope: the geometry rows
+  // have to reflect the live document, and the resource timeline is only
+  // complete once the shell has actually loaded.
+  const [shell, setShell] = useState<RuntimeShellReport | null>(null)
+  useEffect(() => {
+    if (!open) return
+    // Measured after paint, so the sheet is laid out and the #root / dock rects
+    // are settled rather than read mid-transition.
+    const frame = requestAnimationFrame(() => setShell(resolveRuntimeShellReport()))
+    return () => cancelAnimationFrame(frame)
+  }, [open])
   useEffect(() => {
     let live = true
     const parts: string[] = [`host=${window.location.host}`]
@@ -151,6 +168,36 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
                 ].join(' · ')
               })()}
             </code>
+            {/* What the browser actually executed, read from the resource
+                timeline and the pre-React document stamp — not from what this
+                bundle's own source expects. A stale application shell shows up
+                as a loaded hash that disagrees with the build SHA. */}
+            <span>Assets</span>
+            <code>
+              {shell
+                ? [
+                    `css=${shell.loadedCss}`,
+                    `js=${shell.loadedJs}`,
+                    `chunks=${shell.chunkCount}`,
+                    `metaSha=${shell.metaSha.slice(0, 12)}`,
+                  ].join(' · ')
+                : 'measuring…'}
+            </code>
+            <span>Geometry</span>
+            <code>
+              {shell
+                ? [
+                    `inner=${shell.innerHeight}`,
+                    `client=${shell.clientHeight}`,
+                    `root=${shell.rootRect}`,
+                    `dock=${shell.dockRect}`,
+                    `display=${shell.displayMode}`,
+                    `navStandalone=${shell.navigatorStandalone}`,
+                  ].join(' · ')
+                : 'measuring…'}
+            </code>
+            <span>URL</span>
+            <code>{shell ? shell.href : 'measuring…'}</code>
             {/* Install contract. If a Home-Screen icon opens in browser mode
                 this is what distinguishes "wrong host / wrong start_url" from
                 "standalone detection failed". */}
