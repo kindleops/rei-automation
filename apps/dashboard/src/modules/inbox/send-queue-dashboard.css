@@ -135,7 +135,7 @@
 .sqd-stage.is-active .sqd-stage__count { color: rgba(165, 205, 255, 0.95); }
 
 .sqd-stage__label {
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -149,7 +149,7 @@
   align-items: center;
   justify-content: space-between;
   margin-top: 12px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.45);
 }
 
@@ -199,7 +199,7 @@
 .sqd-hcard__dot.is-red    { background: rgba(248, 113, 113, 0.8); box-shadow: 0 0 6px rgba(248, 113, 113, 0.35); }
 
 .sqd-hcard__label {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -252,7 +252,7 @@
 }
 
 .sqd-panel__eyebrow {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -260,7 +260,7 @@
 }
 
 .sqd-panel__count {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(108, 133, 178, 0.38);
   margin-left: auto;
@@ -356,7 +356,7 @@
 .sqd-failure-row__desc {
   grid-column: 1 / -1;
   grid-row: 2;
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.5);
   line-height: 1.4;
   margin: 0;
@@ -383,7 +383,7 @@
 }
 
 .sqd-rmetric__label {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -413,7 +413,7 @@
 
 .sqd-tier-bar__label {
   flex: 0 0 130px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.6);
 }
 
@@ -456,7 +456,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 3px 0;
 }
 
@@ -474,7 +474,7 @@
 }
 
 .sqd-sender-row__blocked {
-  font-size: 9.5px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 999px;
   background: rgba(248, 113, 113, 0.1);
@@ -489,7 +489,7 @@
 }
 
 .sqd-routing-blocked__head {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -501,7 +501,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
+  font-size: 11px;
   padding: 4px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   color: rgba(165, 185, 225, 0.7);
@@ -509,12 +509,12 @@
 
 .sqd-routing-blocked__market {
   color: rgba(251, 191, 36, 0.65);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .sqd-routing-blocked__reason {
   color: rgba(248, 113, 113, 0.6);
-  font-size: 9.5px;
+  font-size: 11px;
   margin-left: auto;
 }
 
@@ -530,7 +530,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   padding: 5px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
@@ -570,7 +570,7 @@
 }
 
 .sqd-template-row__fail {
-  font-size: 9px;
+  font-size: 11px;
   padding: 1px 6px;
   border-radius: 999px;
   background: rgba(248, 113, 113, 0.1);
@@ -596,7 +596,7 @@
 }
 
 .sqd-section-eyebrow {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -644,12 +644,12 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .sqd-market-card__total {
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.42);
   margin-top: 2px;
 }
@@ -724,7 +724,7 @@
 .sqd-clear-btn:hover { background: rgba(255, 255, 255, 0.07); color: rgba(205, 222, 255, 0.9); }
 
 .sqd-inspector__count {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.45);
   white-space: nowrap;
 }
@@ -744,7 +744,7 @@
   padding: 9px 16px;
   background: rgba(255, 255, 255, 0.028);
   border-bottom: 1px solid rgba(255, 255, 255, 0.065);
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -810,7 +810,7 @@
 }
 
 .sqd-cell--seller small {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(120, 145, 195, 0.55);
   white-space: nowrap;
   overflow: hidden;
@@ -819,8 +819,8 @@
 }
 
 .sqd-cell--dim { color: rgba(128, 150, 200, 0.55); }
-.sqd-cell--mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10.5px; color: rgba(140, 162, 210, 0.65); }
-.sqd-cell--time { font-size: 10.5px; color: rgba(120, 145, 195, 0.6); }
+.sqd-cell--mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 11px; color: rgba(140, 162, 210, 0.65); }
+.sqd-cell--time { font-size: 11px; color: rgba(120, 145, 195, 0.6); }
 
 .sqd-table__empty {
   text-align: center;
@@ -834,7 +834,7 @@
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: lowercase;
@@ -868,7 +868,7 @@
   display: inline-block;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -901,7 +901,7 @@
   border: 1px solid rgba(72, 138, 236, 0.28);
   background: rgba(72, 138, 236, 0.1);
   color: rgba(130, 175, 255, 0.82);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.12s;
@@ -934,7 +934,7 @@
   border: 1px solid rgba(72, 138, 236, 0.2);
   background: rgba(72, 138, 236, 0.06);
   color: rgba(100, 155, 252, 0.7);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -968,7 +968,7 @@
   border: none;
   background: transparent;
   color: rgba(120, 145, 195, 0.55);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   cursor: pointer;
@@ -1050,7 +1050,7 @@
   border-radius: 10px;
   border: 1px solid rgba(72, 138, 236, 0.14);
   background: var(--nexus-surface-overlay);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .sqd-empty-cluster__key {
@@ -1060,7 +1060,7 @@
 
 .sqd-empty-cluster__states {
   color: rgba(108, 133, 178, 0.55);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
 .sqd-empty-cluster__arrow {
@@ -1070,14 +1070,14 @@
 
 .sqd-empty-cluster__sender {
   color: rgba(52, 211, 153, 0.7);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 /* ── Section sub-title ──────────────────────────────────────────────────── */
 
 .sqd-section-sub {
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.42);
   margin-left: 2px;
 }
@@ -1123,7 +1123,7 @@
 }
 
 .sqd-cluster-card__key {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1143,7 +1143,7 @@
   border: 1px solid rgba(72, 138, 236, 0.18);
   background: rgba(72, 138, 236, 0.07);
   color: rgba(130, 175, 252, 0.8);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
 }
@@ -1155,7 +1155,7 @@
 }
 
 .sqd-cluster-card__sender-lbl {
-  font-size: 7.5px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1163,7 +1163,7 @@
 }
 
 .sqd-cluster-card__sender-val {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(52, 211, 153, 0.78);
   font-weight: 600;
 }
@@ -1172,13 +1172,13 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   min-height: 18px;
 }
 
 .sqd-cluster-card__idle {
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.38);
   font-style: italic;
   font-weight: 400;
@@ -1189,7 +1189,7 @@
 .sqd-tier-bar__n {
   flex: 0 0 28px;
   text-align: right;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(140, 165, 218, 0.55);
 }
@@ -1215,7 +1215,7 @@
   padding: 8px 16px;
   background: rgba(255, 255, 255, 0.025);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1237,10 +1237,10 @@
 .sqd-mct__row:hover      { background: rgba(255, 255, 255, 0.018); }
 
 .sqd-mct__market { color: rgba(195, 215, 255, 0.82); font-weight: 600; }
-.sqd-mct__state  { color: rgba(130, 175, 252, 0.75); font-weight: 700; font-size: 10px; }
-.sqd-mct__sender { color: rgba(52, 211, 153, 0.68); font-size: 10.5px; }
-.sqd-mct__cluster{ color: rgba(120, 148, 200, 0.55); font-size: 10px; }
-.sqd-mct__eligible { color: rgba(52, 211, 153, 0.75); font-size: 10px; font-weight: 700; }
+.sqd-mct__state  { color: rgba(130, 175, 252, 0.75); font-weight: 700; font-size: 11px; }
+.sqd-mct__sender { color: rgba(52, 211, 153, 0.68); font-size: 11px; }
+.sqd-mct__cluster{ color: rgba(120, 148, 200, 0.55); font-size: 11px; }
+.sqd-mct__eligible { color: rgba(52, 211, 153, 0.75); font-size: 11px; font-weight: 700; }
 
 /* ── Launch Checklist ───────────────────────────────────────────────────── */
 
@@ -1253,7 +1253,7 @@
 
 .sqd-launch-checklist__head {
   padding: 12px 18px 10px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -1295,21 +1295,21 @@
 }
 
 .sqd-checklist-item__detail {
-  font-size: 10.5px;
+  font-size: 11px;
   color: rgba(108, 133, 178, 0.52);
   line-height: 1.4;
 }
 
 /* ── Responsive ────────────────────────────────────────────────────────── */
 
-@media (max-width: 1300px) {
+@media (max-width: 1439.98px) {
   .sqd-table__head,
   .sqd-table__row {
     grid-template-columns: 160px 100px 100px 1fr 64px 64px 80px 100px;
   }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1439.98px) {
   .sqd-diag-row {
     grid-template-columns: 1fr 1fr;
   }
@@ -1320,11 +1320,11 @@
   }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1439.98px) {
   .sqd-cluster-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1023.98px) {
   .sqd-diag-row { grid-template-columns: 1fr; }
   .sqd-panel { border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
   .sqd-table__head { display: none; }
@@ -1394,7 +1394,7 @@
 }
 
 .sqd-rail__mode {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1454,7 +1454,7 @@
 }
 
 .sqd-rail__blockers-head {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -1505,7 +1505,7 @@
 }
 
 .sqd-rail__clusters-head {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -1522,7 +1522,7 @@
 }
 
 .sqd-rail__cluster-states {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.6);
   font-family: 'SF Mono', 'Fira Code', monospace;
   letter-spacing: 0.02em;
@@ -1559,7 +1559,7 @@
 }
 
 .sqd-rail__empty-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.4);
 }
 
@@ -1581,7 +1581,7 @@
   padding: 7px 12px;
   margin-top: auto;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.4);
   flex-shrink: 0;
 }
@@ -1632,7 +1632,7 @@
   line-height: 1;
 }
 .sqd-stage--sm .sqd-stage__label {
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   opacity: 0.65;
   white-space: nowrap;
@@ -1671,7 +1671,7 @@
 }
 
 .sqd-hcard--sm .sqd-hcard__label {
-  font-size: 9.5px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.55);
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -1758,7 +1758,7 @@
   grid-template-columns: 1fr 80px 90px 90px;
   gap: 0 8px;
   padding: 6px 14px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1860,7 +1860,7 @@
 }
 
 .sqd-cluster-chip__states {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(130, 155, 200, 0.5);
   font-family: 'SF Mono', 'Fira Code', monospace;
   flex: 1;

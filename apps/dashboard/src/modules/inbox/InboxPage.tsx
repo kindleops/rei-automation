@@ -103,7 +103,6 @@ import { IntelligencePanel } from './components/IntelligencePanel'
 import { QueuePage } from '../../views/queue/QueuePage'
 import { InboxCalendarView } from '../../views/calendar/InboxCalendarView'
 import type { TemplateActionPayload } from './components/TemplatePopover'
-import { InboxActivityPanel } from './components/InboxActivityPanel'
 import type { MapStyleMode } from '../../views/map/InboxCommandMap'
 import { MAP_VISUAL_PRESET_STORAGE_KEY, normalizeMapVisualPresetId } from '../../views/map/map-visual-presets'
 import {
@@ -203,6 +202,7 @@ import {
   getInboxViewCounts,
   getSavedPresetConfig,
   isSuppressedThread,
+  resolveThreadOwnerName,
   resolveThreadPrimaryName,
   type ApplyInboxFiltersOptions,
   type InboxAdvancedFilters,
@@ -226,6 +226,8 @@ import {
   resolveWorkspaceWidthLabels,
   type ViewWidthPercent,
 } from '../../domain/inbox/view-layout'
+import { WorkspaceSplit } from './workspace/WorkspaceSplit'
+import { useWorkspaceGeometry } from './workspace/useWorkspaceGeometry'
 import {
   createThreadSelectHandlers,
   executeThreadSelectFetches,
@@ -265,11 +267,13 @@ import './conversation-redesign.css'
 import './conversation-composer-premium.css'
 import './conversation-header-timeline.css'
 import './conversation-live.css'
+// Lane D — conversation identity / receipts / mobile composer. All-new
+// `nx-idv-*` namespace, so its position here does not contend with any lane.
+import '../../views/conversation/styles/conversation-identity.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
 import '../../styles/nx-ui-foundation-final.css'
-import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
-import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
-import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
+import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
+import { SHELL_PANEL_OPEN_EVENT } from '../shell/shell-panels'
 import { applyThemeToDOM, loadSettings, resolveDataThemeAttr, subscribeSettings, updateSetting, type AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
@@ -672,7 +676,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     publishMobileInboxBadge(data.unreadCount ?? 0)
   }, [data.unreadCount])
   const { user, loading: authLoading, signOut } = useAuth()
-  const { isMobile } = useBreakpoint()
+  const { isMobile, width: viewportWidth } = useBreakpoint()
   const DEV = Boolean(import.meta.env.DEV)
   /**
    * N.1 — the one writable Deal Desk selection source (DD-018).
@@ -725,7 +729,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [tableDensity, setTableDensity] = useState<TableDensityMode>('compact')
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarListScrollOffset, setSidebarListScrollOffset] = useState(0)
-  const [topSearchQuery, setTopSearchQuery] = useState('')
   const [buyerFilters, setBuyerFilters] = useState<BuyerMapFilters>(defaultBuyerMapFilters)
   const [selectedBuyerKey, setSelectedBuyerKey] = useState<string | null>(null)
   /**
@@ -1445,13 +1448,60 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => NEXUS_WORKSPACE_PRESETS.find((workspace) => workspace.key === selectedWorkspaceKey) ?? NEXUS_WORKSPACE_PRESETS[0],
     [selectedWorkspaceKey],
   )
-  const workspaceFlexBases = useMemo(
+  /**
+   * Workspace geometry (Constitution §12).
+   *
+   * The preset resolver still produces the *seed* bases — that is what the
+   * width pills and workspace presets write. Once the operator drags, keyboard
+   * resizes, collapses or maximises a pane, `workspaceGeometry` becomes the
+   * source of truth and holds continuous values. `workspaceWidths` is still the
+   * quantized '25' | '50' | '75' | '100' label, derived from the continuous
+   * basis, so every existing `is-width-*` consumer keeps working unchanged.
+   */
+  const workspaceSeedBases = useMemo(
     () => computeWorkspaceFlexBases(selectedWorkspaceViews, workspaceWidthOverrides),
     [selectedWorkspaceViews, workspaceWidthOverrides],
   )
+  const workspaceGeometryDisabled = isMobile
+  const workspaceGeometry = useWorkspaceGeometry({
+    order: selectedWorkspaceViews,
+    userKey: user?.id ?? 'local',
+    routeKey: isRouteFullscreen ? `fullscreen:${initialWorkspaceView ?? 'default'}` : '/inbox',
+    seedBases: workspaceSeedBases as Partial<Record<string, number>>,
+    disabled: workspaceGeometryDisabled,
+  })
+
+  // A width pill or workspace preset re-seeds the geometry. A pane-set change
+  // does not — the hook restores that set's saved layout instead (R12.3).
+  const workspaceSeedSignature = JSON.stringify(workspaceSeedBases)
+  const workspacePaneSetSignature = [...selectedWorkspaceViews].sort().join('|')
+  const workspaceSeedRef = useRef(workspaceSeedBases)
+  workspaceSeedRef.current = workspaceSeedBases
+  const workspaceSeedGuardRef = useRef({ set: workspacePaneSetSignature, seed: workspaceSeedSignature })
+  const applyWorkspaceBases = workspaceGeometry.applyBases
+  useEffect(() => {
+    const previous = workspaceSeedGuardRef.current
+    workspaceSeedGuardRef.current = { set: workspacePaneSetSignature, seed: workspaceSeedSignature }
+    if (previous.set !== workspacePaneSetSignature) return
+    if (previous.seed === workspaceSeedSignature) return
+    applyWorkspaceBases(workspaceSeedRef.current as Partial<Record<string, number>>)
+  }, [applyWorkspaceBases, workspacePaneSetSignature, workspaceSeedSignature])
+
+  const workspaceFlexBases = useMemo(() => {
+    if (workspaceGeometryDisabled) return workspaceSeedBases
+    const panes = workspaceGeometry.layout.panes
+    const resolved: Partial<Record<InboxWorkspaceView, number>> = {}
+    for (const view of selectedWorkspaceViews) {
+      resolved[view] = panes[view]?.basis ?? workspaceSeedBases[view] ?? 100 / selectedWorkspaceViews.length
+    }
+    return resolved
+  }, [workspaceGeometry.layout, workspaceGeometryDisabled, workspaceSeedBases, selectedWorkspaceViews])
+
   const workspaceWidths = useMemo(
-    () => computeWorkspaceWidths(selectedWorkspaceViews, workspaceWidthOverrides),
-    [selectedWorkspaceViews, workspaceWidthOverrides],
+    () => (workspaceGeometryDisabled
+      ? computeWorkspaceWidths(selectedWorkspaceViews, workspaceWidthOverrides)
+      : resolveWorkspaceWidthLabels(selectedWorkspaceViews, {}, workspaceFlexBases)),
+    [workspaceGeometryDisabled, selectedWorkspaceViews, workspaceWidthOverrides, workspaceFlexBases],
   )
   const activeWorkspaceLabel = selectedWorkspacePreset.label
   const activeContextSubtitle = selectedWorkspacePreset.description
@@ -1499,22 +1549,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => selectedWorkspaceViews.map((view) => view === 'metrics' ? 'analytics' : view),
     [selectedWorkspaceViews],
   )
-  const topSearchContext = useMemo(() => ({
-    routePath: '/inbox',
-    currentView: activeWorkspaceView,
-    selectedMarket: commandMapMarket || advancedFilters.market || selected?.market || null,
-    activeMapTheme: commandMapTheme,
-    activeFilters: {
-      market: advancedFilters.market || commandMapMarket || '',
-      sourceMode,
-      stageFilter,
-      viewFilter,
-    },
-  }), [activeWorkspaceView, advancedFilters.market, commandMapMarket, commandMapTheme, selected?.market, sourceMode, stageFilter, viewFilter])
-  const {
-    loading: topSearchLoading,
-    groupedResults: topSearchGroups,
-  } = useInboxTopSearch(topSearchQuery, topSearchContext)
+  /* The inbox no longer runs a second, narrower search of its own. The rail's
+     ⌘K palette covers the same providers plus app/filter/map actions, and this
+     component already publishes GLOBAL_COMMAND_CONTEXT_EVENT (below) so the
+     palette gets the inbox's market, view and filter context. */
 
   const autonomyModel = useMemo(
     () => buildAutonomousEngineModel({
@@ -1907,30 +1945,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const openGlobalCommand = useCallback((initialQuery = '') => {
     window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: { initialQuery } }))
-  }, [])
-
-  const handleExecuteTopSearchResult = useCallback((result: CommandResult) => {
-    if (result.route && result.route !== window.location.pathname) {
-      pushRoutePath(result.route)
-    }
-
-    if (result.location) {
-      saveRecentCommandLocation(result.location)
-    }
-
-    const eventName = result.action?.eventName || GLOBAL_COMMAND_ACTION_EVENT
-    if (result.payload || result.action?.eventName) {
-      window.dispatchEvent(new CustomEvent(eventName, {
-        detail: {
-          ...result.payload,
-          route: result.route,
-          resultId: result.id,
-          resultType: result.type,
-        },
-      }))
-    }
-
-    setTopSearchQuery('')
   }, [])
 
   useEffect(() => {
@@ -2776,9 +2790,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           )
         }
       }
-      const savedMode = window.localStorage.getItem('nx.queue.mode') as QueueCommandMode | null
+      /*
+       * LANE F: `localStorage['nx.queue.mode']` was a seventh source of truth
+       * for queue status. It was read here on mount and won on first paint, so
+       * the operator saw whatever *this browser* last selected rather than
+       * server state. Queue posture is server-owned — it now comes only from
+       * `refreshQueueControl()` and `resolveSendingStatus`. Caps stay local
+       * because they are a per-operator preference, not system state.
+       */
       const savedCaps = window.localStorage.getItem('nx.queue.caps')
-      if (savedMode === 'paused' || savedMode === 'assisted' || savedMode === 'automatic') setQueueCommandMode(savedMode)
       if (savedCaps) {
         const parsed = JSON.parse(savedCaps) as Partial<QueueCommandCaps>
         setQueueCommandCaps((current) => ({ ...current, ...parsed }))
@@ -3206,15 +3226,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const tag = target?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        openGlobalCommand()
-        return
-      }
+      /* ⌘K is NOT bound here. It was — and `app/CommandCenterApp` bound it too,
+         both calling preventDefault(), so on inbox-shell routes one keypress ran
+         two handlers: the shell toggled the palette closed and this one
+         immediately reopened it, making the shortcut unable to dismiss. The
+         shell is the single owner (constitution §18: one owner per behaviour).
 
+         ⌘⇧F used to focus the inbox search input. That input is gone — search
+         is the palette now — so the shortcut opens the palette instead of
+         dispatching `nexus:focus-search` at a field that no longer exists. */
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
-        window.dispatchEvent(new CustomEvent('nexus:focus-search'))
+        openGlobalCommand()
         return
       }
 
@@ -3724,11 +3747,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         likely_renting: selectedRecord.likely_renter === true
           || selectedRecord.likelyRenter === true
           || identityClass === 'renter_occupant',
-        ownership_status: identityClass === 'confirmed_owner'
-          ? 'confirmed'
-          : identityClass === 'probable_owner'
-            ? 'inferred'
-            : 'unconfirmed',
+        // RC-7 (Lane D): this seed is synthesised on the client when the
+        // participants API fails or returns nothing. It has no confirmation
+        // record behind it, so it must not manufacture one. `contact_identity_class`
+        // is a heuristic string — measured live at 'probable_owner' for 200/200
+        // threads — and previously became `ownership_status: 'confirmed' | 'inferred'`,
+        // which rendered as "Verified owner ✓".
+        ownership_status: 'unconfirmed',
+        ownership_confidence: null,
+        ownership_source: null,
+        ownership_inference_reason: `client_seed_from_contact_identity_class:${identityClass}`,
+        is_client_derived: true,
       } satisfies PropertyParticipant
     })() : null
     const fallbackParticipant = fallbackSeed
@@ -3739,6 +3768,24 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       : null
 
     const threadProspectName = selected ? resolveThreadPrimaryName(selected) : null
+
+    // Lane D: seed the card from the newly selected thread IMMEDIATELY.
+    //
+    // Caught in a real browser, not in review: the participants request for this
+    // property takes ~17s (and is often aborted), and `selectedParticipant` kept
+    // the PREVIOUS thread's contact for that whole window. The card therefore
+    // rendered one thread's contact name above another thread's owner record —
+    // "Janmar Holdings LLC" over "2 named owners: Heyward L Zimmerman ·
+    // Geraldine Whiters". Mixing two identities is exactly what this lane must
+    // not do.
+    //
+    // The seed is derived from the selected row, so it is always the right
+    // thread, and it is flagged `is_client_derived` with `ownership_status:
+    // 'unconfirmed'` — it can never be mistaken for a confirmation.
+    setPropertyParticipants(fallbackParticipant ? [fallbackParticipant] : [])
+    setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
+    setMasterOwnerHouseholdLabel(null)
+    setNextEligibleContact(null)
 
     const loadParticipants = () => {
       if (cancelled) return
@@ -3774,7 +3821,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           setSelectedParticipant(withThreadProspectDisplayName(fallbackParticipant, threadProspectName, selectedPhone))
         })
         .finally(() => {
-          if (stillCurrent()) setPropertyParticipantsLoading(false)
+          // RC-4b (Lane D): `stillCurrent()` can never pass for a superseded
+          // request — `selection-request-guard.ts:170-176` `abortResource` bumps
+          // `generation` AND nulls `slot.identity`, so `accept()` is structurally
+          // forbidden from returning true once the request is aborted. Gating the
+          // clear on it meant an aborted request left `propertyParticipantsLoading`
+          // stuck true and ActiveProspectCard showed "Loading…" forever.
+          //
+          // Ownership of the *data* still belongs to the current request only
+          // (that gate stays on `.then`/`.catch`); ownership of the *flag* is
+          // released by whichever request settles last, current or not. This is
+          // the same guard the team already applied to the sibling early-return
+          // path at the top of this effect.
+          setPropertyParticipantsLoading(false)
         })
     }
 
@@ -4022,6 +4081,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         handleSelect(threadId)
         return
       }
+      /* The shell's Live Activity panel identifies rows by thread KEY and has no
+         way to resolve one to a thread id — only the inbox holds the list. */
+      if (kind === 'focus_thread_key') {
+        const threadKey = typeof detail.threadKey === 'string' ? detail.threadKey : ''
+        if (!threadKey) return
+        const match = threads.find((thread) => thread.threadKey === threadKey)
+        if (!match) return
+        handleFocusWorkspaceView('thread')
+        handleSelect(match.id)
+        return
+      }
       if (kind === 'set_inbox_source_mode' && sourceModeFromEvent) {
         setSourceMode(sourceModeFromEvent)
         return
@@ -4069,7 +4139,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     window.addEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
     return () => window.removeEventListener(GLOBAL_COMMAND_ACTION_EVENT, handleCommandAction as EventListener)
-  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, requestBucket, searchQuery, setActiveContext, setSourceMode, stageFilter])
+  }, [advancedFilters, handleFocusWorkspaceView, handleResetFilters, handleSelect, queueModel?.items, refreshInbox, requestBucket, searchQuery, setActiveContext, setSourceMode, stageFilter, threads])
 
   const handleMapSellerContext = useCallback((context: {
     propertyId?: string
@@ -4169,9 +4239,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       case 'open_dossier':
         handleOpenDealIntelligence(thread.id)
         break
-      case 'add_note':
-        handleOpenDealIntelligence(thread.id)
-        break
+      // RC-10 (Lane D): `add_note` had no note editor behind it — it only opened
+      // the intelligence panel. Every caller has been removed; the case goes with
+      // them so nothing can route to it again by accident.
       case 'mark_reviewed':
         await handleThreadAction(thread, 'read')
         break
@@ -4418,17 +4488,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const commands: InboxCmd[] = [
       {
         id: 'focus-search',
-        label: 'Focus Search',
+        label: 'Search sellers, buyers, addresses and conversations',
         category: 'Navigation',
-        shortcut: 'Cmd+Shift+F',
-        keywords: ['find', 'search', 'seller', 'address'],
-        action: () => window.dispatchEvent(new CustomEvent('nexus:focus-search')),
+        shortcut: 'Cmd+K',
+        keywords: ['find', 'search', 'seller', 'address', 'command', 'palette'],
+        action: () => openGlobalCommand(),
       },
       {
         id: 'open-ai',
         label: 'Open AI Assist',
         category: 'AI',
-        shortcut: 'Cmd+K',
+        /* Was labelled Cmd+K, which ⌘K has never done — ⌘K opens the command
+           palette. The hint is removed rather than left lying (§0.1). */
         keywords: ['copilot', 'assistant', 'draft'],
         action: () => setActiveOverlay('ai'),
       },
@@ -4480,10 +4551,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       },
       {
         id: 'activity-feed',
-        label: 'Open Activity Feed',
+        label: 'Open Live Activity',
         category: 'Navigation',
-        keywords: ['activity', 'timeline', 'audit'],
-        action: () => setActiveOverlay('activity'),
+        keywords: ['activity', 'timeline', 'audit', 'heartbeat'],
+        /* Live Activity is a shell panel now — one owner, reachable from all
+           15 routes. The inbox asks for it, it does not mount it. */
+        action: () => window.dispatchEvent(
+          new CustomEvent(SHELL_PANEL_OPEN_EVENT, { detail: { id: 'live-activity' } }),
+        ),
       },
       {
         id: 'queue-hot-leads',
@@ -4608,6 +4683,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     handleStatusChange,
     handleToggleStar,
     insertAiSuggestion,
+    openGlobalCommand,
     selected,
     setActiveOverlay,
     updateAutonomyControl,
@@ -4639,6 +4715,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [useMobileInboxFlow, mobileIntelOpen, mobileThreadOpen])
 
   const viewsToRender = mobilePaneViews ?? renderViews
+
+  /** R12.8 — below 1024px the split becomes a stack with explicit navigation. */
+  const workspaceStacked = !useMobileInboxFlow && viewportWidth < 1024
+  const workspaceGeometryLabels = useMemo(
+    () => Object.fromEntries(
+      selectedWorkspaceViews.map((view) => [view, viewLabelByKey.get(view) ?? view]),
+    ) as Record<string, string>,
+    [selectedWorkspaceViews, viewLabelByKey],
+  )
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
     || (isMultiView
       && renderViews.includes('thread')
@@ -4775,6 +4860,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         participants={propertyParticipants}
         selectedParticipant={selectedParticipant}
         prospectName={selected ? resolveThreadPrimaryName(selected) : null}
+        ownerRecordName={selected ? resolveThreadOwnerName(selected) : null}
         loading={propertyParticipantsLoading}
         onSelectParticipant={handleParticipantSelect}
         onTryNextEligible={handleTryNextEligible}
@@ -5241,11 +5327,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     >
       <NexusTopBar
         onSelectSearchResult={handleSelect}
-        topSearchQuery={topSearchQuery}
-        onTopSearchQueryChange={setTopSearchQuery}
-        topSearchGroups={topSearchGroups}
-        topSearchLoading={topSearchLoading}
-        onExecuteTopSearchResult={handleExecuteTopSearchResult}
         selectedThread={workspaceThread}
         isSuppressed={selectedSuppressed}
         notificationCount={data.unreadCount}
@@ -5294,9 +5375,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           humanReview: viewCounts.needs_review ?? 0,
           followUps: viewCounts.follow_up ?? 0,
           failedSends: queueProcessorHealth?.failedTodayCount ?? viewCounts.failed ?? 0,
-          decisionsRequired: viewCounts.needs_review ?? 0,
-          closingTasks: null,
-          systemTasks: null,
+          // LANE F: `decisionsRequired` was a second copy of `viewCounts.needs_review`
+          // and double-counted into the Action Center badge. `closingTasks` and
+          // `systemTasks` were hardcoded null, so their rows could never render.
+          // All three are removed; sending blockers now come from the resolver.
         }}
         onNavigateInboxView={handleNavigateInboxView}
         onOpenQueueCommand={() => pushRoutePath('/queue')}
@@ -5327,7 +5409,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onOpenAi={() => setActiveOverlay('ai')}
         onOpenKeys={() => setActiveOverlay('keys')}
         onOpenKpis={() => pushRoutePath('/analytics')}
-        onOpenActivity={() => setActiveOverlay('activity')}
         onOpenTasks={() => handleNavigateInboxView('needs_review')}
         onResetLayout={handleResetWorkspaceLayout}
         dryRun={autonomyControls.dryRun}
@@ -5441,36 +5522,53 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           )}
 
           {isMultiView ? (
-            <section className="nx-workspace-split-grid">
-              {viewsToRender.map((view) => {
-                const paneWidth = workspaceWidths[view] ?? '25'
-                const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
-                const layoutMode = resolveMobileAwareLayoutMode(
-                  view,
-                  flexBasis,
-                  workspaceWidthOverrides[view] ?? paneWidth,
-                  isMobile,
-                )
-                const mobilePaneStyle = useMobileInboxFlow
-                  ? { flex: '1 1 auto', maxWidth: '100%', minWidth: 0 }
-                  : { flex: `1 1 ${flexBasis}%`, maxWidth: `${flexBasis}%`, minWidth: 0 }
-                return (
-                  <div
-                    key={view}
-                    className={cls(
-                      'nx-workspace-pane',
-                      `is-view-${view}`,
-                      `is-width-${paneWidth}`,
-                      `is-layout-${layoutMode}`,
-                      view === activeWorkspaceView && 'is-primary',
-                    )}
-                    style={mobilePaneStyle}
-                  >
-                    {renderWorkspacePane(view, 'multi', paneWidth)}
-                  </div>
-                )
-              })}
-            </section>
+            useMobileInboxFlow ? (
+              /* Mobile keeps its own single-pane flow (mobile-operating-shell.css).
+               * Lane B does not reshape it — geometry is disabled below 768px. */
+              <section className="nx-workspace-split-grid">
+                {viewsToRender.map((view) => {
+                  const paneWidth = workspaceWidths[view] ?? '25'
+                  const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
+                  const layoutMode = resolveMobileAwareLayoutMode(
+                    view,
+                    flexBasis,
+                    workspaceWidthOverrides[view] ?? paneWidth,
+                    isMobile,
+                  )
+                  return (
+                    <div
+                      key={view}
+                      className={cls(
+                        'nx-workspace-pane',
+                        `is-view-${view}`,
+                        `is-width-${paneWidth}`,
+                        `is-layout-${layoutMode}`,
+                        view === activeWorkspaceView && 'is-primary',
+                      )}
+                      style={{ flex: '1 1 auto', maxWidth: '100%', minWidth: 0 }}
+                    >
+                      {renderWorkspacePane(view, 'multi', paneWidth)}
+                    </div>
+                  )
+                })}
+              </section>
+            ) : (
+              <WorkspaceSplit
+                order={viewsToRender}
+                layout={workspaceGeometry.layout}
+                labels={workspaceGeometryLabels}
+                primaryId={activeWorkspaceView}
+                stacked={workspaceStacked}
+                onCommitResize={workspaceGeometry.commitResize}
+                onToggleCollapse={workspaceGeometry.collapse}
+                onExpand={workspaceGeometry.expand}
+                onToggleMaximize={workspaceGeometry.maximize}
+                onReset={workspaceGeometry.reset}
+                renderPane={(view, widthLabel) =>
+                  renderWorkspacePane(view as InboxWorkspaceView, 'multi', widthLabel)
+                }
+              />
+            )
           ) : (
             renderWorkspacePane(activeWorkspaceView, 'single', '100')
           )}
@@ -5551,17 +5649,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onApply={handleApplyAdvancedFilters}
       />
 
-      {activeOverlay === 'activity' && (
-        <InboxActivityPanel
-          threadKey={selected?.threadKey}
-          onClose={() => setActiveOverlay(null)}
-          onViewThread={(key) => {
-            const t = threads.find((thread) => thread.threadKey === key)
-            if (t) handleSelect(t.id)
-            setActiveOverlay(null)
-          }}
-        />
-      )}
+      {/* Live Activity moved to the shell rail — modules/shell/shell-panels.ts.
+          It is one panel with one owner, reachable from every route instead of
+          only this one. */}
 
       {aiOpen
         ? createPortal(

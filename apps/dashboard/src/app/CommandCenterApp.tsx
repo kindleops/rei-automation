@@ -23,6 +23,10 @@ import { useBreakpoint } from '../modules/mobile/useBreakpoint'
 import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
 import { PinnedAppDock } from '../modules/mobile/PinnedAppDock'
 import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
+import { ShellTopRail } from '../modules/shell/ShellTopRail'
+import { SHELL_NAV_ITEMS } from '../modules/shell/shell-nav'
+import { SkipLink } from '../shared/ui'
+import { startSessionEventBridge } from '../modules/operations/session-event-bridge'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,48 +45,11 @@ const initialState: RouteLoadState = {
 }
 
 // ── Nav Items ──────────────────────────────────────────────────────────────
-
-type NavIconName =
-  | 'radar'
-  | 'inbox'
-  | 'alert'
-  | 'stats'
-  | 'map'
-  | 'users'
-  | 'file-text'
-  | 'settings'
-  | 'bell'
-  | 'star'
-  | 'grid'
-  | 'target'
-  | 'send'
-  | 'mail'
-
-interface NavItem {
-  path: string
-  label: string
-  icon: NavIconName
-  shortcut: string
-  room: string
-}
-
-const navItems: NavItem[] = [
-  { path: '/inbox', label: 'Inbox', icon: 'inbox', shortcut: 'I', room: 'Inbox' },
-  { path: '/conversation', label: 'Conversation', icon: 'inbox', shortcut: 'C', room: 'Conversation' },
-  { path: '/deal-intelligence', label: 'Deal Intelligence', icon: 'target', shortcut: 'D', room: 'Deal Intelligence' },
-  { path: '/entity-graph', label: 'Entity Graph', icon: 'grid', shortcut: 'E', room: 'Entity Graph' },
-  { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'stats', shortcut: 'O', room: 'Comp Intelligence' },
-  { path: '/buyer-match', label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match' },
-  { path: '/queue', label: 'Outbound Command Center', icon: 'send', shortcut: 'Q', room: 'Outbound Command Center' },
-  { path: '/pipeline', label: 'Pipeline', icon: 'radar', shortcut: 'P', room: 'Pipeline' },
-  { path: '/calendar', label: 'Calendar', icon: 'bell', shortcut: 'L', room: 'Calendar' },
-  { path: '/map', label: 'Map', icon: 'map', shortcut: 'M', room: 'Map' },
-  { path: '/analytics', label: 'Analytics', icon: 'stats', shortcut: 'A', room: 'Analytics' },
-  { path: '/closing-desk', label: 'Closing Desk', icon: 'file-text', shortcut: 'K', room: 'Closing Desk' },
-  { path: '/campaign-command', label: 'Campaign Command', icon: 'send', shortcut: 'G', room: 'Campaign Command' },
-  { path: '/email-command', label: 'Email Command', icon: 'mail', shortcut: 'Y', room: 'Email Command' },
-  { path: '/workflow-studio', label: 'Workflow Studio', icon: 'grid', shortcut: 'W', room: 'Workflow Studio' },
-]
+// The 15 global routes now live in one place — `modules/shell/shell-nav.ts` —
+// so the keyboard bindings below and the navigation the shell rail RENDERS are
+// generated from the same list and cannot drift apart. They were previously
+// declared here and never rendered as navigation at all.
+const navItems = SHELL_NAV_ITEMS
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
   light: 'light',
@@ -163,7 +130,26 @@ const GlobalNotificationShell = ({
 }) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
-  const showGlobalBell = routePath !== '/inbox' && !isMobile
+
+  /*
+   * Start the toast -> Operations Center bridge once, at the shell level, so a
+   * toast that fires and auto-dismisses after 6s is still recoverable in the
+   * Operations Center's Activity section. The toast bus was previously a
+   * closed third notification system with an incompatible severity enum.
+   */
+  useEffect(() => startSessionEventBridge(), [])
+  /*
+   * LANE F — two notification bells rendered simultaneously on six routes.
+   *
+   * This guard was `routePath !== '/inbox'`, but the inbox command shell —
+   * which carries its own bell in NexusTopBar — also runs on '/',
+   * '/conversation', '/map', '/pipeline', '/calendar' and '/comp-intelligence'.
+   * On all six the operator got two bells, two independent open-states and two
+   * LeadCommandNotificationCenter mounts. The correct test is "does this route
+   * already have the command shell", which is what routeHasInboxCommandShell
+   * answers.
+   */
+  const showGlobalBell = !routeHasInboxCommandShell(routePath) && !isMobile
   const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
 
   return (
@@ -469,7 +455,13 @@ export const CommandCenterApp = () => {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+      /* THE single ⌘K owner. `modules/inbox/InboxPage` used to bind it as well,
+         both handlers calling preventDefault(), so on inbox-shell routes one
+         keypress ran two: this one toggled the palette shut and the inbox one
+         immediately reopened it. That binding is gone; anything that wants the
+         palette dispatches GLOBAL_COMMAND_OPEN_EVENT, which this component is
+         the only listener for. */
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         if (cmdOpen) closeCmd()
         else openCmd()
@@ -550,7 +542,6 @@ export const CommandCenterApp = () => {
   }, [route])
 
   const isRouteLoading = routeState.path !== route.path || routeState.status === 'loading'
-  const activeNav = navItems.find((item) => item.path === route.path)
 
   // ── Loading State ──────────────────────────────────────────────────────
 
@@ -597,13 +588,24 @@ export const CommandCenterApp = () => {
         onOpenSearch={() => openCmd()}
       >
         <div className={`nx-os${isMobile ? ' is-mobile-os' : ''}`}>
-          {!isMobile && route.path !== '/map' && activeNav && (
-            <div className="nx-room-label">
-              <span className="nx-room-label__name">{activeNav.room}</span>
-            </div>
-          )}
+          {/* §16.2/§16.6 — first keyboard entry point in the app. */}
+          <SkipLink targetId="lc-main" />
 
-          <main className="nx-stage">
+          {/* The ONE top rail. Renders on every route, at desktop/tablet widths.
+              It replaces the fixed `.nx-room-label` overlay that used to
+              collide with each view's own page header. On mobile it is
+              deliberately NOT mounted: mobile already has its own proven
+              chrome (MobileCommandDock + PortableCommandShell/PinnedAppDock),
+              and stacking the rail on top of that produced two visible menus
+              plus a duplicated top-offset reservation (the rail's own
+              `margin-top` clearing the fixed dock, on top of the inbox
+              shell's pre-existing `padding-top` for the same dock) that left
+              a dead gap of empty decorative background between them. This
+              mirrors the pre-existing `.nx-room-label` gate, which also never
+              rendered on mobile. */}
+          {!isMobile ? <ShellTopRail routeTitle={route.title} /> : null}
+
+          <main className="nx-stage" id="lc-main">
             <ErrorBoundary label={route.title} resetKey={route.path}>
               {route.render(routeState.data)}
             </ErrorBoundary>

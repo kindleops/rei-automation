@@ -135,7 +135,7 @@
   padding: 8px 10px;
   background: transparent;
   color: var(--di25-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -214,7 +214,7 @@
 .nx-di25-property-deck__eyebrow {
   display: block;
   margin-bottom: 5px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -258,7 +258,7 @@
   align-items: center;
   border-radius: 999px;
   padding: 5px 10px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -339,7 +339,7 @@
 }
 
 .nx-di25-action-btn span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -426,7 +426,7 @@
 }
 
 .nx-di25-pipeline-head__copy strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -434,7 +434,7 @@
 }
 
 .nx-di25-pipeline-head__copy span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.3;
   color: var(--di25-muted);
@@ -457,7 +457,7 @@
   align-self: flex-start;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -544,7 +544,7 @@
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 7px 10px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -589,7 +589,7 @@
   border: 0;
   border-radius: 999px;
   padding: 5px 10px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -657,7 +657,7 @@
 }
 
 .nx-di25-glass-control__label {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -716,7 +716,7 @@
 }
 
 .nx-di25-glass-btn__card-head em {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   font-style: normal;
   letter-spacing: 0.1em;
@@ -726,7 +726,7 @@
 
 .nx-di25-glass-btn__card-head .nx-conv-glass-btn__caret {
   margin-left: 0;
-  font-size: 8px;
+  font-size: 11px;
   opacity: 0.45;
 }
 
@@ -743,7 +743,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.01em;
 }
@@ -919,7 +919,7 @@
   border-radius: 999px;
   padding: 6px 11px;
   border: 1px solid transparent;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -989,7 +989,7 @@
   border-radius: 999px;
   padding: 2px 7px;
   border: 1px solid transparent;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1004,7 +1004,7 @@
   padding: 7px 9px;
   border-radius: 10px;
   border: 1px solid transparent;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .nx-di25-contactability strong {
@@ -1015,7 +1015,7 @@
 
 .nx-di25-contactability span {
   color: var(--di25-muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -1098,7 +1098,7 @@
 .nx-di25-badge {
   border-radius: 999px;
   padding: 3px 8px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1120,7 +1120,7 @@
 .nx-di25-flag {
   border-radius: 999px;
   padding: 3px 7px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1176,7 +1176,7 @@
 }
 
 .nx-di25-layer__head span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1184,7 +1184,7 @@
 }
 
 .nx-di25-layer__hint {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   font-style: normal;
   letter-spacing: 0.05em;
@@ -1221,7 +1221,7 @@
 }
 
 .nx-di25-layer__title .nx-di25-layer__hint {
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: none;
   color: color-mix(in srgb, var(--di25-muted) 88%, transparent);
@@ -1231,7 +1231,7 @@
   flex-shrink: 0;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1250,7 +1250,7 @@
   flex-shrink: 0;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1280,7 +1280,7 @@
 }
 
 .nx-di25-engine-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   font-style: normal;
   color: #9fd0ff;
@@ -1311,7 +1311,7 @@
 
 .nx-di25-snap-card span {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1330,7 +1330,7 @@
 .nx-di25-snap-card em {
   display: block;
   margin-top: 1px;
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   color: var(--di25-muted);
 }
@@ -1340,7 +1340,7 @@
   padding: 6px 7px;
   border-radius: 9px;
   background: rgba(80, 150, 245, 0.08);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .nx-di25-appreciation span {
@@ -1349,7 +1349,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .nx-di25-appreciation strong {
@@ -1363,7 +1363,7 @@
 .nx-di25-appreciation em {
   display: block;
   margin-top: 1px;
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   color: var(--di25-muted);
 }
@@ -1505,7 +1505,7 @@
 
 .nx-di25-radial-dial__denom {
   margin-top: 1px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1573,7 +1573,7 @@
 }
 
 .nx-di25-radial__caption span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1581,7 +1581,7 @@
 }
 
 .nx-di25-radial__caption em {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 600;
   font-style: normal;
   letter-spacing: 0.04em;
@@ -1642,7 +1642,7 @@
 }
 
 .nx-di25-baseline-metric__short {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1650,7 +1650,7 @@
 }
 
 .nx-di25-baseline-metric__full {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 600;
   font-style: normal;
   letter-spacing: 0.03em;
@@ -1712,7 +1712,7 @@
 }
 
 .nx-di25-metric-chip span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1758,7 +1758,7 @@
 }
 
 .nx-di25-engine-confidence__row span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1841,7 +1841,7 @@
 
 .nx-di25-engine-cta__copy p {
   margin: 4px 0 0;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.45;
   color: color-mix(in srgb, var(--di25-muted) 92%, transparent);
@@ -1859,7 +1859,7 @@
   gap: 6px;
   padding: 6px 8px;
   border-radius: 10px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1891,7 +1891,7 @@
 }
 
 .nx-di25-engine-readiness span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1927,7 +1927,7 @@
   justify-content: space-between;
   gap: 6px;
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--di25-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1942,7 +1942,7 @@
 
 .nx-di25-score-chip span {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1967,7 +1967,7 @@
 .nx-di25-tier {
   border-radius: 999px;
   padding: 4px 8px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2026,14 +2026,14 @@
 
 .nx-di25-engine-cta__note {
   margin: 0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
   color: color-mix(in srgb, var(--di25-muted) 90%, transparent);
 }
 
 .nx-di25-engine-ts {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--di25-muted) 86%, transparent);
@@ -2043,7 +2043,7 @@
   margin-top: 6px;
   padding: 6px 8px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: #ffb4a2;
   background: rgba(220, 38, 38, 0.12);
 }
@@ -2133,7 +2133,7 @@
 
 .nx-di25-engine-group__head h4 {
   margin: 0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2320,7 +2320,7 @@
 
 .nx-di25-engine-theater__dial em {
   margin-top: -2px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   font-style: normal;
   letter-spacing: 0.14em;
@@ -2352,7 +2352,7 @@
 }
 
 .nx-di25-engine-theater__kicker {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2393,7 +2393,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2507,7 +2507,7 @@
 }
 
 .nx-di25-engine-theater__label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
   color: color-mix(in srgb, var(--di25-text) 72%, var(--di25-muted));
@@ -2600,7 +2600,7 @@
   display: flex;
   justify-content: space-between;
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--di25-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -2620,7 +2620,7 @@
   grid-template-columns: 72px 1fr 28px;
   gap: 5px;
   align-items: center;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .nx-di25-strategy-row span,
@@ -2657,7 +2657,7 @@
 .nx-di25-strategy-row strong,
 .nx-di25-tx-prob__row strong {
   text-align: right;
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2709,7 +2709,7 @@
 
 .nx-di25-pulse__card span {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2749,7 +2749,7 @@
 }
 
 .nx-di25-field span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2819,7 +2819,7 @@
 }
 
 .nx-di25-intel__title span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2827,7 +2827,7 @@
 }
 
 .nx-di25-intel__title em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -2850,7 +2850,7 @@
 .nx-di25-intel__badge {
   padding: 3px 7px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2893,7 +2893,7 @@
 }
 
 .nx-di25-intel-hero__metric span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2911,7 +2911,7 @@
 .nx-di25-intel-hero__metric.is-accent strong { color: #9fd0ff; }
 
 .nx-di25-intel-hero__metric em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -2935,7 +2935,7 @@
 }
 
 .nx-di25-intel-tile span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -2943,7 +2943,7 @@
 }
 
 .nx-di25-intel-tile strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
   word-break: break-word;
@@ -2960,7 +2960,7 @@
 }
 
 .nx-di25-intel-insight span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2969,7 +2969,7 @@
 
 .nx-di25-intel-insight p {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.45;
   color: color-mix(in srgb, var(--di25-text) 90%, var(--di25-muted));
 }
@@ -2991,7 +2991,7 @@
 }
 
 .nx-di25-intel-status span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -3020,7 +3020,7 @@
 }
 
 .nx-di25-intel-disposition span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -3028,7 +3028,7 @@
 }
 
 .nx-di25-intel-disposition strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3046,7 +3046,7 @@
 
 .nx-di25-intel-contact span {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -3060,7 +3060,7 @@
 }
 
 .nx-di25-intel-contact em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3079,7 +3079,7 @@
 }
 
 .nx-di25-intel-flags > span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3096,7 +3096,7 @@
   font-style: normal;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3116,7 +3116,7 @@
   padding: 10px;
   border-radius: 10px;
   text-align: center;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--di25-muted);
   background: rgba(255, 255, 255, 0.02);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -3130,7 +3130,7 @@
 }
 
 .nx-di25-intel-timeline-head > span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--di25-muted);
 }
@@ -3142,7 +3142,7 @@
   border: 0;
   border-radius: 999px;
   padding: 4px 8px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3210,14 +3210,14 @@
 }
 
 .nx-di25-intel-timeline__card header strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   line-height: 1.35;
 }
 
 .nx-di25-intel-timeline__card header span {
   flex-shrink: 0;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--di25-muted);
   font-variant-numeric: tabular-nums;
@@ -3226,7 +3226,7 @@
 .nx-di25-intel-timeline__card em {
   display: block;
   margin-top: 3px;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3235,7 +3235,7 @@
 
 .nx-di25-intel-timeline__card p {
   margin: 4px 0 0;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
   color: color-mix(in srgb, var(--di25-text) 82%, var(--di25-muted));
 }
@@ -3265,7 +3265,7 @@
   background: transparent;
   color: var(--di25-text);
   padding: 7px 8px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -3276,7 +3276,7 @@
 
 .nx-di25-muted-note {
   margin: 0 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--di25-muted);
   line-height: 1.4;
 }
@@ -3305,7 +3305,7 @@
   flex-shrink: 0;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -3336,7 +3336,7 @@
 }
 
 .nx-di25-mf-strip__economics span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -3371,7 +3371,7 @@
 }
 
 .nx-di25-mf-mix-chip em {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   font-style: normal;
   letter-spacing: 0.08em;
@@ -3407,7 +3407,7 @@
 }
 
 .nx-di25-mf-benchmark span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3425,7 +3425,7 @@
   margin: 0 0 6px;
   padding: 7px 9px;
   border-radius: 10px;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
   color: color-mix(in srgb, var(--di25-muted) 92%, transparent);
   background: rgba(255, 255, 255, 0.03);
@@ -3438,7 +3438,7 @@
   align-items: center;
   gap: 6px 10px;
   padding-top: 2px;
-  font-size: 8px;
+  font-size: 11px;
   color: color-mix(in srgb, var(--di25-muted) 88%, transparent);
 }
 
@@ -3473,7 +3473,7 @@
   flex-shrink: 0;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -3486,7 +3486,7 @@
   margin: 0 0 8px;
   padding: 8px 10px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
   background: rgba(255, 210, 138, 0.08);
   box-shadow: inset 0 0 0 1px rgba(255, 210, 138, 0.16);
@@ -3512,7 +3512,7 @@
 
 .nx-di25-comp-funnel__head span {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3522,7 +3522,7 @@
 .nx-di25-comp-funnel__head em {
   display: block;
   margin-top: 2px;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3558,7 +3558,7 @@
 }
 
 .nx-di25-comp-funnel__origin span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3599,7 +3599,7 @@
   top: -10px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -3665,7 +3665,7 @@
 }
 
 .nx-di25-comp-funnel__node-copy span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3673,7 +3673,7 @@
 }
 
 .nx-di25-comp-funnel__node-copy em {
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3690,7 +3690,7 @@
 }
 
 .nx-di25-comp-funnel__foot span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--di25-muted);
 }
@@ -3729,7 +3729,7 @@
 }
 
 .nx-di25-comp-hero__primary span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3745,7 +3745,7 @@
 }
 
 .nx-di25-comp-hero__primary em {
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 700;
   color: #9fd0ff;
@@ -3774,7 +3774,7 @@
 }
 
 .nx-di25-comp-hero__metric span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3791,7 +3791,7 @@
 .nx-di25-comp-hero__metric.is-accent strong { color: #c4b5fd; }
 
 .nx-di25-comp-hero__metric em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3810,7 +3810,7 @@
 }
 
 .nx-di25-comp-hero__band span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3818,7 +3818,7 @@
 }
 
 .nx-di25-comp-hero__band strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #d9fbe8;
@@ -3842,7 +3842,7 @@
 }
 
 .nx-di25-comp-hero__channel em {
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -3851,7 +3851,7 @@
 }
 
 .nx-di25-comp-hero__channel strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
@@ -3874,7 +3874,7 @@
 }
 
 .nx-di25-comp-spotlight__head span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3882,7 +3882,7 @@
 }
 
 .nx-di25-comp-spotlight__head em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 600;
   color: var(--di25-muted);
@@ -3902,7 +3902,7 @@
 }
 
 .nx-di25-comp-group__head span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3910,7 +3910,7 @@
 }
 
 .nx-di25-comp-group__head em {
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -3981,7 +3981,7 @@
 }
 
 .nx-di25-comp-card__match {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4006,7 +4006,7 @@
 }
 
 .nx-di25-comp-card__meta span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--di25-muted);
 }
@@ -4028,14 +4028,14 @@
 }
 
 .nx-di25-comp-card__headline em {
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 700;
   color: var(--di25-muted);
 }
 
 .nx-di25-comp-state {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4077,7 +4077,7 @@
 }
 
 .nx-di25-comp-pricing__cell span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4098,7 +4098,7 @@
   align-items: center;
   padding: 3px 7px;
   border-radius: 999px;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4136,7 +4136,7 @@
 }
 
 .nx-di25-comp-card__buyer span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4144,7 +4144,7 @@
 }
 
 .nx-di25-comp-card__buyer strong {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
   color: color-mix(in srgb, var(--di25-text) 88%, #c4b5fd);
@@ -4160,7 +4160,7 @@
 .nx-di25-comp-chips span {
   padding: 4px 7px;
   border-radius: 999px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   color: color-mix(in srgb, var(--di25-text) 80%, var(--di25-muted));
   background: rgba(255, 255, 255, 0.04);
@@ -4176,7 +4176,7 @@
 }
 
 .nx-di25-comp-card__context span {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--di25-muted);
 }
@@ -4185,7 +4185,7 @@
   margin: 0 0 8px;
   padding: 7px 8px;
   border-radius: 10px;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
   color: #ffd28a;
   background: rgba(255, 210, 138, 0.08);
@@ -4200,7 +4200,7 @@
 }
 
 .nx-di25-comp-card__similarity span {
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4236,7 +4236,7 @@
   padding: 6px 9px;
   border: 0;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -4268,7 +4268,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: #9fd0ff;
   cursor: pointer;
@@ -4286,7 +4286,7 @@
   padding: 14px 10px;
   border-radius: 12px;
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--di25-muted);
   background: rgba(255, 255, 255, 0.03);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -4306,7 +4306,7 @@
 
 .nx-di25-activity p {
   margin: 2px 0 0;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--di25-muted);
   line-height: 1.35;
 }
@@ -4316,7 +4316,7 @@
   border: 0;
   background: transparent;
   color: #9fd0ff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   padding: 0;
@@ -4341,21 +4341,21 @@
 
 .nx-di25-activity strong {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.3;
 }
 
 .nx-di25-activity span {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--di25-muted);
   margin-top: 1px;
 }
 
 .nx-di25-activity em {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
   color: var(--di25-muted);
   opacity: 0.75;
@@ -4597,7 +4597,7 @@ body.nx-di25-engine-active .nx-copilot-orb--floating {
 }
 
 /* Mobile fullscreen */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-deal-compact-shell {
     padding: 8px 10px 20px;
     gap: 12px;
@@ -4623,7 +4623,7 @@ body.nx-di25-engine-active .nx-copilot-orb--floating {
   }
 
   .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-di25-action-btn span {
-    font-size: 8px;
+    font-size: 11px;
   }
 
   .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-intel-header.is-compact-only {

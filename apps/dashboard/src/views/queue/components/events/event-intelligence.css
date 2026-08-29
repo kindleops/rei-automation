@@ -97,7 +97,7 @@
 
 .occ-evt-kpi-card__label {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -116,7 +116,7 @@
 .occ-evt-kpi-card__sub {
   display: block;
   margin-top: 1px;
-  font-size: 8px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
@@ -149,7 +149,7 @@
 }
 
 .occ-evt-velocity__title {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -157,7 +157,7 @@
 }
 
 .occ-evt-velocity__peak {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--occ-cyan);
   font-weight: 700;
 }
@@ -184,7 +184,7 @@
 }
 
 .occ-evt-velocity--mobile .occ-evt-velocity__bar-lbl {
-  font-size: 6px;
+  font-size: 11px;
 }
 
 .occ-evt-velocity__bar {
@@ -225,7 +225,7 @@
 }
 
 .occ-evt-velocity__bar-lbl {
-  font-size: 7px;
+  font-size: 11px;
   color: var(--occ-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -252,7 +252,7 @@
 }
 
 .occ-evt-filter-field__lbl {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -272,7 +272,7 @@
 }
 
 .occ-evt-live {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -346,7 +346,7 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--occ-accent) 30%, var(--occ-border));
   background: color-mix(in srgb, var(--occ-accent) 10%, transparent);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -370,7 +370,7 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--occ-border) 80%, transparent);
   background: rgba(255,255,255,0.04);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
   backdrop-filter: blur(8px);
@@ -491,7 +491,7 @@
 }
 
 .occ-evt-spine__time {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
   font-variant-numeric: tabular-nums;
@@ -508,7 +508,7 @@
 }
 
 .occ-evt-spine__address {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -518,7 +518,7 @@
 .occ-evt-spine__meta {
   position: relative;
   z-index: 1;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--occ-dim);
   line-height: 1.45;
   margin-bottom: 4px;
@@ -528,7 +528,7 @@
   position: relative;
   z-index: 1;
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -636,7 +636,7 @@
 }
 
 .occ-evt-status {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -650,7 +650,7 @@
 .occ-evt-status.is-blue { color: var(--occ-blue); background: rgba(59,130,246,0.1); }
 
 .occ-evt-card__time {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
   font-variant-numeric: tabular-nums;
@@ -671,7 +671,7 @@
   position: relative;
   z-index: 1;
   margin: 0 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
   line-height: 1.35;
 }
@@ -696,7 +696,7 @@
 }
 .occ-evt-tchip__lbl {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -705,7 +705,7 @@
 .occ-evt-tchip__val {
   display: block;
   margin-top: 2px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
@@ -725,7 +725,7 @@
   margin-top: 8px;
   padding-top: 7px;
   border-top: 1px solid color-mix(in srgb, var(--occ-border) 65%, transparent);
-  font-size: 9px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
@@ -815,14 +815,14 @@
 
 .occ-evt-mcard__phone {
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
 }
 
 .occ-evt-mcard__address {
   margin: 0 0 3px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.3;
   color: var(--occ-muted);
   white-space: nowrap;
@@ -832,7 +832,7 @@
 
 .occ-evt-mcard__meta {
   margin: 0;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--occ-dim);
@@ -852,7 +852,7 @@
 }
 
 .occ-evt-mcard__time {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -899,7 +899,7 @@
   backdrop-filter: blur(14px) saturate(1.4);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -914,7 +914,7 @@
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(255,255,255,0.06);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   color: var(--occ-cyan);
   font-variant-numeric: tabular-nums;
@@ -937,7 +937,7 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--occ-border) 78%, transparent);
   background: rgba(255,255,255,0.04);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
 }

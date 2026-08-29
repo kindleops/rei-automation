@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
-import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
+import { formatCurrency, formatMessageDateTime, formatPercent, formatPhone } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
 import { buildPropertyExternalLinks, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
-import type { PropertyParticipant } from '../utils/participantLabels'
+import { describeOwnerRecord, looksLikePhoneNumber, type PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
@@ -146,8 +146,18 @@ const messageTimestampMs = (message: ThreadMessage): number => {
   return Number.isFinite(ts) ? ts : 0
 }
 
-type DeliveryBadge = 'sending' | 'sent' | 'delivered' | 'failed' | 'scheduled' | 'cancelled'
+type DeliveryBadge = 'sending' | 'sent' | 'delivered' | 'failed' | 'scheduled' | 'cancelled' | 'unconfirmed'
 
+/**
+ * RC-9. "Delivered" is a carrier fact, not a default.
+ *
+ * The previous implementation returned `'delivered'` for any message with a
+ * `sentAt`, for any status the data layer had honestly labelled `sent`, and as
+ * the terminal fallback — which made `'sent'` unreachable and turned every
+ * unconfirmed send into a double-tick. `deliveredAt` and a provider status
+ * containing "deliver" are the only two things that prove delivery, so they are
+ * the only two things that produce the delivered badge.
+ */
 const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
   const raw = String(message.rawStatus || '').toLowerCase()
@@ -180,6 +190,8 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
     && !message.sentAt
   if (isScheduled) return 'scheduled'
 
+  // Delivery evidence: a carrier receipt timestamp, or a provider status that
+  // literally says delivered. Nothing else may claim delivery.
   if (message.deliveredAt) return 'delivered'
   if (statusEvidence.some((value) => value.includes('deliver') && !value.includes('undeliv'))) return 'delivered'
 
@@ -194,21 +206,34 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   ))
   if (isActivelySending) return 'sending'
 
-  if (message.sentAt) return 'delivered'
-  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'delivered'
+  // Send evidence without delivery evidence. This is the state the data layer
+  // already computes honestly (`resolveDeliveryStatusDisplay` → 'sent'); it is
+  // now rendered rather than upgraded.
+  if (message.sentAt) return 'sent'
+  if (statusEvidence.some((value) => (
+    value === 'sent'
+    || value === 'success'
+    || value === 'accepted'
+    || value === 'submitted'
+    || value === 'queued'
+    || value.includes('queue')
+    || value.includes('pending')
+  ))) return 'sent'
 
-  return 'delivered'
+  // No receipt of any kind. Say so instead of inventing one.
+  return 'unconfirmed'
 }
 
-const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string } => {
+const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string; title: string } => {
   switch (badge) {
-    case 'sending': return { icon: '◷', label: 'Sending' }
-    case 'sent': return { icon: '✓', label: 'Sent' }
-    case 'delivered': return { icon: '✓✓', label: 'Delivered' }
-    case 'failed': return { icon: '!', label: 'Failed' }
-    case 'scheduled': return { icon: '◷', label: 'Scheduled' }
-    case 'cancelled': return { icon: '×', label: 'Cancelled' }
-    default: return { icon: '•', label: badge }
+    case 'sending': return { icon: '◷', label: 'Sending', title: 'Handed to the carrier, no receipt yet.' }
+    case 'sent': return { icon: '✓', label: 'Sent', title: 'Accepted by the carrier. Delivery to the handset is not confirmed.' }
+    case 'delivered': return { icon: '✓✓', label: 'Delivered', title: 'Carrier confirmed delivery to the handset.' }
+    case 'failed': return { icon: '!', label: 'Failed', title: 'The carrier rejected or could not deliver this message.' }
+    case 'scheduled': return { icon: '◷', label: 'Scheduled', title: 'Queued to send later. Not sent yet.' }
+    case 'cancelled': return { icon: '×', label: 'Cancelled', title: 'Cancelled before it was sent.' }
+    case 'unconfirmed': return { icon: '·', label: 'No receipt', title: 'No send or delivery receipt was recorded for this message.' }
+    default: return { icon: '·', label: 'No receipt', title: 'No send or delivery receipt was recorded for this message.' }
   }
 }
 
@@ -442,7 +467,9 @@ export const buildAdaptiveSuggestions = (thread: InboxWorkflowThread, isSuppress
   return [
     { id: 'ownership_check', label: 'Ownership Check', text: isSpanish ? 'Hola, ¿sigue siendo propietario de esta propiedad?' : "Hi, are you still the owner of this property?", tone: 'soft' },
     { id: 'soft_intro', label: 'Local Investor Intro', text: isSpanish ? 'Soy inversor local y me interesa hacer una oferta por su propiedad.' : "I'm a local investor interested in making you an offer on your property.", tone: 'soft' },
-    { id: 'ai_assist', label: 'AI Assist', text: '', tone: 'internal' },
+    // §0.1 — "AI Assist" claimed a model call this chip does not make; it only
+    // opens the copilot overlay. Named for what it does.
+    { id: 'ai_assist', label: 'Open Copilot', text: '', tone: 'internal' },
   ]
 }
 
@@ -553,13 +580,25 @@ export const ChatThread = ({
     </div>
   )
 
-  const prospectName = selectedParticipant?.display_name || resolveThreadPrimaryName(thread)
-  const householdLabel = masterOwnerHouseholdLabel
-    || (resolveThreadOwnerName(thread) ? `${resolveThreadOwnerName(thread)} household` : null)
-  const phoneNumber = fallback(
+  // §0.2 — never render a raw phone number as the conversation title. Confirmed
+  // in a real browser: `resolveThreadPrimaryName` returns the phone number when
+  // the inbox row was hydrated without linked context, so the header read
+  // "+1 (404) 936-3531" and the line below it read "+1 (404) 936-3531 household".
+  const namedProspect = [selectedParticipant?.display_name, resolveThreadPrimaryName(thread)]
+    .map((value) => String(value ?? '').trim())
+    .find((value) => value && !looksLikePhoneNumber(value))
+  const prospectName = namedProspect || 'Seller name not on record'
+  // RC-8: `"<Name> household"` asserted a relationship the record never carried —
+  // it rendered "Janmar Holdings LLC household" for an LLC. The owner record is
+  // now described, not characterised.
+  const ownerRecord = describeOwnerRecord(resolveThreadOwnerName(thread), masterOwnerHouseholdLabel)
+  // Format the number for reading. A raw E.164 string is a developer artifact
+  // (constitution §0.2) — it was rendering as "+14049363531" in the header.
+  const rawPhoneNumber = fallback(
     selectedParticipant?.canonical_e164 || thread.phoneNumber || thread.canonicalE164,
     '',
   )
+  const phoneNumber = rawPhoneNumber ? formatPhone(rawPhoneNumber) : ''
   const propertyAddress = resolveThreadAddressLine(thread)
   const market = resolveThreadMarketBadge(thread)
   const matchedKeywords = getThreadMatchedKeywords(thread, searchQuery)
@@ -639,14 +678,16 @@ export const ChatThread = ({
         <Icon name="bookmark" />
         {withLabels && <span>{thread.isPinned ? 'Unpin' : 'Pin'}</span>}
       </button>
+      {/* RC-10: this opened the intelligence panel — there is no note editor —
+          so it is named for what it does. */}
       <button
         type="button"
         className="nx-chat-action-icon"
-        title="Thread notes and details"
+        title="Open the deal intelligence dossier"
         onClick={() => onThreadAction?.(thread.id, 'open_dossier')}
       >
         <Icon name="file-text" />
-        {withLabels && <span>Notes</span>}
+        {withLabels && <span>Dossier</span>}
       </button>
       <button
         type="button"
@@ -702,7 +743,7 @@ export const ChatThread = ({
                 rel="noopener noreferrer"
                 aria-label="Open street view"
               >
-                <img src={streetViewThumbUrl} alt="" loading="lazy" decoding="async" />
+                <img src={streetViewThumbUrl} alt="" loading="eager" decoding="async" />
               </a>
             ) : null}
             <div className="nx-conv-mobile-identity">
@@ -745,8 +786,16 @@ export const ChatThread = ({
                   </button>
                 )}
               </div>
-              {householdLabel ? (
-                <div className="nx-conv-identity-household">{householdLabel}</div>
+              {ownerRecord ? (
+                <div className={cls('nx-conv-owner-record', `is-${ownerRecord.identity.kind}`)}>
+                  <Icon name={ownerRecord.identity.kind === 'entity' ? 'briefcase' : ownerRecord.identity.kind === 'multiple' ? 'users' : 'user'} />
+                  <span className="nx-conv-owner-record__line">{ownerRecord.line}</span>
+                  {ownerRecord.identity.kind !== 'person' ? (
+                    <span className="nx-conv-owner-record__type">
+                      {ownerRecord.identity.kind === 'entity' ? ownerRecord.identity.typeLabel : `${ownerRecord.identity.parties.length} named owners`}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
               {propertyAddress && (
                 <div className="nx-conv-identity-address">{propertyAddress}</div>
@@ -891,7 +940,10 @@ export const ChatThread = ({
                       <>
                         <span
                           className={cls('nx-msg__receipt', `is-${deliveryBadge}`)}
-                          title={deliveryBadge === 'failed' && msg.error ? String(msg.error) : undefined}
+                          data-delivery={deliveryBadge}
+                          title={deliveryBadge === 'failed' && msg.error
+                            ? `${receiptMeta.title} ${String(msg.error)}`
+                            : receiptMeta.title}
                         >
                           <span aria-hidden="true">{receiptMeta.icon}</span>
                           <span>{receiptMeta.label}</span>
@@ -948,16 +1000,16 @@ export const ChatThread = ({
                     ) : null
                   )}
 
-                  <div className="nx-bubble-hover-actions">
-                    {isFailed && isOutbound && (
-                      <button type="button" title="Retry send" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'retry_send')}>
+                  {/* RC-10: the "Add note" bubble action routed to the intel
+                      panel — there is no note editor — so it is removed rather
+                      than left as a control that lies. */}
+                  {isFailed && isOutbound ? (
+                    <div className="nx-bubble-hover-actions">
+                      <button type="button" title="Retry send" aria-label="Retry send" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'retry_send')}>
                         <Icon name="refresh-cw" />
                       </button>
-                    )}
-                    <button type="button" title="Add note" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'add_note')}>
-                      <Icon name="file-text" />
-                    </button>
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )

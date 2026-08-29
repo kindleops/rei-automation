@@ -1012,7 +1012,12 @@ const QueueRow = ({
                 <Icon name={asset.icon} size={11} />
               </span>
               <strong className="occ-row-title" title={identity.primary}>{identity.primary}</strong>
-              {identity.phoneEnding && <span className="occ-contact-badge">{identity.phoneEnding}</span>}
+              {identity.phoneEnding && (
+                // The number lives here, as metadata — never as the title.
+                <span className="occ-contact-badge" title={identity.phoneFull ?? undefined}>
+                  {identity.phoneEnding}
+                </span>
+              )}
               <span className={cls('occ-contact-indicator', contactOk ? 'is-ok' : 'is-warn')} title={contactOk ? 'SMS eligible' : 'Contact blocked'} />
             </div>
             <p className="occ-row-address" title={item.propertyAddress ?? undefined}>

@@ -62,7 +62,7 @@
 /* Eyebrow label */
 .nxhud-eyebrow {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -95,7 +95,7 @@
   border-radius: 99px;
   background: rgba(48, 209, 88, 0.10);
   border: 1px solid rgba(48, 209, 88, 0.22);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -127,7 +127,7 @@
   border-radius: 9px;
   padding: 0 5px;
   background: rgba(255, 69, 58, 0.85);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: #fff;
   line-height: 1;
@@ -233,7 +233,7 @@
 
 .nxhud-mark-read-btn {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(152, 180, 226, 0.36);
   border-color: transparent;
@@ -291,7 +291,7 @@
 
 .nxhud-space-more {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.34);
 }
 
@@ -308,7 +308,7 @@
 .nxhud-space-chip.is-secondary {
   height: 21px;
   padding: 0 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(142, 168, 216, 0.38);
 }
 
@@ -465,7 +465,7 @@
 
 /* Source label */
 .nxhud-card__source {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -482,7 +482,7 @@
 
 /* Watched chip */
 .nxhud-card__watched-chip {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -496,7 +496,7 @@
 /* Timestamp */
 .nxhud-card__time {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   white-space: nowrap;
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
@@ -591,7 +591,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(160, 190, 235, 0.55);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 110ms, color 110ms, border-color 110ms;
@@ -669,7 +669,7 @@
 }
 
 .nxhud-footer-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   letter-spacing: 0.02em;
@@ -682,7 +682,7 @@
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.04);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 11px;
   color: rgba(190, 210, 240, 0.50);
   letter-spacing: 0.04em;
 }
@@ -705,7 +705,7 @@
 }
 
 .nxhud-settings-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -768,14 +768,14 @@
 }
 
 .nxhud-sound-toggle-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   font-style: italic;
 }
 
 .nxhud-settings-note {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   line-height: 1.5;
   padding: 10px 12px;
@@ -861,7 +861,7 @@
 }
 
 .nxhud-toast__space {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -901,7 +901,7 @@
 
 /* ── Responsive: narrow viewports ────────────────────────────────────── */
 
-@media (max-width: 480px) {
+@media (max-width: 479.98px) {
   .nxhud-panel.nx-notification-center {
     top: 0 !important;
     right: 0 !important;

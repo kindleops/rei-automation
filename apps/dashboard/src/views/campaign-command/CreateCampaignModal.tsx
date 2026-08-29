@@ -2849,7 +2849,7 @@ const TargetReachPanel = ({
             <Icon name="alert-circle" size={12} />
             <div>
               <div>Queue eligibility is a preview-window check.</div>
-              <div style={{ marginTop: 4, fontSize: 10, opacity: 0.8 }}>
+              <div style={{ marginTop: 4, fontSize: 11, opacity: 0.8 }}>
                 {preview.queue_eligibility_note || 'Matched and linkage counts are full source; clean, ready, and blocker counts use the candidate preview window.'}
               </div>
             </div>
@@ -3324,8 +3324,8 @@ const BackendStatusStrip = ({
 
           {import.meta.env.DEV && preview?._request && (
             <details className="cmp-diag-raw" style={{ marginTop: 8 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 10, opacity: 0.7 }}>Preview request</summary>
-              <pre style={{ fontSize: 9, maxHeight: 200, overflow: 'auto', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11, opacity: 0.7 }}>Preview request</summary>
+              <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {JSON.stringify(preview._request, null, 2)}
               </pre>
             </details>
@@ -3333,8 +3333,8 @@ const BackendStatusStrip = ({
 
           {import.meta.env.DEV && preview && preview._raw != null && (
             <details className="cmp-diag-raw" style={{ marginTop: 8 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 10, opacity: 0.7 }}>Raw API response</summary>
-              <pre style={{ fontSize: 9, maxHeight: 200, overflow: 'auto', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11, opacity: 0.7 }}>Raw API response</summary>
+              <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                 {JSON.stringify(preview._raw, null, 2)}
               </pre>
             </details>

@@ -18,7 +18,7 @@
 
 .occ-fail-intel-header__sub {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
   line-height: 1.4;
 }
@@ -47,7 +47,7 @@
 
 .occ-fail-kpi-card__label {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -66,7 +66,7 @@
 .occ-fail-kpi-card__sub {
   display: block;
   margin-top: 1px;
-  font-size: 8px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
@@ -97,7 +97,7 @@
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--occ-border) 80%, transparent);
   background: rgba(255,255,255,0.03);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--occ-dim);
   cursor: pointer;
@@ -185,7 +185,7 @@
 .occ-fail-sev,
 .occ-fail-disposition,
 .occ-fail-market-chip {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -203,7 +203,7 @@
 .occ-fail-sev.is-medium { color: var(--occ-amber); }
 .occ-fail-sev.is-low { color: var(--occ-dim); }
 
-.occ-fail-tag.is-suppress { color: var(--occ-red); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.occ-fail-tag.is-suppress { color: var(--occ-red); font-size: 11px; font-weight: 800; text-transform: uppercase; }
 
 .occ-fail-disposition.is-green { color: var(--occ-green); }
 .occ-fail-disposition.is-red { color: var(--occ-red); }
@@ -232,7 +232,7 @@
   position: relative;
   z-index: 1;
   margin: 0 0 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
   line-height: 1.35;
 }
@@ -266,7 +266,7 @@
 
 .occ-fail-tchip__lbl {
   display: block;
-  font-size: 7px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -307,7 +307,7 @@
   margin-top: 8px;
   padding-top: 7px;
   border-top: 1px solid color-mix(in srgb, var(--occ-border) 65%, transparent);
-  font-size: 9px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
@@ -398,19 +398,19 @@
   flex-wrap: wrap;
   gap: 5px;
   margin-bottom: 5px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
 .occ-fail-intel-card__top-market {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-muted);
   margin-bottom: 5px;
 }
 
 .occ-fail-intel-card__action {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
   line-height: 1.35;
   border-top: 1px solid color-mix(in srgb, var(--occ-border) 65%, transparent);
@@ -420,7 +420,7 @@
 .occ-fail-intel-card__cta {
   display: inline-block;
   margin-top: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: var(--occ-accent);
 }
@@ -466,7 +466,7 @@
 }
 .occ-fail-dossier__cause {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   color: var(--occ-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -508,7 +508,7 @@
 }
 
 .occ-fail-dossier__badge {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -543,7 +543,7 @@
 }
 .occ-fail-dossier__metric span {
   display: block;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -561,7 +561,7 @@
 }
 .occ-fail-dossier__section-title {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -581,7 +581,7 @@
 }
 .occ-fail-dossier__preview-title {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -590,7 +590,7 @@
 }
 .occ-fail-dossier__empty {
   margin: 0;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--occ-dim);
 }
 
@@ -601,7 +601,7 @@
   align-items: center;
   padding: 6px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--occ-border) 55%, transparent);
-  font-size: 10px;
+  font-size: 11px;
 }
 .occ-fail-preview-row:last-child { border-bottom: none; }
 .occ-fail-preview-row strong { font-size: 11px; }

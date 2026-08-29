@@ -61,7 +61,7 @@
   }
   
   .nx-identity-badge {
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 900;
     color: rgba(104, 217, 196, 0.6);
     background: rgba(104, 217, 196, 0.1);
@@ -289,7 +289,7 @@
     margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-size: 10px;
+    font-size: 11px;
   }
   
   .nx-reasoning-section ul {
@@ -343,7 +343,7 @@
     color: #ff453a;
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 9px;
+    font-size: 11px;
   }
   
   .nx-action-preview-desc {
@@ -357,7 +357,7 @@
     padding: 10px 12px;
     background: rgba(0, 0, 0, 0.3);
     font-family: 'SF Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: #a0aec0;
     overflow-x: auto;
   }
@@ -401,7 +401,7 @@
   }
   
   .nx-chips-label {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.4);
     text-transform: uppercase;
@@ -503,7 +503,7 @@
     gap: 4px;
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.05em;
   }
@@ -537,7 +537,7 @@
   .nx-conf-bar-fill.is-low { background: #ff453a; }
 
   .nx-conf-score {
-    font-size: 9px;
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.5);
     font-weight: 600;
   }
@@ -587,7 +587,7 @@
 
   .nx-handoff-details p {
     margin: 0;
-    font-size: 10px;
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.5);
   }
 
@@ -831,7 +831,7 @@
 }
 
 .nx-copilot-header__version {
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   color: rgba(104, 217, 196, 0.4);
   background: rgba(104, 217, 196, 0.05);
@@ -841,7 +841,7 @@
 }
 
 .nx-copilot-header__command-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   color: #68d9c4;
   background: rgba(104, 217, 196, 0.1);
@@ -851,7 +851,7 @@
 }
 
 .nx-copilot-header__status {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(200, 210, 230, 0.5);
   display: flex;
   align-items: center;
@@ -882,7 +882,7 @@
   gap: 4px;
   padding: 3px 8px;
   border-radius: 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1018,7 +1018,7 @@
 }
 
 .nx-copilot-switcher__item-info small {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(200, 210, 230, 0.5);
 }
 
@@ -1060,7 +1060,7 @@
 }
 
 .nx-copilot-context__label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1094,7 +1094,7 @@
   align-items: center;
   padding: 2px 7px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(200, 210, 230, 0.7);
   background: rgba(255, 255, 255, 0.04);
@@ -1108,7 +1108,7 @@
   align-items: center;
   gap: 5px;
   margin-top: 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 180, 100, 0.8);
 }
 
@@ -1162,7 +1162,7 @@
 }
 
 .nx-copilot-msg__name {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1212,7 +1212,7 @@
 }
 
 .nx-copilot-msg__time {
-  font-size: 9px;
+  font-size: 11px;
   color: rgba(200, 210, 230, 0.3);
   margin-top: 4px;
   display: block;
@@ -1241,7 +1241,7 @@
 }
 
 .nx-copilot-draft-card__badge {
-  font-size: 9px;
+  font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(120, 180, 140, 0.1);
@@ -1263,7 +1263,7 @@
 }
 
 .nx-copilot-draft-card__meta span {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: rgba(200, 210, 230, 0.5);
   background: rgba(255, 255, 255, 0.03);
@@ -1280,7 +1280,7 @@
   padding: 8px 12px;
   background: rgba(255, 140, 100, 0.05);
   border-top: 1px solid rgba(255, 140, 100, 0.1);
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 180, 140, 0.8);
 }
 
@@ -1308,7 +1308,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(200, 210, 230, 0.8);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   transition: all 0.15s ease;
 }
@@ -1353,7 +1353,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
   color: rgba(200, 210, 230, 0.7);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: capitalize;
   transition: all 0.15s ease;
@@ -1417,7 +1417,7 @@
 }
 
 .nx-copilot-typing__label {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(200, 210, 230, 0.4);
   font-style: italic;
 }
@@ -1430,7 +1430,7 @@
 }
 
 .nx-copilot-suggestions__label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1608,7 +1608,7 @@
   border: 1px solid rgba(255, 255, 255, 0.04);
   background: rgba(255, 255, 255, 0.02);
   color: rgba(200, 210, 230, 0.55);
-  font-size: 8.5px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1697,7 +1697,7 @@
   background: transparent;
   border: 0;
   color: #ecf4ff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   flex: 1;
   outline: none;
@@ -1706,7 +1706,7 @@
 }
 
 .nx-copilot-voice-selector-wrap label {
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #95a7c9;
@@ -1741,7 +1741,7 @@
 }
 
 .nx-intel-orb-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   color: #68d9c4;
   letter-spacing: 0.1em;
@@ -1850,7 +1850,7 @@
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -1913,7 +1913,7 @@
   bottom: -8px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   color: #68d9c4;
   letter-spacing: 0.15em;
@@ -1939,7 +1939,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   color: var(--nexus-muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   transition: all 0.3s ease;
   cursor: pointer;
@@ -2010,7 +2010,7 @@
 }
 
 .nx-copilot-voice-grid__header small {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--nexus-muted);
 }
 
@@ -2058,7 +2058,7 @@
 }
 
 .nx-copilot-voice-info small {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--nexus-muted);
 }
 
@@ -2076,7 +2076,7 @@
 .nx-provider-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -2188,7 +2188,7 @@
   align-items: center;
   gap: 8px;
   color: #68d9c4;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.05em;
 }
@@ -2196,7 +2196,7 @@
 .nx-underwrite-badge {
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   background: rgba(255, 255, 255, 0.05);
 }
@@ -2223,7 +2223,7 @@
 }
 
 .nx-underwrite-stat label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   color: var(--nexus-muted);
@@ -2241,7 +2241,7 @@
 }
 
 .nx-comps-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: var(--nexus-muted);
   margin-bottom: 8px;

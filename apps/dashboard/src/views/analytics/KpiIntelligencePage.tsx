@@ -89,7 +89,9 @@ export const KpiIntelligencePage = () => {
   const Section = ({ title, children, className, action }: any) => (
     <section className={`nx-card-section ${className || ''}`}>
       <header className="nx-card-section__header">
-        <h3>{title}</h3>
+        {/* R16.5 — these are the page's top-level sections, directly under the
+            <h1>. As <h3> they made /analytics skip a level. */}
+        <h2>{title}</h2>
         {action}
       </header>
       <div className="nx-card-section__body">
@@ -174,7 +176,14 @@ export const KpiIntelligencePage = () => {
             <option value="all_time">All Time</option>
           </select>
 
-          <button className="nx-kpi-btn" onClick={loadData}>
+          {/* R16.4 — icon-only control. The <svg> is aria-hidden, so without an
+              explicit name this button is announced as just "button". */}
+          <button
+            className="nx-kpi-btn"
+            onClick={loadData}
+            aria-label="Refresh metrics"
+            title="Refresh metrics"
+          >
             <Icon name="refresh-cw" />
           </button>
         </div>
@@ -254,7 +263,7 @@ export const KpiIntelligencePage = () => {
         <Section title="Elite Leaderboards" className="nx-grid-leaderboards">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px' }}>
             <div>
-              <h4 style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP MARKETS</h4>
+              <h4 style={{ fontSize: '11px', color: 'var(--nx-muted, #94a3b8)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP MARKETS</h4>
               <table className="nx-leaderboard-table">
                 <thead>
                   <tr>
@@ -280,7 +289,7 @@ export const KpiIntelligencePage = () => {
             </div>
 
             <div>
-              <h4 style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP TEMPLATES</h4>
+              <h4 style={{ fontSize: '11px', color: 'var(--nx-muted, #94a3b8)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.1em' }}>TOP TEMPLATES</h4>
               <table className="nx-leaderboard-table">
                 <thead>
                   <tr>
@@ -321,7 +330,7 @@ export const KpiIntelligencePage = () => {
                 borderRadius: '8px',
                 border: '1px solid var(--nx-border)'
               }}>
-                <div style={{ fontSize: '10px', color: 'var(--nx-text-3)', textTransform: 'uppercase', marginBottom: '4px' }}>{m.label}</div>
+                <div style={{ fontSize: '11px', color: 'var(--nx-text-3)', textTransform: 'uppercase', marginBottom: '4px' }}>{m.label}</div>
                 <div style={{ fontSize: '18px', fontWeight: 700, color: m.color }}>{m.value}</div>
               </div>
             ))}
@@ -368,13 +377,13 @@ export const KpiIntelligencePage = () => {
                 <div>Pos: <strong className="text-green">{formatPercent((overview?.positive_rate_pct || 0) / 100)}</strong></div>
               </div>
             </div>
-            <div className="nx-channel-card" style={{ opacity: 0.4, background: 'rgba(255,255,255,0.01)' }}>
+            <div className="nx-channel-card" style={{ opacity: 0.75, background: 'rgba(255,255,255,0.01)' }}>
               <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 4px 0', fontSize: '13px' }}><Icon name="file-text" /> EMAIL</h4>
-              <p style={{ fontSize: '10px', fontStyle: 'italic', margin: 0 }}>Tracking not wired yet — connect email events to message_events.</p>
+              <p style={{ fontSize: '11px', fontStyle: 'italic', margin: 0 }}>Tracking not wired yet — connect email events to message_events.</p>
             </div>
-            <div className="nx-channel-card" style={{ opacity: 0.4, background: 'rgba(255,255,255,0.01)' }}>
+            <div className="nx-channel-card" style={{ opacity: 0.75, background: 'rgba(255,255,255,0.01)' }}>
               <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 4px 0', fontSize: '13px' }}><Icon name="phone" /> VOICE / RVM</h4>
-              <p style={{ fontSize: '10px', fontStyle: 'italic', margin: 0 }}>Future placeholder — awaiting RVM integration.</p>
+              <p style={{ fontSize: '11px', fontStyle: 'italic', margin: 0 }}>Future placeholder — awaiting RVM integration.</p>
             </div>
           </div>
         </Section>
@@ -391,7 +400,7 @@ export const KpiIntelligencePage = () => {
                 <div className="nx-funnel-step__bar-wrap"><div className="nx-funnel-step__bar" style={{ width: '94%', height: '4px' }} /></div>
               </div>
             ))}
-            <p style={{ fontSize: '10px', opacity: 0.5, fontStyle: 'italic', marginTop: '4px' }}>
+            <p style={{ fontSize: '11px', opacity: 0.5, fontStyle: 'italic', marginTop: '4px' }}>
               Carrier-level tracking not wired yet. Add carrier_name and line_type to message_events.
             </p>
           </div>
@@ -401,7 +410,7 @@ export const KpiIntelligencePage = () => {
         <Section title="Buyer Demand" className="nx-grid-buyer">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ padding: '12px', background: 'rgba(var(--nexus-accent-rgb), 0.05)', borderRadius: '8px', border: '1px solid rgba(var(--nexus-accent-rgb), 0.1)' }}>
-              <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--nx-neon-blue)', marginBottom: '4px' }}>Avg Buyer Score</div>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--nx-neon-blue)', marginBottom: '4px' }}>Avg Buyer Score</div>
               <div style={{ fontSize: '24px', fontWeight: 800 }}>84.5</div>
             </div>
             <div style={{ fontSize: '12px', padding: '8px' }}>
@@ -409,7 +418,7 @@ export const KpiIntelligencePage = () => {
               <div>Active Matches: <strong>1,240</strong></div>
               <div>Interest 30d: <strong className="text-green">+18%</strong></div>
             </div>
-            <p style={{ fontSize: '10px', opacity: 0.5, fontStyle: 'italic', margin: '4px 0 0 0' }}>
+            <p style={{ fontSize: '11px', opacity: 0.5, fontStyle: 'italic', margin: '4px 0 0 0' }}>
               Connect buyer_match table to surface real-time buyer demand.
             </p>
           </div>
@@ -429,7 +438,7 @@ export const KpiIntelligencePage = () => {
       </div>
 
       {/* INTELLIGENCE ALERTS */}
-      <Section title="Intelligence Alert Feed" action={<span className="text-blue" style={{ fontSize: '10px', cursor: 'pointer' }}>VIEW ALL</span>}>
+      <Section title="Intelligence Alert Feed" action={<span className="text-blue" style={{ fontSize: '11px', cursor: 'pointer' }}>VIEW ALL</span>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {outliers.length > 0 ? outliers.slice(0, 4).map((o, idx) => (
             <div key={idx} style={{ 

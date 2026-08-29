@@ -211,13 +211,13 @@ const RecordsTab = () => {
                     ) : <span style={{ color: 'var(--text-2)' }}>—</span>}
                   </td>
                   <td>{r.market ?? '—'}</td>
-                  <td style={{ textTransform: 'uppercase', fontSize: 10, color: 'var(--text-2)' }}>{r.language}</td>
+                  <td style={{ textTransform: 'uppercase', fontSize: 11, color: 'var(--text-2)' }}>{r.language}</td>
                   <td>{fmtDate(r.last_email_sent)}</td>
                   <td>{fmtDate(r.last_reply)}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="ecc__btn" style={{ padding: '3px 8px', fontSize: 10 }}>Open</button>
-                      <button className="ecc__btn is-primary" style={{ padding: '3px 8px', fontSize: 10 }}>Compose</button>
+                      <button className="ecc__btn" style={{ padding: '3px 8px', fontSize: 11 }}>Open</button>
+                      <button className="ecc__btn is-primary" style={{ padding: '3px 8px', fontSize: 11 }}>Compose</button>
                     </div>
                   </td>
                 </tr>
@@ -344,7 +344,7 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
                   padding: '4px 8px',
                   borderRadius: 4,
                   cursor: 'pointer',
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: 600,
                 }}
               >
@@ -356,7 +356,7 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
             <div className="ecc__thread-participants">
               {activeThread.email_address} · {activeThread.message_count} messages
               {activeThread.has_sms_thread && (
-                <span style={{ marginLeft: 8, color: 'var(--accent)', fontSize: 10, fontWeight: 700 }}>
+                <span style={{ marginLeft: 8, color: 'var(--accent)', fontSize: 11, fontWeight: 700 }}>
                   SMS linked
                 </span>
               )}
@@ -380,8 +380,8 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
                 </div>
                 <div className="ecc__message-ts">
                   {msg.direction === 'outbound' ? 'You' : msg.from_address} · {fmtRelative(msg.sent_at)}
-                  {msg.opened && <span style={{ marginLeft: 6, color: 'var(--success)', fontSize: 10 }}>Opened</span>}
-                  {msg.bounced && <span style={{ marginLeft: 6, color: 'var(--danger)', fontSize: 10 }}>Bounced</span>}
+                  {msg.opened && <span style={{ marginLeft: 6, color: 'var(--success)', fontSize: 11 }}>Opened</span>}
+                  {msg.bounced && <span style={{ marginLeft: 6, color: 'var(--danger)', fontSize: 11 }}>Bounced</span>}
                 </div>
               </div>
             ))}
@@ -892,11 +892,11 @@ const SuppressionTab = ({ entries }: { entries: SuppressionEntry[] }) => {
                 <td>{fmtDate(e.suppressed_at)}</td>
                 <td>
                   {e.can_remove ? (
-                    <button className="ecc__btn is-danger-outline" style={{ padding: '3px 8px', fontSize: 10 }}>
+                    <button className="ecc__btn is-danger-outline" style={{ padding: '3px 8px', fontSize: 11 }}>
                       Remove
                     </button>
                   ) : (
-                    <span style={{ fontSize: 10, color: 'var(--text-2)' }}>Brevo-managed</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)' }}>Brevo-managed</span>
                   )}
                 </td>
               </tr>

@@ -57,7 +57,7 @@
 .lcnc-header__actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
 .lcnc-eyebrow {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -81,7 +81,7 @@
   border-radius: 99px;
   background: rgba(48, 209, 88, 0.10);
   border: 1px solid rgba(48, 209, 88, 0.22);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -110,7 +110,7 @@
   border-radius: 9px;
   padding: 0 5px;
   background: rgba(255, 69, 58, 0.85);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   color: #fff;
 }
@@ -295,7 +295,7 @@
 
 .lcnc-group__label {
   margin: 4px 2px 6px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -420,7 +420,7 @@
 .lcnc-card.is-critical .lcnc-card__icon-wrap { color: #ff7070; background: rgba(255, 69, 58, 0.14); }
 
 .lcnc-card__domain {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.10em;
   text-transform: uppercase;
@@ -429,7 +429,7 @@
 }
 
 .lcnc-card__group-badge {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   padding: 1px 5px;
   border-radius: 4px;
@@ -439,7 +439,7 @@
 
 .lcnc-card__time {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
@@ -504,7 +504,7 @@
   border-radius: 7px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.45);
 }
 
@@ -529,7 +529,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(160, 190, 235, 0.55);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -598,7 +598,7 @@
   border: 0;
   background: transparent;
   color: rgba(152, 180, 226, 0.42);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -606,7 +606,7 @@
 .lcnc-footer__actions button:hover { color: var(--nexus-accent, #70dcf5); }
 
 .lcnc-footer-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(152, 180, 226, 0.30);
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
 }
@@ -616,7 +616,7 @@
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.04);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 /* Preferences panel */
@@ -640,7 +640,7 @@
 
 .lcnc-prefs__eyebrow {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   color: rgba(152, 180, 226, 0.36);
@@ -678,7 +678,7 @@
 .lcnc-prefs__label {
   display: block;
   margin-bottom: 8px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.12em;
   color: rgba(152, 180, 226, 0.36);
@@ -713,7 +713,7 @@
   color: var(--nexus-accent, #70dcf5);
 }
 
-.lcnc-prefs__toggle--compact { min-width: 42px; height: 22px; font-size: 10px; }
+.lcnc-prefs__toggle--compact { min-width: 42px; height: 22px; font-size: 11px; }
 
 .lcnc-prefs__time-row {
   display: grid;
@@ -897,7 +897,7 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
-@media (max-width: 767px) and (orientation: portrait) {
+@media (max-width: 767.98px) and (orientation: portrait) {
   .lcnc-panel.nx-notification-center.is-mobile-sheet {
     top: var(--nx-mobile-chrome-top, calc(64px + env(safe-area-inset-top, 0px))) !important;
     right: 0 !important;

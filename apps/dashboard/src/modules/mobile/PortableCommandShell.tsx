@@ -6,7 +6,9 @@ import { useNotificationIntelligence } from '../../domain/notifications/useNotif
 import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
 import { getQueueProcessorHealth, type QueueProcessorHealth } from '../../lib/data/inboxData'
 import { InboxKpiOrb } from '../inbox/components/InboxKpiOrb'
-import { QueueCommandCenter, type QueueCommandMode, type QueueCommandCaps } from '../inbox/components/QueueCommandCenter'
+import { QueueCommandCenter, type QueueCommandMode, type QueueCommandCaps, type CampaignControlDiagnostics } from '../inbox/components/QueueCommandCenter'
+import { getQueueControlSettings } from '../../lib/api/backendClient'
+import { resolveSendingStatus, toLegacyBadgeStatus } from '../operations/ops-status'
 import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
@@ -46,6 +48,7 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
   const [workspaceSection, setWorkspaceSection] = useState<'apps' | 'appearance'>('apps')
   const [workspaceQuery, setWorkspaceQuery] = useState('')
   const [queueHealth, setQueueHealth] = useState<QueueProcessorHealth | null>(null)
+  const [queueControl, setQueueControl] = useState<CampaignControlDiagnostics | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
 
@@ -53,12 +56,27 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
   const activeThemeId = (settings.nexusTheme ?? 'dark') as NexusGlobalThemeId
   const activeAccentId = (settings.accentPalette ?? 'cyan') as AccentPalette
 
+  /*
+   * LANE F: this used to fetch health only and pass `control={null}` to the
+   * queue sheet, so the mobile dock had no way to know the queue was stopped
+   * by execution mode — it rendered `queueHealth.status`, which defaults to
+   * 'healthy'. Mobile now reads the same two inputs as the desktop rail and
+   * runs them through the one resolver.
+   */
   const refreshQueueHealth = useCallback(async () => {
     setQueueLoading(true)
     try {
-      setQueueHealth(await getQueueProcessorHealth())
+      const [health, control] = await Promise.all([
+        getQueueProcessorHealth(),
+        getQueueControlSettings().catch(() => null),
+      ])
+      setQueueHealth(health)
+      setQueueControl(
+        (control && control.ok ? control.data?.diagnostics : null) as CampaignControlDiagnostics | null ?? null,
+      )
     } catch {
       setQueueHealth(null)
+      setQueueControl(null)
     } finally {
       setQueueLoading(false)
     }
@@ -78,7 +96,13 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
     if (activeSurface !== 'workspace') setWorkspaceQuery('')
   }, [activeSurface])
 
-  const processorStatus = queueHealth?.status ?? 'unknown'
+  // One resolver, same as NexusTopBar — never the raw health status.
+  const sendingStatus = resolveSendingStatus({
+    health: queueHealth,
+    control: queueControl,
+    loading: queueLoading,
+  })
+  const processorStatus = toLegacyBadgeStatus(sendingStatus)
 
   const openSearch = () => {
     if (onOpenSearch) onOpenSearch()
@@ -151,6 +175,13 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       <MobileCommandDock
         activeSurface={resolveDockSurface()}
         onSurfaceChange={handleDockSurfaceChange}
+        // Restored by Lane H. Lane F passes the KPI orb into the mobile dock
+        // (PortableCommandShell.tsx:178 on ui/lane-f-operations). The `ort` merge kept
+        // Lane F's import but dropped this prop, because the surrounding JSX was edited
+        // on the other side too. MobileCommandDock still declares `kpiControl`
+        // (MobileCommandDock.tsx:26) and renders it (:74-76), so the mobile dock had
+        // silently lost its KPI orb with nothing but an unused import to show for it.
+        // `tsc --noEmit` did not catch this; the production build (`tsc -b`) did.
         kpiControl={<InboxKpiOrb />}
         workspaceActive={activeSurface === 'workspace'}
         queueStatus={processorStatus}
@@ -275,7 +306,7 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       >
         <QueueCommandCenter
           health={queueHealth}
-          control={null}
+          control={queueControl}
           loading={queueLoading}
           mode={queueMode}
           caps={queueCaps}

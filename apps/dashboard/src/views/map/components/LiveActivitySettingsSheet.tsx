@@ -67,11 +67,11 @@ export const LiveActivitySettingsSheet = memo(function LiveActivitySettingsSheet
       <aside
         className={cls('nx-icm-activity-sheet', isMobile && 'is-mobile')}
         role="dialog"
-        aria-label="Live Activity settings"
+        aria-label="Map Activity settings"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="nx-icm-activity-sheet__header">
-          <strong>Activity Settings</strong>
+          <strong>Map Activity Settings</strong>
           <button type="button" className="nx-icm-activity-sheet__close" onClick={onClose} aria-label="Close settings">×</button>
         </header>
 

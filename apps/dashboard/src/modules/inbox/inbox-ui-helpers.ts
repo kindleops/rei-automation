@@ -1,8 +1,10 @@
 import {
   resolveInboxSellerName,
   resolveInboxProspectName,
+  resolveInboxProspectNameWithSource,
   resolveInboxOwnerName,
   resolveInboxPropertyAddress,
+  formatDisplayPhone,
   type ThreadContext,
   type ThreadMessage,
 } from '../../lib/data/inboxData'
@@ -351,6 +353,24 @@ export const resolveThreadPrimaryName = (thread: InboxWorkflowThread): string =>
   return resolveInboxProspectName(thread as unknown as Record<string, unknown>)
 }
 
+/**
+ * A *person's* name, or '' — never a phone number, never a placeholder.
+ *
+ * `resolveInboxProspectName` deliberately falls back to a formatted phone number
+ * (source: 'phone_fallback') and then to the literal 'Unknown Contact'. Rendering
+ * either of those as a row title is what produced 28 raw phone numbers as titles on
+ * /inbox. Callers that need a *title* must use this; callers that just need any
+ * label may keep using the original.
+ */
+export const resolveThreadPersonName = (thread: InboxWorkflowThread): string => {
+  const { value, source } = resolveInboxProspectNameWithSource(thread as unknown as Record<string, unknown>)
+  if (!value || source === 'phone_fallback' || source === 'none') return ''
+  return value
+}
+
+/** Formats a phone for display as secondary metadata. Never used as a title. */
+export const formatThreadPhone = (raw: string): string => (raw ? formatDisplayPhone(raw) : '')
+
 /** Master owner headline for property conversation container. */
 export const resolveThreadOwnerName = (thread: InboxWorkflowThread): string => {
   return resolveInboxOwnerName(thread as unknown as Record<string, unknown>)
@@ -376,7 +396,11 @@ export const resolveThreadMarketBadge = (thread: InboxWorkflowThread): string =>
   const st = String(row.property_state ?? row.property_address_state ?? row.state ?? '').trim()
   if (city && st) return `${city}, ${st}`
   if (st) return st
-  return 'Unknown'
+  // RC-3. This used to return the bare string 'Unknown' while the only caller-side
+  // guard rejected 'Unknown Market'. 'Unknown' !== 'Unknown Market', so the guard
+  // passed and the word "Unknown" rendered under every row. The data layer already
+  // signals "no market" with an empty string — match it instead of inventing a label.
+  return ''
 }
 
 const numberOrNull = (value: unknown): number | null => {

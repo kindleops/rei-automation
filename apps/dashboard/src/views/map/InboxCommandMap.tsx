@@ -2658,7 +2658,11 @@ const SoldCompMapCard = ({
         <button type="button" className="nx-map-card__close-btn" onClick={onClose} aria-label="Close">×</button>
       )}
 
-      {/* Media header */}
+      {/* Media header.
+          IL-03: the image below is SECONDARY media — comparable-sale cards in
+          a long list of many comps, not the selected property, so genuinely
+          offscreen and correctly lazy. The selected property's own imagery is
+          rendered eagerly by SellerMapCard. */}
       <div className="nx-map-card__media">
         {imageUrl ? (
           <img src={imageUrl} alt={comp.property_address_full || 'Comp'} loading="lazy" />
@@ -4218,7 +4222,7 @@ export function InboxCommandMap({
     isMobileRef.current = isMobile
   }, [isMobile])
   const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>(() => (
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'compact' : 'full'
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767.98px)').matches ? 'compact' : 'full'
   ))
 
   useEffect(() => {
@@ -9849,7 +9853,7 @@ export function InboxCommandMap({
                   </div>
                   <div className="nx-icm__controls-grid">
                     <div className="nx-icm__controls-group">
-                      <span className="nx-icm__controls-label">Live Activity</span>
+                      <span className="nx-icm__controls-label">Map Activity</span>
                       <div className="nx-icm__controls-segment">
                         {(['hidden', 'minimal', 'compact', 'expanded', 'docked'] as const).map((value) => (
                           <button

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { useRef, useState, useEffect, useCallback, useLayoutEffect, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
@@ -522,22 +522,18 @@ export const Composer = ({
               >
                 <Icon name="calendar" /><span>Schedule Message</span>
               </button>
-              <button type="button" className="nx-qap-action-btn is-not-ready" disabled title="Coming soon">
-                <Icon name="paperclip" /><span>Attachment</span><span className="nx-qap-badge">Soon</span>
-              </button>
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                onClick={() => { onQuickAction?.('add_note'); setQuickActionsOpen(false) }}
-              >
-                <Icon name="file-text" /><span>Internal Note</span>
-              </button>
+              {/* RC-10 — removed rather than shipped as controls that lie:
+                  · "Attachment" was permanently disabled with title="Coming soon".
+                  · "Internal Note" routed to `add_note`, which only opened the
+                    intelligence panel. There is no note editor and no notes
+                    endpoint (see the Lane D backend handoff).
+                  "Follow-Up" is named for what it actually calls: snoozeThread. */}
               <button
                 type="button"
                 className="nx-qap-action-btn"
                 onClick={() => { onQuickAction?.('snooze'); setQuickActionsOpen(false) }}
               >
-                <Icon name="clock" /><span>Follow-Up</span>
+                <Icon name="clock" /><span>Snooze Thread</span>
               </button>
               <button
                 type="button"
@@ -572,8 +568,18 @@ export const Composer = ({
 
   return (
     <div
-      className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft', isMobile && keyboardInset > 0 && 'is-keyboard-open')}
-      style={isMobile && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}
+      className={cls(
+        'nx-composer',
+        `is-layout-${layoutMode}`,
+        isListening && 'is-listening',
+        isTranslatingDraft && 'is-translating-draft',
+        isMobile && 'nx-composer--mobile-sticky',
+        isMobile && keyboardInset > 0 && 'is-keyboard-open',
+      )}
+      /* R15.5 — sticky above the keyboard, and above the home indicator when
+         the keyboard is closed. `--nx-kb-inset` is consumed by the stylesheet so
+         the safe-area fallback stays in CSS rather than being overwritten here. */
+      style={isMobile ? ({ '--nx-kb-inset': `${keyboardInset}px` } as CSSProperties) : undefined}
     >
       {polishPreview && (
         <div className="nx-polish-preview" role="region" aria-label="Operator polish preview">

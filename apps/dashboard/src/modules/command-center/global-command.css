@@ -67,7 +67,7 @@
 .gcc-search__label {
   display: block;
   margin-bottom: 6px;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgba(191, 213, 236, 0.62);
@@ -325,7 +325,7 @@
   border-color: rgba(166, 214, 255, 0.16);
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1023.98px) {
   .gcc-layout {
     grid-template-columns: 1fr;
   }
@@ -335,7 +335,7 @@
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767.98px) {
   .gcc-overlay {
     padding: 14px;
   }
@@ -360,4 +360,26 @@
   .gcc-item__meta {
     display: none;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Lane A round 2 — §16.1 interactive boundaries.
+   The palette is now the app's ONE search surface, so its field divider, its
+   selected row and its focus ring carry the 3:1 boundary set. Everything else
+   in this file is left as-is; only the four functional categories move.
+   Tokens only — no hex, no !important.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gcc-search {
+  border-bottom-color: var(--lc-line-interactive);
+}
+
+.gcc-item.is-active {
+  border-color: var(--lc-line-selected);
+}
+
+.gcc-search__input:focus-visible,
+.gcc-item:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 2px;
 }

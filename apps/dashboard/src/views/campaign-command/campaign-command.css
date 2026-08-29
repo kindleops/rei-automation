@@ -57,7 +57,7 @@
   border-radius: 999px;
   background: transparent;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -81,7 +81,7 @@
 }
 
 .ccc__filter-count {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 999px;
@@ -136,7 +136,7 @@
 }
 
 .ccc__intel-title {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -158,7 +158,7 @@
 .ccc__intel-card.is-blocked { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 
 .ccc__intel-card-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -186,7 +186,7 @@
 .ccc__intel-issue {
   display: flex;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-1);
   line-height: 1.4;
   padding: 6px 8px;
@@ -295,7 +295,7 @@
 }
 
 .ccm-schedule-field > span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -323,7 +323,7 @@
   border-radius: 8px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .ccm-schedule-summary-item strong {
@@ -360,7 +360,7 @@
 
 .ccm-activation-stat span {
   display: block;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -397,7 +397,7 @@
 }
 
 .ccm-activation-blockers__title {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -520,7 +520,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--text-2);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -585,7 +585,7 @@
 }
 
 .cmp-reach-funnel-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;

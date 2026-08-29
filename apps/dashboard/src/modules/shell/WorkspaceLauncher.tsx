@@ -1,7 +1,7 @@
-import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { pushRoutePath, useRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
+import { Popover } from '../../shared/ui'
 import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
@@ -148,8 +148,6 @@ export const WorkspaceLauncher = ({
   onOpenNotifications,
 }: WorkspaceLauncherProps) => {
   const routePath = useRoutePath()
-  const popoverRef = useRef<HTMLDivElement | null>(null)
-  const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
   const categoryOptions = mobileShell ? MOBILE_CATEGORY_OPTIONS : DESKTOP_CATEGORY_OPTIONS
   const [category, setCategory] = useState<LauncherCategory>(mobileShell ? 'applications' : 'workspaces')
   const [query, setQuery] = useState('')
@@ -160,57 +158,6 @@ export const WorkspaceLauncher = ({
       setCategory(mobileShell ? 'applications' : 'workspaces')
     }
   }, [open, category, categoryOptions, mobileShell])
-
-  const updatePopoverPosition = useCallback(() => {
-    const anchor = anchorRef.current?.getBoundingClientRect()
-    const panel = popoverRef.current
-    if (!anchor) return
-
-    const panelWidth = panel?.offsetWidth || Math.min(540, window.innerWidth - 24)
-    const gap = 8
-    let left = anchor.left
-    if (left + panelWidth > window.innerWidth - 12) {
-      left = Math.max(12, window.innerWidth - panelWidth - 12)
-    }
-
-    setPopoverPosition({
-      top: anchor.bottom + gap,
-      left,
-    })
-  }, [anchorRef])
-
-  const usePopover = !mobileShell && !compact
-
-  useLayoutEffect(() => {
-    if (!open || !usePopover) {
-      setPopoverPosition(null)
-      return
-    }
-    updatePopoverPosition()
-  }, [open, usePopover, updatePopoverPosition, category, query])
-
-  useEffect(() => {
-    if (!open || !usePopover) return
-    const handleViewportChange = () => updatePopoverPosition()
-    window.addEventListener('resize', handleViewportChange)
-    window.addEventListener('scroll', handleViewportChange, true)
-    return () => {
-      window.removeEventListener('resize', handleViewportChange)
-      window.removeEventListener('scroll', handleViewportChange, true)
-    }
-  }, [open, usePopover, updatePopoverPosition])
-
-  useEffect(() => {
-    if (!open || !usePopover) return
-    const handlePointer = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (popoverRef.current?.contains(target)) return
-      if (anchorRef.current?.contains(target)) return
-      onClose()
-    }
-    window.addEventListener('mousedown', handlePointer)
-    return () => window.removeEventListener('mousedown', handlePointer)
-  }, [open, usePopover, onClose, anchorRef])
 
   const pinnedWorkspaces = useMemo(
     () => workspaceOptions.filter((item) => item.pinned || item.key === activeWorkspaceKey).slice(0, 4),
@@ -611,28 +558,19 @@ export const WorkspaceLauncher = ({
     )
   }
 
-  if (!open) return null
-
-  if (!popoverPosition) return null
-
-  const popover = (
-    <div
-      ref={popoverRef}
+  // Lane A migration: the desktop launcher was a hand-rolled portal with a
+  // literal `zIndex: 13000`, no focus trap, no focus restore and no Esc. It now
+  // uses the single shared popover primitive (constitution §11.9–§11.12).
+  return (
+    <Popover
+      open={open}
+      anchorRef={anchorRef}
+      onClose={onClose}
+      label="Workspace launcher"
+      placement="bottom-start"
       className="nx-wsl-popover nx-shell-popover-portal"
-      style={{
-        position: 'fixed',
-        top: popoverPosition.top,
-        left: popoverPosition.left,
-        zIndex: 13000,
-      }}
-      role="dialog"
-      aria-label="Workspace launcher"
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
     >
       {launcherBody}
-    </div>
+    </Popover>
   )
-
-  return typeof document !== 'undefined' ? createPortal(popover, document.body) : null
 }

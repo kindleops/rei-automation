@@ -6,6 +6,7 @@ import { classifyQueueFailure } from '../../domain/queue/classifyFailure'
 import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 import { fetchQueuePage, getBackendBaseUrl } from '../api/backendClient'
 import { buildTextgridFleet, TEXTGRID_FLEET_SELECT } from './textgridFleet'
+import { humanizeQueueStatus } from '../../modules/operations/ops-humanize'
 
 // ── Server-side filter helpers (Phase 1/2) ───────────────────────────────────
 
@@ -140,7 +141,13 @@ const deliveryFromStatus = (status: QueueItemStatus): DeliveryStatus => {
   return 'pending'
 }
 
-const statusLabelFor = (status: QueueItemStatus): string => status.replace(/_/g, ' ')
+/**
+ * LANE F — this used to be `status.replace(/_/g, ' ')`, which put database
+ * enums straight into the UI as lowercase prose: "paused invalid queue row",
+ * "blocked by health guard", "replied before send". Those are internal codes,
+ * not operator language (§0.2).
+ */
+const statusLabelFor = (status: QueueItemStatus): string => humanizeQueueStatus(status)
 
 const asRecord = (value: unknown): AnyRecord => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as AnyRecord : {}

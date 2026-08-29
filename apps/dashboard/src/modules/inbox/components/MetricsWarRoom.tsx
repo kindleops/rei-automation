@@ -567,7 +567,7 @@ function WrUsaMap({
                       y={sp.cy}
                       className="wr-map__state-label"
                       style={{
-                        fontSize: 8,
+                        fontSize: 11,
                         opacity: hasData ? 0.9 : 0.45,
                         fill: hasData ? '#fff' : 'rgba(140,180,240,0.7)',
                       }}
@@ -707,7 +707,7 @@ function WrRevenue({ spend, offerMetrics, loading }: {
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <WrSkeleton key={i} h={14} />)
         ) : !offerMetrics || !offerMetrics.isWired ? (
-          <div className="wr-empty">Offer &amp; contract pipeline not wired yet.<br /><span style={{ fontSize: 9, opacity: 0.6 }}>Connect offers / contracts / closings tables.</span></div>
+          <div className="wr-empty">Offer &amp; contract pipeline not wired yet.<br /><span style={{ fontSize: 11, opacity: 0.6 }}>Connect offers / contracts / closings tables.</span></div>
         ) : rows.length === 0 ? (
           <div className="wr-empty">No offer/contract activity in this period.</div>
         ) : (
@@ -924,7 +924,7 @@ function WrLineChart({ timeSeries, loading }: { timeSeries: TimeSeriesPoint[]; l
       </div>
       <div className="wr-panel__body wr-linechart-body">
         {!hasData ? (
-          <div className="wr-empty">No time-series data for this period.<br /><span style={{ fontSize: 9, opacity: 0.6 }}>Send messages to generate activity data.</span></div>
+          <div className="wr-empty">No time-series data for this period.<br /><span style={{ fontSize: 11, opacity: 0.6 }}>Send messages to generate activity data.</span></div>
         ) : (
           <svg viewBox={`0 0 ${W} ${H}`} className="wr-linechart-svg" preserveAspectRatio="xMidYMid meet">
             <defs>
@@ -1084,10 +1084,10 @@ function WrLeaderboard({
                   <span className="wr-lb__rank">{i + 1}</span>
                   <span className="wr-lb__name">{r.label}</span>
                   <span className="wr-lb__val">{fmt.int(r.sent)}</span>
-                  <span style={{ color: replyRate > 6 ? 'var(--wr-teal)' : 'var(--wr-muted)', fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                  <span style={{ color: replyRate > 6 ? 'var(--wr-teal)' : 'var(--wr-muted)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
                     {r.sent > 0 ? `${replyRate.toFixed(1)}%` : '—'}
                   </span>
-                  <span style={{ color: r.optOutRate > 2 ? 'var(--wr-amber)' : 'var(--wr-dimmer)', fontVariantNumeric: 'tabular-nums', fontSize: 10 }}>
+                  <span style={{ color: r.optOutRate > 2 ? 'var(--wr-amber)' : 'var(--wr-dimmer)', fontVariantNumeric: 'tabular-nums', fontSize: 11 }}>
                     {fmt.pct(r.optOutRate)}
                   </span>
                 </div>
@@ -1112,7 +1112,7 @@ function WrCarrierIntel({ carriers, loading }: { carriers: CarrierPerformance[];
           Array.from({ length: 4 }).map((_, i) => <WrSkeleton key={i} h={18} />)
         ) : !carriers.length ? (
           <div className="wr-empty">Carrier data not available.<br />
-            <span style={{ fontSize: 9, opacity: 0.6 }}>Populate <code>carrier_name</code> in <code>message_events</code> to enable.</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Populate <code>carrier_name</code> in <code>message_events</code> to enable.</span>
           </div>
         ) : (
           carriers.map(c => (
@@ -1163,7 +1163,7 @@ function WrNumbersHealth({ numbers, loading }: { numbers: TextgridNumberHealth[]
           Array.from({ length: 4 }).map((_, i) => <WrSkeleton key={i} h={16} />)
         ) : !numbers.length ? (
           <div className="wr-empty">No TextGrid numbers configured.<br />
-            <span style={{ fontSize: 9, opacity: 0.6 }}>Check the <code>textgrid_numbers</code> table.</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Check the <code>textgrid_numbers</code> table.</span>
           </div>
         ) : (
           <>
@@ -1292,7 +1292,7 @@ function WrBuyerDemand({ metrics, loading }: { metrics: BuyerDemandMetrics | nul
           <WrSkeleton h={80} />
         ) : !metrics || !metrics.isWired ? (
           <div className="wr-empty">Buyer match data not wired yet.<br />
-            <span style={{ fontSize: 9, opacity: 0.6 }}>Connect buyer_matches / buyer_criteria tables.</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Connect buyer_matches / buyer_criteria tables.</span>
           </div>
         ) : (
           <div className="wr-buyer-layout">
@@ -1363,7 +1363,7 @@ function WrAgentIntelligence({ agents, loading, compact = false }: { agents: Age
           Array.from({ length: compact ? 2 : 4 }).map((_, i) => <WrSkeleton key={i} h={52} />)
         ) : !agents.length ? (
           <div className="wr-empty">No agent activity in this period.<br />
-            <span style={{ fontSize: 9, opacity: 0.6 }}>Populate <code>sender_name</code> in <code>message_events</code> to enable agent tracking.</span>
+            <span style={{ fontSize: 11, opacity: 0.6 }}>Populate <code>sender_name</code> in <code>message_events</code> to enable agent tracking.</span>
           </div>
         ) : (
           <>
@@ -1409,7 +1409,7 @@ function WrAgentIntelligence({ agents, loading, compact = false }: { agents: Age
                       <span style={{ color: a.optOutRate > 2 ? 'var(--wr-amber)' : 'var(--wr-muted)' }}>{fmt.pct(a.optOutRate)}</span>
                       <span style={{ color: 'var(--wr-muted)' }}>{a.bestMarket || '—'}</span>
                       <span style={{ color: 'var(--wr-purple)' }}>{fmt.int(a.contractsInfluenced)}</span>
-                      <span className={cls('wr-agent-badge', `wr-agent-badge--${s}`)} style={{ fontSize: 9 }}>{agentStatusLabel(s)}</span>
+                      <span className={cls('wr-agent-badge', `wr-agent-badge--${s}`)} style={{ fontSize: 11 }}>{agentStatusLabel(s)}</span>
                     </div>
                   )
                 })}
@@ -1440,7 +1440,7 @@ function WrTemplateTable({ templates, loading }: { templates: TemplatePerformanc
           {t.preview ? t.preview.slice(0, 40) + (t.preview.length > 40 ? '…' : '') : (t.name ?? t.templateId.slice(0, 16))}
         </span>
         {t.agentPersona && (
-          <span style={{ fontSize: 8, opacity: 0.55, color: 'var(--wr-purple)' }}>{t.agentPersona}{t.stage ? ` · ${t.stage}` : ''}</span>
+          <span style={{ fontSize: 11, opacity: 0.55, color: 'var(--wr-purple)' }}>{t.agentPersona}{t.stage ? ` · ${t.stage}` : ''}</span>
         )}
       </span>
       <span style={{ color: 'var(--wr-muted)' }}>{t.language || 'EN'}</span>
@@ -1740,7 +1740,7 @@ export function MetricsRail25({
       </div>
       <div className="wr-rail__scroll">
         {alerts.slice(0, 1).map((a, i) => (
-          <div key={i} className={cls('wr-alert', a.severity === 'critical' ? 'wr-alert--critical' : a.severity === 'warning' ? 'wr-alert--warning' : 'wr-alert--info')} style={{ margin: '6px 8px 0', fontSize: 10 }}>
+          <div key={i} className={cls('wr-alert', a.severity === 'critical' ? 'wr-alert--critical' : a.severity === 'warning' ? 'wr-alert--warning' : 'wr-alert--info')} style={{ margin: '6px 8px 0', fontSize: 11 }}>
             <span className="wr-alert__msg">{a.message.slice(0, 55)}{a.message.length > 55 && '…'}</span>
           </div>
         ))}

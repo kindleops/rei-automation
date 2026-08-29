@@ -1,8 +1,12 @@
 import { asString } from '../../lib/data/shared'
 import type { ThreadMessage, ThreadIntelligenceRecord } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
-
-const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
+import { buildMediaIdentity } from '../../shared/media/identity'
+import {
+  buildAerialImageUrl,
+  buildStreetImageUrl,
+  type MediaSizeName,
+} from '../../shared/media/urls'
 
 export interface NormalizedPropertySnapshot {
   // Property Identity
@@ -109,33 +113,36 @@ export const buildPropertyExternalLinks = (address: string | null): ExternalLink
 }
 
 /**
- * Build Google Street View API URL. Prefers lat/lng coordinates over address string.
+ * Build a static Google Street View URL.
+ *
+ * Thin adapter over `shared/media` — the single URL builder and the single
+ * place that decides whether a coordinate pair is real. Kept here so the ~10
+ * existing call sites keep working unchanged.
+ *
+ * Behaviour this fixes versus the previous inline implementation:
+ *  - no hardcoded API key fallback; an unset key returns `null` so callers can
+ *    surface KEY_MISSING instead of silently using a literal
+ *  - `(0, 0)` is rejected as the unset sentinel it is, so a row carrying real
+ *    coordinates is no longer routed to fuzzy address geocoding
+ *  - address sentinels such as the literal string "No Address" are rejected
+ *    rather than URL-encoded and geocoded
+ *  - `return_error_code=true` is always set, so "no imagery here" arrives as an
+ *    HTTP error the `<img>` can react to, not as a grey tile behind HTTP 200
+ *  - `size` is a real parameter, not a post-hoc string replace that never matched
  */
 export const buildStreetViewUrl = (
   address: string | null,
   lat?: number | null,
   lng?: number | null,
-): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
-  const location = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
-  if (!location) return null
-  console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
-  return `https://maps.googleapis.com/maps/api/streetview?size=640x400&location=${location}&fov=80&heading=210&pitch=2&scale=2&key=${apiKey}`
-}
+  size: MediaSizeName = 'hero',
+): string | null => buildStreetImageUrl(buildMediaIdentity({ address, lat, lng }), size)
 
 export const buildAerialViewUrl = (
   address: string | null,
   lat?: number | null,
   lng?: number | null,
-): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
-  const center = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
-  if (!center) return null
-  console.debug('[GOOGLE_MAP_SOURCE]', { source: hasCoords ? 'coords' : 'address', lat, lng, address })
-  return `https://maps.googleapis.com/maps/api/staticmap?size=600x300&maptype=satellite&scale=2&zoom=19&center=${center}&key=${apiKey}`
-}
+  size: MediaSizeName = 'card',
+): string | null => buildAerialImageUrl(buildMediaIdentity({ address, lat, lng }), size)
 
 /**
  * Normalize raw intelligence data into a structured property snapshot.

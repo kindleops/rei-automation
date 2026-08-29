@@ -1,0 +1,403 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   lc-tokens.css — LeadCommand semantic token layer
+   Owner: Lane A (global shell + visual system)
+   Constitution: §1 tokens · §2 typography · §3 spacing · §4 surfaces ·
+                 §5 borders/elevation · §7 motion · §11 layering · §15 breakpoints
+
+   RULES OF THIS FILE
+   - This is the ONLY file allowed to reference raw `--nx-*` primitives (R1.2).
+   - It defines NO raw colour of its own. Every colour is a mapping onto the
+     existing per-theme `--nx-*` values in styles/nexus-theme.css, so all
+     10 themes × 12 accents keep working unchanged (locked product decision).
+   - Product components consume `--lc-*` exclusively.
+
+   Loaded from main.tsx AFTER nexus-theme.css / nexus-theme-contract.css so the
+   primitives it maps are already declared.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── §4 Surface hierarchy — exactly 5 levels ───────────────────────────
+     Fallback chains exist because not every theme block emits every
+     primitive (e.g. `light` omits --nx-surface-elevated / --nx-text-soft). */
+  --lc-surface-base: var(--nx-bg);
+  --lc-surface-sunken: var(--nx-bg-2, var(--nx-bg));
+  --lc-surface-raised: var(--nx-surface, var(--nx-card));
+  --lc-surface-overlay: var(--nx-panel, var(--nx-surface));
+  --lc-surface-popover: var(--nx-surface-elevated, var(--nx-card-strong, var(--nx-card)));
+
+  /* ── §1 Text — 4 roles only ────────────────────────────────────────── */
+  --lc-text-primary: var(--nx-text-strong, var(--nx-text));
+  --lc-text-secondary: var(--nx-text);
+  --lc-text-muted: var(--nx-muted);
+  --lc-text-inverse: var(--nx-button-text);
+
+  /* ── §1 Line + accent ──────────────────────────────────────────────── */
+  --lc-line: var(--nx-border);
+  --lc-line-strong: var(--nx-border-strong, var(--nx-border));
+  --lc-accent: var(--nx-accent);
+  --lc-accent-soft: var(--nx-accent-soft);
+  --lc-accent-rgb: var(--nx-accent-rgb);
+  --lc-accent-contrast: var(--nx-bg);
+
+  /* ── §16.1 INTERACTIVE boundaries — 3:1, all 10 themes ────────────────
+     Round 1 measured `--lc-line` at 1.14–1.29:1 and `--lc-line-strong` at
+     1.40–1.88:1 against `--lc-surface-raised` in every theme, i.e. every
+     boundary in the app failed the 3:1 rule. Raising ALL of them would break
+     the locked MAP COMMAND glass language, which depends on near-invisible
+     hairlines.
+
+     Operator decision (round 2): only boundaries the operator has to *act on*
+     are raised — focus rings, selected rows, form fields and pane dividers.
+     Decorative card/panel hairlines keep `--lc-line` / `--lc-glass-border`;
+     that is a recorded, accepted deviation from §16.1.
+
+     `--lc-line-interactive` is derived from `--lc-text-muted` (measured
+     5.36–7.88:1 on every surface in every theme) mixed back toward the surface
+     until it lands just above 3:1. It defines no colour of its own, so all 10
+     themes and 12 accents keep working (R1.2). */
+  --lc-line-interactive: color-mix(in srgb, var(--lc-text-muted) 78%, var(--lc-surface-raised));
+
+  /* Selection and focus share one accent-derived colour so "this is the thing
+     you are on" reads identically everywhere (§6.2). */
+  --lc-line-selected: var(--lc-focus-ring);
+
+  /* §16.2 focus ring colour. Defaults to the accent — but in the `light` theme
+     the raw accent measures 2.43:1 against every surface, so the ring itself
+     failed 3:1. The light override below darkens it toward the text colour,
+     keeping the accent hue while clearing the threshold. */
+  --lc-focus-ring: var(--lc-accent);
+
+  /* ── §1 Status — semantic, never raw hex at call sites ─────────────── */
+  --lc-positive: var(--nx-success);
+  --lc-caution: var(--nx-warning);
+  --lc-critical: var(--nx-danger);
+  --lc-neutral: var(--nx-muted);
+
+  /* Field / control surfaces */
+  --lc-field-bg: var(--nx-input-bg, var(--nx-bg-2));
+  --lc-control-bg: var(--nx-button-bg, var(--nx-card));
+
+  /* ── Liquid glass (MAP COMMAND visual language) ────────────────────
+     Locked direction: dense tactical-messenger, liquid-glass chrome. The raw
+     recipe already exists in styles/nx-glass-system.css; the semantic layer
+     names it so product code stops re-inventing 936 ad-hoc shadows. Applies to
+     app chrome and to surface levels 3–4 only (§4.2) — never to a list row. */
+  --lc-glass-bg: var(--nx-glass-bg-tinted, var(--nx-glass-bg));
+  --lc-glass-border: var(--nx-glass-border, var(--nx-border));
+  --lc-glass-divider: var(--nx-glass-divider, var(--nx-border));
+  --lc-glass-hover: var(--nx-glass-bg-hover, var(--nx-accent-soft));
+  --lc-glass-blur: var(--nx-shell-glass-blur, 28px);
+  --lc-glass-saturate: var(--nx-shell-glass-saturate, 1.6);
+  --lc-glass-highlight: var(--nx-glass-inner-highlight, inset 0 1px 0 transparent);
+
+  /* Scrim behind level-3 overlays */
+  --lc-scrim: rgb(0 0 0 / 0.55);
+
+  /* ── §2 Type scale — 8 steps, 11px floor, no exceptions ────────────── */
+  --lc-text-2xs: 11px;   /* absolute floor — meta only */
+  --lc-text-xs: 12px;
+  --lc-text-sm: 13px;    /* dense body — list rows, tables, panels */
+  --lc-text-base: 14px;
+  --lc-text-md: 16px;
+  --lc-text-lg: 20px;
+  --lc-text-xl: 26px;
+  --lc-text-2xl: 34px;
+
+  /* §2.3 Line height — two values only */
+  --lc-leading-tight: 1.25;  /* >= 20px */
+  --lc-leading-body: 1.45;   /* <= 16px */
+
+  /* §2.4 Weights — three values only */
+  --lc-weight-body: 400;
+  --lc-weight-emphasis: 500;
+  --lc-weight-heading: 600;
+
+  /* §2.5 Letter-spacing — uppercase micro-labels only */
+  --lc-tracking-eyebrow: 0.06em;
+
+  /* §2.6 Fonts */
+  --lc-font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --lc-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ── §3 Spacing — 4px grid, 7 steps ────────────────────────────────── */
+  --lc-space-1: 4px;
+  --lc-space-2: 8px;
+  --lc-space-3: 12px;
+  --lc-space-4: 16px;
+  --lc-space-5: 24px;
+  --lc-space-6: 32px;
+  --lc-space-7: 48px;
+
+  /* §3.3 Panel gutter — responsive below */
+  --lc-gutter: var(--lc-space-4);
+
+  /* ── §5 Radii — 6 values ───────────────────────────────────────────── */
+  --lc-radius-xs: 4px;
+  --lc-radius-sm: 6px;
+  --lc-radius-md: 10px;
+  --lc-radius-lg: 14px;
+  --lc-radius-xl: 20px;
+  --lc-radius-pill: 999px;
+
+  /* ── §5 Elevation — 5 shadows ──────────────────────────────────────── */
+  --lc-elev-0: none;
+  --lc-elev-1: 0 1px 2px rgb(0 0 0 / 0.18);
+  --lc-elev-2: 0 4px 12px rgb(0 0 0 / 0.22);
+  --lc-elev-3: 0 12px 32px rgb(0 0 0 / 0.28);
+  --lc-elev-4: 0 24px 64px rgb(0 0 0 / 0.34);
+
+  /* §4.2 Blur — levels 3 and 4 only */
+  --lc-blur-sm: 8px;
+  --lc-blur-md: 16px;
+  --lc-blur-lg: 28px;
+
+  /* ── §7 Motion ─────────────────────────────────────────────────────── */
+  --lc-dur-1: 120ms;  /* hover, focus, colour */
+  --lc-dur-2: 200ms;  /* dropdown, tooltip, toast */
+  --lc-dur-3: 280ms;  /* drawer, sheet, modal */
+  --lc-dur-4: 400ms;  /* full-screen transition */
+  --lc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lc-ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+  --lc-ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── §11 Layering — the single z-index scale ───────────────────────── */
+  --lc-z-base: 0;
+  --lc-z-sticky: 100;
+  --lc-z-drawer: 1000;
+  --lc-z-modal: 2000;
+  --lc-z-popover: 3000;
+  --lc-z-tooltip: 4000;
+  --lc-z-toast: 5000;
+
+  /* ── §15 Breakpoints — 5, and only these (for JS + docs parity) ────── */
+  --lc-bp-xs: 480px;
+  --lc-bp-sm: 768px;
+  --lc-bp-md: 1024px;
+  --lc-bp-lg: 1440px;
+
+  /* §15.3 Touch target floor */
+  --lc-tap-min: 44px;
+
+  /* Shell geometry */
+  --lc-rail-height: 48px;
+}
+
+/* ── Nested theme scopes ───────────────────────────────────────────────
+   Custom properties resolve where they are DECLARED, so a `--lc-*` declared on
+   `:root` keeps the root theme's colour even inside an element that re-declares
+   `--nx-*`. Re-declaring the semantic set on any element carrying
+   `data-nexus-theme` lets theme swatches and previews paint their own theme's
+   real values — which is how R1.3 ("swatches read computed CSS custom
+   properties") is satisfied without forking colour into TypeScript.
+   `[data-nexus-theme]` also matches <html>, and emits identical values there. */
+[data-nexus-theme] {
+  --lc-surface-base: var(--nx-bg);
+  --lc-surface-sunken: var(--nx-bg-2, var(--nx-bg));
+  --lc-surface-raised: var(--nx-surface, var(--nx-card));
+  --lc-surface-overlay: var(--nx-panel, var(--nx-surface));
+  --lc-surface-popover: var(--nx-surface-elevated, var(--nx-card-strong, var(--nx-card)));
+  --lc-text-primary: var(--nx-text-strong, var(--nx-text));
+  --lc-text-secondary: var(--nx-text);
+  --lc-text-muted: var(--nx-muted);
+  --lc-text-inverse: var(--nx-button-text);
+  --lc-line: var(--nx-border);
+  --lc-line-strong: var(--nx-border-strong, var(--nx-border));
+  --lc-accent: var(--nx-accent);
+  --lc-accent-soft: var(--nx-accent-soft);
+  --lc-accent-rgb: var(--nx-accent-rgb);
+  --lc-accent-contrast: var(--nx-bg);
+  --lc-line-interactive: color-mix(in srgb, var(--lc-text-muted) 78%, var(--lc-surface-raised));
+  --lc-line-selected: var(--lc-focus-ring);
+  --lc-focus-ring: var(--lc-accent);
+  --lc-positive: var(--nx-success);
+  --lc-caution: var(--nx-warning);
+  --lc-critical: var(--nx-danger);
+  --lc-neutral: var(--nx-muted);
+  --lc-field-bg: var(--nx-input-bg, var(--nx-bg-2));
+  --lc-control-bg: var(--nx-button-bg, var(--nx-card));
+
+  /* ── Liquid glass (MAP COMMAND visual language) ────────────────────
+     Locked direction: dense tactical-messenger, liquid-glass chrome. The raw
+     recipe already exists in styles/nx-glass-system.css; the semantic layer
+     names it so product code stops re-inventing 936 ad-hoc shadows. Applies to
+     app chrome and to surface levels 3–4 only (§4.2) — never to a list row. */
+  --lc-glass-bg: var(--nx-glass-bg-tinted, var(--nx-glass-bg));
+  --lc-glass-border: var(--nx-glass-border, var(--nx-border));
+  --lc-glass-divider: var(--nx-glass-divider, var(--nx-border));
+  --lc-glass-hover: var(--nx-glass-bg-hover, var(--nx-accent-soft));
+  --lc-glass-blur: var(--nx-shell-glass-blur, 28px);
+  --lc-glass-saturate: var(--nx-shell-glass-saturate, 1.6);
+  --lc-glass-highlight: var(--nx-glass-inner-highlight, inset 0 1px 0 transparent);
+}
+
+/* §16.1 — `light` is the one theme whose accent fails as a boundary colour
+   (2.43:1 on base, raised and popover, measured round 1). Darken it toward the
+   primary text colour: same hue, ≥3:1. Every other theme keeps the raw accent. */
+:root[data-nexus-theme='light'],
+[data-nexus-theme='light'] {
+  --lc-focus-ring: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-text-primary));
+}
+
+/* ── §3.2 Density modes — set on <html data-lc-density> ────────────────
+   Compact reduces row padding one step. It never reduces font size below the
+   §2 floor and never shrinks hit targets below §15.3. */
+:root[data-lc-density='compact'] {
+  --lc-row-pad-y: var(--lc-space-1);
+  --lc-row-pad-x: var(--lc-space-2);
+  --lc-gutter: var(--lc-space-3);
+}
+
+:root,
+:root[data-lc-density='comfortable'] {
+  --lc-row-pad-y: var(--lc-space-2);
+  --lc-row-pad-x: var(--lc-space-3);
+}
+
+/* §3.3 Panel gutters step down with viewport */
+@media (max-width: 1023.98px) {
+  :root {
+    --lc-gutter: var(--lc-space-3);
+  }
+}
+
+/* ── §7.4 / §16.9 Reduced motion, honoured globally, in ONE place ──────
+   DELIBERATE, DOCUMENTED EXCEPTION to R1.6 (no new `!important`):
+   the app ships 6,691 existing `!important` declarations, 853 transitions and
+   444 animations. R7.4 demands 100% coverage — that is unreachable from a
+   non-important universal rule. This is the single `!important` block Lane A
+   introduces, and it only ever *removes* motion.
+   `data-lc-motion="off"` is driven by settings.animationsEnabled (R7.5), which
+   was previously a dead setting that nothing read. */
+/* LANE H — the `prefers-reduced-motion` block that used to live here has been
+   removed, NOT weakened. It selected on a bare `*`, which scores (0,0,0), so every
+   class-scoped `transition: … !important` in the 6,691 existing declarations still
+   outranked it; Lane G measured `.nx-send-button` (inbox-polish.css:4418) still
+   transitioning under `prefers-reduced-motion: reduce` with this rule active.
+   The surviving rule is Lane G's `:root:root *` form in `lc-responsive.css`, which
+   scores (0,2,0), beats a single-class `!important`, and re-measured to 0 animating
+   and 0 transitioning elements. Keeping both would have violated R7.4's "in ONE
+   place" while leaving the ineffective copy to imply coverage it never had.
+
+   The `data-lc-motion='off'` rule below stays here: it is Lane A's wiring of
+   settings.animationsEnabled (R7.5, previously a dead setting), and its
+   `:root[data-lc-motion='off'] *` selector already scores (0,2,0). */
+
+:root[data-lc-motion='off'] *,
+:root[data-lc-motion='off'] *::before,
+:root[data-lc-motion='off'] *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── §16.2 Focus visibility ────────────────────────────────────────────
+   Every interactive element gets a visible focus ring: 2px, 2px offset, and a
+   colour that clears 3:1 in all 10 themes (see --lc-focus-ring above).
+   Scoped to `.lc-*` owned surfaces plus a global baseline for elements that do
+   not already opt out. */
+.lc-ui :focus-visible,
+.lc-focus-ring:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--lc-radius-sm);
+}
+
+/* ── §16.1 Interactive boundaries — the 3:1 set ────────────────────────
+   Four categories only, per the round-2 operator decision:
+     1. focus rings          — above
+     2. form fields          — anything the operator types or picks into
+     3. selected rows        — the row/option currently acted on
+     4. pane dividers        — §12.4 draggable separators, which are controls
+   Everything else keeps the decorative hairline. */
+.lc-ui input:not([type='checkbox']):not([type='radio']),
+.lc-ui select,
+.lc-ui textarea,
+.lc-field {
+  border-color: var(--lc-line-interactive);
+}
+
+/* The rule above only reaches shell-owned surfaces. Measured in a real browser,
+   every legacy field outside them still drew its edge at 1.24:1 — `.occ-search`
+   and `.occ-filter-select` on /queue, and the same story in every other module.
+   "Form fields go to 3:1" has to mean all of them, so the rule below reaches
+   fields wherever they live.
+
+   Why the doubled `[class]`: module sheets style these with class selectors, so
+   a bare `input` selector loses the cascade. `input[class][class]` is (0,2,1) —
+   it beats a one- or two-class module rule WITHOUT `!important`, which §1 bans
+   and of which this app already carries 6,691.
+
+   This only sets a COLOUR. A field with `border-width: 0` (the inbox composer,
+   the palette input, every borderless search box) is untouched, so no field
+   gains an edge it did not already draw — the existing edges just become
+   visible ones. Width, radius, background and focus styling are left to the
+   owning lane. */
+input[class][class]:not([type='checkbox']):not([type='radio']):not([type='range']),
+select[class][class],
+textarea[class][class] {
+  border-color: var(--lc-line-interactive);
+}
+
+/* §12.1/§12.4 — a split-pane divider is an interactive control with
+   `role="separator"`, not decoration. Any lane's divider inherits 3:1 here. */
+[role='separator'][tabindex],
+[role='separator'][aria-valuenow],
+.lc-pane-divider {
+  background-color: var(--lc-line-interactive);
+}
+
+[role='separator'][tabindex]:focus-visible,
+[role='separator'][aria-valuenow]:focus-visible,
+.lc-pane-divider:focus-visible {
+  outline: 2px solid var(--lc-focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Skip link (§16.6 landmarks / keyboard entry) ─────────────────────── */
+.lc-skip-link {
+  position: fixed;
+  left: var(--lc-space-2);
+  z-index: var(--lc-z-toast);
+  /* §15.3 — 44×44 minimum even though this control is keyboard-only. */
+  display: inline-flex;
+  align-items: center;
+  min-width: 200px;
+  min-height: var(--lc-tap-min);
+  padding: var(--lc-space-2) var(--lc-space-4);
+  font-family: var(--lc-font-ui);
+  font-size: var(--lc-text-sm);
+  font-weight: var(--lc-weight-emphasis);
+  line-height: var(--lc-leading-body);
+  color: var(--lc-text-primary);
+  background: var(--lc-surface-popover);
+  border: 1px solid var(--lc-line-strong);
+  border-radius: var(--lc-radius-sm);
+  box-shadow: var(--lc-elev-2);
+  /* Off-canvas until focused. `top` (not transform) so the reduced-motion
+     switch, which neutralises transitions, can never leave it stranded. */
+  top: calc(-1 * var(--lc-space-7) - var(--lc-space-5));
+  transition: top var(--lc-dur-1) var(--lc-ease-out);
+}
+
+.lc-skip-link:focus,
+.lc-skip-link:focus-visible {
+  top: var(--lc-space-2);
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only utility owned by the semantic layer. */
+.lc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

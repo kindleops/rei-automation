@@ -254,7 +254,7 @@ export const CampaignIntelligenceRail = ({ campaign }: { campaign: CampaignSumma
           </>
         ) : (
           <>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 4 }}>Metrics</div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 4 }}>Metrics</div>
             {metrics.map((m) => (
               <div key={m.label} className="ccc__hs-metric">
                 <span className="ccc__hs-metric-label">{m.label}</span>
@@ -580,7 +580,7 @@ const TargetsTab = ({ campaignId, isMobileLayout = false }: { campaignId: string
                     <td style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-2)' }}>{t.property_address_full ?? '—'}</td>
                     <td>{t.market ?? '—'}</td>
                     <td>{t.property_address_state ?? '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 10 }}>{t.canonical_e164 ?? '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.canonical_e164 ?? '—'}</td>
                     <td>
                       {t.language && (
                         <span className="ccc__lang-badge">{t.language.toUpperCase()}</span>
@@ -598,11 +598,11 @@ const TargetsTab = ({ campaignId, isMobileLayout = false }: { campaignId: string
                         {t.target_status.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td style={{ color: 'var(--text-2)', fontSize: 10 }}>{t.last_contact_at ? fmtDate(t.last_contact_at) : '—'}</td>
+                    <td style={{ color: 'var(--text-2)', fontSize: 11 }}>{t.last_contact_at ? fmtDate(t.last_contact_at) : '—'}</td>
                     <td>
                       {t.suppression_status === 'suppressed' && <span className="ccc__suppressed-badge">SUPP</span>}
                     </td>
-                    <td style={{ color: 'var(--text-2)', fontSize: 10, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td style={{ color: 'var(--text-2)', fontSize: 11, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {t.template_name ?? (t.template_id ? t.template_id : '—')}
                     </td>
                   </tr>
@@ -614,7 +614,7 @@ const TargetsTab = ({ campaignId, isMobileLayout = false }: { campaignId: string
             <button type="button" className="ccc-btn" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
               Previous
             </button>
-            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
               Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount.toLocaleString()}
             </span>
             <button type="button" className="ccc-btn" disabled={page >= totalPages || loading} onClick={() => setPage((p) => p + 1)}>
@@ -775,7 +775,7 @@ const RepliesTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignSu
               </span>
             </div>
             <div className="ccc__reply-message">"{r.inbound_message}"</div>
-            <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 5 }}>{r.property_address_full}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 5 }}>{r.property_address_full}</div>
             <div className="ccc__reply-footer">
               <span>{fmtDate(r.created_at)}</span>
               <span className="ccc__reply-next-action">{r.next_action}</span>
@@ -912,7 +912,7 @@ const GeographyTab = ({ campaign }: { campaign: CampaignSummary }) => {
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-2)' }}>{fmt(e.sent)} sent · {fmt(e.delivered)} dlv</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{fmt(e.sent)} sent · {fmt(e.delivered)} dlv</div>
               <span className={cls('ccc__perf-badge', `is-${e.performance}`)}>{e.performance}</span>
             </div>
           </div>
@@ -966,7 +966,7 @@ const TemplatesTab = ({ campaign }: { campaign: CampaignSummary }) => {
               <td><RateCell value={t.delivery_rate} /></td>
               <td><RateCell value={t.reply_rate} good={12} warn={7} /></td>
               <td><RateCell value={t.opt_out_rate} isOptOut /></td>
-              <td style={{ color: 'var(--text-2)', fontSize: 10 }}>{t.last_used_at ? fmtDate(t.last_used_at) : '—'}</td>
+              <td style={{ color: 'var(--text-2)', fontSize: 11 }}>{t.last_used_at ? fmtDate(t.last_used_at) : '—'}</td>
             </tr>
           ))}
         </tbody>

@@ -17,7 +17,7 @@ export const DevApiBanner = () => {
   const backendUrl = import.meta.env.VITE_BACKEND_API_URL || config?.baseUrl || 'same-origin proxy'
 
   return (
-    <div style={{
+    <div data-lc-dev-overlay="true" style={{
       position: 'fixed',
       bottom: 0,
       left: 0,
