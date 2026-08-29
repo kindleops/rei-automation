@@ -100,6 +100,19 @@ export function CampaignMobileActionDock({
             Refresh
           </button>
         )}
+        {/* The campaign creator had no entry point at all on mobile — detail
+            offered only the lifecycle action and a utility sheet, so an existing
+            campaign's targeting could not be opened on a phone. 'edit' routes
+            through executeCampaignAction to onOpenBuilder(campaign, 'edit'),
+            the same builder desktop uses. */}
+        <button
+          type="button"
+          className="ccc-mobile-dock__setup"
+          onClick={() => onAction('edit', campaign)}
+        >
+          <Icon name="settings" size={14} />
+          Setup
+        </button>
         <button
           type="button"
           className="ccc-mobile-dock__more"

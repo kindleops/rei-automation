@@ -1,6 +1,6 @@
 import { computeCampaignHealth, computeCampaignReadiness } from '../campaign-health'
 import type { CampaignSummary } from '../campaigns.types'
-import { cls, fmt, fmtPct, fmtRelative } from '../campaign-formatters'
+import { cls, fmt, fmtPct, resolveNextSend } from '../campaign-formatters'
 
 interface CampaignMobileIntelRibbonProps {
   campaign: CampaignSummary
@@ -17,7 +17,10 @@ export function CampaignMobileIntelRibbon({ campaign }: CampaignMobileIntelRibbo
         { label: 'Readiness', value: readiness.label, tone: readiness.level },
         { label: 'Ready', value: fmt(campaign.ready_targets), tone: 'accent' },
         { label: 'Queue', value: fmt(queueRows), tone: '' },
-        { label: 'Next', value: fmtRelative(campaign.next_send_at), tone: '' },
+        // resolveNextSend, never raw fmtRelative: a paused campaign with a past
+        // scheduled_for otherwise renders a countdown to an event that cannot occur
+        // ("55d ago" under a NEXT label).
+        { label: 'Next', value: resolveNextSend(campaign).label, tone: '' },
       ]
     : [
         {

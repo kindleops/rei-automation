@@ -50,8 +50,20 @@ import { QueueInlineFlow } from './components/QueueInlineFlow'
 import { SenderIntelligenceModule } from './components/senders/SenderIntelligenceModule'
 import { buildSenderStats, type SenderStat } from './sender-fleet-stats'
 import { OccQueueFilterMenu } from './components/OccQueueFilterMenu'
-import { OccMobileDossierSheet } from './components/OccMobileDossierSheet'
-import { OccMobileQueueCard } from './components/OccMobileQueueCard'
+import { QueueMobileHeader, type QueueMobileStat } from './components/mobile/QueueMobileHeader'
+import { QueueMobileControlBar } from './components/mobile/QueueMobileControlBar'
+import { QueueMobileRow } from './components/mobile/QueueMobileRow'
+import { QueueMobileSelectionBar } from './components/mobile/QueueMobileSelectionBar'
+import { QueueMobilePager } from './components/mobile/QueueMobilePager'
+import { QueueMobileItemSheet } from './components/mobile/QueueMobileItemSheet'
+import { EventsMobileFeed } from './components/mobile/EventsMobileFeed'
+import { FailuresMobileList } from './components/mobile/FailuresMobileList'
+import { MarketsMobileList, SendersMobileList } from './components/mobile/FleetMobileList'
+import {
+  resolveQueueCapability,
+  resolveQueueStateMap,
+  summarizeQueueAttention,
+} from './queue-mobile-semantics'
 import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
 import './components/templates/template-intelligence.css'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
@@ -81,6 +93,8 @@ import {
   queueShowsMessagePreview,
 } from './queue-ui-helpers'
 import '../../modules/inbox/queue-ops.css'
+// Mobile authority sheet — imported last so it wins over queue-ops.css on phones.
+import './queue-mobile.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -128,6 +142,24 @@ const DATE_PRESET_LABELS: Record<DatePreset, string> = {
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const
+
+/** Compact range token for the mobile control bar — never a full-width band. */
+const MOBILE_RANGE_TOKEN: Record<DatePreset, string> = {
+  today: 'Today', '24h': '24h', '7d': '7d', '14d': '14d', '30d': '30d',
+  '60d': '60d', '90d': '90d', all: 'All', custom: 'Custom',
+}
+
+const MOBILE_SECTION_LABEL: Record<QueueSection, string> = {
+  queue: 'Queue',
+  events: 'Events',
+  failures: 'Failures',
+  market: 'Markets',
+  senders: 'Senders',
+  templates: 'Templates',
+}
+
+/** Module rail order — operate first, analyze second. */
+const MOBILE_SECTION_ORDER: QueueSection[] = ['queue', 'events', 'failures', 'market', 'senders', 'templates']
 
 function getPresetRange(preset: Exclude<DatePreset, 'custom' | 'all'>): { from: string; to: string } {
   const now = new Date()
@@ -1161,6 +1193,9 @@ export const QueuePage = ({
   const [eventItemsLoading, setEventItemsLoading] = useState(false)
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('compact')
   const [exceptionsOpen, setExceptionsOpen] = useState(false)
+  // Mobile-only: deliberate selection mode and the filter sheet.
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   const [templateSearchParams, setTemplateSearchParams] = useState(
     () => new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
@@ -1217,6 +1252,12 @@ export const QueuePage = ({
 
   useEffect(() => {
     if (!initialData) refreshData(0)
+    // getSupabaseClient() throws when the env vars are absent. Every other data
+    // path already degrades to the generated model, so the realtime channel must
+    // degrade too rather than crash the whole surface.
+    if (!shouldUseSupabase()) {
+      return () => { if (realtimeRef.current) clearTimeout(realtimeRef.current) }
+    }
     const supabase = getSupabaseClient()
     const ch = supabase
       .channel('occ-queue-live')
@@ -1691,6 +1732,58 @@ export const QueuePage = ({
     { key: 'proof', label: 'Proof/Test', count: proofCount, tone: 'amber' },
   ]
 
+  // ── Mobile derived state ─────────────────────────────────────────────────
+  const mobileSummary = useMemo(() => summarizeQueueAttention(kpi), [kpi])
+
+  // The queue list is exactly `filteredItems`. The health tiles set the same
+  // server-backed status bucket the desktop KPI cards use, so a tile's count and
+  // the list it opens always agree.
+  const mobileItems = filteredItems
+
+  const mobileActiveStat: QueueMobileStat | null =
+    statusFilter === 'queued' || statusFilter === 'sending' || statusFilter === 'failed'
+    || statusFilter === 'scheduled' || statusFilter === 'blocked' || statusFilter === 'approval'
+      ? statusFilter
+      : null
+
+  const mobileSections = useMemo(() => MOBILE_SECTION_ORDER.map(key => {
+    const def = QUEUE_SECTIONS.find(s => s.key === key)!
+    // The Failures badge must count the same universe the Failures surface
+    // reports (failed + blocked), not failed alone.
+    const badge = key === 'failures' ? kpi.failed + kpi.blocked
+      : key === 'templates' ? templateStatsMemo.length
+      : key === 'senders' ? senderFleetCount
+      : key === 'events' ? items.filter(i => i.lastEventAt).length
+      : key === 'market' ? marketConfiguredCount
+      : 0
+    return { key, label: MOBILE_SECTION_LABEL[key], icon: def.icon, badge }
+  }), [kpi.failed, kpi.blocked, templateStatsMemo.length, senderFleetCount, items, marketConfiguredCount])
+
+  // Only actions the current selection can actually perform are enabled.
+  const mobileSelectionCapability = useMemo(() => {
+    const caps = selectedRows.map(i => resolveQueueCapability(i, resolveQueueStateMap(i)))
+    return {
+      retry: caps.filter(c => c.canRetry).length,
+      reschedule: caps.filter(c => c.canReschedule).length,
+      pause: caps.filter(c => c.canPause).length,
+      cancel: selectedRows.filter(i => !['cancelled', 'delivered'].includes(i.status)).length,
+      suppress: selectedRows.filter(i => !['cancelled', 'delivered'].includes(i.status)).length,
+      excluded: bulkNonRetryable,
+    }
+  }, [selectedRows, bulkNonRetryable])
+
+  const changeSection = useCallback((next: QueueSection) => {
+    setSection(next)
+    setSelectionMode(false)
+    setSelectedIds(new Set())
+    if (next !== 'queue') { setSelectedId(null); setDossierOpen(false) }
+    if (next !== 'templates') setSelectedTemplateId(null)
+    if (next !== 'senders') setSelectedSenderPhone(null)
+    if (next !== 'market') setSelectedMarketName(null)
+    if (next !== 'failures') setSelectedFailureCause(null)
+    if (next !== 'events') setSelectedEventItem(null)
+  }, [])
+
   const isInitialLoad = loading && !model
   const kpiLoading = loading && !kpiIsRange
 
@@ -1704,6 +1797,236 @@ export const QueuePage = ({
       <div ref={rootRef} className="occ-root occ-loading is-layout-full">
         <span className="occ-spinner" />
         <p>Syncing outbound queue…</p>
+      </div>
+    )
+  }
+
+  // ── Mobile operating surface ─────────────────────────────────────────────
+  // A separate tree so desktop chrome (KPI strip, section bar, pagination
+  // block, density chooser) is never shrunk onto a phone.
+  if (isMobileLayout) {
+    const activeFilters = [
+      statusFilter !== 'all',
+      marketFilter !== 'all',
+      templateFilter !== 'all',
+      senderFilter !== 'all',
+      Boolean(searchQuery.trim()),
+      Boolean(causeFilter),
+      datePreset !== '7d',
+    ].filter(Boolean).length
+    const statusLabel = statusFilter === 'all'
+      ? 'All rows'
+      : (filterTabs.find(t => t.key === statusFilter)?.label ?? 'All rows')
+    const openItem = selectedItem && dossierOpen ? selectedItem : null
+
+    return (
+      <div
+        ref={rootRef}
+        className={cls('occ-root', 'is-recovery', 'is-mobile-layout', `is-layout-${layoutMode}`)}
+      >
+        <QueueConfirmModal
+          preview={confirmPreview}
+          busy={busyAction !== null}
+          onConfirm={() => { if (confirmPreview) void executeConfirmedAction() }}
+          onCancel={() => setConfirmPreview(null)}
+        />
+
+        <QueueMobileHeader
+          section={section}
+          sections={mobileSections}
+          title={MOBILE_SECTION_LABEL[section]}
+          meta={section === 'queue'
+            ? `${totalCount.toLocaleString()} rows · ${MOBILE_RANGE_TOKEN[datePreset]}`
+            : MOBILE_RANGE_TOKEN[datePreset]}
+          showHealth={section === 'queue'}
+          summary={mobileSummary}
+          activeStat={mobileActiveStat}
+          loading={loading}
+          onSection={changeSection}
+          onStat={(stat) => {
+            setStatusFilter(prev => (prev === stat ? 'all' : stat))
+            if (section !== 'queue') changeSection('queue')
+          }}
+          onRefresh={() => { setLoading(true); refreshData(currentPage) }}
+        />
+
+        {section === 'queue' && (
+          <>
+            <QueueMobileControlBar
+              rangeToken={MOBILE_RANGE_TOKEN[datePreset]}
+              statusLabel={statusLabel}
+              activeFilters={activeFilters}
+              searchActive={Boolean(searchQuery.trim())}
+              selectionMode={selectionMode}
+              selectableCount={mobileItems.length}
+              onOpenFilters={() => setFiltersOpen(true)}
+              onToggleSelectionMode={() => {
+                setSelectionMode(v => {
+                  if (v) setSelectedIds(new Set())
+                  return !v
+                })
+              }}
+            />
+
+            <div className="qm-rows">
+              {mobileItems.map(item => (
+                <QueueMobileRow
+                  key={item.id}
+                  item={item}
+                  isOpen={selectedId === item.id}
+                  isChecked={selectedIds.has(item.id)}
+                  selectionMode={selectionMode}
+                  onOpen={() => handleSelectRow(item)}
+                  onToggleCheck={toggleSelect}
+                />
+              ))}
+              {mobileItems.length === 0 && (
+                <div className="qm-empty">
+                  {items.length === 0
+                    ? 'No queue rows for this range.'
+                    : 'No rows match the current filter.'}
+                </div>
+              )}
+            </div>
+
+            <QueueMobilePager
+              rowStart={rowStart}
+              rowEnd={rowEnd}
+              totalCount={totalCount}
+              hasPrev={currentPage > 0}
+              hasNext={currentPage < totalPages - 1}
+              onPrev={() => handlePageChange(currentPage - 1)}
+              onNext={() => handlePageChange(currentPage + 1)}
+            />
+
+            <QueueMobileSelectionBar
+              selectedCount={selectedIds.size}
+              capability={mobileSelectionCapability}
+              onRetry={() => requestBulkAction('bulk-retry')}
+              onReschedule={() => requestBulkAction('bulk-reschedule')}
+              onPause={() => requestBulkAction('bulk-pause')}
+              onCancel={() => requestBulkAction('bulk-cancel')}
+              onSuppress={() => requestBulkAction('bulk-suppress')}
+              onOpenFailures={() => { changeSection('failures'); setStatusFilter('failed') }}
+              onClear={() => { clearSelection(); setSelectionMode(false) }}
+            />
+
+            {openItem && (
+              <QueueMobileItemSheet
+                item={openItem}
+                mode="queue"
+                index={Math.max(0, mobileItems.findIndex(i => i.id === openItem.id))}
+                total={mobileItems.length}
+                onClose={() => { dismissedContextRef.current = openItem.id; setSelectedId(null); setDossierOpen(false) }}
+                onPrev={() => navigateMobileDossier('prev', mobileItems, openItem.id, handleSelectRow)}
+                onNext={() => navigateMobileDossier('next', mobileItems, openItem.id, handleSelectRow)}
+                onAction={handleAction}
+              />
+            )}
+          </>
+        )}
+
+        {section === 'events' && (
+          <>
+            <EventsMobileFeed
+              items={eventItems.length > 0 ? eventItems : items}
+              loading={eventItemsLoading}
+              rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+              selectedEventId={selectedEventItem?.id ?? null}
+              onSelectEvent={setSelectedEventItem}
+            />
+            {selectedEventItem && (
+              <QueueMobileItemSheet
+                item={selectedEventItem}
+                mode="event"
+                index={Math.max(0, eventTimelineItems.findIndex(i => i.id === selectedEventItem.id))}
+                total={eventTimelineItems.length}
+                onClose={() => setSelectedEventItem(null)}
+                onPrev={() => navigateMobileDossier('prev', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
+                onNext={() => navigateMobileDossier('next', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
+                onAction={handleAction}
+              />
+            )}
+          </>
+        )}
+
+        {section === 'failures' && (
+          <FailuresMobileList
+            items={items}
+            loadedRowCount={items.length}
+            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            selectedCause={selectedFailureCause}
+            onSelectCause={setSelectedFailureCause}
+            onViewRows={c => { setCauseFilter(c); setStatusFilter('failed'); changeSection('queue') }}
+          />
+        )}
+
+        {section === 'market' && (
+          <MarketsMobileList
+            items={items}
+            directory={model?.marketDirectory ?? []}
+            fleet={model?.textgridFleet ?? []}
+            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            selectedMarket={selectedMarketName}
+            onSelectMarket={setSelectedMarketName}
+            onViewRows={m => { setMarketFilter(m); changeSection('queue') }}
+          />
+        )}
+
+        {section === 'senders' && (
+          <SendersMobileList
+            items={items}
+            fleet={model?.textgridFleet ?? []}
+            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            selectedPhone={selectedSenderPhone}
+            onSelectPhone={setSelectedSenderPhone}
+          />
+        )}
+
+        {section === 'templates' && (
+          <TemplateIntelligenceModule
+            searchParams={templateSearchParams}
+            setSearchParams={syncTemplateSearchParams}
+            globalRangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            isMobileLayout
+            onViewQueueRows={(templateId) => {
+              setTemplateFilter(templateId)
+              changeSection('queue')
+            }}
+          />
+        )}
+
+        {filtersOpen && (
+          <OccQueueFilterMenu
+            open
+            datePreset={datePreset}
+            dateBasis={dateBasis}
+            customFrom={customFrom}
+            customTo={customTo}
+            statusFilter={statusFilter}
+            marketFilter={marketFilter}
+            templateFilter={templateFilter}
+            senderFilter={senderFilter}
+            searchQuery={searchQuery}
+            filterTabs={filterTabs}
+            marketOptions={marketOptions}
+            templateOptions={templateOptions}
+            senderOptions={senderOptions}
+            causeFilter={causeFilter}
+            causeLabel={causeFilter ? (FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')) : undefined}
+            onClose={() => setFiltersOpen(false)}
+            onDatePreset={setDatePreset}
+            onDateBasis={setDateBasis}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+            onStatusFilter={setStatusFilter}
+            onMarketFilter={setMarketFilter}
+            onTemplateFilter={setTemplateFilter}
+            onSenderFilter={setSenderFilter}
+            onSearchQuery={setSearchQuery}
+            onClearCause={() => setCauseFilter(null)}
+          />
+        )}
       </div>
     )
   }
@@ -1882,39 +2205,6 @@ export const QueuePage = ({
       )}
       </div>
 
-      {isMobileLayout && section === 'queue' && (
-        <OccQueueFilterMenu
-          datePreset={datePreset}
-          dateBasis={dateBasis}
-          customFrom={customFrom}
-          customTo={customTo}
-          statusFilter={statusFilter}
-          marketFilter={marketFilter}
-          templateFilter={templateFilter}
-          senderFilter={senderFilter}
-          searchQuery={searchQuery}
-          density={density}
-          section={section}
-          filterTabs={filterTabs}
-          marketOptions={marketOptions}
-          templateOptions={templateOptions}
-          senderOptions={senderOptions}
-          causeFilter={causeFilter}
-          causeLabel={causeFilter ? (FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')) : undefined}
-          onDatePreset={setDatePreset}
-          onDateBasis={setDateBasis}
-          onCustomFrom={setCustomFrom}
-          onCustomTo={setCustomTo}
-          onStatusFilter={key => setStatusFilter(key)}
-          onMarketFilter={setMarketFilter}
-          onTemplateFilter={setTemplateFilter}
-          onSenderFilter={setSenderFilter}
-          onSearchQuery={setSearchQuery}
-          onDensity={setDensity}
-          onClearCause={() => setCauseFilter(null)}
-        />
-      )}
-
       {/* ── Section selector (desktop) ──────────────────────────────── */}
       {!isMobileLayout && <div className="occ-section-bar occ-glass-rail">
         <div className="occ-section-tabs" role="tablist" aria-label="Queue command views">
@@ -2085,31 +2375,19 @@ export const QueuePage = ({
             )}
 
             {/* Table body */}
-            <div className={cls('occ-table-body', isMobileLayout && 'is-mobile-cards', loading && 'is-refreshing')}>
+            <div className={cls('occ-table-body', loading && 'is-refreshing')}>
               {filteredItems.map(item => (
-                isMobileLayout ? (
-                  <OccMobileQueueCard
-                    key={item.id}
-                    item={item}
-                    isSelected={selectedId === item.id}
-                    isChecked={selectedIds.has(item.id)}
-                    density={density}
-                    onClick={() => handleSelectRow(item)}
-                    onCheck={toggleSelect}
-                  />
-                ) : (
-                  <QueueRow
-                    key={item.id}
-                    item={item}
-                    isSelected={selectedId === item.id}
-                    isExpanded={expandedId === item.id}
-                    isChecked={selectedIds.has(item.id)}
-                    density={density}
-                    onClick={() => handleSelectRow(item)}
-                    onCheck={toggleSelect}
-                    onToggleExpand={handleToggleExpand}
-                  />
-                )
+                <QueueRow
+                  key={item.id}
+                  item={item}
+                  isSelected={selectedId === item.id}
+                  isExpanded={expandedId === item.id}
+                  isChecked={selectedIds.has(item.id)}
+                  density={density}
+                  onClick={() => handleSelectRow(item)}
+                  onCheck={toggleSelect}
+                  onToggleExpand={handleToggleExpand}
+                />
               ))}
               {filteredItems.length === 0 && (
                 <div className="occ-table-empty">
@@ -2249,32 +2527,6 @@ export const QueuePage = ({
             tabOverview={tabOverview}
             onAction={handleAction}
             onViewFailureRows={c => { setCauseFilter(c); setSection('queue'); setStatusFilter('failed') }}
-          />
-        )}
-        {isMobileLayout && section === 'queue' && selectedItem && dossierOpen && (
-          <OccMobileDossierSheet
-            open
-            item={selectedItem}
-            mode="queue"
-            index={Math.max(0, filteredItems.findIndex(i => i.id === selectedItem.id))}
-            total={filteredItems.length}
-            onClose={() => { dismissedContextRef.current = selectedItem.id; setSelectedId(null); setDossierOpen(false) }}
-            onPrev={() => navigateMobileDossier('prev', filteredItems, selectedItem.id, handleSelectRow)}
-            onNext={() => navigateMobileDossier('next', filteredItems, selectedItem.id, handleSelectRow)}
-            onAction={handleAction}
-          />
-        )}
-        {isMobileLayout && section === 'events' && selectedEventItem && (
-          <OccMobileDossierSheet
-            open
-            item={selectedEventItem}
-            mode="event"
-            index={Math.max(0, eventTimelineItems.findIndex(i => i.id === selectedEventItem.id))}
-            total={eventTimelineItems.length}
-            onClose={() => setSelectedEventItem(null)}
-            onPrev={() => navigateMobileDossier('prev', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
-            onNext={() => navigateMobileDossier('next', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
-            onAction={handleAction}
           />
         )}
       </div>

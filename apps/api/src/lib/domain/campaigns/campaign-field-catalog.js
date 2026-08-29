@@ -307,6 +307,20 @@ const JSON_OPERATORS = [
 const FIELD_GROUPS = [
   {
     domain: 'properties',
+    // Record identity. `properties.property_id` and `properties.master_owner_id`
+    // were already listed in PREVIEW_SUPPORTED_FIELD_KEYS and already mapped in
+    // FULL_REACH_GRAPH_FILTER_COLUMNS, but they were missing from the catalog —
+    // so filter validation rejected them as `unknown_campaign_field` before the
+    // mapping was ever consulted. That is what made an explicit id-list handoff
+    // (Entity Graph "use selected records") impossible.
+    category: 'Record Identity',
+    columns: [
+      'property_id',
+      'master_owner_id',
+    ],
+  },
+  {
+    domain: 'properties',
     category: 'Location & Market',
     // Canonical address geography only. The legacy property_state / property_zip /
     // property_county_name columns are deliberately excluded from the operator-facing
@@ -725,6 +739,7 @@ const ENUM_COLUMNS = new Set([
 
 const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'properties.property_id',
+  'properties.master_owner_id',
   'properties.property_county_name',
   'properties.property_state',
   'properties.property_zip',

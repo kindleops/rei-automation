@@ -23,13 +23,41 @@ const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
 const GRAPH_NODE_CAP = 48
 
+/**
+ * Columns the list/table surface can show. Broader than a card needs, because
+ * the table's column picker offers the full legitimate catalog — but still a
+ * curated list rather than `*`, since this runs 25-100 rows at a time.
+ *
+ * Deliberately excluded: row_hash, upsert_key, *_match_key, search_profile_hash,
+ * raw_payload_json. Those are internal plumbing, not operator fields.
+ */
 const PROPERTY_SUMMARY_SELECT = [
+  // identity + geography
   'property_id', 'master_owner_id', 'property_address_full', 'property_address_city',
-  'property_address_state', 'property_address_zip', 'property_zip', 'market', 'market_region',
-  'latitude', 'longitude', 'property_type', 'property_class', 'normalized_asset_class',
-  'estimated_value', 'equity_percent', 'equity_amount', 'total_loan_balance',
-  'final_acquisition_score', 'structured_motivation_score', 'property_flags_text',
+  'property_address_state', 'property_address_zip', 'property_zip',
+  'property_address_county_name', 'market', 'market_region', 'latitude', 'longitude',
+  'apn_parcel_id', 'subdivision_name', 'school_district_name', 'flood_zone', 'zoning',
+  // structure
+  'property_type', 'property_class', 'normalized_asset_class', 'asset_class',
   'total_bedrooms', 'total_baths', 'building_square_feet', 'units_count',
+  'year_built', 'effective_year_built', 'stories', 'lot_acreage', 'lot_square_feet',
+  'building_condition', 'building_quality', 'garage', 'pool', 'basement',
+  'heating_type', 'roof_cover', 'sewer', 'water',
+  // value / equity / debt
+  'estimated_value', 'equity_percent', 'equity_amount', 'total_loan_balance',
+  'assd_total_value', 'sale_price', 'sale_date', 'arv_estimate', 'rent_estimate',
+  'cap_rate', 'ppsf', 'cash_offer', 'estimated_repair_cost', 'rehab_level',
+  // scoring + signals
+  'final_acquisition_score', 'structured_motivation_score', 'deal_strength_score',
+  'tag_distress_score', 'ai_score', 'property_flags_text', 'seller_tags_text',
+  'tax_delinquent', 'tax_delinquent_year', 'active_lien', 'is_corporate_owner',
+  'out_of_state_owner', 'is_hot_preforeclosure', 'acquisition_bucket',
+  // ownership + contact rollups already on the row
+  'owner_name', 'owner_type_guess', 'owner_display_name', 'ownership_years',
+  'owner_address_full', 'priority_tier', 'best_phone', 'best_email', 'sms_eligible',
+  'contact_status', 'best_language', 'timezone',
+  // provenance (safe subset)
+  'source_system', 'created_at', 'updated_at', 'exported_at_utc',
 ].join(',')
 
 const OWNER_SUMMARY_SELECT = [
@@ -465,10 +493,11 @@ function propertyToResult(row, score = 100) {
     subtitle: summary.subtitle || undefined,
     badges: [summary.marketLabel, summary.assetType].filter(Boolean),
     score: summary.acquisitionScore ?? score,
+    // No fabricated link counts. This used to hardcode `prospects: 1,
+    // contacts: 2, reachableContacts: 2` on every property in the universe, so
+    // the UI advertised "2 reachable contacts" for 169,797 rows regardless of
+    // whether any contact existed. Real counts arrive via enrichPropertyLinks.
     linkedCounts: {
-      prospects: 1,
-      contacts: 2,
-      reachableContacts: 2,
       avgAcquisitionScore: summary.acquisitionScore,
     },
     details: {
@@ -485,8 +514,129 @@ function propertyToResult(row, score = 100) {
       acquisitionScore: summary.acquisitionScore,
       flagCount: summary.flagCount,
       flags: summary.flags,
+      // `row` carries the selected columns verbatim so the table's column
+      // picker can offer the full catalog without a second fetch. Cards read
+      // the curated fields above; only the table reaches into `row`.
+      row,
     },
     contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
+  })
+}
+
+/**
+ * Resolve the real owner / person / contact chain for a page of property rows.
+ *
+ * `properties.master_owner_id` is null for 128,265 of 169,797 rows (75.5%), so
+ * the column alone cannot answer "who owns this". The prospect graph can:
+ * `prospects.linked_property_ids_json` carries the property linkage and is
+ * GIN-indexed, so a page of 25 ids resolves in a single bitmap-OR scan.
+ *
+ * Opt-in via `include_links=1` — the desktop table does not need it, and it
+ * costs two extra round trips.
+ */
+async function enrichPropertyLinks(supabase, results) {
+  const propertyIds = results.map((row) => clean(row.entityId)).filter(Boolean)
+  if (propertyIds.length === 0) return results
+
+  const directOwnerIds = results
+    .map((row) => clean(row.contextIds?.masterOwnerId))
+    .filter(Boolean)
+
+  const containsClauses = propertyIds
+    .map((id) => `linked_property_ids_json.cs.["${id}"]`)
+    .join(',')
+
+  const { data: prospects, error } = await supabase
+    .from('prospects')
+    .select('prospect_id, master_owner_id, full_name, likely_owner, contact_score_final, phones_json, emails_json, linked_property_ids_json')
+    .or(containsClauses)
+    .limit(Math.max(propertyIds.length * 8, 100))
+
+  if (error) return results
+
+  /** propertyId -> { people, contacts, reachable, ownerIds, bestPerson } */
+  const byProperty = new Map()
+  for (const prospect of prospects || []) {
+    const phones = parseJsonArray(prospect.phones_json).length
+    const emails = parseJsonArray(prospect.emails_json).length
+    const reachable = Number(prospect.contact_score_final) > 0 && phones + emails > 0
+    for (const linkedId of parseJsonArray(prospect.linked_property_ids_json)) {
+      if (!propertyIds.includes(linkedId)) continue
+      const entry = byProperty.get(linkedId) || {
+        people: 0, contacts: 0, reachable: 0, ownerIds: new Set(), bestPerson: null, bestScore: -1,
+      }
+      entry.people += 1
+      entry.contacts += phones + emails
+      if (reachable) entry.reachable += phones + emails
+      if (prospect.master_owner_id) entry.ownerIds.add(prospect.master_owner_id)
+      const score = Number(prospect.contact_score_final) || 0
+      // A person flagged `likely_owner` outranks a higher-scoring associate:
+      // the property row is asking "who owns this", not "who answers fastest".
+      const rank = (prospect.likely_owner ? 1_000_000 : 0) + score
+      if (rank > entry.bestScore) {
+        entry.bestScore = rank
+        entry.bestPerson = {
+          prospectId: prospect.prospect_id,
+          name: clean(prospect.full_name) || null,
+          likelyOwner: Boolean(prospect.likely_owner),
+        }
+      }
+      byProperty.set(linkedId, entry)
+    }
+  }
+
+  const ownerIds = new Set(directOwnerIds)
+  for (const entry of byProperty.values()) {
+    for (const id of entry.ownerIds) ownerIds.add(id)
+  }
+
+  const ownerNames = new Map()
+  if (ownerIds.size > 0) {
+    const { data: owners } = await supabase
+      .from('master_owners')
+      .select('master_owner_id, display_name, owner_type_guess, property_count')
+      .in('master_owner_id', [...ownerIds].slice(0, 200))
+    for (const owner of owners || []) {
+      ownerNames.set(owner.master_owner_id, {
+        name: clean(owner.display_name) || null,
+        ownerType: clean(owner.owner_type_guess) || null,
+        propertyCount: owner.property_count ?? null,
+      })
+    }
+  }
+
+  return results.map((row) => {
+    const entry = byProperty.get(row.entityId)
+    const directOwnerId = clean(row.contextIds?.masterOwnerId)
+    const linkedOwnerId = entry ? [...entry.ownerIds][0] : null
+    const ownerId = directOwnerId || linkedOwnerId || null
+    const owner = ownerId ? ownerNames.get(ownerId) : null
+
+    return {
+      ...row,
+      linkedCounts: {
+        ...row.linkedCounts,
+        ...(entry
+          ? { prospects: entry.people, contacts: entry.contacts, reachableContacts: entry.reachable }
+          : { prospects: 0, contacts: 0, reachableContacts: 0 }),
+        ...(owner?.propertyCount ? { ownerPortfolio: owner.propertyCount } : {}),
+      },
+      details: {
+        ...(row.details || {}),
+        ...(owner?.name ? { ownerName: owner.name } : {}),
+        ...(owner?.ownerType ? { ownerType: owner.ownerType } : {}),
+        // The owner came from the linked person, not from properties.master_owner_id.
+        // Callers that render an ownership claim need to know which it was.
+        ...(!directOwnerId && linkedOwnerId ? { ownerVia: 'linked_person' } : {}),
+        ...(entry?.bestPerson?.name ? { bestPersonName: entry.bestPerson.name } : {}),
+        ...(entry?.bestPerson?.likelyOwner ? { bestPersonIsLikelyOwner: true } : {}),
+      },
+      contextIds: {
+        ...row.contextIds,
+        ...(ownerId ? { masterOwnerId: ownerId } : {}),
+        ...(entry?.bestPerson?.prospectId ? { prospectId: entry.bestPerson.prospectId } : {}),
+      },
+    }
   })
 }
 
@@ -654,7 +804,7 @@ function emailToResult(row, score = 100) {
   })
 }
 
-function paginatedResponse(results, total, cursor, pageSize) {
+function paginatedResponse(results, total, cursor, pageSize, notes = []) {
   const nextCursor = cursor + pageSize < total ? cursor + pageSize : null
   return {
     results,
@@ -665,6 +815,9 @@ function paginatedResponse(results, total, cursor, pageSize) {
       hasMore: nextCursor !== null,
       nextCursor,
       previousCursor: cursor > 0 ? Math.max(cursor - pageSize, 0) : null,
+      // Anything the adapter did to the requested query that changes what the
+      // total counts. The UI states these rather than quietly under-reporting.
+      ...(notes.length > 0 ? { notes } : {}),
     },
   }
 }
@@ -677,6 +830,12 @@ const BROWSE_SORT_COLUMNS = {
   contact_methods: { default: 'sort_rank', columns: ['sort_rank', 'contact_score_final'] },
   markets: { default: 'market_key', columns: ['market_key', 'property_count'] },
   zips: { default: 'zip', columns: ['zip', 'property_count'] },
+}
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
 }
 
 function parseBrowseFilters(params = {}) {
@@ -692,12 +851,49 @@ function parseBrowseFilters(params = {}) {
     reachable: ['1', 'true', 'yes'].includes(lower(params.reachable || params.eg_reachable)),
     unitsMin: int(params.units_min ?? params.unitsMin, null, 100000),
     unitsMax: int(params.units_max ?? params.unitsMax, null, 100000),
-    scoreMin: Number(params.score_min ?? params.scoreMin ?? params.eg_score_min) || null,
-    scoreMax: Number(params.score_max ?? params.scoreMax ?? params.eg_score_max) || null,
-    coverageMin: Number(params.coverage_min ?? params.coverageMin ?? params.eg_coverage_min) || null,
+    // `Number(x) || null` swallowed a legitimate 0 — "score at least 0" and
+    // "coverage at least 0%" were silently dropped as if unset.
+    scoreMin: finiteOrNull(params.score_min ?? params.scoreMin ?? params.eg_score_min),
+    scoreMax: finiteOrNull(params.score_max ?? params.scoreMax ?? params.eg_score_max),
+    coverageMin: finiteOrNull(params.coverage_min ?? params.coverageMin ?? params.eg_coverage_min),
     language: clean(params.language || params.eg_language),
     entityType: clean(params.entity_type || params.entityType || params.eg_entity_type),
   }
+}
+
+/**
+ * The UI shows asset types through `normalizeAssetTypeLabel` — `Single Family`
+ * renders as `SFR` — but the filter matched the raw column, so an operator who
+ * filtered for the "SFR" they could see on 126,889 rows got the 4 rows that
+ * literally store the string "SFR". Translate the display label back to the
+ * stored values it stands for.
+ *
+ * `normalized_asset_class` is null on every row today, so `property_type` is
+ * the only column worth matching; it is still checked for forward safety.
+ */
+const ASSET_TYPE_FILTER_PATTERNS = Object.freeze({
+  sfr: ['Single Family', 'Single-Family', 'SFR', 'Residential'],
+  'single family': ['Single Family', 'Single-Family', 'SFR', 'Residential'],
+  multifamily: ['Multi-Family', 'Multifamily', 'Multi Family'],
+  'multi-family': ['Multi-Family', 'Multifamily', 'Multi Family'],
+  apartment: ['Apartment'],
+  condo: ['Condo'],
+  townhome: ['Townhouse', 'Townhome'],
+  townhouse: ['Townhouse', 'Townhome'],
+  land: ['Vacant Land', 'Land'],
+  commercial: ['Commercial'],
+  'mobile home': ['Mobile Home'],
+  other: ['Other'],
+})
+
+function assetTypeFilterClause(assetType) {
+  const patterns = ASSET_TYPE_FILTER_PATTERNS[lower(assetType)] || [assetType]
+  return patterns
+    .flatMap((pattern) => [
+      `property_type.ilike.%${pattern}%`,
+      `normalized_asset_class.ilike.%${pattern}%`,
+    ])
+    .join(',')
 }
 
 function applyPropertyFilters(query, filters) {
@@ -706,10 +902,12 @@ function applyPropertyFilters(query, filters) {
     query = query.or(`market.ilike.${like},market_region.ilike.${like}`)
   }
   if (filters.city) query = query.ilike('property_address_city', `%${filters.city}%`)
-  if (filters.state) query = query.ilike('property_address_state', `%${filters.state}%`)
+  // Exact match, not a substring: the column holds a 2-letter code, so
+  // `ilike '%TX%'` bought nothing and guaranteed a sequential scan forever.
+  if (filters.state) query = query.eq('property_address_state', filters.state.toUpperCase())
   if (filters.zip) query = query.or(`property_address_zip.eq.${filters.zip},property_zip.eq.${filters.zip}`)
   if (filters.assetType) {
-    query = query.or(`normalized_asset_class.ilike.%${filters.assetType}%,property_type.ilike.%${filters.assetType}%`)
+    query = query.or(assetTypeFilterClause(filters.assetType))
   }
   if (filters.unitsMin !== null) query = query.gte('units_count', filters.unitsMin)
   if (filters.unitsMax !== null) query = query.lte('units_count', filters.unitsMax)
@@ -897,17 +1095,39 @@ async function getCanonicalMarketAggregates(supabase) {
   return merged
 }
 
-async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, includeLinks = false }) {
   const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
+  const notes = []
+  const effectiveFilters = { ...filters }
+
+  // `ORDER BY final_acquisition_score DESC NULLS LAST` cannot use
+  // idx_properties_final_score_desc (a DESC btree orders NULLS FIRST), so it
+  // planned a parallel seq scan + top-N heapsort over 169,797 rows: 2.9s, and
+  // past the statement timeout once the exact count was added. Bounding the
+  // column makes it an index scan (~10ms). The bound drops the 65,580 rows
+  // that have no score — which a score ranking cannot place anyway — so the
+  // response says so instead of quietly shrinking the universe.
+  if (orderCol === 'final_acquisition_score' && effectiveFilters.scoreMin === null) {
+    effectiveFilters.scoreMin = 0
+    notes.push('score_order_excludes_unscored')
+  }
+
   let query = supabase
     .from('properties')
     .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
-  query = applyPropertyFilters(query, filters)
+  query = applyPropertyFilters(query, effectiveFilters)
   const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
+    // Deterministic tiebreaker. Without it, ~104k rows sharing a handful of
+    // score values are ordered arbitrarily per query, so `range()` pages
+    // silently repeat and skip rows: page 1 + page 2 returned 49 distinct
+    // properties, not 50.
+    .order('property_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
-  return paginatedResponse((data || []).map((row) => propertyToResult(row)), count || 0, cursor, pageSize)
+  let results = (data || []).map((row) => propertyToResult(row))
+  if (includeLinks) results = await enrichPropertyLinks(supabase, results)
+  return paginatedResponse(results, count || 0, cursor, pageSize, notes)
 }
 
 async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
@@ -918,6 +1138,7 @@ async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, fil
   query = applyOwnerFilters(query, filters)
   const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
+    .order('master_owner_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => ownerToResult(row)), count || 0, cursor, pageSize)
@@ -931,6 +1152,7 @@ async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, 
   query = applyProspectFilters(query, filters)
   const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
+    .order('prospect_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => prospectToResult(row)), count || 0, cursor, pageSize)
@@ -942,6 +1164,7 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
     .from('sub_owners')
     .select(SUB_OWNER_SELECT, { count: 'exact' })
     .order(orderCol, { ascending, nullsFirst: false })
+    .order('sub_owner_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   const results = (data || []).map((row) => buildSearchResult({
@@ -951,7 +1174,10 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
     subtitle: classifyOwnershipEntity(row),
     badges: [classifyOwnershipEntity(row)].filter(Boolean),
     score: 100,
-    linkedCounts: { properties: 1, prospects: 0, contacts: 0 },
+    // `properties: 1` here was a constant, not a count — every ownership entity
+    // in the browse list claimed exactly one property. Left unset until the
+    // owner rollup is joined (the dossier resolves the real portfolio).
+    linkedCounts: {},
     details: {
       mailingAddress: row.owner_address_full
         || [row.owner_address_city, row.owner_address_state, row.owner_address_zip].filter(Boolean).join(', ')
@@ -970,6 +1196,7 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
       .from('emails')
       .select(EMAIL_SUMMARY_SELECT, { count: 'exact' })
       .order(orderCol, { ascending, nullsFirst: false })
+      .order('email_id', { ascending: true })
       .range(cursor, cursor + pageSize - 1)
     if (error) throw error
     return paginatedResponse((data || []).map((row) => emailToResult(row)), count || 0, cursor, pageSize)
@@ -981,6 +1208,7 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
   query = applyPhoneFilters(query, filters)
   const { data, error, count } = await query
     .order(orderCol, { ascending, nullsFirst: false })
+    .order('phone_id', { ascending: true })
     .range(cursor, cursor + pageSize - 1)
   if (error) throw error
   return paginatedResponse((data || []).map((row) => phoneToResult(row)), count || 0, cursor, pageSize)
@@ -1170,6 +1398,471 @@ async function browseZips(supabase, { cursor, pageSize, sortBy, ascending }) {
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   Universe Lens — composition of the cohort the operator is currently looking at.
+
+   Every number here is a real `count(*)` against the same filter set the list is
+   using; nothing is sampled, extrapolated, or derived from a page of rows. The
+   facets are deliberately chosen to be index-backed (property_type, market,
+   tax_delinquent, active_lien, equity_percent, final_acquisition_score,
+   estimated_value, priority_score) so a full recomputation stays interactive:
+   each count is an index scan and they run concurrently.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const LENS_SCORE_BANDS = [
+  { key: 'elite', label: '80+', min: 80, max: null },
+  { key: 'strong', label: '65-79', min: 65, max: 79.999 },
+  { key: 'moderate', label: '50-64', min: 50, max: 64.999 },
+  { key: 'low', label: 'Under 50', min: null, max: 49.999 },
+]
+
+const LENS_EQUITY_BANDS = [
+  { key: 'free_clear', label: '90-100%', min: 90, max: null },
+  { key: 'high', label: '60-89%', min: 60, max: 89.999 },
+  { key: 'moderate', label: '30-59%', min: 30, max: 59.999 },
+  { key: 'low', label: 'Under 30%', min: null, max: 29.999 },
+]
+
+const LENS_VALUE_BANDS = [
+  { key: 'v_1m_plus', label: '$1M+', min: 1_000_000, max: null },
+  { key: 'v_500k', label: '$500K-1M', min: 500_000, max: 999_999 },
+  { key: 'v_250k', label: '$250-500K', min: 250_000, max: 499_999 },
+  { key: 'v_under_250k', label: 'Under $250K', min: null, max: 249_999 },
+]
+
+const LENS_ASSET_TYPES = [
+  { key: 'sfr', label: 'SFR', values: ['Single Family', 'Single-Family', 'SFR', 'Residential'] },
+  { key: 'multifamily', label: 'Multifamily', values: ['Multi-Family', 'Multifamily', 'Multi Family', 'Multifamily 5+'] },
+  { key: 'apartment', label: 'Apartment', values: ['Apartment'] },
+  { key: 'land', label: 'Land', values: ['Vacant Land', 'Land'] },
+  { key: 'other', label: 'Other', values: ['Other', 'Townhouse', 'Mobile Home', 'Condo'] },
+]
+
+/**
+ * Only signal columns that carry data. `is_preforeclosure`, `is_foreclosure`,
+ * `is_vacant_land` and `is_auction` are present in the schema but true on zero
+ * rows — a facet permanently pinned at 0 reads as "we checked and there are
+ * none" when it actually means the column was never populated.
+ * `is_hot_preforeclosure` (704) is the populated foreclosure signal.
+ */
+const LENS_SIGNALS = [
+  { key: 'tax_delinquent', label: 'Tax delinquent', column: 'tax_delinquent' },
+  { key: 'active_lien', label: 'Active lien', column: 'active_lien' },
+  { key: 'is_hot_preforeclosure', label: 'Hot pre-foreclosure', column: 'is_hot_preforeclosure' },
+  { key: 'out_of_state_owner', label: 'Absentee owner', column: 'out_of_state_owner' },
+  { key: 'is_corporate_owner', label: 'Corporate owner', column: 'is_corporate_owner' },
+]
+
+/**
+ * Facet counts are `count: 'exact'` — real counts, never planner estimates, so
+ * the composition an operator reads is the composition that exists.
+ *
+ * Concurrency is capped: firing all ~24 facets at once queues them behind the
+ * pool and the unindexed `estimated_value` scans block everything else (a
+ * 24-wide fan-out measured 12s; 6-wide measures ~2.5s, bounded by that scan).
+ */
+// Every facet is index-backed after the Phase 3 indexes (measured 230-310ms
+// each, no outliers), so the cap is now about HTTP round-trips rather than
+// protecting the pool from a 3s sequential scan.
+const LENS_CONCURRENCY = 20
+
+async function runBounded(tasks, limit = LENS_CONCURRENCY) {
+  const results = new Array(tasks.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    for (;;) {
+      const index = cursor++
+      if (index >= tasks.length) return
+      results[index] = await tasks[index]()
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+function countTask(supabase, table, selectColumn, filters, build) {
+  return async () => {
+    let query = supabase.from(table).select(selectColumn, { count: 'exact', head: true })
+    if (filters) query = filters(query)
+    if (build) query = build(query)
+    const { count, error } = await query
+    // null, not 0: a failed count is unknown, and the UI renders unknown as
+    // absent rather than as an authoritative zero.
+    if (error) return null
+    return count || 0
+  }
+}
+
+/** Lens results are pure functions of (scope, filters) over data that changes on
+ *  import, so a short in-process cache keeps scope-flipping instant. */
+const lensCache = new Map()
+const LENS_TTL_MS = 120_000
+
+function lensCacheGet(key) {
+  const hit = lensCache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at > LENS_TTL_MS) {
+    lensCache.delete(key)
+    return null
+  }
+  return hit.value
+}
+
+/**
+ * A facet that errored comes back as null. Caching a lens that contains nulls
+ * would pin a partial answer for the whole TTL — which is exactly what happened:
+ * three unindexed signal counts timed out once, and the lens then served
+ * "2 of 5 signals" for two minutes even though a retry succeeds. Partial
+ * results are returned to the caller but never cached.
+ */
+function lensIsComplete(lens) {
+  const headlineOk = (lens.headline ?? []).every((item) => item.value !== null)
+  const dimensionsOk = (lens.dimensions ?? []).every((dimension) => (
+    dimension.pending || dimension.buckets.every((bucket) => bucket.value !== null)
+  ))
+  const totalOk = lens.part === 'deep' || lens.total !== null
+  return headlineOk && dimensionsOk && totalOk
+}
+
+function lensCacheSet(key, value) {
+  if (!lensIsComplete(value)) return
+  if (lensCache.size > 64) lensCache.clear()
+  lensCache.set(key, { at: Date.now(), value })
+}
+
+function bandBuilder(column, band) {
+  return (query) => {
+    let next = query
+    if (band.min !== null && band.min !== undefined) next = next.gte(column, band.min)
+    if (band.max !== null && band.max !== undefined) next = next.lte(column, band.max)
+    if (band.min === null || band.min === undefined) next = next.not(column, 'is', null)
+    return next
+  }
+}
+
+/**
+ * Property lens.
+ *
+ * Facets are split by measured cost, because four columns have no index and
+ * each costs a full 169,797-row scan:
+ *   is_hot_preforeclosure 3228ms · is_corporate_owner 1737ms ·
+ *   out_of_state_owner 1703ms · estimated_value 1604ms
+ * Those four now have indexes (measured 0.35-5.8ms), so the split is no longer
+ * load-bearing for them — it is kept because it is the right shape whenever a
+ * facet is expensive, and because the UI's pending treatment depends on it.
+ * `part: 'fast'` returns the core composition immediately; `part: 'deep'`
+ * returns value + signals and the UI fills them in behind. Nothing is estimated
+ * in either half — a deep facet is marked pending until its real count lands.
+ */
+async function propertyLens(supabase, filters, part = 'fast') {
+  const apply = (query) => applyPropertyFilters(query, filters)
+  const count = (build) => countTask(supabase, 'properties', 'property_id', apply, build)
+  const deep = part === 'deep'
+
+  const tasks = deep
+    ? [
+        ...LENS_SIGNALS.map((signal) => count((q) => q.eq(signal.column, true))),
+        ...LENS_VALUE_BANDS.map((band) => count(bandBuilder('estimated_value', band))),
+      ]
+    : [
+        count(null),
+        count((q) => q.not('final_acquisition_score', 'is', null)),
+        count((q) => q.not('master_owner_id', 'is', null)),
+        count((q) => q.not('latitude', 'is', null)),
+        ...LENS_ASSET_TYPES.map((entry) => count((q) => q.in('property_type', entry.values))),
+        ...LENS_SCORE_BANDS.map((band) => count(bandBuilder('final_acquisition_score', band))),
+        ...LENS_EQUITY_BANDS.map((band) => count(bandBuilder('equity_percent', band))),
+      ]
+
+  const out = await runBounded(tasks)
+  let i = 0
+
+  if (deep) {
+    const signalCounts = LENS_SIGNALS.map(() => out[i++])
+    const valueCounts = LENS_VALUE_BANDS.map(() => out[i++])
+    return {
+      scope: 'properties',
+      part: 'deep',
+      dimensions: [
+        {
+          key: 'value',
+          label: 'Estimated value',
+          buckets: LENS_VALUE_BANDS.map((band, n) => ({ key: band.key, label: band.label, value: valueCounts[n] })),
+        },
+        {
+          key: 'signals',
+          label: 'Distress & acquisition signals',
+          buckets: LENS_SIGNALS.map((signal, n) => ({ key: signal.key, label: signal.label, value: signalCounts[n] })),
+        },
+      ],
+    }
+  }
+
+  const total = out[i++]
+  const scored = out[i++]
+  const withOwner = out[i++]
+  const withCoords = out[i++]
+  const assetCounts = LENS_ASSET_TYPES.map(() => out[i++])
+  const scoreCounts = LENS_SCORE_BANDS.map(() => out[i++])
+  const equityCounts = LENS_EQUITY_BANDS.map(() => out[i++])
+
+  return {
+    scope: 'properties',
+    part: 'fast',
+    total,
+    headline: [
+      { key: 'scored', label: 'Scored', value: scored },
+      { key: 'owner_linked', label: 'Owner linked', value: withOwner },
+      { key: 'mappable', label: 'Mappable', value: withCoords },
+    ],
+    dimensions: [
+      {
+        key: 'asset_type',
+        label: 'Asset type',
+        filterKey: 'assetType',
+        buckets: LENS_ASSET_TYPES.map((entry, n) => ({ key: entry.key, label: entry.label, value: assetCounts[n] })),
+      },
+      {
+        key: 'acquisition_score',
+        label: 'Acquisition score',
+        filterKey: 'scoreMin',
+        buckets: LENS_SCORE_BANDS.map((band, n) => ({ key: band.key, label: band.label, value: scoreCounts[n], min: band.min, max: band.max })),
+      },
+      {
+        key: 'equity',
+        label: 'Equity',
+        buckets: LENS_EQUITY_BANDS.map((band, n) => ({ key: band.key, label: band.label, value: equityCounts[n] })),
+      },
+      { key: 'value', label: 'Estimated value', pending: true, buckets: LENS_VALUE_BANDS.map((b) => ({ key: b.key, label: b.label, value: null })) },
+      { key: 'signals', label: 'Distress & acquisition signals', pending: true, buckets: LENS_SIGNALS.map((sig) => ({ key: sig.key, label: sig.label, value: null })) },
+    ],
+  }
+}
+
+async function ownerLens(supabase, filters) {
+  const apply = (query) => applyOwnerFilters(query, filters)
+  const col = 'master_owner_id'
+  const count = (build) => countTask(supabase, 'master_owners', col, apply, build)
+  const tiers = ['TIER_1', 'TIER_2', 'TIER_3']
+  const portfolioBands = [
+    { key: 'p1', label: '1', min: 1, max: 1 },
+    { key: 'p2_5', label: '2-5', min: 2, max: 5 },
+    { key: 'p6_20', label: '6-20', min: 6, max: 20 },
+    { key: 'p21', label: '21+', min: 21, max: null },
+  ]
+
+  const tasks = [
+    count(null),
+    count((q) => q.gt('contactability_score', 0)),
+    count((q) => q.ilike('owner_type_guess', '%LLC/CORP%')),
+    count((q) => q.ilike('owner_type_guess', '%INDIVIDUAL%')),
+    ...tiers.map((tier) => count((q) => q.eq('priority_tier', tier))),
+    ...portfolioBands.map((band) => count(bandBuilder('property_count', band))),
+    count((q) => q.gte('contactability_score', 80)),
+    count((q) => q.gte('contactability_score', 40).lt('contactability_score', 80)),
+    count((q) => q.gt('contactability_score', 0).lt('contactability_score', 40)),
+    count((q) => q.or('contactability_score.is.null,contactability_score.eq.0')),
+  ]
+
+  const out = await runBounded(tasks)
+  let i = 0
+  const total = out[i++]
+  const contactable = out[i++]
+  const corporate = out[i++]
+  const individual = out[i++]
+  const tierCounts = tiers.map(() => out[i++])
+  const portfolioCounts = portfolioBands.map(() => out[i++])
+  const coverage = [out[i++], out[i++], out[i++], out[i++]]
+
+  return {
+    scope: 'master_owners',
+    total,
+    headline: [
+      { key: 'contactable', label: 'Contactable', value: contactable },
+      { key: 'corporate', label: 'Corporate', value: corporate },
+      { key: 'individual', label: 'Individual', value: individual },
+    ],
+    dimensions: [
+      {
+        key: 'priority_tier',
+        label: 'Priority tier',
+        filterKey: 'priorityTier',
+        buckets: tiers.map((tier, n) => ({ key: tier, label: tier.replace('TIER_', 'Tier '), value: tierCounts[n] })),
+      },
+      {
+        key: 'portfolio',
+        label: 'Portfolio size',
+        buckets: portfolioBands.map((band, n) => ({ key: band.key, label: band.label, value: portfolioCounts[n] })),
+      },
+      {
+        key: 'coverage',
+        label: 'Contact coverage',
+        buckets: [
+          { key: 'high', label: '80%+', value: coverage[0] },
+          { key: 'mid', label: '40-79%', value: coverage[1] },
+          { key: 'low', label: '1-39%', value: coverage[2] },
+          { key: 'none', label: 'None', value: coverage[3] },
+        ],
+      },
+    ],
+  }
+}
+
+async function peopleLens(supabase, filters) {
+  const apply = (query) => applyProspectFilters(query, filters)
+  const col = 'prospect_id'
+  const count = (build) => countTask(supabase, 'prospects', col, apply, build)
+  const languages = ['English', 'Spanish']
+
+  const tasks = [
+    count(null),
+    count((q) => q.gt('contact_score_final', 0)),
+    count((q) => q.eq('likely_owner', true)),
+    count((q) => q.eq('likely_renting', true)),
+    ...languages.map((lang) => count((q) => q.ilike('language_preference', `%${lang}%`))),
+    count((q) => q.gte('contact_score_final', 100)),
+    count((q) => q.gte('contact_score_final', 50).lt('contact_score_final', 100)),
+    count((q) => q.gt('contact_score_final', 0).lt('contact_score_final', 50)),
+  ]
+
+  const out = await runBounded(tasks)
+  let i = 0
+  const total = out[i++]
+  const reachable = out[i++]
+  const likelyOwner = out[i++]
+  const renting = out[i++]
+  const languageCounts = languages.map(() => out[i++])
+  const scoreCounts = [out[i++], out[i++], out[i++]]
+
+  return {
+    scope: 'people',
+    total,
+    headline: [
+      { key: 'reachable', label: 'Reachable', value: reachable },
+      { key: 'likely_owner', label: 'Likely owner', value: likelyOwner },
+      { key: 'renting', label: 'Likely renting', value: renting },
+    ],
+    dimensions: [
+      {
+        key: 'language',
+        label: 'Language',
+        filterKey: 'language',
+        buckets: languages.map((lang, n) => ({ key: lang, label: lang, value: languageCounts[n] })),
+      },
+      {
+        key: 'contact_score',
+        label: 'Contact score',
+        buckets: [
+          { key: 'high', label: '100+', value: scoreCounts[0] },
+          { key: 'mid', label: '50-99', value: scoreCounts[1] },
+          { key: 'low', label: '1-49', value: scoreCounts[2] },
+        ],
+      },
+    ],
+  }
+}
+
+async function contactLens(supabase, filters, subtype) {
+  if (lower(subtype) === 'email') {
+    const out = await runBounded([
+      countTask(supabase, 'emails', 'email_id', null, null),
+      countTask(supabase, 'emails', 'email_id', null, (q) => q.gt('contact_score_final', 0)),
+    ])
+    return {
+      scope: 'contact_methods',
+      total: out[0],
+      headline: [{ key: 'scored', label: 'Scored', value: out[1] }],
+      dimensions: [],
+    }
+  }
+
+  const apply = (query) => applyPhoneFilters(query, filters)
+  const count = (build) => countTask(supabase, 'phones', 'phone_id', apply, build)
+  const phoneTypes = [
+    { key: 'W', label: 'Wireless' },
+    { key: 'L', label: 'Landline' },
+    { key: 'V', label: 'VOIP' },
+  ]
+
+  const tasks = [
+    count(null),
+    count((q) => q.is('wrong_number_at', null)),
+    count((q) => q.not('wrong_number_at', 'is', null)),
+    count((q) => q.gt('contact_score_final', 0)),
+    ...phoneTypes.map((entry) => count((q) => q.eq('phone_type', entry.key))),
+  ]
+
+  const out = await runBounded(tasks)
+  let i = 0
+  const total = out[i++]
+  const eligible = out[i++]
+  const wrongNumber = out[i++]
+  const scored = out[i++]
+  const typeCounts = phoneTypes.map(() => out[i++])
+
+  return {
+    scope: 'contact_methods',
+    total,
+    headline: [
+      { key: 'eligible', label: 'Eligible', value: eligible },
+      { key: 'wrong_number', label: 'Wrong number', value: wrongNumber },
+      { key: 'scored', label: 'Scored', value: scored },
+    ],
+    dimensions: [
+      {
+        key: 'phone_type',
+        label: 'Line type',
+        buckets: phoneTypes.map((entry, n) => ({ key: entry.key, label: entry.label, value: typeCounts[n] })),
+      },
+    ],
+  }
+}
+
+async function organizationLens(supabase) {
+  const out = await runBounded([
+    countTask(supabase, 'sub_owners', 'sub_owner_id', null, null),
+    countTask(supabase, 'sub_owners', 'sub_owner_id', null, (q) => q.not('master_owner_id', 'is', null)),
+    countTask(supabase, 'sub_owners', 'sub_owner_id', null, (q) => q.not('owner_address_full', 'is', null)),
+  ])
+  return {
+    scope: 'organizations',
+    total: out[0],
+    headline: [
+      { key: 'owner_linked', label: 'Owner linked', value: out[1] },
+      { key: 'mailing', label: 'Mailing address', value: out[2] },
+    ],
+    dimensions: [],
+  }
+}
+
+export async function getEntityGraphLens(params = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const tab = lower(params.tab || 'properties')
+  const filters = parseBrowseFilters(params)
+  const partKey = lower(params.part) === 'deep' ? 'deep' : 'fast'
+  const cacheKey = `${tab}|${lower(params.subtype || '')}|${partKey}|${JSON.stringify(filters)}`
+  const cached = lensCacheGet(cacheKey)
+  if (cached) return cached
+
+  const lens = await computeEntityGraphLens(supabase, tab, filters, params)
+  lensCacheSet(cacheKey, lens)
+  return lens
+}
+
+async function computeEntityGraphLens(supabase, tab, filters, params) {
+  const part = lower(params.part) === 'deep' ? 'deep' : 'fast'
+  if (part === 'deep' && tab !== 'properties') {
+    return { scope: tab, part: 'deep', dimensions: [] }
+  }
+  switch (tab) {
+    case 'master_owners': return ownerLens(supabase, filters)
+    case 'people': return peopleLens(supabase, filters)
+    case 'contact_methods': return contactLens(supabase, filters, params.subtype)
+    case 'organizations': return organizationLens(supabase)
+    default: return propertyLens(supabase, filters, part)
+  }
+}
+
 export async function browseEntityGraph(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const tab = lower(params.tab || 'properties')
@@ -1178,7 +1871,8 @@ export async function browseEntityGraph(params = {}, deps = {}) {
   const sortBy = clean(params.sort_by || params.sortBy) || BROWSE_SORT_COLUMNS[tab]?.default || 'id'
   const ascending = ['1', 'true', 'yes'].includes(lower(params.ascending))
   const filters = parseBrowseFilters(params)
-  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters }
+  const includeLinks = ['1', 'true', 'yes'].includes(lower(params.include_links ?? params.includeLinks))
+  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters, includeLinks }
 
   switch (tab) {
     case 'properties':
@@ -1279,11 +1973,15 @@ export async function searchEntityGraph(params = {}, deps = {}) {
       .range(cursor, cursor + pageSize - 1)
     const { data, error, count } = await dbQuery
     if (error) throw error
-    const results = (data || []).map((row) => propertyToResult(
+    let results = (data || []).map((row) => propertyToResult(
       row,
       lower(row.property_id) === lower(q) ? 1000 : 500,
     ))
-    return paginatedResponse(dedupeResults(sortResults(results, query)), count || results.length, cursor, pageSize)
+    results = dedupeResults(sortResults(results, query))
+    if (['1', 'true', 'yes'].includes(lower(params.include_links ?? params.includeLinks))) {
+      results = await enrichPropertyLinks(supabase, results)
+    }
+    return paginatedResponse(results, count || results.length, cursor, pageSize)
   }
 
   if (tab === 'master_owners') {
@@ -1481,6 +2179,12 @@ function buildGraphNodesEdges(anchor, neighborhood) {
     : null
   if (ownerNodeId && anchor.type !== 'master_owner') {
     pushNode(ownerNodeId, 'master_owner', neighborhood.owner.display_name || neighborhood.owner.master_owner_id)
+    // The anchor→owner edge was missing entirely, so a property whose owner was
+    // resolved rendered the owner as a node floating off the prospect chain
+    // with no stated relationship to the property being inspected.
+    if (anchor.type === 'property') {
+      pushEdge(anchor.id, ownerNodeId, neighborhood.ownerVia === 'linked_person' ? 'Owner (via person)' : 'Owned By')
+    }
   }
 
   for (const property of neighborhood.properties.slice(0, GRAPH_NODE_CAP)) {
@@ -1519,21 +2223,29 @@ function buildGraphNodesEdges(anchor, neighborhood) {
     else pushEdge(anchor.id, id, 'Linked Person')
   }
 
+  // Callers pass either raw phone/email rows (owner neighborhood) or
+  // contact-ladder entries (property and prospect neighborhoods), which use
+  // `{ id, value, prospectId }` instead of `{ phone_id, canonical_e164, ... }`.
+  // Reading only the row shape produced `phone:undefined` nodes with an empty
+  // label — a contact that could be seen but not identified or opened.
   for (const phone of neighborhood.phones.slice(0, 12)) {
-    const id = `phone:${phone.phone_id}`
-    const label = formatReadablePhone(phone.canonical_e164 || phone.phone) || phone.phone_id
-    pushNode(id, 'phone', label)
-    const prospectId = phone.primary_prospect_id || phone.canonical_prospect_id
+    const phoneId = phone.phone_id || phone.id
+    if (!phoneId) continue
+    const id = `phone:${phoneId}`
+    const raw = phone.canonical_e164 || phone.phone || phone.value
+    pushNode(id, 'phone', formatReadablePhone(raw) || raw || phoneId)
+    const prospectId = phone.primary_prospect_id || phone.canonical_prospect_id || phone.prospectId
     if (prospectId) pushEdge(`prospect:${prospectId}`, id, 'Contacted Through')
     else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Contacted Through')
     else pushEdge(anchor.id, id, 'Contacted Through')
   }
 
   for (const email of neighborhood.emails.slice(0, 12)) {
-    const id = `email:${email.email_id}`
-    const label = email.email_normalized || email.email || email.email_id
-    pushNode(id, 'email', label)
-    const prospectId = email.primary_prospect_id || email.canonical_prospect_id
+    const emailId = email.email_id || email.id
+    if (!emailId) continue
+    const id = `email:${emailId}`
+    pushNode(id, 'email', email.email_normalized || email.email || email.value || emailId)
+    const prospectId = email.primary_prospect_id || email.canonical_prospect_id || email.prospectId
     if (prospectId) pushEdge(`prospect:${prospectId}`, id, 'Contacted Through')
     else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Contacted Through')
     else pushEdge(anchor.id, id, 'Contacted Through')
@@ -1656,7 +2368,8 @@ async function countMarketZipMetrics(supabase, entityType, entityId) {
 }
 
 async function loadOwnerNeighborhood(supabase, masterOwnerId) {
-  const { data: owner } = await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', masterOwnerId).maybeSingle()
+  // Anchor record: every column, so the inspector can group all 77 of them.
+  const { data: owner } = await supabase.from('master_owners').select('*').eq('master_owner_id', masterOwnerId).maybeSingle()
   if (!owner) return null
 
   const propertyIds = parseJsonArray(owner.joined_property_ids_json)
@@ -1722,21 +2435,41 @@ async function loadOwnerNeighborhood(supabase, masterOwnerId) {
 }
 
 async function loadPropertyNeighborhood(supabase, propertyId) {
-  const { data: property } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('property_id', propertyId).maybeSingle()
+  // `select('*')` on a single row, not the 25-column summary: the record
+  // inspector groups every populated field, and properties carries 343 columns
+  // of acquisition, distress, structure, and provenance data the summary hid.
+  const { data: property } = await supabase.from('properties').select('*').eq('property_id', propertyId).maybeSingle()
   if (!property) return null
 
   const masterOwnerId = property.master_owner_id
-  const owner = masterOwnerId
-    ? (await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', masterOwnerId).maybeSingle()).data
+  let owner = masterOwnerId
+    ? (await supabase.from('master_owners').select('*').eq('master_owner_id', masterOwnerId).maybeSingle()).data
     : null
 
   const { data: prospects } = await supabase
     .from('prospects')
-    .select(PROSPECT_SUMMARY_SELECT)
+    .select('*')
     .or(`linked_property_ids_json.cs.["${propertyId}"],master_owner_id.eq.${masterOwnerId || '___none___'}`)
     .limit(20)
 
   const activeProspect = prospects?.[0] || null
+
+  // 75% of properties have no master_owner_id of their own, so the dossier used
+  // to report `masterOwner: null` even when the linked person carries a master
+  // owner. Resolve through the person, and mark the derivation so the UI can
+  // say "via linked person" instead of asserting a direct ownership record.
+  let ownerVia = owner ? 'property' : null
+  if (!owner && activeProspect?.master_owner_id) {
+    const { data: linkedOwner } = await supabase
+      .from('master_owners')
+      .select('*')
+      .eq('master_owner_id', activeProspect.master_owner_id)
+      .maybeSingle()
+    if (linkedOwner) {
+      owner = linkedOwner
+      ownerVia = 'linked_person'
+    }
+  }
   const [threads, contactLadder] = await Promise.all([
     fetchThreadsForContext(supabase, { propertyId, masterOwnerId }),
     fetchContactLadder(supabase, { masterOwnerId, propertyId, prospectId: activeProspect?.prospect_id }),
@@ -1758,6 +2491,7 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
       emails: contactLadder.emails,
       threads,
       owner,
+      ownerVia,
     },
   )
 
@@ -1783,6 +2517,7 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     },
     identity: {
       masterOwner: owner?.display_name || null,
+      masterOwnerVia: ownerVia,
       talkingTo: activeProspect?.full_name || null,
       talkingToRelationship: relationshipLabel(activeProspect, owner),
       propertyContext: property.property_address_full,
@@ -1794,7 +2529,8 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
 }
 
 async function loadProspectNeighborhood(supabase, prospectId) {
-  const { data: prospect } = await supabase.from('prospects').select(PROSPECT_SUMMARY_SELECT).eq('prospect_id', prospectId).maybeSingle()
+  // Anchor record: every column, so the inspector can group all 63 of them.
+  const { data: prospect } = await supabase.from('prospects').select('*').eq('prospect_id', prospectId).maybeSingle()
   if (!prospect) return null
 
   const propertyIds = parseJsonArray(prospect.linked_property_ids_json)
@@ -1841,7 +2577,8 @@ async function loadProspectNeighborhood(supabase, prospectId) {
 async function loadContactNeighborhood(supabase, type, id) {
   const isPhone = type === 'phone'
   const table = isPhone ? 'phones' : 'emails'
-  const select = isPhone ? PHONE_SUMMARY_SELECT : EMAIL_SUMMARY_SELECT
+  // Anchor record: every column for the inspector.
+  const select = '*'
   const key = isPhone ? 'phone_id' : 'email_id'
   const { data: contact } = await supabase.from(table).select(select).eq(key, id).maybeSingle()
   if (!contact) return null
@@ -1922,7 +2659,11 @@ export async function getEntityGraphDossier(type, id, deps = {}) {
     case 'contact':
       return loadContactNeighborhood(supabase, entityType === 'contact' ? 'phone' : entityType, entityId)
     case 'organization': {
-      const { data: sub } = await supabase.from('sub_owners').select(SUB_OWNER_SELECT).eq('sub_owner_id', entityId).maybeSingle()
+      // Anchor record: every column, matching the property/owner/person/contact
+      // inspectors. The 7-column summary select left Entities showing 8 of the
+      // 22 fields the record actually has, while its header still claimed to be
+      // reporting "populated of total".
+      const { data: sub } = await supabase.from('sub_owners').select('*').eq('sub_owner_id', entityId).maybeSingle()
       if (sub) {
         const owner = sub.master_owner_id
           ? (await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', sub.master_owner_id).maybeSingle()).data

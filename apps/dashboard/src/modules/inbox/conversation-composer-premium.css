@@ -570,6 +570,18 @@
   animation: nx-qap-rise 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* The panel carries both .nx-qap-anchor and the legacy .nx-quick-actions-popover
+   skin, and the legacy rule (position:absolute; z-index:90) was winning — so the
+   z-index:12000 backdrop painted OVER the panel. elementFromPoint at the panel's
+   centre returned the backdrop, meaning every tap on a Quick Action hit the
+   dismiss layer instead of the button. The component also computes its offsets
+   in viewport coordinates, which only makes sense for position:fixed.
+   Two classes deep so it wins on specificity, independent of import order. */
+.nx-qap-anchor.nx-quick-actions-popover {
+  position: fixed;
+  z-index: 12001;
+}
+
 /* Voice recording premium */
 .nx-voice-recording-panel {
   display: flex;

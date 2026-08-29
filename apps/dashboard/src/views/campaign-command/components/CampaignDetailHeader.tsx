@@ -4,7 +4,7 @@ import type { CampaignActionDef } from '../campaign-health'
 import { computeCampaignHealth, computeCampaignReadiness } from '../campaign-health'
 import { isTestModeCampaign } from '../campaign-operator'
 import type { CampaignCommandState, CampaignSummary } from '../campaigns.types'
-import { cls, fmt, fmtPct, fmtRelative } from '../campaign-formatters'
+import { cls, fmt, fmtPct, resolveNextSend } from '../campaign-formatters'
 import { CampaignStatusBadge } from './CampaignStatusBadge'
 
 function actionIcon(actionId: string) {
@@ -55,6 +55,7 @@ export function CampaignDetailHeader({
   const primaryAction = detailActions[0]
   const secondaryActions = detailActions.slice(1)
   const queueRows = campaign.queued_targets + campaign.scheduled_targets
+  const nextSend = resolveNextSend(campaign)
 
   const statChips = [
     { label: 'Targets', value: fmt(campaign.total_targets) },
@@ -100,15 +101,22 @@ export function CampaignDetailHeader({
               </button>
             )}
           </div>
-          <div className={cls('ccc__detail-hero-meta', isMobileLayout && 'ccc__detail-hero-meta--mobile')}>
+          {/* On mobile CampaignMissionHero states campaign state, automation mode and
+              next action immediately below this header. Rendering them here too
+              produced "PAUSED · AUTO-SEND · Paused" — three badges for two facts,
+              the third being resolveNextSend's own "Paused" label.
+
+              Not rendered rather than `hidden`: the sheet sets an explicit
+              `display: flex` on this class, which outranks the UA [hidden] rule,
+              so the attribute left the row visible at 19.5px. */}
+          {!isMobileLayout && (
+          <div className="ccc__detail-hero-meta">
             <CampaignStatusBadge status={campaign.status} executionProof={campaign.execution_proof} />
-            {!isMobileLayout && scopeLabel && <span className="ccc__detail-scope-pill">{scopeLabel} scope</span>}
-            {!isMobileLayout && (
-              <span className={cls('ccc__detail-readiness-pill', `is-${readiness.level}`)}>
-                {readiness.label}
-              </span>
-            )}
-            {!isMobileLayout && health.sampleSufficient && (
+            {scopeLabel && <span className="ccc__detail-scope-pill">{scopeLabel} scope</span>}
+            <span className={cls('ccc__detail-readiness-pill', `is-${readiness.level}`)}>
+              {readiness.label}
+            </span>
+            {health.sampleSufficient && (
               <span className="ccc__detail-rate-pill">
                 {fmtPct(campaign.delivery_rate)} dlv · {fmtPct(campaign.reply_rate)} reply
               </span>
@@ -116,10 +124,8 @@ export function CampaignDetailHeader({
             {campaign.auto_send_enabled && (
               <span className="ccc__detail-auto-pill">Auto-send</span>
             )}
-            {isMobileLayout && (
-              <span className="ccc__detail-next-pill">Next {fmtRelative(campaign.next_send_at)}</span>
-            )}
           </div>
+          )}
         </div>
       </div>
 
@@ -152,7 +158,7 @@ export function CampaignDetailHeader({
           <div className="ccc__detail-stat-chip">
             <span className="ccc__detail-stat-chip__label">Next send</span>
             <strong className="ccc__detail-stat-chip__value ccc__detail-stat-chip__value--sm">
-              {fmtRelative(campaign.next_send_at)}
+              {nextSend.label}
             </strong>
           </div>
         </div>

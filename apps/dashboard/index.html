@@ -9,6 +9,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NEXUS" />
+    <!-- Build identity, readable before React mounts. Lets a handset be
+         identified from the document alone when the app fails to boot. -->
+    <meta name="nx-build-sha" content="__NEXUS_BUILD_SHA__" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" crossorigin href="__NEXUS_MAIN_CSS__" id="nexus-main-css" />
     <title>NEXUS Command Center</title>
@@ -18,9 +21,47 @@
     <script>
       (function () {
         var KEY = 'nexus:sw-recovery-generation'
-        var GEN = '5'
+        var GEN = '6'
         var ENTRY = '__NEXUS_MAIN_ENTRY__'
         var CSS = '__NEXUS_MAIN_CSS__'
+        var loaded = false
+        var DIAG_KEY = 'nexus:diag-armed'
+
+        // Storage access throws when cookies are blocked (iOS private mode). A
+        // bootstrap that throws never mounts the app, so every access is guarded
+        // and a failure degrades to "clean up, but never reload".
+        function readMark() {
+          try {
+            return localStorage.getItem(KEY) || sessionStorage.getItem(KEY)
+          } catch (e) { return null }
+        }
+
+        function writeMark() {
+          var ok = false
+          try { localStorage.setItem(KEY, GEN); ok = true } catch (e) { /* blocked */ }
+          try { sessionStorage.setItem(KEY, GEN); ok = true } catch (e) { /* blocked */ }
+          return ok
+        }
+
+        // The cache-buster is a transient reload argument, never part of the
+        // installed start URL. Scope matching is path-based, so adding and
+        // removing a query param cannot knock the PWA out of standalone.
+        function stripBuster() {
+          try {
+            var u = new URL(location.href)
+            if (!u.searchParams.has('nxsw')) return
+            u.searchParams.delete('nxsw')
+            history.replaceState(null, '', u.pathname + (u.search || '') + u.hash)
+          } catch (e) { /* cosmetic only */ }
+        }
+
+        function reloadFresh() {
+          try {
+            var u = new URL(location.href)
+            u.searchParams.set('nxsw', GEN)
+            location.replace(u.toString())
+          } catch (e) { location.reload() }
+        }
 
         function ensureMainStylesheet() {
           if (!CSS || CSS.indexOf('__NEXUS_') === 0) return
@@ -33,22 +74,194 @@
           document.head.appendChild(link)
         }
 
+
+        // ── Diagnostics readout ───────────────────────────────────────────
+        //
+        // Renders ONLY for ?diag=1. The normal app never sees it, so this is
+        // not a debug overlay on the product — it is a URL you have to ask for.
+        // It exists because the handset is the only place these numbers are
+        // real, and a Mac + Web Inspector is not always available.
+        // 'show' render now · 'arm' set the one-shot flag · 'off' do nothing.
+        // The installed PWA has no address bar and always launches at its fixed
+        // start_url, so it can never be given ?diag=1. Arming from Safari writes
+        // a flag on the shared origin that the next PWA launch consumes exactly
+        // once — that is the only way to measure standalone geometry.
+        function diagMode() {
+          var param = null
+          try { param = new URL(location.href).searchParams.get('diag') } catch (e) { /* opaque URL */ }
+          if (param === '1') return 'show'
+          if (param === 'arm') return 'arm'
+          try {
+            if (localStorage.getItem(DIAG_KEY) === '1') {
+              localStorage.removeItem(DIAG_KEY)
+              return 'show'
+            }
+          } catch (e) { /* storage blocked */ }
+          return 'off'
+        }
+
+        function diagBox(text) {
+          var box = document.createElement('pre')
+          box.id = 'nx-diag'
+          box.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:2147483647',
+            'margin:0', 'padding:14px', 'overflow:auto',
+            'background:#000', 'color:#7CFFB2',
+            'font:11px/1.5 ui-monospace,Menlo,monospace',
+            'white-space:pre-wrap', 'word-break:break-all',
+            '-webkit-user-select:text', 'user-select:text',
+          ].join(';')
+          box.textContent = text
+          box.addEventListener('click', function () { box.remove() })
+          document.body.appendChild(box)
+          return box
+        }
+
+        function armDiagnostics() {
+          var ok = false
+          try { localStorage.setItem(DIAG_KEY, '1'); ok = true } catch (e) { /* blocked */ }
+          diagBox(ok
+            ? 'DIAGNOSTICS ARMED\n\nNow open NEXUS from your Home Screen icon.\nThe readout appears once, then disarms itself.\n\n(tap to dismiss)'
+            : 'COULD NOT ARM\n\nStorage is blocked in this browser, so the flag\ncould not be written.\n\n(tap to dismiss)')
+        }
+
+        function pad(label) {
+          var out = label
+          while (out.length < 7) out += ' '
+          return out + ' '
+        }
+
+        function rectLine(label, node) {
+          if (!node) return pad(label) + 'ABSENT'
+          var b = node.getBoundingClientRect()
+          return pad(label) + 'h' + Math.round(b.height) +
+            '  top ' + Math.round(b.top) +
+            '  bot ' + Math.round(b.bottom) +
+            '  w' + Math.round(b.width)
+        }
+
+        function safeAreaBottom() {
+          try {
+            var probe = document.createElement('div')
+            probe.style.cssText = 'position:fixed;left:-9999px;top:0;padding-bottom:env(safe-area-inset-bottom,0px)'
+            document.body.appendChild(probe)
+            var v = window.getComputedStyle(probe).paddingBottom
+            document.body.removeChild(probe)
+            return v
+          } catch (e) { return '?' }
+        }
+
+        function firstMatch(list, re) {
+          for (var i = 0; i < list.length; i++) if (re.test(list[i])) return list[i]
+          return 'none'
+        }
+
+        function diagText() {
+          var names = []
+          try {
+            names = performance.getEntriesByType('resource').map(function (e) { return e.name })
+              .filter(function (n) { return n.indexOf(location.origin) === 0 })
+              .map(function (n) { return n.split('/').pop() })
+          } catch (e) { /* timeline unavailable */ }
+
+          var modes = ['standalone', 'fullscreen', 'minimal-ui', 'browser']
+          var dm = 'unknown'
+          for (var i = 0; i < modes.length; i++) {
+            if (window.matchMedia('(display-mode: ' + modes[i] + ')').matches) { dm = modes[i]; break }
+          }
+          var meta = document.querySelector('meta[name="nx-build-sha"]')
+          var vv = window.visualViewport
+
+          return [
+            'NEXUS SHELL DIAGNOSTICS',
+            '',
+            pad('SHA') + (meta ? meta.content : 'NO-META'),
+            pad('JS') + firstMatch(names, /^main-.*\.js/),
+            pad('CSS') + firstMatch(names, /^main-.*\.css/),
+            pad('files') + names.length,
+            '',
+            pad('mode') + dm + '   navStandalone=' + navigator.standalone,
+            pad('href') + location.href,
+            '',
+            pad('inner') + window.innerHeight +
+              '   client ' + document.documentElement.clientHeight +
+              '   screen ' + screen.height,
+            pad('vv') + (vv ? Math.round(vv.height) + '   offsetTop ' + Math.round(vv.offsetTop) : 'n/a'),
+            pad('safeB') + safeAreaBottom(),
+            '',
+            rectLine('html', document.documentElement),
+            rectLine('body', document.body),
+            rectLine('#root', document.getElementById('root')),
+            rectLine('dock', document.querySelector('.nx-pinned-app-dock')),
+            '',
+            pad('vvRun') + JSON.stringify(window.__nxViewport || null),
+          ].join('\n')
+        }
+
+        function renderDiagnostics() {
+          var box = diagBox(diagText() + '\n\n(tap to dismiss)')
+
+          // Worker/cache state resolves asynchronously; appended once known.
+          var extra = []
+          var done = 0
+          var finish = function () {
+            if (++done < 2) return
+            box.textContent = diagText() + '\n\n' + extra.join('\n') + '\n\n(tap to dismiss)'
+          }
+          try {
+            navigator.serviceWorker.getRegistrations().then(function (r) {
+              extra.push(pad('sw') + r.length + ' registration(s)   controller=' +
+                (navigator.serviceWorker.controller ? 'YES' : 'none'))
+              finish()
+            }, finish)
+          } catch (e) { finish() }
+          try {
+            caches.keys().then(function (k) {
+              extra.push(pad('caches') + (k.length ? k.join(', ') : 'none'))
+              finish()
+            }, finish)
+          } catch (e) { finish() }
+        }
+
+        function scheduleDiagnostics() {
+          var mode = diagMode()
+          if (mode === 'off') return
+          if (mode === 'arm') { armDiagnostics(); return }
+          // Poll until the shell has mounted so #root and the dock report real
+          // geometry instead of a pre-mount zero.
+          var tries = 0
+          var tick = function () {
+            tries++
+            if (document.querySelector('.nx-pinned-app-dock') || tries > 24) {
+              renderDiagnostics()
+              return
+            }
+            setTimeout(tick, 250)
+          }
+          setTimeout(tick, 500)
+        }
+
         function loadApp() {
+          if (loaded) return
+          loaded = true
           ensureMainStylesheet()
           var script = document.createElement('script')
           script.type = 'module'
           script.crossOrigin = 'anonymous'
           script.src = ENTRY
           document.body.appendChild(script)
+          scheduleDiagnostics()
         }
 
-        if (localStorage.getItem(KEY) === GEN) {
+        stripBuster()
+
+        if (readMark() === GEN) {
           loadApp()
           return
         }
 
         if (!('serviceWorker' in navigator)) {
-          localStorage.setItem(KEY, GEN)
+          writeMark()
           loadApp()
           return
         }
@@ -59,19 +272,31 @@
           return Promise.all(regs.map(function (reg) { return reg.unregister() })).then(function () {
             return regs.length > 0 || hadController
           })
-        }).then(function (hadServiceWorker) {
-          if (!('caches' in window)) return hadServiceWorker
+        }).then(function (hadWorker) {
+          if (!('caches' in window)) return hadWorker
+          // Every CacheStorage entry on this origin was created by the retired
+          // worker — this build ships none and registers none, so there is no
+          // cache worth keeping. Cookies, localStorage, sessionStorage and user
+          // preferences are deliberately untouched.
           return caches.keys().then(function (keys) {
-            return Promise.all(keys.filter(function (key) {
-              return key.indexOf('nexus-shell') === 0
-            }).map(function (key) { return caches.delete(key) }))
-          }).then(function () { return hadServiceWorker })
-        }).then(function (hadServiceWorker) {
-          localStorage.setItem(KEY, GEN)
-          if (hadServiceWorker) {
-            location.reload()
+            if (!keys.length) return hadWorker
+            return Promise.all(keys.map(function (key) {
+              return caches.delete(key)
+            })).then(function () { return true })
+          })
+        }).then(function (hadWorker) {
+          var marked = writeMark()
+          // Reload only when stale state was actually found AND the marker
+          // persisted. Without a durable marker a reload would loop forever, so
+          // the unmarkable case mounts the app on the assets it already has.
+          if (hadWorker && marked) {
+            reloadFresh()
             return
           }
+          loadApp()
+        }).catch(function () {
+          // Cleanup is best-effort. The app must mount either way.
+          writeMark()
           loadApp()
         })
       })()

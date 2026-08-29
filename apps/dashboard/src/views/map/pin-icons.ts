@@ -74,35 +74,41 @@ const S = ICON_SIZE / 64
 // Classic peaked-roof house: body + arched door + side windows
 
 function drawSFR(ctx: CanvasRenderingContext2D) {
-  setup(ctx, 2.8)
+  // Designed for ~24px on screen, not for inspection at 64px. The previous glyph
+  // filled the canvas and paired an arched door with two square windows, which at
+  // marker size read as a visor between two ear cups — the "helmet". This is a
+  // single house silhouette: solid body, clear roof line, one doorway, inset from
+  // the canvas edge so the sprite never reads as a filled square.
+  setup(ctx, 3.2)
+  ctx.fillStyle = 'rgba(255,255,255,0.16)'
 
-  // House body (pentagon)
+  const cx = 32 * S
+  const roofY = 13 * S
+  const eaveY = 29 * S
+  const baseY = 52 * S
+  const left = 12 * S
+  const right = 52 * S
+
+  // Body: peaked-roof house as one closed silhouette.
   ctx.beginPath()
-  ctx.moveTo(32 * S,  6 * S)   // roof peak
-  ctx.lineTo(57 * S, 24 * S)   // right eave
-  ctx.lineTo(57 * S, 57 * S)   // right base
-  ctx.lineTo(7  * S, 57 * S)   // left base
-  ctx.lineTo(7  * S, 24 * S)   // left eave
+  ctx.moveTo(cx, roofY)
+  ctx.lineTo(right, eaveY)
+  ctx.lineTo(right, baseY)
+  ctx.lineTo(left, baseY)
+  ctx.lineTo(left, eaveY)
   ctx.closePath()
   ctx.fill()
   ctx.stroke()
 
-  // Arched door (centered)
-  const dL = 24 * S, dR = 40 * S, dB = 57 * S
-  const dMid = (dL + dR) / 2
-  const dRad = (dR - dL) / 2
-  const dTop = 43 * S + dRad
+  // Doorway: a single vertical opening reads as a house at small size where
+  // windows only add noise.
+  const dW = 9 * S
   ctx.beginPath()
-  ctx.moveTo(dL, dB)
-  ctx.lineTo(dL, dTop)
-  ctx.arc(dMid, dTop, dRad, Math.PI, 0)
-  ctx.lineTo(dR, dB)
+  ctx.moveTo(cx - dW / 2, baseY)
+  ctx.lineTo(cx - dW / 2, 39 * S)
+  ctx.lineTo(cx + dW / 2, 39 * S)
+  ctx.lineTo(cx + dW / 2, baseY)
   ctx.stroke()
-
-  // Left window
-  ctx.strokeRect(11 * S, 30 * S, 10 * S, 9 * S)
-  // Right window
-  ctx.strokeRect(43 * S, 30 * S, 10 * S, 9 * S)
 }
 
 // ─── Multi-Family — 2-4 unit / duplex ────────────────────────────────────

@@ -1,95 +1,27 @@
 /* eslint-disable no-restricted-globals */
-// CACHE_VERSION is injected at build time by vite (pwa-manifest plugin).
-const CACHE_VERSION = '__NEXUS_CACHE_VERSION__'
-const ACTIVE_CACHE = `nexus-shell-${CACHE_VERSION}`
-const LEGACY_CACHES = ['nexus-shell-v1']
-
-const isDocumentRequest = (request, url) =>
-  request.mode === 'navigate'
-  || request.destination === 'document'
-  || url.pathname === '/'
-  || url.pathname.endsWith('.html')
-
-const isImmutableAsset = (url) =>
-  url.pathname.startsWith('/assets/')
-  || /\.[a-f0-9]{8,}\.(js|css|woff2?)$/i.test(url.pathname)
-
-const isCacheableAssetResponse = (url, response) => {
-  if (!response?.ok) return false
-  const type = (response.headers.get('content-type') || '').toLowerCase()
-  if (type.includes('text/html')) return false
-  if (url.pathname.startsWith('/assets/')) {
-    return type.includes('javascript') || type.includes('css') || type.includes('font')
-  }
-  return type.includes('javascript') || type.includes('css') || type.includes('font')
-}
-
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
-})
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(self.skipWaiting())
-})
+// Tombstone worker.
+//
+// The previous worker answered fetches after the first load, which made a URL
+// serve one build on load 1 and potentially another on load 2 — the "it was
+// full-screen, then I refreshed and it wasn't" symptom. It also told the page to
+// reload on controllerchange, so a deploy could swap the build under a running
+// session.
+//
+// This file replaces it with a worker whose only job is to remove itself, clear
+// every cache it created, and hand control back to the network. It exists rather
+// than 404ing so that handsets which already have the old worker installed get a
+// definitive uninstall.
+self.addEventListener('install', () => self.skipWaiting())
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((key) => key.startsWith('nexus-shell') || LEGACY_CACHES.includes(key))
-          .map((key) => caches.delete(key)),
-      ))
-      .then(() => caches.open(ACTIVE_CACHE))
-      .then(() => self.clients.claim())
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+      .then(() => self.registration.unregister())
       .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-      .then((clients) => {
-        for (const client of clients) {
-          client.postMessage({ type: 'NEXUS_SW_ACTIVATED', cache: ACTIVE_CACHE })
-        }
-      }),
+      .then((clients) => { for (const client of clients) client.navigate(client.url) })
+      .catch(() => undefined),
   )
 })
 
-self.addEventListener('fetch', (event) => {
-  const { request } = event
-  if (request.method !== 'GET') return
-
-  const url = new URL(request.url)
-  if (url.origin !== self.location.origin) return
-  if (url.pathname.startsWith('/api/') || url.pathname === '/version') return
-  if (url.pathname === '/sw.js') return
-
-  if (isImmutableAsset(url)) {
-    // Network-first: never serve a stale (possibly HTML-poisoned) cache before the network.
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (isCacheableAssetResponse(url, response)) {
-            const copy = response.clone()
-            void caches.open(ACTIVE_CACHE).then((cache) => cache.put(request, copy))
-          }
-          return response
-        })
-        .catch(() => caches.match(request).then((cached) => {
-          const cachedType = (cached?.headers.get('content-type') || '').toLowerCase()
-          if (cached && !cachedType.includes('text/html')) return cached
-          return Response.error()
-        })),
-    )
-    return
-  }
-
-  if (isDocumentRequest(request, url)) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => response)
-        .catch(() => caches.match(request)),
-    )
-    return
-  }
-
-  event.respondWith(
-    fetch(request).catch(() => caches.match(request)),
-  )
-})
+// No fetch handler: every request goes straight to the network.

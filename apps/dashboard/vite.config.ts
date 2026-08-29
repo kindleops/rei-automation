@@ -654,8 +654,9 @@ function resolveBuildCacheVersion(devIdentity: { commitSha: string }) {
 
 const MAIN_ENTRY_PLACEHOLDER = '__NEXUS_MAIN_ENTRY__'
 const MAIN_CSS_PLACEHOLDER = '__NEXUS_MAIN_CSS__'
+const BUILD_SHA_PLACEHOLDER = '__NEXUS_BUILD_SHA__'
 
-const swRecoveryBootPlugin = (): Plugin => {
+const swRecoveryBootPlugin = (commitSha: string): Plugin => {
   let outDir = 'dist'
 
   return {
@@ -668,7 +669,8 @@ const swRecoveryBootPlugin = (): Plugin => {
       handler(html, ctx) {
         if (!ctx.server) return html
         return html
-          .replace(MAIN_ENTRY_PLACEHOLDER, '/src/main.tsx')
+          .replaceAll(MAIN_ENTRY_PLACEHOLDER, '/src/main.tsx')
+          .replaceAll(BUILD_SHA_PLACEHOLDER, commitSha)
           .replace(
             new RegExp(`\\s*<link rel="stylesheet"[^>]*href="${MAIN_CSS_PLACEHOLDER}"[^>]*/>\\s*`, 'g'),
             '\n',
@@ -688,9 +690,23 @@ const swRecoveryBootPlugin = (): Plugin => {
 
       const indexPath = path.join(outDir, 'index.html')
       let html = fs.readFileSync(indexPath, 'utf8')
+      // replaceAll, not replace: MAIN_CSS_PLACEHOLDER appears twice (the <link>
+      // and the `var CSS` recovery fallback). With a first-match-only replace the
+      // fallback shipped holding a literal placeholder and could never re-attach
+      // the stylesheet.
       html = html
-        .replace(MAIN_ENTRY_PLACEHOLDER, `/assets/${mainFile}`)
-        .replace(MAIN_CSS_PLACEHOLDER, `/assets/${mainCss}`)
+        .replaceAll(MAIN_ENTRY_PLACEHOLDER, `/assets/${mainFile}`)
+        .replaceAll(MAIN_CSS_PLACEHOLDER, `/assets/${mainCss}`)
+        .replaceAll(BUILD_SHA_PLACEHOLDER, commitSha)
+
+      // Checked by exact placeholder, not by the `__NEXUS_` prefix: the boot
+      // script legitimately contains that prefix as a literal in its dev-mode
+      // guard, so a prefix test would always trip.
+      const leftover = [MAIN_ENTRY_PLACEHOLDER, MAIN_CSS_PLACEHOLDER, BUILD_SHA_PLACEHOLDER]
+        .filter((token) => html.includes(token))
+      if (leftover.length) {
+        throw new Error(`sw-recovery-boot: unsubstituted placeholder(s) in dist/index.html: ${leftover.join(', ')}`)
+      }
 
       fs.writeFileSync(indexPath, html)
     },
@@ -752,7 +768,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_DASHBOARD_GIT_BRANCH': JSON.stringify(devIdentity.branch),
       'import.meta.env.VITE_DASHBOARD_WORKTREE_ID': JSON.stringify(devIdentity.worktreeId),
     },
-    plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
+    plugins: [react(), swRecoveryBootPlugin(commitSha), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     build: {
       rollupOptions: {
         input: {

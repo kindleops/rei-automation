@@ -204,6 +204,9 @@ export function mapAuthoritativeCountsFromPayload(
     suppressed: Number(rawCounts.suppressed ?? rawCounts.dnc_opt_out ?? 0),
     all_messages: Number(rawCounts.all_messages ?? rawCounts.all ?? 0),
     all: Number(rawCounts.all ?? rawCounts.all_messages ?? 0),
+    // Authoritative total archived conversations (exact head-count server-side),
+    // not the length of any loaded page.
+    archived: Number(rawCounts.archived ?? 0),
     active: Number(rawCounts.active ?? 0),
     automated: Number(rawCounts.automated ?? 0),
   }

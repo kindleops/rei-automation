@@ -20,6 +20,7 @@ const cls = (...tokens: Array<string | false | null | undefined>) =>
 
 const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
   { id: 'dark', label: 'Dark' },
+  { id: 'true_black', label: 'True Black' },
   { id: 'red_ops', label: 'Red Ops' },
   { id: 'light', label: 'Light' },
 ]

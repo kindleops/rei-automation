@@ -141,6 +141,10 @@ export const CANONICAL_INBOX_ROW_SELECT_FIELDS = [
 
 export const CANONICAL_INBOX_COUNT_KEYS = [
   "all",
+  // Archived is a terminal bucket outside the operational set. It is counted with its
+  // own exact-count query so the chip reflects TOTAL archived conversations, never the
+  // length of a loaded page.
+  "archived",
   "all_messages",
   "priority",
   "needs_attention",
@@ -196,6 +200,11 @@ export function compactInboxThreadSummaryRow(row = {}) {
     property_id: row.property_id || null,
     prospect_id: row.prospect_id || null,
     participant_id: row.prospect_id || row.master_owner_id || null,
+    // Archive state must survive compaction so the client can render Restore instead
+    // of Archive without a second round-trip.
+    is_archived: row.is_archived === true,
+    archive_scope: row.archive_scope ?? null,
+    archived_at: row.archived_at ?? null,
     master_owner_id: row.master_owner_id || null,
     display_name: row.display_name || row.owner_name || row.seller_display_name || row.owner_display_name || row.event_seller_display_name || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || row.event_seller_display_name || row.display_name || null,
@@ -213,8 +222,14 @@ export function compactInboxThreadSummaryRow(row = {}) {
     direction: row.latest_message_direction || row.latest_direction || row.direction || null,
     inbox_bucket: row.inbox_bucket || row.inbox_category || null,
     inbox_category: row.inbox_category || row.inbox_bucket || null,
-    conversation_stage: row.conversation_stage || row.stage || row.universal_stage || null,
-    stage: row.stage || row.conversation_stage || row.universal_stage || null,
+    // lifecycle_stage / lead_temperature are the canonical operator-editable fields.
+    // Without them here a reopened thread rendered the S1/unscored fallback even though
+    // the operator had already persisted a different stage or temperature.
+    lifecycle_stage: row.lifecycle_stage || row.conversation_stage || row.stage || null,
+    lead_temperature: row.lead_temperature ?? null,
+    operational_status: row.operational_status || null,
+    conversation_stage: row.lifecycle_stage || row.conversation_stage || row.stage || row.universal_stage || null,
+    stage: row.lifecycle_stage || row.stage || row.conversation_stage || row.universal_stage || null,
     status: row.status || row.universal_status || row.inbox_status || null,
     unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : 0,
     is_suppressed: row.is_suppressed === true || row.opt_out === true,

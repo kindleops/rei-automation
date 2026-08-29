@@ -6763,6 +6763,8 @@ center+right hidden */
   right: 0;
   width: min(420px, 100vw);
   height: 100vh;
+  height: -webkit-fill-available;
+  height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr;
   border-left: 1px solid var(--map-glass-border, rgba(171, 205, 255, 0.16));
@@ -25447,4 +25449,180 @@ no clipping */
 }
 .nx-composer-recipient__dot {
   opacity: 0.45;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INBOX MOBILE — operator density pass
+
+   The row carried eight stacked bands (identity, stage/market/phone, message,
+   badges, offer/value/equity, repairs/score/contact, tags, contact flags). That
+   is a CRM record, not a conversation list: on a handset it pushed the next
+   thread off-screen and buried the one thing that matters — who replied and
+   what they said. Mobile keeps identity, the message, the address and up to
+   three signals; the underwriting bands live in the thread detail.
+
+   Desktop is untouched: everything here is inside a mobile media query, and the
+   duplicated address element is display:none until this block turns it on.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Off by default — desktop keeps the address in the header. */
+.nx-thread-card-rebuilt__address--below { display: none; }
+
+@media (max-width: 768px) {
+  /* ── Row shell ─────────────────────────────────────────────────────────── */
+  .nx-thread-card-rebuilt {
+    gap: 9px;
+    padding: 7px 9px 7px 7px;
+    border-radius: 11px;
+    align-items: flex-start;
+  }
+
+  /* ── Street View: a property thumbnail, not an avatar and not a hero ───── */
+  .nx-thread-card-rebuilt__media {
+    flex: 0 0 78px;
+    width: 78px;
+    min-width: 78px;
+    height: 58px;              /* consistent 4:3 crop */
+    border-radius: 8px;
+  }
+
+  /* ── Hierarchy 1 · identity is the strongest thing in the row ─────────── */
+  .nx-thread-card-rebuilt__name {
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  /* Long names must not wrap the row taller — they ellipsis instead. */
+  .nx-thread-card-rebuilt__identity { min-width: 0; }
+
+  /* ── Hierarchy 2 · the latest message ─────────────────────────────────── */
+  .nx-thread-card-rebuilt__preview {
+    margin-top: 1px;
+    font-size: 12.5px;
+    line-height: 1.28;
+    color: #dfe3ea;
+    -webkit-line-clamp: 2;     /* hard ceiling: two lines, never more */
+  }
+
+  /* ── Hierarchy 3 · address, quiet, one line ───────────────────────────── */
+  .nx-thread-card-rebuilt__address--below {
+    display: block;
+    margin-top: 2px;
+    font-size: 10.5px;
+    line-height: 1.2;
+    color: #8b93a1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* ...and only once: the header copy stands down on mobile. */
+  .nx-thread-card-rebuilt__header .nx-thread-card-rebuilt__address { display: none; }
+
+  /* ── Hierarchy 4 · at most three signals; the rest belong in detail ───── */
+  .nx-thread-card-rebuilt__signals {
+    margin-top: 3px;
+    gap: 3px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .nx-thread-card-rebuilt__signals > *:nth-child(n + 4) { display: none; }
+
+  /* Underwriting bands: collapsed on mobile, still rendered for desktop. */
+  .nx-thread-card-rebuilt .is-detail-meta { display: none; }
+
+  /* ── Timestamp: small, quiet, right-aligned ───────────────────────────── */
+  .nx-thread-card-rebuilt__right {
+    flex: 0 0 auto;
+    gap: 4px;
+    padding-left: 6px;
+  }
+  .nx-thread-card-rebuilt__time {
+    font-size: 9.5px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  /* The emoji flame duplicates the urgency rail and the signal pills. */
+  .nx-thread-card-rebuilt__hot-icon { display: none; }
+
+  /* ── Urgency rail: slimmer and more intentional ───────────────────────── */
+  .nx-thread-card-rebuilt::before {
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     BUCKET NAV — native command surface, not emoji tiles
+     ══════════════════════════════════════════════════════════════════════ */
+  .nx-cat-nav {
+    gap: 5px;
+    margin: 0 8px 4px;
+    padding: 3px 0 4px;
+    scroll-snap-type: x proximity;
+  }
+  .nx-cat-nav__item {
+    /* Horizontal pill: label and count on one line, so six buckets fit the
+       width instead of six stacked tiles eating vertical space. */
+    flex-direction: row;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    scroll-snap-align: start;
+  }
+  /* The emoji is what made this read as consumer chrome. */
+  .nx-cat-nav__icon { display: none; }
+  .nx-cat-nav__label {
+    font-size: 10.5px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    white-space: nowrap;
+  }
+  .nx-cat-nav__count {
+    font-size: 10.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.72;
+  }
+
+  /* Emphasis: the two buckets an operator acts on lead. */
+  .nx-cat-nav__item[data-category="priority"],
+  .nx-cat-nav__item[data-category="new_replies"] {
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(233, 240, 250, 0.95);
+  }
+  .nx-cat-nav__item[data-category="priority"] .nx-cat-nav__count,
+  .nx-cat-nav__item[data-category="new_replies"] .nx-cat-nav__count { opacity: 1; }
+
+  /* Recede: reference buckets, present but not competing. */
+  .nx-cat-nav__item[data-category="waiting"],
+  .nx-cat-nav__item[data-category="all_messages"],
+  .nx-cat-nav__item[data-category="archived"] {
+    background: transparent;
+    color: rgba(186, 204, 228, 0.45);
+  }
+
+  /* ── Top controls: shorten the run from dock to first conversation ────── */
+  .nx-sidebar-rebuilt__search-top { padding-top: 4px; padding-bottom: 4px; }
+  .nx-sidebar-rebuilt__list-container { padding-top: 0; }
+
+  /* Saved filters are a rare, deliberate action — they do not deserve a
+     permanent full-width row above the conversations. Collapsed to a compact
+     trailing affordance; the Manage Lists panel still opens in place. */
+  .nx-sidebar-rebuilt__secondary-controls {
+    gap: 6px;
+    padding: 2px 8px 5px;
+    justify-content: flex-start;
+  }
+  .nx-sidebar-rebuilt__secondary-controls > button {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 7px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(186, 204, 228, 0.6);
+    background: rgba(255, 255, 255, 0.03);
+  }
 }

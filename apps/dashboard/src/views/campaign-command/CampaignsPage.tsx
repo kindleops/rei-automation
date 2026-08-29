@@ -50,15 +50,31 @@ import { CampaignFilterMenu } from './components/CampaignFilterMenu'
 import { CampaignDetailHeader } from './components/CampaignDetailHeader'
 import { CampaignDetailTabBar } from './components/CampaignDetailTabBar'
 import { CampaignStatusBadge } from './components/CampaignStatusBadge'
+import { CampaignListCard } from './components/CampaignListCard'
+import { CampaignCommandReadout } from './components/CampaignCommandReadout'
+import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
+import { CampaignDetailMobile } from './mobile/CampaignDetailMobile'
+import { CampaignOverviewMobile } from './mobile/CampaignOverviewMobile'
+import { CampaignQueueMobile } from './mobile/CampaignQueueMobile'
+import { CampaignTargetsMobile } from './mobile/CampaignTargetsMobile'
+import { CampaignRepliesMobile } from './mobile/CampaignRepliesMobile'
+import './mobile/campaign-detail-bands.css'
+import './mobile/campaign-overview-mobile.css'
+import './mobile/campaign-detail-mobile.css'
+import './mobile/campaign-command-mobile.css'
+import './campaign-mission-hero.css'
+import './campaign-command-readout.css'
+import './campaign-list-card.css'
 import { CampaignMobileActionDock } from './components/CampaignMobileActionDock'
-import { CampaignMobileIntelRibbon } from './components/CampaignMobileIntelRibbon'
 import { CampaignChipFilterMenu } from './components/CampaignChipFilterMenu'
-import { cls, fmt, fmtInterval, fmtPct, fmtRelative } from './campaign-formatters'
+import { cls, fmt, fmtInterval, fmtPct, fmtRelative, resolveNextSend } from './campaign-formatters'
 import '../../modules/inbox/queue-ops.css'
 import './campaigns.css'
 import './campaign-command.css'
 import './campaign-command-glass.css'
 import './campaign-mobile.css'
+// Final authority: corrects the component sheets above. Must stay last.
+import './campaign-cinematic.css'
 
 export { cls, fmt, fmtPct, fmtInterval, fmtRelative }
 
@@ -212,7 +228,8 @@ export const CampaignIntelligenceRail = ({ campaign }: { campaign: CampaignSumma
     { label: 'Positive', value: fmt(campaign.positive_reply_count), variant: campaign.positive_reply_count > 0 ? 'is-good' : '' },
     { label: 'Ready', value: fmt(campaign.ready_targets), variant: campaign.ready_targets > 0 ? '' : 'is-warn' },
     { label: 'Readiness', value: readiness.label, variant: readiness.level === 'ready' ? 'is-good' : readiness.level === 'warnings' ? 'is-warn' : 'is-bad' },
-    { label: 'Next Send', value: fmtRelative(campaign.next_send_at), variant: '' },
+    // State-aware: a paused campaign must never render a stale past countdown.
+    { label: 'Next Send', value: resolveNextSend(campaign).label, variant: '' },
   ]
 
   return (
@@ -243,7 +260,7 @@ export const CampaignIntelligenceRail = ({ campaign }: { campaign: CampaignSumma
             </div>
             <div className="ccc__intel-card">
               <div className="ccc__intel-card-label">Schedule</div>
-              <div className="ccc__intel-card-value">{campaign.next_send_at ? fmtRelative(campaign.next_send_at) : 'Not scheduled'}</div>
+              <div className="ccc__intel-card-value">{resolveNextSend(campaign).label}</div>
             </div>
             {readiness.blockers.map((b) => (
               <div key={b} className="ccc__intel-issue"><span>⛔</span>{b}</div>
@@ -303,22 +320,52 @@ const OverviewTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignS
 
   return (
     <div className={cls('ccc-detail-overview', isMobileLayout && 'ccc-detail-overview--mobile')}>
-      {isMobileLayout && <CampaignMobileIntelRibbon campaign={campaign} />}
+      {/* Legacy intel ribbon removed on mobile: CampaignMissionHero now owns
+          readiness / READY / queue / next for every mobile detail view. The ribbon
+          restated READY ~150px below the hero and rendered a raw relative time,
+          producing "NEXT 55d ago" on a paused campaign. */}
 
-      <section className={cls('ccc-detail-section', isMobileLayout && 'ccc-detail-section--collapsible')}>
-        <div className="ccc-detail-section__head">
-          <h3>Launch readiness</h3>
-          <span className={cls('ccc-detail-section__badge', `is-${readiness.level}`)}>{readiness.label}</span>
-        </div>
-        <div className={cls('ccc__readiness-banner', 'ccc-detail-readiness', `is-${readiness.level}`)}>
-          {readiness.blockers.map((b) => <span key={b} className="ccc__readiness-blocker">{b}</span>)}
-          {readiness.warnings.map((w) => <span key={w} className="ccc__readiness-warning">{w}</span>)}
-          {readiness.blockers.length === 0 && readiness.warnings.length === 0 && (
-            <span className="ccc-detail-readiness__ok">All checks passed — campaign is ready to launch.</span>
-          )}
-        </div>
-      </section>
+      {/* On mobile CampaignMissionHero already states the campaign's first
+          blocker directly under the hero number. Repeating it verbatim ~200px
+          later, inside a bordered banner under a badge that repeats the same
+          state a third time, is the single loudest redundancy on this screen.
+          Only render blockers the hero did not already show. */}
+      {(() => {
+        const heroBlocker = isMobileLayout ? readiness.blockers[0] : undefined
+        const blockers = readiness.blockers.filter((b) => b !== heroBlocker)
+        const nothingLeftToSay =
+          isMobileLayout && blockers.length === 0 && readiness.warnings.length === 0
+        if (nothingLeftToSay) return null
+        return (
+          <section className={cls('ccc-detail-section', isMobileLayout && 'ccc-detail-section--collapsible')}>
+            <div className="ccc-detail-section__head">
+              <h3>Launch readiness</h3>
+              {!isMobileLayout && (
+                <span className={cls('ccc-detail-section__badge', `is-${readiness.level}`)}>{readiness.label}</span>
+              )}
+            </div>
+            <div className={cls('ccc__readiness-banner', 'ccc-detail-readiness', `is-${readiness.level}`)}>
+              {blockers.map((b) => <span key={b} className="ccc__readiness-blocker">{b}</span>)}
+              {readiness.warnings.map((w) => <span key={w} className="ccc__readiness-warning">{w}</span>)}
+              {blockers.length === 0 && readiness.warnings.length === 0 && (
+                <span className="ccc-detail-readiness__ok">All checks passed — campaign is ready to launch.</span>
+              )}
+            </div>
+          </section>
+        )
+      })()}
 
+      {/* Three full-height cards each reading "Cost unavailable" is a wall of
+          nothing. With no configured rate and no sends there is no cost story to
+          tell, so state it once, quietly. */}
+      {cost.totalSpend == null ? (
+        <section className="ccc-detail-section ccc-detail-section--muted">
+          <div className="ccc-detail-empty">
+            <span>Cost &amp; spend</span>
+            <p>No spend yet — figures appear once this campaign sends.</p>
+          </div>
+        </section>
+      ) : (
       <section className="ccc-detail-section">
         <div className="ccc-detail-section__head"><h3>Cost &amp; spend</h3></div>
         <div className="ccc__cost-grid ccc-detail-cost-grid">
@@ -343,6 +390,7 @@ const OverviewTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignS
         </div>
         </div>
       </section>
+      )}
 
       <section className="ccc-detail-section">
         <div className="ccc-detail-section__head"><h3>Target funnel</h3></div>
@@ -407,7 +455,7 @@ const OverviewTab = ({ campaign, isMobileLayout = false }: { campaign: CampaignS
         <div className="ccc-detail-settings">
       <div className="ccc__setting-row ccc-detail-setting-row">
         <div><div className="ccc__setting-label">Next Send</div><div className="ccc__setting-desc">Next scheduled execution</div></div>
-        <div className="ccc__setting-value">{fmtRelative(campaign.next_send_at)}</div>
+        <div className="ccc__setting-value">{resolveNextSend(campaign).label}</div>
       </div>
       <div className="ccc__setting-row ccc-detail-setting-row">
         <div><div className="ccc__setting-label">Send Interval</div><div className="ccc__setting-desc">Delay between sends</div></div>
@@ -1060,17 +1108,29 @@ export const DetailPanel = ({
 
   const detailActions = getDetailActions(campaign)
 
+
   return (
     <div className={cls('ccc__detail-panel', 'ccc-glass-workspace', 'ccc__detail-panel--glass', isMobileLayout && 'is-mobile-detail')}>
       <div className={cls('ccc-mobile-detail-chrome', isMobileLayout && 'is-sticky')}>
-        <CampaignDetailHeader
-          campaign={campaign}
-          commandState={commandState}
-          detailActions={detailActions}
-          isMobileLayout={isMobileLayout}
-          onClose={onClose}
-          onAction={onAction}
-        />
+        {/* Mobile Detail is its own composition (zones A–F of the approved IA).
+            It replaces the desktop header + mission hero + test banner, which
+            stacked three bordered blocks saying overlapping things. The tab bar,
+            tab content and action dock below are unchanged. */}
+        {isMobileLayout ? (
+          <CampaignDetailMobile
+            campaign={campaign}
+            onClose={onClose}
+          />
+        ) : (
+          <CampaignDetailHeader
+            campaign={campaign}
+            commandState={commandState}
+            detailActions={detailActions}
+            isMobileLayout={isMobileLayout}
+            onClose={onClose}
+            onAction={onAction}
+          />
+        )}
         <CampaignDetailTabBar
           tabs={TABS}
           activeTab={activeTab}
@@ -1080,7 +1140,9 @@ export const DetailPanel = ({
       </div>
 
       <div className={cls('ccc__detail-body', 'ccc__detail-body--glass', isMobileLayout && 'ccc__detail-body--mobile-dock')}>
-        {activeTab === 'overview'  && <OverviewTab campaign={campaign} isMobileLayout={isMobileLayout} />}
+        {activeTab === 'overview'  && (isMobileLayout
+          ? <CampaignOverviewMobile campaign={campaign} />
+          : <OverviewTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
         {activeTab === 'execution' && (
           <CampaignControlCenter
             campaignId={campaign.id}
@@ -1088,9 +1150,15 @@ export const DetailPanel = ({
             onLifecycleChange={() => onAction('refresh', campaign)}
           />
         )}
-        {activeTab === 'targets'   && <TargetsTab campaignId={campaign.id} isMobileLayout={isMobileLayout} />}
-        {activeTab === 'queue'     && <QueueTab campaign={campaign} isMobileLayout={isMobileLayout} />}
-        {activeTab === 'replies'   && <RepliesTab campaign={campaign} isMobileLayout={isMobileLayout} />}
+        {activeTab === 'targets'   && (isMobileLayout
+          ? <CampaignTargetsMobile campaignId={campaign.id} />
+          : <TargetsTab campaignId={campaign.id} isMobileLayout={isMobileLayout} />)}
+        {activeTab === 'queue'     && (isMobileLayout
+          ? <CampaignQueueMobile campaign={campaign} />
+          : <QueueTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
+        {activeTab === 'replies'   && (isMobileLayout
+          ? <CampaignRepliesMobile campaign={campaign} />
+          : <RepliesTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
         {activeTab === 'failures'  && <FailuresTab campaign={campaign} />}
         {activeTab === 'geography' && <GeographyTab campaign={campaign} />}
         {activeTab === 'templates' && <TemplatesTab campaign={campaign} />}
@@ -1177,6 +1245,27 @@ export const CampaignListPanel = ({
 
   return (
     <div className="ccc__list-panel ccc-glass-rail">
+      {isMobileLayout ? (
+        // Search + filter + count on ONE row. Stacked, these consumed roughly a
+        // quarter of the first viewport before a single campaign was visible.
+        <div className="ccf">
+          <label className="ccf__search">
+            <Icon name="search" size={13} />
+            <input
+              placeholder="Search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </label>
+          <CampaignFilterMenu
+            statusFilter={statusFilter}
+            options={filterOptions}
+            onStatusFilter={setStatusFilter}
+            isMobileLayout={isMobileLayout}
+          />
+          <span className="ccf__count">{campaigns.length}</span>
+        </div>
+      ) : (
       <div className="ccc__list-toolbar ccc__list-toolbar--glass">
         <div className="ccc__list-search ccc__list-search--glass">
           <Icon name="search" size={12} />
@@ -1198,7 +1287,8 @@ export const CampaignListPanel = ({
           </span>
         </div>
       </div>
-      <div className="ccc__list-scroll ccc__list-scroll--glass">
+      )}
+      <div className={cls('ccc__list-scroll', 'ccc__list-scroll--glass', isMobileLayout && 'clc-list')}>
         {loading ? (
           <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {[1, 2, 3, 4, 5].map((i) => <div key={i} className="ccc__shimmer" style={{ height: 56, width: '100%' }} />)}
@@ -1236,6 +1326,19 @@ export const CampaignListPanel = ({
             const pAction = getPrimaryAction(c)
             const isSelected = c.id === selectedId
             const health = computeHealth(c)
+            // Mobile gets the state-led card: one dominant number (ready
+            // inventory), a peripheral state rail, at most one attention flag.
+            // Desktop keeps the dense row — it has the width for it.
+            if (isMobileLayout) {
+              return (
+                <CampaignListCard
+                  key={c.id}
+                  campaign={c}
+                  selected={isSelected}
+                  onSelect={() => onSelect(isSelected ? null : c)}
+                />
+              )
+            }
             return (
               <div
                 key={c.id}
@@ -1495,9 +1598,55 @@ export const CampaignsPage = () => {
 
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
 
-  const portfolioSubtitle = model
-    ? `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled`
-    : 'Loading…'
+  // On mobile the readout below owns portfolio state. This subtitle repeated it
+  // 40px away AND disagreed with it — "4 active" here vs "4 paused" there, because
+  // kpis.activeCampaigns counts paused-with-inventory as active while the readout
+  // reports true lifecycle state. Two answers to one question; the readout wins.
+  const portfolioSubtitle = !model
+    ? 'Loading…'
+    : isMobile
+      ? ''
+      : `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled`
+
+  // Campaign Command on mobile is its own composition, not the desktop tree with
+  // smaller boxes. It short-circuits the shared layout entirely so none of the
+  // desktop header / KPI / three-column chrome reaches the phone. Detail and the
+  // creator still render through the shared tree below.
+  if (isMobile && !selectedCampaign) {
+    return (
+      <>
+        <CampaignCommandMobile
+          model={model}
+          campaigns={campaigns}
+          loading={loading}
+          search={searchQuery}
+          onSearchChange={setSearchQuery}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
+          onSelect={handleSelectCampaign}
+          onNew={() => handleGlobalAction('create')}
+        />
+        {isCreateModalOpen && (
+          <CreateCampaignModal
+            campaignId={editCampaignId ?? undefined}
+            mode={builderMode}
+            onClose={() => {
+              setIsCreateModalOpen(false)
+              setEditCampaignId(null)
+              setBuilderMode('create')
+            }}
+            onSuccess={(newId) => {
+              setIsCreateModalOpen(false)
+              setEditCampaignId(null)
+              setBuilderMode('create')
+              void load({ silent: true })
+              if (newId) handleSelectCampaign({ id: newId } as CampaignSummary)
+            }}
+          />
+        )}
+      </>
+    )
+  }
 
   return (
     <div className={cls(
@@ -1615,8 +1764,16 @@ export const CampaignsPage = () => {
         </div>
       ) : model ? (
         <div className="ccc__kpi-zone">
-          {!isMobile && <div className="ccc__portfolio-label">Campaign Portfolio</div>}
-          <KpiStrip kpis={model.kpis} isMobileLayout={isMobile} />
+          {isMobile ? (
+            // Four equal boxes gave ACTIVE / READY / SENT / REPLY identical weight
+            // and said nothing about movement. One dominant number + a status line.
+            <CampaignCommandReadout kpis={model.kpis} campaigns={model.campaigns} />
+          ) : (
+            <>
+              <div className="ccc__portfolio-label">Campaign Portfolio</div>
+              <KpiStrip kpis={model.kpis} isMobileLayout={false} />
+            </>
+          )}
         </div>
       ) : null)}
 

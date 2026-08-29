@@ -663,6 +663,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     data,
     loading: _dataLoading,
     refresh: refreshInbox,
+    refreshCounts: refreshInboxCounts,
     loadMore,
     recentlyUpdatedThreadIds,
     sourceMode,
@@ -1004,7 +1005,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       active_conversations: activeCount,
       waiting_for_reply: waitingCount,
       all_threads: allCount,
-      archived_leads: local.archived,
+      // Authoritative server total (exact head-count) with the locally-derived value only
+      // as a fallback. Never page-length arithmetic.
+      archived: readStoreCount('archived') ?? local.archived,
+      archived_leads: readStoreCount('archived') ?? local.archived,
       wrong_numbers: local.wrong_number,
       sent_today: sentToday,
       replies_today: repliesToday,
@@ -3302,7 +3306,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [announceLayout, applySavedPreset, filtered, layoutState.activeOverlay, layoutState.inboxMode, layoutState.leftPanelMode, layoutState.mapMode, openGlobalCommand, selected, selectThread, setActiveOverlay])
 
-  const handleWorkflowMutation = useCallback(async (label: string, mutation: () => Promise<any>, options?: { action?: { label: string, onClick: () => void }, skipRefresh?: boolean }) => {
+  const handleWorkflowMutation = useCallback(async (label: string, mutation: () => Promise<any>, options?: { action?: { label: string, onClick: () => void }, skipRefresh?: boolean, skipCountRefresh?: boolean }) => {
     try {
       if (DEV) console.log(`[NexusInbox] Mutation Triggered: ${label}`, { options })
       const result = await mutation()
@@ -3318,6 +3322,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       } else {
         if (DEV) console.log(`[NexusInbox] Skipping refresh (optimistic only) for: ${label}`)
       }
+      /**
+       * Counts are reconciled on EVERY successful mutation, including the
+       * skipRefresh (optimistic-row) paths. Archive/restore/status/stage change
+       * bucket membership, and the category chips are authoritative-server values —
+       * previously they went stale until an unrelated refresh happened to fire.
+       */
+      if (options?.skipCountRefresh !== true) {
+        void refreshInboxCounts()
+      }
       emitNotification({ 
         title: label, 
         detail: 'Action completed successfully', 
@@ -3327,7 +3340,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     } catch (err) {
       emitNotification({ title: 'Error', detail: String(err), severity: 'critical' })
     }
-  }, [refreshInbox, currentInboxQuery, DEV])
+  }, [refreshInbox, refreshInboxCounts, currentInboxQuery, DEV])
 
   const handleThreadAction = useCallback(async (target: string | InboxWorkflowThread, action: string) => {
     const thread = typeof target === 'string' ? threads.find((t) => t.id === target) : target
@@ -3356,6 +3369,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     } else if (action === 'refetch') {
       setMessageRefetchKey((k) => k + 1)
       void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
+      // ThreadStateBar fires this after every successful status/stage/temperature
+      // commit; those change bucket membership, so counts must reconcile too.
+      void refreshInboxCounts()
       return
     } else if (action === 'open_map') {
       setSelectedWorkspaceViews(['command_map'])
