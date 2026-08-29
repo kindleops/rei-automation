@@ -8,6 +8,7 @@ import type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/
 export type { InboxModel, InboxThread, InboxRealtimeStatus } from '../../domain/inbox/inbox-model-types'
 import { isDev, shouldUseSupabase } from '../../lib/data/shared'
 import type { InboxWorkflowThread, InboxStatus, SellerStage, AutomationState } from '../../lib/data/inboxWorkflowData'
+import { resolveAutomationModeFromRow } from '../../domain/lead-state/deal-desk-control-contract'
 import { hasSupabaseEnv } from '../../lib/supabaseClient'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import {
@@ -520,6 +521,19 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
   }
 }
 
+const legacyAutomationDisplay = (thread: InboxThread): AutomationState => {
+  const row = thread as InboxThread & Record<string, unknown>
+  const resolved = resolveAutomationModeFromRow({
+    automation_state: row.automation_state,
+    autopilot_mode: row.autopilot_mode,
+  })
+  if (!resolved.ok) return 'manual_control'
+  if (resolved.value === 'active') return 'active'
+  if (resolved.value === 'paused') return 'paused'
+  if (resolved.value === 'human_controlled' || resolved.value === 'review_required') return 'manual_control'
+  return 'completed'
+}
+
 export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
   const lastAt = t.lastMessageIso || new Date().toISOString()
   const inboxStatus = (t.threadWorkflowStatus || (t.status === 'unread' ? 'new_reply' : 'waiting')) as InboxStatus
@@ -547,7 +561,7 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
     inboxStatus,
     conversationStage,
     inboxStage: conversationStage,
-    automationState: (t.threadIsArchived || t.threadIsSuppressed ? 'completed' : 'active') as AutomationState,
+    automationState: legacyAutomationDisplay(t),
     nextSystemAction: 'Review thread for system recommended next steps.',
     isArchived: t.threadIsArchived ?? (t.status === 'archived' || t.isArchived) ?? false,
     isRead: t.threadIsRead ?? (t.status === 'read' || t.unreadCount === 0) ?? true,

@@ -432,6 +432,7 @@ export const UNIVERSAL_LEAD_STATE_PATCH_FIELDS = Object.freeze([
   'lead_temperature',
   'disposition',
   'contactability_status',
+  'automation_state',
   'next_action',
   'next_action_at',
   'follow_up_at',
@@ -462,7 +463,24 @@ export const LEGACY_FIELD_ALIASES = Object.freeze({
   temperature: 'lead_temperature',
   stage: 'lifecycle_stage',
   status: 'operational_status',
+  autopilot_mode: 'automation_state',
 });
+
+const AUTOMATION_STATE_ALIASES = Object.freeze({
+  running: 'running',
+  active: 'running',
+  autopilot_on: 'running',
+  paused: 'paused',
+  autopilot_paused: 'paused',
+  manual: 'manual',
+  manual_only: 'manual',
+  human_controlled: 'manual',
+});
+
+export function normalizeAutomationState(value) {
+  const key = normalizeKey(value);
+  return AUTOMATION_STATE_ALIASES[key] || null;
+}
 
 export function normalizePatchToCanonical(patch = {}) {
   const normalized = {};
@@ -474,12 +492,26 @@ export function normalizePatchToCanonical(patch = {}) {
     ) {
       continue;
     }
-    if (canonicalKey === 'lifecycle_stage') normalized.lifecycle_stage = normalizeLifecycleStage(value);
-    else if (canonicalKey === 'operational_status') normalized.operational_status = normalizeOperationalStatus(value);
-    else if (canonicalKey === 'lead_temperature') normalized.lead_temperature = normalizeLeadTemperature(value);
-    else if (canonicalKey === 'disposition') normalized.disposition = normalizeDisposition(value);
-    else if (canonicalKey === 'contactability_status') normalized.contactability_status = normalizeContactability(value);
-    else normalized[canonicalKey] = value;
+    if (canonicalKey === 'lifecycle_stage') {
+      const stage = normalizeLifecycleStage(value, null);
+      if (stage) normalized.lifecycle_stage = stage;
+    } else if (canonicalKey === 'operational_status') {
+      const status = normalizeOperationalStatus(value, null);
+      if (status) normalized.operational_status = status;
+    } else if (canonicalKey === 'lead_temperature') {
+      const temperature = normalizeLeadTemperature(value, null);
+      if (temperature) normalized.lead_temperature = temperature;
+    } else if (canonicalKey === 'disposition') {
+      const disposition = normalizeDisposition(value, null);
+      if (disposition) normalized.disposition = disposition;
+    } else if (canonicalKey === 'contactability_status') {
+      const contactability = normalizeContactability(value, null);
+      if (contactability) normalized.contactability_status = contactability;
+    }
+    else if (canonicalKey === 'automation_state') {
+      const state = normalizeAutomationState(value);
+      if (state) normalized.automation_state = state;
+    } else normalized[canonicalKey] = value;
   }
   return normalized;
 }

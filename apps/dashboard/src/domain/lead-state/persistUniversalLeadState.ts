@@ -40,6 +40,8 @@ export interface UniversalLeadStateMutationResult {
   mutationPayload: AnyRecord | null
   writeTarget: 'inbox_thread_state' | 'none'
   data?: unknown
+  row?: Record<string, unknown> | null
+  errorCode?: string | null
 }
 
 function buildMutationPayload(threadKey: string, patch: UniversalLeadStatePatch): AnyRecord {
@@ -53,21 +55,44 @@ function toMutationResult(
 ): UniversalLeadStateMutationResult {
   const mutationPayload = buildMutationPayload(threadKey, patch)
   if (result.ok) {
+    const body = result.data && typeof result.data === 'object'
+      ? result.data as Record<string, unknown>
+      : null
+    if (body?.blocked === true) {
+      return {
+        ok: false,
+        threadKey,
+        errorMessage: typeof body.reason === 'string' ? body.reason : 'The server rejected this state change.',
+        errorCode: typeof body.reason === 'string' ? body.reason : 'STATE_CHANGE_BLOCKED',
+        mutationPayload,
+        writeTarget: 'none',
+        data: result.data,
+        row: body.previous && typeof body.previous === 'object' ? body.previous as Record<string, unknown> : null,
+      }
+    }
     return {
       ok: true,
       threadKey,
       errorMessage: null,
+      errorCode: null,
       mutationPayload,
       writeTarget: 'inbox_thread_state',
       data: result.data,
+      row: body?.row && typeof body.row === 'object' ? body.row as Record<string, unknown> : null,
     }
   }
   return {
     ok: false,
     threadKey,
     errorMessage: result.message,
+    errorCode: result.error,
     mutationPayload,
     writeTarget: 'none',
+    row: result.upstream && typeof result.upstream === 'object'
+      && (result.upstream as Record<string, unknown>).previous
+      && typeof (result.upstream as Record<string, unknown>).previous === 'object'
+        ? (result.upstream as Record<string, unknown>).previous as Record<string, unknown>
+        : null,
   }
 }
 
