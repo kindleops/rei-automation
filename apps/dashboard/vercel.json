@@ -1,7 +1,7 @@
 {
   "framework": "vite",
   "devCommand": "vite --host 0.0.0.0 --port $PORT",
-  "buildCommand": "GIT_COMMIT_SHA=${VERCEL_GIT_COMMIT_SHA:-$(git rev-parse HEAD)} VITE_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build && node scripts/stamp-preview-manifest.mjs",
+  "buildCommand": "GIT_COMMIT_SHA=${NEXUS_BUILD_SHA:-${VERCEL_GIT_COMMIT_SHA:-$(git rev-parse HEAD)}} VITE_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build && node scripts/stamp-preview-manifest.mjs",
   "outputDirectory": "dist",
   "headers": [
     {
