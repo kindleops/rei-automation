@@ -6,6 +6,11 @@ import {
 } from "@/lib/supabase/sms-engine.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import {
+  persistActiveOffer as persistActiveOfferDefault,
+  bindOfferToQueueRow as bindOfferToQueueRowDefault,
+  MONETARY_OFFER_USE_CASES,
+} from "@/lib/domain/seller-flow/seller-offer-authority.js";
+import {
   normalizeUsPhoneToE164,
   prepareRenderedSmsForQueue,
 } from "@/lib/sms/sanitize.js";
@@ -1953,7 +1958,24 @@ export async function checkInboundAutoReplySuppression({
   return { suppressed: false, reason: null };
 }
 
+
+// The SAME authority resolution the {{offer_price}} token uses (ceiling-bounded,
+// strategy-authorized amount preferred over the bare recommendation). Keeping
+// one resolver is what guarantees the persisted offer equals the sent amount.
+export function resolveAuthorizedOfferAmount(dealAuthority = null) {
+  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  const pick = (value) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
+    return amount;
+  };
+  return pick(dealAuthority?.authorized_offer_amount) ?? pick(dealAuthority?.recommended_offer);
+}
 export async function executeInboundAutomationDecision({
+  opportunityId = null,
+  persistActiveOfferImpl = persistActiveOfferDefault,
+  bindOfferToQueueRowImpl = bindOfferToQueueRowDefault,
   message,
   threadKey,
   propertyId,
@@ -2824,6 +2846,74 @@ export async function executeInboundAutomationDecision({
     };
   }
 
+  // ── OFFER TERM AUTHORITY: persist the offer BEFORE the send ────────────────
+  // Invariant: the amount in the seller's SMS must equal the amount in the
+  // persisted active offer. Previously the money was rendered into the body and
+  // enqueued here, while the only durable write happened later in
+  // persistSellerTransitionArtifacts inside a warn-only try/catch — so a failure
+  // there left the seller holding $X with nothing recording that $X was the
+  // active offer. The offer is now a PRECONDITION: if it cannot be persisted,
+  // the monetary message is not queued.
+  let persisted_offer = null;
+  if (MONETARY_OFFER_USE_CASES.has(lower(selected_use_case))) {
+    const offer_price = resolveAuthorizedOfferAmount(dealAuthority);
+    const offer_result = offer_price
+      ? await persistActiveOfferImpl({
+          opportunity_id: opportunityId,
+          property_id: propertyId,
+          thread_key: threadKey || inboundFrom,
+          master_owner_id: ownerId,
+          purchase_price: offer_price,
+          offer_type: lower(selected_use_case),
+          direction: "outbound",
+          recommended_offer: dealAuthority?.recommended_offer ?? null,
+          authorized_ceiling: dealAuthority?.authorized_offer_ceiling ?? null,
+          strategy: strategyDirective?.strategy || null,
+          source_message_event_id: clean(inboundEventId) || null,
+          // closing/EMD deliberately omitted: no canonical policy exists in this
+          // system, and a fabricated contract term must never reach a seller.
+          supabase,
+        })
+      : { ok: false, reason: "offer_amount_unauthorized" };
+
+    if (!offer_result?.ok) {
+      warn("[OFFER_AUTHORITY_BLOCKED_SEND]", {
+        thread_key: threadKey || inboundFrom,
+        use_case: selected_use_case,
+        reason: offer_result?.reason || "offer_persist_failed",
+      });
+      const blocked_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: true,
+        reply_mode: "none",
+        audit_reason: offer_result?.reason || "offer_persist_failed",
+      };
+      return {
+        ok: true,
+        automation_decision: blocked_decision,
+        selected_template,
+        rendered_message_text,
+        natural_reply: natural_reply.audit,
+        queued: false,
+        queue_item_id: null,
+        queue_row_id: null,
+        queue_result: {
+          ok: false,
+          status: 409,
+          reason: offer_result?.reason || "offer_persist_failed",
+        },
+        suppression_applied: false,
+        duplicate_suppressed: false,
+        dry_run: Boolean(dryRun),
+        auto_reply_mode: effective_auto_reply_mode,
+        queue_permission,
+        audit_reason: blocked_decision.audit_reason,
+      };
+    }
+    persisted_offer = offer_result;
+  }
+
   const queue_result = await insertSupabaseSendQueueRow({
     queue_key,
     queue_id: queue_key,
@@ -2929,10 +3019,35 @@ export async function executeInboundAutomationDecision({
       phone_id: phoneId || null,
       thread_key: clean(threadKey) || normalized_to_phone,
       inbound_message_event_id: inboundEventId || null,
+      // Binds this exact SMS to the persisted active offer it advertises. The
+      // body's amount and offer_price are the same resolved authority value, so
+      // the queued message and the offer record can never disagree.
+      offer_id: persisted_offer?.offer_id || null,
+      offer_version: persisted_offer?.offer_version ?? null,
+      offer_price: persisted_offer?.purchase_price ?? null,
+      offer_terms_hash: persisted_offer?.terms_hash || null,
     },
   }, {
     supabase,
   });
+
+  // Close the loop: the offer now points at the exact queue row carrying it.
+  if (persisted_offer?.offer_id && queue_result?.ok) {
+    try {
+      await bindOfferToQueueRowImpl({
+        offer_id: persisted_offer.offer_id,
+        send_queue_row_id: queue_result.queue_row_id || queue_result.id || null,
+        supabase,
+      });
+    } catch (bind_error) {
+      // The offer is already durable; a missing back-pointer is an audit gap,
+      // not a reason to un-send a queued message.
+      warn("[OFFER_QUEUE_BIND_SKIPPED]", {
+        offer_id: persisted_offer.offer_id,
+        error: bind_error?.message || "bind_failed",
+      });
+    }
+  }
 
   if (!queue_result?.ok) {
     const blocked_decision = {

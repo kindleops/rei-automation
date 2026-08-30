@@ -78,20 +78,25 @@ export function resolveCanonicalTerms({
   opportunity = null,
   thread_state = null,
   offer_snapshot = null,
+  accepted_offer = null,
   overrides = {},
 } = {}) {
   if (!opportunity?.id) {
     return { ok: false, reason: "missing_opportunity" };
   }
 
-  // The accepted purchase price comes ONLY from persisted negotiation authority.
-  // current_offer is the live negotiated number; recommended_offer is the ADE
-  // baseline used when acceptance lands before a counter was recorded.
-  const seller_contract_price =
-    toNumber(opportunity.current_offer) ?? toNumber(opportunity.recommended_offer);
-
+  // ── The contract price comes from the ACCEPTED OFFER, full stop ────────────
+  // Not `recommended_offer` (that is recommendation lineage, never an agreed
+  // term) and not `asking_price` (a field with known extraction corruption:
+  // values like 2, 4, 331 exist in production). If no offer was accepted
+  // through the Offer Term Authority, there is no contract price and this fails
+  // closed rather than substituting a number nobody agreed to.
+  if (!accepted_offer?.offer_id) {
+    return { ok: false, reason: "no_accepted_offer" };
+  }
+  const seller_contract_price = toNumber(accepted_offer.accepted_price ?? accepted_offer.purchase_price);
   if (!seller_contract_price) {
-    return { ok: false, reason: "missing_canonical_offer_price" };
+    return { ok: false, reason: "accepted_offer_missing_price" };
   }
 
   const property_address =
@@ -112,10 +117,21 @@ export function resolveCanonicalTerms({
     thread_key: clean(opportunity.primary_thread_key) || clean(thread_state?.thread_key) || null,
     seller_display_name: clean(opportunity.seller_display_name) || null,
     seller_contract_price,
-    // Optional terms: only persisted when supplied by canonical state. Never
-    // invented, so a template tab stays empty rather than showing a guess.
-    earnest_money: toNumber(overrides.earnest_money),
-    scheduled_closing_date: toIso(overrides.scheduled_closing_date),
+    // Contract terms come from the ACCEPTED OFFER, never from ad hoc overrides.
+    // They are null whenever the accepted offer carried no closing/EMD term —
+    // this system has no canonical closing-date or EMD policy, so a null here
+    // is the honest answer and the contract simply cannot complete yet.
+    earnest_money: toNumber(accepted_offer.emd_amount),
+    scheduled_closing_date: toIso(accepted_offer.closing_date),
+    closing_term: clean(accepted_offer.closing_term) || null,
+    emd_term: clean(accepted_offer.emd_term) || null,
+    // Offer + acceptance identity, so the contract is traceable to the exact
+    // agreed version.
+    accepted_offer_id: clean(accepted_offer.offer_id),
+    accepted_offer_version: accepted_offer.offer_version ?? null,
+    acceptance_event_id: clean(accepted_offer.acceptance_event_id) || null,
+    accepted_at: toIso(accepted_offer.accepted_at),
+    offer_terms_hash: clean(accepted_offer.terms_hash) || null,
     // Signer identity is frequently absent for SMS-sourced sellers (the
     // canonical graph carries a phone, not an email). Nullable by design; the
     // envelope step fails closed when it is still missing.
@@ -210,7 +226,26 @@ export async function createClosingCaseFromAcceptance({
     return { ok: false, created: false, reason: "authority_load_failed" };
   }
 
-  const resolved = resolveCanonicalTerms({ ...authorities, overrides });
+  // The ACCEPTED OFFER is the term source. Without one there is no agreed price,
+  // closing term or EMD, and no contract may be created.
+  let accepted_offer = null;
+  try {
+    const { loadAcceptedOffer } = await import(
+      "@/lib/domain/seller-flow/seller-offer-authority.js"
+    );
+    accepted_offer = await loadAcceptedOffer({
+      opportunity_id: authorities.opportunity?.id,
+      supabase,
+    });
+  } catch (error) {
+    warn("[CLOSING_ACCEPTED_OFFER_LOAD_FAILED]", {
+      opportunity_id: authorities.opportunity?.id || null,
+      error: error?.message || "load_failed",
+    });
+    return { ok: false, created: false, reason: "accepted_offer_load_failed" };
+  }
+
+  const resolved = resolveCanonicalTerms({ ...authorities, accepted_offer, overrides });
   if (!resolved.ok) {
     return { ok: false, created: false, reason: resolved.reason };
   }
@@ -251,6 +286,12 @@ export async function createClosingCaseFromAcceptance({
     seller_contract_price: terms.seller_contract_price,
     earnest_money: terms.earnest_money,
     scheduled_closing_date: terms.scheduled_closing_date,
+    // Traceability: the exact accepted offer + version this contract came from.
+    offer_id: terms.accepted_offer_id,
+    negotiation_id:
+      terms.accepted_offer_version != null ? String(terms.accepted_offer_version) : null,
+    offer_id: terms.accepted_offer_id,
+    negotiation_id: terms.accepted_offer_version != null ? String(terms.accepted_offer_version) : null,
     signer_email: terms.signer_email,
     signer_name: terms.signer_name,
     last_activity_at: accepted_iso,
