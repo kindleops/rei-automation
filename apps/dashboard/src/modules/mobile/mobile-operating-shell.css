@@ -2589,3 +2589,78 @@ html.is-mobile-layout {
 .nx-os:not(.is-mobile-os) .nx-conv-back {
   display: none !important;
 }
+
+/* ── iOS standalone-PWA fullscreen geometry contract ────────────────────────
+   Verified on a physical installed iPhone at
+   182f4b3bfa3bab64185aaf4eab6e54d891c1af4c (css main-Dt6KsIub.css).
+
+   ONE screen root: html owns the standalone extent and every descendant
+   consumes 100% of it. The Map and both portaled docks anchor absolutely to
+   that shared root instead of position:fixed — fixed resolves to the initial
+   containing block, which on device is the SHORT layout viewport (probed 1163
+   of a 1242.66 screen), because nothing on the ancestor chain creates a fixed
+   containing block. Both docks portal to document.body, making body the only
+   common ancestor of every fullscreen layer.
+
+   Scoped to display-mode: standalone. Browser and desktop keep their existing
+   dvh contract untouched. Safe-area pads interactive chrome only and never
+   sizes or shortens the root or the Map. Guarded by
+   scripts/assert-mobile-fullscreen-contract.mjs. */
+@media (display-mode: standalone) {
+  html.is-mobile-layout {
+    width: 100%;
+    height: 100lvh;
+    overflow: hidden;
+  }
+
+  html.is-mobile-layout body {
+    position: relative;
+    width: 100%;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden;
+  }
+
+  html.is-mobile-layout #root,
+  html.is-mobile-layout .nx-os.is-mobile-os,
+  html.is-mobile-layout .nx-premium-inbox,
+  html.is-mobile-layout .nx-fullscreen-app-shell,
+  html.is-mobile-layout .nx-route-redirect-shell {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
+  html.is-mobile-layout .nx-os.is-mobile-os {
+    position: relative !important;
+  }
+
+  html.is-mobile-layout .nx-os.is-mobile-os .nx-stage {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  html.is-mobile-layout .nx-icm.is-mobile-map {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  html.is-mobile-layout .nx-mobile-command-dock {
+    position: absolute !important;
+    top: 0 !important;
+  }
+
+  html.is-mobile-layout .nx-pinned-app-dock {
+    position: absolute !important;
+    top: auto !important;
+    bottom: 0 !important;
+  }
+}

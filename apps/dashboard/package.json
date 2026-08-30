@@ -55,7 +55,8 @@
     "typecheck": "tsc --noEmit",
     "proof:dev-runtime": "npx tsx scripts/proof/dev-runtime-diagnostics-proof.ts",
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
-    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api"
+    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
+    "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
