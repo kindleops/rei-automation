@@ -100,7 +100,7 @@ export function transitionQualifiesForOpportunity(transition = {}) {
   return Number(transition.stage_after_number || 1) >= 2 && transition.advanced === true;
 }
 
-async function findExistingOpportunity(supabase, { ownerId, propertyId, threadKey }) {
+export async function findExistingOpportunity(supabase, { ownerId, propertyId, threadKey }) {
   const keys = [
     buildOpportunityDedupeKey({ master_owner_id: ownerId, primary_property_id: propertyId }),
     buildOpportunityDedupeKey({ primary_thread_key: threadKey }),

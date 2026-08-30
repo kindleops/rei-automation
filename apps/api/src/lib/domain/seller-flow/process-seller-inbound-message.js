@@ -1473,7 +1473,33 @@ export async function processSellerInboundMessage({
   // with the lifecycle advancement.
   const authority_gate_applied = Boolean(transition?.authority_gate?.applied);
 
+  // Offer Term Authority anchor. A monetary offer cannot be durably persisted
+  // without an opportunity, and the opportunity is otherwise not resolved until
+  // persistSellerTransitionArtifacts — which runs AFTER the send. Resolving it
+  // here (read-only) lets the executor persist the offer BEFORE queueing the
+  // message, so the amount the seller receives always has a durable record.
+  let offer_opportunity_id = null;
+  if (!writes_suppressed) {
+    try {
+      const { findExistingOpportunity } = await import(
+        "@/lib/domain/seller-flow/persist-seller-transition.js"
+      );
+      const existing_opportunity = await findExistingOpportunity(supabase, {
+        ownerId,
+        propertyId,
+        threadKey: threadKey || inboundFrom,
+      });
+      offer_opportunity_id = existing_opportunity?.id || null;
+    } catch (opportunity_error) {
+      runtimeDeps.warn("[OFFER_OPPORTUNITY_LOOKUP_FAILED]", {
+        thread_key: threadKey || inboundFrom,
+        error: opportunity_error?.message || "opportunity_lookup_failed",
+      });
+    }
+  }
+
   const execution = await runtimeDeps.executeInboundAutomationDecision({
+    opportunityId: offer_opportunity_id,
     message,
     threadKey: threadKey || inboundFrom,
     propertyId,

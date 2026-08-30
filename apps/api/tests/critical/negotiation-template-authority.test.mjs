@@ -73,9 +73,26 @@ function offerDirective(overrides = {}) {
 test("§12: offer renders ONLY the strategy-authorized ADE amount — never the seller's ask", async () => {
   const insertedQueueRows = [];
   const supabase = makeSellerOrchestrationSupabase({ templates: [OFFER_TEMPLATE], insertedQueueRows });
+  // A monetary offer may only be sent once the Offer Term Authority has durably
+  // persisted it. This test covers RENDERING, so the authority is stubbed — and
+  // the stub captures the amount it was given, which lets us assert the core
+  // invariant directly: the persisted offer equals the amount in the SMS.
+  let persisted_amount = null;
   const result = await executeInboundAutomationDecision({
     ...baseArgs(),
     supabaseClient: supabase,
+    opportunityId: "11111111-1111-4111-8111-111111111111",
+    persistActiveOfferImpl: async ({ purchase_price }) => {
+      persisted_amount = purchase_price;
+      return {
+        ok: true,
+        offer_id: "offer:test:v1",
+        offer_version: 1,
+        purchase_price,
+        terms_hash: "test-hash",
+      };
+    },
+    bindOfferToQueueRowImpl: async () => ({ ok: true }),
     strategyDirective: offerDirective(),
     dealAuthority: {
       recommended_offer: 80000,
@@ -86,6 +103,7 @@ test("§12: offer renders ONLY the strategy-authorized ADE amount — never the 
   assert.equal(result.queued, true);
   assert.ok(result.rendered_message_text.includes("$80,000"));
   assert.ok(!result.rendered_message_text.includes("95,000"), "seller ask must never reach the offer field");
+  assert.equal(persisted_amount, 80000, "persisted offer amount == amount rendered into the SMS");
 });
 
 test("§12: renderer fails closed to human review when authority is missing", async () => {

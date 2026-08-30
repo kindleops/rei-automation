@@ -40,8 +40,32 @@ const OPPORTUNITY = {
 };
 
 // ── Minimal in-memory Supabase stub (only what these modules call) ───────────
-function makeSupabase({ opportunity = OPPORTUNITY, cases = [], events = [] } = {}) {
-  const state = { cases: [...cases], events: [...events] };
+// The contract price now comes from the ACCEPTED OFFER (Offer Term Authority),
+// never from recommended_offer. These tests therefore seed a real accepted
+// offer for the opportunity, which is what production requires too.
+const ACCEPTED_OFFER = {
+  offer_id: "offer:" + OPP_ID + ":v1",
+  opportunity_id: OPP_ID,
+  offer_version: 1,
+  status: "accepted",
+  purchase_price: 250000,
+  accepted_price: 250000,
+  accepted_at: "2026-08-30T12:00:00.000Z",
+  acceptance_event_id: "evt-accept-1",
+  closing_date: null,
+  closing_term: null,
+  emd_amount: null,
+  emd_term: null,
+  terms_hash: "offer-terms-hash-1",
+};
+
+function makeSupabase({
+  opportunity = OPPORTUNITY,
+  cases = [],
+  events = [],
+  offers = [ACCEPTED_OFFER],
+} = {}) {
+  const state = { cases: [...cases], events: [...events], offers: [...offers] };
 
   function table(name) {
     const q = { _filters: {}, _isNull: [] };
@@ -105,6 +129,11 @@ function makeSupabase({ opportunity = OPPORTUNITY, cases = [], events = [] } = {
           Object.entries(q._filters).every(([k, v]) => c[k] === v)
         );
       }
+      if (name === "seller_offers") {
+        return state.offers.filter((o) =>
+          Object.entries(q._filters).every(([k, v]) => o[k] === v)
+        );
+      }
       return [];
     }
     return api;
@@ -142,22 +171,30 @@ test("acceptance creates exactly ONE closing case from canonical Supabase author
   assert.equal(c.provenance.opportunity_version, 7, "provenance carries the source version");
 });
 
-test("price comes from persisted negotiation authority, never from message text", () => {
-  const r = resolveCanonicalTerms({ opportunity: OPPORTUNITY });
-  assert.equal(r.terms.seller_contract_price, 250000, "current_offer wins");
+test("price comes from the ACCEPTED OFFER, never from message text or a recommendation", () => {
+  // CONTRACT CHANGE (deliberate): this test previously asserted that with no
+  // live counter "the ADE baseline is used" — i.e. recommended_offer became the
+  // contract price. That is exactly the defect the Offer Term Authority exists
+  // to remove: a recommendation is lineage, not a term anyone agreed to. The
+  // assertions below are inverted on purpose.
+  const r = resolveCanonicalTerms({ opportunity: OPPORTUNITY, accepted_offer: ACCEPTED_OFFER });
+  assert.equal(r.terms.seller_contract_price, 250000, "the accepted offer sets the price");
 
-  // With no live counter, the ADE baseline is used — still persisted authority.
+  // A recommendation with NO accepted offer must NOT produce a contract price.
   const baseline = resolveCanonicalTerms({
-    opportunity: { ...OPPORTUNITY, current_offer: null },
+    opportunity: { ...OPPORTUNITY, current_offer: null, recommended_offer: 240000 },
+    accepted_offer: null,
   });
-  assert.equal(baseline.terms.seller_contract_price, 240000);
+  assert.equal(baseline.ok, false, "recommended_offer can never substitute for acceptance");
+  assert.equal(baseline.reason, "no_accepted_offer");
 
-  // No canonical price at all -> fail closed, no contract.
+  // Nothing accepted at all -> fail closed, no contract.
   const none = resolveCanonicalTerms({
     opportunity: { ...OPPORTUNITY, current_offer: null, recommended_offer: null },
+    accepted_offer: null,
   });
   assert.equal(none.ok, false);
-  assert.equal(none.reason, "missing_canonical_offer_price");
+  assert.equal(none.reason, "no_accepted_offer");
 });
 
 // ── 2) replay creates no duplicate ───────────────────────────────────────────
