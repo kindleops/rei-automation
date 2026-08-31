@@ -115,8 +115,17 @@ test("the SMS price and the persisted offer price come from ONE resolver", async
   assert.equal(stored.recommended_offer, 240000, "lineage recorded separately from the price");
   assert.notEqual(stored.purchase_price, stored.recommended_offer, "price is NOT the recommendation");
   assert.ok(stored.terms_hash, "terms hash persisted");
-  assert.equal(stored.closing_date, null, "no closing term invented");
-  assert.equal(stored.emd_amount, null, "no EMD invented");
+  // CONTRACT CHANGE (deliberate): these previously asserted null with "no
+  // closing term invented" / "no EMD invented", which was correct while NO
+  // canonical policy existed. SELLER_OFFER_POLICY_V1 is now authorized, so a new
+  // offer legitimately carries the policy terms before it is sent. The exact
+  // closing DATE is still absent here — it is computed at acceptance, not at
+  // proposal time.
+  assert.equal(stored.closing_window_days, 14, "policy closing window on the proposal");
+  assert.equal(stored.emd_amount, 1000, "policy EMD on the proposal");
+  assert.equal(stored.emd_due_business_days, 3);
+  assert.equal(stored.policy_version, "v1");
+  assert.equal(stored.closing_date, null, "the exact date is only set at acceptance");
 });
 
 test("an amount above the authorized ceiling is refused (never sent, never persisted)", async () => {
@@ -271,9 +280,12 @@ test("closing case terms come from the accepted offer, identical to what was sen
   assert.equal(terms.terms.accepted_offer_version, 1);
   assert.equal(terms.terms.acceptance_event_id, "evt-yes-3");
   assert.equal(terms.terms.offer_terms_hash, offer.terms_hash);
-  // No policy exists, so these are honestly null rather than invented:
-  assert.equal(terms.terms.scheduled_closing_date, null);
-  assert.equal(terms.terms.earnest_money, null);
+  // CONTRACT CHANGE (deliberate): these previously asserted null because no
+  // canonical policy existed. Under SELLER_OFFER_POLICY_V1 the accepted offer
+  // carries a computed closing date and the policy EMD, and the contract takes
+  // both FROM THE ACCEPTED OFFER (never from a default at closing time).
+  assert.ok(terms.terms.scheduled_closing_date, "closing date carried from the accepted offer");
+  assert.equal(terms.terms.earnest_money, 1000, "EMD carried from the accepted offer");
 });
 
 test("NO accepted offer -> no contract (fails closed)", () => {
