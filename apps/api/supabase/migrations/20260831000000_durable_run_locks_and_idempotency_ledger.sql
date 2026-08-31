@@ -818,3 +818,96 @@ BEGIN
   RETURN jsonb_build_object('ok', true, 'deleted_count', v_deleted);
 END;
 $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 3. ACCESS CONTROL
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- These two primitives are the concurrency authority for cron runners and
+-- webhook processing. If an ordinary client could call them it could:
+--   * force-release a lock another runner is holding, admitting a second runner;
+--   * mark an unprocessed inbound event 'completed', permanently suppressing it;
+--   * steal or expire a claim mid-flight.
+--
+-- Postgres grants EXECUTE on new functions to PUBLIC by default, and in
+-- Supabase `anon` / `authenticated` are members of PUBLIC and reach the schema
+-- through PostgREST. Left alone, every RPC above would be world-callable with
+-- the anon key. So: RLS on both tables, service_role-only policies, table
+-- privileges revoked from anon/authenticated, and EXECUTE revoked from PUBLIC
+-- and re-granted to service_role only.
+--
+-- The functions are deliberately SECURITY INVOKER (the default), NOT SECURITY
+-- DEFINER: service_role already bypasses RLS, so DEFINER would add privilege
+-- escalation with no benefit.
+--
+-- The whole block is a no-op on a plain Postgres that has no Supabase roles,
+-- so the migration still applies to a local scratch database.
+
+ALTER TABLE public.run_locks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.idempotency_ledger ENABLE ROW LEVEL SECURITY;
+
+DO $harden$
+DECLARE
+  v_fn text;
+  v_signatures text[] := ARRAY[
+    'public.run_lock_acquire(text, uuid, text, integer, jsonb)',
+    'public.run_lock_heartbeat(text, uuid, integer)',
+    'public.run_lock_release(text, uuid, text, jsonb, text)',
+    'public.run_lock_force_release(text, text)',
+    'public.run_lock_purge_expired(integer)',
+    'public.idempotency_begin(text, text, uuid, text, jsonb, integer, text)',
+    'public.idempotency_complete(text, text, text, jsonb, boolean)',
+    'public.idempotency_fail(text, text, text, jsonb, boolean)',
+    'public.idempotency_purge_expired(integer)',
+    -- Pure row formatters: no table access, but they are part of this
+    -- primitive's surface, so they are locked down with everything else.
+    'public.run_lock_meta(public.run_locks)',
+    'public.idempotency_meta(public.idempotency_ledger)'
+  ];
+BEGIN
+  -- EXECUTE is granted to PUBLIC by default: revoke it regardless of whether
+  -- the Supabase roles exist, so a plain Postgres is hardened too.
+  FOREACH v_fn IN ARRAY v_signatures LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', v_fn);
+  END LOOP;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    RAISE NOTICE 'Supabase roles absent (local scratch database): EXECUTE revoked from PUBLIC, role grants skipped.';
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'run_locks'
+      AND policyname = 'run_locks_service_role_all'
+  ) THEN
+    CREATE POLICY run_locks_service_role_all
+      ON public.run_locks
+      FOR ALL TO service_role
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'idempotency_ledger'
+      AND policyname = 'idempotency_ledger_service_role_all'
+  ) THEN
+    CREATE POLICY idempotency_ledger_service_role_all
+      ON public.idempotency_ledger
+      FOR ALL TO service_role
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+
+  EXECUTE 'REVOKE ALL ON public.run_locks FROM anon, authenticated';
+  EXECUTE 'REVOKE ALL ON public.idempotency_ledger FROM anon, authenticated';
+  EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.run_locks TO service_role';
+  EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.idempotency_ledger TO service_role';
+
+  FOREACH v_fn IN ARRAY v_signatures LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM anon, authenticated', v_fn);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', v_fn);
+  END LOOP;
+END
+$harden$;

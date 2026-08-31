@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  describeRuntimeEnvironment,
+  isExplicitNonProductionRuntime,
+} from "@/lib/config/runtime-environment.js";
 import { getSharedSecretAuthResult } from "./shared-secret.js";
 
 function clean(value) {
@@ -25,17 +29,24 @@ export function getCronAuthResult(request) {
   const cron_secret = clean(process.env.CRON_SECRET);
   const authorization = clean(request?.headers?.get("authorization"));
   const user_agent = clean(request?.headers?.get("user-agent"));
-  const is_vercel_production = clean(process.env.VERCEL_ENV).toLowerCase() === "production";
   const is_vercel_cron = user_agent.includes("vercel-cron/1.0");
   const provided_secret = readProvidedCronSecret(request);
+  // FAIL CLOSED. The old check was `VERCEL_ENV === "production"` alone, which is
+  // unset on Cloudflare Containers and any non-Vercel host - so a missing
+  // CRON_SECRET silently authorized every cron caller there. The permissive
+  // branch now requires PROOF of a dev/test runtime; an unrecognised or empty
+  // environment is treated as production and rejected.
+  const runtime_environment = describeRuntimeEnvironment();
+  const secret_optional = isExplicitNonProductionRuntime();
 
   if (!cron_secret) {
-    if (is_vercel_production) {
+    if (!secret_optional) {
       return {
         ok: false,
         status: 500,
         reason: "missing_cron_secret",
         is_vercel_cron,
+        runtime_environment,
         user_agent: user_agent || null,
       };
     }
@@ -46,6 +57,7 @@ export function getCronAuthResult(request) {
       required: false,
       reason: "cron_secret_not_configured",
       is_vercel_cron,
+      runtime_environment,
       user_agent: user_agent || null,
     };
   }
@@ -56,6 +68,7 @@ export function getCronAuthResult(request) {
       status: 401,
       reason: "invalid_cron_authorization",
       is_vercel_cron,
+      runtime_environment,
       user_agent: user_agent || null,
     };
   }
@@ -66,6 +79,7 @@ export function getCronAuthResult(request) {
     required: true,
     reason: "authorized",
     is_vercel_cron,
+    runtime_environment,
     user_agent: user_agent || null,
   };
 }
