@@ -15,6 +15,13 @@ import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
 import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
 
+/** market_status values that mean a live listing exists (so an MLS listing
+ * price is legitimately expected evidence). Everything else -- notably
+ * 'Off Market' and 'Sold' -- means no active listing. */
+const LISTED_MARKET_STATUSES = Object.freeze([
+  'active', 'pending', 'contingent', 'for sale', 'listed', 'under contract', 'coming soon',
+]);
+
 const SCORE_TABLE = 'property_acquisition_scores';
 // Append-only ADE run lineage. property_acquisition_scores is upserted by
 // property_id and is therefore a MUTABLE latest-state projection: the same row
@@ -276,6 +283,36 @@ const RPC_COMP_DETAIL_SELECT = [
   'computed_ppsf',
   'comp_confidence_score',
   'deal_grade',
+  // ── advanced comp features ────────────────────────────────────────────────
+  // These are already ingested in buyer_comp_raw_v2 and are now projected by
+  // v_recent_sold_comps. normalizePropertyFeatures has always known how to map
+  // them; omitting them here (and in the view) is what pinned every selected
+  // comp at data_completeness = 37 in every market. Names must stay exactly as
+  // the normalizer reads them.
+  'subdivision_name',
+  'school_district_name',
+  'zoning',
+  'flood_zone',
+  'building_quality',
+  'exterior_walls',
+  'interior_walls',
+  'floor_cover',
+  'roof_cover',
+  'roof_type',
+  'basement',
+  'garage',
+  'pool',
+  'porch',
+  'patio',
+  'deck',
+  'driveway',
+  'stories',
+  'style',
+  'air_conditioning',
+  'heating_type',
+  'heating_fuel_type',
+  'sewer',
+  'water',
 ].join(',');
 
 const ADVANCED_COMP_SELECT = [
@@ -2649,6 +2686,41 @@ function subjectCompleteness(subject) {
   };
 }
 
+/**
+ * Is there real listing/MLS evidence for this subject?
+ *
+ * Grounded in the production estate: market_status_label is 'Off Market'
+ * (123,143), 'Sold' (48) or 'Active' (43), and mls_current_listing_price is
+ * populated for 0.1% of properties. An off-market property correctly has no
+ * active listing price.
+ */
+function hasListingEvidence(subject) {
+  if (hasValue(subject.listing_price)) return true;
+  const status = lower(subject.market_status);
+  if (!status) return false;
+  return LISTED_MARKET_STATUSES.some((listed) => status.includes(listed));
+}
+
+/**
+ * Source-aware applicability for finance/distress evidence.
+ *
+ * This is the finance-leg analogue of featurePriority(), which already returns
+ * 0 for beds/baths/sqft/units on land so that inapplicable evidence leaves the
+ * denominator. financeCompleteness had no such mechanism: it counted a flat
+ * 10-field list unconditionally, so an off-market cash-acquisition subject lost
+ * a full 10 points of finance completeness for correctly having no MLS listing
+ * price -- roughly 1.5 points of overall confidence across ~99.9% of the estate.
+ *
+ * listing_price is NOT deleted from the contract. It stays in the denominator
+ * whenever listing evidence exists or should exist (an actively listed or
+ * MLS-backed subject); it is only excluded when the subject is genuinely
+ * off-market. No weighting constant changes.
+ */
+function financeFieldApplicable(subject, field) {
+  if (field === 'listing_price') return hasListingEvidence(subject);
+  return true;
+}
+
 function financeCompleteness(subject) {
   const fields = [
     'equity_percent',
@@ -2662,11 +2734,15 @@ function financeCompleteness(subject) {
     'listing_price',
     'market_status',
   ];
-  const available = fields.filter((field) => hasValue(subject[field]));
+  const applicable = fields.filter((field) => financeFieldApplicable(subject, field));
+  const available = applicable.filter((field) => hasValue(subject[field]));
   return {
-    score: Math.round((available.length / fields.length) * 100),
+    score: applicable.length
+      ? Math.round((available.length / applicable.length) * 100)
+      : 0,
     available,
-    missing: fields.filter((field) => !hasValue(subject[field])),
+    missing: applicable.filter((field) => !hasValue(subject[field])),
+    not_applicable: fields.filter((field) => !financeFieldApplicable(subject, field)),
   };
 }
 
