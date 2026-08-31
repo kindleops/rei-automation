@@ -10,7 +10,16 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
-function safeEqual(left, right) {
+/**
+ * Constant-time secret comparison. This is the ONE primitive for comparing a
+ * presented secret against a configured one; cron-auth imports it rather than
+ * defining a second comparison.
+ *
+ * Semantics (unchanged, and identical to the plain `!==` it replaces at the
+ * cron call site): both sides are trimmed, an empty side is a mismatch, a
+ * length mismatch is a mismatch, otherwise crypto.timingSafeEqual.
+ */
+export function timingSafeSecretEqual(left, right) {
   const left_buffer = Buffer.from(clean(left), "utf8");
   const right_buffer = Buffer.from(clean(right), "utf8");
 
@@ -18,11 +27,17 @@ function safeEqual(left, right) {
     return false;
   }
 
+  // timingSafeEqual throws on unequal lengths, so length must be checked first.
+  // Length is not secret here: it is already observable from the header.
   if (left_buffer.length !== right_buffer.length) {
     return false;
   }
 
   return crypto.timingSafeEqual(left_buffer, right_buffer);
+}
+
+function safeEqual(left, right) {
+  return timingSafeSecretEqual(left, right);
 }
 
 function isProductionRuntime() {

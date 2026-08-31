@@ -173,3 +173,74 @@ test("the x-vercel-cron-secret header is still accepted", () => {
     assert.equal(result.reason, "authorized");
   });
 });
+
+// ─── Constant-time secret comparison ────────────────────────────────────────
+// Behavioural cover only. Timing itself is deliberately NOT benchmarked here:
+// a unit test cannot measure it reliably, and a flaky timing assertion would be
+// worse than none.
+
+test("comparison: exact match authorizes", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer abcdefgh12345678" }));
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, "authorized");
+  });
+});
+
+test("comparison: wrong secret of the SAME length is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const wrong = "abcdefgh12345679";
+    assert.equal(wrong.length, "abcdefgh12345678".length, "precondition: equal lengths");
+    const result = getCronAuthResult(request({ authorization: `Bearer ${wrong}` }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: wrong SHORTER secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer abcdefgh" }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: wrong LONGER secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(
+      request({ authorization: "Bearer abcdefgh12345678-extra-suffix" })
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: missing presented secret is rejected where one is required", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: null }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: an empty Bearer value is rejected, never treated as a match", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer " }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+  });
+});
+
+test("comparison: the timing-safe primitive is a pure predicate", async () => {
+  const { timingSafeSecretEqual } = await import("@/lib/security/shared-secret.js");
+  assert.equal(timingSafeSecretEqual("same-value", "same-value"), true);
+  assert.equal(timingSafeSecretEqual("same-value", "diff-value"), false, "same length, different");
+  assert.equal(timingSafeSecretEqual("short", "much-longer-value"), false);
+  assert.equal(timingSafeSecretEqual("", "anything"), false, "empty never matches");
+  assert.equal(timingSafeSecretEqual("anything", ""), false, "empty never matches");
+  assert.equal(timingSafeSecretEqual(null, null), false, "null never matches null");
+});

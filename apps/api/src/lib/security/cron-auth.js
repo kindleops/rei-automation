@@ -3,7 +3,10 @@ import {
   describeRuntimeEnvironment,
   isExplicitNonProductionRuntime,
 } from "@/lib/config/runtime-environment.js";
-import { getSharedSecretAuthResult } from "./shared-secret.js";
+import {
+  getSharedSecretAuthResult,
+  timingSafeSecretEqual,
+} from "./shared-secret.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -62,7 +65,10 @@ export function getCronAuthResult(request) {
     };
   }
 
-  if (!provided_secret || provided_secret !== cron_secret) {
+  // Constant-time comparison via the shared primitive. Behaviourally identical
+  // to the previous `!provided_secret || provided_secret !== cron_secret`:
+  // an empty presented secret and a length mismatch are both rejections.
+  if (!timingSafeSecretEqual(provided_secret, cron_secret)) {
     return {
       ok: false,
       status: 401,
