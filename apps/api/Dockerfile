@@ -10,7 +10,12 @@
 # in this monorepo) and the server dies with MODULE_NOT_FOUND here, even though
 # it boots fine on a dev machine that has a parent node_modules to fall back on.
 
-FROM node:20-bookworm-slim AS runner
+# Node 22+ is REQUIRED, not a preference. @supabase/realtime-js needs native
+# WebSocket, which only exists from Node 22; on Node 20 every createClient()
+# call throws at import. The whole test suite failed this way on the first CI
+# run (434/434 files, identical error) -- and the container would have failed
+# the same way at runtime on any route that touches Supabase.
+FROM node:22-bookworm-slim AS runner
 
 ENV NODE_ENV=production \
     PORT=3000 \

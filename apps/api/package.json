@@ -64,6 +64,6 @@
     "@types/react-dom": "^18.3.5"
   },
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=22"
   }
 }
