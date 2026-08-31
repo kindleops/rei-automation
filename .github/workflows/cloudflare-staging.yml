@@ -42,8 +42,12 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: apps/api critical suite
-        run: npm --prefix apps/api run test:critical
+      # Chunked: as one process this suite has been killed mid-run three times
+      # (twice locally, once on a runner), each time exiting with NO summary --
+      # which looks identical to success unless you check for it. The chunked
+      # runner treats a missing summary as INCOMPLETE and fails the build.
+      - name: apps/api critical suite (chunked)
+        run: npm --prefix apps/api run test:critical:chunked
 
       - name: apply durability migration to the ephemeral Postgres
         run: |

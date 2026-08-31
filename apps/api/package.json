@@ -43,7 +43,8 @@
     "start": "next start",
     "discord:register": "node scripts/register-discord-commands.mjs",
     "proof:master-filters": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs",
-    "proof:master-filters:offline": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs --offline"
+    "proof:master-filters:offline": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs --offline",
+    "test:critical:chunked": "node scripts/run-critical-suite.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.4",
