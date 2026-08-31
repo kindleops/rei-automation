@@ -98,6 +98,10 @@ test("§12: offer renders ONLY the strategy-authorized ADE amount — never the 
       recommended_offer: 80000,
       authorized_offer_amount: 80000,
       authorized_offer_ceiling: 90000,
+      // Mandatory as of the valuation-spendability gate. This test is the
+      // legitimate-offer path, so the valuation IS offer-authoritative; the
+      // not-authoritative path is proven in valuation-offer-authority.test.mjs.
+      offer_authoritative: true,
     },
   });
   assert.equal(result.queued, true);
