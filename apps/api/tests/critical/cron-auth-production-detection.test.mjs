@@ -244,3 +244,88 @@ test("comparison: the timing-safe primitive is a pure predicate", async () => {
   assert.equal(timingSafeSecretEqual("anything", ""), false, "empty never matches");
   assert.equal(timingSafeSecretEqual(null, null), false, "null never matches null");
 });
+
+// ─── Provider-neutral cron provenance ───────────────────────────────────────
+// CRON_SECRET remains the ONLY authentication authority. x-internal-cron-source
+// carries provenance so behavioural branching (queue_processor_mode "safe")
+// works on Cloudflare, where the Vercel user-agent does not exist.
+
+function cronRequest({ authorization = null, user_agent = "", source = null } = {}) {
+  const headers = new Map();
+  if (authorization) headers.set("authorization", authorization);
+  if (user_agent) headers.set("user-agent", user_agent);
+  if (source) headers.set("x-internal-cron-source", source);
+  return { headers: { get: (n) => headers.get(String(n).toLowerCase()) ?? null } };
+}
+
+test("provenance: legacy Vercel cron is still recognised as a scheduled run", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", user_agent: "vercel-cron/1.0" })
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "vercel");
+    assert.equal(r.is_vercel_cron, true, "legacy field preserved");
+  });
+});
+
+test("provenance: a Cloudflare scheduled invocation is recognised", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", source: "cloudflare" })
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "cloudflare");
+    assert.equal(r.is_vercel_cron, false, "no Vercel user-agent on Cloudflare");
+  });
+});
+
+test("provenance: spoofed source WITHOUT the correct secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer wrong", source: "cloudflare" })
+    );
+    assert.equal(r.ok, false, "provenance must never authenticate on its own");
+    assert.equal(r.status, 401);
+    assert.equal(r.reason, "invalid_cron_authorization");
+  });
+});
+
+test("provenance: source header with NO secret at all is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(cronRequest({ source: "cloudflare" }));
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 401);
+  });
+});
+
+test("provenance: correct secret with NO provenance is a manual (non-scheduled) call", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(cronRequest({ authorization: "Bearer sec" }));
+    assert.equal(r.ok, true, "a manual authenticated call still authorizes");
+    assert.equal(r.is_scheduled_cron, false, "no scheduler claimed it");
+    assert.equal(r.cron_source, null);
+  });
+});
+
+test("provenance: unknown runtime with no secret still fails closed", () => {
+  withEnv({ CRON_SECRET: undefined }, () => {
+    const r = getCronAuthResult(cronRequest({ source: "cloudflare" }));
+    assert.equal(r.ok, false, "provenance must not rescue a missing secret");
+    assert.equal(r.status, 500);
+    assert.equal(r.reason, "missing_cron_secret");
+    assert.equal(r.runtime_environment, "unknown");
+  });
+});
+
+test("provenance: an arbitrary future scheduler is carried through", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", source: "github-actions" })
+    );
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "github-actions");
+  });
+});

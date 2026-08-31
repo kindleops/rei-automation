@@ -205,10 +205,16 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       dry_run,
       authenticated: auth.auth.authenticated,
       is_vercel_cron: auth.auth.is_vercel_cron,
+      is_scheduled_cron: auth.auth.is_scheduled_cron,
+      cron_source: auth.auth.cron_source,
     });
 
     const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
-    if (!dry_run && auth.auth.is_vercel_cron && queue_processor_mode === "safe") {
+    // Provider-neutral: queue_processor_mode "safe" means an AUTOMATED
+    // scheduled run must not auto-send. This used to key off the Vercel
+    // user-agent, which is absent on Cloudflare -- a Cloudflare cron would
+    // have been treated as a manual call and auto-sent in safe mode.
+    if (!dry_run && auth.auth.is_scheduled_cron && queue_processor_mode === "safe") {
       return json_response({
         ok: true,
         skipped: true,

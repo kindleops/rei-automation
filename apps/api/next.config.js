@@ -1,7 +1,21 @@
+const path = require("path");
+
 const { withSentryConfig } = require("@sentry/nextjs");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Emit .next/standalone: a self-contained Node server with only the traced
+  // runtime dependencies. This is what the Cloudflare Container runs; it is
+  // inert on any other host, so it is safe to enable now.
+  output: "standalone",
+  experimental: {
+    // REQUIRED in this monorepo. apps/api/node_modules is a symlink to the repo
+    // root, so without an explicit tracing root Next emits a standalone bundle
+    // with NO node_modules. That still boots here -- Node walks up and finds the
+    // parent node_modules -- but the container copies the standalone directory
+    // alone, where the same bundle would fail with MODULE_NOT_FOUND.
+    outputFileTracingRoot: path.join(__dirname, "../../"),
+  },
   // CORS is handled by src/middleware.js which supports per-origin allowlisting,
   // proper OPTIONS preflight (204), and Authorization header.
   // The previous headers() block used * + credentials:true which is spec-invalid
