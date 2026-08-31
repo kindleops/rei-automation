@@ -1,3 +1,7 @@
+import {
+  resolveBuyerCeilingAuthority,
+  resolveEffectiveAuthorizedCeiling,
+} from './buyerCeilingAuthority.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import {
   normalizeAssetClass,
@@ -9,9 +13,14 @@ import { classifyAssetLane } from './assetClassification.js';
 import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
-import { readFeatureFlag } from './modelConstants.js';
+import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
 
 const SCORE_TABLE = 'property_acquisition_scores';
+// Append-only ADE run lineage. property_acquisition_scores is upserted by
+// property_id and is therefore a MUTABLE latest-state projection: the same row
+// id held $10,969,000 on 2026-08-03 and $5,479,900 on 2026-08-31. Monetary
+// offers must bind to an immutable snapshot instead.
+const SNAPSHOT_TABLE = 'acquisition_score_snapshots';
 const DEFAULT_TARGET_ASSIGNMENT_FEE = 15_000;
 const MAX_SELECTED_COMPS = 12;
 const DECISION_TIERS = Object.freeze({
@@ -1362,7 +1371,8 @@ export function scoreComparable(subject, rawComp, options = {}) {
 }
 
 function removeOutliers(scoredComps = []) {
-  if (scoredComps.length < 5) {
+  // Same threshold the buyer-ceiling leg reuses (MAD_MIN_OBSERVATIONS).
+  if (scoredComps.length < MAD_MIN_OBSERVATIONS) {
     return { selected: scoredComps, rejected: [], method: 'insufficient_count_for_mad' };
   }
   const values = scoredComps.map((comp) => comp.adjusted_price).filter(Boolean);
@@ -2558,14 +2568,18 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
           : 0.7;
   const valuationCeiling = Math.max(0, valuation.mid * maxArvFactor - repairs.amount);
   const behaviorCeiling = num(investor.mid);
-  let effectiveCeiling;
-  if (behaviorCeiling && investor.confidence >= 45) {
-    effectiveCeiling = Math.min(valuationCeiling, behaviorCeiling);
-  } else if (behaviorCeiling) {
-    effectiveCeiling = valuationCeiling * 0.75 + behaviorCeiling * 0.25;
-  } else {
-    effectiveCeiling = valuationCeiling;
-  }
+  // MONETARY CEILING INVARIANT: buyer-behavior evidence may constrain this
+  // ceiling, never expand it past what the valuation independently supports.
+  // The previous branch did the opposite -- weak buyer evidence (confidence
+  // < 45) took a 75/25 blend that inflated the ceiling 18.7x on a contaminated
+  // n=2 sample. See buyerCeilingAuthority.js for the full trace.
+  const buyerCeilingAuthority = resolveBuyerCeilingAuthority(investor);
+  const ceilingResolution = resolveEffectiveAuthorizedCeiling({
+    valuation_based_ceiling: valuationCeiling,
+    behavior_based_ceiling: behaviorCeiling,
+    buyer_ceiling_authority: buyerCeilingAuthority,
+  });
+  const effectiveCeiling = ceilingResolution.effective_authorized_ceiling;
 
   const motivation = distressAndMotivation(subject);
   const confidenceHaircut = ((100 - valuation.confidence) / 100) * 0.06;
@@ -2591,6 +2605,13 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
       valuation_based_ceiling: roundMoney(valuationCeiling),
       behavior_based_ceiling: roundMoney(behaviorCeiling),
       effective_buyer_ceiling: roundMoney(effectiveCeiling),
+      effective_authorized_ceiling: roundMoney(effectiveCeiling),
+      ceiling_basis: ceilingResolution.basis,
+      ceiling_clamped_to_valuation: ceilingResolution.clamped,
+      buyer_ceiling_authoritative: buyerCeilingAuthority.authoritative,
+      buyer_ceiling_reasons: buyerCeilingAuthority.reasons,
+      buyer_ceiling_sample_size: buyerCeilingAuthority.sample_size,
+      buyer_ceiling_outlier_defense: buyerCeilingAuthority.outlier_defense,
       estimated_repairs: repairs.amount,
       target_assignment_fee: targetAssignmentFee,
       confidence_haircut_percent: round(confidenceHaircut * 100, 2),
@@ -3626,12 +3647,81 @@ export async function scoreProperty(propertyId, deps = {}) {
     v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
   });
   const row = scoreRowFromDecision(normalizedId, decision, now);
+  // Mint the immutable lineage id BEFORE either write so it travels inside the
+  // snapshot payload itself. Downstream monetary authority binds to THIS id,
+  // never to property_acquisition_scores.id (which the next run rewrites).
+  const immutableSnapshotId = (deps.newSnapshotId ?? (() => crypto.randomUUID()))();
+  if (row.evidence && typeof row.evidence === 'object') {
+    row.evidence.immutable_snapshot_id = immutableSnapshotId;
+  }
   const score = await persister(row, deps);
+  const snapshotWriter = deps.persistImmutableScoreSnapshot ?? persistImmutableScoreSnapshot;
+  let snapshot = null;
+  try {
+    snapshot = await snapshotWriter(row, score?.id ?? null, deps, immutableSnapshotId);
+  } catch (snapshotError) {
+    // Never fail scoring/analytics on lineage write. The absence of a
+    // snapshot_id is itself the signal that this run has no immutable
+    // provenance and therefore must not back a monetary offer.
+    snapshot = null;
+  }
   return {
     ok: true,
     score,
+    snapshot_id: snapshot?.snapshot_id ?? null,
+    immutable_snapshot_id: snapshot?.snapshot_id ?? null,
     evidence: score?.evidence ?? row.evidence,
   };
+}
+
+/**
+ * Write the append-only lineage row for this ADE run. Immutability is enforced
+ * by database trigger, so this insert is the only way a run's monetary evidence
+ * can ever be recorded -- and it can never be rewritten afterwards.
+ */
+export async function persistImmutableScoreSnapshot(row, projectionScoreId = null, deps = {}, snapshotId = null) {
+  const ev = row?.evidence ?? {};
+  const oc = ev.offer_calculation ?? {};
+  const comps = ev.comp_data_status ?? {};
+  const snapshot = {
+    ...(snapshotId ? { snapshot_id: snapshotId } : {}),
+    property_id: row?.property_id ?? null,
+    computed_at: row?.computed_at ?? new Date().toISOString(),
+    engine_name: ev.engine?.name ?? null,
+    engine_version: ev.engine?.version ?? null,
+    subject_inputs: ev.subject ?? null,
+    raw_candidate_count: comps.raw_candidate_count ?? null,
+    eligible_comp_count: comps.eligible_candidate_count ?? null,
+    selected_comp_count: comps.selected_comp_count ?? null,
+    rejected_comp_count: comps.rejected_comp_count ?? null,
+    outlier_method: ev.outlier_method?.method ?? null,
+    selected_comps: ev.selected_comps ?? null,
+    rejected_comps: ev.rejected_comps ?? null,
+    valuation_low: row?.valuation_low ?? null,
+    valuation_mid: row?.valuation_mid ?? null,
+    valuation_high: row?.valuation_high ?? null,
+    valuation_confidence: row?.valuation_confidence ?? null,
+    comp_count: row?.comp_count ?? null,
+    decision_tier: row?.decision_tier ?? null,
+    confidence: row?.confidence ?? null,
+    buyer_ceiling_authoritative: oc.buyer_ceiling_authoritative ?? null,
+    buyer_ceiling_reasons: oc.buyer_ceiling_reasons ?? null,
+    buyer_ceiling_sample: ev.investor_ceiling_summary?.sample_purchases ?? null,
+    valuation_based_ceiling: oc.valuation_based_ceiling ?? null,
+    behavior_based_ceiling: oc.behavior_based_ceiling ?? null,
+    effective_authorized_ceiling: oc.effective_authorized_ceiling ?? null,
+    recommended_cash_offer: row?.recommended_cash_offer ?? null,
+    minimum_acceptable_offer: row?.minimum_acceptable_offer ?? null,
+    evidence: ev,
+    projection_score_id: projectionScoreId,
+  };
+  const { data, error } = await db(deps)
+    .from(SNAPSHOT_TABLE)
+    .insert(snapshot)
+    .select('snapshot_id')
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {

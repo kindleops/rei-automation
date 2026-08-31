@@ -211,7 +211,8 @@ export function computeNegotiationGapMetrics({
   const recommended = num(recommended_offer);
   const latest = num(latest_offer) ?? num(initial_offer) ?? recommended;
   const first = num(initial_offer) ?? recommended;
-  const ceiling = num(authorized_offer_ceiling) ?? recommended;
+  // A recommendation may NEVER serve as its own ceiling (self-validation).
+  const ceiling = num(authorized_offer_ceiling);
   const floor = num(authorized_offer_floor);
   const arvValue = num(arv);
   const repairs = num(repair_estimate);
@@ -286,7 +287,8 @@ export function classifyNegotiationZone({
   const p = policy || resolveNegotiationPolicy({});
   const ask = num(current_ask);
   const recommended = num(recommended_offer);
-  const ceiling = num(authorized_offer_ceiling) ?? recommended;
+  // A recommendation may NEVER serve as its own ceiling (self-validation).
+  const ceiling = num(authorized_offer_ceiling);
   const confidence = num(valuation_confidence);
   const askConfidence = num(asking_price_confidence);
 

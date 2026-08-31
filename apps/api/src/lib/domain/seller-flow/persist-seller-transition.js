@@ -151,8 +151,15 @@ export function buildNegotiationStatePatch(previous = {}, { transition = {}, int
   if (adeSnapshot) {
     state.recommended_offer = num(adeSnapshot.recommended_cash_offer) ?? state.recommended_offer ?? null;
     state.authorized_offer_floor = num(adeSnapshot.minimum_acceptable_offer) ?? state.authorized_offer_floor ?? null;
+    // MONETARY CEILING INVARIANT: the spend ceiling must be INDEPENDENT of the
+    // buyer-behavior leg that produced the recommendation. investor_ceiling_mid
+    // is that same leg (it carried the contaminated $19,032,220 package event
+    // into a $21,284,800 ceiling), so it is deliberately NOT a source here.
     state.authorized_offer_ceiling =
-      num(adeSnapshot.investor_ceiling_mid) ?? num(adeSnapshot.investor_ceiling_high) ?? state.authorized_offer_ceiling ?? null;
+      num(adeSnapshot.evidence?.offer_calculation?.effective_authorized_ceiling) ??
+      num(adeSnapshot.evidence?.offer_calculation?.valuation_based_ceiling) ??
+      state.authorized_offer_ceiling ??
+      null;
   }
 
   if ((transition.workflow_event_types || []).includes("SELLER_ACCEPTED_OFFER")) {

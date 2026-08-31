@@ -43,6 +43,20 @@ const ADE = Object.freeze({
   seller_finance_score: 40,
   novation_score: 40,
   best_strategy: "cash",
+  // A real persisted ADE snapshot ALWAYS carries offer_calculation (146/147 in
+  // production; the one exception has no valuation at all). The authorized
+  // ceiling is now read from this INDEPENDENT, valuation-derived figure rather
+  // than investor_ceiling_mid, which is the buyer-behavior leg that produced the
+  // recommendation. Values chosen to preserve this fixture's existing economics
+  // exactly: ceiling 90,000, recommendation 80,000.
+  evidence: {
+    offer_calculation: {
+      valuation_based_ceiling: 90000,
+      effective_authorized_ceiling: 90000,
+      behavior_based_ceiling: 90000,
+      buyer_ceiling_authoritative: true,
+    },
+  },
 });
 
 function stateWith({ ask = null, ade = ADE, extra = {} } = {}) {

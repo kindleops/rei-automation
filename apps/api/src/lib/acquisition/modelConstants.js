@@ -205,6 +205,15 @@ export const COMP_ANCHOR_MIN_MULTIPLE = 0.15;
 export const VALUATION_ANCHOR_HARD_MULTIPLE = 10;
 /** Consideration at/below this is treated as nominal (mission §4). */
 export const NOMINAL_PRICE_MAX_USD = 5_000;
+
+/**
+ * Observations required before a median-absolute-deviation outlier defense can
+ * run at all. This is the engine's EXISTING statistical policy (removeOutliers
+ * has always disabled MAD below this count and reported
+ * `insufficient_count_for_mad`); naming it here lets the buyer/investor ceiling
+ * leg reuse the same defensible threshold instead of inventing its own.
+ */
+export const MAD_MIN_OBSERVATIONS = 5;
 /** A single comp may not control more than this share of a valuation (mission §23). */
 export const MAX_SINGLE_COMP_VALUATION_SHARE = 0.45;
 
