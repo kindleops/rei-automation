@@ -1,0 +1,69 @@
+{
+  // Cloudflare front door for Lead Command. SOURCE ONLY -- not deployed.
+  //
+  //   /        -> dashboard static assets (Workers Static Assets)
+  //   /api/*   -> apps/api Container (Next.js 14 standalone, Node)
+  //
+  // The container image is a REGISTRY REFERENCE, never a Dockerfile path.
+  // That is deliberate: with a registry reference `wrangler deploy` does NOT
+  // need a local Docker engine, so no container engine ever runs on the dev Mac.
+  // The image is built on a GitHub-hosted runner and pushed to the Cloudflare
+  // managed registry.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lead-command-staging",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "../../apps/dashboard/dist",
+    "binding": "ASSETS",
+    // The dashboard is a client-routed SPA: unknown paths must serve index.html
+    // rather than 404, or a deep link like /inbox/thread/123 breaks on reload.
+    "not_found_handling": "single-page-application",
+    // /api/* must reach the Worker (and therefore the Container), never be
+    // answered by a static asset lookup.
+    "run_worker_first": ["/api/*"]
+  },
+
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      // Replaced by CI with the pushed tag:
+      //   registry.cloudflare.com/<ACCOUNT_ID>/rei-api:<GIT_SHA>
+      "image": "registry.cloudflare.com/ACCOUNT_ID_PLACEHOLDER/rei-api:TAG_PLACEHOLDER",
+      "instance_type": "standard",
+      // STAGING STARTS AT ONE INSTANCE. Raising this is gated on the scale-out
+      // checklist in docs/cloudflare/topology-contract.md.
+      "max_instances": 1
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [{ "name": "API_CONTAINER", "class_name": "ApiContainer" }]
+  },
+
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+
+  // All 14 schedules, expressions preserved verbatim from apps/api/vercel.json.
+  // scheduled() is INERT unless CRON_ENABLED=true, so a staging deploy does not
+  // fire real work against production data.
+  "triggers": {
+    "crons": [
+      "* * * * *",
+      "*/2 * * * *",
+      "*/5 * * * *",
+      "*/10 * * * *",
+      "*/15 * * * *",
+      "30 8 * * *"
+    ]
+  },
+
+  "vars": {
+    "CRON_ENABLED": "false",
+    "DEPLOYMENT_ENV": "staging",
+    "DEPLOYMENT_PROVIDER": "cloudflare"
+  },
+
+  "observability": { "enabled": true }
+}

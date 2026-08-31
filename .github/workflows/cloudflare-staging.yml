@@ -1,0 +1,119 @@
+# Remote build + Cloudflare STAGING deploy.
+#
+# All heavy work runs on a GitHub-hosted Ubuntu runner. Docker is used ONLY here
+# -- never on a development machine.
+#
+# Not wired to main. Runs on the staging branch or manual dispatch, and the
+# image job only starts if every correctness gate passed.
+
+name: cloudflare-staging
+
+on:
+  push:
+    branches: ["release/cloudflare-staging"]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: correctness gates (no Docker)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: proofdb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: apps/api critical suite
+        run: npm --prefix apps/api run test:critical
+
+      - name: apply durability migration to the ephemeral Postgres
+        run: |
+          psql "$DB" -v ON_ERROR_STOP=1 -q \
+            -f apps/api/supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql
+        env:
+          DB: postgres://postgres:postgres@127.0.0.1:5432/proofdb
+          PGPASSWORD: postgres
+
+      - name: durable-state concurrency proof (24-way)
+        # The proof's fail-closed allowlist permits loopback only; the service
+        # container is reached on 127.0.0.1, so the guard is satisfied without
+        # being weakened.
+        run: node apps/api/scripts/proof/durable-state-concurrency-proof.mjs
+        env:
+          DURABLE_STATE_PROOF_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/proofdb
+          DURABLE_STATE_PROOF_PARALLEL: 24
+
+      - name: dashboard typecheck (784 source files)
+        run: npm --prefix apps/dashboard run typecheck
+
+      - name: dashboard build
+        run: npm --prefix apps/dashboard run build
+
+      - name: iOS fullscreen contract
+        run: npm --prefix apps/dashboard run assert:fullscreen
+
+  image:
+    name: remote image build + staging deploy
+    needs: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: build apps/api (standalone)
+        run: npm --prefix apps/api run build
+
+      - name: build dashboard assets
+        run: npm --prefix apps/dashboard run build
+
+      # Docker runs HERE and only here.
+      - name: build + push image to the Cloudflare managed registry
+        run: |
+          npx wrangler containers build \
+            --push \
+            --tag "rei-api:${GITHUB_SHA}" \
+            --path apps/api/Dockerfile \
+            .
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: pin the pushed image into the wrangler config
+        run: |
+          sed -i \
+            -e "s#ACCOUNT_ID_PLACEHOLDER#${CLOUDFLARE_ACCOUNT_ID}#" \
+            -e "s#TAG_PLACEHOLDER#${GITHUB_SHA}#" \
+            infra/cloudflare/wrangler.jsonc
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Deploys from a REGISTRY REFERENCE, so no Docker engine is needed at
+      # deploy time. STAGING ONLY: no DNS, no custom domain, no production.
+      - name: deploy staging worker + container
+        run: npx wrangler deploy --config infra/cloudflare/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
