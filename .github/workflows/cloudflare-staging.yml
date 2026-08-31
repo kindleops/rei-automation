@@ -99,11 +99,16 @@ jobs:
       # PATH is the directory CONTAINING the Dockerfile, and is also the build
       # context -- which is why the Dockerfile's COPY paths are relative to
       # apps/api rather than to the repo root.
+      # NOTE: the GitHub secrets are named CLOUDFARE_* (no "L") -- that spelling
+      # is intentional here because it matches how they are stored. The env vars
+      # exposed to wrangler keep the correct CLOUDFLARE_* spelling, which is what
+      # wrangler actually reads. Do not "correct" the secrets.* side without
+      # renaming the secrets first, or they silently resolve to empty strings.
       - name: build + push image to the Cloudflare managed registry
         run: npx wrangler containers build apps/api -t "rei-api:${GITHUB_SHA}" --push
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
 
       - name: pin the pushed image into the wrangler config
         run: |
@@ -112,12 +117,12 @@ jobs:
             -e "s#TAG_PLACEHOLDER#${GITHUB_SHA}#" \
             infra/cloudflare/wrangler.jsonc
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
 
       # Deploys from a REGISTRY REFERENCE, so no Docker engine is needed at
       # deploy time. STAGING ONLY: no DNS, no custom domain, no production.
       - name: deploy staging worker + container
         run: npx wrangler deploy --config infra/cloudflare/wrangler.jsonc
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
