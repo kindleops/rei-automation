@@ -42,6 +42,21 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # AUTH PREFLIGHT -- runs FIRST, on purpose.
+      # The last two runs spent ~35 minutes passing every correctness gate and
+      # then died on credentials. Validating the token up front turns a
+      # 40-minute round trip into a 60-second one.
+      #
+      # whoami prints which accounts the token can reach and its permission
+      # scopes. It never prints the token; only the LENGTH of the account id.
+      - name: cloudflare auth preflight
+        run: |
+          echo "account id length: ${#CLOUDFLARE_ACCOUNT_ID}"
+          npx wrangler whoami
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
+
       # Chunked: as one process this suite has been killed mid-run three times
       # (twice locally, once on a runner), each time exiting with NO summary --
       # which looks identical to success unless you check for it. The chunked
