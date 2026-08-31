@@ -12,6 +12,11 @@ on:
   push:
     branches: ["release/cloudflare-staging"]
   workflow_dispatch:
+    inputs:
+      skip_gates:
+        description: "Skip correctness gates and go straight to image build + deploy (infra iteration only)"
+        type: boolean
+        default: false
 
 concurrency:
   group: cloudflare-staging
@@ -24,6 +29,11 @@ jobs:
   gates:
     name: correctness gates (no Docker)
     runs-on: ubuntu-latest
+    # Skippable ONLY via manual dispatch. A push to the staging branch always
+    # runs the full gates -- nothing ships without them. This exists so a
+    # credential or registry problem can be iterated in ~3 minutes instead of
+    # replaying 35 minutes of already-green checks.
+    if: ${{ inputs.skip_gates != true }}
     services:
       postgres:
         image: postgres:17
@@ -94,6 +104,10 @@ jobs:
     name: remote image build + staging deploy
     needs: gates
     runs-on: ubuntu-latest
+    # Runs when gates passed, or when gates were explicitly skipped for an
+    # infra-only iteration. `always()` is required because a skipped dependency
+    # would otherwise skip this job too.
+    if: ${{ always() && (needs.gates.result == 'success' || inputs.skip_gates == true) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
