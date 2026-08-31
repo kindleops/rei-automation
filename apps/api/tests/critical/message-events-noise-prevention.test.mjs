@@ -31,18 +31,22 @@ afterEach(() => {
   __resetTextgridInboundTestDeps();
 });
 
-test("acquireRunLock uses runtime state storage instead of Message Events rows", async () => {
-  let created_args = null;
+test("acquireRunLock uses the durable lock backend instead of Message Events rows", async () => {
+  let acquire_args = null;
 
   __setRunLockTestDeps({
-    readRuntimeState: async () => null,
-    createRuntimeStateIfAbsent: async (args) => {
-      created_args = args;
-      return { created: true, state: args.state };
-    },
-    writeRuntimeState: async () => {
-      throw new Error("fresh run lock should not overwrite runtime state");
-    },
+    getDurableBackend: () => ({
+      runLockAcquire: async (args) => {
+        acquire_args = args;
+        return {
+          ok: true,
+          acquired: true,
+          reason: "lock_acquired",
+          scope: args.lock_key,
+          meta: { scope: args.lock_key, status: "locked" },
+        };
+      },
+    }),
     warn: () => {},
   });
 
@@ -54,22 +58,29 @@ test("acquireRunLock uses runtime state storage instead of Message Events rows",
   assert.equal(result.ok, true);
   assert.equal(result.acquired, true);
   assert.equal(result.record_item_id, "run-locks:queue-run");
-  assert.equal(created_args.namespace, "run-locks");
-  assert.equal(created_args.key, "queue-run");
+  // The lock is keyed durably by scope, and carries a fencing lease token.
+  assert.equal(acquire_args.lock_key, "queue-run");
+  assert.equal(acquire_args.owner, "test-runner");
+  assert.ok(acquire_args.lease_token, "acquisition must mint a lease token");
+  assert.equal(result.lease_token, acquire_args.lease_token);
 });
 
-test("beginIdempotentProcessing stores claims in runtime state instead of Message Events", async () => {
+test("beginIdempotentProcessing stores claims in the durable ledger instead of Message Events", async () => {
   let created_args = null;
 
   __setIdempotencyLedgerTestDeps({
-    readRuntimeState: async () => null,
-    createRuntimeStateIfAbsent: async (args) => {
-      created_args = args;
-      return { created: true, state: args.state };
-    },
-    writeRuntimeState: async () => {
-      throw new Error("fresh idempotency claim should not overwrite runtime state");
-    },
+    getDurableBackend: () => ({
+      idempotencyBegin: async (args) => {
+        created_args = args;
+        return {
+          ok: true,
+          duplicate: false,
+          reason: "event_claimed",
+          scope: args.scope,
+          key: args.key,
+        };
+      },
+    }),
   });
 
   const result = await beginIdempotentProcessing({
@@ -84,8 +95,10 @@ test("beginIdempotentProcessing stores claims in runtime state instead of Messag
     result.record_item_id,
     "idempotency:textgrid_delivery:delivery-abc-123"
   );
-  assert.equal(created_args.namespace, "idempotency");
-  assert.equal(created_args.key, "textgrid_delivery:delivery-abc-123");
+  // Claim is addressed by (scope, key) in the durable ledger, not a /tmp path.
+  assert.equal(created_args.scope, "textgrid_delivery");
+  assert.equal(created_args.key, "delivery-abc-123");
+  assert.ok(created_args.claim_token, "claim must mint a claim token");
 });
 
 test("delivery processing without outbound correlation does not create junk event rows", async () => {
