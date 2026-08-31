@@ -12,6 +12,26 @@ import { Container, getContainer } from "@cloudflare/containers";
 export class ApiContainer extends Container {
   defaultPort = 3000;
   sleepAfter = "10m";
+
+  // Needs outbound internet for Postgres/Supabase and (later) SMTP.
+  enableInternet = true;
+
+  // FIRST STAGING DEPLOY IS DELIBERATELY CREDENTIAL-FREE.
+  //
+  // No SUPABASE_*, no TEXTGRID_*, no SMTP_*, no CRON_SECRET are passed yet, so
+  // this container CANNOT reach production data or send anything. That makes
+  // the first deploy a pure boot/routing proof: /api/version answers without a
+  // database, and any data route simply fails closed.
+  //
+  // RUNTIME_STATE_BACKEND is pinned to postgres so the durability layer can
+  // never silently fall back to in-process state -- it throws instead.
+  envVars = {
+    NODE_ENV: "production",
+    RUNTIME_STATE_BACKEND: "postgres",
+    DEPLOYMENT_ENV: "staging",
+    DEPLOYMENT_PROVIDER: "cloudflare",
+    DEPLOYMENT_PROJECT: "rei-automation-api",
+  };
 }
 
 interface Env {

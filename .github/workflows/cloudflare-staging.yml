@@ -90,13 +90,13 @@ jobs:
         run: npm --prefix apps/dashboard run build
 
       # Docker runs HERE and only here.
+      # Signature verified against `wrangler containers build --help`:
+      #   wrangler containers build <PATH>  -t <name:tag>  [-p|--push]
+      # PATH is the directory CONTAINING the Dockerfile, and is also the build
+      # context -- which is why the Dockerfile's COPY paths are relative to
+      # apps/api rather than to the repo root.
       - name: build + push image to the Cloudflare managed registry
-        run: |
-          npx wrangler containers build \
-            --push \
-            --tag "rei-api:${GITHUB_SHA}" \
-            --path apps/api/Dockerfile \
-            .
+        run: npx wrangler containers build apps/api -t "rei-api:${GITHUB_SHA}" --push
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

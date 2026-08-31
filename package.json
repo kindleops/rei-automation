@@ -27,5 +27,9 @@
     "proof:sms-health-guard": "node scripts/proof/sms-health-guard-proof.mjs",
     "proof:inbox": "npm --workspace apps/dashboard run proof:inbox",
     "build:safe": "npm run boundary:audit && npm run build"
+  },
+  "devDependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "wrangler": "^4.127.1"
   }
 }

@@ -29,8 +29,15 @@ RUN groupadd --system --gid 1001 nodejs \
 #   .next/standalone/node_modules
 #   .next/standalone/apps/api/server.js
 #   .next/standalone/apps/api/.next
-COPY --chown=nextjs:nodejs apps/api/.next/standalone ./
-COPY --chown=nextjs:nodejs apps/api/.next/static ./apps/api/.next/static
+# Build context is apps/api (`wrangler containers build apps/api`), so these
+# paths are relative to apps/api -- NOT to the repo root.
+#
+# With outputFileTracingRoot = repo root, .next/standalone contains:
+#   node_modules/            (439 traced packages)
+#   apps/api/server.js
+#   apps/api/.next/
+COPY --chown=nextjs:nodejs .next/standalone ./
+COPY --chown=nextjs:nodejs .next/static ./apps/api/.next/static
 # NOTE: apps/api has no public/ directory. A COPY of it would fail the remote
 # build, so it is deliberately absent rather than commented-in "just in case".
 
