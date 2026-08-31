@@ -1965,11 +1965,16 @@ export function resolveAuthorizedOfferAmount(dealAuthority = null) {
   // treated as not-authoritative so the gate fails closed.
   if (dealAuthority?.offer_authoritative !== true) return null;
 
+  // DEFENSE IN DEPTH (mission: "never authorize an amount above the independent
+  // monetary ceiling"). A missing ceiling previously SKIPPED the clamp entirely
+  // and returned the raw recommendation -- fail-open. An independent ceiling is
+  // now mandatory: absent or non-positive means no authority at all.
   const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  if (!Number.isFinite(ceiling) || ceiling <= 0) return null;
   const pick = (value) => {
     const amount = Number(value);
     if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
+    if (amount > ceiling) return null;
     return amount;
   };
   return pick(dealAuthority?.authorized_offer_amount) ?? pick(dealAuthority?.recommended_offer);

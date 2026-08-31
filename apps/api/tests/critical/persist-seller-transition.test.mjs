@@ -83,7 +83,7 @@ test("qualifying transition creates an opportunity with facts, stage, and negoti
     intent: "asking_price_provided",
     inboundEventId: "evt-1",
     supabaseClient: supabase,
-    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000 } }) },
+    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000, evidence: { offer_calculation: { valuation_based_ceiling: 80000, effective_authorized_ceiling: 80000 } } } }) },
   });
 
   assert.equal(result.ok, true);
