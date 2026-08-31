@@ -29,6 +29,7 @@
 import crypto from "node:crypto";
 
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { assertContractComplete } from "@/lib/domain/seller-flow/seller-offer-policy.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 function clean(value) {
@@ -94,6 +95,23 @@ export function resolveCanonicalTerms({
   if (!accepted_offer?.offer_id) {
     return { ok: false, reason: "no_accepted_offer" };
   }
+
+  // A closing case REFUSES creation when any contract-bearing term is missing.
+  // Nothing is defaulted or inferred at contract time: price, closing window,
+  // the exact closing date, EMD and its due policy must all already exist on the
+  // accepted offer.
+  const completeness = assertContractComplete({
+    ...accepted_offer,
+    purchase_price: accepted_offer.accepted_price ?? accepted_offer.purchase_price,
+  });
+  if (!completeness.ok) {
+    return {
+      ok: false,
+      reason: "incomplete_contract_terms",
+      missing_contract_terms: completeness.missing,
+    };
+  }
+
   const seller_contract_price = toNumber(accepted_offer.accepted_price ?? accepted_offer.purchase_price);
   if (!seller_contract_price) {
     return { ok: false, reason: "accepted_offer_missing_price" };
@@ -117,12 +135,13 @@ export function resolveCanonicalTerms({
     thread_key: clean(opportunity.primary_thread_key) || clean(thread_state?.thread_key) || null,
     seller_display_name: clean(opportunity.seller_display_name) || null,
     seller_contract_price,
-    // Contract terms come from the ACCEPTED OFFER, never from ad hoc overrides.
-    // They are null whenever the accepted offer carried no closing/EMD term —
-    // this system has no canonical closing-date or EMD policy, so a null here
-    // is the honest answer and the contract simply cannot complete yet.
+    // Contract terms come from the ACCEPTED OFFER, never from ad hoc overrides
+    // and never invented here. SELLER_OFFER_POLICY_V1 put them on the offer
+    // before it was sent, and acceptance computed the exact closing date; the
+    // completeness gate above already refused anything missing.
     earnest_money: toNumber(accepted_offer.emd_amount),
     scheduled_closing_date: toIso(accepted_offer.closing_date),
+    emd_due_date: accepted_offer.emd_due_date ?? null,
     closing_term: clean(accepted_offer.closing_term) || null,
     emd_term: clean(accepted_offer.emd_term) || null,
     // Offer + acceptance identity, so the contract is traceable to the exact
@@ -286,6 +305,7 @@ export async function createClosingCaseFromAcceptance({
     seller_contract_price: terms.seller_contract_price,
     earnest_money: terms.earnest_money,
     scheduled_closing_date: terms.scheduled_closing_date,
+    emd_due_date: terms.emd_due_date,
     // Traceability: the exact accepted offer + version this contract came from.
     offer_id: terms.accepted_offer_id,
     negotiation_id:
