@@ -99,9 +99,18 @@ const base = (over = {}) => ({
 test("the SMS price and the persisted offer price come from ONE resolver", async () => {
   // This is the invariant: the {{offer_price}} token and the persisted offer
   // both derive from resolveAuthorizedOfferAmount(dealAuthority).
-  const authority = { authorized_offer_amount: 250000, authorized_offer_ceiling: 300000, recommended_offer: 240000 };
+  // offer_authoritative is a MANDATORY input as of the valuation-spendability
+  // gate: resolveAuthorizedOfferAmount fails closed without it. This fixture is
+  // the spendable case (an offer-authoritative valuation), which is what the
+  // production producer emits for a legitimate offer. The assertion below is
+  // unchanged; only the now-required field was added.
+  const authority = { authorized_offer_amount: 250000, authorized_offer_ceiling: 300000, recommended_offer: 240000, offer_authoritative: true };
   const sent_amount = resolveAuthorizedOfferAmount(authority);
   assert.equal(sent_amount, 250000, "strategy-authorized amount wins over the recommendation");
+
+  // ...and the SAME authority without the gate authorizes nothing.
+  const { offer_authoritative, ...ungated } = authority;
+  assert.equal(resolveAuthorizedOfferAmount(ungated), null, "fails closed when the valuation is not offer-authoritative");
 
   const supabase = makeSupabase();
   const r = await persistActiveOffer(base({ purchase_price: sent_amount, recommended_offer: 240000, authorized_ceiling: 300000, supabase }));

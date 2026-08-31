@@ -1319,17 +1319,11 @@ function buildPersonalizationContext({
   // A strategy-authorized amount (already ceiling-bounded by the router) takes
   // precedence over the bare recommended offer; any amount above the persisted
   // ceiling is discarded so the render fails closed instead of over-offering.
-  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
-  const pickAuthorized = (value) => {
-    const amount = Number(value);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
-    return amount;
-  };
-  const authorized_offer = formatUsd(
-    pickAuthorized(dealAuthority?.authorized_offer_amount) ??
-      pickAuthorized(dealAuthority?.recommended_offer)
-  );
+  // ONE resolver for both the persisted offer and the rendered token, so the
+  // valuation-spendability gate cannot be satisfied on one path and bypassed on
+  // the other. A non-offer-authoritative valuation yields an empty token, and
+  // the render then fails closed on the missing placeholder.
+  const authorized_offer = formatUsd(resolveAuthorizedOfferAmount(dealAuthority));
 
   return {
     message_body: clean(message) || null,
@@ -1963,6 +1957,14 @@ export async function checkInboundAutoReplySuppression({
 // strategy-authorized amount preferred over the bare recommendation). Keeping
 // one resolver is what guarantees the persisted offer equals the sent amount.
 export function resolveAuthorizedOfferAmount(dealAuthority = null) {
+  // HARD GATE (proven production defect): a valuation the engine itself labelled
+  // REVIEW_REQUIRED / low-confidence must never authorize money, no matter what
+  // number it produced. The ceiling alone cannot catch this — a contaminated
+  // valuation derives its own ceiling and therefore validates itself. Callers
+  // that build dealAuthority MUST set offer_authoritative; its absence is
+  // treated as not-authoritative so the gate fails closed.
+  if (dealAuthority?.offer_authoritative !== true) return null;
+
   const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
   const pick = (value) => {
     const amount = Number(value);

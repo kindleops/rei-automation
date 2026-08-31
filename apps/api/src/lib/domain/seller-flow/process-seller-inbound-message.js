@@ -54,6 +54,7 @@ import {
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { resolveValuationSpendability } from "@/lib/domain/seller-flow/valuation-offer-authority.js";
 import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
 import {
   STATE_SOURCE_CODES,
@@ -1425,6 +1426,31 @@ export async function processSellerInboundMessage({
     });
     authorized_amount = null; // fail closed → renderer blocks monetary sends
   }
+  // ── Valuation spendability (independent of the valuation's own numbers) ────
+  // A ceiling derived from the same snapshot cannot catch a contaminated
+  // valuation, so spendability is decided from the engine's decision tier,
+  // confidence scores, comp COUNT and whether a contamination-defense pass ran.
+  // A non-spendable valuation is still persisted for analysis; it just cannot
+  // authorize money.
+  const valuation_spendability = resolveValuationSpendability({
+    valuation: effective_ade_snapshot,
+    // Pass the qualification OBJECT, not a boolean: a V3 pass only defends when
+    // its anchor-dependent price gates could actually run (see
+    // resolveV3ContaminationDefense). Coercing presence to `true` here would
+    // reintroduce the bypass one flag deeper.
+    v3_qualification: effective_ade_snapshot?.evidence?.v3?.qualification ?? null,
+  });
+  if (!valuation_spendability.spendable) {
+    runtimeDeps.warn("[VALUATION_NOT_OFFER_AUTHORITATIVE]", {
+      thread_key: threadKey || inboundFrom,
+      reason: valuation_spendability.reason,
+      decision_tier: valuation_spendability.decision_tier,
+      comp_count: valuation_spendability.comp_count,
+      confidence: valuation_spendability.confidence,
+      contamination_defense: valuation_spendability.contamination_defense,
+    });
+  }
+
   const deal_authority = {
     recommended_offer:
       underwritingSignals?.ade_result?.recommended_offer ??
@@ -1437,6 +1463,9 @@ export async function processSellerInboundMessage({
     authorized_offer_amount: authorized_amount,
     authorized_offer_ceiling: authorized_ceiling,
     comp_anchor_statement: negotiation?.comp_anchor?.authorized_statement || null,
+    // Hard gate consumed by resolveAuthorizedOfferAmount.
+    offer_authoritative: valuation_spendability.spendable,
+    valuation_spendability,
   };
 
   // ── V2 deterministic response strategy (business decision → wording
