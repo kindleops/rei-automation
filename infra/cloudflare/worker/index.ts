@@ -76,6 +76,15 @@ export class ApiContainer extends Container<Env> {
       ...(env.INTERNAL_API_SECRET
         ? { INTERNAL_API_SECRET: env.INTERNAL_API_SECRET }
         : {}),
+
+      // Inbound webhook SIGNATURE VERIFICATION only. This is a verifier, not a
+      // transport: it lets the container reject forged inbound callbacks. It
+      // cannot originate anything. TEXTGRID_ACCOUNT_SID / TEXTGRID_AUTH_TOKEN
+      // remain withheld, so sendTextgridSMS still throws before any network
+      // call and SMS stays physically impossible.
+      ...(env.TEXTGRID_WEBHOOK_SECRET
+        ? { TEXTGRID_WEBHOOK_SECRET: env.TEXTGRID_WEBHOOK_SECRET }
+        : {}),
     };
   }
 }
@@ -91,6 +100,7 @@ interface Env {
   SUPABASE_DB_URL?: string;
   OPS_DASHBOARD_SECRET?: string;
   INTERNAL_API_SECRET?: string;
+  TEXTGRID_WEBHOOK_SECRET?: string;
   APP_BASE_URL?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
