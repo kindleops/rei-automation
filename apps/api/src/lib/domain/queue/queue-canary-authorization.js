@@ -8,6 +8,9 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(clean(token), "utf8").digest("hex");
 }
 
+/** Kept as a literal so this module takes no dependency on the campaigns layer. */
+const ENQUEUE_SCOPE_NAME = "campaign_enqueue_target_one";
+
 function sortedIds(ids = []) {
   return [...new Set(ids.map((id) => clean(id)).filter(Boolean))].sort();
 }
@@ -19,6 +22,17 @@ export function authorizationMatchesRequest(authorization = {}, request = {}) {
   const authorized_ids = sortedIds(authorization.queue_row_ids || []);
 
   if (!authorization.id) return { ok: false, reason: "authorization_missing" };
+
+  // SCOPE FIRST, before any queue-row-list comparison. An enqueue-scoped
+  // authorization carries queue_row_ids = [], which against an empty requested
+  // list would otherwise compare equal and silently authorize a dispatch. The
+  // two scopes are mutually exclusive and an empty list is never a wildcard.
+  if (clean(authorization?.metadata?.scope) === ENQUEUE_SCOPE_NAME) {
+    return { ok: false, reason: "authorization_wrong_scope" };
+  }
+  if (authorized_ids.length === 0) {
+    return { ok: false, reason: "authorization_no_rows_authorized" };
+  }
   if (clean(authorization.campaign_id) !== campaign_id) {
     return { ok: false, reason: "authorization_campaign_mismatch" };
   }
