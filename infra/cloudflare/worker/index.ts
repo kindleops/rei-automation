@@ -117,7 +117,7 @@ export default {
     // "secret not bound to this Worker" from "Worker has it but the
     // Durable Object/container forwarding drops it".
     // BOOLEANS ONLY -- no secret value is ever returned. Remove after commissioning.
-    if (url.pathname === "/__worker-env-probe") {
+    if (url.pathname === "/api/__worker-env-probe") {
       return Response.json({
         worker_sees_supabase_url: Boolean(env.SUPABASE_URL),
         worker_sees_supabase_service_role_key: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
