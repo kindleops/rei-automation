@@ -85,6 +85,27 @@ export class ApiContainer extends Container<Env> {
       ...(env.TEXTGRID_WEBHOOK_SECRET
         ? { TEXTGRID_WEBHOOK_SECRET: env.TEXTGRID_WEBHOOK_SECRET }
         : {}),
+
+      // OUTBOUND SMS TRANSPORT. From here the container CAN send.
+      //
+      // Automated sending stays blocked by four independent controls:
+      //   1. queue_emergency_stop_active = true   (DB)
+      //   2. queue_processor_mode        = off    (DB)
+      //   3. queue_execution_mode        = scoped_canary_only (DB)
+      //   4. ENABLE_LIVE_SENDING/AUTOMATION_/WORKFLOW_ = false (env, default-deny)
+      // plus cron is unregistered, so nothing invokes a runner.
+      //
+      // KNOWN EXCEPTION: /api/internal/inbox/send-now evaluates the runtime
+      // brake with failClosed:false and proceeds anyway, recording
+      // bypassed_queue_emergency_stop. It is guarded only by
+      // INTERNAL_API_SECRET and its own compliance/suppression checks. That is
+      // existing product behaviour, deliberately unchanged here.
+      ...(env.TEXTGRID_ACCOUNT_SID
+        ? { TEXTGRID_ACCOUNT_SID: env.TEXTGRID_ACCOUNT_SID }
+        : {}),
+      ...(env.TEXTGRID_AUTH_TOKEN
+        ? { TEXTGRID_AUTH_TOKEN: env.TEXTGRID_AUTH_TOKEN }
+        : {}),
     };
   }
 }
@@ -101,6 +122,8 @@ interface Env {
   OPS_DASHBOARD_SECRET?: string;
   INTERNAL_API_SECRET?: string;
   TEXTGRID_WEBHOOK_SECRET?: string;
+  TEXTGRID_ACCOUNT_SID?: string;
+  TEXTGRID_AUTH_TOKEN?: string;
   APP_BASE_URL?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
