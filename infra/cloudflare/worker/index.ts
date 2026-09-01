@@ -112,6 +112,20 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // Commissioning probe: does the WORKER itself see the secrets?
+    // The container already reports them missing; this distinguishes
+    // "secret not bound to this Worker" from "Worker has it but the
+    // Durable Object/container forwarding drops it".
+    // BOOLEANS ONLY -- no secret value is ever returned. Remove after commissioning.
+    if (url.pathname === "/__worker-env-probe") {
+      return Response.json({
+        worker_sees_supabase_url: Boolean(env.SUPABASE_URL),
+        worker_sees_supabase_service_role_key: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+        worker_sees_app_base_url: Boolean(env.APP_BASE_URL),
+        worker_binding_names: Object.keys(env as Record<string, unknown>).sort(),
+      });
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return forwardToApi(request, env);
     }
