@@ -72,36 +72,6 @@ interface Env {
   DEPLOY_GIT_SHA?: string;
 }
 
-/**
- * PWA / caching contract. These headers are the reason the installed iOS PWA
- * updates correctly; a stale sw.js or manifest silently serves an old build.
- */
-function applyAssetHeaders(request: Request, response: Response): Response {
-  const path = new URL(request.url).pathname;
-  const headers = new Headers(response.headers);
-
-  if (path === "/sw.js" || path.endsWith("/sw.js")) {
-    // NEVER cache the service worker: a cached sw.js pins users to an old build.
-    headers.set("Cache-Control", "no-store, must-revalidate");
-  } else if (path === "/manifest.webmanifest") {
-    // Must be same-origin readable with credentials for the installed PWA.
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Content-Type", "application/manifest+json");
-  } else if (path.startsWith("/assets/")) {
-    // Vite emits content-hashed filenames, so these are safe to pin forever.
-    headers.set("Cache-Control", "public, max-age=31536000, immutable");
-  } else if (path === "/" || path.endsWith(".html")) {
-    // The HTML shell must revalidate or a new deploy is never picked up.
-    headers.set("Cache-Control", "no-cache");
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
-
 async function forwardToApi(request: Request, env: Env): Promise<Response> {
   // Single named instance: the conservative first topology. Raising instance
   // count is gated on docs/cloudflare/topology-contract.md.
@@ -112,25 +82,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Commissioning probe: does the WORKER itself see the secrets?
-    // The container already reports them missing; this distinguishes
-    // "secret not bound to this Worker" from "Worker has it but the
-    // Durable Object/container forwarding drops it".
-    // BOOLEANS ONLY -- no secret value is ever returned. Remove after commissioning.
-    if (url.pathname === "/api/__worker-env-probe") {
-      return Response.json({
-        worker_sees_supabase_url: Boolean(env.SUPABASE_URL),
-        worker_sees_supabase_service_role_key: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
-        worker_sees_app_base_url: Boolean(env.APP_BASE_URL),
-        worker_binding_names: Object.keys(env as Record<string, unknown>).sort(),
-      });
-    }
-
     if (url.pathname.startsWith("/api/")) {
       return forwardToApi(request, env);
     }
 
-    return applyAssetHeaders(request, await env.ASSETS.fetch(request));
+    // Static assets are served directly. Their cache/Content-Type contract
+    // lives in apps/dashboard/static/_headers, which Cloudflare applies to
+    // asset responses -- one source of truth, not two.
+    return env.ASSETS.fetch(request);
   },
 
   /**
