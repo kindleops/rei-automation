@@ -11,6 +11,11 @@ export const INTERNAL_TEST_PHONE_SET = new Set([
   "+16127433952", // Ryan's internal test number (107-touch control)
   "+16124515970", // Approved internal test number (live negotiation certification, alternate physical phone)
   "+16128072000", // Approved internal canary recipient (Stage 1 transport-chain proof)
+  // INTERNAL_CANARY / NOT BUSINESS DATA. Operator-controlled handset for the
+  // Offer Authority opener proof lane. Registration alone grants NOTHING: the
+  // enqueue-time window exemption additionally requires an exact
+  // campaign + target + recipient + sender pin AND a live scoped authorization.
+  "+13059807795", // Approved internal canary recipient (Offer Authority opener proof)
 ]);
 
 /**
