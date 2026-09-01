@@ -101,6 +101,27 @@ jobs:
 
       - name: dashboard build
         run: npm --prefix apps/dashboard run build
+        env:
+          # Vite INLINES these at build time. Without them the shipped bundle has
+          # no Supabase config, the client cannot initialise, and the dashboard
+          # renders a blank screen -- which is exactly what happened after the
+          # Vercel cutover, because Vercel supplied them as project env vars and
+          # this build did not.
+          # Every VITE_* value is inlined into a PUBLIC browser bundle, so none of
+          # them are secret once shipped; they are stored as Actions secrets only
+          # to keep them out of the repository.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+          VITE_BACKEND_API_SECRET: ${{ secrets.VITE_BACKEND_API_SECRET }}
+          VITE_OPS_DASHBOARD_SECRET: ${{ secrets.VITE_OPS_DASHBOARD_SECRET }}
+          VITE_USE_SUPABASE: "true"
+          VITE_ENABLE_LIVE_INBOX: "true"
+          # Production: no dev banner. VITE_BACKEND_API_URL is intentionally
+          # unset so the app uses the same-origin /api proxy.
+          VITE_SHOW_DEBUG: "false"
+          VITE_COMMIT_SHA: ${{ github.sha }}
+          VITE_DASHBOARD_GIT_SHA: ${{ github.sha }}
 
       - name: iOS fullscreen contract
         run: npm --prefix apps/dashboard run assert:fullscreen
@@ -126,6 +147,27 @@ jobs:
 
       - name: build dashboard assets
         run: npm --prefix apps/dashboard run build
+        env:
+          # Vite INLINES these at build time. Without them the shipped bundle has
+          # no Supabase config, the client cannot initialise, and the dashboard
+          # renders a blank screen -- which is exactly what happened after the
+          # Vercel cutover, because Vercel supplied them as project env vars and
+          # this build did not.
+          # Every VITE_* value is inlined into a PUBLIC browser bundle, so none of
+          # them are secret once shipped; they are stored as Actions secrets only
+          # to keep them out of the repository.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+          VITE_BACKEND_API_SECRET: ${{ secrets.VITE_BACKEND_API_SECRET }}
+          VITE_OPS_DASHBOARD_SECRET: ${{ secrets.VITE_OPS_DASHBOARD_SECRET }}
+          VITE_USE_SUPABASE: "true"
+          VITE_ENABLE_LIVE_INBOX: "true"
+          # Production: no dev banner. VITE_BACKEND_API_URL is intentionally
+          # unset so the app uses the same-origin /api proxy.
+          VITE_SHOW_DEBUG: "false"
+          VITE_COMMIT_SHA: ${{ github.sha }}
+          VITE_DASHBOARD_GIT_SHA: ${{ github.sha }}
 
       # Docker runs HERE and only here.
       # Signature verified against `wrangler containers build --help`:
