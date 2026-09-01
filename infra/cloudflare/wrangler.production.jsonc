@@ -1,0 +1,58 @@
+{
+  // PRODUCTION Cloudflare configuration -- DISTINCT from staging.
+  //
+  // Deliberately a separate Worker, separate container application and separate
+  // Durable Object namespace. Staging shares the production DATABASE for
+  // commissioning, which is precisely why the two deployments must not share a
+  // Worker: production must be independently controllable.
+  //
+  // Uses the SAME proven image as staging (registry reference, so no Docker is
+  // needed at deploy time).
+  //
+  // INITIAL POSTURE -- deliberately inert:
+  //   * NO triggers.crons block. Cloudflare will not invoke scheduled() at all.
+  //     Stronger than relying on a flag; crons are added at commissioning.
+  //   * CRON_ENABLED=false as a second, independent guard.
+  //   * live-send flags absent => the Worker forwards "false" (default-deny).
+  //   * NO custom domain. Temporary workers.dev hostname only; DNS is a
+  //     separate, explicitly approved step.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lead-command-production",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "../../apps/dashboard/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "registry.cloudflare.com/ACCOUNT_ID_PLACEHOLDER/rei-api:TAG_PLACEHOLDER",
+      "instance_type": "standard",
+      // Single instance. Raising this is gated on the scale-out checklist in
+      // docs/cloudflare/topology-contract.md.
+      "max_instances": 1
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [{ "name": "API_CONTAINER", "class_name": "ApiContainer" }]
+  },
+
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+
+  "vars": {
+    "CRON_ENABLED": "false",
+    "DEPLOYMENT_ENV": "production",
+    "DEPLOYMENT_PROVIDER": "cloudflare",
+    "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
+    "DEPLOYMENT_ID": "DEPLOYMENT_ID_PLACEHOLDER"
+  },
+
+  "observability": { "enabled": true }
+}

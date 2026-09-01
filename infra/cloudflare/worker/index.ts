@@ -42,10 +42,13 @@ export class ApiContainer extends Container<Env> {
       DEPLOYMENT_PROVIDER: "cloudflare",
       DEPLOYMENT_PROJECT: "rei-automation-api",
 
-      // Belt-and-braces alongside credential absence.
-      ENABLE_LIVE_SENDING: "false",
-      AUTOMATION_LIVE_SENDS_ENABLED: "false",
-      WORKFLOW_LIVE_SENDS_ENABLED: "false",
+      // Default-deny. Only an explicit "true" in Worker vars enables these, so
+      // a missing/typo'd value fails closed rather than open.
+      ENABLE_LIVE_SENDING: env.ENABLE_LIVE_SENDING === "true" ? "true" : "false",
+      AUTOMATION_LIVE_SENDS_ENABLED:
+        env.AUTOMATION_LIVE_SENDS_ENABLED === "true" ? "true" : "false",
+      WORKFLOW_LIVE_SENDS_ENABLED:
+        env.WORKFLOW_LIVE_SENDS_ENABLED === "true" ? "true" : "false",
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -70,6 +73,11 @@ interface Env {
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
   DEPLOY_GIT_SHA?: string;
+  // Outbound enablement. Absent => "false". Flipping these is a deliberate
+  // commissioning act performed in the dashboard, never a code change.
+  ENABLE_LIVE_SENDING?: string;
+  AUTOMATION_LIVE_SENDS_ENABLED?: string;
+  WORKFLOW_LIVE_SENDS_ENABLED?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {
