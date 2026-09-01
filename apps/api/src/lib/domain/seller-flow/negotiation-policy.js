@@ -372,12 +372,26 @@ export function evaluateConcession({
     return { allowed: false, reason_code: "NO_QUALIFYING_MOVEMENT_OR_FACT", amount: null, is_final: false };
   }
 
-  const remaining = ceiling - latest;
+  // WALKAWAY IS MINIMUM ECONOMICS, NOT THE RAW CEILING. Conceding all the way to
+  // the authorized ceiling drives the assignment margin to zero: on a $400k
+  // ceiling opening at a $40,000 fee, three ladder steps reached $10,000 then
+  // $5,000 -- below the $15,000 hard floor. The floor is what makes a cash
+  // assignment worth doing, so it bounds concessions too. Opt-in: when no
+  // minimum margin is carried on the state, behaviour is exactly as before.
+  const minimumMargin = num(state.minimum_assignment_margin ?? state.minimum_margin);
+  const concessionCeiling =
+    minimumMargin !== null && minimumMargin > 0 && minimumMargin < ceiling
+      ? ceiling - minimumMargin
+      : ceiling;
+  if (latest >= concessionCeiling) {
+    return { allowed: false, reason_code: "MINIMUM_MARGIN_REACHED", amount: null, is_final: true };
+  }
+  const remaining = concessionCeiling - latest;
   const step = Math.max(500, Math.round(remaining * p.concession.max_step_share_of_remaining));
-  let amount = Math.min(ceiling, latest + step);
+  let amount = Math.min(concessionCeiling, latest + step);
   // Never offer more than the seller is asking (§6 within-authority guard).
   if (ask !== null && amount > ask) amount = ask;
-  const is_final = amount >= ceiling;
+  const is_final = amount >= concessionCeiling;
 
   return {
     allowed: amount > latest,
