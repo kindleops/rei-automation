@@ -57,6 +57,25 @@ export class ApiContainer extends Container<Env> {
         ? { SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY }
         : {}),
       ...(env.APP_BASE_URL ? { APP_BASE_URL: env.APP_BASE_URL } : {}),
+
+      // Core commissioning additions. Non-provider: none of these can emit
+      // outbound traffic on their own.
+      //   SUPABASE_DB_URL     - direct pg pool, used only by the map-filter modules
+      //   OPS_DASHBOARD_SECRET- gates cockpit READ routes
+      //   INTERNAL_API_SECRET - gates /api/internal/* authentication
+      //
+      // STILL WITHHELD, deliberately: TEXTGRID_* (SMS transport), CRON_SECRET,
+      // QUEUE_ENGINE_SHARED_SECRET, SCOPED_CANARY_EXECUTION_SECRET.
+      // Note INTERNAL_API_SECRET alone does NOT make the box send-capable:
+      // inbox/send-now still needs TEXTGRID_* to reach a transport, and
+      // sendTextgridSMS throws without credentials before any network call.
+      ...(env.SUPABASE_DB_URL ? { SUPABASE_DB_URL: env.SUPABASE_DB_URL } : {}),
+      ...(env.OPS_DASHBOARD_SECRET
+        ? { OPS_DASHBOARD_SECRET: env.OPS_DASHBOARD_SECRET }
+        : {}),
+      ...(env.INTERNAL_API_SECRET
+        ? { INTERNAL_API_SECRET: env.INTERNAL_API_SECRET }
+        : {}),
     };
   }
 }
@@ -69,6 +88,9 @@ interface Env {
   // Commissioning credentials. Deliberately a SHORT list -- see ApiContainer.
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  SUPABASE_DB_URL?: string;
+  OPS_DASHBOARD_SECRET?: string;
+  INTERNAL_API_SECRET?: string;
   APP_BASE_URL?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
