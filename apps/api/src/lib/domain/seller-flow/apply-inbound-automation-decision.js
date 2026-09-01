@@ -2877,8 +2877,24 @@ export async function executeInboundAutomationDecision({
           authorized_ceiling: dealAuthority?.authorized_offer_ceiling ?? null,
           strategy: strategyDirective?.strategy || null,
           source_message_event_id: clean(inboundEventId) || null,
-          // closing/EMD deliberately omitted: no canonical policy exists in this
-          // system, and a fabricated contract term must never reach a seller.
+          // OFFER-VERSION FREEZE: bind this version to the immutable ADE run and
+          // the margin policy that produced it. Without these the offer could not
+          // prove which valuation it came from, and a later recomputation would
+          // leave no evidence of divergence.
+          ade_snapshot_id: dealAuthority?.ade_snapshot_id ?? null,
+          valuation_mid: dealAuthority?.valuation_mid ?? null,
+          metadata: dealAuthority?.margin_policy
+            ? {
+                margin_policy_version: dealAuthority.margin_policy.policy_version ?? null,
+                minimum_margin: dealAuthority.margin_policy.minimum_margin ?? null,
+                target_margin: dealAuthority.margin_policy.target_margin ?? null,
+                protected_margin: dealAuthority.margin_policy.protected_margin ?? null,
+                max_available_margin: dealAuthority.margin_policy.max_available_margin ?? null,
+                margin_pct: dealAuthority.margin_policy.margin_pct ?? null,
+              }
+            : {},
+          // closing/EMD terms are applied inside persistActiveOffer from
+          // SELLER_OFFER_POLICY_V1; they are deliberately not fabricated here.
           supabase,
         })
       : { ok: false, reason: "offer_amount_unauthorized" };
