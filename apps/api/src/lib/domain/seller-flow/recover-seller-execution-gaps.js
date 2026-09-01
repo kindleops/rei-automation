@@ -21,6 +21,7 @@ import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal
 import { STATE_SOURCE_CODES, lifecycleStageNumber } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { transitionOpportunityStage } from "@/lib/domain/opportunity/opportunity-service.js";
 import { NEXT_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import { finalizeSellerAcceptance } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -284,13 +285,36 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
             .then((patched) => patched?.ok === true)
             .catch(() => false);
         }
+        // Self-heal the acceptance -> closing seam: bind the accepted offer and
+        // create the closing case if a prior live turn advanced the stage but
+        // crashed before convergence. Idempotent and fail-closed: no active
+        // offer -> no closing case. The acceptance_event_id is derived from the
+        // opportunity so repeated sweeps cannot double-bind.
+        let converged = null;
+        try {
+          const finalized = await finalizeSellerAcceptance({
+            opportunity_id: opp.id,
+            thread_key: opp.primary_thread_key || null,
+            acceptance_event_id: `gap_recovery:${opp.id}`,
+            acceptance_at: new Date().toISOString(),
+            provenance: { source: "seller_execution_gap_recovery" },
+            supabase,
+          });
+          converged = {
+            offer_id: finalized?.offer_id || null,
+            closing_case_id: finalized?.closing_case_id || null,
+            reason: finalized?.reason || null,
+          };
+        } catch {
+          converged = { reason: "finalize_exception" };
+        }
         await emitRecoveryEvent(supabase, {
           type: "RECOVERY_CONTRACT_ACTION_RESTORED",
           subjectId: opp.primary_thread_key || opp.id,
-          payload: { gap_key: opp.id, advanced: true },
+          payload: { gap_key: opp.id, advanced: true, converged },
         });
         outcome.repaired += 1;
-        outcome.results.push({ opportunity_id: opp.id, ok: true, advanced: true, state_patch_ok });
+        outcome.results.push({ opportunity_id: opp.id, ok: true, advanced: true, state_patch_ok, converged });
       } catch (stage_error) {
         outcome.results.push({ opportunity_id: opp.id, ok: false, reason: stage_error?.message });
       }

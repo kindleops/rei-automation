@@ -22,6 +22,7 @@ import {
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { finalizeSellerAcceptance, isAcceptanceEdge } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -385,6 +386,7 @@ export async function persistSellerTransitionArtifacts({
     negotiation_state_updated: false,
     workflow_events_emitted: 0,
     ade: { requested: transition?.ade_action || ADE_ACTIONS.NONE, ran: false, error: null },
+    acceptance: { edge: false, converged: false, offer_id: null, closing_case_id: null, reason: null },
   };
 
   if (!transition) return { ...summary, skipped: true, reason: "no_transition" };
@@ -607,6 +609,42 @@ export async function persistSellerTransitionArtifacts({
         opportunity_id: opportunity.id,
         error: metadata_error?.message || "metadata_update_failed",
       });
+    }
+
+    // ── Acceptance -> closing convergence (spec §12, P0 #5) ─────────────────
+    // When the durable negotiation state flips terms_accepted false -> true, the
+    // acceptance is bound to the exact active seller_offer and exactly one
+    // closing case is created from canonical Supabase authorities. This replaces
+    // the dead Podio contract trigger on the live path. It writes internal
+    // records only — no seller-visible send, no DocuSign envelope — so it is safe
+    // under queue/campaign containment. Failure-isolated: a convergence failure
+    // never fails seller inbound processing; the gap-recovery sweep is the net.
+    if (isAcceptanceEdge(previousState, negotiationState)) {
+      summary.acceptance.edge = true;
+      try {
+        const finalized = await finalizeSellerAcceptance({
+          opportunity_id: opportunity.id,
+          thread_key: threadKey,
+          acceptance_event_id: clean(inboundEventId) || null,
+          acceptance_at: negotiationState.terms_accepted_at || nowIso,
+          provenance: {
+            reasoning_code: transition.reasoning_code || null,
+            source_view: "seller_inbound_orchestrator",
+          },
+          supabase,
+        });
+        summary.acceptance.converged = Boolean(finalized?.closing_case_id);
+        summary.acceptance.offer_id = finalized?.offer_id || null;
+        summary.acceptance.offer_version = finalized?.offer_version ?? null;
+        summary.acceptance.closing_case_id = finalized?.closing_case_id || null;
+        summary.acceptance.reason = finalized?.reason || null;
+      } catch (acceptance_error) {
+        summary.acceptance.reason = "finalize_exception";
+        warn("[SELLER_TRANSITION_ACCEPTANCE_FINALIZE_FAILED]", {
+          opportunity_id: opportunity.id,
+          error: acceptance_error?.message || "finalize_failed",
+        });
+      }
     }
 
     // ── Workflow Studio negotiation events (spec §16) ───────────────────

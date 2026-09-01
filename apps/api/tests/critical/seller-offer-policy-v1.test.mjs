@@ -43,7 +43,15 @@ function makeSupabase() {
         if (name === "seller_offers") {
           if (row.status === OFFER_STATUS.ACTIVE && state.offers.some((o) => o.opportunity_id === row.opportunity_id && o.status === OFFER_STATUS.ACTIVE))
             return { select: () => ({ maybeSingle: async () => ({ data: null, error: { code: "23505", message: "one active" } }) }) };
-          const created = { created_at: new Date().toISOString(), ...row };
+          // Deterministic offer-creation instant. acceptActiveOffer enforces
+          // "acceptance must come after the offer was sent"; without a fixed
+          // created_at this fixture used the real wall clock, so a hardcoded
+          // acceptance_at of 2026-09-01T10:00Z began to PREDATE the freshly
+          // created offer once the machine clock passed 10:00 UTC, flaking the
+          // acceptance tests by time of day. Seeding a fixed past instant makes
+          // the chronology guard deterministic (the sibling term-authority
+          // suite pins sent_at for the same reason).
+          const created = { created_at: "2026-08-01T00:00:00.000Z", ...row };
           state.offers.push(created);
           return { select: () => ({ maybeSingle: async () => ({ data: created, error: null }) }) };
         }
