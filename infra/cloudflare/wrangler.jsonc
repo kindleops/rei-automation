@@ -59,10 +59,18 @@
     ]
   },
 
+  // Non-secret vars. Credentials are Worker SECRETS (wrangler secret put /
+  // dashboard) and are forwarded to the container by an explicit allowlist in
+  // worker/index.ts -- never by spreading env.
   "vars": {
     "CRON_ENABLED": "false",
     "DEPLOYMENT_ENV": "staging",
-    "DEPLOYMENT_PROVIDER": "cloudflare"
+    "DEPLOYMENT_PROVIDER": "cloudflare",
+    // Both replaced by CI. DEPLOYMENT_ID is the GitHub run id: Cloudflare's own
+    // Version ID cannot be injected here because it does not exist until the
+    // deploy that creates it. The Version ID is reported in the deploy output.
+    "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
+    "DEPLOYMENT_ID": "DEPLOYMENT_ID_PLACEHOLDER"
   },
 
   "observability": { "enabled": true }

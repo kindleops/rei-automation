@@ -9,29 +9,53 @@
 
 import { Container, getContainer } from "@cloudflare/containers";
 
-export class ApiContainer extends Container {
+export class ApiContainer extends Container<Env> {
   defaultPort = 3000;
   sleepAfter = "10m";
 
-  // Needs outbound internet for Postgres/Supabase and (later) SMTP.
+  // Needs outbound internet for Postgres/Supabase.
   enableInternet = true;
 
-  // FIRST STAGING DEPLOY IS DELIBERATELY CREDENTIAL-FREE.
-  //
-  // No SUPABASE_*, no TEXTGRID_*, no SMTP_*, no CRON_SECRET are passed yet, so
-  // this container CANNOT reach production data or send anything. That makes
-  // the first deploy a pure boot/routing proof: /api/version answers without a
-  // database, and any data route simply fails closed.
-  //
-  // RUNTIME_STATE_BACKEND is pinned to postgres so the durability layer can
-  // never silently fall back to in-process state -- it throws instead.
-  envVars = {
-    NODE_ENV: "production",
-    RUNTIME_STATE_BACKEND: "postgres",
-    DEPLOYMENT_ENV: "staging",
-    DEPLOYMENT_PROVIDER: "cloudflare",
-    DEPLOYMENT_PROJECT: "rei-automation-api",
-  };
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+
+    // EXPLICIT ALLOWLIST. Never spread `...env` here.
+    //
+    // Absence of credentials IS the staging containment boundary, so the
+    // container must only ever receive variables named here. A blanket spread
+    // would silently forward any future Worker secret -- TextGrid, SMTP,
+    // CRON_SECRET -- and quietly make staging send-capable.
+    //
+    // Specifically NOT forwarded, and not to be added without an explicit
+    // decision: TEXTGRID_*, SMTP_*, BREVO_*, INTERNAL_API_SECRET, CRON_SECRET,
+    // *_WEBHOOK_SECRET, QUEUE_ENGINE_SHARED_SECRET, OPENAI_KEY.
+    //
+    // Note: the live-send flags below do NOT govern /api/internal/inbox/send-now,
+    // which bypasses the queue emergency stop by design. That path is contained
+    // solely by the absence of TEXTGRID_* and INTERNAL_API_SECRET.
+    this.envVars = {
+      NODE_ENV: "production",
+      // Must be postgres. The durability layer throws rather than falling back
+      // to in-process state under NODE_ENV=production.
+      RUNTIME_STATE_BACKEND: "postgres",
+      DEPLOYMENT_ENV: env.DEPLOYMENT_ENV ?? "staging",
+      DEPLOYMENT_PROVIDER: "cloudflare",
+      DEPLOYMENT_PROJECT: "rei-automation-api",
+
+      // Belt-and-braces alongside credential absence.
+      ENABLE_LIVE_SENDING: "false",
+      AUTOMATION_LIVE_SENDS_ENABLED: "false",
+      WORKFLOW_LIVE_SENDS_ENABLED: "false",
+
+      ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
+      ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
+      ...(env.SUPABASE_URL ? { SUPABASE_URL: env.SUPABASE_URL } : {}),
+      ...(env.SUPABASE_SERVICE_ROLE_KEY
+        ? { SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY }
+        : {}),
+      ...(env.APP_BASE_URL ? { APP_BASE_URL: env.APP_BASE_URL } : {}),
+    };
+  }
 }
 
 interface Env {
@@ -39,6 +63,13 @@ interface Env {
   API_CONTAINER: DurableObjectNamespace<ApiContainer>;
   CRON_SECRET?: string;
   CRON_ENABLED?: string;
+  // Commissioning credentials. Deliberately a SHORT list -- see ApiContainer.
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  APP_BASE_URL?: string;
+  DEPLOYMENT_ENV?: string;
+  DEPLOYMENT_ID?: string;
+  DEPLOY_GIT_SHA?: string;
 }
 
 /**

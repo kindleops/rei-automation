@@ -144,6 +144,8 @@ jobs:
           sed -i \
             -e "s#ACCOUNT_ID_PLACEHOLDER#${CLOUDFLARE_ACCOUNT_ID}#" \
             -e "s#TAG_PLACEHOLDER#${GITHUB_SHA}#" \
+            -e "s#GIT_SHA_PLACEHOLDER#${GITHUB_SHA}#" \
+            -e "s#DEPLOYMENT_ID_PLACEHOLDER#${GITHUB_RUN_ID}#" \
             infra/cloudflare/wrangler.jsonc
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFARE_ACCOUNT_ID }}
