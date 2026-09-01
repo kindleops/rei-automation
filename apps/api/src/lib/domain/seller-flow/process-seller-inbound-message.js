@@ -1466,6 +1466,15 @@ export async function processSellerInboundMessage({
     // Hard gate consumed by resolveAuthorizedOfferAmount.
     offer_authoritative: valuation_spendability.spendable,
     valuation_spendability,
+    // OFFER-VERSION FREEZE. Everything a seller_offer must permanently bind:
+    // the immutable ADE run it was derived from, the valuation, and the margin
+    // policy that sized the spread. Once frozen onto an offer version these
+    // never move; a materially new valuation can only reach the seller through
+    // a NEW version created by the canonical persistActiveOffer path.
+    ade_snapshot_id: effective_ade_snapshot?.evidence?.immutable_snapshot_id ?? null,
+    valuation_mid: effective_ade_snapshot?.valuation_mid ?? null,
+    margin_policy:
+      effective_ade_snapshot?.evidence?.offer_calculation?.assignment_margin_policy ?? null,
   };
 
   // ── V2 deterministic response strategy (business decision → wording

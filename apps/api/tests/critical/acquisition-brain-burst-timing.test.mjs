@@ -655,21 +655,8 @@ test("evaluateContactWindowShadow alias works", () => {
   assert.equal(w.allowed, true);
 });
 
-test("p95 pure compute under 15ms on fixture loop", () => {
-  const samples = [];
-  for (let i = 0; i < 50; i += 1) {
-    const t0 = Date.now();
-    planShadowBurst({
-      thread_key: THREAD,
-      messages: [
-        msg(1, "Yeah", "ownership_confirmed", 0),
-        msg(2, "proposal?", "asks_offer", 5_000),
-      ],
-      now: new Date(baseMs + 120_000),
-    });
-    samples.push(Date.now() - t0);
-  }
-  samples.sort((a, b) => a - b);
-  const p95 = samples[Math.floor(samples.length * 0.95)];
-  assert.ok(p95 < 15, `p95=${p95}`);
-});
+// The 15ms pure-compute budget now lives in
+// acquisition-brain-burst-benchmark.test.mjs, in its own process with warmup and
+// a CPU-time assertion. The budget itself is unchanged; only the measurement
+// methodology moved, because Date.now() at millisecond granularity inside a
+// 52-test process could not measure a sub-millisecond operation reliably.
