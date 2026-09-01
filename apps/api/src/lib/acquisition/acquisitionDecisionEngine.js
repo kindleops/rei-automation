@@ -2,6 +2,7 @@ import {
   resolveBuyerCeilingAuthority,
   resolveEffectiveAuthorizedCeiling,
 } from './buyerCeilingAuthority.js';
+import { resolveTargetAssignmentMargin } from './assignmentMarginPolicy.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import {
   normalizeAssetClass,
@@ -2618,14 +2619,45 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
   });
   const effectiveCeiling = ceilingResolution.effective_authorized_ceiling;
 
+  // DEAL-AWARE PROFIT PRESERVATION. targetAssignmentFee is a MINIMUM/target
+  // concept, never a maximum. The flat $15,000 made expected margin ~flat in
+  // dollars, so it collapsed to ~2% of ceiling on large deals. The policy sizes
+  // the preserved spread from the deal itself and can only ever preserve MORE
+  // than the incoming floor, so no deal becomes easier to approve than before.
+  // It NEVER touches effectiveCeiling -- it only chooses how much room to keep
+  // inside it.
+  const marginPolicy = resolveTargetAssignmentMargin({
+    effective_authorized_ceiling: effectiveCeiling,
+    asset_family: subject.asset_family,
+    buyer_demand_score: investor.buyer_demand_score,
+    liquidity_score: investor.liquidity_score,
+    // Overall confidence is derived FROM the offer, so it does not exist yet at
+    // this point; passing it would be circular. Valuation confidence is the
+    // evidence-quality signal genuinely available here.
+    confidence: null,
+    valuation_confidence: valuation.confidence,
+    buyer_ceiling_authoritative: buyerCeilingAuthority.authoritative,
+    minimum_margin_floor: targetAssignmentFee,
+    // V2 already applies demandPremium / confidenceHaircut to the offer below.
+    // Letting the policy re-apply them would count the same evidence twice in
+    // the same direction (measured ~1.3-1.4x amplification).
+    market_adjustments_applied_by_caller: true,
+  });
+  const dealTargetMargin = marginPolicy.target_margin;
+
   const motivation = distressAndMotivation(subject);
   const confidenceHaircut = ((100 - valuation.confidence) / 100) * 0.06;
   const motivationDiscount = (motivation.score / 100) * 0.035;
   const demandPremium =
     ((investor.buyer_demand_score + investor.liquidity_score) / 200) * 0.015;
-  const offerBeforeRound =
+  const marketAdjustedOffer =
     effectiveCeiling * (1 - confidenceHaircut - motivationDiscount + demandPremium) -
-    targetAssignmentFee;
+    dealTargetMargin;
+  // target_margin is ASPIRATIONAL: demandPremium can push the offer above
+  // (ceiling - target) and eat into it. protected_margin is ENFORCED -- the
+  // opening offer may never leave less than it on the table.
+  const protectedMarginCap = effectiveCeiling - marginPolicy.protected_margin;
+  const offerBeforeRound = Math.min(marketAdjustedOffer, protectedMarginCap);
   const recommended = Math.max(0, roundMoney(offerBeforeRound));
   const negotiationBand = Math.max(5_000, valuation.mid * 0.03);
   const minimum = Math.max(0, roundMoney(recommended - negotiationBand));
@@ -2650,7 +2682,13 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
       buyer_ceiling_sample_size: buyerCeilingAuthority.sample_size,
       buyer_ceiling_outlier_defense: buyerCeilingAuthority.outlier_defense,
       estimated_repairs: repairs.amount,
-      target_assignment_fee: targetAssignmentFee,
+      // The target actually used for this deal (>= the incoming floor).
+      target_assignment_fee: dealTargetMargin,
+      assignment_margin_floor: marginPolicy.minimum_margin,
+      protected_margin: marginPolicy.protected_margin,
+      protected_margin_enforced: marketAdjustedOffer > protectedMarginCap,
+      negotiable_margin: Math.max(0, roundMoney(expectedFee - marginPolicy.minimum_margin)),
+      assignment_margin_policy: marginPolicy,
       confidence_haircut_percent: round(confidenceHaircut * 100, 2),
       motivation_discount_percent: round(motivationDiscount * 100, 2),
       demand_premium_percent: round(demandPremium * 100, 2),
@@ -2797,14 +2835,21 @@ function determineDecisionTier({
   aos,
   confidence,
   compCount,
-  targetAssignmentFee,
+  // VIABILITY, not aspiration. These gates ask "is this deal economically worth
+  // doing?", so they key off the hard floor. target_margin is an aspirational
+  // profit objective: it drives offer construction and AOS scoring, and must
+  // never double as a minimum-worthiness gate. Using the target here demoted
+  // sound deals -- e.g. a $400k deal whose own demandPremium shaved $2,700 off
+  // a $40,000 aspiration failed its own gate at $37,300, and a genuinely
+  // excellent $25,000 fee was routed away from cash entirely.
+  minimumMargin,
 }) {
   const hardGateChecks = {
     confidence_at_least_85: confidence >= 85,
     comp_count_at_least_4: compCount >= 4,
     valuation_confidence_at_least_80: valuation.confidence >= 80,
-    assignment_fee_meets_target:
-      num(offer.expected_assignment_fee, 0) >= targetAssignmentFee,
+    assignment_fee_meets_minimum_economics:
+      num(offer.expected_assignment_fee, 0) >= minimumMargin,
     recommended_offer_available: num(offer.recommended_cash_offer, 0) > 0,
     aos_at_least_780: aos.score >= 780,
   };
@@ -2818,7 +2863,7 @@ function determineDecisionTier({
   } else if (
     creative.best_creative_score >= 68 &&
     (
-      num(offer.expected_assignment_fee, 0) < targetAssignmentFee ||
+      num(offer.expected_assignment_fee, 0) < minimumMargin ||
       creative.best_creative_score >= 80
     ) &&
     confidence >= 50
@@ -2829,7 +2874,7 @@ function determineDecisionTier({
     confidence >= 68 &&
     compCount >= 3 &&
     valuation.confidence >= 65 &&
-    num(offer.expected_assignment_fee, 0) >= targetAssignmentFee * 0.75 &&
+    num(offer.expected_assignment_fee, 0) >= minimumMargin * 0.75 &&
     aos.score >= 600
   ) {
     tier = DECISION_TIERS.AUTO_RANGE_OFFER;
@@ -2982,13 +3027,22 @@ export function calculateAcquisitionDecision({
     repairs,
     targetAssignmentFee,
   );
+  // Every downstream margin comparison must use the DEAL-SPECIFIC target the
+  // offer was actually built against, not the global floor. Using the floor
+  // here would score a large deal as if $15,000 were still the goal.
+  // AOS asks "did we achieve the profit objective?" -> aspirational target.
+  const dealTargetAssignmentFee =
+    num(offer.summary?.target_assignment_fee) ?? targetAssignmentFee;
+  // Tier/viability gates ask "is this worth doing at all?" -> hard floor.
+  const dealMinimumMargin =
+    num(offer.summary?.assignment_margin_floor) ?? targetAssignmentFee;
   const aos = acquisitionOpportunityScore({
     subject,
     valuation,
     investor,
     offer,
     creative,
-    targetAssignmentFee,
+    targetAssignmentFee: dealTargetAssignmentFee,
   });
   const subjectData = subjectCompleteness(subject);
   const financeData = financeCompleteness(subject);
@@ -3008,10 +3062,11 @@ export function calculateAcquisitionDecision({
     aos,
     confidence,
     compCount: selected.length,
-    targetAssignmentFee,
+    minimumMargin: dealMinimumMargin,
   });
+  // "Is cash viable?" is a viability question -> hard floor, not aspiration.
   const cashViability =
-    num(offer.expected_assignment_fee, 0) >= targetAssignmentFee * 0.75 &&
+    num(offer.expected_assignment_fee, 0) >= dealMinimumMargin * 0.75 &&
     valuation.confidence >= 60;
   const bestStrategy =
     creative.best_creative_score >= 68 && !cashViability
@@ -3114,7 +3169,7 @@ export function calculateAcquisitionDecision({
       version: '2.0.0',
       deterministic: true,
       computed_at: now.toISOString(),
-      target_assignment_fee: targetAssignmentFee,
+      target_assignment_fee: dealTargetAssignmentFee,
     },
     subject: {
       property_id: subject.property_id,
@@ -3786,6 +3841,11 @@ export async function persistImmutableScoreSnapshot(row, projectionScoreId = nul
     valuation_based_ceiling: oc.valuation_based_ceiling ?? null,
     behavior_based_ceiling: oc.behavior_based_ceiling ?? null,
     effective_authorized_ceiling: oc.effective_authorized_ceiling ?? null,
+    // Margin-policy inputs/output/version, so an offer can permanently prove
+    // WHY it preserved the spread it did.
+    assignment_margin_policy: oc.assignment_margin_policy ?? null,
+    assignment_margin_policy_version: oc.assignment_margin_policy?.policy_version ?? null,
+    target_assignment_fee: oc.target_assignment_fee ?? null,
     recommended_cash_offer: row?.recommended_cash_offer ?? null,
     minimum_acceptable_offer: row?.minimum_acceptable_offer ?? null,
     evidence: ev,

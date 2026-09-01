@@ -263,6 +263,11 @@ export function applyNegotiationTurn(previous, {
     if (ceiling !== null) next.authorized_offer_ceiling = ceiling;
     next.direct_purchase_maximum =
       num(ade_snapshot.investor_ceiling_high) ?? next.authorized_offer_ceiling ?? next.direct_purchase_maximum;
+    // Hard floor on assignment economics; bounds how far negotiation may concede.
+    next.minimum_assignment_margin =
+      num(ade_snapshot.evidence?.offer_calculation?.assignment_margin_floor) ??
+      next.minimum_assignment_margin ??
+      null;
     next.arv = num(ade_snapshot.valuation_mid) ?? next.arv;
     next.repair_estimate = num(ade_snapshot.estimated_repairs) ?? next.repair_estimate;
     next.comp_confidence = num(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
