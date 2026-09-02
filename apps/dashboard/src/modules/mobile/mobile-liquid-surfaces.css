@@ -747,3 +747,272 @@ html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-
 html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-day span {
   background: rgba(15, 23, 42, 0.06) !important;
 }
+
+/* ── Top-anchored sheets (workspace launcher, queue intelligence, more) ── */
+
+html.is-mobile-layout .nx-mobile-sheet {
+  font-family: var(--lc-font-sans);
+  border-color: transparent;
+  border-radius: 0 0 var(--lc-shell-radius) var(--lc-shell-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%),
+    var(--lc-glass-bg);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  box-shadow:
+    inset 0 -1px 0 var(--lc-hairline),
+    0 24px 60px -20px rgba(0, 0, 0, 0.7);
+}
+
+html.is-mobile-layout .nx-mobile-sheet__handle {
+  width: 40px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+html.is-mobile-layout .nx-mobile-sheet__header {
+  border-bottom-color: var(--lc-hairline);
+  background: transparent;
+}
+
+html.is-mobile-layout .nx-mobile-sheet__title-wrap strong {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .nx-mobile-sheet__title-wrap small {
+  font-size: 12.5px;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-mobile-sheet__close {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  border: 0;
+  color: var(--lc-ink-2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+html.is-mobile-layout .nx-mobile-sheet-backdrop {
+  background: rgba(3, 6, 12, 0.42);
+}
+
+/* ── Inbox: conversation header on a phone ────────────────────────────── */
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-hero {
+  padding: 6px 12px 8px;
+  column-gap: 12px;
+}
+
+html.is-mobile-layout .nx-conv-header.is-mobile-header .nx-conv-back,
+html.is-mobile-layout .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  color: var(--lc-ink);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 140ms var(--lc-ease-out), background 160ms ease;
+}
+
+html.is-mobile-layout .nx-conv-header.is-mobile-header .nx-conv-back:active,
+html.is-mobile-layout .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger:active {
+  transform: scale(0.9);
+  background: var(--lc-press);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-controls {
+  min-height: 36px;
+  gap: 8px;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-seller-name--mobile {
+  font-family: var(--lc-font-sans);
+  font-size: 19px !important;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-identity-address--mobile {
+  font-size: 13px !important;
+  font-weight: 500;
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-streetview {
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 8px 20px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* Property intelligence strip: mono figures, hairline cells, no uppercase. */
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell {
+  font-family: var(--lc-font-sans);
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__label {
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__value {
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lc-ink);
+}
+
+/* ── Inbox: category tabs ─────────────────────────────────────────────── */
+
+html.is-mobile-layout .nx-inbox-status-tabs {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 6px 0 8px;
+  padding: 0 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.is-mobile-layout .nx-inbox-status-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+html.is-mobile-layout .nx-inbox-status-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--lc-ink-2);
+  font-family: var(--lc-font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 140ms var(--lc-ease-out), background 160ms ease, color 160ms ease;
+}
+
+html.is-mobile-layout .nx-inbox-status-tab:active {
+  transform: scale(0.96);
+}
+
+html.is-mobile-layout .nx-inbox-status-tab.is-active {
+  color: rgb(var(--lc-accent-rgb));
+  background: rgba(var(--lc-accent-rgb), 0.16);
+  border-color: rgba(var(--lc-accent-rgb), 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+html.is-mobile-layout .nx-inbox-status-tab__icon {
+  display: none;
+}
+
+html.is-mobile-layout .nx-inbox-status-tab__badge {
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout .nx-inbox-status-tab.is-active .nx-inbox-status-tab__badge {
+  background: rgba(var(--lc-accent-rgb), 0.22);
+  color: rgb(var(--lc-accent-rgb));
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-sheet {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.3) 30%),
+    var(--lc-glass-bg);
+  box-shadow:
+    inset 0 -1px 0 var(--lc-hairline),
+    0 24px 60px -24px rgba(15, 23, 42, 0.35);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-sheet__handle {
+  background: rgba(15, 23, 42, 0.2);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-sheet__close,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-status-tab {
+  color: var(--lc-ink-2);
+  background: rgba(15, 23, 42, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger {
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-status-tab.is-active {
+  color: rgb(var(--lc-accent-rgb));
+  background: rgba(var(--lc-accent-rgb), 0.12);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-status-tab__badge {
+  background: rgba(15, 23, 42, 0.07);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-sheet-backdrop {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+/* Intel strip cells: hairline columns instead of boxed chips (base rules use !important). */
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-conv-property-strip {
+  gap: 0 !important;
+  padding: 2px 12px 10px !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell {
+  padding: 4px 14px 4px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell + .nx-intel-cell {
+  padding-left: 14px !important;
+  box-shadow: inset 1px 0 0 var(--lc-hairline) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell__label {
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+  font-size: 10.5px !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-flag::before {
+  display: none !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-flag .nx-intel-cell__value {
+  color: #ffd28a !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-intel-cell.is-market .nx-intel-cell__value {
+  color: rgb(var(--lc-accent-rgb)) !important;
+}
