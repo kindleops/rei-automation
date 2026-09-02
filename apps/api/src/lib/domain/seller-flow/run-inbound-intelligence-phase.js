@@ -203,6 +203,8 @@ export async function runInboundIntelligencePhase({
   underwriting = null,
   deal_state = null,
   supabaseClient = null,
+  // §6 ContextResolutionResult from the orchestrator (status/confidence/evidence)
+  context_resolution = null,
 } = {}) {
   const relationship = resolveInboundRelationship({
     message,
@@ -225,6 +227,7 @@ export async function runInboundIntelligencePhase({
     classification,
     conversationBrain,
     latestThreadContext,
+    contextResolution: context_resolution,
   });
 
   let canonical_decision = applyRelationshipOverride(raw_canonical_decision, relationship);
@@ -536,6 +539,17 @@ export async function runInboundIntelligencePhase({
     execution_blocked_reason,
     human_review_required,
     coverage,
+    context_resolution: context_resolution
+      ? {
+          status: context_resolution.status,
+          confidence: context_resolution.confidence ?? null,
+          winner: context_resolution.winner ?? null,
+          reason: context_resolution.reason ?? null,
+          repair: context_resolution.repair ?? null,
+          disagreement: context_resolution.disagreement ?? null,
+          rejected_count: Array.isArray(context_resolution.rejected) ? context_resolution.rejected.length : 0,
+        }
+      : null,
     human_review_status: human_review_required
       ? relationship.referral_detected
         ? "referral_review_required"

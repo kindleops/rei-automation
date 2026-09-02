@@ -191,6 +191,8 @@ export function deriveDecisionInputFromSnapshot(snapshot = {}, overrides = {}) {
       exception_workflow: snapshot.coverage?.exception_workflow?.key || null,
       exception_sla_deadline: snapshot.coverage?.exception_sla_deadline || null,
       coverage_forced: snapshot.coverage?.coverage_forced === true,
+      // §6 identity provenance: how the property/owner were resolved for this turn
+      context_resolution: snapshot.context_resolution || null,
       review_hold_tier: cd.transition?.review_hold_tier || null,
       source_event_id: snapshot.source_event_id,
       provider_message_sid: snapshot.provider_message_sid,
