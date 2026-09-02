@@ -42,7 +42,7 @@
 //     processing must not fail because a downstream record write failed.
 //   • dry_run: validates nothing is written.
 
-import { acceptActiveOffer } from "@/lib/domain/seller-flow/seller-offer-authority.js";
+import { acceptActiveOffer, recordSellerCounter, loadActiveOffer, loadAcceptedOffer } from "@/lib/domain/seller-flow/seller-offer-authority.js";
 import { createClosingCaseFromAcceptance } from "@/lib/domain/closings/create-closing-case-from-acceptance.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { info, warn } from "@/lib/logging/logger.js";
@@ -84,10 +84,19 @@ export function isAcceptanceEdge(previousState = null, negotiationState = null) 
 export async function finalizeSellerAcceptance({
   opportunity_id = null,
   thread_key = null,
+  property_id = null,
+  master_owner_id = null,
   acceptance_event_id = null,
   acceptance_at = null,
   expected_offer_id = null,
   expected_offer_version = null,
+  // WHICH price was agreed, and on what basis (from negotiation_state.accepted_terms):
+  //   seller_accepted_our_offer -> the active OUTBOUND offer is the agreed one
+  //   we_accepted_seller_ask    -> the seller's ASK is the agreed price; it must
+  //                                become the accepted offer VERSION, never our
+  //                                stale lower proposal
+  accepted_price = null,
+  acceptance_basis = null,
   dry_run = false,
   provenance = {},
   supabase: injected = null,
@@ -114,6 +123,54 @@ export async function finalizeSellerAcceptance({
   const supabase = injected || getDefaultSupabaseClient();
   if (!supabase) return { ...base, reason: "missing_supabase" };
 
+  // ── 0. Converge the offer VERSION to the agreed price ──────────────────────
+  // When WE accepted the seller's ask, the agreed price is the ask -- not our
+  // last (lower) proposal that is still the active offer. Binding the active
+  // offer as-is would create a closing case at the WRONG price. So the ask is
+  // first recorded as the seller's counter (a new immutable inbound version that
+  // supersedes our proposal), and THAT version is what gets accepted.
+  // Idempotent: if the active offer already carries the agreed price (a replay,
+  // or the counter was already recorded), nothing new is written.
+  const agreedPrice = Number.isFinite(Number(accepted_price)) && Number(accepted_price) > 0 ? Number(accepted_price) : null;
+  let offerSentBefore = true;
+  if (clean(acceptance_basis) === "we_accepted_seller_ask" && agreedPrice !== null) {
+    let active = null;
+    let accepted = null;
+    try {
+      [active, accepted] = await Promise.all([
+        loadActiveOffer({ opportunity_id, supabase }),
+        loadAcceptedOffer({ opportunity_id, supabase }),
+      ]);
+    } catch (error) {
+      warn("[FINALIZE_ACCEPTANCE_ACTIVE_LOOKUP_FAILED]", { opportunity_id, error: error?.message || "lookup_failed" });
+      return { ...base, reason: "active_offer_lookup_failed" };
+    }
+    // REPLAY: the agreed price is already the ACCEPTED version -> nothing to
+    // converge; acceptActiveOffer will report duplicate_acceptance and the
+    // closing case reconciles. Recording another counter here would churn a
+    // spurious version on every replay.
+    const alreadyAcceptedAtAgreed = accepted && Number(accepted.purchase_price) === agreedPrice;
+    if (!alreadyAcceptedAtAgreed && (!active || Number(active.purchase_price) !== agreedPrice)) {
+      const counter = await recordSellerCounter({
+        opportunity_id,
+        thread_key,
+        property_id,
+        master_owner_id,
+        counter_price: agreedPrice,
+        source_message_event_id: acceptance_event_id,
+        metadata: { acceptance_basis: "we_accepted_seller_ask", converged_by: "finalize_seller_acceptance" },
+        supabase,
+      });
+      if (!counter?.ok) {
+        warn("[FINALIZE_ACCEPTANCE_COUNTER_FAILED]", { opportunity_id, agreed_price: agreedPrice, reason: counter?.reason || "counter_failed" });
+        return { ...base, reason: counter?.reason || "counter_record_failed" };
+      }
+      // The counter was created at this instant; the acceptance is at the same
+      // instant, so the chronology guard must not treat it as predating the offer.
+      offerSentBefore = false;
+    }
+  }
+
   // ── 1. Bind the acceptance to the exact active offer ──────────────────────
   let acceptance;
   try {
@@ -123,6 +180,7 @@ export async function finalizeSellerAcceptance({
       acceptance_at,
       expected_offer_id,
       expected_offer_version,
+      offer_sent_before: offerSentBefore,
       supabase,
     });
   } catch (error) {
@@ -149,6 +207,28 @@ export async function finalizeSellerAcceptance({
     };
   }
 
+  // PRICE INVARIANT: the bound offer's price must be the agreed price. If the
+  // caller knows what was agreed and the durable offer says otherwise, no
+  // closing case may be created from it -- fail closed and surface it.
+  const boundPrice = Number(acceptance.accepted_price);
+  if (agreedPrice !== null && Number.isFinite(boundPrice) && boundPrice !== agreedPrice) {
+    warn("[FINALIZE_ACCEPTANCE_PRICE_MISMATCH]", {
+      opportunity_id,
+      offer_id: acceptance.offer_id,
+      bound_price: boundPrice,
+      agreed_price: agreedPrice,
+    });
+    return {
+      ...base,
+      ok: false,
+      offer_accepted: acceptance.accepted === true,
+      offer_id: acceptance.offer_id,
+      offer_version: acceptance.offer_version ?? null,
+      accepted_price: boundPrice,
+      reason: "accepted_price_mismatch",
+    };
+  }
+
   const withOffer = {
     ...base,
     ok: true,
@@ -156,6 +236,7 @@ export async function finalizeSellerAcceptance({
     offer_id: acceptance.offer_id,
     offer_version: acceptance.offer_version ?? null,
     accepted_price: acceptance.accepted_price ?? null,
+    acceptance_basis: clean(acceptance_basis) || null,
     acceptance_reason: acceptance.reason || (acceptance.accepted ? "accepted" : null),
   };
 

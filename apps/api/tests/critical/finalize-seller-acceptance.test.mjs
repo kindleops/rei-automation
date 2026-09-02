@@ -324,3 +324,75 @@ test("an exception binding the offer is isolated, not thrown", async () => {
   assert.equal(r.reason, "accept_exception");
   assert.equal(r.closing_case_created, false);
 });
+
+// ── the agreed PRICE decides which version is bound (§12: bind the correct version) ──
+
+test("when WE accepted the seller's ASK, the ask becomes a new accepted version -- never our stale lower offer", async () => {
+  const supabase = makeSupabase();
+  const ours = await seedActiveOffer(supabase, { purchase_price: 240000 }); // our proposal
+  const r = await finalizeSellerAcceptance({
+    opportunity_id: OPP, thread_key: THREAD, property_id: "prop-1", master_owner_id: "owner-1",
+    acceptance_event_id: "evt-ask-accept",
+    accepted_price: 252000,                 // the seller's ask, which we accepted
+    acceptance_basis: "we_accepted_seller_ask",
+    supabase,
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.offer_accepted, true);
+  assert.equal(r.accepted_price, 252000, "the agreed price is the ask");
+  assert.notEqual(r.offer_id, ours.offer_id, "not our stale proposal");
+  assert.equal(r.offer_version, 2, "the ask is a NEW inbound version");
+  const bound = supabase._state.offers.find((o) => o.offer_id === r.offer_id);
+  assert.equal(bound.direction, "inbound");
+  assert.equal(bound.status, "accepted");
+  assert.equal(bound.purchase_price, 252000);
+  // our proposal is superseded, history preserved
+  assert.equal(supabase._state.offers.find((o) => o.offer_id === ours.offer_id).status, "superseded");
+  // and the closing case carries the AGREED price
+  assert.equal(supabase._state.closing_cases.length, 1);
+  assert.equal(supabase._state.closing_cases[0].seller_contract_price, 252000);
+});
+
+test("when the SELLER accepted OUR offer, our active proposal is bound at its own price", async () => {
+  const supabase = makeSupabase();
+  const ours = await seedActiveOffer(supabase, { purchase_price: 245000 });
+  const r = await finalizeSellerAcceptance({
+    opportunity_id: OPP, thread_key: THREAD, acceptance_event_id: "evt-our-accept",
+    accepted_price: 245000, acceptance_basis: "seller_accepted_our_offer", supabase,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.offer_id, ours.offer_id);
+  assert.equal(r.accepted_price, 245000);
+  assert.equal(supabase._state.offers.length, 1, "no counter is recorded when they accept ours");
+});
+
+test("a bound price that differs from the agreed price FAILS CLOSED: no closing case at the wrong price", async () => {
+  const supabase = makeSupabase();
+  await seedActiveOffer(supabase, { purchase_price: 240000 });
+  // caller says the agreed price was 250000 on the seller-accepted-ours basis,
+  // but the durable active offer is 240000 -> the two disagree
+  const r = await finalizeSellerAcceptance({
+    opportunity_id: OPP, thread_key: THREAD, acceptance_event_id: "evt-mismatch",
+    accepted_price: 250000, acceptance_basis: "seller_accepted_our_offer", supabase,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "accepted_price_mismatch");
+  assert.equal(r.closing_case_created, false);
+  assert.equal(supabase._state.closing_cases.length, 0, "never a closing case at a disputed price");
+});
+
+test("converging to the ask is idempotent: a replay records no second counter", async () => {
+  const supabase = makeSupabase();
+  await seedActiveOffer(supabase, { purchase_price: 240000 });
+  const args = {
+    opportunity_id: OPP, thread_key: THREAD, property_id: "prop-1", master_owner_id: "owner-1",
+    acceptance_event_id: "evt-ask-replay", accepted_price: 252000, acceptance_basis: "we_accepted_seller_ask", supabase,
+  };
+  const first = await finalizeSellerAcceptance(args);
+  const second = await finalizeSellerAcceptance(args);
+  assert.equal(first.closing_case_created, true);
+  assert.equal(second.ok, true);
+  assert.equal(supabase._state.offers.length, 2, "exactly one counter version, no churn on replay");
+  assert.equal(supabase._state.offers.filter((o) => o.status === "accepted").length, 1);
+  assert.equal(supabase._state.closing_cases.length, 1);
+});

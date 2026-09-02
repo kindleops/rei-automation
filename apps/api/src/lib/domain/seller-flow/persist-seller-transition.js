@@ -625,8 +625,15 @@ export async function persistSellerTransitionArtifacts({
         const finalized = await finalizeSellerAcceptance({
           opportunity_id: opportunity.id,
           thread_key: threadKey,
+          property_id: propertyId || opportunity.primary_property_id || null,
+          master_owner_id: ownerId || opportunity.master_owner_id || null,
           acceptance_event_id: clean(inboundEventId) || null,
           acceptance_at: negotiationState.terms_accepted_at || nowIso,
+          // The agreed price and its basis come from the durable negotiation
+          // state, so the seam binds the RIGHT offer version (the seller's ask
+          // when we accepted it, our proposal when they accepted it).
+          accepted_price: negotiationState.accepted_price ?? null,
+          acceptance_basis: negotiationState.accepted_terms?.basis || null,
           provenance: {
             reasoning_code: transition.reasoning_code || null,
             source_view: "seller_inbound_orchestrator",
