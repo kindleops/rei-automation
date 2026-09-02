@@ -51,6 +51,13 @@ import {
   consumeEnqueueAuthorization,
 } from './canary-enqueue-authorization.js'
 import {
+  CANARY_WINDOW_EXEMPTION_PIN,
+  CANARY_WINDOW_EXEMPTION_REASON,
+  EXEMPTION_DENIED,
+  canaryLanePinMatches,
+  evaluateCanaryEnqueueWindowExemption,
+} from './canary-enqueue-window-exemption.js'
+import {
   applyGovernance,
   indexGovernance,
 } from '@/lib/domain/campaigns/template-governance.js'
@@ -184,6 +191,62 @@ async function authorizeCanaryEnqueue(supabase, { target, campaign, recipient, d
     },
     token,
   )
+}
+
+/**
+ * Gather everything the PINNED contact-window exemption needs, then decide.
+ *
+ * Reached ONLY when canaryLanePinMatches() has already passed, so no ordinary
+ * campaign target -- and no real seller -- ever performs these reads.
+ *
+ * Every read is wrapped. An unreadable control value, a failed sender lookup or
+ * a thrown authorization lookup yields a DENY, never an exception, so a
+ * malformed state falls back to the normal contact-window result exactly as the
+ * spec requires.
+ */
+async function resolveCanaryWindowExemption(supabase, { target, campaign, recipient, deps, now }) {
+  let sender = null
+  try {
+    sender = await resolveSender(supabase, { market: clean(target.market), recipient })
+  } catch {
+    return { allowed: false, reason: EXEMPTION_DENIED.ERROR, detail: 'sender_unreadable', sender: '' }
+  }
+  const senderPhone = clean(sender?.phone_number)
+
+  // An unreadable control value returns '' -> explicit-presence check denies.
+  const readControl = async (key) => {
+    try {
+      return clean(await getSystemValueFresh(key, { supabase }))
+    } catch {
+      return ''
+    }
+  }
+  const [campaignMode, executionMode, emergencyStopAt] = await Promise.all([
+    readControl('campaign_mode'),
+    readControl('queue_execution_mode'),
+    readControl('queue_emergency_stop_at'),
+  ])
+
+  let authorization = null
+  try {
+    const canary = await authorizeCanaryEnqueue(supabase, { target, campaign, recipient, deps })
+    if (canary.ok) authorization = canary.authorization
+  } catch {
+    authorization = null
+  }
+
+  const verdict = evaluateCanaryEnqueueWindowExemption({
+    target,
+    campaign,
+    recipient,
+    sender: senderPhone,
+    authorization,
+    campaignMode,
+    executionMode,
+    emergencyStopAt,
+    now,
+  })
+  return { ...verdict, sender: senderPhone }
 }
 
 async function resolveCampaignMode(supabase) {
@@ -431,7 +494,45 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   }
 
   const window = isWithinContactWindow(new Date(nowIso), tz.iana, WINDOW_START_HOUR, WINDOW_END_HOUR)
-  if (!window.ok) return fail(ENQUEUE_REASON.OUTSIDE_WINDOW, window.reason)
+  let windowExemption = null
+  if (!window.ok) {
+    // PINNED INTERNAL-CANARY EXEMPTION.
+    // The cheap, pure pin predicate runs FIRST, so every other target -- every
+    // real seller -- short-circuits here and reaches byte-for-byte the same
+    // denial it reached before this branch existed, with no extra reads. Only
+    // the one pinned lane pays for the full conjunction below.
+    if (canaryLanePinMatches({ target, recipient })) {
+      windowExemption = await resolveCanaryWindowExemption(supabase, {
+        target,
+        campaign,
+        recipient,
+        deps,
+        now: nowIso,
+      })
+    }
+    if (!windowExemption?.allowed) {
+      // Fails closed to the NORMAL contact-window result. The denial reason is
+      // appended only for observability; the outcome is unchanged.
+      return fail(
+        ENQUEUE_REASON.OUTSIDE_WINDOW,
+        windowExemption ? `${window.reason}:${windowExemption.reason}` : window.reason,
+      )
+    }
+    logger.warn('enqueue_campaign_target_one.contact_window_internal_canary_exemption', {
+      reason: CANARY_WINDOW_EXEMPTION_REASON,
+      campaign_id: clean(target.campaign_id),
+      campaign_target_id: requestedId,
+      recipient,
+      sender: windowExemption.sender,
+      authorization_id: windowExemption.authorization_id,
+      canary_run_id: windowExemption.canary_run_id,
+      overridden_window_result: { ok: false, reason: window.reason },
+      window_start_hour: WINDOW_START_HOUR,
+      window_end_hour: WINDOW_END_HOUR,
+      timezone: tz.iana,
+      evaluated_at: nowIso,
+    })
+  }
 
   // ── 9. Identity + render (reuses #92 and #91) ───────────────────────────
   const { data: owner, error: ownerErr } = await supabase
@@ -454,6 +555,18 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   if (!sender) return fail(ENQUEUE_REASON.NO_SENDER, clean(target.market) || 'no_market')
   const senderPhone = clean(sender.phone_number)
   if (senderPhone === recipient) return fail(ENQUEUE_REASON.SENDER_IS_RECIPIENT)
+
+  // TOCTOU CLOSURE. The exemption was decided against a sender resolved at the
+  // window gate, but sender selection is usage-ordered and could in principle
+  // resolve differently by the time the row is built. If the row would carry any
+  // sender other than the pinned one, the exemption did not apply to the row
+  // actually being written -- so fail closed to the normal window result.
+  if (windowExemption?.allowed && senderPhone !== CANARY_WINDOW_EXEMPTION_PIN.sender) {
+    return fail(
+      ENQUEUE_REASON.OUTSIDE_WINDOW,
+      `${EXEMPTION_DENIED.NOT_PINNED_SENDER}:sender_changed_after_exemption`,
+    )
+  }
 
   // ── 11. Canonical campaign mode ─────────────────────────
   // Resolved immediately before the write so the value stamped on the row
@@ -544,6 +657,26 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
         campaign_target_id: requestedId,
       },
       no_direct_provider_send: true,
+      // Provenance for the pinned window exemption. Present ONLY on the one
+      // exempted row. The raw authorization token is never recorded.
+      ...(windowExemption?.allowed
+        ? {
+            contact_window_exemption: {
+              reason: CANARY_WINDOW_EXEMPTION_REASON,
+              campaign_id: clean(target.campaign_id),
+              campaign_target_id: requestedId,
+              recipient,
+              sender: senderPhone,
+              authorization_id: windowExemption.authorization_id,
+              canary_run_id: windowExemption.canary_run_id,
+              overridden_window_result: { ok: false, reason: window.reason },
+              window_start_hour: WINDOW_START_HOUR,
+              window_end_hour: WINDOW_END_HOUR,
+              timezone: tz.iana,
+              evaluated_at: nowIso,
+            },
+          }
+        : {}),
     },
   }
 
