@@ -114,7 +114,11 @@ export function authorizeFlushRequest(request, { requireCronAuth, requireInterna
   if (cron_auth.authorized && cron_auth.auth?.authenticated) {
     return {
       ok: true,
-      caller_type: cron_auth.auth?.is_vercel_cron ? "vercel_cron" : "cron_secret",
+      // Provider-neutral provenance: "<source>_cron" for any scheduler
+      // (vercel_cron, cloudflare_cron, ...), "cron_secret" for a manual call.
+      caller_type: cron_auth.auth?.is_scheduled_cron
+        ? `${cron_auth.auth.cron_source}_cron`
+        : "cron_secret",
     };
   }
 

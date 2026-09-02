@@ -1,19 +1,39 @@
+/**
+ * Idempotency ledger: mark-before-work claims for webhook events.
+ *
+ * DURABILITY (changed): the authoritative claim now lives in the
+ * `public.idempotency_ledger` table, not in /tmp. The claim itself is a single
+ * atomic `INSERT ... ON CONFLICT DO NOTHING ... RETURNING` inside
+ * `idempotency_begin()`. There is no SELECT-then-INSERT in this file, so two
+ * concurrent deliveries of the same event can never both receive a claim -
+ * including when they land on different instances, which the filesystem
+ * implementation could not detect at all. See
+ * supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql
+ *
+ * PUBLIC CONTRACT PRESERVED: beginIdempotentProcessing /
+ * completeIdempotentProcessing / failIdempotentProcessing /
+ * hashIdempotencyPayload keep their signatures, their `reason` strings
+ * (`event_claimed`, `duplicate_event_ignored`, `event_already_processing`,
+ * `stale_or_failed_event_reclaimed`), their statuses (`processing` /
+ * `completed` / `failed`) and the 10-minute default lease.
+ *
+ * NOT FENCED (unchanged, deliberate): complete/fail are still unconditional
+ * writes. The JS functions never received a claim token, so fencing them would
+ * change public behaviour. Double execution is prevented at the claim, not at
+ * the completion.
+ */
+
 import crypto from "node:crypto";
 
 import {
-  buildRuntimeStateRecordId,
-  createRuntimeStateIfAbsent,
-  parseRuntimeStateRecordId,
-  readRuntimeState,
-  writeRuntimeState,
-} from "@/lib/domain/runtime/runtime-state-store.js";
+  getDurableBackend,
+  __resetDurableMemoryState,
+} from "@/lib/domain/runtime/durable-state-backend.js";
 
 const IDEMPOTENCY_NAMESPACE = "idempotency";
 
 const defaultDeps = {
-  createRuntimeStateIfAbsent,
-  readRuntimeState,
-  writeRuntimeState,
+  getDurableBackend,
 };
 
 let runtimeDeps = { ...defaultDeps };
@@ -22,30 +42,21 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function toTimestamp(value) {
-  if (!value) return null;
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? null : timestamp;
-}
-
 function buildLedgerStateKey(scope, key) {
   return `${clean(scope)}:${clean(key)}`;
 }
 
 function buildLedgerRecordId(scope, key) {
-  return buildRuntimeStateRecordId(
-    IDEMPOTENCY_NAMESPACE,
-    buildLedgerStateKey(scope, key)
-  );
+  return `${IDEMPOTENCY_NAMESPACE}:${buildLedgerStateKey(scope, key)}`;
 }
 
 function parseLedgerRecordId(record_item_id = "") {
-  const parsed = parseRuntimeStateRecordId(record_item_id);
-  const composite_key = clean(parsed?.key);
+  const normalized = clean(record_item_id);
+  const namespace_separator = normalized.indexOf(":");
+  const composite_key =
+    namespace_separator === -1
+      ? ""
+      : clean(normalized.slice(namespace_separator + 1));
   const separator_index = composite_key.indexOf(":");
 
   if (separator_index === -1) {
@@ -61,17 +72,8 @@ function parseLedgerRecordId(record_item_id = "") {
   };
 }
 
-async function findLedgerRecord(scope, key) {
-  return runtimeDeps.readRuntimeState({
-    namespace: IDEMPOTENCY_NAMESPACE,
-    key: buildLedgerStateKey(scope, key),
-  });
-}
-
-function isProcessingLeaseStale(meta = {}, lease_ms) {
-  const started_at_ts = toTimestamp(meta.started_at);
-  if (started_at_ts === null) return true;
-  return Date.now() - started_at_ts > lease_ms;
+function backend() {
+  return (runtimeDeps.getDurableBackend || getDurableBackend)();
 }
 
 export function __setIdempotencyLedgerTestDeps(overrides = {}) {
@@ -80,6 +82,7 @@ export function __setIdempotencyLedgerTestDeps(overrides = {}) {
 
 export function __resetIdempotencyLedgerTestDeps() {
   runtimeDeps = { ...defaultDeps };
+  __resetDurableMemoryState();
 }
 
 export function hashIdempotencyPayload(value) {
@@ -89,12 +92,26 @@ export function hashIdempotencyPayload(value) {
     .digest("hex");
 }
 
+/**
+ * Claim an event for processing.
+ *
+ * Returns `duplicate: true` when the caller MUST NOT process (a prior attempt
+ * completed, or another worker holds an unexpired claim), and `duplicate:
+ * false` when the caller MUST process.
+ *
+ * Backend failures fail HARD here on purpose - the opposite of run locks.
+ * Returning `duplicate: true` on a database outage would silently DROP inbound
+ * seller messages; returning `duplicate: false` would process without any
+ * duplicate protection. Throwing lets the webhook return non-2xx so the
+ * provider retries the delivery, which is the only safe option.
+ */
 export async function beginIdempotentProcessing({
   scope,
   key,
   summary = "",
   metadata = {},
   lease_ms = 10 * 60_000,
+  payload_hash = null,
 } = {}) {
   const normalized_scope = clean(scope);
   const normalized_key = clean(key);
@@ -110,125 +127,26 @@ export async function beginIdempotentProcessing({
   }
 
   const record_item_id = buildLedgerRecordId(normalized_scope, normalized_key);
-  const existing = await findLedgerRecord(normalized_scope, normalized_key);
-  const started_at = nowIso();
   const claim_token = crypto.randomUUID();
-  const next_meta = {
-    ...(existing || {}),
-    ...metadata,
+
+  const result = await backend().idempotencyBegin({
     scope: normalized_scope,
     key: normalized_key,
-    summary: clean(summary) || null,
-    status: "processing",
-    started_at,
-    completed_at: null,
-    failed_at: null,
-    last_error: null,
-    attempts: Number(existing?.attempts || 0) + 1,
     claim_token,
-  };
-
-  if (existing?.status === "completed") {
-    return {
-      ok: true,
-      duplicate: true,
-      reason: "duplicate_event_ignored",
-      record_item_id,
-      key: normalized_key,
-      scope: normalized_scope,
-      meta: existing,
-    };
-  }
-
-  if (
-    existing?.status === "processing" &&
-    !isProcessingLeaseStale(existing, lease_ms)
-  ) {
-    return {
-      ok: true,
-      duplicate: true,
-      reason: "event_already_processing",
-      record_item_id,
-      key: normalized_key,
-      scope: normalized_scope,
-      meta: existing,
-    };
-  }
-
-  if (!existing) {
-    const created = await runtimeDeps.createRuntimeStateIfAbsent({
-      namespace: IDEMPOTENCY_NAMESPACE,
-      key: buildLedgerStateKey(normalized_scope, normalized_key),
-      state: next_meta,
-    });
-
-    if (created?.created) {
-      return {
-        ok: true,
-        duplicate: false,
-        reason: "event_claimed",
-        record_item_id,
-        key: normalized_key,
-        scope: normalized_scope,
-      };
-    }
-
-    const live_state = created?.state || (await findLedgerRecord(normalized_scope, normalized_key));
-    if (live_state?.status === "completed") {
-      return {
-        ok: true,
-        duplicate: true,
-        reason: "duplicate_event_ignored",
-        record_item_id,
-        key: normalized_key,
-        scope: normalized_scope,
-        meta: live_state,
-      };
-    }
-
-    if (
-      live_state?.status === "processing" &&
-      !isProcessingLeaseStale(live_state, lease_ms)
-    ) {
-      return {
-        ok: true,
-        duplicate: true,
-        reason: "event_already_processing",
-        record_item_id,
-        key: normalized_key,
-        scope: normalized_scope,
-        meta: live_state,
-      };
-    }
-  }
-
-  await runtimeDeps.writeRuntimeState({
-    namespace: IDEMPOTENCY_NAMESPACE,
-    key: buildLedgerStateKey(normalized_scope, normalized_key),
-    state: next_meta,
+    summary: clean(summary) || null,
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    lease_ms: Math.max(Number(lease_ms) || 0, 1),
+    payload_hash: clean(payload_hash) || null,
   });
 
-  const confirmed_meta = await findLedgerRecord(normalized_scope, normalized_key);
-  if (clean(confirmed_meta?.claim_token) !== claim_token) {
-    return {
-      ok: true,
-      duplicate: true,
-      reason: "event_already_processing",
-      record_item_id,
-      key: normalized_key,
-      scope: normalized_scope,
-      meta: confirmed_meta,
-    };
-  }
-
   return {
-    ok: true,
-    duplicate: false,
-    reason: existing ? "stale_or_failed_event_reclaimed" : "event_claimed",
+    ok: result?.ok !== false,
+    duplicate: Boolean(result?.duplicate),
+    reason: result?.reason || "event_claimed",
     record_item_id,
     key: normalized_key,
     scope: normalized_scope,
-    meta: next_meta,
+    meta: result?.meta || null,
   };
 }
 
@@ -250,29 +168,18 @@ export async function completeIdempotentProcessing({
   const parsed_record = parseLedgerRecordId(record_item_id);
   const resolved_scope = clean(scope) || clean(parsed_record.scope);
   const resolved_key = clean(key) || clean(parsed_record.key);
-  const completed_at = nowIso();
-  const existing = await findLedgerRecord(resolved_scope, resolved_key);
-  const processing_meta = {
-    ...(existing || {}),
-    ...metadata,
+
+  const result = await backend().idempotencyComplete({
     scope: resolved_scope,
     key: resolved_key,
     summary: clean(summary) || null,
-    status: "completed",
-    completed_at,
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
     skip_content_fields: Boolean(skip_content_fields),
-  };
-  delete processing_meta.claim_token;
-
-  await runtimeDeps.writeRuntimeState({
-    namespace: IDEMPOTENCY_NAMESPACE,
-    key: buildLedgerStateKey(resolved_scope, resolved_key),
-    state: processing_meta,
   });
 
   return {
-    ok: true,
-    reason: "idempotency_record_completed",
+    ok: result?.ok !== false,
+    reason: result?.reason || "idempotency_record_completed",
     record_item_id,
   };
 }
@@ -295,33 +202,22 @@ export async function failIdempotentProcessing({
   const parsed_record = parseLedgerRecordId(record_item_id);
   const resolved_scope = clean(scope) || clean(parsed_record.scope);
   const resolved_key = clean(key) || clean(parsed_record.key);
-  const failed_at = nowIso();
   const error_message =
     clean(error?.message) ||
     clean(error) ||
     "unknown_error";
-  const existing = await findLedgerRecord(resolved_scope, resolved_key);
-  const processing_meta = {
-    ...(existing || {}),
-    ...metadata,
+
+  const result = await backend().idempotencyFail({
     scope: resolved_scope,
     key: resolved_key,
-    status: "failed",
-    failed_at,
-    last_error: error_message,
+    error: error_message,
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
     skip_content_fields: Boolean(skip_content_fields),
-  };
-  delete processing_meta.claim_token;
-
-  await runtimeDeps.writeRuntimeState({
-    namespace: IDEMPOTENCY_NAMESPACE,
-    key: buildLedgerStateKey(resolved_scope, resolved_key),
-    state: processing_meta,
   });
 
   return {
-    ok: true,
-    reason: "idempotency_record_failed",
+    ok: result?.ok !== false,
+    reason: result?.reason || "idempotency_record_failed",
     record_item_id,
     error_message,
   };

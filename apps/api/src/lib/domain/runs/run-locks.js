@@ -1,20 +1,35 @@
+/**
+ * Coarse, runner-level run locks.
+ *
+ * DURABILITY (changed): the authoritative lock state now lives in the
+ * `public.run_locks` table, not in /tmp. Acquisition, heartbeat and release are
+ * each a single atomic SQL function call; nothing is decided by a
+ * read-modify-write in this file. See
+ * supabase/migrations/20260831000000_durable_run_locks_and_idempotency_ledger.sql
+ *
+ * SCOPE (unchanged): this is a coarse guard that keeps two *runners* of the
+ * same job from overlapping. It is NOT the per-send concurrency authority -
+ * that remains `queue_atomic_claim_send_row` plus FOR UPDATE SKIP LOCKED at the
+ * `send_queue` row level, which is untouched by this module.
+ *
+ * PUBLIC CONTRACT: acquireRunLock / releaseRunLock / withRunLock /
+ * forceReleaseStaleLock keep their existing signatures and result shapes, so no
+ * caller had to change. `heartbeatRunLock` is new and additive.
+ */
+
 import crypto from "node:crypto";
 
 import {
-  buildRuntimeStateRecordId,
-  createRuntimeStateIfAbsent,
-  readRuntimeState,
-  writeRuntimeState,
-} from "@/lib/domain/runtime/runtime-state-store.js";
+  getDurableBackend,
+  __resetDurableMemoryState,
+} from "@/lib/domain/runtime/durable-state-backend.js";
 import { warn } from "@/lib/logging/logger.js";
 
 const RUN_LOCK_LOGGER_KEY = "domain.runs.run_locks";
 const RUN_LOCK_NAMESPACE = "run-locks";
 
 const defaultDeps = {
-  createRuntimeStateIfAbsent,
-  readRuntimeState,
-  writeRuntimeState,
+  getDurableBackend,
   warn,
 };
 
@@ -24,76 +39,12 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function toTimestamp(value) {
-  if (!value) return null;
-  const ts = new Date(value).getTime();
-  return Number.isNaN(ts) ? null : ts;
-}
-
 function buildRunLockRecordId(scope = "") {
-  return buildRuntimeStateRecordId(RUN_LOCK_NAMESPACE, clean(scope));
+  return `${RUN_LOCK_NAMESPACE}:${clean(scope)}`;
 }
 
-async function findRunLockState(scope) {
-  return runtimeDeps.readRuntimeState({
-    namespace: RUN_LOCK_NAMESPACE,
-    key: clean(scope),
-  });
-}
-
-function isLeaseActive(meta = {}, at = Date.now()) {
-  if (clean(meta?.status).toLowerCase() !== "locked") return false;
-  
-  // If the lock was explicitly released, it is not active.
-  if (meta?.released_at) return false;
-
-  const expires_at_ts = toTimestamp(meta?.expires_at);
-  return expires_at_ts !== null && expires_at_ts > at;
-}
-
-function buildLockPayload({
-  scope,
-  lease_token,
-  owner = null,
-  lease_ms,
-  metadata = {},
-  existing_meta = {},
-  state = "locked",
-  reason = null,
-  outcome = null,
-  error = null,
-} = {}) {
-  const timestamp = nowIso();
-  const expires_at = new Date(Date.now() + Math.max(Number(lease_ms) || 0, 1)).toISOString();
-
-  return {
-    version: 1,
-    scope: clean(scope),
-    status: clean(state) || "locked",
-    lease_token: clean(lease_token) || null,
-    owner: clean(owner) || null,
-    lease_ms: Math.max(Number(lease_ms) || 0, 1),
-    started_at: existing_meta?.started_at || timestamp,
-    acquired_at: existing_meta?.acquired_at || timestamp,
-    last_heartbeat_at: timestamp,
-    expires_at,
-    released_at:
-      state === "released"
-        ? timestamp
-        : existing_meta?.released_at || null,
-    reason: clean(reason) || null,
-    outcome: clean(outcome) || null,
-    last_error:
-      clean(error?.message || error) ||
-      existing_meta?.last_error ||
-      null,
-    acquisition_count: Number(existing_meta?.acquisition_count || 0) + 1,
-    metadata: metadata && typeof metadata === "object" ? metadata : {},
-  };
+function backend() {
+  return (runtimeDeps.getDurableBackend || getDurableBackend)();
 }
 
 export function __setRunLockTestDeps(overrides = {}) {
@@ -102,8 +53,20 @@ export function __setRunLockTestDeps(overrides = {}) {
 
 export function __resetRunLockTestDeps() {
   runtimeDeps = { ...defaultDeps };
+  __resetDurableMemoryState();
 }
 
+/**
+ * Acquire a lock, or report that a live holder already has it.
+ *
+ * Steals the lock ONLY when the existing lease has expired (reason
+ * `stale_lock_reclaimed`). A live lease is never stolen.
+ *
+ * Backend failures fail SOFT here on purpose: a cron that cannot reach the lock
+ * table skips this tick and retries on the next one. Failing hard would turn a
+ * transient database blip into a crashed runner, and skipping is always safe
+ * because no work has started yet.
+ */
 export async function acquireRunLock({
   scope,
   lease_ms = 10 * 60_000,
@@ -120,112 +83,151 @@ export async function acquireRunLock({
   }
 
   const record_item_id = buildRunLockRecordId(normalized_scope);
-  const existing_meta = await findRunLockState(normalized_scope);
+  const lease_token = crypto.randomUUID();
 
-  if (isLeaseActive(existing_meta)) {
-    return {
-      ok: true,
-      acquired: false,
-      reason: "run_lock_active",
-      record_item_id,
+  let result;
+  try {
+    result = await backend().runLockAcquire({
+      lock_key: normalized_scope,
+      lease_token,
+      owner: clean(owner) || null,
+      lease_ms: Math.max(Number(lease_ms) || 0, 1),
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+    });
+  } catch (error) {
+    runtimeDeps.warn("run_lock.backend_unavailable", {
+      module: RUN_LOCK_LOGGER_KEY,
       scope: normalized_scope,
-      meta: existing_meta,
+      record_item_id,
+      error: clean(error?.message) || "unknown_error",
+    });
+    return {
+      ok: false,
+      acquired: false,
+      reason: "run_lock_backend_unavailable",
+      scope: normalized_scope,
+      record_item_id,
     };
   }
 
-  const lease_token = crypto.randomUUID();
-  const next_meta = buildLockPayload({
-    scope: normalized_scope,
-    lease_token,
-    owner,
-    lease_ms,
-    metadata,
-    existing_meta,
-    state: "locked",
-    reason:
-      existing_meta?.status === "locked"
-        ? "stale_lock_reclaimed"
-        : "lock_acquired",
-  });
-
-  // Log acquisition
-  runtimeDeps.warn("run_lock.acquired", {
-    module: RUN_LOCK_LOGGER_KEY,
-    scope: normalized_scope,
-    record_item_id,
-    lease_token,
-    owner,
-    expires_at: next_meta.expires_at,
-  });
-
-  if (!existing_meta) {
-    const created = await runtimeDeps.createRuntimeStateIfAbsent({
-      namespace: RUN_LOCK_NAMESPACE,
-      key: normalized_scope,
-      state: next_meta,
-    });
-
-    if (created?.created) {
-      return {
-        ok: true,
-        acquired: true,
-        reason: "lock_acquired",
-        scope: normalized_scope,
-        record_item_id,
-        lease_token,
-        meta: next_meta,
-      };
-    }
-
-    const live_state = created?.state || (await findRunLockState(normalized_scope));
-    if (isLeaseActive(live_state)) {
+  if (!result?.acquired) {
+    if (result?.reason === "run_lock_active") {
       return {
         ok: true,
         acquired: false,
         reason: "run_lock_active",
         record_item_id,
         scope: normalized_scope,
-        meta: live_state,
+        meta: result?.meta || null,
       };
     }
-  }
 
-  await runtimeDeps.writeRuntimeState({
-    namespace: RUN_LOCK_NAMESPACE,
-    key: normalized_scope,
-    state: next_meta,
-  });
-
-  const confirmed_meta = await findRunLockState(normalized_scope);
-  if (clean(confirmed_meta?.lease_token) !== lease_token) {
     runtimeDeps.warn("run_lock.acquire_race_lost", {
       module: RUN_LOCK_LOGGER_KEY,
       scope: normalized_scope,
       record_item_id,
-      existing_lease_token: clean(confirmed_meta?.lease_token) || null,
+      existing_lease_token: result?.meta?.lease_token || null,
+      reason: result?.reason || null,
     });
 
     return {
-      ok: true,
+      ok: result?.ok !== false,
       acquired: false,
-      reason: "run_lock_race_lost",
+      reason: result?.reason || "run_lock_race_lost",
       scope: normalized_scope,
       record_item_id,
-      meta: confirmed_meta,
+      meta: result?.meta || null,
     };
   }
+
+  runtimeDeps.warn("run_lock.acquired", {
+    module: RUN_LOCK_LOGGER_KEY,
+    scope: normalized_scope,
+    record_item_id,
+    lease_token,
+    owner,
+    expires_at: result?.meta?.expires_at || null,
+  });
 
   return {
     ok: true,
     acquired: true,
-    reason: next_meta.reason,
+    reason: result?.reason || "lock_acquired",
     scope: normalized_scope,
     record_item_id,
     lease_token,
-    meta: next_meta,
+    meta: result?.meta || null,
   };
 }
 
+/**
+ * Extend the lease. Only the current holder can: once another instance has
+ * reclaimed an expired lease, the previous holder's token no longer matches and
+ * this returns `run_lock_lease_token_mismatch`.
+ *
+ * An already-expired lease is NOT extendable, because another instance may
+ * claim it at any moment.
+ */
+export async function heartbeatRunLock({
+  scope,
+  record_item_id = null,
+  lease_token = null,
+  lease_ms = null,
+} = {}) {
+  const normalized_scope =
+    clean(scope) || clean(record_item_id).replace(/^run-locks:/, "");
+
+  if (!normalized_scope) {
+    return { ok: false, refreshed: false, reason: "missing_run_lock_scope" };
+  }
+  if (!clean(lease_token)) {
+    return {
+      ok: false,
+      refreshed: false,
+      reason: "run_lock_lease_token_required",
+      scope: normalized_scope,
+    };
+  }
+
+  try {
+    const result = await backend().runLockHeartbeat({
+      lock_key: normalized_scope,
+      lease_token: clean(lease_token),
+      lease_ms: lease_ms == null ? null : Math.max(Number(lease_ms) || 0, 1),
+    });
+
+    return {
+      ok: result?.ok !== false,
+      refreshed: Boolean(result?.refreshed),
+      reason: result?.reason || "run_lock_heartbeat",
+      scope: normalized_scope,
+      record_item_id: buildRunLockRecordId(normalized_scope),
+      meta: result?.meta || null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      refreshed: false,
+      reason: "run_lock_backend_unavailable",
+      scope: normalized_scope,
+      error: clean(error?.message) || "unknown_error",
+    };
+  }
+}
+
+/**
+ * Release a lock held by this caller.
+ *
+ * TIGHTENED (deliberate): the release is now fenced on `lease_token`. The
+ * previous filesystem implementation wrote `status: "released"` unconditionally,
+ * so an instance whose lease had already expired and been reclaimed could
+ * release the NEW holder's lock and let a third runner in. That is exactly the
+ * failure this migration exists to remove.
+ *
+ * Operator/manual release is unaffected - it goes through
+ * `forceReleaseStaleLock`, which is what /api/internal/runs/release-lock (and
+ * its /api/internal/run-locks/release alias) already call.
+ */
 export async function releaseRunLock({
   scope,
   record_item_id = null,
@@ -235,8 +237,7 @@ export async function releaseRunLock({
   error = null,
 } = {}) {
   const normalized_scope =
-    clean(scope) ||
-    clean(record_item_id).replace(/^run-locks:/, "");
+    clean(scope) || clean(record_item_id).replace(/^run-locks:/, "");
 
   if (!normalized_scope) {
     return {
@@ -246,30 +247,59 @@ export async function releaseRunLock({
     };
   }
 
-  const existing_meta = (await findRunLockState(normalized_scope)) || {};
-  
-  // Guard: if already released, avoid unnecessary writes or duplicate logs
-  if (existing_meta.status === "released") {
-      return { ok: true, released: true, reason: "already_released" };
+  if (!clean(lease_token)) {
+    runtimeDeps.warn("run_lock.release_missing_lease_token", {
+      module: RUN_LOCK_LOGGER_KEY,
+      scope: normalized_scope,
+    });
+    return {
+      ok: false,
+      released: false,
+      reason: "run_lock_lease_token_required",
+      scope: normalized_scope,
+      record_item_id: buildRunLockRecordId(normalized_scope),
+    };
   }
 
-  const next_meta = {
-    ...existing_meta,
-    version: 1,
-    scope: normalized_scope,
-    status: "released",
-    lease_token: clean(lease_token) || clean(existing_meta?.lease_token) || null,
-    outcome: clean(outcome) || null,
-    released_at: nowIso(),
-    last_error: clean(error?.message || error) || null,
-    metadata: metadata && typeof metadata === "object" ? metadata : {},
-  };
+  let result;
+  try {
+    result = await backend().runLockRelease({
+      lock_key: normalized_scope,
+      lease_token: clean(lease_token),
+      outcome: clean(outcome) || null,
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
+      error: clean(error?.message || error) || null,
+    });
+  } catch (backend_error) {
+    runtimeDeps.warn("run_lock.release_backend_unavailable", {
+      module: RUN_LOCK_LOGGER_KEY,
+      scope: normalized_scope,
+      error: clean(backend_error?.message) || "unknown_error",
+    });
+    return {
+      ok: false,
+      released: false,
+      reason: "run_lock_backend_unavailable",
+      scope: normalized_scope,
+      record_item_id: buildRunLockRecordId(normalized_scope),
+    };
+  }
 
-  await runtimeDeps.writeRuntimeState({
-    namespace: RUN_LOCK_NAMESPACE,
-    key: normalized_scope,
-    state: next_meta,
-  });
+  if (!result?.released) {
+    runtimeDeps.warn("run_lock.release_rejected", {
+      module: RUN_LOCK_LOGGER_KEY,
+      scope: normalized_scope,
+      reason: result?.reason || null,
+    });
+    return {
+      ok: result?.ok !== false,
+      released: false,
+      reason: result?.reason || "run_lock_release_rejected",
+      scope: normalized_scope,
+      record_item_id: buildRunLockRecordId(normalized_scope),
+      meta: result?.meta || null,
+    };
+  }
 
   runtimeDeps.warn("run_lock.released", {
     module: RUN_LOCK_LOGGER_KEY,
@@ -280,7 +310,7 @@ export async function releaseRunLock({
   return {
     ok: true,
     released: true,
-    reason: "run_lock_released",
+    reason: result?.reason || "run_lock_released",
     record_item_id: buildRunLockRecordId(normalized_scope),
     scope: normalized_scope,
     outcome: clean(outcome) || null,
@@ -330,11 +360,14 @@ export async function withRunLock({
   try {
     const result = await fn({
       lock,
-      refresh: async () => ({
-        ok: true,
-        skipped: true,
-        reason: "run_lock_refresh_not_implemented",
-      }),
+      // Now a real, fenced lease extension instead of a stub.
+      refresh: async (refresh_lease_ms = null) =>
+        heartbeatRunLock({
+          scope,
+          record_item_id: lock.record_item_id,
+          lease_token: lock.lease_token,
+          lease_ms: refresh_lease_ms,
+        }),
     });
 
     await releaseRunLock({
@@ -362,13 +395,14 @@ export async function withRunLock({
   }
 }
 
+/**
+ * Operator escape hatch: release without knowing the lease token.
+ * Unconditional by design.
+ */
 export async function forceReleaseStaleLock({
   scope,
   reason = "force_released_stale",
 } = {}, _deps = {}) {
-  const read_state = _deps.readRuntimeState || runtimeDeps.readRuntimeState;
-  const write_state = _deps.writeRuntimeState || runtimeDeps.writeRuntimeState;
-
   const normalized_scope = clean(scope);
   if (!normalized_scope) {
     return {
@@ -378,33 +412,23 @@ export async function forceReleaseStaleLock({
     };
   }
 
-  const record = await read_state({
-    namespace: RUN_LOCK_NAMESPACE,
-    key: normalized_scope,
+  const active_backend = _deps.getDurableBackend
+    ? _deps.getDurableBackend()
+    : backend();
+
+  const result = await active_backend.runLockForceRelease({
+    lock_key: normalized_scope,
+    reason,
   });
-  if (!record) {
+
+  if (!result?.released) {
     return {
-      ok: true,
+      ok: result?.ok !== false,
       released: false,
-      reason: "no_lock_record_found",
+      reason: result?.reason || "no_lock_record_found",
       scope: normalized_scope,
     };
   }
-
-  const was_active = isLeaseActive(record);
-  const forced_meta = {
-    ...record,
-    status: "released",
-    released_at: nowIso(),
-    outcome: reason,
-    last_error: `Force-released: ${reason}`,
-  };
-
-  await write_state({
-    namespace: RUN_LOCK_NAMESPACE,
-    key: normalized_scope,
-    state: forced_meta,
-  });
 
   return {
     ok: true,
@@ -412,10 +436,10 @@ export async function forceReleaseStaleLock({
     reason,
     scope: normalized_scope,
     record_item_id: buildRunLockRecordId(normalized_scope),
-    was_active,
-    previous_expires_at: record?.expires_at || null,
-    previous_owner: record?.owner || null,
-    previous_acquired_at: record?.acquired_at || null,
+    was_active: Boolean(result?.was_active),
+    previous_expires_at: result?.previous_expires_at || null,
+    previous_owner: result?.previous_owner || null,
+    previous_acquired_at: result?.previous_acquired_at || null,
   };
 }
 
@@ -423,6 +447,7 @@ export default {
   __setRunLockTestDeps,
   __resetRunLockTestDeps,
   acquireRunLock,
+  heartbeatRunLock,
   releaseRunLock,
   withRunLock,
   forceReleaseStaleLock,

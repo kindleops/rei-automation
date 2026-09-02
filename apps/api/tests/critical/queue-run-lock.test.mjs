@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { runSendQueue } from "@/lib/domain/queue/run-send-queue.js";
-import { forceReleaseStaleLock } from "@/lib/domain/runs/run-locks.js";
+import {
+  acquireRunLock,
+  forceReleaseStaleLock,
+  __resetRunLockTestDeps,
+} from "@/lib/domain/runs/run-locks.js";
 import {
   buildSupabaseQueueRow,
   makeLiveQueueSystemValue,
@@ -89,28 +93,22 @@ test("runSendQueue blocks when queue_runner_enabled is false", async () => {
 });
 
 test("forceReleaseStaleLock releases a stuck lock record", async () => {
-  let stored_record = {
-    status: "locked",
+  // Run locks are durable now, so the lock is seeded by genuinely acquiring it
+  // rather than by stubbing readRuntimeState/writeRuntimeState, which no longer
+  // exist. The assertions describe observable behaviour instead of file writes.
+  __resetRunLockTestDeps();
+
+  const held = await acquireRunLock({
     scope: "queue-run",
-    lease_token: "tok-stale",
-    expires_at: "2099-01-01T00:00:00.000Z",
     owner: "queue_runner",
-    acquired_at: "2026-04-04T14:55:00.000Z",
-    acquisition_count: 1,
-  };
+    lease_ms: 10 * 60_000,
+  });
+  assert.equal(held.acquired, true);
 
-  let written_state = null;
-
-  const result = await forceReleaseStaleLock(
-    { scope: "queue-run", reason: "test_manual_recovery" },
-    {
-      readRuntimeState: async () => stored_record,
-      writeRuntimeState: async ({ state }) => {
-        written_state = state;
-        return { ok: true };
-      },
-    }
-  );
+  const result = await forceReleaseStaleLock({
+    scope: "queue-run",
+    reason: "test_manual_recovery",
+  });
 
   assert.equal(result.ok, true);
   assert.equal(result.released, true);
@@ -119,23 +117,19 @@ test("forceReleaseStaleLock releases a stuck lock record", async () => {
   assert.equal(result.record_item_id, "run-locks:queue-run");
   assert.equal(result.was_active, true);
   assert.equal(result.previous_owner, "queue_runner");
-  assert.equal(result.previous_expires_at, "2099-01-01T00:00:00.000Z");
+  assert.equal(result.previous_expires_at, held.meta.expires_at);
 
-  assert.ok(written_state);
-  assert.equal(written_state.status, "released");
-  assert.equal(written_state.outcome, "test_manual_recovery");
+  // The lock is genuinely free afterwards, not merely flagged: the next
+  // acquirer gets a clean acquisition rather than a stale reclaim.
+  const next = await acquireRunLock({ scope: "queue-run", owner: "next_runner" });
+  assert.equal(next.acquired, true);
+  assert.equal(next.reason, "lock_acquired");
 });
 
 test("forceReleaseStaleLock returns ok=true with released=false when no lock record exists", async () => {
-  const result = await forceReleaseStaleLock(
-    { scope: "queue-run:999" },
-    {
-      readRuntimeState: async () => null,
-      writeRuntimeState: async () => {
-        throw new Error("should not be called");
-      },
-    }
-  );
+  __resetRunLockTestDeps();
+
+  const result = await forceReleaseStaleLock({ scope: "queue-run:999" });
 
   assert.equal(result.ok, true);
   assert.equal(result.released, false);

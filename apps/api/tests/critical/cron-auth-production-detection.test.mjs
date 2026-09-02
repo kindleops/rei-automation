@@ -1,0 +1,331 @@
+/**
+ * cron-auth-production-detection.test.mjs
+ *
+ * Regression cover for the Cloudflare cron fail-open.
+ *
+ * BUG: getCronAuthResult() detected production with `VERCEL_ENV === "production"`
+ * ALONE. On Cloudflare Containers (and any non-Vercel host) VERCEL_ENV is unset,
+ * so a missing CRON_SECRET took the permissive branch and returned ok:true -
+ * silently authorizing every cron caller.
+ *
+ * INVARIANT: production runtime + missing CRON_SECRET => hard failure (500).
+ * Never a silent authorization. An unrecognised environment counts as
+ * production, so a misconfigured deploy fails closed.
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { getCronAuthResult } from "@/lib/security/cron-auth.js";
+
+const CRON_ENV_KEYS = ["NODE_ENV", "VERCEL_ENV", "CRON_SECRET"];
+
+function withEnv(overrides, fn) {
+  const previous = {};
+  for (const key of CRON_ENV_KEYS) previous[key] = process.env[key];
+  for (const key of CRON_ENV_KEYS) delete process.env[key];
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) process.env[key] = value;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const key of CRON_ENV_KEYS) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+}
+
+function request({ authorization = null, user_agent = "vercel-cron/1.0" } = {}) {
+  const headers = new Map();
+  if (authorization) headers.set("authorization", authorization);
+  headers.set("user-agent", user_agent);
+  return { headers: { get: (name) => headers.get(String(name).toLowerCase()) ?? null } };
+}
+
+// ─── 1. Vercel production, secret missing -> reject ──────────────────────────
+
+test("VERCEL_ENV=production with no CRON_SECRET is rejected (500)", () => {
+  withEnv({ VERCEL_ENV: "production" }, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 500);
+    assert.equal(result.reason, "missing_cron_secret");
+  });
+});
+
+// ─── 2. THE CLOUDFLARE CASE: NODE_ENV=production, VERCEL_ENV unset ──────────
+
+test("NODE_ENV=production with VERCEL_ENV unset and no CRON_SECRET is rejected (500)", () => {
+  withEnv({ NODE_ENV: "production" }, () => {
+    assert.equal(process.env.VERCEL_ENV, undefined, "precondition: VERCEL_ENV unset");
+    const result = getCronAuthResult(request());
+    assert.equal(
+      result.ok,
+      false,
+      "this is the Cloudflare fail-open: it must NOT silently authorize"
+    );
+    assert.equal(result.status, 500);
+    assert.equal(result.reason, "missing_cron_secret");
+    assert.equal(result.runtime_environment, "production");
+  });
+});
+
+// ─── 2b. Fail closed on a completely unmarked environment ───────────────────
+
+test("an unrecognised runtime with no CRON_SECRET fails CLOSED, not open", () => {
+  withEnv({}, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(
+      result.ok,
+      false,
+      "a misconfigured deploy that sets no env markers must not authorize crons"
+    );
+    assert.equal(result.status, 500);
+    assert.equal(result.runtime_environment, "unknown");
+  });
+});
+
+// ─── 3. Cloudflare-like production + correct secret -> authorize ─────────────
+
+test("Cloudflare-like production with the correct secret authorizes", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "s3cr3t-value" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer s3cr3t-value" }));
+    assert.equal(result.ok, true);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.required, true);
+    assert.equal(result.reason, "authorized");
+  });
+});
+
+// ─── 4. Incorrect secret -> reject ───────────────────────────────────────────
+
+test("an incorrect secret is rejected (401) in production", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "s3cr3t-value" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer wrong-value" }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("a missing secret header is rejected (401) when a secret is configured", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "s3cr3t-value" }, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+// ─── 5. Explicit dev/test without a secret keeps development behaviour ──────
+
+test("NODE_ENV=test with no CRON_SECRET preserves the permissive dev behaviour", () => {
+  withEnv({ NODE_ENV: "test" }, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(result.ok, true);
+    assert.equal(result.authenticated, false);
+    assert.equal(result.required, false);
+    assert.equal(result.reason, "cron_secret_not_configured");
+    assert.equal(result.runtime_environment, "non_production");
+  });
+});
+
+test("NODE_ENV=development with no CRON_SECRET preserves the permissive dev behaviour", () => {
+  withEnv({ NODE_ENV: "development" }, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(result.ok, true);
+    assert.equal(result.required, false);
+    assert.equal(result.reason, "cron_secret_not_configured");
+  });
+});
+
+test("a Vercel preview with no CRON_SECRET keeps the permissive behaviour", () => {
+  withEnv({ VERCEL_ENV: "preview" }, () => {
+    const result = getCronAuthResult(request());
+    assert.equal(result.ok, true);
+    assert.equal(result.required, false);
+  });
+});
+
+// ─── Valid-secret behaviour is unchanged in dev too ─────────────────────────
+
+test("a configured secret is still enforced in development", () => {
+  withEnv({ NODE_ENV: "development", CRON_SECRET: "dev-secret" }, () => {
+    assert.equal(getCronAuthResult(request({ authorization: "Bearer dev-secret" })).ok, true);
+    assert.equal(getCronAuthResult(request({ authorization: "Bearer nope" })).ok, false);
+  });
+});
+
+// ─── The x-vercel-cron-secret header path still works ───────────────────────
+
+test("the x-vercel-cron-secret header is still accepted", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "header-secret" }, () => {
+    const headers = new Map([
+      ["x-vercel-cron-secret", "header-secret"],
+      ["user-agent", "vercel-cron/1.0"],
+    ]);
+    const result = getCronAuthResult({
+      headers: { get: (n) => headers.get(String(n).toLowerCase()) ?? null },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, "authorized");
+  });
+});
+
+// ─── Constant-time secret comparison ────────────────────────────────────────
+// Behavioural cover only. Timing itself is deliberately NOT benchmarked here:
+// a unit test cannot measure it reliably, and a flaky timing assertion would be
+// worse than none.
+
+test("comparison: exact match authorizes", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer abcdefgh12345678" }));
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, "authorized");
+  });
+});
+
+test("comparison: wrong secret of the SAME length is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const wrong = "abcdefgh12345679";
+    assert.equal(wrong.length, "abcdefgh12345678".length, "precondition: equal lengths");
+    const result = getCronAuthResult(request({ authorization: `Bearer ${wrong}` }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: wrong SHORTER secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer abcdefgh" }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: wrong LONGER secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(
+      request({ authorization: "Bearer abcdefgh12345678-extra-suffix" })
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: missing presented secret is rejected where one is required", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: null }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+    assert.equal(result.reason, "invalid_cron_authorization");
+  });
+});
+
+test("comparison: an empty Bearer value is rejected, never treated as a match", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "abcdefgh12345678" }, () => {
+    const result = getCronAuthResult(request({ authorization: "Bearer " }));
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 401);
+  });
+});
+
+test("comparison: the timing-safe primitive is a pure predicate", async () => {
+  const { timingSafeSecretEqual } = await import("@/lib/security/shared-secret.js");
+  assert.equal(timingSafeSecretEqual("same-value", "same-value"), true);
+  assert.equal(timingSafeSecretEqual("same-value", "diff-value"), false, "same length, different");
+  assert.equal(timingSafeSecretEqual("short", "much-longer-value"), false);
+  assert.equal(timingSafeSecretEqual("", "anything"), false, "empty never matches");
+  assert.equal(timingSafeSecretEqual("anything", ""), false, "empty never matches");
+  assert.equal(timingSafeSecretEqual(null, null), false, "null never matches null");
+});
+
+// ─── Provider-neutral cron provenance ───────────────────────────────────────
+// CRON_SECRET remains the ONLY authentication authority. x-internal-cron-source
+// carries provenance so behavioural branching (queue_processor_mode "safe")
+// works on Cloudflare, where the Vercel user-agent does not exist.
+
+function cronRequest({ authorization = null, user_agent = "", source = null } = {}) {
+  const headers = new Map();
+  if (authorization) headers.set("authorization", authorization);
+  if (user_agent) headers.set("user-agent", user_agent);
+  if (source) headers.set("x-internal-cron-source", source);
+  return { headers: { get: (n) => headers.get(String(n).toLowerCase()) ?? null } };
+}
+
+test("provenance: legacy Vercel cron is still recognised as a scheduled run", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", user_agent: "vercel-cron/1.0" })
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "vercel");
+    assert.equal(r.is_vercel_cron, true, "legacy field preserved");
+  });
+});
+
+test("provenance: a Cloudflare scheduled invocation is recognised", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", source: "cloudflare" })
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "cloudflare");
+    assert.equal(r.is_vercel_cron, false, "no Vercel user-agent on Cloudflare");
+  });
+});
+
+test("provenance: spoofed source WITHOUT the correct secret is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer wrong", source: "cloudflare" })
+    );
+    assert.equal(r.ok, false, "provenance must never authenticate on its own");
+    assert.equal(r.status, 401);
+    assert.equal(r.reason, "invalid_cron_authorization");
+  });
+});
+
+test("provenance: source header with NO secret at all is rejected", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(cronRequest({ source: "cloudflare" }));
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 401);
+  });
+});
+
+test("provenance: correct secret with NO provenance is a manual (non-scheduled) call", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(cronRequest({ authorization: "Bearer sec" }));
+    assert.equal(r.ok, true, "a manual authenticated call still authorizes");
+    assert.equal(r.is_scheduled_cron, false, "no scheduler claimed it");
+    assert.equal(r.cron_source, null);
+  });
+});
+
+test("provenance: unknown runtime with no secret still fails closed", () => {
+  withEnv({ CRON_SECRET: undefined }, () => {
+    const r = getCronAuthResult(cronRequest({ source: "cloudflare" }));
+    assert.equal(r.ok, false, "provenance must not rescue a missing secret");
+    assert.equal(r.status, 500);
+    assert.equal(r.reason, "missing_cron_secret");
+    assert.equal(r.runtime_environment, "unknown");
+  });
+});
+
+test("provenance: an arbitrary future scheduler is carried through", () => {
+  withEnv({ NODE_ENV: "production", CRON_SECRET: "sec" }, () => {
+    const r = getCronAuthResult(
+      cronRequest({ authorization: "Bearer sec", source: "github-actions" })
+    );
+    assert.equal(r.is_scheduled_cron, true);
+    assert.equal(r.cron_source, "github-actions");
+  });
+});
