@@ -76,6 +76,13 @@ import {
 import { validateCommandOptionCounts } from "@/lib/discord/command-registration-validation.js";
 import { validateCommandPayloadSizes } from "@/lib/discord/command-registration-validation.js";
 
+// Resolve apps/api from THIS file's location. These paths were hardcoded to
+// /Users/ryankindle/real-estate-automation -- a different checkout that happens
+// to exist on one developer machine. The tests therefore passed there and
+// nowhere else, and failed on the first CI run with ENOENT.
+const API_ROOT = path.resolve(import.meta.dirname, "../..");
+const REGISTER_COMMANDS_SCRIPT = path.join(API_ROOT, "scripts/register-discord-commands.mjs");
+
 // ---------------------------------------------------------------------------
 // Test environment
 // ---------------------------------------------------------------------------
@@ -926,7 +933,7 @@ test("routing handles /target, /territory, /conquest and campaign create/inspect
 
 test("command registration includes target-build, target-scan, target-property, territory, conquest and campaign create/inspect/scale", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
 
@@ -979,7 +986,7 @@ function loadRegisteredCommandsPayload() {
     process.execPath,
     ["--import", preload_path, "scripts/register-discord-commands.mjs"],
     {
-      cwd: "/Users/ryankindle/real-estate-automation",
+      cwd: API_ROOT,
       env: {
         ...process.env,
         DISCORD_APPLICATION_ID: "app_test",
@@ -997,7 +1004,7 @@ function loadRegisteredCommandsPayload() {
 
 test("v3: /target-scan has <= 25 options", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
   const scan_block = extractTopLevelCommandBlock(source, "target-scan");
@@ -1010,7 +1017,7 @@ test("v3: /target-scan has <= 25 options", () => {
 
 test("v3: /target-property has <= 25 options", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
   const property_block = extractTopLevelCommandBlock(source, "target-property");
@@ -1023,7 +1030,7 @@ test("v3: /target-property has <= 25 options", () => {
 
 test("v3: /target-property includes advanced property filters", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
   const property_block = extractTopLevelCommandBlock(source, "target-property");
@@ -1052,7 +1059,7 @@ test("v3: /target-property includes advanced property filters", () => {
 
 test("v3: /target-scan does not include advanced property filters", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
   const scan_block = extractTopLevelCommandBlock(source, "target-scan");
@@ -2032,7 +2039,7 @@ test("v2: all targeting button custom_ids are under 100 characters", () => {
 
 test("v2: command registration includes market, asset, strategy, and tag choices", () => {
   const source = fs.readFileSync(
-    "/Users/ryankindle/real-estate-automation/scripts/register-discord-commands.mjs",
+    REGISTER_COMMANDS_SCRIPT,
     "utf8"
   );
 
