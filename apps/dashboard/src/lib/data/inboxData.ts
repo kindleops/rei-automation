@@ -2208,6 +2208,7 @@ export const getInboxRowsForView = async (
     wrong_number: 'dead',
     manual_review: 'needs_review',
     dnc_opt_out: 'suppressed', opt_out: 'suppressed',
+    archived_threads: 'archived', archive: 'archived',
   }
   const normalizedView: string = VIEW_ALIAS_MAP[view as string] ?? view
   let inbox_bucket = 'all_messages'
@@ -2221,6 +2222,7 @@ export const getInboxRowsForView = async (
   else if (normalizedView === 'active') inbox_bucket = 'active'
   else if (normalizedView === 'waiting') inbox_bucket = 'waiting'
   else if (normalizedView === 'unlinked') inbox_bucket = 'unlinked'
+  else if (normalizedView === 'archived') inbox_bucket = 'archived'
   const endpoint = '/api/cockpit/inbox/live'
   const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
   const threadShellStartedAt = dataLayerNow()

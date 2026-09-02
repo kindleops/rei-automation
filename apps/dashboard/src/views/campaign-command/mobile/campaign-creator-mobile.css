@@ -1,0 +1,991 @@
+/*
+ * Campaign Creator — mobile, 393pt.
+ *
+ * Reuses the frozen Campaign grammar wholesale: True Black, one 16px gutter,
+ * full-width bands on hairlines, tabular values, four-level ramp, semantic
+ * accent only. The creator's own additions are the stage rail, the drill-in
+ * category row, the editable filter row and the category sheet.
+ */
+
+/* Tokens must exist wherever a rule references them. The creator chrome rules
+   below target .cmp-studio--mobile, which is OUTSIDE .cbx — so scoping the
+   tokens only to the new components voided those declarations and left the
+   campaign-setup row flush against the screen edge. */
+.cmp-studio--mobile,
+.cbx,
+.csr,
+.ccs {
+  /* The shared band primitives read --d-* from the Detail root. The creator is
+     not inside that root, so an unresolved var() collapsed every band's gutter
+     to zero and content sat flush against the screen edge. Same tokens, defined
+     where the creator can see them. */
+  --d-ink:   var(--nx-text, #f6f8fc);
+  --d-ink-2: color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);
+  --d-ink-3: color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);
+  --d-ink-4: color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);
+  --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
+  --d-hair:  rgba(148, 163, 184, 0.08);
+  --d-live:  #30d158;
+  --d-hold:  #ff9f0a;
+  --d-bad:   #ff453a;
+  --d-pad:   16px;
+
+  --c-ink:   var(--nx-text, #f6f8fc);
+  --c-ink-2: color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);
+  --c-ink-3: color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);
+  --c-ink-4: color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);
+  --c-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
+  --c-hair:  rgba(148, 163, 184, 0.08);
+  --c-live:  #30d158;
+  --c-hold:  #ff9f0a;
+  --c-pad:   16px;
+}
+
+.cbx { background: var(--nx-bg, #000); color: var(--c-ink); }
+
+/* Campaign identity — a real field, not a boxed input. */
+.cbx__name {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--c-ink);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  padding: 0;
+}
+
+.cbx__name::placeholder { color: var(--c-ink-4); font-weight: 400; }
+
+/* ── Drill-in category rows ───────────────────────────────────────────── */
+.cbx__cat {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--c-ink-3);
+  padding: 10px 0;
+}
+
+.cbx__cat:active { background: rgba(255, 255, 255, 0.04); }
+
+.cbx__cat-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-ink);
+  text-transform: none;
+}
+
+.cbx__cat.is-nil .cbx__cat-label { color: var(--c-ink-2); }
+
+/* ── Applied filter rows — compact, editable, no dev chrome ───────────── */
+.cbx__filter { align-items: flex-start; gap: 8px; padding: 9px 0 10px; }
+
+.cbx__filter-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 7px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cbx__filter-field {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--c-ink);
+}
+
+.cbx__filter-op { font-size: 13px; color: var(--c-ink-4); font-style: italic; }
+
+.cbx__filter-value {
+  font-size: 14px;
+  color: var(--c-ink-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cbx__filter-note {
+  flex: 0 0 100%;
+  font-size: 11px;
+  color: var(--c-ink-4);
+}
+
+.cbx__filter-note.is-pending { color: var(--c-hold); }
+.cbx__filter.is-pending .cbx__filter-field { color: var(--c-hold); }
+
+.cbx__filter-remove {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-ink-4);
+  cursor: pointer;
+}
+
+.cbx__filter-remove:active { background: rgba(255, 255, 255, 0.06); }
+
+.cbx__flag {
+  margin: 0 0 6px;
+  padding-left: 11px;
+  position: relative;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--c-hold);
+}
+
+.cbx__flag::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 4px; bottom: 4px;
+  width: 2px; border-radius: 2px;
+  background: var(--c-hold);
+}
+
+.cbx__flag.is-quiet { color: var(--c-ink-3); }
+.cbx__flag.is-quiet::before { background: var(--c-ink-4); }
+
+/* ── Stage rail ───────────────────────────────────────────────────────── */
+.csr {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px var(--c-pad) calc(9px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--c-rule);
+  background: rgba(0, 0, 0, 0.86);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.csr__stages {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+/* The connecting track. Fills behind completed stages. */
+.csr__stages::before {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 5px;
+  height: 1px;
+  background: var(--c-hair);
+}
+
+.csr__stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.csr__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.3);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.csr__stage.is-done .csr__dot { background: var(--c-ink-3); }
+.csr__stage.is-current .csr__dot { background: var(--c-ink); transform: scale(1.25); }
+
+.csr__label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--c-ink-4);
+}
+
+.csr__stage.is-done .csr__label { color: var(--c-ink-3); }
+.csr__stage.is-current .csr__label { color: var(--c-ink); }
+
+/* The live candidate count. */
+.csr__count {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  min-width: 74px;
+}
+
+.csr__count-value {
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink);
+  line-height: 1.05;
+}
+
+.csr__count-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--c-ink-4);
+}
+
+/* Stale is a real state: the number no longer describes current targeting. */
+.csr__count.is-stale .csr__count-value { color: var(--c-ink-4); }
+.csr__count.is-stale .csr__count-label { color: var(--c-hold); }
+.csr__count.is-loading .csr__count-value { color: var(--c-ink-3); }
+
+/* ── Category sheet ───────────────────────────────────────────────────── */
+.ccs {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  background: var(--nx-bg, #000);
+  color: var(--c-ink);
+  animation: ccs-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ccs-in {
+  from { transform: translateY(18px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.ccs__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 var(--c-pad) 0 6px;
+  border-bottom: 1px solid var(--c-rule);
+}
+
+.ccs__close {
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 9px;
+  background: none; color: var(--c-ink);
+  cursor: pointer;
+}
+
+.ccs__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.ccs__count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--c-ink-4);
+}
+
+.ccs__sub {
+  margin: 0;
+  padding: 10px var(--c-pad) 0;
+  font-size: 12.5px;
+  color: var(--c-ink-4);
+}
+
+.ccs__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-bottom: 90px;
+}
+
+.ccs__foot {
+  flex: none;
+  padding: 8px var(--c-pad) calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--c-rule);
+  background: rgba(0, 0, 0, 0.86);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.ccs__done {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--c-ink);
+  color: #000;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ccs { animation: none; }
+  .csr__dot { transition: none; }
+}
+
+
+/* ── Creator chrome on BUILD ──────────────────────────────────────────────
+   The studio header carried an accent-tinted "PROPERTIES ANCHOR" pill and a
+   subtitle about the field catalog, and the campaign-setup card was a rounded
+   box above the first band. Both belong to the old creator. */
+.cmp-studio--mobile .cmp-studio-header {
+  background: var(--nx-bg, #000);
+  border-bottom: 1px solid var(--d-rule);
+  padding: 0 6px 0 var(--d-pad);
+  min-height: 48px;
+}
+
+.cmp-studio--mobile .cmp-anchor-pill { display: none; }
+
+.cmp-studio--mobile .cmp-mobile-setup {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--d-rule);
+}
+
+.cmp-studio--mobile .cmp-mobile-setup__trigger,
+.cmp-studio--mobile .cmp-mobile-setup__trigger > div {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--d-ink);
+}
+
+.cmp-studio--mobile .cmp-mobile-setup__trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px var(--d-pad) 14px;
+}
+
+.cmp-studio--mobile .cmp-mobile-setup__trigger strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--d-ink);
+}
+
+.cmp-studio--mobile .cmp-mobile-setup__trigger span {
+  font-size: 12.5px;
+  color: var(--d-ink-4);
+}
+
+/* The creator body is the ground plane, not a panel. */
+.cmp-studio-overlay--mobile,
+.cmp-studio--mobile,
+.cmp-studio--mobile .cmp-studio-workspace {
+  background: var(--nx-bg, #000);
+}
+
+.cmp-studio--mobile .cmp-studio-content { padding: 0; background: var(--nx-bg, #000); }
+
+/* ══ REACH ════════════════════════════════════════════════════════════════
+ * The contraction is ONE CONNECTED SILHOUETTE. A single SVG polygon spans the
+ * whole funnel: it holds a stage's proportional width through that stage's row,
+ * then slopes inward across the transition row where inventory is lost. Stage
+ * rows sit ON the shape; loss reasons sit in the transition where the narrowing
+ * happens; READY is the terminal, carried by the same shape.
+ *
+ * The previous version drew each stage as its own centred rectangle. With a real
+ * contraction of ~24% those rectangles were nearly identical and read as floating
+ * highlight blocks with text layered over them, not as an audience narrowing.
+ *
+ * Colour is a system, not decoration:
+ *   • The fill runs a TONAL PROGRESSION on the live app accent — restrained at
+ *     the top of the shape, luminous at READY.
+ *   • Losses are MUTED WARM. They read as contraction, not as failure.
+ *   • Amber (--d-hold) is reserved for a genuine no-route; red for a real error.
+ *   • Local and approved cross-state share the same healthy family — approved
+ *     cross-state is normal routing and must never look degraded.
+ */
+.crx {
+  background: var(--nx-bg, #000);
+  color: var(--d-ink);
+
+  --crx-a: var(--nexus-accent-rgb, var(--nx-accent-rgb, 56, 189, 248));
+  --crx-warm: 226, 178, 134;
+}
+
+.crx__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px var(--d-pad) 12px;
+  border-bottom: 1px solid var(--d-rule);
+}
+
+.crx__state {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--d-ink-3);
+}
+
+.crx__state.is-stale { color: var(--d-hold); font-weight: 500; }
+
+.crx__refresh {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--d-ink-2);
+  font-size: 13px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.crx__refresh:disabled { opacity: 0.4; }
+
+/* ── Summary: the answer before the shape is inspected ────────────────── */
+.crx__summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding: 15px var(--d-pad) 16px;
+  border-bottom: 1px solid var(--d-rule);
+  background: linear-gradient(180deg, rgba(var(--crx-a), 0.10) 0%, rgba(var(--crx-a), 0) 100%);
+}
+
+.crx__summary.is-stale { opacity: 0.5; }
+.crx__summary.is-skeleton { opacity: 0.45; }
+
+.crx__summary-value {
+  font-size: 30px;
+  font-weight: 640;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink);
+}
+
+.crx__summary-unit {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: rgba(var(--crx-a), 0.92);
+}
+
+.crx__summary-sub {
+  flex-basis: 100%;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--d-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.crx__gap { margin: 0; font-size: 13.5px; color: var(--d-ink-2); }
+
+/* ── The silhouette ───────────────────────────────────────────────────── */
+.crx__funnel.is-stale { opacity: 0.55; }
+
+.crx__shape { position: relative; }
+
+.crx__silhouette {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* The shape animates as one object when the counts land. */
+.crx__silhouette-fill,
+.crx__silhouette-edge,
+.crx__silhouette-ready {
+  transition: d 620ms cubic-bezier(0.22, 1, 0.36, 1),
+              x 620ms cubic-bezier(0.22, 1, 0.36, 1),
+              width 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.crx__silhouette-ready { filter: drop-shadow(0 0 14px rgba(var(--crx-a), 0.30)); }
+
+.crx__rows {
+  position: relative;
+  z-index: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.crx__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.crx__row-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--d-ink-2);
+}
+
+.crx__row-value {
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink);
+}
+
+/* READY: terminal state, and the future entry point into real targets. */
+.crx__row.is-ready .crx__row-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.crx__row.is-ready .crx__row-btn:disabled { cursor: default; }
+
+.crx__row.is-ready .crx__row-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: #fff;
+}
+
+.crx__row.is-ready .crx__row-value {
+  font-size: 24px;
+  font-weight: 660;
+  color: #fff;
+}
+
+.crx__row.is-ready svg {
+  flex: none;
+  margin-left: -2px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* The transition: where the shape narrows, and why. */
+.crx__trans { display: flex; align-items: center; }
+
+.crx__trans-btn {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.crx__trans-value {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 580;
+  font-variant-numeric: tabular-nums;
+  color: rgba(var(--crx-warm), 0.90);
+}
+
+.crx__trans-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: rgba(var(--crx-warm), 0.56);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crx__ready-note {
+  margin: 0;
+  padding: 8px 0 0;
+  font-size: 12px;
+  color: var(--d-ink-4);
+}
+
+/* Drill-in affordance for the blocker detail. */
+.crx__drill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 10px;
+  border: 0;
+  border-top: 1px solid var(--d-hair);
+  background: none;
+  color: rgba(var(--crx-warm), 0.76);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+/* ── COUNTING: the silhouette holds its final shape ───────────────────── */
+.crx__funnel.is-counting .crx__silhouette-fill,
+.crx__funnel.is-counting .crx__silhouette-ready {
+  animation: crxPulse 1600ms ease-in-out infinite;
+}
+
+.crx__funnel.is-counting .crx__silhouette-ready { animation-delay: 160ms; }
+
+@keyframes crxPulse {
+  0%, 100% { opacity: 0.42; }
+  50%      { opacity: 0.90; }
+}
+
+/* ── Sender routing: a horizontal capacity instrument ─────────────────── */
+.crx__routes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.crx__route {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.crx__route.is-skeleton { opacity: 0.45; }
+
+.crx__route-value {
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink);
+}
+
+.crx__route-label {
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.09em;
+  color: var(--d-ink-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crx__route-meter {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+/* Local and approved cross-state are the SAME healthy family. */
+.crx__route-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(var(--crx-a), 0.78);
+  transition: width 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.crx__route.is-nil .crx__route-value { color: var(--d-ink-4); }
+.crx__route.is-nil .crx__route-meter > span { background: rgba(255, 255, 255, 0.10); }
+
+/* Amber only when a route genuinely does not exist. */
+.crx__route.is-bad .crx__route-value,
+.crx__route.is-bad .crx__route-label { color: var(--d-hold); }
+.crx__route.is-bad .crx__route-meter > span { background: var(--d-hold); }
+
+/* ── Losses ───────────────────────────────────────────────────────────── */
+.crx__loss-label { min-width: 0; flex: 1; text-transform: none; }
+.crx__loss-label.is-route { color: var(--d-hold); }
+
+.crx__reconcile {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--d-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.crx__reconcile.is-off { color: var(--d-hold); }
+
+@media (prefers-reduced-motion: reduce) {
+  .crx__silhouette-fill,
+  .crx__silhouette-edge,
+  .crx__silhouette-ready,
+  .crx__route-meter > span { transition: none; }
+  .crx__funnel.is-counting .crx__silhouette-fill,
+  .crx__funnel.is-counting .crx__silhouette-ready { animation: none; }
+}
+
+/* The shared row label capitalizes, because Overview feeds it snake_case
+   blocker keys. REACH supplies properly cased sentences, so capitalizing turned
+   "Local, same market" into "Local, Same Market". */
+.crx .cdb__row-label,
+.crx .crx__loss-label {
+  text-transform: none;
+}
+
+/* ══ LAUNCH ═══════════════════════════════════════════════════════════════
+ * "Exactly what happens if I press the button?"
+ *
+ * The answer leads, then one compact execution plan, then routing as
+ * confirmation, then system automation state, then blockers and warnings kept
+ * structurally distinct — a blocker is a stop, a warning is a note.
+ *
+ * Same frozen grammar as BUILD and REACH: True Black, one 16px gutter,
+ * full-width bands on hairlines, tabular values, semantic colour only. No
+ * cards, no vanity metric.
+ */
+.clx {
+  background: var(--nx-bg, #000);
+  color: var(--d-ink);
+
+  --crx-a: var(--nexus-accent-rgb, var(--nx-accent-rgb, 56, 189, 248));
+}
+
+.clx__answer {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding: 16px var(--d-pad) 17px;
+  border-bottom: 1px solid var(--d-rule);
+  background: linear-gradient(180deg, rgba(var(--crx-a), 0.12) 0%, rgba(var(--crx-a), 0) 100%);
+}
+
+/* Blocked: the figure is still true, but it is not an invitation. */
+.clx__answer.is-blocked {
+  background: linear-gradient(180deg, rgba(255, 159, 10, 0.10) 0%, rgba(255, 159, 10, 0) 100%);
+}
+
+.clx__answer-value {
+  font-size: 32px;
+  font-weight: 640;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink);
+}
+
+.clx__answer-unit {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: rgba(var(--crx-a), 0.92);
+}
+
+.clx__answer.is-blocked .clx__answer-unit { color: var(--d-hold); }
+
+.clx__answer-scope {
+  flex-basis: 100%;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--d-ink-3);
+}
+
+/* Plan rows open their own control sheet, so they carry a chevron. */
+.clx .cdb__row.clx__row {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  gap: 10px;
+}
+
+.clx .clx__row svg {
+  flex: none;
+  color: var(--d-ink-4);
+}
+
+.clx .cdb__row-label {
+  font-size: 10.5px;
+  font-weight: 660;
+  letter-spacing: 0.09em;
+  color: var(--d-ink-4);
+  text-transform: none;
+}
+
+/* The cap binding below READY changes what actually sends, so it is marked. */
+.clx .clx__row.is-capped .cdb__row-value { color: var(--d-hold); }
+
+.clx__note {
+  margin: 9px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--d-ink-3);
+}
+
+.clx__note.is-capped,
+.clx__note.is-hold { color: var(--d-hold); }
+
+.clx__hold { color: var(--d-hold); }
+
+/* Routing: confirmation, not a second funnel. */
+.clx__routes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.clx__route {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.clx__route-value {
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink);
+}
+
+.clx__route-label {
+  font-size: 10px;
+  font-weight: 660;
+  letter-spacing: 0.09em;
+  color: var(--d-ink-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Approved cross-state is healthy routing and must never look degraded. */
+.clx__route.is-nil .clx__route-value { color: var(--d-ink-4); }
+.clx__route.is-bad .clx__route-value,
+.clx__route.is-bad .clx__route-label { color: var(--d-hold); }
+
+/* A blocker is a stop. */
+.clx__stop .cdb__key { color: var(--d-bad); }
+.clx__stop .cdb__count { color: var(--d-bad); }
+
+.clx__reason {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--d-ink-2);
+  text-transform: none;
+  white-space: normal;
+}
+
+.clx__stop .clx__reason { color: var(--d-ink); }
+
+/* Final action. */
+.clx__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 16px var(--d-pad) 22px;
+}
+
+.clx__primary {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 13px;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+}
+
+.clx__primary.is-go {
+  background: rgb(var(--crx-a));
+  color: #04121a;
+}
+
+/* Blocked and busy states are not launch buttons and must not look like one. */
+.clx__primary.is-blocked {
+  background: rgba(255, 159, 10, 0.13);
+  color: var(--d-hold);
+  font-weight: 560;
+  text-align: left;
+  line-height: 1.35;
+  padding: 13px 16px;
+}
+
+.clx__primary.is-busy {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--d-ink-3);
+}
+
+.clx__primary.is-draft {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--d-ink);
+}
+
+.clx__primary:disabled { opacity: 0.5; cursor: default; }
+
+.clx__secondary {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--d-ink-3);
+  font-size: 13.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.clx__secondary:disabled { opacity: 0.4; cursor: default; }
+
+/* The stage rail overlays the bottom of the scroll area, so the final action
+   needs clearance or it sits half-hidden behind BUILD / REACH / LAUNCH. */
+.clx__actions { padding-bottom: 96px; }
+
+/* Secondary line under the LAUNCH answer: the gap between contact-ready and
+   what can actually be scheduled after personalization. */
+.clx__answer-sub {
+  flex-basis: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--d-hold);
+}

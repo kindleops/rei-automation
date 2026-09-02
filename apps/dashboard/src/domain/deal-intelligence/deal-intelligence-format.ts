@@ -87,8 +87,19 @@ export const fmtPhoneType = (code: string | null | undefined) => {
   return PHONE_TYPE_LABELS[key] || humanizeEnum(key)
 }
 
-export const scoreTone = (score: number | null | undefined) => {
-  const n = Number(score) || 0
+/**
+ * AOS is the acquisition engine's *opportunity* score and its domain is 0-1000,
+ * not 0-100: seven components are each clamped to 100 and then weighted to a
+ * combined 10.0x, and the decision tiers gate on 780 / 600 / 430. Baseline
+ * property scores are 0-100. Anything reading a score therefore has to say
+ * which domain it is in.
+ */
+export const AOS_SCORE_MAX = 1000
+export const BASELINE_SCORE_MAX = 100
+
+export const scoreTone = (score: number | null | undefined, max: number = BASELINE_SCORE_MAX) => {
+  const raw = Number(score) || 0
+  const n = max === BASELINE_SCORE_MAX ? raw : (raw / Math.max(max, 1)) * 100
   if (n >= 80) return 'strong'
   if (n >= 65) return 'active'
   if (n >= 45) return 'balanced'

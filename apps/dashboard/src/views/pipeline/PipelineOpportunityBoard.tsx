@@ -29,14 +29,42 @@ import { PipelineViewManager } from './components/PipelineViewManager'
 import { StageChangeConfirmModal } from '../../modules/inbox/components/StageChangeConfirmModal'
 import { normalizeLifecycleStage, type LifecycleStageCode } from '../../domain/lead-state/universal-lead-state-registry'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { PipelineMobileHeader } from './components/PipelineMobileHeader'
-import { PipelineMobileToolbar } from './components/PipelineMobileToolbar'
-import { PipelineMobileStageRail } from './components/PipelineMobileStageRail'
+import { PipelineMobileFilterSheet } from './components/PipelineMobileFilterSheet'
+import {
+  EMPTY_FILTERS,
+  SORT_OPTIONS,
+  activeFilterCount,
+  applyFilters,
+  applySort,
+  followUpDue as isFollowUpDueCanonical,
+  needsResponse as isNeedsResponse,
+  stageOf,
+  statusOf,
+  temperatureOf,
+  type PipelineMobileFilters,
+  type PipelineMobileSortId,
+} from './components/pipeline-mobile-filters'
+import { PipelineMobileCommandBar } from './components/PipelineMobileCommandBar'
+import { PipelineMobileSpine } from './components/PipelineMobileSpine'
+import { PipelineMobileRow } from './components/PipelineMobileRow'
+import { MobileWorkflowControls } from '../../modules/deal-intelligence/mobile/MobileWorkflowControls'
+import { PipelineLeadCommandSheet } from './components/PipelineLeadCommandSheet'
 import { PipelineMobileDetailSheet } from './components/PipelineMobileDetailSheet'
 import { PipelineMobileOpportunityDetail } from './components/PipelineMobileOpportunityDetail'
 import '../../modules/inbox/queue-ops.css'
 import './pipeline-view.css'
 import './pipeline-mobile.css'
+import './pipeline-mobile-board.css'
+
+/** Compact scope labels for the mobile board. */
+const MOBILE_SCOPE_LABELS: Record<string, string> = {
+  active: 'Active',
+  needs_attention: 'Attention',
+  all: 'All',
+  dead: 'Dead',
+  suppressed: 'Suppressed',
+  closed: 'Closed',
+}
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -99,6 +127,8 @@ interface PipelineOpportunityBoardProps {
   selectedOpportunity?: PipelineOpportunity | null
   detailLoading?: boolean
   detailError?: string | null
+  /** Re-reads the board so counts/membership reconcile after a workflow move. */
+  onRefresh?: () => void | Promise<void>
   layoutMode: ViewLayoutMode
   groupBy: PipelineGroupByMode
   loading?: boolean
@@ -145,6 +175,7 @@ export function PipelineOpportunityBoard({
   groupBy,
   loading,
   refreshing,
+  onRefresh,
   onGroupByChange,
   onSelect,
   onPreview,
@@ -163,6 +194,11 @@ export function PipelineOpportunityBoard({
   const [query, setQuery] = useState('')
   const [hotOnly, setHotOnly] = useState(false)
   const [followUpOnly, setFollowUpOnly] = useState(false)
+  // Mobile board filter/sort state. One object so the quick-filter chips and the
+  // Filters sheet cannot disagree about what is selected.
+  const [mobileFilters, setMobileFilters] = useState<PipelineMobileFilters>(EMPTY_FILTERS)
+  const [mobileSort, setMobileSort] = useState<PipelineMobileSortId>('recent')
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [showSuppressed, setShowSuppressed] = useState(false)
   const [activeStageId, setActiveStageId] = useState('')
   const [dragCardId, setDragCardId] = useState<string | null>(null)
@@ -185,6 +221,10 @@ export function PipelineOpportunityBoard({
   const pointerDragRef = useRef<{ cardId: string; startX: number; startY: number; active: boolean } | null>(null)
   const suppressClickRef = useRef(false)
   const { isMobile } = useBreakpoint()
+  const [commandLead, setCommandLead] = useState<PipelineOpportunity | null>(null)
+  const [workflowThread, setWorkflowThread] = useState<{
+    threadKey: string; name: string; stage: string | null; status: string | null; temperature: string | null
+  } | null>(null)
 
   useEffect(() => {
     setGroupOverrides({})
@@ -209,7 +249,10 @@ export function PipelineOpportunityBoard({
   const mutableView = isGroupByMutable(groupBy)
   const readOnlyView = isGroupByReadOnly(groupBy)
 
-  const visibleCards = useMemo(() => {
+  /**
+   * Scope + query, before the mobile filter/sort funnel. Desktop stops here.
+   */
+  const scopedCards = useMemo(() => {
     const q = query.trim().toLowerCase()
     return allCards
       .filter((c) => {
@@ -226,6 +269,47 @@ export function PipelineOpportunityBoard({
         ].some((s) => String(s ?? '').toLowerCase().includes(q))
       })
   }, [allCards, query, showSuppressed, hotOnly, followUpOnly])
+
+  /**
+   * The mobile universe. Everything downstream — stage counts, the rendered
+   * list, the header total — reads from this one array, which is what keeps the
+   * numbers on screen describing the same set. See the count contract in
+   * `pipeline-mobile-filters.ts`.
+   */
+  const visibleCards = useMemo(() => {
+    if (!isMobile) return scopedCards
+    const byId = new Map(scopedCards.map((c) => [c.opp.id, c]))
+    const filtered = applyFilters(scopedCards.map((c) => c.opp), mobileFilters)
+    return applySort(filtered, mobileSort)
+      .map((opp) => byId.get(opp.id))
+      .filter((c): c is OppCard => Boolean(c))
+  }, [scopedCards, isMobile, mobileFilters, mobileSort])
+
+  /** Facet counts are taken from the scoped set so a chip never reads zero
+   *  purely because another filter is already hiding its matches. */
+  const mobileFacets = useMemo(() => {
+    const opps = scopedCards.map((c) => c.opp)
+    const tally = (pick: (o: PipelineOpportunity) => string) => {
+      const m = new Map<string, number>()
+      for (const o of opps) {
+        const k = pick(o)
+        if (k) m.set(k, (m.get(k) ?? 0) + 1)
+      }
+      return m
+    }
+    const toOptions = (m: Map<string, number>, label: (k: string) => string) =>
+      [...m.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, count]) => ({ id, label: label(id), count }))
+
+    return {
+      stages: toOptions(tally(stageOf), (k) => stageLabel(k as never) || k),
+      statuses: toOptions(tally(statusOf), (k) => k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())),
+      temperatures: toOptions(tally(temperatureOf), (k) => k.replace(/^./, (c) => c.toUpperCase())),
+      needsResponse: opps.filter(isNeedsResponse).length,
+      followUpDue: opps.filter(isFollowUpDueCanonical).length,
+    }
+  }, [scopedCards])
 
   const groupDefinitions = useMemo(
     () => groupDefinitionsForMode(groupBy, visibleCards.map((c) => c.opp)),
@@ -257,6 +341,30 @@ export function PipelineOpportunityBoard({
     if (displayStageModels.some((s) => s.def.id === activeStageId)) return
     setActiveStageId(displayStageModels[0]?.def.id ?? '')
   }, [activeStageId, displayStageModels])
+
+  /**
+   * Land the operator somewhere with leads in it.
+   *
+   * Selecting "Follow-ups due" used to leave the board on whatever stage was
+   * already active, which for 13 matching leads spread across other stages
+   * meant an empty list under a header reading 13. The counts agreed; the board
+   * was still useless. When the active stage empties out but the filtered set
+   * is not empty, move to its biggest stage.
+   *
+   * Only fires on a genuinely empty active stage, so a deliberate tap on a
+   * zero-count stage is never overridden.
+   */
+  const filterSignature = `${activeFilterCount(mobileFilters)}:${JSON.stringify(mobileFilters)}`
+  const lastFilterSignature = useRef(filterSignature)
+  useEffect(() => {
+    if (!isMobile) return
+    if (lastFilterSignature.current === filterSignature) return
+    lastFilterSignature.current = filterSignature
+    const active = displayStageModels.find((s) => s.def.id === activeStageId)
+    if (active && active.count > 0) return
+    const biggest = [...displayStageModels].sort((a, b) => b.count - a.count)[0]
+    if (biggest && biggest.count > 0) setActiveStageId(biggest.def.id)
+  }, [filterSignature, isMobile, displayStageModels, activeStageId])
 
   const commitDrop = useCallback(async (
     cardId: string,
@@ -508,57 +616,145 @@ export function PipelineOpportunityBoard({
     const activeCards = activeStage?.cards ?? []
 
     return (
-      <div className="plv plv--mobile-studio">
-        <PipelineMobileHeader
-          scope={scope}
-          onScopeChange={onScopeChange}
-          metrics={kpi}
-          scopedTotal={scopedTotal}
+      <div className="plv plv--mobile-studio plm">
+        <PipelineMobileCommandBar
+          // The header total is ALWAYS the filtered universe on mobile. Using
+          // the server's `scopedTotal` made the header contradict the board:
+          // switching to a scope with no leads still read "258" above an empty
+          // list. `globalTotal` still carries the book-wide number beside it.
+          total={visibleCards.length}
           globalTotal={globalTotal}
+          needsReply={mobileFacets.needsResponse}
+          followUpsDue={mobileFacets.followUpDue}
+          needsReplyOn={mobileFilters.needsResponse}
+          followUpOn={mobileFilters.followUpDue}
+          onNeedsReply={() => setMobileFilters((f) => ({ ...f, needsResponse: !f.needsResponse }))}
+          onFollowUp={() => setMobileFilters((f) => ({ ...f, followUpDue: !f.followUpDue }))}
+          onOpenFilters={() => setFilterSheetOpen(true)}
+          filterCount={activeFilterCount(mobileFilters)}
+          sortLabel={SORT_OPTIONS.find((o) => o.id === mobileSort)?.label ?? 'Newest activity'}
+          scope={scope}
+          scopes={PIPELINE_SCOPE_OPTIONS.map((o) => ({
+            id: o.value,
+            // Shorter mobile labels; the full words collided at 375px.
+            label: MOBILE_SCOPE_LABELS[o.value] ?? o.label,
+          }))}
+          onScopeChange={(id) => onScopeChange?.(id as typeof scope)}
+          query={query}
+          onQueryChange={setQuery}
           refreshing={refreshing}
         />
 
-        {transitionError && <div className="plv-transition-error" role="alert">{transitionError}</div>}
+        {filterSheetOpen ? (
+          <PipelineMobileFilterSheet
+            filters={mobileFilters}
+            onChange={setMobileFilters}
+            sort={mobileSort}
+            onSortChange={setMobileSort}
+            stageOptions={mobileFacets.stages}
+            statusOptions={mobileFacets.statuses}
+            temperatureOptions={mobileFacets.temperatures}
+            needsResponseCount={mobileFacets.needsResponse}
+            followUpDueCount={mobileFacets.followUpDue}
+            resultCount={visibleCards.length}
+            onClose={() => setFilterSheetOpen(false)}
+          />
+        ) : null}
 
-        <PipelineMobileToolbar
-          query={query}
-          onQueryChange={setQuery}
-          groupBy={groupBy}
-          onGroupByChange={onGroupByChange}
-          hotOnly={hotOnly}
-          followUpOnly={followUpOnly}
-          showSuppressed={showSuppressed}
-          onHotOnly={setHotOnly}
-          onFollowUpOnly={setFollowUpOnly}
-          onShowSuppressed={setShowSuppressed}
-          resultCount={visibleCards.length}
-        />
+        {transitionError ? (
+          <div className="plm-error" role="alert">
+            <strong>Couldn’t update that lead</strong>
+            <span>{transitionError}</span>
+          </div>
+        ) : null}
 
-        <PipelineMobileStageRail
-          stages={displayStageModels.map((s) => ({
-            id: s.def.id,
-            label: s.def.label,
-            tone: s.def.tone,
-            count: s.count,
+        <PipelineMobileSpine
+          stages={displayStageModels.map((st) => ({
+            id: st.def.id,
+            label: st.def.label,
+            count: st.count,
           }))}
           activeId={activeStageId}
           onSelect={setActiveStageId}
         />
 
-        <div className="plv-mobile-list">
-          {loading && opportunities.length === 0 && (
-            <div className="plv-mobile-empty" role="status">
-              <strong>Loading pipeline…</strong>
+        <div className="plm-list">
+          {loading && opportunities.length === 0 ? (
+            <div className="plm-skeleton" aria-hidden="true">
+              <span /><span /><span /><span /><span /><span />
             </div>
-          )}
-          {!loading && activeCards.length === 0 && (
-            <div className="plv-mobile-empty" role="status">
-              <strong>No deals in {activeStage?.def.label ?? 'this stage'}</strong>
-              <span>Try another stage, widen scope, or clear filters.</span>
+          ) : null}
+          {!loading && activeCards.length === 0 ? (
+            // Compact on purpose: an empty stage must not push the spine off
+            // screen, because the spine is how you leave the empty stage.
+            <div className="plm-empty" role="status">
+              <strong>No leads in {activeStage?.def.label ?? 'this stage'}</strong>
+              {activeFilterCount(mobileFilters) > 0 ? (
+                <button type="button" className="plm-empty__clear"
+                  onClick={() => setMobileFilters(EMPTY_FILTERS)}>
+                  Clear filters
+                </button>
+              ) : (
+                <span>Pick another stage above or widen the scope.</span>
+              )}
             </div>
-          )}
-          {activeCards.map((card) => renderCard(card, true))}
+          ) : null}
+          {activeCards.map((card) => (
+            <PipelineMobileRow
+              key={card.opp.id}
+              opp={card.opp}
+              selected={card.opp.id === selectedId}
+              onOpen={() => setCommandLead(card.opp)}
+              onMessage={card.opp.primary_thread_key
+                ? () => onOpenCommandView(card.opp.primary_thread_key)
+                : undefined}
+              onWorkflow={card.opp.primary_thread_key
+                ? () => setWorkflowThread({
+                    threadKey: card.opp.primary_thread_key as string,
+                    name: card.opp.seller_display_name ?? card.opp.property_address_full ?? 'lead',
+                    stage: (card.opp as unknown as Record<string, unknown>).canonical_lifecycle_stage as string ?? null,
+                    status: (card.opp as unknown as Record<string, unknown>).canonical_operational_status as string ?? null,
+                    temperature: (card.opp as unknown as Record<string, unknown>).canonical_lead_temperature as string ?? null,
+                  })
+                : undefined}
+            />
+          ))}
         </div>
+
+        <div className="plm-safe" aria-hidden="true" />
+
+        {commandLead ? (
+          <PipelineLeadCommandSheet
+            opp={commandLead}
+            onClose={() => setCommandLead(null)}
+            onOpenConversation={(tk) => { setCommandLead(null); onOpenCommandView(tk) }}
+            onOpenFullDetail={(o) => { setCommandLead(null); handleCardClick(o.id) }}
+            onWorkflowPatched={() => { void onRefresh?.() }}
+          />
+        ) : null}
+
+        {workflowThread ? (
+          <div className="plm-sheet-root" role="dialog" aria-modal="true" aria-label="Change workflow state">
+            <button type="button" className="plm-sheet-scrim" aria-label="Close"
+              onClick={() => setWorkflowThread(null)} />
+            <div className="plm-sheet">
+              <div className="plm-sheet__grip" aria-hidden="true" />
+              <h3 className="plm-sheet__title">{workflowThread.name}</h3>
+              {/* The same canonical control the Seller Detail uses — same
+                  registry, same optimistic commit, same PATCH. */}
+              <MobileWorkflowControls
+                data={{
+                  threadKey: workflowThread.threadKey,
+                  lifecycle_stage: workflowThread.stage,
+                  operational_status: workflowThread.status,
+                  lead_temperature: workflowThread.temperature,
+                }}
+                onPatched={() => { void onRefresh?.() }}
+              />
+              <button type="button" className="plm-sheet__done" onClick={() => setWorkflowThread(null)}>Done</button>
+            </div>
+          </div>
+        ) : null}
 
         <PipelineMobileDetailSheet
           open={dockOpen && Boolean(sheetOpp)}

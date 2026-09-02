@@ -1109,6 +1109,38 @@ export interface QueueControlSettings {
   [key: string]: unknown
 }
 
+export interface CampaignMarketInventoryResponse {
+  ok: boolean
+  scope: string
+  scope_label: string
+  inventory: {
+    universe_properties: number
+    contact_resolved: number
+    sms_eligible: number
+    ready: number
+    route_local: number
+    route_cross_state: number
+    route_none: number
+  }
+  markets: Array<{
+    market: string
+    universe: number
+    ready: number
+    local_route: number
+    cross_state: number
+    unrouted: number
+  }>
+}
+
+/**
+ * GLOBAL inventory — the whole target graph, not the targets inside campaigns.
+ * Deliberately a separate call from the campaign list so it can never slow the
+ * list's critical path.
+ */
+export function getCampaignMarketInventory(limit = 12): Promise<BackendResult<CampaignMarketInventoryResponse>> {
+  return callBackend(`/api/cockpit/campaigns/market-inventory?limit=${limit}`)
+}
+
 export function getQueueControlSettings(): Promise<BackendResult<{ ok: boolean; action: string; diagnostics: QueueControlSettings }>> {
   return callBackend('/api/cockpit/queue/control')
 }
@@ -1708,8 +1740,28 @@ export function fetchMapAccounting(params: {
   return callBackend<MapAccountingResponse>(`/api/internal/dashboard/ops/map/accounting?${qs}`, { signal })
 }
 
-export function queueCampaignPlan(campaignId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<QueueBatchResponse>> {
-  return callBackend<QueueBatchResponse>(`/api/cockpit/campaigns/${campaignId}/queue-plan`, {
+/**
+ * Renderability preflight for LAUNCH.
+ *
+ * dry_run runs the full plan — routing, template selection, render + lint —
+ * without writing a single send_queue row (createCampaignQueuePlan guards every
+ * insert behind `if (!dryRun)`). planned_target_count is therefore the exact
+ * audience Schedule can hand off, which is NOT the graph READY count: Miami
+ * Commercial reads 5 READY and plans 0, every one blocked on the blank-greeting
+ * lint. That gap must be visible before Schedule, not discovered after it.
+ */
+export interface CampaignLaunchPreflight extends QueueBatchResponse {
+  total_ready_targets?: number
+  planned_target_count?: number
+  skipped_counts_by_reason?: Record<string, number>
+  first_scheduled_at?: string | null
+  last_scheduled_at?: string | null
+  spread_interval_seconds?: number
+  caps?: Record<string, unknown>
+}
+
+export function queueCampaignPlan(campaignId: string, payload: Record<string, unknown> = {}): Promise<BackendResult<CampaignLaunchPreflight>> {
+  return callBackend<CampaignLaunchPreflight>(`/api/cockpit/campaigns/${campaignId}/queue-plan`, {
     method: 'POST',
     body: JSON.stringify({
       dry_run: true,

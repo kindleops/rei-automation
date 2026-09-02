@@ -1,0 +1,250 @@
+/*
+ * Campaign Command readout — mobile.
+ *
+ * Native command surface, not a SaaS dashboard: one dominant number, status as a
+ * LINE rather than boxes, generous negative space, motion only where it encodes
+ * real state (the running pip).
+ */
+
+.ccr {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 13px;
+}
+
+/* ── Dominant inventory number ────────────────────────────────────────── */
+.ccr__hero {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ccr__hero-value {
+  font-size: clamp(40px, 13vw, 52px);
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: -0.035em;
+  color: var(--nx-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccr__hero-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-bottom: 3px;
+}
+
+.ccr__hero-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--nx-accent);
+  white-space: nowrap;
+}
+
+.ccr__hero-sub {
+  font-size: 11px;
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── State line ───────────────────────────────────────────────────────── */
+.ccr__states {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ccr__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccr__state.is-running   { color: var(--nx-success, #22c55e); }
+.ccr__state.is-scheduled { color: var(--nx-accent); }
+.ccr__state.is-paused    { color: var(--nx-warning, #f5a524); }
+.ccr__state.is-idle      { color: var(--nx-text-tertiary); font-weight: 500; }
+
+/* The one piece of motion on this surface. It means "sending is live right now",
+   so it is not decoration. */
+.ccr__pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ccr-pip 1.9s ease-in-out infinite;
+}
+
+@keyframes ccr-pip {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.82); }
+}
+
+/* ── Movement line ────────────────────────────────────────────────────── */
+.ccr__movement {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding-top: 1px;
+  border-top: 1px solid var(--nx-border-subtle, rgba(255, 255, 255, 0.06));
+  padding-block-start: 9px;
+}
+
+.ccr__mv {
+  font-size: 12px;
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccr__mv strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nx-text-primary);
+  margin-right: 3px;
+}
+
+.ccr__mv.is-good strong { color: var(--nx-success, #22c55e); }
+.ccr__mv.is-quiet { color: var(--nx-text-tertiary); }
+
+.ccr__next {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nx-accent);
+  white-space: nowrap;
+}
+
+/* ── Alerts: only rendered when genuinely out of range ────────────────── */
+.ccr__alerts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ccr__alert {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.ccr__alert.is-warn {
+  color: var(--nx-warning, #f5a524);
+  background: color-mix(in srgb, var(--nx-warning, #f5a524) 14%, transparent);
+}
+
+.ccr__alert.is-crit {
+  color: var(--nx-danger, #ef4444);
+  background: color-mix(in srgb, var(--nx-danger, #ef4444) 14%, transparent);
+}
+
+/* ── Compact filter row: was ~25% of the first viewport ───────────────── */
+.ccf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 10px;
+}
+
+.ccf__search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 10px;
+  background: var(--nx-surface-1, rgba(255, 255, 255, 0.05));
+  border: 1px solid transparent;
+}
+
+.ccf__search:focus-within {
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+}
+
+.ccf__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--nx-text-primary);
+  /* 16px avoids the iOS focus zoom without inheriting the global !important rule. */
+  font-size: 16px;
+}
+
+.ccf__search input::placeholder { color: var(--nx-text-tertiary); font-size: 13px; }
+
+.ccf__filter {
+  /* Was consuming ~45% of the row to show a single word, pushing search into a
+     stub and orphaning the count at the edge. */
+  flex: none;
+  max-width: 42%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--nx-border-subtle, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--nx-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+}
+
+.ccf__filter.is-active {
+  color: var(--nx-accent);
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+}
+
+.ccf__count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  padding-right: 2px;
+}
+
+/* Restore a 44px hit area without inflating the visual box — the global mobile
+   rule would otherwise make both controls 44px tall and push the list down. */
+.ccf__filter::after {
+  content: '';
+  position: absolute;
+  inset: -4px -2px;
+}
+
+@media (max-width: 380px) {
+  .ccr { padding: 12px 14px 11px; gap: 9px; }
+  .ccf__filter { max-width: 40%; }
+  .ccr__hero-value { font-size: 38px; }
+  .ccr__movement { gap: 11px; }
+  .ccf { padding: 0 10px 9px; }
+}
+
+@media (min-width: 415px) {
+  .ccr { padding: 16px 18px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ccr__pip { animation: none; }
+}

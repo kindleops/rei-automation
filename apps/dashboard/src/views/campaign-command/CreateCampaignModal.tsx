@@ -1,6 +1,15 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, CreateCampaignPayload } from './campaigns.types'
+import { CampaignFunnel } from './components/CampaignFunnel'
+import { funnelCountsFromPreview, universeGapFromPreview } from './campaign-funnel.model'
+import './campaign-funnel.css'
+import { CampaignBuildMobile } from './mobile/CampaignBuildMobile'
+import { CampaignReachMobile } from './mobile/CampaignReachMobile'
+import { CampaignStageRail } from './mobile/CampaignStageRail'
+import { CampaignCategorySheet } from './mobile/CampaignCategorySheet'
+import { CampaignLaunchMobile } from './mobile/CampaignLaunchMobile'
+import './mobile/campaign-creator-mobile.css'
 import {
   activateCampaignWithReview,
   buildCampaignTargetSnapshots,
@@ -15,7 +24,7 @@ import {
   isInsideContactWindow,
   resolveCampaignTimezone,
 } from './campaign-builder-launch'
-import { getCampaignBackend } from '../../lib/api/backendClient'
+import { getCampaignBackend, queueCampaignPlan, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
 import {
   CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
@@ -38,7 +47,7 @@ import {
 import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { CampaignBuilderMobileNav, type CampaignBuilderPhase } from './components/CampaignBuilderMobileNav'
+import type { CampaignBuilderPhase } from './components/CampaignBuilderMobileNav'
 import './campaign-pacing.css'
 import './campaign-builder-mobile.css'
 
@@ -217,13 +226,14 @@ const getDefaultFutureDateTimeLocal = (): string => {
 }
 
 const DEFAULT_PACING: PacingMode = 'normal'
+const DEFAULT_MAX_TARGETS = 1000
 
 const createDefaultLaunchSettings = (): LaunchSettings => {
   const preset = PACING_PRESET_BY_KEY.get(DEFAULT_PACING)!
   return {
     mode: 'dry_run',
     pacing: DEFAULT_PACING,
-    max_targets: '1000',
+    max_targets: String(DEFAULT_MAX_TARGETS),
     daily_cap: preset.daily_cap,
     per_sender_cap: preset.per_sender_cap,
     per_market_cap: preset.per_market_cap,
@@ -383,7 +393,25 @@ const computeLaunchReadiness = (
   if (loading) return { status: 'loading', reasons: [], graphPartial: false }
   if (!preview) return { status: 'no_preview', reasons: ['Run a preview to validate targeting counts.'], graphPartial: false }
   const graphPartial = preview.graph_refresh_scope === 'partial'
-  if (estimates.deliverable === 0) return { status: 'blocked', reasons: ['No contacts match the current targeting.'], graphPartial }
+  if (estimates.deliverable === 0) {
+    // "No contacts match" is only true when nothing matched. When rows DID match
+    // but the live sender-inventory recount returns 0 sendable (as it does for
+    // markets served entirely by approved cross-state routes, e.g. Philadelphia,
+    // PA: 3,500 matched, 3,499 routed cross-state, live recount 0), say that
+    // instead of blaming the targeting.
+    const matched = Number(
+      preview.exclusive_block_reasons?.matched ?? preview.total_matched_properties ?? preview.total_matched ?? 0,
+    )
+    return {
+      status: 'blocked',
+      reasons: [
+        matched > 0
+          ? `${matched.toLocaleString()} properties match, but none are sendable against current live sender inventory.`
+          : 'No contacts match the current targeting.',
+      ],
+      graphPartial,
+    }
+  }
   const reasons: string[] = []
   if (graphPartial) reasons.push('Target graph is incomplete — counts reflect a partial market sample, not the full universe')
   if (draftCount > 0) reasons.push(`${draftCount} filter${draftCount !== 1 ? 's' : ''} edited but not applied`)
@@ -393,6 +421,25 @@ const computeLaunchReadiness = (
     reasons.push(`Partial sender coverage (${estimates.senderCoveragePct}% — initial batch limited, feeder replenishes)`)
   }
   return { status: reasons.length > 0 ? 'warning' : 'ready', reasons, graphPartial }
+}
+
+/**
+ * Mobile scope-tab labels.
+ *
+ * At 393px the six full labels total 953px of scroll width, so the strip opened
+ * sliced mid-word ("MASTE…") against a hard edge and read as broken rather than
+ * scrollable. "Targeting" also repeated across three tabs inside a panel already
+ * headed "Property Targeting".
+ *
+ * Desktop keeps the full labels — this only shortens the mobile strip.
+ */
+const MOBILE_DOMAIN_TAB_LABELS: Record<string, string> = {
+  properties: 'Property',
+  prospects: 'Prospect',
+  master_owners: 'Master Owner',
+  phones: 'Phone Quality',
+  outreach: 'Outreach',
+  sender_coverage: 'Sender',
 }
 
 const SCHEDULE_PRESETS: Array<{ key: string; label: string; value: () => string }> = [
@@ -528,6 +575,50 @@ const makeFilterId = (): string => {
   return `filter-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/**
+ * Rehydrate a campaign's persisted targeting into editable filter state.
+ *
+ * Saved filters are stored in the backend's snake_case shape and carry NO `id`
+ * — but the editor keys everything off `id`: buildActiveFilterDraft keeps only
+ * filters whose id is marked 'active' in filterStatuses. So loading a campaign
+ * dropped every saved filter, and opening an existing campaign showed an empty
+ * builder previewing the entire 41.7k universe instead of its own targeting.
+ *
+ * Assigns ids, maps field_key -> fieldKey, and returns the matching 'active'
+ * statuses so the loaded targeting is applied rather than sitting as an
+ * invisible draft.
+ */
+const rehydrateSavedFilters = (
+  raw: unknown,
+): { groups: CampaignFilterGroups; statuses: Record<string, FilterStatus> } => {
+  const groups = createEmptyFilterGroups()
+  const statuses: Record<string, FilterStatus> = {}
+  const source = (raw ?? {}) as Record<string, unknown>
+
+  for (const domain of ALL_DOMAIN_KEYS) {
+    const list = Array.isArray(source[domain]) ? (source[domain] as unknown[]) : []
+    groups[domain] = list.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const row = entry as Record<string, unknown>
+      const fieldKey = String(row.fieldKey ?? row.field_key ?? '').trim()
+      const operator = String(row.operator ?? '').trim()
+      if (!fieldKey || !operator) return []
+      const id = String(row.id ?? '').trim() || makeFilterId()
+      statuses[id] = 'active'
+      return [{
+        id,
+        domain,
+        category: String(row.category ?? ''),
+        fieldKey,
+        operator,
+        value: row.value,
+      } as CampaignFilterCondition]
+    })
+  }
+
+  return { groups, statuses }
+}
+
 const buildActiveFilterDraft = (
   draft: CampaignWizardDraft,
   statuses: Record<string, FilterStatus>,
@@ -609,7 +700,10 @@ const buildLaunchPayload = (settings: LaunchSettings): CampaignLaunchPayload => 
     create_send_queue_rows: isLive,
     explicit_operator_action: true,
     pacing: settings.pacing,
-    max_targets: parsePositiveInt(settings.max_targets, 1),
+    // A blank/invalid cap previously fell back to 1, silently turning a
+    // 30k-target campaign into a one-message send. Fall back to the same default
+    // the form ships with so an empty field never truncates the audience.
+    max_targets: parsePositiveInt(settings.max_targets, DEFAULT_MAX_TARGETS),
     daily_cap: parsePositiveInt(settings.daily_cap, 750),
     per_sender_cap: parsePositiveInt(settings.per_sender_cap, 150),
     per_market_cap: parsePositiveInt(settings.per_market_cap, 400),
@@ -655,11 +749,39 @@ export const CreateCampaignModal = ({
   const [isSaving, setIsSaving] = useState(false)
   const [isLaunching, setIsLaunching] = useState(false)
   const [fieldPickerState, setFieldPickerState] = useState<{ domain: CampaignDomainKey; category: string } | null>(null)
+  const [categorySheetOpen, setCategorySheetOpen] = useState(false)
   const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
   const [savedCampaignId, setSavedCampaignId] = useState<string | null>(campaignId ?? null)
   const [loadStage, setLoadStage] = useState(0)
+  // Distinct from loadStage, which also covers catalog boot. This is only "we
+  // were opened for an existing campaign and its saved targeting has not
+  // arrived yet" — without it, Setup rendered a builder with zero filters for
+  // the ~1.5s the detail call takes, which reads as "this campaign has no
+  // targeting" rather than "still loading".
+  const [isLoadingCampaign, setIsLoadingCampaign] = useState<boolean>(Boolean(campaignId))
   const [launchSettings, setLaunchSettings] = useState<LaunchSettings>(() => createDefaultLaunchSettings())
   const [launchPanelExpanded, setLaunchPanelExpanded] = useState(false)
+  // LAUNCH keeps its execution plan compact; each row opens its own control in
+  // the same full-screen sheet chrome BUILD uses for targeting categories.
+  const [launchSheet, setLaunchSheet] = useState<null | 'schedule' | 'pacing' | 'limit'>(null)
+  /**
+   * LAUNCH renderability preflight.
+   *
+   * REACH keeps showing canonical graph READY. LAUNCH must show what Schedule
+   * can ACTUALLY hand off after template selection + render + lint — Miami
+   * Commercial is 5 READY / 0 schedulable, and that was only discoverable after
+   * pressing Schedule.
+   *
+   * Cached against the campaign + targeting + launch-settings signature so BUILD
+   * stays cheap (nothing renders on filter edits) and the preflight re-runs only
+   * when an input that can change renderability changes.
+   */
+  const [launchPreflight, setLaunchPreflight] = useState<CampaignLaunchPreflight | null>(null)
+  // The exact inputs the snapshot was computed against. Schedule reuses the
+  // snapshot only while this still equals the live key.
+  const [launchPreflightSnapshotKey, setLaunchPreflightSnapshotKey] = useState<string | null>(null)
+  const [launchPreflightLoading, setLaunchPreflightLoading] = useState(false)
+  const preflightKeyRef = useRef<string | null>(null)
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
   const [pendingLaunchIntent, setPendingLaunchIntent] = useState<'schedule' | 'activate'>('schedule')
   const [launchResult, setLaunchResult] = useState<CampaignLaunchResult | null>(null)
@@ -697,7 +819,7 @@ export const CreateCampaignModal = ({
     setIsPersistingLaunch(true)
     setPersistLaunchError(null)
     void (async () => {
-      const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups)
+      const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups, Boolean(savedCampaignId))
       try {
         if (savedCampaignId) {
           await updateCampaignDraft(savedCampaignId, payload)
@@ -753,26 +875,30 @@ export const CreateCampaignModal = ({
     if (!campaignId) return
     let cancelled = false
     setLoadStage(3)
+    setIsLoadingCampaign(true)
     getCampaignBackend(campaignId)
       .then((res) => {
         if (cancelled || !res.ok || !res.data.campaign) return
         const c = res.data.campaign as Record<string, unknown>
         const meta = (c.metadata as Record<string, unknown>) ?? {}
-        const filters = (meta.target_filters as CampaignFilterGroups) ?? createEmptyFilterGroups()
+        const { groups, statuses } = rehydrateSavedFilters(meta.target_filters)
         setDraft((prev) => ({
           ...prev,
           name: String(c.name ?? prev.name),
           description: String(c.description ?? prev.description),
           template_use_case: String(c.objective ?? prev.template_use_case),
           stage_code: String(c.stage_code ?? prev.stage_code),
-          target_filters: filters,
+          target_filters: groups,
         }))
+        setFilterStatuses((prev) => ({ ...prev, ...statuses }))
         setSavedCampaignId(campaignId)
         setLoadStage(4)
+        setIsLoadingCampaign(false)
       })
       .catch((err) => {
         console.error('[CreateCampaignModal] campaign load failed', err)
       })
+      .finally(() => { if (!cancelled) setIsLoadingCampaign(false) })
     return () => { cancelled = true }
   }, [campaignId])
 
@@ -825,11 +951,36 @@ export const CreateCampaignModal = ({
       })
   }, [activeFilterDraft, activePreviewKey])
 
+  // Key that produced the currently displayed preview. Anything else means the
+  // number on screen no longer describes current targeting.
+  const previewedKeyRef = useRef<string | null>(null)
+  const [previewedKey, setPreviewedKey] = useState<string | null>(null)
+
   useEffect(() => {
+    if (!isPreviewLoading && preview) {
+      previewedKeyRef.current = activePreviewKey
+      setPreviewedKey(activePreviewKey)
+    }
+    // Only record the key a completed preview actually corresponds to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, isPreviewLoading])
+
+  const previewStale = previewedKey != null && previewedKey !== activePreviewKey
+
+  useEffect(() => {
+    // Desktop keeps live preview-on-change. On mobile a preview costs seconds,
+    // so BUILD edits mark the count stale instead of re-running the query, and
+    // the recount happens when the operator actually reaches REACH.
+    if (!isMobile) {
+      runPreview('auto')
+      return
+    }
+    if (mobilePhase !== 'reach') return
+    if (previewedKeyRef.current === activePreviewKey) return
     runPreview('auto')
     // activePreviewKey is the serialized active-filter contract; draft-only edits should not trigger preview.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePreviewKey])
+  }, [activePreviewKey, isMobile, mobilePhase])
 
   const fieldsByKey = useMemo(() => {
     const map = new Map((catalog?.fields ?? []).map((field) => [field.key, field]))
@@ -1002,9 +1153,12 @@ export const CreateCampaignModal = ({
   const getValueLabel = (filter: CampaignFilterCondition, field: CampaignFieldDefinition): string => {
     const op = filter.operator
     if (EMPTY_VALUE_OPERATORS.has(op)) return '(no value required)'
-    if (op === 'is_true') return 'True'
-    if (op === 'is_false') return 'False'
-    if (field.type === 'boolean') return op === 'is_true' ? 'True' : 'False'
+    // The friendly operator label already reads "is true" / "is false", so
+    // emitting a "True"/"False" value beside it rendered the applied filter as
+    // "Out Of State Owner is true True" — duplicated and ambiguous about which
+    // half is the condition.
+    if (op === 'is_true' || op === 'is_false') return ''
+    if (field.type === 'boolean') return ''
     if (op === 'between') {
       const [a, b] = valueAsRange(filter.value)
       return `${a} – ${b}`
@@ -1025,7 +1179,7 @@ export const CreateCampaignModal = ({
       setPersistLaunchError('Campaign name required')
       return null
     }
-    const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups)
+    const payload = buildCampaignPersistPayload(activeFilterDraft, launchSettings, serializeFilterGroups, Boolean(savedCampaignId))
     try {
       if (savedCampaignId) {
         await updateCampaignDraft(savedCampaignId, payload)
@@ -1160,17 +1314,63 @@ export const CreateCampaignModal = ({
   }
 
   const executeLaunch = async (payload: CampaignLaunchPayload, mode: CampaignLaunchMode) => {
+    // A Schedule action MUST always terminate in a visible state.
+    //
+    // Previously every failure path left launchResult null: a throw from
+    // launchCampaign, or `if (!campaignId) return`, dismissed the confirm modal
+    // and rendered nothing — while the server-side write may well have
+    // succeeded. That is a successful write the operator never sees, which is
+    // indistinguishable from "nothing happened". Every branch below now sets a
+    // result so LaunchSummaryModal renders deterministically.
+    let targetBuild: CampaignLaunchResult['target_build'] = null
     try {
       setIsLaunching(true)
       setLaunchResult(null)
       const campaignId = await ensureCampaignForLaunch()
-      if (!campaignId) return
+      if (!campaignId) {
+        setLaunchResult({
+          ok: false,
+          error: 'campaign_not_persisted',
+          message: persistLaunchError || 'Campaign could not be saved, so nothing was scheduled.',
+          target_build: null,
+        } as unknown as CampaignLaunchResult)
+        return
+      }
 
-      let targetBuild: CampaignLaunchResult['target_build'] = null
+      // Reuse the exact snapshot the preflight already built.
+      //
+      // The preflight builds campaign_targets and plans against them to produce
+      // the SCHEDULABLE figure the operator just read. Rebuilding here repeated
+      // that work — ~110s for a 1,000-target build — so Schedule appeared to hang
+      // for minutes after the tap and the confirmation never arrived. The
+      // snapshot is keyed against every input that can change the result
+      // (targeting, template/use-case, pacing, caps, spacing, contact window),
+      // so an unchanged key means the built targets are still exactly right.
+      const snapshotValid = Boolean(
+        launchPreflight
+        && launchPreflightSnapshotKey
+        && launchPreflightSnapshotKey === launchPreflightKey,
+      )
       if (mode === 'no_send' || mode === 'live') {
-        targetBuild = await buildCampaignTargetSnapshots(campaignId, {
-          limit: payload.max_targets,
-        })
+        if (snapshotValid) {
+          targetBuild = {
+            built_count: Number(launchPreflight?.total_ready_targets ?? 0),
+            reused_preflight_snapshot: true,
+          } as unknown as CampaignLaunchResult['target_build']
+        } else {
+          // Stale or missing snapshot: invalidate and require a fresh preflight
+          // rather than rebuilding for minutes under the operator.
+          setLaunchPreflight(null)
+          setLaunchPreflightSnapshotKey(null)
+          preflightKeyRef.current = null
+          setLaunchResult({
+            ok: false,
+            error: 'preflight_stale',
+            message: 'Targeting or launch settings changed — re-checking message readiness before scheduling.',
+            target_build: null,
+          } as unknown as CampaignLaunchResult)
+          return
+        }
       }
 
       const result = await launchCampaign(campaignId, payload)
@@ -1182,7 +1382,16 @@ export const CreateCampaignModal = ({
         severity: result.ok === false ? 'warning' : 'success',
       })
     } catch (error) {
-      emitNotification({ title: 'Launch execution failed', detail: humanizeLaunchError(error), severity: 'critical' })
+      const message = humanizeLaunchError(error)
+      // Surface the failure IN the summary surface, not only as a toast — the
+      // write may have landed server-side and the operator must be told to check.
+      setLaunchResult({
+        ok: false,
+        error: 'launch_execution_failed',
+        message,
+        target_build: targetBuild,
+      } as unknown as CampaignLaunchResult)
+      emitNotification({ title: 'Launch execution failed', detail: message, severity: 'critical' })
     } finally {
       setIsLaunching(false)
       setPendingLivePayload(null)
@@ -1369,18 +1578,18 @@ export const CreateCampaignModal = ({
           <span className="cmp-active-filter-value">{valueLabel}</span>
         </div>
         <div className="cmp-active-filter-meta">
+          {/* Operator-facing metadata only. The domain name repeats the scope tab
+              the filter already lives under, "Preview ✓" is the normal case, and
+              `src: <column>` is a database column name — none of that belongs on
+              a card the operator reads while building targeting. The one signal
+              worth keeping is a field that will NOT be honoured by preview. */}
           {optionCount > 0 && (
             <span className="cmp-active-filter-badge cmp-active-filter-badge--count">{formatNumber(optionCount)} options</span>
           )}
-          <span className="cmp-active-filter-badge cmp-active-filter-badge--domain">{field.domain.replace(/_/g, ' ')}</span>
-          {field.supported_in_preview ? (
-            <span className="cmp-active-filter-badge cmp-active-filter-badge--preview">Preview ✓</span>
-          ) : (
-            <span className="cmp-active-filter-badge cmp-active-filter-badge--unsupported">~preview</span>
+          {!field.supported_in_preview && (
+            <span className="cmp-active-filter-badge cmp-active-filter-badge--unsupported">Not counted in preview</span>
           )}
-          {field.source_column && (
-            <span className="cmp-active-filter-badge cmp-active-filter-badge--source">src: {field.source_column}</span>
-          )}
+
           <div className="cmp-active-filter-actions">
             <button type="button" onClick={() => editFilter(filter.id)}>Edit</button>
             <button type="button" onClick={() => removeFilter(filter)}>Remove</button>
@@ -1489,6 +1698,121 @@ export const CreateCampaignModal = ({
     'Preparing campaign builder',
   ]
 
+  // ── Mobile BUILD projections ───────────────────────────────────────────
+  // Sender/routing is REACH intelligence, not a targeting category, so it is
+  // not offered as a drill-in. Any sender_coverage filter already saved on a
+  // campaign still appears under APPLIED FILTERS so it stays visible and
+  // removable rather than becoming unreachable.
+  const BUILD_CATEGORY_LABELS: Record<string, string> = {
+    properties: 'Property',
+    prospects: 'Prospect',
+    master_owners: 'Owner',
+    phones: 'Phone quality',
+    outreach: 'Outreach rules',
+  }
+
+  const buildCategories = useMemo(() => (catalog?.domains ?? [])
+    .filter((domain) => BUILD_CATEGORY_LABELS[domain.key])
+    .map((domain) => ({
+      key: domain.key,
+      label: BUILD_CATEGORY_LABELS[domain.key],
+      applied: activeFilterDraft.target_filters[domain.key]?.length ?? 0,
+    })), [catalog, activeFilterDraft])
+
+  const buildAppliedFilters = useMemo(() => {
+    const rows: Array<{
+      id: string; domain: string; fieldLabel: string; operatorLabel: string
+      valueLabel: string; unsupported: boolean; pending: boolean
+    }> = []
+    for (const domain of ALL_DOMAIN_KEYS) {
+      for (const filter of draft.target_filters[domain] ?? []) {
+        const field = fieldsByKey.get(filter.fieldKey)
+        if (!field) continue
+        rows.push({
+          id: filter.id,
+          domain,
+          fieldLabel: field.label,
+          operatorLabel: FRIENDLY_OPERATORS[filter.operator] ?? filter.operator,
+          valueLabel: getValueLabel(filter, field),
+          unsupported: !field.supported_in_preview,
+          pending: filterStatuses[filter.id] !== 'active',
+        })
+      }
+    }
+    return rows
+  }, [draft, fieldsByKey, filterStatuses])
+
+
+  // NOTE: this hook must stay ABOVE the isCatalogLoading early return. Placing
+  // it below made the hook count differ between renders once the catalog
+  // resolved, which crashed the whole Creator with "Rendered more hooks than
+  // during the previous render".
+  // Renderability preflight — runs when LAUNCH is entered, and only re-runs when
+  // an input that can change what renders actually changes. dry_run writes zero
+  // rows (every insert in createCampaignQueuePlan is behind `if (!dryRun)`).
+  const launchPreflightKey = [
+    savedCampaignId || 'unsaved',
+    activePreviewKey,
+    launchSettings.max_targets,
+    launchSettings.pacing,
+    launchSettings.daily_cap,
+    launchSettings.spread_interval_seconds,
+    launchSettings.contact_window_start,
+    launchSettings.contact_window_end,
+    draft.template_use_case || '',
+    draft.stage_code || '',
+  ].join('|')
+
+  useEffect(() => {
+    if (!isMobile || mobilePhase !== 'launch') return
+    if (!savedCampaignId) { setLaunchPreflight(null); return }
+    if (preflightKeyRef.current === launchPreflightKey) return
+    preflightKeyRef.current = launchPreflightKey
+    let dead = false
+    setLaunchPreflightLoading(true)
+    // The plan can only measure renderability against campaign_targets, and those
+    // are built at Schedule time — so a bare dry_run reports planned=0 for every
+    // campaign, which would falsely claim "0 schedulable" for a 3,260-row slice.
+    // Build the snapshots first (campaign_targets only — never send_queue), then
+    // plan against them. This is the same build Schedule performs, just earlier.
+    // The preflight MUST measure the same set Schedule will build.
+    //
+    // A bounded sample undercounts: at a 250-row ceiling Dallas reported 16
+    // schedulable and then queued 50, because Schedule builds max_targets and
+    // finds more renderable rows further down. Schedulable has to equal the
+    // actual handoff, so the preflight uses the identical limit Schedule uses.
+    const limit = parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS)
+    // Build the target snapshots, then plan against them.
+    //
+    // The plan can only measure renderability against campaign_targets, so a
+    // bare dry_run reports planned=0 for a campaign that has never been built —
+    // which would falsely claim "0 schedulable" for a 3,260-row audience.
+    // build-targets writes campaign_targets only (never send_queue) and does not
+    // take the campaign execution lock: that lock is acquired only for live or
+    // proof-hydration writes, and a dry run is neither. Verified concurrently:
+    // preview 3.7s / build-targets 8.4s, no contention.
+    void buildCampaignTargetSnapshots(savedCampaignId, { limit })
+      .then(() => queueCampaignPlan(savedCampaignId, {
+        dry_run: true,
+        create_send_queue_rows: false,
+        limit,
+      }))
+      .then((res) => {
+        if (dead) return
+        // Only trust the plan when it actually had targets to plan against;
+        // planned_target_count is 0 for a campaign with no snapshots yet, which
+        // would falsely claim "0 schedulable" for a 3,260-row audience.
+        const data = res.ok && res.data ? res.data : null
+        const usable = data && Number(data.total_ready_targets ?? 0) > 0 ? data : null
+        setLaunchPreflight(usable)
+        setLaunchPreflightSnapshotKey(usable ? launchPreflightKey : null)
+      })
+      .catch(() => { if (!dead) { setLaunchPreflight(null); setLaunchPreflightSnapshotKey(null) } })
+      .finally(() => { if (!dead) setLaunchPreflightLoading(false) })
+    return () => { dead = true }
+  }, [isMobile, mobilePhase, savedCampaignId, launchPreflightKey])
+
+
   if (isCatalogLoading || !catalog || !activeDomainDefinition) {
     return createPortal(
       <div className={`cmp-studio-overlay${isMobile ? ' cmp-studio-overlay--mobile' : ''}`}>
@@ -1513,9 +1837,70 @@ export const CreateCampaignModal = ({
   const degradedOptionState = Object.values(optionStatus).find((state) => state.degraded)
   const backendDegraded = Boolean(catalog.degraded || preview?.degraded || degradedOptionState)
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
+  // The one READY figure. REACH derives it from the exclusive partition, so
+  // LAUNCH must read the same value rather than a parallel ready_to_queue.
+  const canonicalReady = preview
+    ? Number(preview.exclusive_block_reasons?.ready ?? preview.ready_to_queue ?? 0)
+    : null
+
+  // Same canonical routing tiers REACH reports, scoped to the targeted audience.
+  const previewCanonicalRouting = (() => {
+    const canonical = (preview?.sender_coverage as { canonical?: Record<string, number | null> } | null)?.canonical
+    if (!canonical) return null
+    return {
+      covered: Number(canonical.exact_market_match ?? 0),
+      crossState: Number(canonical.approved_state_fallback ?? 0),
+      unrouted: Number(canonical.no_sender_route ?? 0),
+    }
+  })()
+
+  /**
+   * Single source of truth from LAUNCH through confirmation.
+   *
+   * Derived from the preflight snapshot + canonical routing, exactly as the
+   * mobile LAUNCH screen derives them, so the confirmation dialog cannot show a
+   * different audience, coverage or runtime at the moment of commitment.
+   */
+  const launchConfirmTruth = (() => {
+    const schedulable = launchPreflight?.planned_target_count != null
+      ? Number(launchPreflight.planned_target_count)
+      : null
+    const routedPct = previewCanonicalRouting
+      ? (() => {
+          const total = previewCanonicalRouting.covered + previewCanonicalRouting.crossState + previewCanonicalRouting.unrouted
+          return total > 0
+            ? Math.round(((previewCanonicalRouting.covered + previewCanonicalRouting.crossState) / total) * 100)
+            : null
+        })()
+      : null
+    const first = launchPreflight?.first_scheduled_at
+    const last = launchPreflight?.last_scheduled_at
+    let durationLabel: string | null = null
+    if (first && last) {
+      const mins = Math.max(0, (new Date(last).getTime() - new Date(first).getTime()) / 60000)
+      durationLabel = mins < 1 ? 'under a minute'
+        : mins < 90 ? `~${Math.round(mins)} min`
+        : mins < 1440 ? `~${(mins / 60).toFixed(1)} hr`
+        : `~${Math.ceil(mins / 1440)} days`
+    }
+    if (schedulable == null && routedPct == null && durationLabel == null) return null
+    return { schedulable, routedPct, durationLabel }
+  })()
+
   const launchEstimates = computeLaunchEstimates(preview, launchSettings)
   const launchReadiness = computeLaunchReadiness(preview, isPreviewLoading, totalDraftCount, launchEstimates)
+
+  const buildReadinessLine = launchReadiness.graphPartial
+    ? `Target graph is incomplete — counts reflect a partial sample (${preview?.graph_row_count?.toLocaleString() ?? '?'} rows).`
+    : null
+
+  const removeFilterById = (id: string) => {
+    const found = Object.values(draft.target_filters).flat().find((f) => f.id === id)
+    if (found) removeFilter(found)
+  }
   const { market: draftMarket } = extractMarketFromFilterDraft(activeFilterDraft)
+
+
   const campaignTimezone = resolveCampaignTimezone(draftMarket)
   const insideContactWindow = isInsideContactWindow(
     campaignTimezone,
@@ -1524,11 +1909,13 @@ export const CreateCampaignModal = ({
   )
   const mobileHardBlockers = isMobile && mobilePhase === 'launch'
     ? [
-        ...(isPersistingLaunch ? ['Saving campaign to server…'] : []),
+        // "Saving…" and "Preview still loading" are transient states, not
+        // blockers an operator can clear. Listing them under BLOCKERS made a
+        // half-second save read as "1 must clear". Both already gate the action
+        // through canScheduleNow, and the button renders them as busy.
         ...(persistLaunchError ? [persistLaunchError] : []),
         ...(!savedCampaignId && !isPersistingLaunch ? ['Campaign not persisted yet'] : []),
         ...(!draft.name.trim() ? ['Campaign name required'] : []),
-        ...(isPreviewLoading ? ['Preview still loading'] : []),
         ...(!preview ? ['Run preview to validate targeting'] : []),
         ...(backendDegraded ? [backendDegradedMessage] : []),
         ...(launchEstimates.deliverable === 0 ? ['No eligible targets'] : []),
@@ -1537,10 +1924,42 @@ export const CreateCampaignModal = ({
         ...activationBlockers,
       ].filter((value, index, list) => value && list.indexOf(value) === index)
     : []
+  /**
+   * Sender coverage on LAUNCH is read from the canonical routing tiers, not from
+   * a ratio.
+   *
+   * computeLaunchReadiness derived coverage as sender_covered / universe, which
+   * for Miami is 8,975 / 11,756 = 76% and printed "Partial sender coverage (76%)".
+   * That is false: canonical routing reports 11,756 locally routed and 0
+   * unrouted. The missing 24% is phone and suppression loss, already accounted
+   * for in REACH's exclusive partition. The same claim was then restated as a
+   * second warning, so one non-issue occupied two lines.
+   *
+   * Desktop keeps the old reason string; only the mobile launch surface is
+   * corrected here, and only when canonical routing is present to contradict it.
+   */
+  const canonicalRoutingKnown = previewCanonicalRouting != null
+  const isDerivedCoverageReason = (reason: string) => reason.startsWith('Partial sender coverage')
+
   const mobileActivationWarnings = isMobile && mobilePhase === 'launch'
     ? [
-        ...(launchReadiness.status === 'warning' ? launchReadiness.reasons : []),
-        ...(launchEstimates.senderCoveragePct !== null && launchEstimates.senderCoveragePct < 100 && launchEstimates.senderCovered > 0
+        // Suppress the derived coverage ratio whenever canonical routing is
+        // known — not only when nothing is unrouted. It divides READY by the
+        // universe, so a 4-market slice reported "Partial sender coverage (63%)"
+        // while canonical routing showed 21,040 of 22,632 covered (~93%), and it
+        // duplicated the accurate "1,592 have no sender route" warning printed
+        // right beside it.
+        ...(launchReadiness.status === 'warning'
+          ? launchReadiness.reasons.filter((reason) =>
+              !(canonicalRoutingKnown && isDerivedCoverageReason(reason)))
+          : []),
+        ...(canonicalRoutingKnown && previewCanonicalRouting!.unrouted > 0
+          ? [`${previewCanonicalRouting!.unrouted.toLocaleString()} targets have no sender route and will not be queued`]
+          : []),
+        ...(!canonicalRoutingKnown
+          && launchEstimates.senderCoveragePct !== null
+          && launchEstimates.senderCoveragePct < 100
+          && launchEstimates.senderCovered > 0
           ? [`${launchEstimates.senderCovered.toLocaleString()} targets covered by sender capacity — feeder replenishes as capacity opens`]
           : []),
       ].filter((value, index, list) => value && list.indexOf(value) === index)
@@ -1557,14 +1976,138 @@ export const CreateCampaignModal = ({
     formatLabel(draft.stage_code),
   ].join(' · ')
 
+  /**
+   * Domain heading + category stack.
+   *
+   * Extracted verbatim so the desktop panel and the mobile full-screen
+   * category sheet render the SAME field pickers and filter editors — the
+   * sheet owns chrome only, so no targeting or editing semantics change.
+   */
+  const renderCategoryStack = () => (
+    <>
+                <div className="cmp-domain-heading">
+                  <div>
+                    <span className="cmp-domain-kicker">{formatLabel(activeDomainDefinition.key)}</span>
+                    <h3>{activeDomainDefinition.tabLabel}</h3>
+                  </div>
+                  <div className={`cmp-domain-sot ${activeDomain === 'properties' ? 'is-anchor' : ''}`}>
+                    <Icon name={activeDomain === 'properties' ? 'database' : 'layers'} size={14} />
+                    <span>{activeDomainDefinition.sourceOfTruth}</span>
+                  </div>
+                </div>
+
+                {isLoadingCampaign && (
+                  <div className="cmp-campaign-loading" role="status" aria-live="polite">
+                    <span className="cmp-campaign-loading__bar" aria-hidden="true" />
+                    <span className="cmp-campaign-loading__bar" aria-hidden="true" />
+                    <span className="cmp-campaign-loading__bar" aria-hidden="true" />
+                    <p>Loading saved targeting…</p>
+                  </div>
+                )}
+
+                <div className="cmp-category-stack" hidden={isLoadingCampaign}>
+                  {activeDomainDefinition.categories.map((category) => {
+                    const categoryFields = activeDomainFields.filter((field) => field.category === category)
+                    const categoryFilters = draft.target_filters[activeDomain].filter((filter) => filter.category === category)
+                    const activeInCategory = categoryFilters.filter(f => filterStatuses[f.id] === 'active').length
+                    const draftInCategory = categoryFilters.filter(f => filterStatuses[f.id] !== 'active').length
+                    const suggestedKeys = SUGGESTED_FIELD_KEYS[`${activeDomain}.${category}`] ?? []
+                    const isPickerOpen = fieldPickerState?.domain === activeDomain && fieldPickerState?.category === category
+
+                    return (
+                      <section key={category} className="cmp-filter-category">
+                        <div className="cmp-filter-category-header">
+                          <div>
+                            <span>{category}</span>
+                            {/* Catalog size, not applied state — "5 fields" in the primary
+                                slot read as "5 filters set" while the real applied counts
+                                ("N active" / "N draft") sit beside it. */}
+                            <strong>{categoryFields.length} available</strong>
+                            {activeInCategory > 0 && (
+                              <em className="cmp-category-count cmp-category-count--active">{activeInCategory} active</em>
+                            )}
+                            {draftInCategory > 0 && (
+                              <em className="cmp-category-count cmp-category-count--draft">{draftInCategory} draft</em>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className={isPickerOpen ? 'is-active' : ''}
+                            onClick={() => {
+                              setFieldPickerState(isPickerOpen ? null : { domain: activeDomain, category })
+                            }}
+                          >
+                            <Icon name="filter" size={13} />
+                            Add Filter
+                          </button>
+                        </div>
+
+                        {isPickerOpen && (
+                          <FieldPickerInline
+                            categoryFields={categoryFields}
+                            suggestedKeys={suggestedKeys}
+                            onPick={addFilterForField}
+                            onClose={() => setFieldPickerState(null)}
+                          />
+                        )}
+
+                        {categoryFilters.length > 0 ? (
+                          <div className="cmp-filter-row-stack">
+                            {categoryFilters.map((filter) => {
+                              const status = filterStatuses[filter.id]
+                              if (status === 'active') {
+                                return renderActiveFilterCard(filter)
+                              }
+                              return renderFilterRow(filter, categoryFields)
+                            })}
+                          </div>
+                        ) : (
+                          <div className="cmp-empty-category">
+                            {suggestedKeys.length > 0 && (
+                              <>
+                                <div className="cmp-suggested-label">Suggested</div>
+                                <div className="cmp-suggested-chips">
+                                  {suggestedKeys
+                                    .map((key) => fieldsByKey.get(key))
+                                    .filter((f): f is CampaignFieldDefinition => !!f)
+                                    .map((field) => (
+                                      <button
+                                        key={field.key}
+                                        className="cmp-suggested-chip"
+                                        onClick={() => addFilterForField(field)}
+                                        title={field.description}
+                                      >
+                                        + {field.label}
+                                      </button>
+                                    ))
+                                  }
+                                  <button
+                                    className="cmp-suggested-chip cmp-suggested-chip--more"
+                                    onClick={() => setFieldPickerState({ domain: activeDomain, category })}
+                                  >
+                                    Browse all {categoryFields.length} fields
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    )
+                  })}
+                </div>
+    </>
+  )
   const modal = (
     <div className={`cmp-studio-overlay${isMobile ? ' cmp-studio-overlay--mobile' : ''}`}>
       <div className={`cmp-studio cmp-studio--catalog${isMobile ? ' cmp-studio--mobile' : ''}`}>
         <div className="cmp-studio-workspace">
           <div className="cmp-studio-header">
             <div>
+              {/* Was the literal "New Campaign" in every mode, so editing an
+                  existing campaign gave no indication of which one was open. */}
               <div className="cmp-studio-title">
-                New Campaign
+                {campaignId && draft.name.trim() ? draft.name.trim() : 'New Campaign'}
                 <span className="cmp-anchor-pill">Properties Anchor</span>
               </div>
               <div className="cmp-studio-subtitle">Approved field catalog — grouped by source-of-truth domain</div>
@@ -1671,35 +2214,33 @@ export const CreateCampaignModal = ({
             </div>
           ) : null}
 
+          {/* Mobile BUILD is its own composition. Targeting fields live in a
+              full-screen sheet, so this screen stays answerable: what am I
+              targeting, how many match, and what is unresolved. */}
           {isMobile && mobilePhase === 'build' && (
-            <>
-              {launchReadiness.graphPartial && (
-                <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
-                  <Icon name="alert" size={12} />
-                  <span>Target graph is incomplete — counts reflect a partial market sample ({preview?.graph_row_count?.toLocaleString() ?? '?'} rows).</span>
-                </div>
-              )}
-              {totalDraftCount > 0 && (
-                <div className="cmp-draft-filter-warn">
-                  <Icon name="alert-circle" size={12} />
-                  <span>{totalDraftCount} filter{totalDraftCount !== 1 ? 's' : ''} edited but not applied</span>
-                </div>
-              )}
-              <button
-                type="button"
-                className="cmp-mobile-reach-chip"
-                onClick={() => setMobilePhase('reach')}
-              >
-                <span className="cmp-mobile-reach-chip__value">
-                  {isPreviewLoading ? '…' : formatNumber(launchEstimates.deliverable)}
-                </span>
-                <div className="cmp-mobile-reach-chip__copy">
-                  <strong>Ready to schedule</strong>
-                  <span>View reach funnel &amp; diagnostics</span>
-                </div>
-                <Icon name="chevron-right" size={16} />
-              </button>
-            </>
+            <CampaignBuildMobile
+              name={draft.name}
+              onNameChange={(value) => updateDraftRoot('name', value)}
+              categories={buildCategories}
+              appliedFilters={buildAppliedFilters}
+              candidateCount={preview ? Number(preview.total_matched ?? 0) : null}
+              previewStale={previewStale}
+              previewLoading={isPreviewLoading}
+              unappliedCount={totalDraftCount}
+              readinessLine={buildReadinessLine}
+              onOpenCategory={(key) => {
+                setActiveDomain(key as CampaignDomainKey)
+                setCategorySheetOpen(true)
+              }}
+              onEditFilter={(id) => {
+                const found = Object.values(draft.target_filters).flat().find((f) => f.id === id)
+                if (!found) return
+                setActiveDomain(found.domain)
+                editFilter(id)
+                setCategorySheetOpen(true)
+              }}
+              onRemoveFilter={removeFilterById}
+            />
           )}
 
           {!isMobile && (
@@ -1951,178 +2492,146 @@ export const CreateCampaignModal = ({
           )}
 
           {isMobile && mobilePhase === 'launch' && (
-            <div className="cmp-mobile-launch">
-              {isPersistingLaunch && (
-                <div className="cmp-draft-filter-warn">
-                  <Icon name="clock" size={12} />
-                  <span>Saving campaign before launch…</span>
-                </div>
-              )}
-              {savedCampaignId && (
-                <div className="cmp-mobile-launch-card">
-                  <h4>Campaign ID</h4>
-                  <code className="cmp-mobile-launch-id">{savedCampaignId}</code>
-                </div>
-              )}
-              <div className="cmp-mobile-launch-card">
-                <h4>Launch readiness</h4>
-                <div className="ccc__intel-metric-row"><span>Persisted targets</span><strong>{formatNumber(preview?.built_target_count ?? preview?.ready_to_queue ?? launchEstimates.deliverable)}</strong></div>
-                <div className="ccc__intel-metric-row"><span>Preview candidates</span><strong>{formatNumber(launchEstimates.deliverable)}</strong></div>
-                <div className="ccc__intel-metric-row"><span>Sender covered</span><strong>{formatNumber(launchEstimates.senderCovered)}</strong></div>
-              </div>
-              {mobileActivationBlockers.length > 0 && (
-                <div className="cmp-readiness-reasons cmp-readiness-reasons--blockers">
-                  <strong>Blockers</strong>
-                  {mobileActivationBlockers.slice(0, 3).map((blocker) => (
-                    <span key={blocker}>{blocker}</span>
-                  ))}
-                </div>
-              )}
-              {mobileActivationWarnings.length > 0 && (
-                <div className="cmp-readiness-reasons">
-                  <strong>Warnings</strong>
-                  {mobileActivationWarnings.slice(0, 3).map((warning) => (
-                    <span key={warning}>{warning}</span>
-                  ))}
-                </div>
-              )}
-              {!insideContactWindow && (
-                <div className="cmp-draft-filter-warn">
-                  <Icon name="clock" size={12} />
-                  <span>Outside {campaignTimezone} contact window — execution begins at the next valid window opening.</span>
-                </div>
-              )}
-              {activationProgress && (
-                <div className="cmp-draft-filter-warn">
-                  <Icon name="activity" size={12} />
-                  <span>{activationProgress}</span>
-                </div>
-              )}
-              {launchReadiness.graphPartial && (
-                <div className="cmp-draft-filter-warn cmp-graph-stale-warn">
-                  <Icon name="alert" size={12} />
-                  <span>Target graph is incomplete — counts reflect a partial market sample ({preview?.graph_row_count?.toLocaleString() ?? '?'} rows).</span>
-                </div>
-              )}
-              {totalDraftCount > 0 && (
-                <div className="cmp-draft-filter-warn">
-                  <Icon name="alert-circle" size={12} />
-                  <span>{totalDraftCount} filter{totalDraftCount !== 1 ? 's' : ''} edited but not applied</span>
-                </div>
-              )}
-
-              <div className="cmp-mobile-launch-hero">
-                <span className="cmp-mobile-launch-hero__label">Preview candidates</span>
-                <div className="cmp-mobile-launch-hero__row">
-                  <span className={`cmp-mobile-launch-hero__value${isPreviewLoading ? ' is-loading' : ''}`}>
-                    {formatNumber(launchEstimates.deliverable)}
-                  </span>
-                  <span className={`cmp-readiness-badge is-${launchReadiness.status}`}>
-                    {launchReadiness.status === 'loading' ? 'Updating'
-                      : launchReadiness.status === 'no_preview' ? 'No Preview'
-                      : launchReadiness.status === 'ready' ? 'Ready'
-                      : launchReadiness.status === 'warning' ? 'Review'
-                      : 'Blocked'}
-                  </span>
-                </div>
-                {launchReadiness.reasons.length > 0 && (
-                  <div className="cmp-readiness-reasons">
-                    {launchReadiness.reasons.map((r) => <span key={r}>{r}</span>)}
-                  </div>
-                )}
-              </div>
-
-              <div className="cmp-mobile-launch-card">
-                <h4>Schedule</h4>
-                <label>
-                  <span>Send at</span>
-                  <input
-                    type="datetime-local"
-                    value={launchSettings.first_scheduled_at}
-                    onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
-                  />
-                </label>
-                <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
-                  {SCHEDULE_PRESETS.map((preset) => (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      className="cmp-schedule-preset"
-                      onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="cmp-mobile-launch-card">
-                <h4>Pacing</h4>
-                <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
-                  {PACING_PRESETS.map((preset) => (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
-                      onClick={() => applyPacingPreset(preset.key)}
-                      title={preset.blurb}
-                    >
-                      <strong>{preset.label}</strong>
-                      {preset.key !== 'custom' && <span>{formatNumber(Number(preset.daily_cap))}/day</span>}
-                    </button>
-                  ))}
-                </div>
-                <div className="cmp-mobile-launch-estimates">
-                  <div><em>Messages/day</em><strong>{formatNumber(launchEstimates.dailyVolume)}</strong></div>
-                  <div><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></div>
-                  <div><em>Runtime</em><strong>{launchEstimates.durationLabel}</strong></div>
-                  <div><em>Est. cost</em><strong>{formatUsdApprox(launchEstimates.cost)}</strong></div>
-                </div>
-              </div>
-
-              <div className="cmp-mobile-launch-card">
-                <h4>Send cap</h4>
-                <label>
-                  <span>Max targets</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={launchSettings.max_targets}
-                    onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
-                  />
-                </label>
-              </div>
-
-              <div className="cmp-mobile-launch-actions">
-                <button
-                  type="button"
-                  className="cmp-launch-btn is-accent"
-                  disabled={isLaunching || isPersistingLaunch || !canActivateNow}
-                  onClick={requestActivate}
-                >
-                  {isLaunching ? 'Activating…' : 'Activate Now'}
-                </button>
-                <button
-                  type="button"
-                  className="cmp-launch-btn"
-                  disabled={isLaunching || isPersistingLaunch || !canScheduleNow}
-                  onClick={requestSchedule}
-                >
-                  Schedule for Later
-                </button>
-                <button
-                  type="button"
-                  className="cmp-launch-btn cmp-launch-btn--ghost"
-                  disabled={isSaving || isPersistingLaunch || !canSaveDraft}
-                  onClick={saveCampaign}
-                >
-                  {isSaving ? 'Saving…' : 'Save Draft'}
-                </button>
-              </div>
-            </div>
+            <CampaignLaunchMobile
+              ready={canonicalReady}
+              schedulable={
+                launchPreflight?.planned_target_count != null
+                  ? Number(launchPreflight.planned_target_count)
+                  : null
+              }
+              schedulableLoading={launchPreflightLoading}
+              schedulableBlockers={launchPreflight?.skipped_counts_by_reason ?? null}
+              firstScheduledAt={launchPreflight?.first_scheduled_at ?? null}
+              lastScheduledAt={launchPreflight?.last_scheduled_at ?? null}
+              maxTargets={parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS)}
+              plan={{
+                effectiveSends: launchEstimates.effectiveSends,
+                dailyVolume: launchEstimates.dailyVolume,
+                spacingSeconds: launchEstimates.spacingSeconds,
+                durationLabel: launchEstimates.durationLabel,
+                spanDays: launchEstimates.spanDays,
+              }}
+              scheduledAt={launchSettings.first_scheduled_at}
+              routing={previewCanonicalRouting}
+              savedCampaignId={savedCampaignId}
+              campaignTimezone={campaignTimezone}
+              insideContactWindow={insideContactWindow}
+              blockers={mobileActivationBlockers}
+              warnings={mobileActivationWarnings}
+              previewLoading={isPreviewLoading}
+              activationProgress={activationProgress}
+              isLaunching={isLaunching}
+              isSaving={isSaving}
+              isPersisting={isPersistingLaunch}
+              canActivate={canActivateNow}
+              canSchedule={canScheduleNow}
+              canSaveDraft={canSaveDraft}
+              onActivate={requestActivate}
+              onSchedule={requestSchedule}
+              onSaveDraft={saveCampaign}
+              onEditSchedule={() => setLaunchSheet('schedule')}
+              onEditPacing={() => setLaunchSheet('pacing')}
+              onEditLimit={() => setLaunchSheet('limit')}
+              /* A blocker is resolved where it was created, not here. */
+              onResolveBlocker={() => setMobilePhase(preview ? 'build' : 'reach')}
+            />
           )}
 
-          {(!isMobile || mobilePhase === 'build') && (
+          {isMobile && mobilePhase === 'launch' && launchSheet && (
+            <CampaignCategorySheet
+              title={launchSheet === 'schedule' ? 'Start' : launchSheet === 'pacing' ? 'Pace' : 'Send limit'}
+              ariaLabel={`${launchSheet} settings`}
+              note={
+                launchSheet === 'schedule'
+                  ? (launchSettings.first_scheduled_at ? 'scheduled' : 'not set')
+                  : launchSheet === 'pacing'
+                    ? `${formatNumber(launchEstimates.dailyVolume)}/day`
+                    : `${formatNumber(launchEstimates.effectiveSends)} planned`
+              }
+              onClose={() => setLaunchSheet(null)}
+            >
+              {launchSheet === 'schedule' && (
+                <div className="cmp-mobile-launch-card">
+                  <label>
+                    <span>Send at</span>
+                    <input
+                      type="datetime-local"
+                      value={launchSettings.first_scheduled_at}
+                      onChange={(event) => updateLaunchSetting({ first_scheduled_at: event.target.value })}
+                    />
+                  </label>
+                  <div className="cmp-schedule-presets" role="group" aria-label="Quick schedule presets">
+                    {SCHEDULE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        className="cmp-schedule-preset"
+                        onClick={() => updateLaunchSetting({ first_scheduled_at: preset.value() })}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {launchSheet === 'pacing' && (
+                <div className="cmp-mobile-launch-card">
+                  <div className="cmp-pacing-presets" role="group" aria-label="Pacing presets">
+                    {PACING_PRESETS.map((preset) => (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        className={`cmp-pacing-preset ${launchSettings.pacing === preset.key ? 'is-active' : ''}`}
+                        onClick={() => applyPacingPreset(preset.key)}
+                        title={preset.blurb}
+                      >
+                        <strong>{preset.label}</strong>
+                        {preset.key !== 'custom' && <span>{formatNumber(Number(preset.daily_cap))}/day</span>}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="cmp-mobile-launch-estimates">
+                    <div><em>Messages/day</em><strong>{formatNumber(launchEstimates.dailyVolume)}</strong></div>
+                    <div><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></div>
+                    <div><em>Window</em><strong>{launchEstimates.windowHours}h</strong></div>
+                    <div><em>Runtime</em><strong>{launchEstimates.durationLabel}</strong></div>
+                  </div>
+                </div>
+              )}
+
+              {launchSheet === 'limit' && (
+                <div className="cmp-mobile-launch-card">
+                  <label>
+                    <span>Max targets</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={launchSettings.max_targets}
+                      onChange={(event) => updateLaunchSetting({ max_targets: event.target.value })}
+                    />
+                  </label>
+                  <div className="cmp-mobile-launch-estimates">
+                    <div><em>Ready</em><strong>{canonicalReady != null ? formatNumber(canonicalReady) : '—'}</strong></div>
+                    <div><em>Will send</em><strong>{formatNumber(launchEstimates.effectiveSends)}</strong></div>
+                  </div>
+                </div>
+              )}
+            </CampaignCategorySheet>
+          )}
+
+          {isMobile && mobilePhase === 'build' && categorySheetOpen && (
+            <CampaignCategorySheet
+              title={BUILD_CATEGORY_LABELS[activeDomain] ?? activeDomainDefinition?.tabLabel ?? 'Targeting'}
+              subtitle={activeDomainDefinition?.sourceOfTruth ?? null}
+              appliedCount={activeFilterDraft.target_filters[activeDomain]?.length ?? 0}
+              onClose={() => { setCategorySheetOpen(false); setFieldPickerState(null) }}
+            >
+              {renderCategoryStack()}
+            </CampaignCategorySheet>
+          )}
+
+          {!isMobile && (
           <>
           <div className="cmp-domain-tabs">
             {catalog.domains.map((domain) => {
@@ -2133,7 +2642,7 @@ export const CreateCampaignModal = ({
                   className={`cmp-domain-tab ${activeDomain === domain.key ? 'is-active' : ''} ${domain.key === 'properties' ? 'is-anchor' : ''}`}
                   onClick={() => { setActiveDomain(domain.key); setFieldPickerState(null) }}
                 >
-                  <span>{domain.tabLabel}</span>
+                  <span>{isMobile ? (MOBILE_DOMAIN_TAB_LABELS[domain.key] ?? domain.tabLabel) : domain.tabLabel}</span>
                   {count > 0 && <strong>{count}</strong>}
                 </button>
               )
@@ -2146,120 +2655,18 @@ export const CreateCampaignModal = ({
           </div>
 
           <div className="cmp-studio-content">
-            <div className="cmp-domain-heading">
-              <div>
-                <span className="cmp-domain-kicker">{formatLabel(activeDomainDefinition.key)}</span>
-                <h3>{activeDomainDefinition.tabLabel}</h3>
-              </div>
-              <div className={`cmp-domain-sot ${activeDomain === 'properties' ? 'is-anchor' : ''}`}>
-                <Icon name={activeDomain === 'properties' ? 'database' : 'layers'} size={14} />
-                <span>{activeDomainDefinition.sourceOfTruth}</span>
-              </div>
-            </div>
-
-            <div className="cmp-category-stack">
-              {activeDomainDefinition.categories.map((category) => {
-                const categoryFields = activeDomainFields.filter((field) => field.category === category)
-                const categoryFilters = draft.target_filters[activeDomain].filter((filter) => filter.category === category)
-                const activeInCategory = categoryFilters.filter(f => filterStatuses[f.id] === 'active').length
-                const draftInCategory = categoryFilters.filter(f => filterStatuses[f.id] !== 'active').length
-                const suggestedKeys = SUGGESTED_FIELD_KEYS[`${activeDomain}.${category}`] ?? []
-                const isPickerOpen = fieldPickerState?.domain === activeDomain && fieldPickerState?.category === category
-
-                return (
-                  <section key={category} className="cmp-filter-category">
-                    <div className="cmp-filter-category-header">
-                      <div>
-                        <span>{category}</span>
-                        <strong>{categoryFields.length} fields</strong>
-                        {activeInCategory > 0 && (
-                          <em className="cmp-category-count cmp-category-count--active">{activeInCategory} active</em>
-                        )}
-                        {draftInCategory > 0 && (
-                          <em className="cmp-category-count cmp-category-count--draft">{draftInCategory} draft</em>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className={isPickerOpen ? 'is-active' : ''}
-                        onClick={() => {
-                          setFieldPickerState(isPickerOpen ? null : { domain: activeDomain, category })
-                        }}
-                      >
-                        <Icon name="filter" size={13} />
-                        Add Filter
-                      </button>
-                    </div>
-
-                    {isPickerOpen && (
-                      <FieldPickerInline
-                        categoryFields={categoryFields}
-                        suggestedKeys={suggestedKeys}
-                        onPick={addFilterForField}
-                        onClose={() => setFieldPickerState(null)}
-                      />
-                    )}
-
-                    {categoryFilters.length > 0 ? (
-                      <div className="cmp-filter-row-stack">
-                        {categoryFilters.map((filter) => {
-                          const status = filterStatuses[filter.id]
-                          if (status === 'active') {
-                            return renderActiveFilterCard(filter)
-                          }
-                          return renderFilterRow(filter, categoryFields)
-                        })}
-                      </div>
-                    ) : (
-                      <div className="cmp-empty-category">
-                        {suggestedKeys.length > 0 && (
-                          <>
-                            <div className="cmp-suggested-label">Suggested</div>
-                            <div className="cmp-suggested-chips">
-                              {suggestedKeys
-                                .map((key) => fieldsByKey.get(key))
-                                .filter((f): f is CampaignFieldDefinition => !!f)
-                                .map((field) => (
-                                  <button
-                                    key={field.key}
-                                    className="cmp-suggested-chip"
-                                    onClick={() => addFilterForField(field)}
-                                    title={field.description}
-                                  >
-                                    + {field.label}
-                                  </button>
-                                ))
-                              }
-                              <button
-                                className="cmp-suggested-chip cmp-suggested-chip--more"
-                                onClick={() => setFieldPickerState({ domain: activeDomain, category })}
-                              >
-                                Browse all {categoryFields.length}…
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </section>
-                )
-              })}
-            </div>
+          {renderCategoryStack()}
           </div>
           </>
           )}
 
           {isMobile && mobilePhase === 'reach' && (
-            <TargetReachPanel
+            <CampaignReachMobile
               preview={preview}
               loading={isPreviewLoading}
-              activeDomain={activeDomain}
-              previewMeta={previewMeta}
-              backendDegraded={backendDegraded}
-              filterGroups={activeFilterDraft.target_filters}
-              totalDraftCount={totalDraftCount}
-              isMobileLayout
-              inline
+              stale={previewStale}
+              updatedAt={previewMeta?.ts ?? null}
+              onRefresh={() => runPreview('manual')}
             />
           )}
 
@@ -2319,22 +2726,23 @@ export const CreateCampaignModal = ({
         />
         )}
 
-        {isMobile && (
-          <CampaignBuilderMobileNav
+        {/* BUILD runs on the new stage rail. REACH and LAUNCH keep the existing
+            nav until their own rebuilds land, so their actions are unaffected.
+
+            The rail is suppressed while a category sheet is open: both sit at the
+            bottom of the viewport, and the rail won the hit test there, so tapping
+            the sheet's Done button switched stages instead of dismissing the
+            sheet. The sheet is modal — the rail belongs to the screen beneath it. */}
+        {isMobile && !categorySheetOpen && !launchSheet && (
+          <CampaignStageRail
             phase={mobilePhase}
             onPhaseChange={setMobilePhase}
-            deliverableCount={preview?.ready_to_queue ?? launchEstimates.deliverable}
-            isPreviewLoading={isPreviewLoading}
-            launchStatus={launchReadiness.status}
-            onPreview={() => runPreview('manual')}
-            onSaveDraft={saveCampaign}
-            onSchedule={requestSchedule}
-            onActivate={requestActivate}
-            canSaveDraft={canSaveDraft}
-            canSchedule={canScheduleNow}
-            canActivate={canActivateNow}
-            isSaving={isSaving}
-            isLaunching={isLaunching}
+            count={preview
+              ? Number(mobilePhase === 'build' ? (preview.total_matched ?? 0) : (canonicalReady ?? 0))
+              : null}
+            stale={previewStale}
+            loading={isPreviewLoading}
+            scopeLabel={mobilePhase === 'build' ? 'match' : 'ready'}
           />
         )}
 
@@ -2344,6 +2752,7 @@ export const CreateCampaignModal = ({
             settings={launchSettings}
             payload={pendingLivePayload}
             estimates={launchEstimates}
+            truth={launchConfirmTruth}
             busy={isLaunching}
             onCancel={() => setPendingLivePayload(null)}
             onConfirm={() => executeLaunch(pendingLivePayload, 'live')}
@@ -2387,6 +2796,7 @@ const LaunchConfirmModal = ({
   intent,
   payload,
   estimates,
+  truth,
   busy,
   onCancel,
   onConfirm,
@@ -2395,6 +2805,13 @@ const LaunchConfirmModal = ({
   settings: LaunchSettings
   payload: CampaignLaunchPayload
   estimates: LaunchEstimates
+  /**
+   * The same figures LAUNCH showed the operator. Confirmation is the moment of
+   * commitment and must not contradict the screen it was opened from: it was
+   * reading estimates directly and rendering "716 of 716 ready · 21% coverage ·
+   * ~8.9 hr" over a LAUNCH screen that said "50 schedulable · ~37 min".
+   */
+  truth: { schedulable: number | null; routedPct: number | null; durationLabel: string | null } | null
   busy: boolean
   onCancel: () => void
   onConfirm: () => void
@@ -2419,18 +2836,24 @@ const LaunchConfirmModal = ({
 
         <div className="cmp-launch-confirm__estimates">
           <div className="cmp-est-chip">
-            <span className="cmp-est-label">Deliverable</span>
-            <strong className="cmp-est-value is-accent">{formatNumber(estimates.effectiveSends)}</strong>
+            <span className="cmp-est-label">Schedulable</span>
+            <strong className="cmp-est-value is-accent">
+              {formatNumber(truth?.schedulable ?? estimates.effectiveSends)}
+            </strong>
             <span className="cmp-est-sub">of {formatNumber(estimates.deliverable)} ready</span>
           </div>
           <div className="cmp-est-chip">
             <span className="cmp-est-label">Sender Coverage</span>
-            <strong className="cmp-est-value">{estimates.senderCoveragePct != null ? `${estimates.senderCoveragePct}%` : formatNumber(estimates.senderCovered)}</strong>
+            <strong className="cmp-est-value">
+              {truth?.routedPct != null
+                ? `${truth.routedPct}%`
+                : estimates.senderCoveragePct != null ? `${estimates.senderCoveragePct}%` : formatNumber(estimates.senderCovered)}
+            </strong>
             <span className="cmp-est-sub">{formatNumber(estimates.senderCovered)} covered</span>
           </div>
           <div className="cmp-est-chip">
             <span className="cmp-est-label">Estimated Runtime</span>
-            <strong className="cmp-est-value">{estimates.durationLabel}</strong>
+            <strong className="cmp-est-value">{truth?.durationLabel || estimates.durationLabel}</strong>
             <span className="cmp-est-sub">{isActivate ? 'starting now' : formatDateTime(payload.first_scheduled_at)} · {formatNumber(estimates.dailyVolume)}/day</span>
           </div>
           <div className="cmp-est-chip">
@@ -2778,6 +3201,9 @@ const TargetReachPanel = ({
       accent: true,
     },
   ]
+  const canonicalFunnel = useMemo(() => funnelCountsFromPreview(preview), [preview])
+  const universeGap = useMemo(() => universeGapFromPreview(preview), [preview])
+
   const hasNoReachableContacts = preview !== null && !loading && Number(reachableContacts ?? 0) === 0 && activeFilterCount > 0
   const hasNoSenderRoute = preview !== null && !loading && Number(senderCovered ?? 0) === 0 && Number(smsEligible ?? reachableContacts ?? 0) > 0
 
@@ -2831,18 +3257,58 @@ const TargetReachPanel = ({
       />
 
       <div className="cmp-summary-body">
-        <div className="cmp-reach-funnel" role="list" aria-label="Target reach funnel">
-          {funnelSteps.map((step, index) => (
-            <ReachFunnelStep
-              key={step.key}
-              label={step.label}
-              value={step.value}
-              hint={step.hint}
-              accent={step.accent}
-              isLast={index === funnelSteps.length - 1}
-            />
-          ))}
-        </div>
+        {/* Canonical funnel. Reads the same mapper as campaign detail and autopilot,
+            so the three surfaces cannot drift into different versions of the same
+            number. Legacy step list is kept behind developer mode for diagnostics. */}
+        {canonicalFunnel ? (
+          <>
+            {universeGap && (
+              <div className="cmp-diag-alert cmp-diag-alert--warn">
+                <Icon name="alert-circle" size={12} />
+                <div>
+                  <div>{formatNumber(universeGap.missing)} properties are not in the target graph yet.</div>
+                  <div style={{ marginTop: 4, fontSize: 10, opacity: 0.8 }}>
+                    They exist but the graph has not been rebuilt since they were imported
+                    {universeGap.generatedAt ? ` (last built ${new Date(universeGap.generatedAt).toLocaleDateString()})` : ''}.
+                    This is a refresh gap, not a targeting decision.
+                  </div>
+                </div>
+              </div>
+            )}
+            <CampaignFunnel counts={canonicalFunnel} />
+          </>
+        ) : (
+          <div className="cmp-reach-funnel" role="list" aria-label="Target reach funnel">
+            {funnelSteps.map((step, index) => (
+              <ReachFunnelStep
+                key={step.key}
+                label={step.label}
+                value={step.value}
+                hint={step.hint}
+                accent={step.accent}
+                isLast={index === funnelSteps.length - 1}
+              />
+            ))}
+          </div>
+        )}
+
+        {developerMode && canonicalFunnel && (
+          <details className="cmp-legacy-funnel">
+            <summary>Legacy funnel steps (diagnostics)</summary>
+            <div className="cmp-reach-funnel" role="list" aria-label="Legacy reach funnel">
+              {funnelSteps.map((step, index) => (
+                <ReachFunnelStep
+                  key={step.key}
+                  label={step.label}
+                  value={step.value}
+                  hint={step.hint}
+                  accent={step.accent}
+                  isLast={index === funnelSteps.length - 1}
+                />
+              ))}
+            </div>
+          </details>
+        )}
 
         {developerMode && preview && queueScopeIsSample && (
           <div className="cmp-diag-alert cmp-diag-alert--info">

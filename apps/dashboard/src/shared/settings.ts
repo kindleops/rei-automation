@@ -20,7 +20,7 @@ export type CopilotReasoningDepth = 'minimal' | 'standard' | 'deep'
 export type CopilotVoiceMode = 'off' | 'text' | 'full'
 export type NexusTheme =
   // System-wide themes (aligned with map/global theme engine)
-  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'light'
+  | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'true_black' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
 export type AccentPalette =
@@ -379,6 +379,12 @@ export interface ThemeTokens {
 export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
   // ── New system-wide themes ─────────────────────────────────────────────
 
+  true_black: {
+    id: 'true_black', label: 'True Black',
+    bg: '#000000', surface: '#0a0b0d', elevated: '#101113',
+    border: 'rgba(255,255,255,0.12)', accent: '#38bdf8', accentGlow: 'rgba(56,189,248,0.22)',
+    textPrimary: '#ededef', textSecondary: 'rgba(154,154,162,0.80)', textMuted: 'rgba(154,154,162,0.55)',
+  },
   dark: {
     id: 'dark', label: 'Dark',
     bg: '#07101a', surface: '#0c1828', elevated: '#111f34',

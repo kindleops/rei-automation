@@ -1,0 +1,727 @@
+/*
+ * Campaign — cinematic pass.
+ *
+ * Final-authority override sheet, imported LAST. No behaviour or copy changes.
+ *
+ * FIRST ATTEMPT WAS WRONG, and the correction is the whole design idea here:
+ * removing every card, border and fill did kill the nesting, but it replaced
+ * structure with nothing. Content ended up floating in undifferentiated dark
+ * space with 26px voids between unrelated things — which reads as unfinished,
+ * not premium.
+ *
+ * What premium mobile actually does (iOS grouped-inset lists, mission-control
+ * instrument panels) is the opposite of "no boxes": ONE consistent raised
+ * surface per group, no outline at all, tight internal rhythm, hairline
+ * separators only INSIDE a group, and a genuinely wide type-contrast range.
+ * Structure comes from light and rhythm; the border was only ever a crutch.
+ *
+ * Rules applied throughout:
+ *   surface   one lift value, one radius, never nested
+ *   rhythm    4/8/12/16/24 — no arbitrary gaps
+ *   type      white primary, 62% secondary, 32% tertiary — a real range
+ *   accent    marks exactly one thing per screen: live state, or the action
+ */
+
+/* ══ Foundations ═══════════════════════════════════════════════════════════ */
+.ccc-detail-overview--mobile,
+.cmp-studio--mobile,
+.ccr,
+.clc-list {
+  /* iOS label ramp — a real contrast range, not three shades of grey. */
+  --cin-1:        #ffffff;
+  --cin-2:        rgba(235, 235, 245, 0.62);
+  --cin-3:        rgba(235, 235, 245, 0.34);
+  --cin-surface:  rgba(255, 255, 255, 0.055);
+  --cin-sep:      rgba(255, 255, 255, 0.075);
+  --cin-r:        14px;
+  --cin-pad:      16px;
+}
+
+/* ══ Campaign Detail ═══════════════════════════════════════════════════════ */
+
+.ccc-detail-overview--mobile {
+  padding: 4px 16px 132px;   /* bottom clears the fixed action dock */
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Each section = title outside, one raised group inside. No borders anywhere. */
+.ccc-detail-overview--mobile .ccc-detail-section {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ccc-detail-overview--mobile .ccc-detail-section + .ccc-detail-section {
+  border-top: 0;
+  margin-top: 0;
+}
+
+.ccc-detail-overview--mobile .ccc-detail-section__head {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Group titles sit OUTSIDE the surface, iOS-style: small, secondary, calm. */
+.ccc-detail-overview--mobile .ccc-detail-section__head h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--cin-2);
+  margin: 0;
+}
+
+/* The one raised surface. */
+.ccc-detail-overview--mobile .ccc__readiness-banner,
+.ccc-detail-overview--mobile .ccc__cost-grid,
+.ccc-detail-overview--mobile .ccc-detail-funnel,
+.ccc-detail-overview--mobile .ccc-detail-settings,
+.ccc-detail-overview--mobile .ccc-detail-empty {
+  background: var(--cin-surface);
+  border: 0;
+  border-radius: var(--cin-r);
+  box-shadow: none;
+  padding: var(--cin-pad);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Children never carry their own surface — that was the nesting. */
+.ccc-detail-overview--mobile .ccc__cost-card,
+.ccc-detail-overview--mobile .ccc-detail-funnel__row,
+.ccc-detail-overview--mobile .ccc__setting-row {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* Separators live inside the group, inset from the padding. */
+.ccc-detail-overview--mobile .ccc__cost-card + .ccc__cost-card,
+.ccc-detail-overview--mobile .ccc__setting-row + .ccc__setting-row {
+  border-top: 1px solid var(--cin-sep);
+  padding-top: 12px;
+}
+
+.ccc-detail-overview--mobile .ccc__cost-grid { display: flex; }
+
+.ccc-detail-overview--mobile .ccc__cost-label,
+.ccc-detail-overview--mobile .ccc__setting-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cin-2);
+}
+
+.ccc-detail-overview--mobile .ccc__cost-value {
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  color: var(--cin-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.ccc-detail-overview--mobile .ccc__cost-sub,
+.ccc-detail-overview--mobile .ccc__setting-desc {
+  font-size: 12px;
+  color: var(--cin-3);
+}
+
+/* Readiness reads as prose on the surface, not as filled alert slabs. */
+.ccc-detail-overview--mobile .ccc__readiness-blocker,
+.ccc-detail-overview--mobile .ccc__readiness-warning,
+.ccc-detail-overview--mobile .ccc-detail-readiness__ok {
+  display: block;
+  border: 0;
+  background: none;
+  padding: 0 0 0 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--cin-1);
+  position: relative;
+}
+
+.ccc-detail-overview--mobile .ccc__readiness-blocker::before,
+.ccc-detail-overview--mobile .ccc__readiness-warning::before,
+.ccc-detail-overview--mobile .ccc-detail-readiness__ok::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 3px;
+}
+
+.ccc-detail-overview--mobile .ccc__readiness-blocker::before { background: var(--nx-danger, #ef4444); }
+.ccc-detail-overview--mobile .ccc__readiness-warning::before { background: var(--nx-warning, #f59e0b); }
+.ccc-detail-overview--mobile .ccc-detail-readiness__ok::before { background: var(--nx-success, #10b981); }
+
+/* Quiet empty state: one line on one surface, never three cards of nothing. */
+.ccc-detail-section--muted .ccc-detail-empty { gap: 4px; }
+
+.ccc-detail-empty > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cin-2);
+}
+
+.ccc-detail-empty > p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--cin-3);
+}
+
+/* Section switcher: an iOS grouped row, not an eyebrow stacked over a value. */
+.ccc-detail-overview--mobile .ccc-detail-tabbar,
+.ccc-mobile-section-select {
+  background: var(--cin-surface);
+  border: 0;
+  border-radius: var(--cin-r);
+}
+
+/* ══ Mission hero — one continuous command surface ═════════════════════════ */
+
+.cmh {
+  border: 0;
+  padding: 14px 16px 18px;
+  gap: 12px;                    /* was 15 with 26px voids between blocks */
+  background:
+    radial-gradient(120% 76% at 4% -12%, rgba(255, 255, 255, 0.07), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 70%);
+}
+
+.cmh--running {
+  background:
+    radial-gradient(120% 76% at 4% -12%, color-mix(in srgb, var(--nx-success, #10b981) 20%, transparent), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 70%);
+}
+
+.cmh__top { margin-bottom: -2px; }
+
+.cmh__state { font-size: 11px; letter-spacing: 0.12em; font-weight: 700; }
+
+.cmh__mode {
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--cin-3, rgba(235, 235, 245, 0.34));
+}
+
+.cmh__mode.is-auto { color: var(--cin-2, rgba(235, 235, 245, 0.62)); background: none; }
+
+.cmh__hero { align-items: baseline; gap: 12px; }
+
+.cmh__hero-value {
+  font-size: clamp(64px, 22vw, 88px);
+  font-weight: 640;
+  line-height: 0.8;
+  letter-spacing: -0.055em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  margin-left: -0.04em;
+}
+
+.cmh__hero-meta { padding-bottom: 0; gap: 1px; }
+
+.cmh__hero-label {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.cmh--running .cmh__hero-label { color: var(--nx-success, #10b981); }
+
+.cmh__hero-sub { font-size: 13px; color: rgba(235, 235, 245, 0.5); }
+
+.cmh__burn {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.09);
+  margin: 2px 0 0;
+}
+
+.cmh__burn-fill { border-radius: 2px; background: rgba(255, 255, 255, 0.5); }
+.cmh--running .cmh__burn-fill { background: var(--nx-success, #10b981); }
+
+/* Instruments on one surface, divided by light. */
+.cmh__strip {
+  border-top: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 12px 4px;
+  gap: 0;
+  margin-top: 2px;
+}
+
+.cmh__cell {
+  position: relative;
+  align-items: center;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.cmh__cell + .cmh__cell::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  bottom: 1px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cmh__cell-value {
+  font-size: 20px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmh__cell-label {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(235, 235, 245, 0.42);
+}
+
+.cmh__next { padding-top: 2px; gap: 8px; }
+
+.cmh__next-label { font-size: 14px; font-weight: 600; color: #fff; }
+.cmh__next-label.is-neutral { color: rgba(235, 235, 245, 0.62); }
+
+.cmh__blocker {
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+}
+
+/* Test-mode banner: an inline strip, not a bordered box wrapping a bordered
+   button — and the button it wrapped already exists in the action dock. */
+.ccc-detail-testmode,
+.ccc__testmode-banner {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 10px 16px 0;
+}
+
+.ccc-detail-testmode button,
+.ccc__testmode-banner button { display: none; }
+
+/* ══ Campaign Command ══════════════════════════════════════════════════════ */
+
+.ccr { padding: 14px 16px 12px; gap: 10px; }
+
+.ccr__hero { align-items: baseline; }
+
+.ccr__hero-value {
+  font-size: clamp(60px, 20vw, 80px);
+  font-weight: 640;
+  line-height: 0.8;
+  letter-spacing: -0.055em;
+  margin-left: -0.04em;
+  color: #fff;
+}
+
+.ccr__hero-meta { padding-bottom: 0; }
+.ccr__hero-label { font-size: 15px; letter-spacing: -0.01em; color: #fff; }
+.ccr__hero-sub { font-size: 13px; color: rgba(235, 235, 245, 0.5); }
+
+.ccr__states { gap: 14px; }
+.ccr__state { font-size: 13px; }
+
+/* The movement line was separated by a rule and read as an orphaned strip. */
+.ccr__movement {
+  border-top: 0;
+  padding-block-start: 0;
+  gap: 14px;
+}
+
+.ccr__mv { font-size: 13px; color: rgba(235, 235, 245, 0.5); }
+.ccr__mv strong { font-size: 15px; color: #fff; }
+
+/* Cards: one lift, no outline, number dominant. */
+.clc {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+}
+
+.clc.is-selected { background: rgba(255, 255, 255, 0.10); }
+.clc.is-dormant  { background: rgba(255, 255, 255, 0.028); }
+
+.clc__name { letter-spacing: -0.015em; font-size: 15px; color: #fff; }
+
+.clc__ready strong {
+  font-size: 30px;
+  font-weight: 640;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.clc__ready em,
+.clc__metric em { font-size: 12px; color: rgba(235, 235, 245, 0.42); }
+
+.clc__foot { font-size: 12px; color: rgba(235, 235, 245, 0.5); }
+
+/* A 2px stub read as an artefact. Full width or not at all. */
+.clc__burn { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); }
+.clc__burn-fill { border-radius: 2px; }
+
+/* Filter row: the count was floating unanchored at the edge. */
+.ccf { gap: 8px; padding: 0 16px 12px; }
+.ccf__search, .ccf__filter { border: 0; background: rgba(255, 255, 255, 0.06); }
+.ccf__count { color: rgba(235, 235, 245, 0.42); }
+
+/* ══ Creator ═══════════════════════════════════════════════════════════════ */
+
+.cmp-studio--mobile .cmp-studio-header {
+  border-bottom: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0));
+}
+
+.cmp-studio--mobile .cmp-studio-title {
+  font-size: 18px;
+  font-weight: 640;
+  letter-spacing: -0.025em;
+  color: #fff;
+}
+
+.cmp-studio--mobile .cmp-studio-subtitle { display: none; }
+
+.cmp-studio--mobile .cmp-domain-tabs {
+  border-bottom: 0;
+  background: none;
+  backdrop-filter: none;
+  padding: 8px 12px 10px;
+}
+
+.cmp-studio--mobile .cmp-domain-tab {
+  border: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 235, 245, 0.55);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.cmp-studio--mobile .cmp-domain-tab.is-active {
+  border: 0;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+  color: #fff;
+}
+
+.cmp-studio--mobile .cmp-filter-category {
+  border: 0;
+  background: none;
+  border-radius: 0;
+  padding: 0 12px 20px;
+}
+
+.cmp-studio--mobile .cmp-filter-category-header { padding: 0 4px 10px; border: 0; }
+
+.cmp-studio--mobile .cmp-active-filter-card {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  background: rgba(255, 255, 255, 0.055);
+  padding: 14px 16px;
+}
+
+.cmp-studio--mobile .cmp-active-filter-badge {
+  border: 0;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(235, 235, 245, 0.5);
+  font-size: 11px;
+}
+
+.cmp-studio--mobile .cmp-mobile-reach-chip {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  padding: 14px 16px;
+}
+
+.cmp-studio--mobile .cmp-mobile-reach-chip__value {
+  font-size: 30px;
+  font-weight: 640;
+  letter-spacing: -0.045em;
+}
+
+.cmp-studio--mobile .cmp-mobile-reach-chip__copy strong { font-size: 14px; }
+.cmp-studio--mobile .cmp-mobile-reach-chip__copy span { font-size: 12px; }
+
+/* Phase nav as one continuous progress track. */
+.cmp-mobile-builder-chrome {
+  border-top: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.07));
+  backdrop-filter: blur(22px) saturate(1.5);
+}
+
+.cmp-mobile-builder-nav { gap: 0; }
+
+.cmp-mobile-builder-nav__item {
+  border: 0;
+  background: none;
+  border-radius: 0;
+  color: rgba(235, 235, 245, 0.42);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  position: relative;
+}
+
+.cmp-mobile-builder-nav__item.is-active { border: 0; background: none; color: #fff; }
+
+.cmp-mobile-builder-nav__item::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.cmp-mobile-builder-nav__item.is-active::after { background: var(--nx-accent, #38bdf8); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cmh__burn-fill { transition: none; }
+}
+
+/* ══ REACH funnel — contraction with a real silhouette ═════════════════════
+ * It was a table: uniform rows with a left-anchored bar behind the text, which
+ * reads as a bar chart of unrelated series. The bands are now CENTRED on one
+ * surface, so consecutive stages taper down the screen and the contraction is
+ * visible before a single number is read. */
+.cfx { display: flex; flex-direction: column; gap: 14px; padding: 0 16px 20px; }
+
+.cfx__hero {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  background:
+    radial-gradient(120% 80% at 6% -12%, rgba(255, 255, 255, 0.075), transparent 58%),
+    rgba(255, 255, 255, 0.05);
+  padding: 18px 16px 16px;
+}
+
+.cfx__hero-value {
+  font-size: clamp(56px, 19vw, 76px);
+  font-weight: 640;
+  line-height: 0.82;
+  letter-spacing: -0.055em;
+  margin-left: -0.04em;
+  color: #fff;
+}
+
+.cfx__hero-label { font-size: 15px; font-weight: 600; color: #fff; }
+.cfx__hero-sub { font-size: 13px; color: rgba(235, 235, 245, 0.5); }
+
+.cfx__stages {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--cin-r, 14px);
+  padding: 6px 14px;
+  overflow: hidden;
+}
+
+.cfx__stage {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 0;
+  overflow: visible;
+}
+
+.cfx__stage + .cfx__stage { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+
+.cfx__stage-bar {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.cfx__stage.is-accent .cfx__stage-bar {
+  background: color-mix(in srgb, var(--nx-accent, #38bdf8) 30%, transparent);
+}
+
+.cfx__stage.is-unknown .cfx__stage-bar { display: none; }
+
+.cfx__stage-row { position: relative; z-index: 1; }
+.cfx__stage-label { font-size: 14px; color: #fff; letter-spacing: -0.01em; }
+
+.cfx__stage-value {
+  font-size: 16px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.cfx__stage-drop {
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.42);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Routing = capability, never damage. Both real routes read identically calm;
+   only "no route at all" is a problem. */
+.cfx__panel-toggle {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 14px 16px;
+}
+
+.cfx__panel-toggle > span:first-child { font-size: 14px; font-weight: 600; color: #fff; }
+
+.cfx__panel-hint {
+  font-size: 13px;
+  color: rgba(235, 235, 245, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.cfx__panel {
+  border: 0;
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: var(--cin-r, 14px);
+  padding: 4px 16px 12px;
+  margin-top: -6px;
+}
+
+.cfx__route-row { border: 0; padding: 11px 0; font-size: 14px; color: #fff; }
+.cfx__route-row + .cfx__route-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+
+.cfx__route-row strong {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.cfx__route-dot.is-exact,
+.cfx__route-dot.is-cross { background: var(--nx-success, #10b981); }
+.cfx__route-dot.is-none  { background: rgba(235, 235, 245, 0.34); }
+
+.cfx__panel-note { font-size: 12px; line-height: 1.5; color: rgba(235, 235, 245, 0.42); }
+
+.cfx__loss {
+  border: 0;
+  border-left: 3px solid rgba(235, 235, 245, 0.34);
+  border-radius: 0;
+  background: none;
+  padding: 2px 0 2px 13px;
+  margin: 0 0 16px;
+}
+
+.cfx__loss.is-routing { border-left-color: var(--nx-warning, #f59e0b); }
+.cfx__loss-label { font-size: 14px; font-weight: 600; color: #fff; }
+
+.cfx__loss-value {
+  font-size: 15px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+.cfx__loss-value em {
+  font-style: normal;
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.42);
+  margin-left: 6px;
+}
+
+.cfx__loss-why { font-size: 12px; line-height: 1.45; color: rgba(235, 235, 245, 0.42); margin: 3px 0 0; }
+
+/* ══ Corrections found by looking at the rendered screen ═══════════════════ */
+
+/* Test-mode banner was a filled, bordered box wrapping ANOTHER bordered button —
+   card-inside-card — and that button duplicates "Convert to Live Campaign"
+   already sitting in the action dock two inches below. Reduced to a single
+   inline warning line; the dock keeps the action. */
+.ccc-mobile-detail-chrome .ccc__test-mode-banner {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  padding: 0 16px 10px;
+  gap: 8px;
+}
+
+.ccc-mobile-detail-chrome .ccc__test-mode-banner > span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--nx-warning, #f59e0b);
+}
+
+.ccc-mobile-detail-chrome .ccc__test-mode-banner button { display: none; }
+
+/* Section switcher: was a tiny uppercase eyebrow stacked over a value inside a
+   bordered box — the exact pattern this pass exists to remove. Now one iOS
+   grouped row: the current section reads as the title, the eyebrow goes. */
+.ccc__detail-tabs--mobile { padding: 0 16px 4px; border: 0; background: none; }
+
+.ccc__detail-tabs--mobile .ccc-detail-tab-filter,
+.ccc__detail-tabs--mobile .occ-liquid-filter__trigger {
+  border: 0;
+  border-radius: var(--cin-r, 14px);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: none;
+  width: 100%;
+  min-height: 46px;
+}
+
+.ccc__detail-tabs--mobile .occ-liquid-filter__trigger-label { display: none; }
+
+.ccc__detail-tabs--mobile .occ-liquid-filter__trigger-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: #fff;
+}
+
+/* ── Campaign Command hero rhythm ────────────────────────────────────────
+   "4 paused" and "No sends today" were two separate rows ~35px apart, each
+   holding three words, so the hero spent ~100px saying almost nothing. */
+.ccr { gap: 4px; }
+.ccr__states { margin-top: 2px; }
+.ccr__movement { margin-top: 0; }
+
+/* The list count sat unanchored against the screen edge next to two filled
+   controls. Give it the same surface so the row reads as one unit. */
+.ccf__count {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 235, 245, 0.55);
+}

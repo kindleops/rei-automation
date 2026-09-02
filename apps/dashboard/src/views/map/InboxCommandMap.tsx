@@ -4083,6 +4083,26 @@ export function InboxCommandMap({
   const buyerDemandGeojsonRef = useRef<FeatureCollection<Point, Record<string, unknown>>>(EMPTY_GEOJSON)
   const soldCompsGeojsonRef = useRef<FeatureCollection<Point, Record<string, unknown>>>(EMPTY_GEOJSON)
   const sellerPinsGeojsonRef = useRef<FeatureCollection<Point, Record<string, unknown>>>(EMPTY_GEOJSON)
+  /**
+   * Single ownership of the seller render family (raw vs clustered).
+   *
+   * The canonical layer-visibility effect is the ONLY place that decision is made.
+   * It publishes its applier here so style-lifecycle paths (addMapLayers, style
+   * reload) can RE-APPLY the current decision instead of computing a second,
+   * divergent one. Two independent deciders is what made the family
+   * non-deterministic: a style reload landing after the canonical effect
+   * overwrote `raw` with `clustered` in 9/10 loads.
+   */
+  const applySellerRenderFamilyRef = useRef<((map: maplibregl.Map) => void) | null>(null)
+  /**
+   * Single ownership of buyer / sold-comp / heatmap layer visibility, for the same
+   * reason as the seller render family above. These previously had two deciders that
+   * ACTIVELY disagreed: syncLayerVisibility showed buyer-purchase layers whenever
+   * `sellerThreads` was on, while the canonical effect hides them unless
+   * `buyerRecentPurchases || buyerMatches` — so a style reload surfaced buyer pins
+   * the canonical decision had hidden.
+   */
+  const applyBuyerLayerVisibilityRef = useRef<((map: maplibregl.Map) => void) | null>(null)
   const activityModeRef = useRef<InboxMapActivityMode>('threads')
   const [activityMode, setActivityMode] = useState<InboxMapActivityMode>(initialActivityMode)
   const [filters, setFilters] = useState<MapFilterState>({ ...defaultFilters, ...initialFilters })
@@ -4260,6 +4280,25 @@ export function InboxCommandMap({
   const [showKpiBadges] = useState(true)
   const [activeKpiFilter, setActiveKpiFilter] = useState<MapKpiFilterKey | null>(null)
   const [viewportBounds, setViewportBounds] = useState<CommandMapBounds | null>(null)
+  /**
+   * Bumped when a map instance is (re)created. Effects that subscribe to map events must
+   * depend on THIS, not on `mapRef.current`: mutating a ref does not trigger a render, so
+   * a `[mapRef.current]` dependency re-runs only by coincidence. That left the `moveend`
+   * subscription unattached, so panning never refreshed viewportBounds and seller pins
+   * were never refetched for the new region.
+   */
+  const [mapInstanceEpoch, setMapInstanceEpoch] = useState(0)
+  /**
+   * Reactive mirror of isSellerPinIconLayerReady().
+   *
+   * The seller render-family choice consults that predicate, but layer EXISTENCE is not
+   * reactive: if the visibility effect happened to run before the seller-pin icon layer
+   * was added, `sellerPinFallbackActive` forced the raw family, and nothing re-ran the
+   * effect once the layer appeared. Identical camera/settings therefore resolved to raw
+   * or clustered ~50/50 — and because the two families expose different feature payloads,
+   * that instability propagated into property-card identity.
+   */
+  const [sellerPinIconsReady, setSellerPinIconsReady] = useState(false)
   const [viewportZoom, setViewportZoom] = useState(zoomedIn ? 10.5 : 4.4)
   const viewportZoomRef = useRef(viewportZoom)
   useEffect(() => {
@@ -4573,6 +4612,86 @@ export function InboxCommandMap({
     () => resolveActiveSellerMapCard(hoveredMapCard, selectedMapCard),
     [hoveredMapCard, selectedMapCard],
   )
+  /**
+   * ── Major overlay ownership ────────────────────────────────────────────────
+   * Only ONE major Map surface may own significant viewport height at a time.
+   * This is a derived precedence over the existing canonical state — no duplicate
+   * booleans for panels that already track themselves.
+   *
+   * `propertySheetYielded` is the one new concept Checkpoint B needs: it separates
+   * WHICH property is selected (canonical, stays in selectedMapCard) from WHETHER its
+   * sheet currently owns the viewport. Yielding hides the sheet without dropping the
+   * selection, so the operator can dip into Map Command / Filters and come back.
+   */
+  const [propertySheetYielded, setPropertySheetYielded] = useState(false)
+
+  const liveActivityExpanded = liveActivitySettings.displayMode === 'expanded'
+
+  const activeMajorMapSurface = useMemo<
+    'advanced-filters' | 'map-command' | 'live-activity' | 'property' | 'none'
+  >(() => {
+    if (mapAdvancedFiltersOpen) return 'advanced-filters'
+    if (filtersOpen) return 'map-command'
+    if (isMobile && liveActivityExpanded) return 'live-activity'
+    if (activeSellerMapCard && !propertySheetYielded) return 'property'
+    return 'none'
+  }, [mapAdvancedFiltersOpen, filtersOpen, isMobile, liveActivityExpanded, activeSellerMapCard, propertySheetYielded])
+
+  /** A property sheet owns the viewport only when it wins precedence. */
+  const propertySheetVisible = activeMajorMapSurface === 'property'
+
+  /**
+   * Yielding is temporary, not a dismissal.
+   *
+   * `propertySheetYielded` was only ever cleared when a NEW property was selected, so
+   * closing a command surface left the sheet suppressed forever: the selection survived
+   * but activeMajorMapSurface fell through to 'none' and nothing owned the viewport.
+   * Overlay visibility and selected-property identity are separate concepts — when no
+   * command surface owns the viewport, the selected property reclaims it.
+   *
+   * One shared restore for every entry point rather than per-surface restoration.
+   */
+  useEffect(() => {
+    if (mapAdvancedFiltersOpen || filtersOpen || (isMobile && liveActivityExpanded)) return
+    setPropertySheetYielded(false)
+  }, [mapAdvancedFiltersOpen, filtersOpen, isMobile, liveActivityExpanded])
+
+  /** Selecting a new property reclaims the viewport from any command surface. */
+  const selectedMapCardId = selectedMapCard?.id ?? null
+  useEffect(() => {
+    if (!selectedMapCardId) return
+    setPropertySheetYielded(false)
+    setFiltersOpen(false)
+    setMapAdvancedFiltersOpen(false)
+  }, [selectedMapCardId])
+
+  /**
+   * ── Camera / sheet coordination ────────────────────────────────────────────
+   * The property sheet covers the lower viewport, so the Map must know how much of
+   * itself is actually visible. Previously padding was {0,0,0,0} and the selected pin
+   * staying above the sheet was incidental.
+   *
+   * Uses MapLibre's canonical padding API against MEASURED sheet geometry — no
+   * hardcoded per-device offsets. Padding is only re-applied when it changes by a
+   * meaningful amount, so a padding ease cannot feed back into another padding ease.
+   */
+  const appliedBottomPaddingRef = useRef(0)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !isMobile) return
+    const measure = () => {
+      const sheet = document.querySelector('.smc-shell') as HTMLElement | null
+      const raw = propertySheetVisible && sheet ? sheet.getBoundingClientRect().height : 0
+      // Cap so a tall focus sheet cannot squeeze the usable map to nothing.
+      const target = raw > 0 ? Math.min(Math.round(raw + 12), Math.round(window.innerHeight * 0.55)) : 0
+      if (Math.abs(target - appliedBottomPaddingRef.current) < 24) return
+      appliedBottomPaddingRef.current = target
+      map.easeTo({ padding: { top: 0, right: 0, bottom: target, left: 0 }, duration: 420 })
+    }
+    const raf = requestAnimationFrame(measure)
+    return () => cancelAnimationFrame(raf)
+  }, [propertySheetVisible, activeSellerMapCard?.intent, isMobile, mapInstanceEpoch])
+
   const activeSellerCardHydrationKey = activeSellerMapCard
     ? `${activeSellerMapCard.kind}|${activeSellerMapCard.intent}|${activeSellerMapCard.id}`
     : null
@@ -4665,6 +4784,8 @@ export function InboxCommandMap({
   const openMapAdvancedFilters = useCallback(() => {
     setFiltersOpen(false)
     setMapAdvancedFiltersOpen(true)
+    // Yield, don't clear: the property stays selected and its pin stays highlighted.
+    setPropertySheetYielded(true)
   }, [])
 
   const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number, matchingProperties?: number | null) => {
@@ -5242,34 +5363,23 @@ export function InboxCommandMap({
       map.off('move', syncMapCardAnchors)
       map.off('resize', syncMapCardAnchors)
     }
-  }, [mapRef.current, containerRef.current])
+    // mapInstanceEpoch, not mapRef.current: this effect early-returns when the map
+    // does not exist yet, and a mutable ref never triggers a re-run. Keyed on the ref
+    // it could stay permanently unsubscribed, leaving hover/selected card anchors
+    // frozen while the map moves.
+  }, [mapInstanceEpoch])
 
   useEffect(() => {
     if (!containerRef.current) return
     if (mapRef.current) return
 
-    const setLayerVisibility = (map: maplibregl.Map, layerIds: readonly string[], visible: boolean) => {
-      layerIds.forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none')
-        }
-      })
-    }
-
-    const syncLayerVisibility = (map: maplibregl.Map, nextMode: InboxMapActivityMode) => {
-      const clusteredMode =
-        (nextMode !== 'sends' && !activeKpiFilterRef.current)
-        || (performanceSettingsRef.current?.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
-      setLayerVisibility(map, RAW_LAYER_IDS, !clusteredMode)
-      setLayerVisibility(map, CLUSTER_POINT_LAYER_IDS, clusteredMode)
-      setLayerVisibility(map, CLUSTER_LAYER_IDS, clusteredMode)
-      setLayerVisibility(map, BUYER_PURCHASE_LAYER_IDS, buyerLayers.sellerThreads || buyerLayers.buyerRecentPurchases || buyerLayers.recentSoldComps || buyerLayers.buyerMatches)
-      setLayerVisibility(map, BUYER_PURCHASE_CLUSTER_IDS, buyerLayers.sellerThreads || buyerLayers.buyerRecentPurchases || buyerLayers.recentSoldComps || buyerLayers.buyerMatches)
-      setLayerVisibility(map, BUYER_PROFILE_LAYER_IDS, buyerLayers.buyerProfiles)
-      setLayerVisibility(map, ALL_SOLD_COMPS_LAYER_IDS, buyerLayers.recentSoldComps)
-      if (map.getLayer(BUYER_HEATMAP_LAYER_ID)) {
-        map.setLayoutProperty(BUYER_HEATMAP_LAYER_ID, 'visibility', buyerLayers.buyerHeatmap && performanceSettingsRef.current?.showHeatEffects !== false ? 'visible' : 'none')
-      }
+    /** Re-applies the canonical visibility decisions after a style lifecycle event. */
+    const syncLayerVisibility = (map: maplibregl.Map) => {
+      // Seller render-family layers are NOT owned here. Re-apply the canonical
+      // effect's current decision; never derive a competing one.
+      applySellerRenderFamilyRef.current?.(map)
+      // Buyer / sold-comp / heatmap layers are NOT owned here either.
+      applyBuyerLayerVisibilityRef.current?.(map)
     }
 
     const applyOverlayVisibility = (map: maplibregl.Map) => {
@@ -6949,7 +7059,7 @@ export function InboxCommandMap({
         })
       }
 
-      syncLayerVisibility(map, activityModeRef.current)
+      syncLayerVisibility(map)
     }
 
     const installPropertyTileStack = (targetMap: maplibregl.Map) => {
@@ -7025,7 +7135,7 @@ export function InboxCommandMap({
           masterFilterActive: Boolean(appliedMapFilterTokenRef.current),
         })
         void syncBasemapPresentation(map)
-        syncLayerVisibility(map, activityModeRef.current)
+        syncLayerVisibility(map)
         scheduleMapResize(true)
         if (styleLoadTimerRef.current) {
           clearTimeout(styleLoadTimerRef.current)
@@ -7135,6 +7245,8 @@ export function InboxCommandMap({
 
       const mapInstance = map
       mapRef.current = mapInstance
+      setMapInstanceEpoch((epoch) => epoch + 1)
+
     if (import.meta.env.DEV || isMapVerificationMode() || isMapDiagnosticsDebugEnabled()) {
       ;(window as unknown as { __nexusCommandMap?: maplibregl.Map }).__nexusCommandMap = mapInstance
     }
@@ -7268,18 +7380,36 @@ export function InboxCommandMap({
         ;(event as any)._clickHandled = true
         const feature = event.features?.[0]
         if (!feature) return
-        const id = String(feature.properties?.conversation_id || '')
+        /**
+         * Conversation-OPTIONAL selection contract.
+         *
+         * The Map is an acquisition surface, not a view over existing conversations.
+         * Pre-contact inventory (not_contacted, ownership-check-ready) has no thread yet
+         * and therefore no conversation_id — but it is still a real operating object.
+         * Requiring conversation_id here made those pins visible-but-inert: every tap on
+         * Rocky Mount's not_contacted inventory silently returned.
+         *
+         * Precedence: conversation-backed identity wins; otherwise fall back to a
+         * property-scoped identity. Clusters never reach here (separate handler).
+         */
+        const conversationId = String(feature.properties?.conversation_id || '')
+        const propertyId = String(feature.properties?.property_id || '')
+        const id = conversationId || (propertyId ? `property:${propertyId}` : '')
         if (!id) return
         hoverPopupRef.current?.remove()
         setSelectedClusterSummary(null)
         setSelectedCensusFeature(null)
         setSelectedBuyerPurchase(null)
         setSelectedPinId(id)
-        onSelectThreadIdRef.current?.(id)
+        // Thread-scoped selection only fires for genuinely conversation-backed pins so
+        // downstream thread consumers never receive a synthetic property identity.
+        if (conversationId) onSelectThreadIdRef.current?.(conversationId)
         const props = feature.properties as unknown as CommandMapPin
-        const hydratedThread = hydratedThreadsByIdRef.current.get(id)
-          || hydratedThreadsByKeyRef.current.get(id)
-          || null
+        const hydratedThread = conversationId
+          ? (hydratedThreadsByIdRef.current.get(conversationId)
+            || hydratedThreadsByKeyRef.current.get(conversationId)
+            || null)
+          : null
         const sellerRecord = commandMapPinToSellerCardRecord(props, hydratedThread as Record<string, unknown> | null)
         const coordinates = (feature.geometry as Point).coordinates as [number, number]
         const { anchor, containerSize } = buildMapCardContainerContext(mapInstance, containerRef.current, coordinates)
@@ -7290,8 +7420,24 @@ export function InboxCommandMap({
             ? hoveredMapCardRef.current
             : null
 
+        /**
+         * Promote on the underlying PROPERTY, not the card id.
+         *
+         * The same physical pin can resolve to different ids across taps: the raw and
+         * clustered layer families carry different payloads, so one tap may see a
+         * conversation_id and the next may not (`2100277107` vs `property:2100277107`).
+         * Comparing card ids therefore never matched and every tap re-created Peek
+         * instead of promoting to Focus. property_id is stable across both families.
+         */
+        const existingPropertyId = String(
+          (existingSeller?.feature as Record<string, unknown> | undefined)?.property_id ?? '',
+        )
+        const isSameProperty = existingSeller
+          ? (existingSeller.id === id || (Boolean(propertyId) && existingPropertyId === propertyId))
+          : false
+
         if (mobile) {
-          if (existingSeller?.id === id && existingSeller.intent === 'hover') {
+          if (isSameProperty && existingSeller?.intent === 'hover') {
             setSelectedMapCard({ ...existingSeller, intent: 'selected', anchor, containerSize, coordinates })
             setHoveredMapCard(null)
           } else {
@@ -8284,9 +8430,22 @@ export function InboxCommandMap({
       const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
       const showPropertyField = sellerPinLayers.sellerPins || masterFilterActive
       const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
+      /**
+       * "Is a seller renderer currently drawing individual properties?" — the signal the
+       * property-universe stack yields to.
+       *
+       * This previously required isSellerPinIconLayerReady(map), i.e. the existence of the
+       * seller-pins icon layer. That layer is not created in this configuration, so the
+       * predicate measured false in every diagnostic run, the tile renderer never yielded,
+       * and every property was drawn twice — the prop-tiles-glass plate (rgba(6,10,20,0.82))
+       * sitting under the seller house glyph.
+       *
+       * Ownership does not depend on which sprite layer exists. It depends on whether the
+       * seller field is presenting: enabled, at property zoom, with seller features loaded.
+       * The masterFilterActive exception is unchanged.
+       */
       const sellerPinFieldActive = (
         shouldPresentSellerPinGeojsonField(showPropertyField, zoom, sellerPinsGeojsonRef.current.features.length)
-        && isSellerPinIconLayerReady(map)
         && !masterFilterActive
       )
       const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && (!sellerPinFieldActive || masterFilterActive)
@@ -8536,6 +8695,19 @@ export function InboxCommandMap({
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
+    const sync = () => setSellerPinIconsReady(isSellerPinIconLayerReady(map))
+    sync()
+    map.on('idle', sync)
+    map.on('styledata', sync)
+    return () => {
+      map.off('idle', sync)
+      map.off('styledata', sync)
+    }
+  }, [mapInstanceEpoch])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
     let timeout: ReturnType<typeof setTimeout> | null = null
     const syncViewport = () => {
       const bounds = map.getBounds()
@@ -8557,17 +8729,28 @@ export function InboxCommandMap({
       if (timeout) clearTimeout(timeout)
       map.off('moveend', onMoveEnd)
     }
-  }, [mapRef.current])
+  }, [mapInstanceEpoch])
 
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map)) return
+    /**
+     * Use the REACTIVE geojson value, not sellerPinsGeojsonRef.current.
+     *
+     * The ref is a mutable predicate: when this effect ran before the ref was populated,
+     * the fallback did not engage and the family resolved to clustered instead of raw —
+     * the residual 2/20 non-determinism. `sellerPinsGeojson` is already a dependency of
+     * this effect, so reading it keeps the decision a pure function of declared inputs.
+     */
     const sellerPinFallbackActive = sellerPinLayers.sellerPins
-      && sellerPinsGeojsonRef.current.features.length > 0
+      && (sellerPinsGeojson?.features?.length ?? 0) > 0
       && !isSellerPinIconLayerReady(map)
+    // Canonical settled zoom (viewportZoom) rather than a mutable read at effect time,
+    // so the family cannot depend on when this effect happens to run.
+    const canonicalZoom = viewportZoom ?? map.getZoom()
     let clusteredMode =
       (activityMode !== 'sends' && !activeKpiFilter)
-      || (performanceSettings.clusterAggressiveness === 'high' && map.getZoom() < 12.5)
+      || (performanceSettings.clusterAggressiveness === 'high' && canonicalZoom < 12.5)
     if (sellerPinFallbackActive) clusteredMode = false
     const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
     const sellerPinFieldReady = sellerPinLayers.sellerPins
@@ -8575,39 +8758,52 @@ export function InboxCommandMap({
       && isSellerPinIconLayerReady(map)
       && !masterFilterActive
     const sellerThreadsVisible = buyerLayers.sellerThreads && !sellerPinFieldReady && !masterFilterActive
-    RAW_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none')
-    })
-    CLUSTER_POINT_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
-    })
-    CLUSTER_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none')
-    })
-  }, [activeKpiFilter, activityMode, appliedMapFilterToken, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, sellerPinsGeojson, baseStyleLoading])
+
+    // The decision above is authoritative. Publish it as an applier so style-lifecycle
+    // re-adds replay THIS decision rather than deriving their own.
+    const applySellerRenderFamily = (target: maplibregl.Map) => {
+      const rawVis = sellerThreadsVisible ? (clusteredMode ? 'none' : 'visible') : 'none'
+      const clusterVis = sellerThreadsVisible ? (clusteredMode ? 'visible' : 'none') : 'none'
+      RAW_LAYER_IDS.forEach((layerId) => {
+        if (target.getLayer(layerId)) target.setLayoutProperty(layerId, 'visibility', rawVis)
+      })
+      CLUSTER_POINT_LAYER_IDS.forEach((layerId) => {
+        if (target.getLayer(layerId)) target.setLayoutProperty(layerId, 'visibility', clusterVis)
+      })
+      CLUSTER_LAYER_IDS.forEach((layerId) => {
+        if (target.getLayer(layerId)) target.setLayoutProperty(layerId, 'visibility', clusterVis)
+      })
+    }
+    applySellerRenderFamilyRef.current = applySellerRenderFamily
+    applySellerRenderFamily(map)
+    // mapInstanceEpoch: this effect reads mapRef.current and bails via isStyleSafe().
+    // Without a readiness dependency it can early-return while the style is still
+    // loading and never re-run, leaving every seller layer at its creation-time
+    // visibility — source populated, layers present, nothing rendered (0 pins).
+    // Same non-reactive-ref class as the moveend subscription fixed earlier.
+  }, [activeKpiFilter, activityMode, appliedMapFilterToken, buyerLayers.sellerThreads, performanceSettings.clusterAggressiveness, sellerPinLayers.sellerPins, sellerPinsGeojson, baseStyleLoading, mapInstanceEpoch, sellerPinIconsReady, viewportZoom])
 
   useEffect(() => {
     const map = mapRef.current
     if (!isStyleSafe(map)) return
     const purchasesVisible = buyerLayers.buyerRecentPurchases || buyerLayers.buyerMatches
-    BUYER_PURCHASE_CLUSTER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', purchasesVisible ? 'visible' : 'none')
-    })
-    BUYER_PURCHASE_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', purchasesVisible ? 'visible' : 'none')
-    })
-    BUYER_PROFILE_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', buyerLayers.buyerProfiles ? 'visible' : 'none')
-    })
-    BUYER_TRAIL_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', selectedBuyerKey && buyerLayers.buyerFocusMode ? 'visible' : 'none')
-    })
-    ALL_SOLD_COMPS_LAYER_IDS.forEach((layerId) => {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', buyerLayers.recentSoldComps ? 'visible' : 'none')
-    })
-    if (map.getLayer(BUYER_HEATMAP_LAYER_ID)) {
-      map.setLayoutProperty(BUYER_HEATMAP_LAYER_ID, 'visibility', buyerLayers.buyerHeatmap && performanceSettings.showHeatEffects ? 'visible' : 'none')
+    // Authoritative. Published so style-lifecycle re-adds replay THIS decision.
+    const applyBuyerLayerVisibility = (target: maplibregl.Map) => {
+      const vis = (on: unknown) => (on ? 'visible' : 'none')
+      const set = (ids: readonly string[], on: unknown) => ids.forEach((layerId) => {
+        if (target.getLayer(layerId)) target.setLayoutProperty(layerId, 'visibility', vis(on))
+      })
+      set(BUYER_PURCHASE_CLUSTER_IDS, purchasesVisible)
+      set(BUYER_PURCHASE_LAYER_IDS, purchasesVisible)
+      set(BUYER_PROFILE_LAYER_IDS, buyerLayers.buyerProfiles)
+      set(BUYER_TRAIL_LAYER_IDS, selectedBuyerKey && buyerLayers.buyerFocusMode)
+      set(ALL_SOLD_COMPS_LAYER_IDS, buyerLayers.recentSoldComps)
+      if (target.getLayer(BUYER_HEATMAP_LAYER_ID)) {
+        target.setLayoutProperty(BUYER_HEATMAP_LAYER_ID, 'visibility', vis(buyerLayers.buyerHeatmap && performanceSettings.showHeatEffects))
+      }
     }
+    applyBuyerLayerVisibilityRef.current = applyBuyerLayerVisibility
+    applyBuyerLayerVisibility(map)
   }, [buyerLayers, performanceSettings.showHeatEffects, selectedBuyerKey, baseStyleLoading])
 
   // ── Census overlay loading (viewport + zoom aware) ─────────────────────────
@@ -9435,10 +9631,23 @@ export function InboxCommandMap({
               className={cls('nx-icm__mode-tab', 'nx-icm__mode-tab--filters', mapAdvancedFiltersOpen && 'is-active')}
               onClick={openMapAdvancedFilters}
             >
-              {activeFilterCount > 0 ? `Advanced Filters · ${activeFilterCount}` : 'Advanced Filters'}
+              {isMobile
+                ? (activeFilterCount > 0 ? `Filters · ${activeFilterCount}` : 'Filters')
+                : (activeFilterCount > 0 ? `Advanced Filters · ${activeFilterCount}` : 'Advanced Filters')}
             </button>
-            <button type="button" className={cls('nx-icm__mode-tab', filtersOpen && 'is-active')} onClick={() => setFiltersOpen((open) => !open)}>
-              Map Controls
+            <button
+              type="button"
+              className={cls('nx-icm__mode-tab', filtersOpen && 'is-active')}
+              onClick={() => setFiltersOpen((open) => {
+                const next = !open
+                if (next) {
+                  setMapAdvancedFiltersOpen(false)
+                  setPropertySheetYielded(true)
+                }
+                return next
+              })}
+            >
+              {isMobile ? 'Controls' : 'Map Controls'}
             </button>
           </div>
         </div>
@@ -10191,9 +10400,19 @@ export function InboxCommandMap({
           reducedMotion={prefersReducedMotion || performanceSettings.animation !== 'full'}
           conversationOpen={mobileConversationOpen}
           composerActive={mobileConversationOpen}
-          sellerCardExpanded={Boolean(activeSellerMapCard?.intent === 'selected')}
-          sellerCardPeek={Boolean(activeSellerMapCard?.intent === 'hover')}
-          onSettingsChange={patchLiveActivitySettings}
+          sellerCardExpanded={Boolean(propertySheetVisible && activeSellerMapCard?.intent === 'selected')}
+          sellerCardPeek={Boolean(propertySheetVisible && activeSellerMapCard?.intent === 'hover')}
+          onSettingsChange={(next) => {
+            // Live Activity expanding is an explicit operator intent: it takes the
+            // viewport, so command surfaces close and the property sheet yields
+            // (selection is preserved).
+            if (next?.displayMode === 'expanded') {
+              setFiltersOpen(false)
+              setMapAdvancedFiltersOpen(false)
+              setPropertySheetYielded(true)
+            }
+            patchLiveActivitySettings(next)
+          }}
           onPerformanceChange={patchPerformanceSettings}
           onSelectEvent={handleActivitySelect}
           onFocusEvent={handleActivityFocus}
@@ -10212,7 +10431,7 @@ export function InboxCommandMap({
         </div>
       )}
 
-      {activeSellerMapCard ? (
+      {activeSellerMapCard && propertySheetVisible ? (
         <MapEntityCard
           key={activeSellerMapCard.id}
           card={activeSellerMapCard}

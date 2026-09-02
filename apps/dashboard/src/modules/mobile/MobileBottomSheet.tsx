@@ -20,7 +20,17 @@ interface MobileBottomSheetProps {
   onClose?: () => void
   children: ReactNode
   className?: string
+  /**
+   * Render a dimming backdrop behind the sheet. Set false only for surfaces
+   * that must keep the layer underneath usable (the map seller card).
+   */
   showBackdrop?: boolean
+  /**
+   * Whether tapping the backdrop dismisses the sheet. A non-dismissible sheet
+   * still renders its backdrop — the dim is part of the modal contract — but
+   * the tap is inert and the backdrop is removed from the a11y tree.
+   */
+  dismissOnBackdrop?: boolean
   elevated?: boolean
 }
 
@@ -34,6 +44,7 @@ export const MobileBottomSheet = ({
   children,
   className,
   showBackdrop = true,
+  dismissOnBackdrop = true,
   elevated = false,
 }: MobileBottomSheetProps) => {
   const [internalSnap, setInternalSnap] = useState<BottomSheetSnap>('half')
@@ -57,8 +68,21 @@ export const MobileBottomSheet = ({
 
   return (
     <>
-      {showBackdrop && onClose ? (
-        <button type="button" className="nx-mobile-sheet-backdrop is-map-context" aria-label="Close sheet" onClick={onClose} />
+      {/* `is-bottom-sheet` claims this sheet's own backdrop layer. The class
+          used to be `is-map-context`, which a map-only rule hid with
+          `display: none !important` — so every sheet in the app silently lost
+          its backdrop. The map case is expressed by `showBackdrop={false}`. */}
+      {showBackdrop ? (
+        dismissOnBackdrop && onClose ? (
+          <button
+            type="button"
+            className="nx-mobile-sheet-backdrop is-bottom-sheet"
+            aria-label="Close sheet"
+            onClick={onClose}
+          />
+        ) : (
+          <div className="nx-mobile-sheet-backdrop is-bottom-sheet is-inert" aria-hidden="true" />
+        )
       ) : null}
       <aside
         className={cls(
