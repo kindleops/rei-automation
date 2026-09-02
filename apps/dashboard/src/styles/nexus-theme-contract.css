@@ -20,7 +20,8 @@
 [data-nexus-theme="blueprint"],
 [data-nexus-theme="matrix"],
 [data-nexus-theme="obsidian"],
-[data-nexus-theme="crimson"] {
+[data-nexus-theme="crimson"],
+[data-nexus-theme="true_black"] {
   --nx-contract-bg:          var(--nx-bg, #060c14);
   --nx-contract-surface:     var(--nx-panel-bg, #0d1520);
   --nx-contract-text:        var(--nx-text, #e2e8f0);
@@ -39,7 +40,32 @@
   --nx-blur-lg: 24px;
   --nx-blur-xl: 48px;
 
-  /* Shell Z-Index tokens */
+  /* ── Shell Z-Index tokens ──────────────────────────────────────────────
+   * One documented mobile overlay stack. Anything that needs to sit above the
+   * page chrome must claim a token here rather than inventing a number.
+   *
+   *   145  .smc-mobile-bottom-sheet   map seller card (designed exception:
+   *                                   sits *under* the dock, no backdrop, so
+   *                                   the map and dock stay usable behind it)
+   *   146  .nx-mobile-search-layer
+   *   148  .nx-mobile-sheet-backdrop  legacy sheets (MobileSheet, MoreSheet,
+   *   149  .nx-mobile-sheet           SettingsSheet, notification centre)
+   *   150  topbar / command dock
+   *   155  pinned app dock backdrop
+   *   160  pinned app dock            ← --nx-shell-z-dock
+   *   169  bottom-sheet backdrop      ← --nx-shell-z-sheet-backdrop
+   *   170  bottom sheet               ← --nx-shell-z-sheet
+   *   165  page-level selection / action bars (Queue)
+   *   180  mobile deal-intelligence pane
+   *  1200  pipeline mobile workflow sheet   (own implementation)
+   *  1300  pipeline lead command sheet      (own implementation)
+   * 13000  popovers
+   * 14000  toasts
+   * 15000  command palette
+   */
+  --nx-shell-z-dock:           160;
+  --nx-shell-z-sheet-backdrop: 169;
+  --nx-shell-z-sheet:          170;
   --nx-shell-z-popover: 13000;
   --nx-shell-z-toast:   14000;
   --nx-shell-z-command: 15000;

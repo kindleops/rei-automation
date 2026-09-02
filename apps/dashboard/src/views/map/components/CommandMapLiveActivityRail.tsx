@@ -67,9 +67,20 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
     if (conversationOpen || composerActive) return 'hidden'
     if (sellerCardExpanded && isMobile) return 'minimal'
     if (sellerCardExpanded && preferredMode === 'expanded') return 'compact'
+    /**
+     * Zero-state collapse (mobile): a full Live Activity panel permanently occupied 117px
+     * of an 852px viewport purely to announce "0 in flow / No live events in scope".
+     * With nothing in flow, fall back to the existing `minimal` mode — the operator can
+     * still tap it open. Reuses the canonical display-mode machinery rather than adding
+     * a parallel collapsed state, and only applies when the operator has NOT explicitly
+     * expanded the rail.
+     */
+    if (isMobile && feed.tickerCount === 0 && feed.visibleCount === 0 && preferredMode !== 'expanded') {
+      return 'minimal'
+    }
     if (isMobile && preferredMode === 'docked') return 'expanded'
     return preferredMode
-  }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded])
+  }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded, feed.tickerCount, feed.visibleCount])
 
   const timelineEvents = feed.visible
   const tickerQueue = feed.tickerQueue
@@ -138,6 +149,9 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
     `is-${effectiveMode}`,
     isMobile && 'is-mobile',
     isHovered && 'is-hovered',
+    // Zero-state marker: lets the mobile stylesheet collapse the rail to a compact
+    // "Live · 0" pill instead of a 117px glass panel that only says "nothing here".
+    feed.tickerCount === 0 && feed.visibleCount === 0 && 'is-empty',
     sellerCardPeek && 'is-behind-peek',
     sellerCardExpanded && 'is-behind-card',
     deck.isFlipping && 'is-flipping',

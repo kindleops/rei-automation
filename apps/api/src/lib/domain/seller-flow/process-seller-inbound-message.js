@@ -1,3 +1,5 @@
+import { buildContextResolutionResult } from "@/lib/domain/context/context-resolution-result.js";
+import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import {
@@ -54,6 +56,7 @@ import {
   resolveGuardedAutoReplyMode,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
+import { resolveValuationSpendability } from "@/lib/domain/seller-flow/valuation-offer-authority.js";
 import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
 import {
   STATE_SOURCE_CODES,
@@ -93,6 +96,7 @@ const defaultDeps = {
   scoreProperty: null,
   getSupabaseClient: getDefaultSupabaseClient,
   getDealContextByThread,
+  probeDealContextAmbiguity: probeDealContextAmbiguityDefault,
   info,
   warn,
 };
@@ -680,6 +684,7 @@ export async function processSellerInboundMessage({
   // lookup; no Podio, no new resolver; classification, stage transition,
   // send-authority, compliance, and transport are untouched.
   const hydration_thread_key = clean(threadKey) || clean(inboundFrom);
+  let context_resolution = null;
   const has_usable_context_id = Boolean(
     clean(propertyId) ||
       clean(prospectId) ||
@@ -697,26 +702,58 @@ export async function processSellerInboundMessage({
     runtimeDeps.getDealContextByThread
   ) {
     try {
-      const deal_context = await runtimeDeps.getDealContextByThread(
-        hydration_thread_key,
-        // Bind resolution to the inbound's received-at instant so a multi-context
-        // thread (or a replayed/recovered historical inbound) resolves the campaign
-        // context in force at reply time — never a later or unrelated property.
-        { supabase, asOfTimestamp: inboundReceivedAt }
-      );
-      const hydrated_property_id = clean(deal_context?.property_id) || null;
-      const hydrated_owner_id = clean(deal_context?.master_owner_id) || null;
-      const hydrated_prospect_id = clean(deal_context?.prospect_id) || null;
-      if (hydrated_property_id || hydrated_owner_id || hydrated_prospect_id) {
-        propertyId = propertyId || hydrated_property_id;
-        ownerId = ownerId || hydrated_owner_id;
-        prospectId = prospectId || hydrated_prospect_id;
+      // §6: resolve with PROVENANCE. The as-of deal context and the ambiguity
+      // probe run together; the pure builder ranks every source, retains what
+      // it rejected, and fails closed on a genuine tie instead of the old lossy
+      // null. Ids are adopted ONLY from a RESOLVED result.
+      const [deal_context, tie] = await Promise.all([
+        runtimeDeps.getDealContextByThread(
+          hydration_thread_key,
+          // Bind resolution to the inbound's received-at instant so a multi-context
+          // thread (or a replayed/recovered historical inbound) resolves the campaign
+          // context in force at reply time — never a later or unrelated property.
+          { supabase, asOfTimestamp: inboundReceivedAt }
+        ),
+        runtimeDeps.probeDealContextAmbiguity
+          ? runtimeDeps.probeDealContextAmbiguity(hydration_thread_key, { supabase, asOfTimestamp: inboundReceivedAt })
+          : Promise.resolve({ ambiguous: false }),
+      ]);
+      context_resolution = buildContextResolutionResult({
+        deal_context: tie?.ambiguous
+          ? { ambiguous: true, distinct_owners: tie.distinct_owners || [] }
+          : deal_context
+            ? { property_id: deal_context.property_id, master_owner_id: deal_context.master_owner_id, prospect_id: deal_context.prospect_id }
+            : null,
+        outbound_pair: context?.fallback_pair_match
+          ? {
+              property_id: context?.ids?.property_id,
+              master_owner_id: context?.ids?.master_owner_id,
+              prospect_id: context?.ids?.prospect_id,
+              strategy: context?.fallback_match_data?.match_strategy || null,
+              context_linked: context?.fallback_match_data?.context_linked === true,
+              verified: context?.fallback_match_data?.context_verified === true,
+            }
+          : null,
+      });
+      if (context_resolution.status === "resolved" && context_resolution.chosen) {
+        propertyId = propertyId || context_resolution.chosen.property_id || null;
+        ownerId = ownerId || context_resolution.chosen.master_owner_id || null;
+        prospectId = prospectId || context_resolution.chosen.prospect_id || null;
         runtimeDeps.info?.("[INBOUND_CONTEXT_HYDRATED_SUPABASE]", {
           thread_key: hydration_thread_key,
           property_id: propertyId,
           master_owner_id: ownerId,
           prospect_id: prospectId,
-          source: "getDealContextByThread",
+          source: context_resolution.winner,
+          confidence: context_resolution.confidence,
+          repair: context_resolution.repair || null,
+        });
+      } else if (context_resolution.status === "ambiguous") {
+        runtimeDeps.warn?.("[INBOUND_CONTEXT_AMBIGUOUS]", {
+          thread_key: hydration_thread_key,
+          reason: context_resolution.reason,
+          disagreement: context_resolution.disagreement || null,
+          distinct_owners: tie?.distinct_owners || null,
         });
       }
     } catch (hydration_error) {
@@ -724,6 +761,34 @@ export async function processSellerInboundMessage({
         thread_key: hydration_thread_key,
         error: hydration_error?.message || "hydration_failed",
       });
+    }
+  }
+
+  // With explicit ids in hand no extra read is needed: rank them against the
+  // outbound-pair evidence already loaded, so an explicit-vs-pair disagreement
+  // (the dirty-canary class) is detected and recorded as a repair.
+  if (!context_resolution) {
+    context_resolution = buildContextResolutionResult({
+      explicit_ids: has_usable_context_id
+        ? {
+            property_id: clean(propertyId) || clean(context?.ids?.property_id) || null,
+            master_owner_id: clean(ownerId) || clean(context?.ids?.master_owner_id) || null,
+            prospect_id: clean(prospectId) || clean(context?.ids?.prospect_id) || null,
+          }
+        : null,
+      outbound_pair: context?.fallback_pair_match
+        ? {
+            property_id: context?.ids?.property_id,
+            master_owner_id: context?.ids?.master_owner_id,
+            prospect_id: context?.ids?.prospect_id,
+            strategy: context?.fallback_match_data?.match_strategy || null,
+            context_linked: context?.fallback_match_data?.context_linked === true,
+            verified: context?.fallback_match_data?.context_verified === true,
+          }
+        : null,
+    });
+    if (context_resolution.repair) {
+      runtimeDeps.warn?.("[INBOUND_CONTEXT_REPAIRED]", { thread_key: hydration_thread_key, repair: context_resolution.repair });
     }
   }
 
@@ -1018,6 +1083,7 @@ export async function processSellerInboundMessage({
   });
 
   const intelligence = await runtimeDeps.runInboundIntelligencePhase({
+    context_resolution,
     message,
     threadKey: threadKey || inboundFrom,
     propertyId,
@@ -1425,6 +1491,31 @@ export async function processSellerInboundMessage({
     });
     authorized_amount = null; // fail closed → renderer blocks monetary sends
   }
+  // ── Valuation spendability (independent of the valuation's own numbers) ────
+  // A ceiling derived from the same snapshot cannot catch a contaminated
+  // valuation, so spendability is decided from the engine's decision tier,
+  // confidence scores, comp COUNT and whether a contamination-defense pass ran.
+  // A non-spendable valuation is still persisted for analysis; it just cannot
+  // authorize money.
+  const valuation_spendability = resolveValuationSpendability({
+    valuation: effective_ade_snapshot,
+    // Pass the qualification OBJECT, not a boolean: a V3 pass only defends when
+    // its anchor-dependent price gates could actually run (see
+    // resolveV3ContaminationDefense). Coercing presence to `true` here would
+    // reintroduce the bypass one flag deeper.
+    v3_qualification: effective_ade_snapshot?.evidence?.v3?.qualification ?? null,
+  });
+  if (!valuation_spendability.spendable) {
+    runtimeDeps.warn("[VALUATION_NOT_OFFER_AUTHORITATIVE]", {
+      thread_key: threadKey || inboundFrom,
+      reason: valuation_spendability.reason,
+      decision_tier: valuation_spendability.decision_tier,
+      comp_count: valuation_spendability.comp_count,
+      confidence: valuation_spendability.confidence,
+      contamination_defense: valuation_spendability.contamination_defense,
+    });
+  }
+
   const deal_authority = {
     recommended_offer:
       underwritingSignals?.ade_result?.recommended_offer ??
@@ -1437,6 +1528,18 @@ export async function processSellerInboundMessage({
     authorized_offer_amount: authorized_amount,
     authorized_offer_ceiling: authorized_ceiling,
     comp_anchor_statement: negotiation?.comp_anchor?.authorized_statement || null,
+    // Hard gate consumed by resolveAuthorizedOfferAmount.
+    offer_authoritative: valuation_spendability.spendable,
+    valuation_spendability,
+    // OFFER-VERSION FREEZE. Everything a seller_offer must permanently bind:
+    // the immutable ADE run it was derived from, the valuation, and the margin
+    // policy that sized the spread. Once frozen onto an offer version these
+    // never move; a materially new valuation can only reach the seller through
+    // a NEW version created by the canonical persistActiveOffer path.
+    ade_snapshot_id: effective_ade_snapshot?.evidence?.immutable_snapshot_id ?? null,
+    valuation_mid: effective_ade_snapshot?.valuation_mid ?? null,
+    margin_policy:
+      effective_ade_snapshot?.evidence?.offer_calculation?.assignment_margin_policy ?? null,
   };
 
   // ── V2 deterministic response strategy (business decision → wording
@@ -1499,6 +1602,7 @@ export async function processSellerInboundMessage({
   }
 
   const execution = await runtimeDeps.executeInboundAutomationDecision({
+    contextResolution: context_resolution,
     opportunityId: offer_opportunity_id,
     message,
     threadKey: threadKey || inboundFrom,

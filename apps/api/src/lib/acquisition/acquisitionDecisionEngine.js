@@ -1,3 +1,8 @@
+import {
+  resolveBuyerCeilingAuthority,
+  resolveEffectiveAuthorizedCeiling,
+} from './buyerCeilingAuthority.js';
+import { resolveTargetAssignmentMargin } from './assignmentMarginPolicy.js';
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import {
   normalizeAssetClass,
@@ -9,9 +14,21 @@ import { classifyAssetLane } from './assetClassification.js';
 import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
-import { readFeatureFlag } from './modelConstants.js';
+import { MAD_MIN_OBSERVATIONS, readFeatureFlag } from './modelConstants.js';
+
+/** market_status values that mean a live listing exists (so an MLS listing
+ * price is legitimately expected evidence). Everything else -- notably
+ * 'Off Market' and 'Sold' -- means no active listing. */
+const LISTED_MARKET_STATUSES = Object.freeze([
+  'active', 'pending', 'contingent', 'for sale', 'listed', 'under contract', 'coming soon',
+]);
 
 const SCORE_TABLE = 'property_acquisition_scores';
+// Append-only ADE run lineage. property_acquisition_scores is upserted by
+// property_id and is therefore a MUTABLE latest-state projection: the same row
+// id held $10,969,000 on 2026-08-03 and $5,479,900 on 2026-08-31. Monetary
+// offers must bind to an immutable snapshot instead.
+const SNAPSHOT_TABLE = 'acquisition_score_snapshots';
 const DEFAULT_TARGET_ASSIGNMENT_FEE = 15_000;
 const MAX_SELECTED_COMPS = 12;
 const DECISION_TIERS = Object.freeze({
@@ -267,6 +284,36 @@ const RPC_COMP_DETAIL_SELECT = [
   'computed_ppsf',
   'comp_confidence_score',
   'deal_grade',
+  // ── advanced comp features ────────────────────────────────────────────────
+  // These are already ingested in buyer_comp_raw_v2 and are now projected by
+  // v_recent_sold_comps. normalizePropertyFeatures has always known how to map
+  // them; omitting them here (and in the view) is what pinned every selected
+  // comp at data_completeness = 37 in every market. Names must stay exactly as
+  // the normalizer reads them.
+  'subdivision_name',
+  'school_district_name',
+  'zoning',
+  'flood_zone',
+  'building_quality',
+  'exterior_walls',
+  'interior_walls',
+  'floor_cover',
+  'roof_cover',
+  'roof_type',
+  'basement',
+  'garage',
+  'pool',
+  'porch',
+  'patio',
+  'deck',
+  'driveway',
+  'stories',
+  'style',
+  'air_conditioning',
+  'heating_type',
+  'heating_fuel_type',
+  'sewer',
+  'water',
 ].join(',');
 
 const ADVANCED_COMP_SELECT = [
@@ -1362,7 +1409,8 @@ export function scoreComparable(subject, rawComp, options = {}) {
 }
 
 function removeOutliers(scoredComps = []) {
-  if (scoredComps.length < 5) {
+  // Same threshold the buyer-ceiling leg reuses (MAD_MIN_OBSERVATIONS).
+  if (scoredComps.length < MAD_MIN_OBSERVATIONS) {
     return { selected: scoredComps, rejected: [], method: 'insufficient_count_for_mad' };
   }
   const values = scoredComps.map((comp) => comp.adjusted_price).filter(Boolean);
@@ -2558,23 +2606,58 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
           : 0.7;
   const valuationCeiling = Math.max(0, valuation.mid * maxArvFactor - repairs.amount);
   const behaviorCeiling = num(investor.mid);
-  let effectiveCeiling;
-  if (behaviorCeiling && investor.confidence >= 45) {
-    effectiveCeiling = Math.min(valuationCeiling, behaviorCeiling);
-  } else if (behaviorCeiling) {
-    effectiveCeiling = valuationCeiling * 0.75 + behaviorCeiling * 0.25;
-  } else {
-    effectiveCeiling = valuationCeiling;
-  }
+  // MONETARY CEILING INVARIANT: buyer-behavior evidence may constrain this
+  // ceiling, never expand it past what the valuation independently supports.
+  // The previous branch did the opposite -- weak buyer evidence (confidence
+  // < 45) took a 75/25 blend that inflated the ceiling 18.7x on a contaminated
+  // n=2 sample. See buyerCeilingAuthority.js for the full trace.
+  const buyerCeilingAuthority = resolveBuyerCeilingAuthority(investor);
+  const ceilingResolution = resolveEffectiveAuthorizedCeiling({
+    valuation_based_ceiling: valuationCeiling,
+    behavior_based_ceiling: behaviorCeiling,
+    buyer_ceiling_authority: buyerCeilingAuthority,
+  });
+  const effectiveCeiling = ceilingResolution.effective_authorized_ceiling;
+
+  // DEAL-AWARE PROFIT PRESERVATION. targetAssignmentFee is a MINIMUM/target
+  // concept, never a maximum. The flat $15,000 made expected margin ~flat in
+  // dollars, so it collapsed to ~2% of ceiling on large deals. The policy sizes
+  // the preserved spread from the deal itself and can only ever preserve MORE
+  // than the incoming floor, so no deal becomes easier to approve than before.
+  // It NEVER touches effectiveCeiling -- it only chooses how much room to keep
+  // inside it.
+  const marginPolicy = resolveTargetAssignmentMargin({
+    effective_authorized_ceiling: effectiveCeiling,
+    asset_family: subject.asset_family,
+    buyer_demand_score: investor.buyer_demand_score,
+    liquidity_score: investor.liquidity_score,
+    // Overall confidence is derived FROM the offer, so it does not exist yet at
+    // this point; passing it would be circular. Valuation confidence is the
+    // evidence-quality signal genuinely available here.
+    confidence: null,
+    valuation_confidence: valuation.confidence,
+    buyer_ceiling_authoritative: buyerCeilingAuthority.authoritative,
+    minimum_margin_floor: targetAssignmentFee,
+    // V2 already applies demandPremium / confidenceHaircut to the offer below.
+    // Letting the policy re-apply them would count the same evidence twice in
+    // the same direction (measured ~1.3-1.4x amplification).
+    market_adjustments_applied_by_caller: true,
+  });
+  const dealTargetMargin = marginPolicy.target_margin;
 
   const motivation = distressAndMotivation(subject);
   const confidenceHaircut = ((100 - valuation.confidence) / 100) * 0.06;
   const motivationDiscount = (motivation.score / 100) * 0.035;
   const demandPremium =
     ((investor.buyer_demand_score + investor.liquidity_score) / 200) * 0.015;
-  const offerBeforeRound =
+  const marketAdjustedOffer =
     effectiveCeiling * (1 - confidenceHaircut - motivationDiscount + demandPremium) -
-    targetAssignmentFee;
+    dealTargetMargin;
+  // target_margin is ASPIRATIONAL: demandPremium can push the offer above
+  // (ceiling - target) and eat into it. protected_margin is ENFORCED -- the
+  // opening offer may never leave less than it on the table.
+  const protectedMarginCap = effectiveCeiling - marginPolicy.protected_margin;
+  const offerBeforeRound = Math.min(marketAdjustedOffer, protectedMarginCap);
   const recommended = Math.max(0, roundMoney(offerBeforeRound));
   const negotiationBand = Math.max(5_000, valuation.mid * 0.03);
   const minimum = Math.max(0, roundMoney(recommended - negotiationBand));
@@ -2591,8 +2674,21 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
       valuation_based_ceiling: roundMoney(valuationCeiling),
       behavior_based_ceiling: roundMoney(behaviorCeiling),
       effective_buyer_ceiling: roundMoney(effectiveCeiling),
+      effective_authorized_ceiling: roundMoney(effectiveCeiling),
+      ceiling_basis: ceilingResolution.basis,
+      ceiling_clamped_to_valuation: ceilingResolution.clamped,
+      buyer_ceiling_authoritative: buyerCeilingAuthority.authoritative,
+      buyer_ceiling_reasons: buyerCeilingAuthority.reasons,
+      buyer_ceiling_sample_size: buyerCeilingAuthority.sample_size,
+      buyer_ceiling_outlier_defense: buyerCeilingAuthority.outlier_defense,
       estimated_repairs: repairs.amount,
-      target_assignment_fee: targetAssignmentFee,
+      // The target actually used for this deal (>= the incoming floor).
+      target_assignment_fee: dealTargetMargin,
+      assignment_margin_floor: marginPolicy.minimum_margin,
+      protected_margin: marginPolicy.protected_margin,
+      protected_margin_enforced: marketAdjustedOffer > protectedMarginCap,
+      negotiable_margin: Math.max(0, roundMoney(expectedFee - marginPolicy.minimum_margin)),
+      assignment_margin_policy: marginPolicy,
       confidence_haircut_percent: round(confidenceHaircut * 100, 2),
       motivation_discount_percent: round(motivationDiscount * 100, 2),
       demand_premium_percent: round(demandPremium * 100, 2),
@@ -2628,6 +2724,41 @@ function subjectCompleteness(subject) {
   };
 }
 
+/**
+ * Is there real listing/MLS evidence for this subject?
+ *
+ * Grounded in the production estate: market_status_label is 'Off Market'
+ * (123,143), 'Sold' (48) or 'Active' (43), and mls_current_listing_price is
+ * populated for 0.1% of properties. An off-market property correctly has no
+ * active listing price.
+ */
+function hasListingEvidence(subject) {
+  if (hasValue(subject.listing_price)) return true;
+  const status = lower(subject.market_status);
+  if (!status) return false;
+  return LISTED_MARKET_STATUSES.some((listed) => status.includes(listed));
+}
+
+/**
+ * Source-aware applicability for finance/distress evidence.
+ *
+ * This is the finance-leg analogue of featurePriority(), which already returns
+ * 0 for beds/baths/sqft/units on land so that inapplicable evidence leaves the
+ * denominator. financeCompleteness had no such mechanism: it counted a flat
+ * 10-field list unconditionally, so an off-market cash-acquisition subject lost
+ * a full 10 points of finance completeness for correctly having no MLS listing
+ * price -- roughly 1.5 points of overall confidence across ~99.9% of the estate.
+ *
+ * listing_price is NOT deleted from the contract. It stays in the denominator
+ * whenever listing evidence exists or should exist (an actively listed or
+ * MLS-backed subject); it is only excluded when the subject is genuinely
+ * off-market. No weighting constant changes.
+ */
+function financeFieldApplicable(subject, field) {
+  if (field === 'listing_price') return hasListingEvidence(subject);
+  return true;
+}
+
 function financeCompleteness(subject) {
   const fields = [
     'equity_percent',
@@ -2641,11 +2772,15 @@ function financeCompleteness(subject) {
     'listing_price',
     'market_status',
   ];
-  const available = fields.filter((field) => hasValue(subject[field]));
+  const applicable = fields.filter((field) => financeFieldApplicable(subject, field));
+  const available = applicable.filter((field) => hasValue(subject[field]));
   return {
-    score: Math.round((available.length / fields.length) * 100),
+    score: applicable.length
+      ? Math.round((available.length / applicable.length) * 100)
+      : 0,
     available,
-    missing: fields.filter((field) => !hasValue(subject[field])),
+    missing: applicable.filter((field) => !hasValue(subject[field])),
+    not_applicable: fields.filter((field) => !financeFieldApplicable(subject, field)),
   };
 }
 
@@ -2700,14 +2835,21 @@ function determineDecisionTier({
   aos,
   confidence,
   compCount,
-  targetAssignmentFee,
+  // VIABILITY, not aspiration. These gates ask "is this deal economically worth
+  // doing?", so they key off the hard floor. target_margin is an aspirational
+  // profit objective: it drives offer construction and AOS scoring, and must
+  // never double as a minimum-worthiness gate. Using the target here demoted
+  // sound deals -- e.g. a $400k deal whose own demandPremium shaved $2,700 off
+  // a $40,000 aspiration failed its own gate at $37,300, and a genuinely
+  // excellent $25,000 fee was routed away from cash entirely.
+  minimumMargin,
 }) {
   const hardGateChecks = {
     confidence_at_least_85: confidence >= 85,
     comp_count_at_least_4: compCount >= 4,
     valuation_confidence_at_least_80: valuation.confidence >= 80,
-    assignment_fee_meets_target:
-      num(offer.expected_assignment_fee, 0) >= targetAssignmentFee,
+    assignment_fee_meets_minimum_economics:
+      num(offer.expected_assignment_fee, 0) >= minimumMargin,
     recommended_offer_available: num(offer.recommended_cash_offer, 0) > 0,
     aos_at_least_780: aos.score >= 780,
   };
@@ -2721,7 +2863,7 @@ function determineDecisionTier({
   } else if (
     creative.best_creative_score >= 68 &&
     (
-      num(offer.expected_assignment_fee, 0) < targetAssignmentFee ||
+      num(offer.expected_assignment_fee, 0) < minimumMargin ||
       creative.best_creative_score >= 80
     ) &&
     confidence >= 50
@@ -2732,7 +2874,7 @@ function determineDecisionTier({
     confidence >= 68 &&
     compCount >= 3 &&
     valuation.confidence >= 65 &&
-    num(offer.expected_assignment_fee, 0) >= targetAssignmentFee * 0.75 &&
+    num(offer.expected_assignment_fee, 0) >= minimumMargin * 0.75 &&
     aos.score >= 600
   ) {
     tier = DECISION_TIERS.AUTO_RANGE_OFFER;
@@ -2885,13 +3027,22 @@ export function calculateAcquisitionDecision({
     repairs,
     targetAssignmentFee,
   );
+  // Every downstream margin comparison must use the DEAL-SPECIFIC target the
+  // offer was actually built against, not the global floor. Using the floor
+  // here would score a large deal as if $15,000 were still the goal.
+  // AOS asks "did we achieve the profit objective?" -> aspirational target.
+  const dealTargetAssignmentFee =
+    num(offer.summary?.target_assignment_fee) ?? targetAssignmentFee;
+  // Tier/viability gates ask "is this worth doing at all?" -> hard floor.
+  const dealMinimumMargin =
+    num(offer.summary?.assignment_margin_floor) ?? targetAssignmentFee;
   const aos = acquisitionOpportunityScore({
     subject,
     valuation,
     investor,
     offer,
     creative,
-    targetAssignmentFee,
+    targetAssignmentFee: dealTargetAssignmentFee,
   });
   const subjectData = subjectCompleteness(subject);
   const financeData = financeCompleteness(subject);
@@ -2911,10 +3062,11 @@ export function calculateAcquisitionDecision({
     aos,
     confidence,
     compCount: selected.length,
-    targetAssignmentFee,
+    minimumMargin: dealMinimumMargin,
   });
+  // "Is cash viable?" is a viability question -> hard floor, not aspiration.
   const cashViability =
-    num(offer.expected_assignment_fee, 0) >= targetAssignmentFee * 0.75 &&
+    num(offer.expected_assignment_fee, 0) >= dealMinimumMargin * 0.75 &&
     valuation.confidence >= 60;
   const bestStrategy =
     creative.best_creative_score >= 68 && !cashViability
@@ -3017,7 +3169,7 @@ export function calculateAcquisitionDecision({
       version: '2.0.0',
       deterministic: true,
       computed_at: now.toISOString(),
-      target_assignment_fee: targetAssignmentFee,
+      target_assignment_fee: dealTargetAssignmentFee,
     },
     subject: {
       property_id: subject.property_id,
@@ -3626,12 +3778,86 @@ export async function scoreProperty(propertyId, deps = {}) {
     v3LoaderDiagnostics: v3Loaded?.diagnostics ?? null,
   });
   const row = scoreRowFromDecision(normalizedId, decision, now);
+  // Mint the immutable lineage id BEFORE either write so it travels inside the
+  // snapshot payload itself. Downstream monetary authority binds to THIS id,
+  // never to property_acquisition_scores.id (which the next run rewrites).
+  const immutableSnapshotId = (deps.newSnapshotId ?? (() => crypto.randomUUID()))();
+  if (row.evidence && typeof row.evidence === 'object') {
+    row.evidence.immutable_snapshot_id = immutableSnapshotId;
+  }
   const score = await persister(row, deps);
+  const snapshotWriter = deps.persistImmutableScoreSnapshot ?? persistImmutableScoreSnapshot;
+  let snapshot = null;
+  try {
+    snapshot = await snapshotWriter(row, score?.id ?? null, deps, immutableSnapshotId);
+  } catch (snapshotError) {
+    // Never fail scoring/analytics on lineage write. The absence of a
+    // snapshot_id is itself the signal that this run has no immutable
+    // provenance and therefore must not back a monetary offer.
+    snapshot = null;
+  }
   return {
     ok: true,
     score,
+    snapshot_id: snapshot?.snapshot_id ?? null,
+    immutable_snapshot_id: snapshot?.snapshot_id ?? null,
     evidence: score?.evidence ?? row.evidence,
   };
+}
+
+/**
+ * Write the append-only lineage row for this ADE run. Immutability is enforced
+ * by database trigger, so this insert is the only way a run's monetary evidence
+ * can ever be recorded -- and it can never be rewritten afterwards.
+ */
+export async function persistImmutableScoreSnapshot(row, projectionScoreId = null, deps = {}, snapshotId = null) {
+  const ev = row?.evidence ?? {};
+  const oc = ev.offer_calculation ?? {};
+  const comps = ev.comp_data_status ?? {};
+  const snapshot = {
+    ...(snapshotId ? { snapshot_id: snapshotId } : {}),
+    property_id: row?.property_id ?? null,
+    computed_at: row?.computed_at ?? new Date().toISOString(),
+    engine_name: ev.engine?.name ?? null,
+    engine_version: ev.engine?.version ?? null,
+    subject_inputs: ev.subject ?? null,
+    raw_candidate_count: comps.raw_candidate_count ?? null,
+    eligible_comp_count: comps.eligible_candidate_count ?? null,
+    selected_comp_count: comps.selected_comp_count ?? null,
+    rejected_comp_count: comps.rejected_comp_count ?? null,
+    outlier_method: ev.outlier_method?.method ?? null,
+    selected_comps: ev.selected_comps ?? null,
+    rejected_comps: ev.rejected_comps ?? null,
+    valuation_low: row?.valuation_low ?? null,
+    valuation_mid: row?.valuation_mid ?? null,
+    valuation_high: row?.valuation_high ?? null,
+    valuation_confidence: row?.valuation_confidence ?? null,
+    comp_count: row?.comp_count ?? null,
+    decision_tier: row?.decision_tier ?? null,
+    confidence: row?.confidence ?? null,
+    buyer_ceiling_authoritative: oc.buyer_ceiling_authoritative ?? null,
+    buyer_ceiling_reasons: oc.buyer_ceiling_reasons ?? null,
+    buyer_ceiling_sample: ev.investor_ceiling_summary?.sample_purchases ?? null,
+    valuation_based_ceiling: oc.valuation_based_ceiling ?? null,
+    behavior_based_ceiling: oc.behavior_based_ceiling ?? null,
+    effective_authorized_ceiling: oc.effective_authorized_ceiling ?? null,
+    // Margin-policy inputs/output/version, so an offer can permanently prove
+    // WHY it preserved the spread it did.
+    assignment_margin_policy: oc.assignment_margin_policy ?? null,
+    assignment_margin_policy_version: oc.assignment_margin_policy?.policy_version ?? null,
+    target_assignment_fee: oc.target_assignment_fee ?? null,
+    recommended_cash_offer: row?.recommended_cash_offer ?? null,
+    minimum_acceptable_offer: row?.minimum_acceptable_offer ?? null,
+    evidence: ev,
+    projection_score_id: projectionScoreId,
+  };
+  const { data, error } = await db(deps)
+    .from(SNAPSHOT_TABLE)
+    .insert(snapshot)
+    .select('snapshot_id')
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {

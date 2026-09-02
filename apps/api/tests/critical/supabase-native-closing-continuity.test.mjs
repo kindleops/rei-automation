@@ -43,19 +43,28 @@ const OPPORTUNITY = {
 // The contract price now comes from the ACCEPTED OFFER (Offer Term Authority),
 // never from recommended_offer. These tests therefore seed a real accepted
 // offer for the opportunity, which is what production requires too.
+// Contract-COMPLETE under SELLER_OFFER_POLICY_V1. A closing case now refuses
+// creation unless the accepted offer carries every contract-bearing term, so
+// this fixture mirrors what a real accepted offer looks like: policy terms
+// applied at proposal time, exact closing date computed at acceptance.
 const ACCEPTED_OFFER = {
   offer_id: "offer:" + OPP_ID + ":v1",
   opportunity_id: OPP_ID,
+  thread_key: "+15550100999",
   offer_version: 1,
   status: "accepted",
   purchase_price: 250000,
   accepted_price: 250000,
   accepted_at: "2026-08-30T12:00:00.000Z",
   acceptance_event_id: "evt-accept-1",
-  closing_date: null,
-  closing_term: null,
-  emd_amount: null,
-  emd_term: null,
+  closing_window_days: 14,
+  closing_date: "2026-09-14",
+  closing_term: "14_calendar_days_from_acceptance",
+  emd_amount: 1000,
+  emd_due_business_days: 3,
+  emd_due_date: "2026-09-02",
+  emd_term: "3_business_days_from_acceptance",
+  policy_version: "v1",
   terms_hash: "offer-terms-hash-1",
 };
 

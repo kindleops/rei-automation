@@ -47,6 +47,17 @@
  */
 
 import {
+  validateCanaryEnqueueAuthorization,
+  consumeEnqueueAuthorization,
+} from './canary-enqueue-authorization.js'
+import {
+  CANARY_WINDOW_EXEMPTION_PIN,
+  CANARY_WINDOW_EXEMPTION_REASON,
+  EXEMPTION_DENIED,
+  canaryLanePinMatches,
+  evaluateCanaryEnqueueWindowExemption,
+} from './canary-enqueue-window-exemption.js'
+import {
   applyGovernance,
   indexGovernance,
 } from '@/lib/domain/campaigns/template-governance.js'
@@ -149,6 +160,95 @@ export function buildCampaignTargetQueueKey(campaignTargetId, touchNumber = 1) {
  * mode outside the sendable set all produce zero rows rather than a row
  * carrying a mode the system did not authorize.
  */
+/**
+ * The global campaign gate (campaign_mode) stays closed. This is the single
+ * explicit exception: an internal-canary opener may be created ONLY when a
+ * scoped, token-bearing, expiring, one-time authorization names this exact
+ * campaign + target + recipient. Everything else still fails the mode gate.
+ */
+async function authorizeCanaryEnqueue(supabase, { target, campaign, recipient, deps }) {
+  const canaryRunId = clean(deps?.canaryRunId)
+  const token = clean(deps?.canaryAuthorizationToken)
+  if (!canaryRunId || !token) return { ok: false, reason: 'canary_authorization_absent' }
+
+  let allowlistValue = ''
+  try {
+    allowlistValue = clean(await getSystemValueFresh('auto_reply_thread_allowlist', { supabase }))
+  } catch {
+    return { ok: false, reason: 'canary_allowlist_unreadable' }
+  }
+
+  return validateCanaryEnqueueAuthorization(
+    supabase,
+    {
+      canary_run_id: canaryRunId,
+      campaign_id: clean(target.campaign_id),
+      campaign_target_id: clean(target.id),
+      recipient,
+      campaign,
+      allowlist_value: allowlistValue,
+      now: deps?.now,
+    },
+    token,
+  )
+}
+
+/**
+ * Gather everything the PINNED contact-window exemption needs, then decide.
+ *
+ * Reached ONLY when canaryLanePinMatches() has already passed, so no ordinary
+ * campaign target -- and no real seller -- ever performs these reads.
+ *
+ * Every read is wrapped. An unreadable control value, a failed sender lookup or
+ * a thrown authorization lookup yields a DENY, never an exception, so a
+ * malformed state falls back to the normal contact-window result exactly as the
+ * spec requires.
+ */
+async function resolveCanaryWindowExemption(supabase, { target, campaign, recipient, deps, now }) {
+  let sender = null
+  try {
+    sender = await resolveSender(supabase, { market: clean(target.market), recipient })
+  } catch {
+    return { allowed: false, reason: EXEMPTION_DENIED.ERROR, detail: 'sender_unreadable', sender: '' }
+  }
+  const senderPhone = clean(sender?.phone_number)
+
+  // An unreadable control value returns '' -> explicit-presence check denies.
+  const readControl = async (key) => {
+    try {
+      return clean(await getSystemValueFresh(key, { supabase }))
+    } catch {
+      return ''
+    }
+  }
+  const [campaignMode, executionMode, emergencyStopAt] = await Promise.all([
+    readControl('campaign_mode'),
+    readControl('queue_execution_mode'),
+    readControl('queue_emergency_stop_at'),
+  ])
+
+  let authorization = null
+  try {
+    const canary = await authorizeCanaryEnqueue(supabase, { target, campaign, recipient, deps })
+    if (canary.ok) authorization = canary.authorization
+  } catch {
+    authorization = null
+  }
+
+  const verdict = evaluateCanaryEnqueueWindowExemption({
+    target,
+    campaign,
+    recipient,
+    sender: senderPhone,
+    authorization,
+    campaignMode,
+    executionMode,
+    emergencyStopAt,
+    now,
+  })
+  return { ...verdict, sender: senderPhone }
+}
+
 async function resolveCampaignMode(supabase) {
   let raw
   try {
@@ -270,7 +370,9 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   if (!clean(target.campaign_id)) return fail(ENQUEUE_REASON.CAMPAIGN_MISSING, 'no campaign_id')
   const { data: campaign, error: campErr } = await supabase
     .from('campaigns')
-    .select('id, name')
+    // status + metadata are required by the scoped canary-enqueue conditions
+    // (internal_canary, do_not_activate, non-live).
+    .select('id, name, status, metadata')
     .eq('id', target.campaign_id)
     .maybeSingle()
   if (campErr) throw campErr
@@ -392,7 +494,45 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   }
 
   const window = isWithinContactWindow(new Date(nowIso), tz.iana, WINDOW_START_HOUR, WINDOW_END_HOUR)
-  if (!window.ok) return fail(ENQUEUE_REASON.OUTSIDE_WINDOW, window.reason)
+  let windowExemption = null
+  if (!window.ok) {
+    // PINNED INTERNAL-CANARY EXEMPTION.
+    // The cheap, pure pin predicate runs FIRST, so every other target -- every
+    // real seller -- short-circuits here and reaches byte-for-byte the same
+    // denial it reached before this branch existed, with no extra reads. Only
+    // the one pinned lane pays for the full conjunction below.
+    if (canaryLanePinMatches({ target, recipient })) {
+      windowExemption = await resolveCanaryWindowExemption(supabase, {
+        target,
+        campaign,
+        recipient,
+        deps,
+        now: nowIso,
+      })
+    }
+    if (!windowExemption?.allowed) {
+      // Fails closed to the NORMAL contact-window result. The denial reason is
+      // appended only for observability; the outcome is unchanged.
+      return fail(
+        ENQUEUE_REASON.OUTSIDE_WINDOW,
+        windowExemption ? `${window.reason}:${windowExemption.reason}` : window.reason,
+      )
+    }
+    logger.warn('enqueue_campaign_target_one.contact_window_internal_canary_exemption', {
+      reason: CANARY_WINDOW_EXEMPTION_REASON,
+      campaign_id: clean(target.campaign_id),
+      campaign_target_id: requestedId,
+      recipient,
+      sender: windowExemption.sender,
+      authorization_id: windowExemption.authorization_id,
+      canary_run_id: windowExemption.canary_run_id,
+      overridden_window_result: { ok: false, reason: window.reason },
+      window_start_hour: WINDOW_START_HOUR,
+      window_end_hour: WINDOW_END_HOUR,
+      timezone: tz.iana,
+      evaluated_at: nowIso,
+    })
+  }
 
   // ── 9. Identity + render (reuses #92 and #91) ───────────────────────────
   const { data: owner, error: ownerErr } = await supabase
@@ -416,12 +556,41 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   const senderPhone = clean(sender.phone_number)
   if (senderPhone === recipient) return fail(ENQUEUE_REASON.SENDER_IS_RECIPIENT)
 
+  // TOCTOU CLOSURE. The exemption was decided against a sender resolved at the
+  // window gate, but sender selection is usage-ordered and could in principle
+  // resolve differently by the time the row is built. If the row would carry any
+  // sender other than the pinned one, the exemption did not apply to the row
+  // actually being written -- so fail closed to the normal window result.
+  if (windowExemption?.allowed && senderPhone !== CANARY_WINDOW_EXEMPTION_PIN.sender) {
+    return fail(
+      ENQUEUE_REASON.OUTSIDE_WINDOW,
+      `${EXEMPTION_DENIED.NOT_PINNED_SENDER}:sender_changed_after_exemption`,
+    )
+  }
+
   // ── 11. Canonical campaign mode ─────────────────────────
   // Resolved immediately before the write so the value stamped on the row
   // reflects the control plane at the moment of creation, not at the start of
   // a long validation pass.
   const campaignMode = await resolveCampaignMode(supabase)
-  if (!campaignMode.ok) return fail(campaignMode.reason, campaignMode.detail)
+  let canaryAuthorization = null
+  if (!campaignMode.ok) {
+    // The global gate is shut. Only an exact scoped canary authorization opens
+    // it, and only for this one target.
+    const canary = await authorizeCanaryEnqueue(supabase, {
+      target,
+      campaign,
+      recipient,
+      deps,
+    })
+    if (!canary.ok) return fail(campaignMode.reason, canary.reason || campaignMode.detail)
+    canaryAuthorization = canary.authorization
+    logger.info('enqueue_campaign_target_one.canary_authorization_accepted', {
+      campaign_target_id: requestedId,
+      authorization_id: canary.authorization_id,
+      campaign_mode: campaignMode.detail || 'paused',
+    })
+  }
 
   // ── 12. Build exactly one row ───────────────────────────────────────────
   const touchNumber = Number(target.touch_number) || 1
@@ -463,7 +632,10 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       source: 'enqueue_campaign_target_one',
       // Required by the send_one_queue_row admission gate, which reads
       // metadata.campaign_mode and defaults to 'paused' when absent.
-      campaign_mode: campaignMode.mode,
+      // On the scoped-canary path the global mode is still `paused`; stamping
+      // the real value keeps send_one_queue_row's admission gate closed to
+      // ordinary runners. Only the scoped-canary dispatcher may run this row.
+      campaign_mode: campaignMode.mode ?? 'paused',
       campaign_target_id: requestedId,
       selected_template_id: templateId,
       template_id: templateId,
@@ -485,7 +657,55 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
         campaign_target_id: requestedId,
       },
       no_direct_provider_send: true,
+      // Provenance for the pinned window exemption. Present ONLY on the one
+      // exempted row. The raw authorization token is never recorded.
+      ...(windowExemption?.allowed
+        ? {
+            contact_window_exemption: {
+              reason: CANARY_WINDOW_EXEMPTION_REASON,
+              campaign_id: clean(target.campaign_id),
+              campaign_target_id: requestedId,
+              recipient,
+              sender: senderPhone,
+              authorization_id: windowExemption.authorization_id,
+              canary_run_id: windowExemption.canary_run_id,
+              overridden_window_result: { ok: false, reason: window.reason },
+              window_start_hour: WINDOW_START_HOUR,
+              window_end_hour: WINDOW_END_HOUR,
+              timezone: tz.iana,
+              evaluated_at: nowIso,
+            },
+          }
+        : {}),
     },
+  }
+
+  // CRASH/REPLAY BOUNDARY. The authorization is spent only once the row is
+  // known to exist. If a previous attempt inserted the row but was interrupted
+  // before consuming, the replay lands on one of the already_queued paths below
+  // and consumes there instead -- so the terminal state is always exactly one
+  // queue row and exactly one consumed authorization, never a stranded row with
+  // a live authorization.
+  const settleCanaryAuthorization = async (queue_row_id) => {
+    if (!canaryAuthorization?.id) return null
+    // A dry run VALIDATES the authorization but must never spend it. This is
+    // enforced here rather than relying on the dry-run supabase wrapper, so a
+    // preview can never consume a one-time authorization by accident.
+    if (deps?.dryRun === true) {
+      logger.info('enqueue_campaign_target_one.canary_authorization_not_consumed_dry_run', {
+        authorization_id: canaryAuthorization.id,
+      })
+      return { ok: true, skipped_dry_run: true, already_consumed: false }
+    }
+    const consumed = await consumeEnqueueAuthorization(supabase, canaryAuthorization.id, {
+      now: deps?.now,
+    })
+    logger.info('enqueue_campaign_target_one.canary_authorization_settled', {
+      authorization_id: canaryAuthorization.id,
+      queue_row_id: queue_row_id || null,
+      already_consumed: consumed.already_consumed === true,
+    })
+    return consumed
   }
 
   // ── 12. Insert, with the unique index as the concurrency guarantee ──────
@@ -504,6 +724,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
         .select('id, campaign_target_id')
         .eq('queue_key', queueKey)
         .maybeSingle()
+      await settleCanaryAuthorization(existing?.id ?? null)
       return {
         created: false,
         reason: ENQUEUE_REASON.ALREADY_QUEUED,
@@ -526,6 +747,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   const queueRowId = insert?.queue_row_id || insert?.item_id || insert?.id || null
 
   if (insert?.idempotent_replay === true || clean(insert?.reason) === 'idempotent_replay') {
+    await settleCanaryAuthorization(queueRowId)
     return {
       created: false,
       reason: ENQUEUE_REASON.ALREADY_QUEUED,
@@ -541,6 +763,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       .select('id, campaign_target_id')
       .eq('queue_key', queueKey)
       .maybeSingle()
+    await settleCanaryAuthorization(existing?.id ?? queueRowId)
     return {
       created: false,
       reason: ENQUEUE_REASON.ALREADY_QUEUED,
@@ -557,6 +780,9 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   }
 
   if (!queueRowId) return fail(ENQUEUE_REASON.INSERT_FAILED, 'no queue_row_id returned')
+
+  // The row exists and is ours: spend the one-time authorization now.
+  await settleCanaryAuthorization(queueRowId)
 
   // ── 13. The invariant ───────────────────────────────────────────────────
   // Read back and prove the row we created belongs to the target we were asked
@@ -651,6 +877,9 @@ export async function previewCampaignTargetOne(campaignTargetId, deps = {}) {
   let captured = null
   const result = await enqueueCampaignTargetOne(campaignTargetId, {
     ...deps,
+    // Hard guarantee: a preview validates the scoped authorization but never
+    // consumes it.
+    dryRun: true,
     insertQueueImpl: async (payload) => {
       captured = payload
       return { queue_row_id: `dry-run:${clean(campaignTargetId)}` }

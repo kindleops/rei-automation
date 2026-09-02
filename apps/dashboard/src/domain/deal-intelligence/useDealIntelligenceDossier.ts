@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchDealIntelligenceDossier, getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
 import { resolveThreadRouteKey } from '../inbox/canonical-thread-reference'
 import { resolveDealDeskThreadReference } from '../inbox/deal-desk-thread-reference'
@@ -16,6 +16,15 @@ interface ThreadIdentity {
 export type EngineRunPhase = 'running' | 'success' | 'error'
 
 export type EngineProgressStatus = 'pending' | 'running' | 'done' | 'error'
+
+/**
+ * How complete the dossier currently on screen is.
+ *
+ * `seed`    — identity handed over by the surface we navigated from; no network yet.
+ * `summary` — shell payload: identity, location, property basics, workflow state.
+ * `full`    — everything, including comps / buyers / activity / enrichment.
+ */
+export type DossierPhase = 'empty' | 'seed' | 'summary' | 'full'
 
 export interface EngineProgress {
   stage: EngineProgressStage
@@ -54,8 +63,12 @@ function buildThreadIdentityKey(thread: ThreadIdentity | null | undefined): stri
   ].join('|')
 }
 
+function isSummaryPayload(value: DealIntelligenceDossier | null | undefined): boolean {
+  return Boolean(value && (value as { summary_only?: boolean }).summary_only)
+}
+
 function isFullDossier(value: DealIntelligenceDossier | null | undefined): boolean {
-  if (!value || (value as { summary_only?: boolean }).summary_only) return false
+  if (!value || isSummaryPayload(value)) return false
   return Boolean(
     value.master_owner?.full_name
     || value.prospect?.full_name
@@ -68,104 +81,166 @@ export function useDealIntelligenceDossier(
   options: { seedDossier?: DealIntelligenceDossier | null; enabled?: boolean } = {},
 ) {
   const enabled = options.enabled !== false
-  const [dossier, setDossier] = useState<DealIntelligenceDossier | null>(options.seedDossier ?? null)
-  const [loading, setLoading] = useState(false)
+  const seed = options.seedDossier ?? null
+
+  // Kept apart rather than merged so a late summary response can never downgrade
+  // an already-loaded section back to its `lazy` placeholder. What renders is
+  // simply the most complete payload we hold.
+  const [summaryDossier, setSummaryDossier] = useState<DealIntelligenceDossier | null>(null)
+  const [fullDossier, setFullDossier] = useState<DealIntelligenceDossier | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [engineRunning, setEngineRunning] = useState(false)
   const [engineRunPhase, setEngineRunPhase] = useState<EngineRunPhase | null>(null)
   const [engineError, setEngineError] = useState<string | null>(null)
   const [engineProgress, setEngineProgress] = useState<EngineProgress[]>([])
   const requestIdRef = useRef(0)
-  const dossierRef = useRef<DealIntelligenceDossier | null>(options.seedDossier ?? null)
+  const dossierRef = useRef<DealIntelligenceDossier | null>(seed ?? null)
+  const seedRef = useRef(seed)
+  seedRef.current = seed
   const threadRef = useRef(thread)
-  const hasFetchedOnceRef = useRef(false)
   threadRef.current = thread
+
+  const dossier = fullDossier ?? summaryDossier ?? seed ?? null
+
+  const phase: DossierPhase = fullDossier
+    ? 'full'
+    : summaryDossier
+      ? 'summary'
+      : seed
+        ? 'seed'
+        : 'empty'
 
   useEffect(() => {
     dossierRef.current = dossier
   }, [dossier])
 
-  useEffect(() => {
-    if (!options.seedDossier) return
-    dossierRef.current = options.seedDossier
-    setDossier(options.seedDossier)
-  }, [options.seedDossier])
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const currentThread = threadRef.current
-    if (!currentThread?.threadKey) {
-      setDossier(null)
-      return
-    }
-
-    const requestId = ++requestIdRef.current
-    setLoading(true)
-    setError(null)
-
+  const buildQuery = useCallback((currentThread: ThreadIdentity) => {
     const qs = new URLSearchParams()
     const propertyId = resolvePropertyId(currentThread, null)
     if (propertyId) qs.set('property_id', propertyId)
     if (currentThread.canonicalE164) qs.set('canonical_e164', currentThread.canonicalE164)
     if (currentThread.prospectId) qs.set('prospect_id', currentThread.prospectId)
     if (currentThread.masterOwnerId) qs.set('master_owner_id', currentThread.masterOwnerId)
+    return qs
+  }, [])
+
+  const fetchPhase = useCallback(async (
+    currentThread: ThreadIdentity,
+    summaryOnly: boolean,
+    signal?: AbortSignal,
+  ): Promise<DealIntelligenceDossier> => {
+    const qs = buildQuery(currentThread)
+    if (summaryOnly) qs.set('summary', '1')
+
+    // Same route key as the thread-select orchestrator, so one conversation is never
+    // fetched twice under two different key shapes (N.1 runtime verification).
+    //
+    // Must go through the Deal Desk *binding*, not the pure resolver: the pure resolver
+    // receives no composite conversation id, so a thread with a composite identity and
+    // no dialable phone would fall back to a different selection key here than on the
+    // selection path — reintroducing the duplicate fetch this line exists to prevent.
+    const routeKey =
+      resolveThreadRouteKey(resolveDealDeskThreadReference(currentThread)) ??
+      currentThread.threadKey!
+    const result = await fetchDealIntelligenceDossier(routeKey, qs.toString(), signal)
+    if (!result.ok) throw new Error(`dossier_http_${result.status}`)
+    const payload = result.data as { ok?: boolean; data?: DealIntelligenceDossier; error?: string }
+    if (!payload?.ok || !payload?.data) throw new Error(payload?.error || 'dossier_failed')
+    return payload.data
+  }, [buildQuery])
+
+  /**
+   * Re-fetch the full dossier. `background` keeps whatever is already on screen
+   * mounted while the request is in flight — the profile must not blank out just
+   * because a section is being refreshed.
+   */
+  const refresh = useCallback(async (signal?: AbortSignal, opts: { background?: boolean } = {}) => {
+    const currentThread = threadRef.current
+    if (!currentThread?.threadKey) {
+      setSummaryDossier(null)
+      setFullDossier(null)
+      return
+    }
+
+    const requestId = ++requestIdRef.current
+    if (!opts.background) setDetailLoading(true)
+    setError(null)
 
     try {
-      // Same route key as the thread-select orchestrator, so one conversation is never
-      // fetched twice under two different key shapes (N.1 runtime verification).
-      //
-      // Must go through the Deal Desk *binding*, not the pure resolver: the pure resolver
-      // receives no composite conversation id, so a thread with a composite identity and
-      // no dialable phone would fall back to a different selection key here than on the
-      // selection path — reintroducing the duplicate fetch this line exists to prevent.
-      const routeKey =
-        resolveThreadRouteKey(resolveDealDeskThreadReference(currentThread)) ??
-        currentThread.threadKey
-      const result = await fetchDealIntelligenceDossier(routeKey, qs.toString(), signal)
+      const data = await fetchPhase(currentThread, false, signal)
       if (requestId !== requestIdRef.current) return
-      if (!result.ok) throw new Error(`dossier_http_${result.status}`)
-      const payload = result.data as { ok?: boolean; data?: DealIntelligenceDossier; error?: string }
-      if (payload?.ok && payload?.data) {
-        setDossier(payload.data)
-      } else {
-        throw new Error(payload?.error || 'dossier_failed')
-      }
+      setFullDossier(data)
     } catch (err: unknown) {
       if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') return
       if (requestId !== requestIdRef.current) return
       setError(err instanceof Error ? err.message : 'dossier_failed')
-      setDossier(null)
+      // Keep whatever we already have. Dropping it turns a failed *refresh* into
+      // a blank profile, which is strictly worse than slightly stale data.
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false)
+      if (requestId === requestIdRef.current) setDetailLoading(false)
     }
-  }, [])
+  }, [fetchPhase])
 
   const identityKey = buildThreadIdentityKey(thread)
 
   useEffect(() => {
     if (!enabled || !identityKey) {
-      setDossier(null)
-      setLoading(false)
+      setSummaryDossier(null)
+      setFullDossier(null)
+      setDetailLoading(false)
       return
     }
 
-    if (isFullDossier(options.seedDossier)) {
-      return
-    }
+    if (isFullDossier(seedRef.current)) return
 
-    dossierRef.current = null
-    setDossier(null)
+    const currentThread = threadRef.current
+    if (!currentThread?.threadKey) return
+
+    setSummaryDossier(null)
+    setFullDossier(null)
     setError(null)
-    setLoading(true)
+    setDetailLoading(true)
 
     const controller = new AbortController()
-    hasFetchedOnceRef.current = true
-    void refresh(controller.signal)
+    const requestId = ++requestIdRef.current
+
+    // Two-phase open, fired CONCURRENTLY. The two requests are independent — the
+    // summary skips comps, buyer market, activity and enrichment — so awaiting the
+    // summary before starting the full build just added its latency to the total.
+    // Server-side the pair also shares one `inbox_threads_hydrated` materialization
+    // via the in-flight cache, so racing them costs no extra database work.
+    const summaryPromise = fetchPhase(currentThread, true, controller.signal)
+    const fullPromise = fetchPhase(currentThread, false, controller.signal)
+
+    void summaryPromise
+      .then((summary) => {
+        if (requestId !== requestIdRef.current) return
+        setSummaryDossier(summary)
+      })
+      .catch(() => {
+        // Non-fatal: the full request is the real load.
+      })
+
+    void fullPromise
+      .then((full) => {
+        if (requestId !== requestIdRef.current) return
+        setFullDossier(full)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') return
+        if (requestId !== requestIdRef.current) return
+        setError(err instanceof Error ? err.message : 'dossier_failed')
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setDetailLoading(false)
+      })
 
     return () => {
       controller.abort()
       requestIdRef.current += 1
     }
-  }, [enabled, identityKey, refresh])
+  }, [enabled, identityKey, fetchPhase])
 
   const runDecisionEngine = useCallback(async () => {
     const currentThread = threadRef.current
@@ -187,7 +262,13 @@ export function useDealIntelligenceDossier(
 
     const base = getBackendBaseUrl()
     const secret = getBackendSecret()
-    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(currentThread.threadKey)}/run-engine?stream=true&property_id=${encodeURIComponent(propertyId)}`
+    // Carry the full identity, not just the property: the route rebuilds the
+    // dossier afterwards, and rebuilding from thread_key + property_id alone
+    // resolves a different linked prospect and swaps the displayed seller.
+    const runQs = buildQuery(currentThread)
+    runQs.set('stream', 'true')
+    runQs.set('property_id', propertyId)
+    const url = `${base}/api/cockpit/deal-intelligence/thread/${encodeURIComponent(currentThread.threadKey)}/run-engine?${runQs.toString()}`
 
     try {
       const res = await fetch(url, {
@@ -197,7 +278,12 @@ export function useDealIntelligenceDossier(
           'Content-Type': 'application/json',
           'x-ops-dashboard-secret': secret,
         },
-        body: JSON.stringify({ property_id: propertyId }),
+        body: JSON.stringify({
+          property_id: propertyId,
+          canonical_e164: currentThread.canonicalE164,
+          prospect_id: currentThread.prospectId,
+          master_owner_id: currentThread.masterOwnerId,
+        }),
       })
       if (!res.ok || !res.body) throw new Error(`run_engine_http_${res.status}`)
 
@@ -205,6 +291,7 @@ export function useDealIntelligenceDossier(
       const decoder = new TextDecoder()
       let buffer = ''
       let streamFailed: string | null = null
+      let receivedDossier = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -246,16 +333,24 @@ export function useDealIntelligenceDossier(
             )
           }
           if (event.dossier) {
-            setDossier(event.dossier)
+            // The run-engine stream closes with a freshly built dossier, so this
+            // IS the post-run state. Adopting it directly is what keeps the rest
+            // of the profile mounted: no refetch, no loading gate, no remount.
+            receivedDossier = true
+            // Bump the request id so an in-flight open cannot land afterwards and
+            // overwrite the engine result with a pre-run dossier.
+            requestIdRef.current += 1
+            setFullDossier(event.dossier)
           }
         }
       }
 
       if (streamFailed) throw new Error(streamFailed)
       setEngineProgress((prev) => prev.map((item) => ({ ...item, status: 'done' })))
-      await refresh()
+      // Only reach for the network if the stream never handed us a result.
+      if (!receivedDossier) await refresh(undefined, { background: true })
       setEngineRunPhase('success')
-      await sleep(1200)
+      await sleep(900)
     } catch (err: unknown) {
       setEngineError(err instanceof Error ? err.message : 'run_engine_failed')
       setEngineProgress((prev) =>
@@ -271,11 +366,21 @@ export function useDealIntelligenceDossier(
       setEngineRunning(false)
       setEngineRunPhase(null)
     }
-  }, [refresh])
+  }, [refresh, buildQuery])
 
-  return {
+  // `loading` now means "nothing to show yet" rather than "a request is open".
+  // Surfaces that used it as a full-screen gate therefore stop blanking as soon
+  // as the summary lands.
+  const loading = !dossier && detailLoading
+
+  return useMemo(() => ({
     dossier,
+    phase,
     loading,
+    /** A request is in flight; sections absent from the summary should skeleton. */
+    detailLoading,
+    /** True once the heavy sections (comps, buyers, activity, enrichment) are present. */
+    detailReady: phase === 'full',
     error,
     refresh,
     runDecisionEngine,
@@ -283,5 +388,8 @@ export function useDealIntelligenceDossier(
     engineRunPhase,
     engineError,
     engineProgress,
-  }
+  }), [
+    dossier, phase, loading, detailLoading, error, refresh, runDecisionEngine,
+    engineRunning, engineRunPhase, engineError, engineProgress,
+  ])
 }

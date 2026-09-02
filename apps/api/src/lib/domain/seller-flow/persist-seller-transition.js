@@ -22,6 +22,7 @@ import {
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { finalizeSellerAcceptance, isAcceptanceEdge } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -151,8 +152,15 @@ export function buildNegotiationStatePatch(previous = {}, { transition = {}, int
   if (adeSnapshot) {
     state.recommended_offer = num(adeSnapshot.recommended_cash_offer) ?? state.recommended_offer ?? null;
     state.authorized_offer_floor = num(adeSnapshot.minimum_acceptable_offer) ?? state.authorized_offer_floor ?? null;
+    // MONETARY CEILING INVARIANT: the spend ceiling must be INDEPENDENT of the
+    // buyer-behavior leg that produced the recommendation. investor_ceiling_mid
+    // is that same leg (it carried the contaminated $19,032,220 package event
+    // into a $21,284,800 ceiling), so it is deliberately NOT a source here.
     state.authorized_offer_ceiling =
-      num(adeSnapshot.investor_ceiling_mid) ?? num(adeSnapshot.investor_ceiling_high) ?? state.authorized_offer_ceiling ?? null;
+      num(adeSnapshot.evidence?.offer_calculation?.effective_authorized_ceiling) ??
+      num(adeSnapshot.evidence?.offer_calculation?.valuation_based_ceiling) ??
+      state.authorized_offer_ceiling ??
+      null;
   }
 
   if ((transition.workflow_event_types || []).includes("SELLER_ACCEPTED_OFFER")) {
@@ -378,6 +386,7 @@ export async function persistSellerTransitionArtifacts({
     negotiation_state_updated: false,
     workflow_events_emitted: 0,
     ade: { requested: transition?.ade_action || ADE_ACTIONS.NONE, ran: false, error: null },
+    acceptance: { edge: false, converged: false, offer_id: null, closing_case_id: null, reason: null },
   };
 
   if (!transition) return { ...summary, skipped: true, reason: "no_transition" };
@@ -600,6 +609,49 @@ export async function persistSellerTransitionArtifacts({
         opportunity_id: opportunity.id,
         error: metadata_error?.message || "metadata_update_failed",
       });
+    }
+
+    // ── Acceptance -> closing convergence (spec §12, P0 #5) ─────────────────
+    // When the durable negotiation state flips terms_accepted false -> true, the
+    // acceptance is bound to the exact active seller_offer and exactly one
+    // closing case is created from canonical Supabase authorities. This replaces
+    // the dead Podio contract trigger on the live path. It writes internal
+    // records only — no seller-visible send, no DocuSign envelope — so it is safe
+    // under queue/campaign containment. Failure-isolated: a convergence failure
+    // never fails seller inbound processing; the gap-recovery sweep is the net.
+    if (isAcceptanceEdge(previousState, negotiationState)) {
+      summary.acceptance.edge = true;
+      try {
+        const finalized = await finalizeSellerAcceptance({
+          opportunity_id: opportunity.id,
+          thread_key: threadKey,
+          property_id: propertyId || opportunity.primary_property_id || null,
+          master_owner_id: ownerId || opportunity.master_owner_id || null,
+          acceptance_event_id: clean(inboundEventId) || null,
+          acceptance_at: negotiationState.terms_accepted_at || nowIso,
+          // The agreed price and its basis come from the durable negotiation
+          // state, so the seam binds the RIGHT offer version (the seller's ask
+          // when we accepted it, our proposal when they accepted it).
+          accepted_price: negotiationState.accepted_price ?? null,
+          acceptance_basis: negotiationState.accepted_terms?.basis || null,
+          provenance: {
+            reasoning_code: transition.reasoning_code || null,
+            source_view: "seller_inbound_orchestrator",
+          },
+          supabase,
+        });
+        summary.acceptance.converged = Boolean(finalized?.closing_case_id);
+        summary.acceptance.offer_id = finalized?.offer_id || null;
+        summary.acceptance.offer_version = finalized?.offer_version ?? null;
+        summary.acceptance.closing_case_id = finalized?.closing_case_id || null;
+        summary.acceptance.reason = finalized?.reason || null;
+      } catch (acceptance_error) {
+        summary.acceptance.reason = "finalize_exception";
+        warn("[SELLER_TRANSITION_ACCEPTANCE_FINALIZE_FAILED]", {
+          opportunity_id: opportunity.id,
+          error: acceptance_error?.message || "finalize_failed",
+        });
+      }
     }
 
     // ── Workflow Studio negotiation events (spec §16) ───────────────────

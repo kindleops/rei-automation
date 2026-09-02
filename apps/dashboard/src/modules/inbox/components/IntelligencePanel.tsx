@@ -45,6 +45,19 @@ import { WatchBell } from '../../../shared/WatchBell'
 import { loadCensusForProperty, calculateInvestorOpportunityScore } from '../../../lib/data/censusData'
 import type { CensusData } from '../../../lib/data/censusData'
 import { DealIntelligence25Panel } from '../../deal-intelligence/DealIntelligence25Panel'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
+
+/**
+ * normalizePropertySnapshot returns strings and coerces missing values to '',
+ * which then reads back as 0. For the mobile seed that is indistinguishable
+ * from a real zero, and it rendered "EQUITY $0" next to "95% equity". Treat 0
+ * as unknown here — the dossier supplies the authoritative number moments later.
+ */
+const asFiniteNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(String(value).replace(/[^0-9.-]/g, ''))
+  return Number.isFinite(n) && n !== 0 ? n : null
+}
 import { DealIntelligenceHeaderActions } from '../../deal-intelligence/DealIntelligenceLeadStateBar'
 import '../../deal-intelligence/deal-intelligence-25.css'
 
@@ -113,6 +126,8 @@ const buildInteractiveAerialViewUrl = ({
 }
 
 type WorkflowThread = InboxWorkflowThread & Partial<{
+  lifecycle_stage: string
+  operational_status: string
   age: number
   phone_carrier: string
   property_type_majority: string
@@ -5990,6 +6005,7 @@ export const IntelligencePanel = ({
 }: IntelligencePanelProps) => {
   void threadContext
   void isSuppressed
+  const { isMobile: isMobileViewport } = useBreakpoint()
 
   // Remount counter for the N.1 performance guardrails (silent, dev/harness only).
   // Declared before the `!thread` early return so both branches count as one mount.
@@ -6016,6 +6032,13 @@ export const IntelligencePanel = ({
     : layoutMode === 'medium'
     ? 'split'
     : 'workspace'
+  // Portrait phones render the Seller Command Center, which carries its own
+  // header and its own overflow. Keeping this toolbar would stack a second,
+  // duplicate control strip above it.
+  const isMobileDetail = layoutMode === 'compact' && isMobileViewport
+  // On the mobile inbox flow, collapsing the intelligence panel reveals this
+  // thread's conversation and its composer — that is the canonical "Message".
+  const useMobileInboxFlowCollapse = isMobileDetail ? onCollapse : undefined
   return (
     <aside className={cls('nx-intelligence-panel', `is-mode-${panelClassMode}`, `is-layout-${layoutMode}`, `is-panel-${panelMode}`)}>
       {layoutMode !== 'compact' ? (
@@ -6027,7 +6050,7 @@ export const IntelligencePanel = ({
             </button>
           ) : null}
         </header>
-      ) : onCollapse ? (
+      ) : onCollapse && !isMobileDetail ? (
         <header className="nx-intel-header is-compact-only">
           <DealIntelligenceHeaderActions
             data={(() => {
@@ -6076,6 +6099,23 @@ export const IntelligencePanel = ({
             masterOwnerId={dealContext?.identity?.master_owner_id || thread.masterOwnerId}
             canonicalE164={dealContext?.identity?.canonical_e164 || thread.canonicalE164}
             fallbackAddress={snapshot.fullAddress || thread.propertyAddress || thread.displayAddress}
+            seed={{
+              sellerName: snapshot.prospectFullName || snapshot.ownerDisplayName || snapshot.ownerName || thread.displayName,
+              address: snapshot.fullAddress || thread.propertyAddress || thread.displayAddress,
+              lifecycleStage: thread.lifecycle_stage ?? thread.conversationStage,
+              operationalStatus: thread.operational_status ?? thread.inboxStatus,
+              leadTemperature: thread.lead_temperature,
+              isStarred: thread.isStarred,
+              isPinned: thread.isPinned,
+              isArchived: thread.isArchived,
+              estimatedValue: asFiniteNumber(snapshot.estimatedValue),
+              equityAmount: asFiniteNumber(snapshot.equityAmount),
+              equityPercent: asFiniteNumber(snapshot.equityPercent),
+              loanBalance: asFiniteNumber(snapshot.loanBalance),
+              repairCost: asFiniteNumber(snapshot.repairCost),
+              phone: thread.canonicalE164,
+            }}
+            onOpenConversation={useMobileInboxFlowCollapse ?? null}
           />
         ) : layoutMode === 'medium' ? (
           <MediumDealWorkspace thread={thread} snapshot={snapshot} messages={messages} phase3={phase3} dealContext={dealContext} onOpenComps={onOpenComps} />

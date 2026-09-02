@@ -50,14 +50,25 @@ export const FAILURE_SEVERITY_ACCENT: Record<string, string> = {
   low: '#64748b',
 }
 
+/**
+ * The failure family a row currently belongs to, or null.
+ *
+ * A row only belongs to a family while it is *actually* failed or blocked.
+ * `failure_category` survives a successful retry — it is the reason a row failed
+ * at some point, not a statement that it is failing now — so keying off the
+ * column alone counted delivered, queued and scheduled rows as failures and
+ * made the Failures module report the whole queue as one family.
+ */
 export function deriveFailureCause(item: QueueItem): string | null {
+  const failed = isFailed(item.status)
+  const blocked = BLOCKED_STATUSES.has(item.status)
+  if (!failed && !blocked) return null
   if (isManualMessage(item) && (item.failureCategory === 'missing_template' || item.diagnosticFlags.includes('MISSING_TEMPLATE'))) return null
   if (isDelivered(item.status) && item.failureCategory === 'missing_template') return null
   if (item.failureCategory) return item.failureCategory
   if (item.status === 'paused_name_missing') return 'paused_name_missing'
-  if (BLOCKED_STATUSES.has(item.status)) return 'blocked_by_guard'
-  if (isFailed(item.status)) return 'unknown'
-  return null
+  if (blocked) return 'blocked_by_guard'
+  return 'unknown'
 }
 
 export interface FailureCauseStat {

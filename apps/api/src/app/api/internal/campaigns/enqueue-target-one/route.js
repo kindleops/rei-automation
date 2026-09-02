@@ -51,10 +51,20 @@ async function handle(request) {
   // Opt-in to writing. Anything other than an explicit false stays a dry run.
   const dryRun = body.dry_run === false || body.dryRun === false ? false : true;
 
+  // Scoped canary-enqueue credentials. campaign_mode stays `paused` globally;
+  // these open the gate for exactly one authorized (campaign, target,
+  // recipient) triple and nothing else. Absent credentials => ordinary
+  // behaviour, i.e. still blocked by the mode gate.
+  const canaryRunId = String(body.canary_run_id ?? body.canaryRunId ?? "").trim();
+  const canaryAuthorizationToken = String(
+    body.canary_authorization_token ?? body.canaryAuthorizationToken ?? ""
+  ).trim();
+  const canaryDeps = { supabase, canaryRunId, canaryAuthorizationToken };
+
   try {
     const result = dryRun
-      ? await previewCampaignTargetOne(campaignTargetId, { supabase })
-      : await enqueueCampaignTargetOne(campaignTargetId, { supabase });
+      ? await previewCampaignTargetOne(campaignTargetId, canaryDeps)
+      : await enqueueCampaignTargetOne(campaignTargetId, canaryDeps);
 
     // The invariant is fatal: surface it as a server error rather than a
     // routine "not created", because it means something substituted a

@@ -4,7 +4,9 @@
 
 :root {
   --nx-pinned-dock-height: 88px;
-  --nx-pinned-dock-collapsed: 14px;
+  /* Visible height of the collapsed command shelf. Content reserves this exact
+     amount, so no inbox row can hide underneath the dock. */
+  --nx-pinned-dock-collapsed: 26px;
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 
@@ -31,6 +33,11 @@ html.is-mobile-layout {
     position: fixed;
     left: 0;
     right: 0;
+    /* Plain `bottom: 0`. iOS already pins fixed elements to the bottom of the
+       visible viewport, so no correction term belongs here. An earlier
+       visualViewport-derived offset was added while the real defect was the
+       duplicated dock reservation; with that fixed, the offset only ever lifted
+       the dock off the bottom edge and opened a black band beneath it. */
     bottom: 0;
     z-index: 160;
     pointer-events: none;
@@ -106,9 +113,22 @@ html.is-mobile-layout {
     touch-action: none;
   }
 
+  /* Collapsed = slim command shelf. The glass is only 26px tall, but the handle
+     stays a full 44px touch target by extending invisibly above the shelf. */
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    overflow: visible;
+    height: var(--nx-pinned-dock-collapsed);
+  }
+
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle {
-    min-height: 14px;
-    padding: 5px 0;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 0 11px;
+    align-content: end;
   }
 
   .nx-pinned-app-dock__handle i {
@@ -121,7 +141,8 @@ html.is-mobile-layout {
   }
 
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle i {
-    width: 64px;
+    width: 56px;
+    height: 4px;
     background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
     box-shadow:
       0 0 12px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.22),
@@ -160,12 +181,21 @@ html.is-mobile-layout {
     opacity: 1;
   }
 
+  /* Expanded (and mid-drag from the docked state) must fit the unpin zone — the
+     shared 120px cap clipped "drag apps here to remove from dock" to a sliver.
+     Scoped to open phases so a collapsed dock can never pop the panel open. */
+  .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__panel,
+  .nx-pinned-app-dock.is-docked.is-reordering .nx-pinned-app-dock__panel {
+    max-height: 168px;
+  }
+
   .nx-pinned-app-dock__panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 0 12px 4px;
+    min-height: 34px;
+    padding: 0 12px 2px;
   }
 
   .nx-pinned-app-dock__panel-head strong {
@@ -179,7 +209,9 @@ html.is-mobile-layout {
   .nx-pinned-app-dock__customize {
     border: 0;
     border-radius: 999px;
-    padding: 4px 10px;
+    min-height: 32px !important;
+    min-width: 64px !important;
+    padding: 4px 12px;
     font-size: 10px;
     font-weight: 700;
     color: var(--tone-primary, #5eead4);
@@ -271,6 +303,14 @@ html.is-mobile-layout {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Uniform cells in the dock track so labels truncate on a consistent grid.
+     The catalog sheet keeps its own grid sizing. */
+  .nx-pinned-app-dock__track .nx-pinned-app-dock__app {
+    width: 68px;
+    min-width: 68px;
+    max-width: 68px;
   }
 
   .nx-pinned-app-dock__app:active {
@@ -409,12 +449,34 @@ html.is-mobile-layout {
     height: 40px;
   }
 
-  /* Reserve bottom space for collapsed line or open dock — except fullscreen map */
+  /* Reserve bottom space for collapsed line or open dock — except fullscreen map.
+     .nx-stage is deliberately NOT in this list. The three shells below all render
+     *inside* .nx-stage (routes.tsx wraps every route in FullscreenAppShell), so
+     listing the stage as well applied the identical reservation twice in one box
+     chain. With a zero inset that reads as 2x32px and is easy to miss; on a
+     notched iPhone it is 2x(26+34+6) = 132px, which is what pushed app content
+     up off the bottom of the display and opened the dead band under the dock.
+     Clearance is owned by the scrolling app shell, once. */
   .nx-os.is-mobile-os .nx-premium-inbox,
   .nx-os.is-mobile-os .nx-fullscreen-app-shell,
-  .nx-os.is-mobile-os .nx-route-redirect-shell,
-  .nx-os.is-mobile-os .nx-stage {
+  .nx-os.is-mobile-os .nx-route-redirect-shell {
     padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
+  }
+
+  /* ...and only the OUTERMOST of them reserves. These shells nest — Pipeline
+     renders .nx-fullscreen-app-shell inside .nx-premium-inbox — so without this
+     the clearance is charged once per level again, which is the same 2x66px
+     that pushed content off the bottom of the display. Clearance is a property
+     of the screen, not of each shell that happens to wrap it. */
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-route-redirect-shell,
+  .nx-os.is-mobile-os .nx-premium-inbox .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-premium-inbox,
+  .nx-os.is-mobile-os .nx-fullscreen-app-shell .nx-route-redirect-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell .nx-fullscreen-app-shell,
+  .nx-os.is-mobile-os .nx-route-redirect-shell .nx-premium-inbox {
+    padding-bottom: 0 !important;
   }
 
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-premium-inbox,

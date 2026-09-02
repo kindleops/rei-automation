@@ -34,6 +34,7 @@ export interface PropertySnapshot {
   total_loan_amount?: number | null
   total_loan_payment?: number | null
   tax_amount?: number | null
+  tax_year?: number | string | null
   repair_estimate?: number | null
   building_condition?: string | null
   last_sale_date?: string | null
@@ -111,6 +112,8 @@ export interface DealIntelligenceProperty {
   market?: string | null
   property_type?: string | null
   property_class?: string | null
+  owner_name?: string | null
+  owner_location?: string | null
   normalized_asset_class?: string | null
   units?: number | null
   bedrooms?: number | null

@@ -303,7 +303,7 @@
   .nx-premium-queue {
     display: flex !important;
     flex-direction: column !important;
-    height: 100svh !important;
+    height: 100dvh !important;
     overflow: hidden !important;
   }
 

@@ -65,6 +65,11 @@ type AssetInput = {
   mortgageBalance: number | null
 }
 
+/** A calendar year is an identifier, not a quantity — it must never be group-separated. */
+const formatYear = (year: number | null | undefined): string => (
+  year == null ? '—' : String(year)
+)
+
 const joinParts = (parts: Array<string | null | undefined>): string =>
   parts.filter((part) => part && part !== '—').join(' · ')
 
@@ -109,9 +114,9 @@ const SINGLE_FAMILY: AssetPresentation = {
     input.beds != null ? `${formatInteger(input.beds)} bd` : null,
     input.baths != null ? `${formatDecimal(input.baths, 1)} ba` : null,
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${input.yearBuilt}` : null,
     input.effectiveYearBuilt != null && input.effectiveYearBuilt !== input.yearBuilt
-      ? `Effective ${formatInteger(input.effectiveYearBuilt)}`
+      ? `Effective ${input.effectiveYearBuilt}`
       : null,
   ]),
   buildContextualLine: (input) => joinParts([
@@ -131,8 +136,8 @@ const SINGLE_FAMILY: AssetPresentation = {
     { label: 'Bathrooms', value: formatDecimal(input.baths, 1) },
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Lot Sqft', value: formatInteger(input.lotSqft) },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
-    { label: 'Effective Year', value: formatInteger(input.effectiveYearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
+    { label: 'Effective Year', value: formatYear(input.effectiveYearBuilt) },
     { label: 'Construction', value: text(input.constructionType) || '—' },
     { label: 'Condition', value: text(input.condition) || '—' },
   ],
@@ -145,7 +150,7 @@ const MULTIFAMILY_2_4: AssetPresentation = {
     input.units != null ? `${formatInteger(input.units)} units` : null,
     input.beds != null && input.baths != null ? `${formatInteger(input.beds)} bd / ${formatDecimal(input.baths, 1)} ba` : null,
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.units != null ? `${formatInteger(input.units)} units` : null,
@@ -165,8 +170,8 @@ const MULTIFAMILY_2_4: AssetPresentation = {
     { label: 'Total Baths', value: formatDecimal(input.baths, 1) },
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Avg Sqft / Unit', value: formatInteger(input.avgSqftPerUnit) },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
-    { label: 'Effective Year', value: formatInteger(input.effectiveYearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
+    { label: 'Effective Year', value: formatYear(input.effectiveYearBuilt) },
   ],
 }
 
@@ -177,7 +182,7 @@ const MULTIFAMILY_5_PLUS: AssetPresentation = {
     input.units != null ? `${formatInteger(input.units)} units` : null,
     input.avgSqftPerUnit != null ? `${formatInteger(input.avgSqftPerUnit)} avg sqft/unit` : null,
     input.avgBedsPerUnit != null ? `${formatDecimal(input.avgBedsPerUnit, 1)} avg bd/unit` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.units != null ? `${formatInteger(input.units)} units` : null,
@@ -199,7 +204,7 @@ const MULTIFAMILY_5_PLUS: AssetPresentation = {
     { label: 'Avg Sqft / Unit', value: formatInteger(input.avgSqftPerUnit) },
     { label: 'Avg Beds / Unit', value: formatDecimal(input.avgBedsPerUnit, 1) },
     { label: 'Avg Baths / Unit', value: formatDecimal(input.avgBathsPerUnit, 1) },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
     { label: 'Construction', value: text(input.constructionType) || '—' },
     { label: 'Condition', value: text(input.condition) || '—' },
   ],
@@ -212,14 +217,14 @@ const RETAIL: AssetPresentation = {
     'Retail',
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
     input.constructionType ? titleize(input.constructionType) : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
     input.zoning ? `${titleize(input.zoning)} zoning` : null,
-    input.effectiveYearBuilt != null ? `Effective ${formatInteger(input.effectiveYearBuilt)}` : null,
+    input.effectiveYearBuilt != null ? `Effective ${formatYear(input.effectiveYearBuilt)}` : null,
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
@@ -232,7 +237,7 @@ const RETAIL: AssetPresentation = {
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Lot Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
     { label: 'Zoning', value: text(input.zoning) || '—' },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
     { label: 'Condition', value: text(input.condition) || '—' },
   ],
 }
@@ -244,13 +249,13 @@ const OFFICE: AssetPresentation = {
     'Office',
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.stories != null ? `${formatInteger(input.stories)} stories` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
     input.zoning ? `${titleize(input.zoning)} zoning` : null,
-    input.effectiveYearBuilt != null ? `Effective ${formatInteger(input.effectiveYearBuilt)}` : null,
+    input.effectiveYearBuilt != null ? `Effective ${formatYear(input.effectiveYearBuilt)}` : null,
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
@@ -264,7 +269,7 @@ const OFFICE: AssetPresentation = {
     { label: 'Stories', value: formatInteger(input.stories) },
     { label: 'Lot Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
     { label: 'Zoning', value: text(input.zoning) || '—' },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
   ],
 }
 
@@ -275,13 +280,13 @@ const INDUSTRIAL: AssetPresentation = {
     'Industrial',
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
     input.zoning ? `${titleize(input.zoning)} zoning` : null,
-    input.effectiveYearBuilt != null ? `Effective ${formatInteger(input.effectiveYearBuilt)}` : null,
+    input.effectiveYearBuilt != null ? `Effective ${formatYear(input.effectiveYearBuilt)}` : null,
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
@@ -294,7 +299,7 @@ const INDUSTRIAL: AssetPresentation = {
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Lot Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
     { label: 'Zoning', value: text(input.zoning) || '—' },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
     { label: 'Condition', value: text(input.condition) || '—' },
   ],
 }
@@ -306,7 +311,7 @@ const STORAGE: AssetPresentation = {
     'Self Storage',
     input.units != null ? `${formatInteger(input.units)} units` : null,
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.units != null ? `${formatInteger(input.units)} units` : null,
@@ -325,7 +330,7 @@ const STORAGE: AssetPresentation = {
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Avg Sqft / Unit', value: formatInteger(input.avgSqftPerUnit) },
     { label: 'Lot Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
   ],
 }
 
@@ -366,13 +371,13 @@ const OTHER_COMMERCIAL: AssetPresentation = {
   buildSummaryLine: (input) => joinParts([
     text(input.subtype) || 'Commercial',
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.acreage != null ? `${formatDecimal(input.acreage, 1)} ac` : null,
     input.zoning ? `${titleize(input.zoning)} zoning` : null,
-    input.effectiveYearBuilt != null ? `Effective ${formatInteger(input.effectiveYearBuilt)}` : null,
+    input.effectiveYearBuilt != null ? `Effective ${formatYear(input.effectiveYearBuilt)}` : null,
   ]),
   buildPeekMetrics: (input) => [
     metric('Estimated Value', formatMoney(input.estimatedValue), 'primary'),
@@ -385,7 +390,7 @@ const OTHER_COMMERCIAL: AssetPresentation = {
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Lot Acreage', value: input.acreage != null ? `${formatDecimal(input.acreage, 2)} ac` : '—' },
     { label: 'Zoning', value: text(input.zoning) || '—' },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
   ],
 }
 
@@ -396,7 +401,7 @@ const UNKNOWN: AssetPresentation = {
     input.assetType !== 'Property' ? input.assetType : null,
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
     input.units != null ? `${formatInteger(input.units)} units` : null,
-    input.yearBuilt != null ? `Built ${formatInteger(input.yearBuilt)}` : null,
+    input.yearBuilt != null ? `Built ${formatYear(input.yearBuilt)}` : null,
   ]),
   buildContextualLine: (input) => joinParts([
     input.sqft != null ? `${formatInteger(input.sqft)} sqft` : null,
@@ -414,7 +419,7 @@ const UNKNOWN: AssetPresentation = {
     { label: 'Asset Type', value: text(input.assetType) || '—' },
     { label: 'Building Sqft', value: formatInteger(input.sqft) },
     { label: 'Units', value: formatInteger(input.units) },
-    { label: 'Year Built', value: formatInteger(input.yearBuilt) },
+    { label: 'Year Built', value: formatYear(input.yearBuilt) },
   ],
 }
 

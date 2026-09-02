@@ -130,6 +130,32 @@
   --nx-glass-success-border:   rgba(22, 163, 74, 0.22);
 }
 
+/*
+ * true_black — neutral glass.
+ *
+ * The default glass fills are navy (rgba(12,18,30) / rgba(8,14,24)), which kept
+ * the app dock and shell chrome visibly blue even once the surfaces went black.
+ * Same construction as every other theme override, just with the hue removed.
+ * `--nx-glass-accent` is left inheriting the live accent so the dock's radial
+ * highlight still follows the accent switcher.
+ */
+[data-nexus-theme="true_black"] {
+  --nx-glass-fill-top:          rgba(16, 17, 19, 0.46);
+  --nx-glass-fill-bottom:       rgba(10, 11, 13, 0.38);
+  --nx-shell-glass-fill-top:    rgba(12, 13, 15, 0.74);
+  --nx-shell-glass-fill-bottom: rgba(8, 9, 10, 0.70);
+  --nx-shell-glass-border:      rgba(255, 255, 255, 0.13);
+  --nx-glass-border:            rgba(255, 255, 255, 0.13);
+  --nx-glass-border-strong:     rgba(255, 255, 255, 0.20);
+  --nx-glass-text:              #ededef;
+  --nx-glass-text-strong:       #ffffff;
+  --nx-glass-muted:             #9a9aa2;
+  --nx-glass-faint:             rgba(154, 154, 162, 0.50);
+  --nx-glass-divider:           rgba(255, 255, 255, 0.08);
+  --nx-glass-shadow:            0 24px 80px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --nx-glass-shadow-sm:         0 8px 24px rgba(0, 0, 0, 0.70);
+}
+
 [data-nexus-theme="red_ops"] {
   --nx-glass-bg:               linear-gradient(145deg, rgba(18,4,6,0.97), rgba(10,3,5,0.94));
   --nx-glass-bg-strong:        linear-gradient(145deg, rgba(18,4,6,0.98), rgba(10,3,5,0.96));

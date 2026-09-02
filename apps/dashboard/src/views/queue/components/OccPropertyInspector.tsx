@@ -29,6 +29,11 @@ const relTime = (iso: string | null | undefined): string => {
 
 const fmtPhone = (p: string | null | undefined) => (p ? `···${String(p).replace(/\D/g, '').slice(-4)}` : '—')
 
+/** 'clear', 'ok' and 'none' all mean "no suppression" — none is worth a row. */
+const CLEAN_SAFETY = new Set(['', 'clear', 'ok', 'none', 'null', 'clean'])
+const isSuppressed = (status: string | null | undefined) =>
+  Boolean(status) && !CLEAN_SAFETY.has(String(status).trim().toLowerCase())
+
 const fmtWhen = (iso: string | null | undefined): string | null => {
   if (!iso) return null
   return new Date(iso).toLocaleString(undefined, {
@@ -178,8 +183,10 @@ export function OccPropertyInspector({ item, mode, onClose, onOpenQueueRow, onNa
       ? 'active'
       : 'pending'
 
+  // Gate on exactly the rows the section renders — a `safetyStatus` of 'clear'
+  // or a zero cost previously opened an empty ROUTING DETAIL card.
   const showRoutingDetail = Boolean(
-    item.routingReason || item.guardReason || item.safetyStatus || item.estimatedCost > 0,
+    item.routingReason || item.guardReason || isSuppressed(item.safetyStatus),
   )
 
   const accentTone = statusView.tone
@@ -409,7 +416,7 @@ export function OccPropertyInspector({ item, mode, onClose, onOpenQueueRow, onNa
                   <span>{item.guardReason}</span>
                 </div>
               )}
-              {item.safetyStatus && item.safetyStatus !== 'clear' && (
+              {isSuppressed(item.safetyStatus) && (
                 <div className="occ-dossier-kv__row">
                   <span>Suppression</span>
                   <span className="is-amber">{item.safetyStatus}</span>
@@ -419,17 +426,21 @@ export function OccPropertyInspector({ item, mode, onClose, onOpenQueueRow, onNa
           </DossierSection>
         )}
 
-        {mode === 'event' && (
+        {mode === 'event' && (item.lastEventType || item.lastEventAt || item.extractedIntent || item.stageBefore || item.stageAfter) && (
           <DossierSection title="Latest event">
             <div className="occ-dossier-kv">
-              <div className="occ-dossier-kv__row">
-                <span>Event</span>
-                <span>{item.lastEventType ?? '—'}</span>
-              </div>
-              <div className="occ-dossier-kv__row">
-                <span>When</span>
-                <span>{item.lastEventAt ? relTime(item.lastEventAt) : '—'}</span>
-              </div>
+              {item.lastEventType && (
+                <div className="occ-dossier-kv__row">
+                  <span>Event</span>
+                  <span>{item.lastEventType}</span>
+                </div>
+              )}
+              {item.lastEventAt && (
+                <div className="occ-dossier-kv__row">
+                  <span>When</span>
+                  <span>{relTime(item.lastEventAt)}</span>
+                </div>
+              )}
               {item.extractedIntent && (
                 <div className="occ-dossier-kv__row">
                   <span>Intent</span>

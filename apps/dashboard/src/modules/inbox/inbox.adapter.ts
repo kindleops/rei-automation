@@ -594,7 +594,17 @@ export const toWorkflowThread = (t: InboxThread): InboxWorkflowThread => {
 
 const extractViewCounts = (model: InboxModel): Record<string, number> => {
   const counts: Record<string, number> = {}
-  if (model.counts) Object.assign(counts, model.counts)
+  // A live response carries NULL placeholders for counts it did not compute (skip_counts,
+  // degraded, or buckets outside its scope). Null means "unknown", not "zero" — copying it
+  // through let a live commit clobber an authoritative value that had just been fetched.
+  // That is exactly how the Archived chip reset from 7 to 0.
+  if (model.counts) {
+    for (const [key, value] of Object.entries(model.counts)) {
+      const numeric = Number(value)
+      if (value === null || value === undefined || !Number.isFinite(numeric)) continue
+      counts[key] = numeric
+    }
+  }
   if (model.priorityInboxCount != null) counts.priority = model.priorityInboxCount
   if (model.activeInboxCount != null) counts.active = model.activeInboxCount
   if (model.waitingInboxCount != null) counts.waiting = model.waitingInboxCount
@@ -1434,6 +1444,19 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     }, 'append')
   }, [runLoad, sourceMode])
 
+  /**
+   * Re-read authoritative category counts from the server.
+   *
+   * Operator mutations (archive/restore/status/stage/temperature) change bucket
+   * membership, so the chip counts must be reconciled against the server's own
+   * bucket semantics — never by local +1/-1 arithmetic.
+   */
+  const refreshCounts = useCallback(async () => {
+    refreshAuthoritativeViewCounts(dispatch, (warning) => {
+      metaRef.current.countsFetchWarning = warning
+    })
+  }, [])
+
   // ── Realtime subscription + polling heartbeat ─────────────────────────────
 
   useEffect(() => {
@@ -1882,5 +1905,15 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     hiddenThreadsCount: null,
   }
 
-  return { data, loading, error, refresh, loadMore, recentlyUpdatedThreadIds, sourceMode, setSourceMode: setMode }
+  return {
+    data,
+    loading,
+    error,
+    refresh,
+    refreshCounts,
+    loadMore,
+    recentlyUpdatedThreadIds,
+    sourceMode,
+    setSourceMode: setMode,
+  }
 }

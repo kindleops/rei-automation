@@ -597,3 +597,144 @@
 [data-nexus-theme='light'] .cmp-mobile-launch-hero {
   background: color-mix(in srgb, #ffffff 90%, transparent);
 }
+/* ── BUILD reach chip: tone follows real readiness ─────────────────────────
+   The chip used to be accent-green in every state, reinforcing a hardcoded
+   "Ready to schedule" on campaigns with nothing to send. Tone is now derived
+   from computeLaunchReadiness so the colour cannot contradict the copy. */
+.cmp-mobile-reach-chip.is-unmeasured,
+.cmp-mobile-reach-chip.is-loading {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cmp-mobile-reach-chip.is-unmeasured .cmp-mobile-reach-chip__value,
+.cmp-mobile-reach-chip.is-loading .cmp-mobile-reach-chip__value {
+  color: var(--text-2, #71717a);
+}
+
+.cmp-mobile-reach-chip.is-blocked {
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 34%, transparent);
+  background: color-mix(in srgb, var(--danger, #ef4444) 10%, rgba(255, 255, 255, 0.03));
+}
+
+.cmp-mobile-reach-chip.is-blocked .cmp-mobile-reach-chip__value {
+  color: var(--danger, #ef4444);
+}
+
+.cmp-mobile-reach-chip.is-warning {
+  border-color: color-mix(in srgb, var(--warning, #f5a524) 32%, transparent);
+  background: color-mix(in srgb, var(--warning, #f5a524) 9%, rgba(255, 255, 255, 0.03));
+}
+
+.cmp-mobile-reach-chip.is-warning .cmp-mobile-reach-chip__value {
+  color: var(--warning, #f5a524);
+}
+
+/* The detail line carries a real blocker/warning reason now, so let it wrap to
+   two lines instead of being clipped to a single 10px row. */
+.cmp-mobile-reach-chip__copy span {
+  white-space: normal;
+  line-height: 1.35;
+}
+
+/* ── Scope strip: read as scrollable, not clipped ──────────────────────────
+   Six scopes overflow 393px. The strip already scrolled, but a hard edge
+   slicing a label mid-word reads as a layout bug, so fade the trailing edge and
+   let the tabs snap. */
+.cmp-studio--mobile .cmp-domain-tabs {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 10px;
+  overscroll-behavior-x: contain;
+}
+
+.cmp-studio--mobile .cmp-domain-tab {
+  scroll-snap-align: start;
+  white-space: nowrap;
+}
+
+/* ── Scope heading: keep only what the tab strip does not already say ──────
+   The heading stacked a kicker ("PROSPECTS") and a title ("Prospect Targeting")
+   directly beneath a tab strip whose active pill already reads PROSPECT, and
+   beneath a header badge stating the anchor. That is 94px of restatement before
+   the first control at 393px.
+
+   The source-of-truth line is the only part that is unique per scope
+   ("Portfolio and owner intelligence layer."), so it stays. */
+.cmp-studio--mobile .cmp-domain-heading > div:first-child {
+  display: none;
+}
+
+.cmp-studio--mobile .cmp-domain-heading {
+  padding-block: 8px 6px;
+}
+
+/* ── Blockers / Warnings: match the surface's own section grammar ──────────
+   These rendered as ~19px bold headings sitting outside any card, while every
+   neighbouring section ("LAUNCH READINESS", "PREVIEW CANDIDATES", "SCHEDULE")
+   uses a 10px uppercase eyebrow. The heading outweighed the blockers it was
+   introducing. */
+.cmp-studio--mobile .cmp-readiness-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 10px 0;
+}
+
+.cmp-studio--mobile .cmp-readiness-reasons > strong {
+  flex: 0 0 100%;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-2, #71717a);
+}
+
+.cmp-studio--mobile .cmp-readiness-reasons--blockers > strong {
+  color: var(--danger, #ef4444);
+}
+
+/* ── Setup loading state ───────────────────────────────────────────────────
+   Opening an existing campaign renders the builder before its saved targeting
+   arrives (~1.5s). Showing an empty filter stack in that window reads as "this
+   campaign has no targeting", which is a factual claim we cannot make yet. */
+.cmp-campaign-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px 20px;
+}
+
+.cmp-campaign-loading__bar {
+  height: 54px;
+  border-radius: 12px;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.035) 0%,
+    rgba(255, 255, 255, 0.075) 45%,
+    rgba(255, 255, 255, 0.035) 70%
+  );
+  background-size: 220% 100%;
+  animation: cmp-campaign-loading-sweep 1.35s ease-in-out infinite;
+}
+
+.cmp-campaign-loading__bar:nth-child(2) { animation-delay: 0.12s; opacity: 0.82; }
+.cmp-campaign-loading__bar:nth-child(3) { animation-delay: 0.24s; opacity: 0.62; }
+
+.cmp-campaign-loading p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-2, #71717a);
+}
+
+@keyframes cmp-campaign-loading-sweep {
+  0%   { background-position: 180% 0; }
+  100% { background-position: -60% 0; }
+}
+
+.cmp-category-stack[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cmp-campaign-loading__bar { animation: none; }
+}

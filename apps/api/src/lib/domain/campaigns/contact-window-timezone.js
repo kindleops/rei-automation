@@ -39,6 +39,11 @@ const clean = (value) => String(value ?? "").trim();
 const upper = (value) => clean(value).toUpperCase();
 
 /** Resolution confidence. */
+// The contact-window policy of record (08:00-21:00 local, fail-closed on an
+// unresolved timezone). Versioned so a persisted decision can name the window
+// policy that was in force when it was made.
+export const CONTACT_WINDOW_POLICY_VERSION = "contact_window_v1_0800_2100_local_fail_closed";
+
 export const TZ_STATUS = {
   VALID: "VALID", // derived confidently, stored value agrees
   CORRECTED: "CORRECTED", // derived confidently, stored value disagreed

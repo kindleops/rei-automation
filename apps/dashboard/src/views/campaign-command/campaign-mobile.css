@@ -69,7 +69,7 @@
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 10px 10px calc(88px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 10px calc(58px + var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 6px);
 }
 
 /* ── Mobile intel ribbon (replaces hidden sidebar) ────────────────────────── */
@@ -128,7 +128,7 @@
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(10px + var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 6px);
   z-index: 30;
   display: flex;
   align-items: center;
@@ -193,7 +193,7 @@
   position: fixed;
   left: 10px;
   right: 10px;
-  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(10px + var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 6px);
   z-index: 1201;
   border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--border-strong) 75%, transparent);
@@ -553,4 +553,22 @@
 [data-nexus-theme='light'] .ccc-mobile-queue-card,
 [data-nexus-theme='light'] .ccc-mobile-intel__tile {
   background: color-mix(in srgb, #ffffff 88%, transparent);
+}
+/* Creator entry point. Deliberately a labelled control rather than a sheet item:
+   opening an existing campaign's targeting is a primary job on mobile, and it
+   had no entry point at all before. */
+.ccc-mobile-dock__setup {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }

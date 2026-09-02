@@ -6,10 +6,10 @@
   --icv-bg:       var(--nx-bg,            #06080d);
   --icv-panel:    rgba(10, 14, 23, 0.72);
   --icv-border:   var(--nx-border,        rgba(255,255,255,0.07));
-  --icv-accent:   var(--nx-accent,        #3ecf8e);
-  --icv-accent-s: rgba(62, 207, 142, 0.10);
-  --icv-blue:     #007aff;
-  --icv-blue-s:   rgba(0, 122, 255, 0.10);
+  --icv-accent:   var(--nexus-accent, var(--nx-accent, #3ecf8e));
+  --icv-accent-s: rgba(var(--nexus-accent-rgb, 62, 207, 142), 0.10);
+  --icv-blue:     var(--nexus-accent, #007aff);
+  --icv-blue-s:   rgba(var(--nexus-accent-rgb, 0, 122, 255), 0.10);
   --icv-text-0:   var(--nx-text,          #f4f4f5);
   --icv-text-1:   #a1a1aa;
   --icv-text-2:   #71717a;

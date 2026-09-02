@@ -287,6 +287,7 @@ function buildDecisionResult({
   next_action = "none",
   audit_reason = "none",
   compound_opportunity = null,
+  context_resolution = null,
 } = {}) {
   return {
     should_queue_reply: Boolean(should_queue_reply),
@@ -304,6 +305,9 @@ function buildDecisionResult({
     // address candidates that survived a leading negative intent. Persisted
     // in decision snapshots so review lanes see the full message meaning.
     compound_opportunity: compound_opportunity || null,
+    // §6 identity provenance (status / confidence / evidence / repair) when the
+    // orchestrator resolved context for this turn; null for legacy callers.
+    context_resolution: context_resolution || null,
   };
 }
 
@@ -353,6 +357,9 @@ function resolveCompoundOpportunitySignal(classification = {}) {
 }
 
 function computeInboundAutomationDecisionRaw({
+  // §6 ContextResolutionResult (status / confidence / evidence); the wrapper
+  // passes its args straight through, so this arrives from applyInboundAutomationDecision(args).
+  contextResolution = null,
   message,
   threadKey,
   propertyId,
@@ -398,15 +405,21 @@ function computeInboundAutomationDecisionRaw({
   }
 
   if (!usable_context) {
+    // §6: a GENUINELY AMBIGUOUS resolution (two contexts, no authority to pick)
+    // is not "missing context" -- it routes to the owned
+    // conflicting_property_identity workflow, never the generic clarifier.
+    const ambiguous = contextResolution?.status === "ambiguous";
+    const reason = ambiguous ? "conflicting_property" : "missing_context";
     return buildDecisionResult({
       should_mark_human_review: true,
       reply_mode: "manual_review",
-      human_review_reason: "missing_context",
+      human_review_reason: reason,
       route_hint,
       stage_hint,
       allowed_template_stages,
       next_action: "mark_human_review",
-      audit_reason: "missing_context",
+      audit_reason: reason,
+      context_resolution: contextResolution || null,
     });
   }
 
@@ -1319,17 +1332,11 @@ function buildPersonalizationContext({
   // A strategy-authorized amount (already ceiling-bounded by the router) takes
   // precedence over the bare recommended offer; any amount above the persisted
   // ceiling is discarded so the render fails closed instead of over-offering.
-  const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
-  const pickAuthorized = (value) => {
-    const amount = Number(value);
-    if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
-    return amount;
-  };
-  const authorized_offer = formatUsd(
-    pickAuthorized(dealAuthority?.authorized_offer_amount) ??
-      pickAuthorized(dealAuthority?.recommended_offer)
-  );
+  // ONE resolver for both the persisted offer and the rendered token, so the
+  // valuation-spendability gate cannot be satisfied on one path and bypassed on
+  // the other. A non-offer-authoritative valuation yields an empty token, and
+  // the render then fails closed on the missing placeholder.
+  const authorized_offer = formatUsd(resolveAuthorizedOfferAmount(dealAuthority));
 
   return {
     message_body: clean(message) || null,
@@ -1963,11 +1970,24 @@ export async function checkInboundAutoReplySuppression({
 // strategy-authorized amount preferred over the bare recommendation). Keeping
 // one resolver is what guarantees the persisted offer equals the sent amount.
 export function resolveAuthorizedOfferAmount(dealAuthority = null) {
+  // HARD GATE (proven production defect): a valuation the engine itself labelled
+  // REVIEW_REQUIRED / low-confidence must never authorize money, no matter what
+  // number it produced. The ceiling alone cannot catch this — a contaminated
+  // valuation derives its own ceiling and therefore validates itself. Callers
+  // that build dealAuthority MUST set offer_authoritative; its absence is
+  // treated as not-authoritative so the gate fails closed.
+  if (dealAuthority?.offer_authoritative !== true) return null;
+
+  // DEFENSE IN DEPTH (mission: "never authorize an amount above the independent
+  // monetary ceiling"). A missing ceiling previously SKIPPED the clamp entirely
+  // and returned the raw recommendation -- fail-open. An independent ceiling is
+  // now mandatory: absent or non-positive means no authority at all.
   const ceiling = Number(dealAuthority?.authorized_offer_ceiling);
+  if (!Number.isFinite(ceiling) || ceiling <= 0) return null;
   const pick = (value) => {
     const amount = Number(value);
     if (!Number.isFinite(amount) || amount <= 0) return null;
-    if (Number.isFinite(ceiling) && ceiling > 0 && amount > ceiling) return null;
+    if (amount > ceiling) return null;
     return amount;
   };
   return pick(dealAuthority?.authorized_offer_amount) ?? pick(dealAuthority?.recommended_offer);
@@ -1990,6 +2010,7 @@ export async function executeInboundAutomationDecision({
   inboundTo = "",
   inboundEventId = null,
   inboundReceivedAt = null,
+  contextResolution = null,
   enableQueueInsert = false,
   applySuppression = true,
   dryRun = true,
@@ -2029,6 +2050,7 @@ export async function executeInboundAutomationDecision({
     threadAllowlist: auto_reply_scope_config.threadAllowlist,
   });
   let base_decision = applyInboundAutomationDecision({
+    contextResolution,
     message,
     threadKey,
     propertyId,
@@ -2870,8 +2892,24 @@ export async function executeInboundAutomationDecision({
           authorized_ceiling: dealAuthority?.authorized_offer_ceiling ?? null,
           strategy: strategyDirective?.strategy || null,
           source_message_event_id: clean(inboundEventId) || null,
-          // closing/EMD deliberately omitted: no canonical policy exists in this
-          // system, and a fabricated contract term must never reach a seller.
+          // OFFER-VERSION FREEZE: bind this version to the immutable ADE run and
+          // the margin policy that produced it. Without these the offer could not
+          // prove which valuation it came from, and a later recomputation would
+          // leave no evidence of divergence.
+          ade_snapshot_id: dealAuthority?.ade_snapshot_id ?? null,
+          valuation_mid: dealAuthority?.valuation_mid ?? null,
+          metadata: dealAuthority?.margin_policy
+            ? {
+                margin_policy_version: dealAuthority.margin_policy.policy_version ?? null,
+                minimum_margin: dealAuthority.margin_policy.minimum_margin ?? null,
+                target_margin: dealAuthority.margin_policy.target_margin ?? null,
+                protected_margin: dealAuthority.margin_policy.protected_margin ?? null,
+                max_available_margin: dealAuthority.margin_policy.max_available_margin ?? null,
+                margin_pct: dealAuthority.margin_policy.margin_pct ?? null,
+              }
+            : {},
+          // closing/EMD terms are applied inside persistActiveOffer from
+          // SELLER_OFFER_POLICY_V1; they are deliberately not fabricated here.
           supabase,
         })
       : { ok: false, reason: "offer_amount_unauthorized" };

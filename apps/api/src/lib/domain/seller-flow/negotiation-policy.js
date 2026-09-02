@@ -34,6 +34,11 @@ function lower(value) {
 // ASSET CLASSES + VALUE BANDS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Bumped when negotiation semantics change. v1_margin_bound: every direct
+// monetary path (final offer, ask accept, counter accept, ADE-authorized offers)
+// honors the margin-protected ceiling (§8, P0 #4).
+export const NEGOTIATION_POLICY_VERSION = "negotiation_policy_v1_margin_bound";
+
 export const ASSET_CLASSES = Object.freeze({
   SFR: "sfr",
   SMALL_MULTIFAMILY: "multi_2_4",
@@ -211,7 +216,8 @@ export function computeNegotiationGapMetrics({
   const recommended = num(recommended_offer);
   const latest = num(latest_offer) ?? num(initial_offer) ?? recommended;
   const first = num(initial_offer) ?? recommended;
-  const ceiling = num(authorized_offer_ceiling) ?? recommended;
+  // A recommendation may NEVER serve as its own ceiling (self-validation).
+  const ceiling = num(authorized_offer_ceiling);
   const floor = num(authorized_offer_floor);
   const arvValue = num(arv);
   const repairs = num(repair_estimate);
@@ -286,7 +292,8 @@ export function classifyNegotiationZone({
   const p = policy || resolveNegotiationPolicy({});
   const ask = num(current_ask);
   const recommended = num(recommended_offer);
-  const ceiling = num(authorized_offer_ceiling) ?? recommended;
+  // A recommendation may NEVER serve as its own ceiling (self-validation).
+  const ceiling = num(authorized_offer_ceiling);
   const confidence = num(valuation_confidence);
   const askConfidence = num(asking_price_confidence);
 
@@ -330,6 +337,33 @@ export function classifyNegotiationZone({
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
+ * THE margin-protected ceiling: the most we may authorize while still keeping
+ * the minimum assignment margin (supersprint §8, P0 #4).
+ *
+ * The authorized ceiling is GROSS (the ADE clamps the recommended offer at
+ * ceiling - protected_margin). Authorizing an amount AT the ceiling therefore
+ * drives the assignment fee to zero. When the state carries a positive minimum
+ * margin below the ceiling, every direct monetary path -- the concession
+ * ladder, the final authorized offer, and both accept-the-seller paths -- must
+ * bound at (ceiling - minimum_margin). Opt-in: with no margin on the state the
+ * result is the raw ceiling and behaviour is exactly as before.
+ *
+ * Returns { ceiling, protected_ceiling, minimum_margin, margin_bound_active }.
+ */
+export function resolveMarginProtectedCeiling(state = {}) {
+  const ceiling = num(state?.authorized_offer_ceiling);
+  const minimum_margin = num(state?.minimum_assignment_margin ?? state?.minimum_margin);
+  const margin_bound_active =
+    ceiling !== null && minimum_margin !== null && minimum_margin > 0 && minimum_margin < ceiling;
+  return {
+    ceiling,
+    protected_ceiling: margin_bound_active ? ceiling - minimum_margin : ceiling,
+    minimum_margin: margin_bound_active ? minimum_margin : null,
+    margin_bound_active,
+  };
+}
+
+/**
  * Decide whether another automated monetary move is permitted and, if so, the
  * maximum authorized amount. Never exceeds the ceiling; never moves without a
  * qualifying reason; never auto-raises after a bare rejection.
@@ -370,12 +404,22 @@ export function evaluateConcession({
     return { allowed: false, reason_code: "NO_QUALIFYING_MOVEMENT_OR_FACT", amount: null, is_final: false };
   }
 
-  const remaining = ceiling - latest;
+  // WALKAWAY IS MINIMUM ECONOMICS, NOT THE RAW CEILING. Conceding all the way to
+  // the authorized ceiling drives the assignment margin to zero: on a $400k
+  // ceiling opening at a $40,000 fee, three ladder steps reached $10,000 then
+  // $5,000 -- below the $15,000 hard floor. The floor is what makes a cash
+  // assignment worth doing, so it bounds concessions too. Opt-in: when no
+  // minimum margin is carried on the state, behaviour is exactly as before.
+  const concessionCeiling = resolveMarginProtectedCeiling(state).protected_ceiling;
+  if (latest >= concessionCeiling) {
+    return { allowed: false, reason_code: "MINIMUM_MARGIN_REACHED", amount: null, is_final: true };
+  }
+  const remaining = concessionCeiling - latest;
   const step = Math.max(500, Math.round(remaining * p.concession.max_step_share_of_remaining));
-  let amount = Math.min(ceiling, latest + step);
+  let amount = Math.min(concessionCeiling, latest + step);
   // Never offer more than the seller is asking (§6 within-authority guard).
   if (ask !== null && amount > ask) amount = ask;
-  const is_final = amount >= ceiling;
+  const is_final = amount >= concessionCeiling;
 
   return {
     allowed: amount > latest,

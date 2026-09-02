@@ -16,15 +16,23 @@
 // not introduce a competing one. The opportunity stays the entity of record and
 // carries active_offer_id / accepted_offer_id pointers.
 //
-// TERM POLICY: closing_date/closing_term and emd_amount/emd_term are written
-// ONLY from an explicitly supplied policy. This system has NO canonical
-// closing-date policy and NO canonical EMD policy, so they are normally null,
-// and an offer missing them cannot complete a contract. Nothing is defaulted
-// here — inventing 14 days or a deposit figure would fabricate a contract term.
+// TERM POLICY: contractual terms come from SELLER_OFFER_POLICY_V1
+// (seller-offer-policy.js) — the ONE place those literals live. Every newly
+// proposed offer carries closing_window_days, earnest_money and
+// emd_due_business_days BEFORE it is sent. The exact scheduled_closing_date is
+// computed at ACCEPTANCE (acceptance + window, rolled forward off weekends and
+// holidays) and is never mutated afterwards. A seller-negotiated window or EMD
+// produces a NEW offer version rather than editing an existing one.
 
 import crypto from "node:crypto";
 
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import {
+  resolveNewOfferTerms,
+  computeScheduledClosingDate,
+  computeEmdDueDate,
+  assertContractComplete,
+} from "@/lib/domain/seller-flow/seller-offer-policy.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 function clean(value) {
@@ -71,6 +79,8 @@ export function buildOfferTermsHash({
   closing_term = null,
   emd_amount = null,
   emd_term = null,
+  closing_window_days = null,
+  emd_due_business_days = null,
 } = {}) {
   return crypto
     .createHash("sha256")
@@ -82,6 +92,10 @@ export function buildOfferTermsHash({
         clean(closing_term) || null,
         money(emd_amount),
         clean(emd_term) || null,
+        // Numeric policy terms participate in the hash: a renegotiated window or
+        // EMD is a different contract even at the same price.
+        Number.isFinite(Number(closing_window_days)) ? Number(closing_window_days) : null,
+        Number.isFinite(Number(emd_due_business_days)) ? Number(emd_due_business_days) : null,
       ])
     )
     .digest("hex");
@@ -138,6 +152,10 @@ export async function persistActiveOffer({
   closing_term = null,
   emd_amount = null,
   emd_term = null,
+  // Negotiated overrides. Supplying any of these creates a NEW offer version
+  // carrying the negotiated term; they never mutate an existing offer.
+  closing_window_days = null,
+  emd_due_business_days = null,
   source_message_event_id = null,
   metadata = {},
   supabase: injected = null,
@@ -161,15 +179,64 @@ export async function persistActiveOffer({
     return { ok: false, reason: "version_lookup_failed" };
   }
 
+  // SELLER_OFFER_POLICY_V1: every NEWLY PROPOSED offer carries the contractual
+  // terms before it is sent. A negotiated override supplies a different value
+  // here, which is why an override necessarily produces a NEW offer version
+  // rather than mutating an existing one.
+  const policy_terms = resolveNewOfferTerms({
+    overrides: {
+      closing_window_days,
+      earnest_money: emd_amount,
+      earnest_money_due_business_days: emd_due_business_days,
+    },
+  });
+
   const offer_id = buildOfferId(opportunity_id, version);
   const terms_hash = buildOfferTermsHash({
     opportunity_id,
     purchase_price: price,
     closing_date,
-    closing_term,
-    emd_amount,
-    emd_term,
+    closing_term: closing_term || policy_terms.closing_term,
+    emd_amount: policy_terms.earnest_money,
+    emd_term: emd_term || policy_terms.emd_term,
+    closing_window_days: policy_terms.closing_window_days,
+    emd_due_business_days: policy_terms.emd_due_business_days,
   });
+
+  // ── OFFER VERSION-CHURN PREVENTION (spec §9) ──────────────────────────────
+  // A fresh computation that yields economically and contractually IDENTICAL
+  // terms must REUSE the active version, not supersede it and mint a new
+  // seller-visible version. Semantic equality = identical terms_hash AND
+  // identical policy_version AND the same direction (a seller counter is never
+  // conflated with our own proposal). A new valuation alone therefore does not
+  // churn the offer version; only a real term change does.
+  let activeForReuse = null;
+  try {
+    activeForReuse = await loadActiveOffer({ opportunity_id, supabase });
+  } catch {
+    activeForReuse = null;
+  }
+  if (
+    activeForReuse &&
+    clean(activeForReuse.terms_hash) === clean(terms_hash) &&
+    clean(activeForReuse.policy_version) === clean(policy_terms.policy_version) &&
+    (clean(activeForReuse.direction) || "outbound") === (clean(direction) || "outbound")
+  ) {
+    info("[OFFER_VERSION_REUSED]", {
+      offer_id: activeForReuse.offer_id,
+      offer_version: activeForReuse.offer_version,
+      terms_hash,
+    });
+    return {
+      ok: true,
+      reused: true,
+      offer_id: activeForReuse.offer_id,
+      offer_version: activeForReuse.offer_version,
+      purchase_price: money(activeForReuse.purchase_price),
+      terms_hash: activeForReuse.terms_hash,
+      offer: activeForReuse,
+    };
+  }
 
   // Supersede the prior active offer FIRST so the one-active unique index can
   // never reject the new row. History is preserved (status change only).
@@ -202,9 +269,12 @@ export async function persistActiveOffer({
     direction: clean(direction) || "outbound",
     purchase_price: price,
     closing_date: clean(closing_date) || null,
-    closing_term: clean(closing_term) || null,
-    emd_amount: money(emd_amount),
-    emd_term: clean(emd_term) || null,
+    closing_term: clean(closing_term) || policy_terms.closing_term,
+    closing_window_days: policy_terms.closing_window_days,
+    emd_amount: policy_terms.earnest_money,
+    emd_term: clean(emd_term) || policy_terms.emd_term,
+    emd_due_business_days: policy_terms.emd_due_business_days,
+    policy_version: policy_terms.policy_version,
     ade_snapshot_id: clean(ade_snapshot_id) || null,
     recommended_offer: money(recommended_offer),
     authorized_ceiling: money(authorized_ceiling),
@@ -406,6 +476,24 @@ export async function acceptActiveOffer({
     };
   }
 
+  // The exact closing date is computed ONCE, here, from the accepted offer's own
+  // window: acceptance + closing_window_days calendar days, rolled forward when
+  // it lands on a weekend or recognized holiday. It is never recomputed or
+  // silently mutated afterwards — a different date requires a new offer version
+  // accepted in its place.
+  const scheduled_closing_date =
+    clean(active.closing_date) ||
+    computeScheduledClosingDate({
+      accepted_at: accepted_iso,
+      closing_window_days: active.closing_window_days,
+    });
+  const emd_due_date =
+    clean(active.emd_due_date) ||
+    computeEmdDueDate({
+      accepted_at: accepted_iso,
+      emd_due_business_days: active.emd_due_business_days,
+    });
+
   const { data: updated, error } = await supabase
     .from("seller_offers")
     .update({
@@ -413,6 +501,8 @@ export async function acceptActiveOffer({
       accepted_at: accepted_iso,
       acceptance_event_id: clean(acceptance_event_id),
       accepted_price: active.purchase_price,
+      closing_date: scheduled_closing_date,
+      emd_due_date,
     })
     .eq("offer_id", clean(active.offer_id))
     .eq("status", OFFER_STATUS.ACTIVE)
@@ -446,6 +536,10 @@ export async function acceptActiveOffer({
     accepted_price: updated.accepted_price,
   });
 
+  // Contract-bearing completeness. An accepted offer that is missing any term a
+  // contract needs is surfaced here rather than discovered later at closing.
+  const completeness = assertContractComplete(updated);
+
   return {
     ok: true,
     accepted: true,
@@ -454,10 +548,16 @@ export async function acceptActiveOffer({
     accepted_price: updated.accepted_price,
     closing_date: updated.closing_date,
     closing_term: updated.closing_term,
+    closing_window_days: updated.closing_window_days,
     emd_amount: updated.emd_amount,
     emd_term: updated.emd_term,
+    emd_due_business_days: updated.emd_due_business_days,
+    emd_due_date: updated.emd_due_date,
+    policy_version: updated.policy_version,
     terms_hash: updated.terms_hash,
     accepted_at: updated.accepted_at,
+    contract_complete: completeness.ok,
+    missing_contract_terms: completeness.missing,
     offer: updated,
   };
 }

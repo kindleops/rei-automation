@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { ThreadContext } from '../../../lib/data/inboxData'
+import { useStreetViewAvailability } from './use-street-view-availability'
 import { Composer } from '../../../modules/inbox/components/Composer'
 import { MobileBottomSheet, type BottomSheetSnap } from '../../../modules/mobile/MobileBottomSheet'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
@@ -206,20 +207,32 @@ export const SellerMapCard = ({
     }
   }
 
-  const imageBlock = viewModel.property.imageUrl ? (
-    <div className={cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')}>
-      <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="lazy" decoding="async" />
+  const heroState = useStreetViewAvailability(viewModel.property.imageUrl)
+  // The image endpoint returns an HTTP-200 apology JPEG when there is no panorama,
+  // so the hero renders only after the metadata endpoint confirms real imagery.
+  const closeButton = !isPeek && onClose ? (
+    <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
+  ) : null
+  const heroClass = cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')
+  const imageBlock = heroState === 'available' && viewModel.property.imageUrl ? (
+    <div className={heroClass} data-hero-state="available">
+      <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="eager" decoding="sync" />
       <div className="smc-image__gradient" />
-      {!isPeek && onClose ? (
-        <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
-      ) : null}
+      {closeButton}
     </div>
   ) : (
-    <div className={cls('smc-image', 'is-placeholder', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')}>
-      <span>Property Preview</span>
-      {!isPeek && onClose ? (
-        <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
-      ) : null}
+    <div
+      className={cls(heroClass, 'is-placeholder', heroState === 'loading' && 'is-loading')}
+      data-hero-state={heroState}
+    >
+      <span className="smc-image__empty">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M3 11.2 12 4l9 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M5.6 10.2V19h12.8v-8.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <em>{heroState === 'loading' ? 'Loading imagery' : 'No street view'}</em>
+      </span>
+      {closeButton}
     </div>
   )
 
@@ -314,7 +327,10 @@ export const SellerMapCard = ({
         {signalsBlock}
         <SellerMapCardOperationalState state={viewModel.operationalState} />
       </div>
-      {actionFooter}
+      {/* Desktop only: the mobile sheet shell owns its own sticky footer. Embedding it
+          here as well is what rendered Send Ownership Check / Message twice in the
+          expanded mobile states. */}
+      {!isMobile ? actionFooter : null}
     </>
   )
 
@@ -330,7 +346,8 @@ export const SellerMapCard = ({
         <SellerMapCardOperationalState state={viewModel.operationalState} />
         <SellerMapCardDossierSections viewModel={viewModel} loading={detailLoading && !viewModel.dossierReady} />
       </div>
-      {actionFooter}
+      {/* Desktop only — see peekBody. */}
+      {!isMobile ? actionFooter : null}
     </>
   )
 
@@ -426,7 +443,8 @@ export const SellerMapCard = ({
             <div className="smc-mobile-sheet__scroll">
               {isPeek ? peekBody : focusBody}
             </div>
-            {!isPeek ? actionFooter : null}
+            {/* Single owner of the mobile action footer, sticky across peek/medium/full. */}
+            {actionFooter}
           </>
         )
       ) : (

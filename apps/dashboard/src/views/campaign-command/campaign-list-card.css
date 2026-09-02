@@ -1,0 +1,262 @@
+/*
+ * Campaign list card — mobile.
+ *
+ * Hierarchy rule: exactly one dominant number per card (READY), one peripheral
+ * state signal (the rail), one optional attention flag. Everything else is
+ * secondary type. Dormant drafts recede rather than competing for attention.
+ */
+
+.clc {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  /* The list is a height-constrained column flexbox, and flex items shrink by
+     default — without this every card collapsed to its 44px min-height floor and
+     clipped the ready figure in half. */
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--nx-surface-1, rgba(255, 255, 255, 0.035));
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.clc:active { transform: scale(0.988); }
+
+.clc.is-selected {
+  background: color-mix(in srgb, var(--nx-accent) 12%, var(--nx-surface-1, rgba(255,255,255,0.04)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nx-accent) 45%, transparent);
+}
+
+/* Dormant drafts recede — they should not compete with live inventory. */
+.clc.is-dormant { opacity: 0.52; }
+
+/* ── State rail: readable peripherally, no legend required ─────────────── */
+.clc__rail {
+  flex: none;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+  background: var(--nx-text-tertiary);
+}
+
+.clc--running   .clc__rail { background: var(--nx-success, #22c55e); }
+.clc--paused    .clc__rail { background: var(--nx-warning, #f5a524); }
+.clc--scheduled .clc__rail { background: var(--nx-accent); }
+.clc--test      .clc__rail { background: #8b5cf6; }
+.clc--draft     .clc__rail { background: var(--nx-text-tertiary); }
+.clc--done      .clc__rail { background: color-mix(in srgb, var(--nx-text-tertiary) 50%, transparent); }
+
+/* Running campaigns get a subtle live pulse — the one place motion earns itself. */
+.clc--running .clc__rail {
+  animation: clc-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes clc-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+.clc__body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px 11px;
+}
+
+/* ── Head ─────────────────────────────────────────────────────────────── */
+.clc__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.clc__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--nx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clc__state {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--nx-text-tertiary);
+}
+
+.clc--running   .clc__state { color: var(--nx-success, #22c55e); }
+.clc--paused    .clc__state { color: var(--nx-warning, #f5a524); }
+.clc--scheduled .clc__state { color: var(--nx-accent); }
+.clc--test      .clc__state { color: #a78bfa; }
+
+/* ── Metrics: one dominant number, the rest defer ─────────────────────── */
+.clc__metrics {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+
+.clc__ready {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.clc__ready strong {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--nx-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.clc__ready em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--nx-accent);
+}
+
+/* Zero ready on a card that has targets is itself a signal. */
+.clc:not(.is-dormant) .clc__ready strong:first-child { color: var(--nx-text-primary); }
+
+.clc__metric {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.clc__metric strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.clc__metric em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--nx-text-tertiary);
+}
+
+.clc__metric.is-good strong { color: var(--nx-success, #22c55e); }
+
+/* ── Inventory burn-down ──────────────────────────────────────────────── */
+/* 2px read as decoration. 4px with a visible track reads as inventory progress. */
+.clc__burn {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--nx-text-primary) 12%, transparent);
+  overflow: hidden;
+}
+
+/* Below ~4% the fill read as a rendering artifact rather than progress, so it
+   gets a floor once any inventory has actually been consumed. */
+.clc__burn-fill {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--nx-accent) 78%, transparent);
+  transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.clc--running .clc__burn-fill { background: var(--nx-success, #22c55e); }
+
+/* ── Foot ─────────────────────────────────────────────────────────────── */
+.clc__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.clc__next {
+  font-size: 11px;
+  color: var(--nx-text-tertiary);
+}
+
+.clc__next.is-pending { color: var(--nx-accent); }
+.clc__next.is-overdue { color: var(--nx-warning, #f5a524); }
+
+.clc__auto {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--nx-text-secondary);
+  background: color-mix(in srgb, var(--nx-text-primary) 10%, transparent);
+}
+
+.clc__flag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 58%;
+}
+
+.clc__flag.is-crit {
+  color: var(--nx-danger, #ef4444);
+  background: color-mix(in srgb, var(--nx-danger, #ef4444) 14%, transparent);
+}
+
+.clc__flag.is-warn {
+  color: var(--nx-warning, #f5a524);
+  background: color-mix(in srgb, var(--nx-warning, #f5a524) 14%, transparent);
+}
+
+/* ── List container ───────────────────────────────────────────────────── */
+.clc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.clc-group-label {
+  padding: 10px 2px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--nx-text-tertiary);
+}
+
+@media (max-width: 380px) {
+  .clc__body { padding: 11px 12px 10px; }
+  .clc__ready strong { font-size: 20px; }
+  .clc__metrics { gap: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clc--running .clc__rail { animation: none; }
+  .clc__burn-fill { transition: none; }
+  .clc:active { transform: none; }
+}

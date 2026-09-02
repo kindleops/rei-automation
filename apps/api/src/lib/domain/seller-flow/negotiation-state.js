@@ -252,16 +252,33 @@ export function applyNegotiationTurn(previous, {
   if (ade_snapshot) {
     const recommended = num(ade_snapshot.recommended_cash_offer);
     const floor = num(ade_snapshot.minimum_acceptable_offer);
-    const ceiling = num(ade_snapshot.investor_ceiling_mid) ?? num(ade_snapshot.investor_ceiling_high);
+    // MONETARY CEILING INVARIANT: the spend ceiling must be independent of the
+    // buyer-behavior leg that produced the recommendation. investor_ceiling_*
+    // IS that leg, so it is deliberately not a source here.
+    const ceiling =
+      num(ade_snapshot.evidence?.offer_calculation?.effective_authorized_ceiling) ??
+      num(ade_snapshot.evidence?.offer_calculation?.valuation_based_ceiling);
     if (recommended !== null) next.recommended_offer = recommended;
     if (floor !== null) next.authorized_offer_floor = floor;
     if (ceiling !== null) next.authorized_offer_ceiling = ceiling;
     next.direct_purchase_maximum =
       num(ade_snapshot.investor_ceiling_high) ?? next.authorized_offer_ceiling ?? next.direct_purchase_maximum;
+    // Hard floor on assignment economics; bounds how far negotiation may concede.
+    next.minimum_assignment_margin =
+      num(ade_snapshot.evidence?.offer_calculation?.assignment_margin_floor) ??
+      next.minimum_assignment_margin ??
+      null;
     next.arv = num(ade_snapshot.valuation_mid) ?? next.arv;
     next.repair_estimate = num(ade_snapshot.estimated_repairs) ?? next.repair_estimate;
     next.comp_confidence = num(ade_snapshot.valuation_confidence) ?? next.comp_confidence;
-    if (ade_snapshot_id || ade_snapshot.id) next.ade_snapshot_id = ade_snapshot_id || ade_snapshot.id;
+    // IMMUTABLE MONETARY PROVENANCE: bind to the append-only lineage row, never
+    // to property_acquisition_scores.id -- that row is upserted by property_id
+    // and the SAME id held $10,969,000 on 2026-08-03 and $5,479,900 on
+    // 2026-08-31. An offer must not be able to have its own evidence rewritten.
+    const immutable_snapshot_id = ade_snapshot.evidence?.immutable_snapshot_id ?? null;
+    if (ade_snapshot_id || immutable_snapshot_id) {
+      next.ade_snapshot_id = ade_snapshot_id || immutable_snapshot_id;
+    }
     next.alternate_strategy_eligibility = {
       subject_to_score: num(ade_snapshot.subject_to_score),
       seller_finance_score: num(ade_snapshot.seller_finance_score),

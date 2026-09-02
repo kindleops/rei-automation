@@ -90,6 +90,46 @@ export async function fetchEntityGraphList(
   return browseEntityGraph(params, signal)
 }
 
+export type EntityGraphLensBucket = {
+  key: string
+  label: string
+  /** null = not counted yet (deep facet pending) or the count failed. Never a guess. */
+  value: number | null
+  min?: number | null
+  max?: number | null
+}
+
+export type EntityGraphLensDimension = {
+  key: string
+  label: string
+  filterKey?: string
+  pending?: boolean
+  buckets: EntityGraphLensBucket[]
+}
+
+export type EntityGraphLens = {
+  scope: string
+  part: 'fast' | 'deep'
+  total?: number | null
+  headline?: Array<{ key: string; label: string; value: number | null }>
+  dimensions: EntityGraphLensDimension[]
+}
+
+export async function fetchEntityGraphLens(
+  params: Record<string, string | number | undefined>,
+  signal?: AbortSignal,
+): Promise<EntityGraphLens> {
+  const qs = buildQueryString(params)
+  const res = await backendClient.callBackend<{ ok: boolean; lens: EntityGraphLens }>(
+    `/api/cockpit/entity-graph/lens?${qs}`,
+    { signal },
+  )
+  if (!res.ok || !res.data?.lens) {
+    throw new Error(res.ok ? 'entity_graph_lens_failed' : (res.message || res.error || 'entity_graph_lens_failed'))
+  }
+  return res.data.lens
+}
+
 export async function fetchEntityGraphTabCounts(signal?: AbortSignal): Promise<EntityGraphTabCounts> {
   const res = await backendClient.callBackend<{ ok: boolean; counts: EntityGraphTabCounts }>(
     '/api/cockpit/entity-graph/counts',
