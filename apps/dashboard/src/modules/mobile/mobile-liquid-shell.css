@@ -1,0 +1,433 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LEAD COMMAND — MOBILE LIQUID SHELL (visual material layer)
+
+   Additive material over the FROZEN mobile geometry. This sheet never moves,
+   resizes, or re-stacks a fixed element: it paints ::before material layers
+   inside the existing fixed containers (top command area, bottom app dock)
+   and restyles the controls that float inside them.
+
+   Top command area  → material attached to the physical top edge, no top
+                       radius, lower corners rounded.
+   Bottom app dock   → material runs through the bottom safe area, no bottom
+                       radius, upper corners rounded.
+
+   Loaded LAST in main.tsx so it wins the cascade over the base shell sheets.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout {
+  --lc-font-sans: -apple-system, 'SF Pro Text', 'SF Pro Display', system-ui, 'Geist', 'Inter', 'Segoe UI', sans-serif;
+  --lc-font-mono: ui-monospace, 'SF Mono', 'Geist Mono', 'IBM Plex Mono', Menlo, monospace;
+
+  --lc-accent-rgb: var(--nexus-accent-rgb, 56, 189, 248);
+  --lc-glass-bg: rgba(9, 13, 21, 0.8);
+  --lc-glass-bg-soft: rgba(9, 13, 21, 0.6);
+  --lc-glass-blur: 30px;
+  --lc-glass-saturate: 1.7;
+  --lc-hairline: rgba(255, 255, 255, 0.08);
+  --lc-highlight: rgba(255, 255, 255, 0.12);
+  --lc-ink: #eef2f7;
+  --lc-ink-2: rgba(238, 242, 247, 0.7);
+  --lc-ink-3: rgba(238, 242, 247, 0.46);
+  --lc-press: rgba(255, 255, 255, 0.08);
+  --lc-shell-radius: 22px;
+  --lc-shadow-top: 0 18px 44px -18px rgba(0, 0, 0, 0.72);
+  --lc-shadow-bottom: 0 -18px 44px -18px rgba(0, 0, 0, 0.72);
+  --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lc-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'],
+html.is-mobile-layout [data-nexus-theme='light'] {
+  --lc-glass-bg: rgba(250, 251, 253, 0.86);
+  --lc-glass-bg-soft: rgba(250, 251, 253, 0.7);
+  --lc-hairline: rgba(15, 23, 42, 0.08);
+  --lc-highlight: rgba(255, 255, 255, 0.95);
+  --lc-ink: #0b1220;
+  --lc-ink-2: rgba(11, 18, 32, 0.68);
+  --lc-ink-3: rgba(11, 18, 32, 0.46);
+  --lc-press: rgba(15, 23, 42, 0.06);
+  --lc-shadow-top: 0 16px 40px -20px rgba(15, 23, 42, 0.35);
+  --lc-shadow-bottom: 0 -16px 40px -20px rgba(15, 23, 42, 0.35);
+}
+
+@keyframes lc-dock-pop {
+  0% { transform: scale(0.84); }
+  55% { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
+@keyframes lc-shell-settle {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* ── Top command area ──────────────────────────────────────────────────── */
+
+html.is-mobile-layout .nx-mobile-command-dock {
+  font-family: var(--lc-font-sans);
+}
+
+/* The slab: covers the safe-area band + control row, attached to the top edge. */
+html.is-mobile-layout .nx-mobile-command-dock::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 0 0 var(--lc-shell-radius) var(--lc-shell-radius);
+  background:
+    radial-gradient(140% 120% at 50% -30%, rgba(var(--lc-accent-rgb), 0.16), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 56%),
+    var(--lc-glass-bg);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  box-shadow:
+    inset 0 -1px 0 var(--lc-hairline),
+    var(--lc-shadow-top);
+  animation: lc-shell-settle 420ms var(--lc-ease-out);
+}
+
+/* The former floating pill becomes a transparent control tray inside the slab.
+   Border width is kept (transparent) so the frozen control-row height is unchanged. */
+html.is-mobile-layout .nx-mobile-command-dock__inner,
+html.is-mobile-layout .nx-mobile-command-dock__inner.nx-liquid-surface {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__sheen {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 46%);
+  opacity: 1;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__rim {
+  left: 22px;
+  right: 22px;
+  opacity: 0.45;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__btn {
+  color: var(--lc-ink-2);
+  transition: transform 160ms var(--lc-ease-out), color 160ms ease;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__btn:active {
+  transform: scale(0.88);
+}
+
+/* Idle glyphs float free in the glass — no box per icon. */
+html.is-mobile-layout .nx-mobile-command-dock__glyph {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: inherit;
+  transition:
+    background 180ms var(--lc-ease-out),
+    border-color 180ms var(--lc-ease-out),
+    box-shadow 220ms var(--lc-ease-out),
+    color 180ms ease;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__glyph svg {
+  opacity: 1;
+  filter: none;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__btn:active .nx-mobile-command-dock__glyph {
+  background: var(--lc-press);
+}
+
+/* Workspace hub keeps a quiet accent tile — it is the app identity control. */
+html.is-mobile-layout .nx-mobile-command-dock__glyph.is-hub {
+  color: var(--lc-ink);
+  border-color: rgba(var(--lc-accent-rgb), 0.18);
+  background: linear-gradient(160deg, rgba(var(--lc-accent-rgb), 0.16), rgba(var(--lc-accent-rgb), 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__btn.is-active .nx-mobile-command-dock__glyph,
+html.is-mobile-layout .nx-mobile-command-dock__btn--workspace.is-active .nx-mobile-command-dock__glyph.is-hub {
+  color: rgb(var(--lc-accent-rgb));
+  border-color: rgba(var(--lc-accent-rgb), 0.3);
+  background: linear-gradient(160deg, rgba(var(--lc-accent-rgb), 0.24), rgba(var(--lc-accent-rgb), 0.08));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 0 4px rgba(var(--lc-accent-rgb), 0.08);
+}
+
+html.is-mobile-layout .nx-mobile-command-dock__badge {
+  min-width: 15px;
+  height: 15px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  border-color: rgba(9, 13, 21, 0.92);
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Bottom app dock ───────────────────────────────────────────────────── */
+
+html.is-mobile-layout .nx-pinned-app-dock {
+  font-family: var(--lc-font-sans);
+}
+
+/* The slab: runs through the bottom safe area, attached to the bottom edge. */
+html.is-mobile-layout .nx-pinned-app-dock::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--lc-shell-radius) var(--lc-shell-radius) 0 0;
+  background:
+    radial-gradient(140% 120% at 50% 130%, rgba(var(--lc-accent-rgb), 0.15), transparent 60%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.035), transparent 52%),
+    var(--lc-glass-bg);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--lc-highlight),
+    var(--lc-shadow-bottom);
+  transition: background 260ms ease, box-shadow 260ms ease;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock.is-collapsed::before {
+  background:
+    linear-gradient(0deg, rgba(255, 255, 255, 0.02), transparent 60%),
+    var(--lc-glass-bg-soft);
+  box-shadow:
+    inset 0 1px 0 var(--lc-hairline),
+    0 -10px 28px -16px rgba(0, 0, 0, 0.6);
+}
+
+/* Inner glass becomes a transparent tray: the slab is the material now. */
+html.is-mobile-layout .nx-pinned-app-dock .nx-pinned-app-dock__glass,
+html.is-mobile-layout .nx-pinned-app-dock .nx-pinned-app-dock__glass.nx-liquid-surface,
+html.is-mobile-layout .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass,
+html.is-mobile-layout .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__sheen {
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.03), transparent 40%);
+  opacity: 1;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__rim {
+  left: 24px;
+  right: 24px;
+  opacity: 0.5;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__handle i {
+  width: 40px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.26);
+  box-shadow: none;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle i {
+  width: 48px;
+  background: rgba(var(--lc-accent-rgb), 0.55);
+  box-shadow: 0 0 10px rgba(var(--lc-accent-rgb), 0.24);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__panel-head strong {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__customize {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--lc-accent-rgb));
+  background: rgba(var(--lc-accent-rgb), 0.1);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__app {
+  color: var(--lc-ink-2);
+  transition: transform 180ms var(--lc-ease-out);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__app:active {
+  transform: scale(0.92);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__glyph {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  transition:
+    background 200ms var(--lc-ease-out),
+    border-color 200ms var(--lc-ease-out),
+    box-shadow 260ms var(--lc-ease-out),
+    color 180ms ease;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__app:active .nx-pinned-app-dock__glyph {
+  background: var(--lc-press);
+}
+
+/* Selected app: accent glass tile that pops in with a soft spring. */
+html.is-mobile-layout .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__glyph {
+  color: rgb(var(--lc-accent-rgb));
+  border-color: rgba(var(--lc-accent-rgb), 0.3);
+  background: linear-gradient(160deg, rgba(var(--lc-accent-rgb), 0.26), rgba(var(--lc-accent-rgb), 0.09));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 10px 24px -10px rgba(var(--lc-accent-rgb), 0.6);
+  animation: lc-dock-pop 460ms var(--lc-ease-spring);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--lc-ink-3);
+  opacity: 1;
+  transition: color 180ms ease;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__label {
+  color: rgb(var(--lc-accent-rgb));
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__badge {
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 9.5px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(9, 13, 21, 0.92);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__dot {
+  box-shadow: 0 0 0 2px rgba(9, 13, 21, 0.92);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__sheet-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__drop-slot,
+html.is-mobile-layout .nx-pinned-app-dock__unpin-zone {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+html.is-mobile-layout .nx-pinned-app-dock__hint {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Reduced motion: keep state changes, drop the springs. */
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__glyph,
+  html.is-mobile-layout .nx-mobile-command-dock::before {
+    animation: none;
+  }
+}
+
+/* ── Light theme material ──────────────────────────────────────────────── */
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock::before,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock::before {
+  background:
+    radial-gradient(140% 120% at 50% -30%, rgba(var(--lc-accent-rgb), 0.12), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.2) 60%),
+    var(--lc-glass-bg);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock::before,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock::before {
+  background:
+    radial-gradient(140% 120% at 50% 130%, rgba(var(--lc-accent-rgb), 0.1), transparent 60%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.2) 60%),
+    var(--lc-glass-bg);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__sheen,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__sheen,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__sheen,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__sheen {
+  opacity: 0;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__btn,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__btn,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__app,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__app {
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__glyph,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__glyph,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__glyph,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__glyph {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__glyph.is-hub,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__glyph.is-hub {
+  color: var(--lc-ink);
+  border-color: rgba(var(--lc-accent-rgb), 0.22);
+  background: linear-gradient(160deg, rgba(var(--lc-accent-rgb), 0.16), rgba(var(--lc-accent-rgb), 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__btn.is-active .nx-mobile-command-dock__glyph,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__btn.is-active .nx-mobile-command-dock__glyph,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__glyph,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__app.is-active .nx-pinned-app-dock__glyph {
+  color: rgb(var(--lc-accent-rgb));
+  border-color: rgba(var(--lc-accent-rgb), 0.3);
+  background: linear-gradient(160deg, rgba(var(--lc-accent-rgb), 0.2), rgba(var(--lc-accent-rgb), 0.07));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px -12px rgba(var(--lc-accent-rgb), 0.5);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__label,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__label {
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__handle i,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__handle i {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock__badge,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-mobile-command-dock__badge {
+  border-color: rgba(250, 251, 253, 0.95);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__badge,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__badge,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock__dot,
+html.is-mobile-layout [data-nexus-theme='light'] .nx-pinned-app-dock__dot {
+  box-shadow: 0 0 0 2px rgba(250, 251, 253, 0.95);
+}
