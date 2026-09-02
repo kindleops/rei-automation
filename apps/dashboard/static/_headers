@@ -1,0 +1,35 @@
+# Cloudflare Workers Static Assets header rules.
+#
+# These apply to STATIC ASSET responses only, which is exactly right: the Worker
+# runs first for /api/* only (assets.run_worker_first), so asset requests never
+# reach Worker code and header logic there would be dead.
+#
+# Rules are applied in order; later matching rules override earlier ones for the
+# same header, so the general rule comes first and specific paths follow.
+#
+# Cache semantics carried over from the previous Vercel configuration. That
+# config contained ONLY Cache-Control rules -- no CSP/HSTS/nosniff -- so there
+# are no security headers to preserve here, and none are invented.
+
+# The HTML shell must revalidate or a new deploy is never picked up.
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Service worker: NEVER cache. A cached sw.js pins installed PWAs to an old
+# build and is how one URL ends up serving two builds.
+/sw.js
+  Cache-Control: no-store, no-cache, must-revalidate
+
+# Web app manifest. Explicit Content-Type because a wrong type makes iOS fall
+# back to a legacy web clip instead of a manifest-driven PWA.
+/manifest.webmanifest
+  Cache-Control: no-cache
+  Content-Type: application/manifest+json
+
+# Vite emits content-hashed filenames, so these are safe to pin forever.
+# This also covers the hashed manifest Vite emits at /assets/manifest-<hash>.webmanifest.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

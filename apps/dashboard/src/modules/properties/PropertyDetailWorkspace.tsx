@@ -1,5 +1,6 @@
 import { AcquisitionScorePanel } from './AcquisitionScorePanel'
 import { AssessmentPanel } from './AssessmentPanel'
+import { BuyerIntelligencePanel } from './BuyerIntelligencePanel'
 import { DealCommandStrip } from './DealCommandStrip'
 import { DistressPanel } from './DistressPanel'
 import { LocationLegalPanel } from './LocationLegalPanel'
@@ -91,6 +92,7 @@ export const PropertyDetailWorkspace = ({
       <RehabConditionPanel property={property} />
       <AssessmentPanel property={property} />
       <SaleHistoryPanel property={property} />
+      <BuyerIntelligencePanel property={property} />
       <MLSPanel property={property} />
       <LocationLegalPanel property={property} />
     </section>

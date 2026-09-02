@@ -160,6 +160,58 @@ export interface CampaignPreviewResult {
   sms_eligible_phones?: number | null
   sms_eligible_phones_count?: number | null
   sender_covered?: number | null
+  /**
+   * Canonical sender-routing split, emitted by the campaign preview API.
+   * `exact` = live sender in the property's own market; `state_fallback` = an
+   * APPROVED route to a live sender elsewhere (frequently another state).
+   * Both are real routes; the split exists so cross-state volume is visible
+   * rather than hidden behind a single "covered" figure.
+   */
+  sender_coverage?: {
+    resolved?: boolean
+    source?: string
+    exact?: number | null
+    state_fallback?: number | null
+    uncovered?: number | null
+    routable?: number | null
+    ready?: number | null
+    graph_claimed_sender_covered?: number | null
+    graph_claimed_ready?: number | null
+    /**
+     * Canonical split read straight off campaign_target_graph.routing_tier over
+     * the same filtered set, partitioning every MATCHED property. The fields
+     * above are a live-inventory recount scoped to clean targets.
+     */
+    canonical?: {
+      ok?: boolean
+      source?: string
+      exact_market_match?: number | null
+      approved_state_fallback?: number | null
+      no_sender_route?: number | null
+      matched?: number | null
+      reconciles?: boolean
+    } | null
+  } | null
+  /**
+   * Exclusive queue_block_reason partition. Each property carries exactly one
+   * reason, so `ready + Σreasons === matched`. Overlapping conditions live in
+   * blocker_flags and are never double-counted here.
+   */
+  exclusive_block_reasons?: {
+    ok?: boolean
+    counts?: Record<string, number | null>
+    ready?: number | null
+    matched?: number | null
+    reconciles?: boolean
+  } | null
+  /** Properties that exist but are absent from the target graph (freshness loss). */
+  universe_gap?: {
+    addressable?: number | null
+    in_target_graph?: number | null
+    not_in_target_graph?: number | null
+    reason?: string
+    graph_generated_at?: string | null
+  } | null
   property_best_phone_count?: number | null
   property_sms_eligible_count?: number | null
   queue_eligibility_scope?: string
@@ -1972,6 +2024,20 @@ function normalizePreviewResponse(payload: unknown): CampaignPreviewResult {
   return {
     ok: true,
     dry_run: true,
+    // The API has emitted these canonical aggregates all along, but this
+    // normalizer builds an explicit object, so anything not copied here is
+    // silently dropped. That is why REACH showed "not measured in preview" for
+    // the routing split and the block partition even though the endpoint
+    // returned both.
+    sender_coverage: (isRecord(responsePayload.sender_coverage)
+      ? responsePayload.sender_coverage
+      : null) as CampaignPreviewResult['sender_coverage'],
+    exclusive_block_reasons: (isRecord(responsePayload.exclusive_block_reasons)
+      ? responsePayload.exclusive_block_reasons
+      : null) as CampaignPreviewResult['exclusive_block_reasons'],
+    universe_gap: (isRecord(responsePayload.universe_gap)
+      ? responsePayload.universe_gap
+      : null) as CampaignPreviewResult['universe_gap'],
     request_id: asText(responsePayload.request_id ?? responsePayload.requestId ?? payload.request_id ?? payload.requestId) || null,
     result_hash: asText(responsePayload.result_hash ?? responsePayload.resultHash ?? payload.result_hash ?? payload.resultHash) || null,
     total_matched_properties: totalMatchedProperties,

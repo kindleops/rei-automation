@@ -1,0 +1,307 @@
+/*
+ * Campaign Detail — mobile, 393pt.
+ *
+ * Deliberately inherits the frozen Command grammar: same four-level type ramp,
+ * same gutter, same hairline bands, same instrument-strip metrics. A campaign
+ * row on Command and its Detail are the same instrument at two magnifications.
+ *
+ * No nested cards, no vanity number, no dashboard modules.
+ */
+
+.cdx {
+  --d-ink:   var(--nx-text, #f6f8fc);
+  --d-ink-2: color-mix(in srgb, var(--nx-text, #e4eaf6) 72%, transparent);
+  --d-ink-3: color-mix(in srgb, var(--nx-text, #e4eaf6) 50%, transparent);
+  --d-ink-4: color-mix(in srgb, var(--nx-text, #e4eaf6) 32%, transparent);
+  --d-rule:  var(--nx-border, rgba(148, 163, 184, 0.15));
+  --d-live:  #30d158;
+  --d-hold:  #ff9f0a;
+  --d-bad:   #ff453a;
+  --d-pad:   16px;
+
+  background: var(--nx-bg, #000);
+  color: var(--d-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── A · Identity ──────────────────────────────────────────────────────── */
+.cdx__nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 var(--d-pad) 0 4px;
+}
+
+.cdx__back {
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 9px;
+  background: none; color: var(--d-ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cdx__back:active { background: rgba(255, 255, 255, 0.08); }
+
+.cdx__name {
+  flex: 1; min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.025em;
+  color: var(--d-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── B · Placement and state ───────────────────────────────────────────── */
+.cdx__place {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--d-pad) 11px;
+}
+
+.cdx__place-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.cdx__geo { color: var(--d-ink-2); font-weight: 500; }
+/* Unavailable metadata, never a fault, never inferred from the name. */
+.cdx__geo.is-absent { color: var(--d-ink-4); font-weight: 400; font-style: italic; }
+
+.cdx__place-main em { font-style: normal; color: var(--d-ink-4); }
+
+.cdx__auto {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--d-ink-3);
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.cdx__state {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em;
+  color: var(--d-ink-3);
+}
+
+.cdx__state.is-running   { color: var(--d-live); }
+.cdx__state.is-paused    { color: var(--d-hold); }
+.cdx__state.is-test      { color: #bf5af2; }
+.cdx__state.is-scheduled { color: var(--d-ink-2); }
+
+.cdx__pulse {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  animation: cdx-pulse 2s ease-in-out infinite;
+}
+
+@keyframes cdx-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.25 } }
+
+/* Renders only when a posture actually constrains this campaign. */
+.cdx__posture {
+  padding: 0 var(--d-pad) 12px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em;
+  color: var(--d-hold);
+}
+
+/* ── Bands ─────────────────────────────────────────────────────────────── */
+.cdx__rail,
+.cdx__band {
+  border-top: 1px solid var(--d-rule);
+  padding: 11px var(--d-pad) 12px;
+}
+
+.cdx__rail-key,
+.cdx__band-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.085em;
+  color: var(--d-ink-3);
+  margin-bottom: 7px;
+}
+
+/* Scope is stated, never implied. */
+.cdx__band-head em {
+  font-style: normal; font-weight: 500;
+  letter-spacing: 0.02em; text-transform: none;
+  font-size: 10.5px; color: var(--d-ink-4);
+}
+
+/* ── C/E · Instrument strips — same grammar as a Command row ───────────── */
+.cdx__metrics {
+  display: grid;
+  grid-template-columns: 1.05fr 0.78fr 0.98fr 1.06fr 0.83fr;
+  align-items: baseline;
+  gap: 0 4px;
+  margin-right: -6px;
+}
+
+.cdx__band-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: baseline;
+  gap: 0 4px;
+  margin-right: -6px;
+}
+
+.cdx__m { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
+
+.cdx__m strong {
+  font-size: 15px; font-weight: 620;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--d-ink-2);
+}
+
+.cdx__m em { font-style: normal; font-size: 10.5px; color: var(--d-ink-3); white-space: nowrap; }
+
+/* READY leads, pace second, zeros tertiary — identical ranking to Command. */
+.cdx__m.is-lead strong { font-size: 21px; color: var(--d-ink); }
+.cdx__m.is-pace strong { font-size: 16px; color: var(--d-ink-2); }
+.cdx__m.is-good strong { color: var(--d-live); }
+.cdx__m.is-bad  strong { color: var(--d-bad); }
+.cdx__m.is-nil  strong { color: var(--d-ink-4); font-weight: 560; }
+.cdx__m.is-nil  em     { color: var(--d-ink-4); }
+
+/* ── D · Burn ──────────────────────────────────────────────────────────── */
+.cdx__burn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 var(--d-pad) 12px;
+}
+
+.cdx__burn-track {
+  flex: 1;
+  height: 3px; border-radius: 2px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.cdx__burn-fill {
+  display: block; height: 100%; border-radius: 2px;
+  background: rgba(255, 255, 255, 0.5);
+  transition: width 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cdx__burn-text {
+  flex: none;
+  font-size: 11.5px; color: var(--d-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── F · One action line ───────────────────────────────────────────────── */
+.cdx__next {
+  display: flex; align-items: baseline; gap: 10px;
+  border-top: 1px solid var(--d-rule);
+  padding: 12px var(--d-pad) 13px;
+}
+
+.cdx__next-key {
+  flex: none;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.085em;
+  color: var(--d-ink-3);
+}
+
+.cdx__next-label {
+  font-size: 14px; font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--d-ink);
+}
+
+/* A blocked campaign states the blocker AS the action — one line, not two. */
+.cdx__next.is-blocked .cdx__next-label { color: var(--d-hold); }
+
+.cdx__next.is-blocked .cdx__next-key { color: var(--d-hold); opacity: 0.75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cdx__pulse { animation: none; }
+  .cdx__burn-fill { transition: none; }
+}
+
+/* ── G · Section switcher ──────────────────────────────────────────────────
+   Zone G of the approved IA. It was a tiny uppercase "SECTION" eyebrow stacked
+   over the current value inside a large filled pill — the current section is
+   the title, and the word "Section" adds nothing. Brought into the same band
+   grammar as A–F. */
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile {
+  padding: 0;
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  background: none;
+}
+
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile .ccc-detail-tab-filter,
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile .occ-liquid-filter__trigger {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  padding-inline: 16px;
+}
+
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile .occ-liquid-filter__trigger-title {
+  /* This reads "Section" — the label, not the value. */
+  display: none;
+}
+
+.ccc--mobile-campaign-detail .ccc__detail-tabs--mobile .occ-liquid-filter__trigger-sub {
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: #f6f8fc;
+}
+
+/* The detail chrome wrapper carried padding meant for the desktop panel, which
+   left a band of empty space above the campaign name. */
+.ccc--mobile-campaign-detail .ccc-mobile-detail-chrome {
+  padding: 0;
+  border: 0;
+  background: var(--nx-bg, #000);
+}
+
+.ccc--mobile-campaign-detail .ccc__detail-panel--glass {
+  padding: 0;
+  border: 0;
+  background: var(--nx-bg, #000);
+}
+
+/* The page root keeps desktop padding and its own surface colour while a mobile
+   campaign is open, which showed as a band of empty blue above the campaign
+   name. Mobile Detail owns the full screen. */
+/* Command fills the stage via position:absolute, which is why it has no gap at
+   the top. Detail sat in normal flow and inherited a 50px shell strip above the
+   stage content, showing as a band of empty blue over the campaign name. Same
+   treatment, same result. */
+.ccc.ccc--mobile-campaign-detail {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+  background: var(--nx-bg, #000);
+  border: 0;
+  overflow: hidden;
+}
+
+.ccc.ccc--mobile-campaign-detail .ccc__body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ccc.ccc--mobile-campaign-detail .ccc__detail-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

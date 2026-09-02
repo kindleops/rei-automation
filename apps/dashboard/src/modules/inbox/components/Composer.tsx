@@ -414,6 +414,82 @@ export const Composer = ({
     if (polished) setPolishPreview({ original: polishPreview.original, polished })
   }
 
+  /**
+   * The four tools that sit inline in the composer on desktop. On mobile that inline
+   * row is collapsed into this panel, so they are hoisted here and rendered as their
+   * own section at the TOP of the panel — ahead of the template list — instead of
+   * being buried under it. Desktop keeps them in their original sections.
+   */
+  const qaPolishButton = (
+    <button
+      key="polish"
+      type="button"
+      className="nx-qap-action-btn"
+      disabled={composerDisabled || !hasDraft || isPolishing}
+      onClick={() => { void runOperatorPolish(); setQuickActionsOpen(false) }}
+    >
+      <Icon name="spark" /><span>Operator Polish</span>
+    </button>
+  )
+
+  const qaTranslateButton = (
+    <button
+      key="translate"
+      type="button"
+      className="nx-qap-action-btn"
+      disabled={composerDisabled || !hasDraft || isTranslatingDraft}
+      onClick={() => { onTranslateDraft?.(localDraft); setQuickActionsOpen(false) }}
+    >
+      <Icon name="globe" /><span>Translate Draft</span>
+    </button>
+  )
+
+  const qaScheduleButton = (
+    <button
+      key="schedule"
+      type="button"
+      className="nx-qap-action-btn"
+      disabled={composerDisabled}
+      onClick={() => { onOpenSchedule(localDraft); setQuickActionsOpen(false) }}
+    >
+      <Icon name="calendar" /><span>Schedule Message</span>
+    </button>
+  )
+
+  const qaVoiceButton = (
+    <button
+      key="voice"
+      type="button"
+      className={cls('nx-qap-action-btn', isListening && 'is-active')}
+      disabled={composerDisabled || voiceUnsupported}
+      onClick={() => { toggleVoice(); setQuickActionsOpen(false) }}
+      aria-pressed={isListening}
+    >
+      <Icon name="mic" />
+      <span>
+        {voiceUnsupported
+          ? 'Voice Input (unsupported)'
+          : isListening ? 'Stop Recording' : 'Voice Input'}
+      </span>
+    </button>
+  )
+
+  const qaAiSuggestionButtons = aiSuggestions.slice(0, 3).map((suggestion) => (
+    <button
+      key={suggestion.id}
+      type="button"
+      className={cls('nx-qap-action-btn', suggestion.tone && `is-${suggestion.tone}`)}
+      disabled={composerDisabled || !suggestion.text}
+      onClick={() => {
+        if (suggestion.text) setLocalDraft(suggestion.text)
+        if (suggestion.id === 'ai_assist') onAI()
+        setQuickActionsOpen(false)
+      }}
+    >
+      <Icon name="spark" /><span>{suggestion.label}</span>
+    </button>
+  ))
+
   const quickActionsPortal = quickActionsOpen && qapPosition && typeof document !== 'undefined'
     ? createPortal(
       <>
@@ -434,6 +510,21 @@ export const Composer = ({
               <Icon name="x" />
             </button>
           </div>
+
+          {isMobile ? (
+            <>
+              <div className="nx-qap-section">
+                <div className="nx-qap-section-label">Composer tools</div>
+                <div className="nx-qap-actions">
+                  {qaScheduleButton}
+                  {qaPolishButton}
+                  {qaTranslateButton}
+                  {qaVoiceButton}
+                </div>
+              </div>
+              <div className="nx-qap-divider" />
+            </>
+          ) : null}
 
           <div className="nx-qap-section">
             <div className="nx-qap-section-label">Templates</div>
@@ -472,56 +563,25 @@ export const Composer = ({
 
           <div className="nx-qap-divider" />
 
-          <div className="nx-qap-section">
-            <div className="nx-qap-section-label">Writing tools</div>
-            <div className="nx-qap-actions">
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                disabled={composerDisabled || !hasDraft || isPolishing}
-                onClick={() => { void runOperatorPolish(); setQuickActionsOpen(false) }}
-              >
-                <Icon name="spark" /><span>Operator Polish</span>
-              </button>
-              {aiSuggestions.slice(0, 3).map((suggestion) => (
-                <button
-                  key={suggestion.id}
-                  type="button"
-                  className={cls('nx-qap-action-btn', suggestion.tone && `is-${suggestion.tone}`)}
-                  disabled={composerDisabled || !suggestion.text}
-                  onClick={() => {
-                    if (suggestion.text) setLocalDraft(suggestion.text)
-                    if (suggestion.id === 'ai_assist') onAI()
-                    setQuickActionsOpen(false)
-                  }}
-                >
-                  <Icon name="spark" /><span>{suggestion.label}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                disabled={composerDisabled || !hasDraft || isTranslatingDraft}
-                onClick={() => { onTranslateDraft?.(localDraft); setQuickActionsOpen(false) }}
-              >
-                <Icon name="globe" /><span>Translate Draft</span>
-              </button>
+          {/* On mobile Polish/Translate are promoted to the Composer tools section above,
+              so this section carries only the AI suggestions and is dropped when empty. */}
+          {!isMobile || qaAiSuggestionButtons.length > 0 ? (
+            <div className="nx-qap-section">
+              <div className="nx-qap-section-label">Writing tools</div>
+              <div className="nx-qap-actions">
+                {!isMobile ? qaPolishButton : null}
+                {qaAiSuggestionButtons}
+                {!isMobile ? qaTranslateButton : null}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="nx-qap-divider" />
 
           <div className="nx-qap-section">
             <div className="nx-qap-section-label">Message actions</div>
             <div className="nx-qap-actions">
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                disabled={composerDisabled}
-                onClick={() => { onOpenSchedule(localDraft); setQuickActionsOpen(false) }}
-              >
-                <Icon name="calendar" /><span>Schedule Message</span>
-              </button>
+              {!isMobile ? qaScheduleButton : null}
               <button type="button" className="nx-qap-action-btn is-not-ready" disabled title="Coming soon">
                 <Icon name="paperclip" /><span>Attachment</span><span className="nx-qap-badge">Soon</span>
               </button>
@@ -650,6 +710,7 @@ export const Composer = ({
               }}
             />
 
+            {!isMobile ? (
             <div className="nx-composer-dock__tools">
               <button
                 type="button"
@@ -727,6 +788,7 @@ export const Composer = ({
                 )}
               </button>
             </div>
+            ) : null}
           </div>
         </div>
 

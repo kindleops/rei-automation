@@ -158,6 +158,71 @@
   --text-tertiary:       rgba(148, 163, 184, 0.65);
   --text-muted:          var(--nx-muted);
 }
+/* ── true_black ─────────────────────────────────────────────────────────── */
+/*
+ * Deep neutral black. `dark` is intentionally a navy (#050914, ~60% saturation)
+ * and stays that way; this is the OLED-style option for operators who want the
+ * surfaces to actually be black.
+ *
+ * Note: no `--nx-accent` is declared here on purpose. The accent palettes are
+ * `:root[data-nexus-accent="..."]` (specificity 0,2,0) which outrank a theme
+ * block (0,1,0), but leaving it out entirely makes the intent explicit — this
+ * theme carries no hue of its own and every accent works against it.
+ */
+:root[data-nexus-theme="true_black"],
+[data-nexus-theme="true_black"] {
+  --nx-bg:              #000000;
+  --nx-bg-2:            #08090b;
+  --nx-surface:         #050506;
+  --nx-panel:           #0a0b0d;
+  --nx-card:            #101113;
+  --nx-card-strong:     #1a1c1f;
+  --nx-surface-elevated: var(--nx-card-strong);
+  --nx-border:          rgba(255, 255, 255, 0.12);
+  --nx-border-strong:   rgba(255, 255, 255, 0.20);
+  --nx-text:            #ededef;
+  --nx-text-strong:     #ffffff;
+  --nx-muted:           #9a9aa2;
+  --nx-muted-2:         rgba(154, 154, 162, 0.65);
+  --nx-text-soft:       var(--nx-muted);
+  --nx-accent-rgb:      56, 189, 248;
+  --nx-accent-soft:     color-mix(in srgb, var(--nx-accent, #38bdf8) 14%, transparent);
+  --nx-success:         #10b981;
+  --nx-warning:         #f59e0b;
+  --nx-danger:          #ef4444;
+  --nx-shadow:          rgba(0, 0, 0, 0.75);
+  --nx-glass-bg:        linear-gradient(145deg, rgba(6,6,7,0.96), rgba(12,12,14,0.92));
+  --nx-glass-card:      linear-gradient(145deg, rgba(16,17,19,0.96), rgba(10,11,13,0.92));
+  --nx-glass-border:    rgba(255, 255, 255, 0.12);
+  --nx-input-bg:        #0d0e10;
+  --nx-button-bg:       #1a1c1f;
+  --nx-button-text:     #ffffff;
+
+  --nx-panel-bg:        var(--nx-panel);
+  --nx-card-bg:         var(--nx-card);
+  --nx-bg-soft:         var(--nx-bg-2);
+  --nx-text-muted:      var(--nx-muted);
+  --nx-command-bg:      var(--nx-panel);
+  --nx-bubble-inbound:  rgba(255, 255, 255, 0.07);
+  --nx-bubble-outbound: var(--nx-accent, #0084ff);
+  --nx-badge-bg:        color-mix(in srgb, var(--nx-accent, #38bdf8) 8%, transparent);
+  --nx-badge-border:    color-mix(in srgb, var(--nx-accent, #38bdf8) 20%, transparent);
+  --nx-grid:            rgba(255, 255, 255, 0.03);
+
+  --inbox-bg:           var(--nx-bg);
+  --inbox-panel:        var(--nx-panel);
+  --inbox-card:         var(--nx-card);
+  --inbox-text:         var(--nx-text);
+  --inbox-text-strong:  var(--nx-text-strong);
+  --inbox-muted:        var(--nx-muted);
+  --inbox-border:       var(--nx-border);
+  --text:               var(--nx-text);
+  --muted:              var(--nx-muted);
+  --surface:            var(--nx-surface);
+  --panel:              var(--nx-panel);
+  --card:               var(--nx-card);
+}
+
 /* ── dark ───────────────────────────────────────────────────────────────── */
 :root[data-nexus-theme="dark"],
 [data-nexus-theme="dark"] {

@@ -324,6 +324,7 @@ export function PipelineWorkspace({
 
   return (
     <PipelineOpportunityBoard
+      onRefresh={refresh}
       opportunities={opportunities}
       metrics={metrics}
       globalTotal={globalTotal}

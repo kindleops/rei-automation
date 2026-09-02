@@ -66,6 +66,11 @@ const fmtText = (raw: unknown) => {
 
 const fmtMoneyField = (raw: unknown) => formatMoney(nullIfZeroish(asNumber(raw)))
 const fmtIntField = (raw: unknown) => formatInteger(nullIfZeroish(asNumber(raw)))
+/** Calendar years are identifiers, not quantities — never group-separated (1,910 → 1910). */
+const fmtYearField = (raw: unknown) => {
+  const year = nullIfZeroish(asNumber(raw))
+  return year == null ? '—' : String(year)
+}
 const fmtDecField = (raw: unknown, digits = 1) => formatDecimal(nullIfZeroish(asNumber(raw)), digits)
 const fmtBool = (raw: unknown) => {
   if (raw === true) return 'Yes'
@@ -122,12 +127,12 @@ const STRUCTURE_SPECS: FieldSpec[] = [
   { key: 'baths', label: 'Bathrooms', columns: ['total_baths', 'baths'], assetClasses: RESIDENTIAL, format: (r) => fmtDecField(r, 1) },
   { key: 'building_sqft', label: 'Building Sqft', columns: ['building_square_feet', 'sqft'], excludeWhenUsed: true },
   { key: 'units', label: 'Units', columns: ['units_count', 'units'], excludeWhenUsed: true },
-  { key: 'buildings_count', label: 'Buildings Count', columns: ['sum_buildings_nbr'] },
-  { key: 'commercial_units', label: 'Commercial Units', columns: ['sum_commercial_units'], assetClasses: [...COMMERCIAL, ...RESIDENTIAL] },
-  { key: 'garage_sqft', label: 'Garage Sqft', columns: ['sum_garage_sqft'] },
+  { key: 'buildings_count', label: 'Buildings Count', columns: ['sum_buildings_nbr'] , format: fmtIntField },
+  { key: 'commercial_units', label: 'Commercial Units', columns: ['sum_commercial_units'], assetClasses: [...COMMERCIAL, ...RESIDENTIAL] , format: fmtIntField },
+  { key: 'garage_sqft', label: 'Garage Sqft', columns: ['sum_garage_sqft'] , format: fmtIntField },
   { key: 'fireplaces', label: 'Fireplaces', columns: ['num_of_fireplaces'] },
-  { key: 'year_built', label: 'Year Built', columns: ['year_built'], format: fmtIntField },
-  { key: 'effective_year_built', label: 'Effective Year Built', columns: ['effective_year_built'], format: fmtIntField },
+  { key: 'year_built', label: 'Year Built', columns: ['year_built'], format: fmtYearField },
+  { key: 'effective_year_built', label: 'Effective Year Built', columns: ['effective_year_built'], format: fmtYearField },
   { key: 'avg_sqft_per_unit', label: 'Avg Sqft per Unit', columns: ['avg_sqft_per_unit'], assetClasses: RESIDENTIAL, format: (r, rec) => {
     const sqft = nullIfZeroish(asNumber(firstDefined(rec, ['building_square_feet'])))
     const units = nullIfZeroish(asNumber(firstDefined(rec, ['units_count'])))
@@ -193,7 +198,7 @@ const VALUATION_SPECS: FieldSpec[] = [
   { key: 'calculated_improvement', label: 'Calculated Improvement Value', columns: ['calculated_improvement_value'], format: fmtMoneyField },
   { key: 'calculated_land', label: 'Calculated Land Value', columns: ['calculated_land_value'], format: fmtMoneyField },
   { key: 'tax_amount', label: 'Tax Amount', columns: ['tax_amt', 'annual_taxes'], format: fmtMoneyField },
-  { key: 'tax_year', label: 'Tax Year', columns: ['tax_year'], format: fmtIntField },
+  { key: 'tax_year', label: 'Tax Year', columns: ['tax_year'], format: fmtYearField },
   { key: 'value_per_sqft', label: 'Value / Sqft', columns: ['value_per_sqft'], format: (r, rec) => {
     const v = nullIfZeroish(asNumber(firstDefined(rec, ['estimated_value'])))
     const sqft = nullIfZeroish(asNumber(firstDefined(rec, ['building_square_feet'])))
@@ -232,7 +237,7 @@ const LOAN_SPECS: FieldSpec[] = [
 
 const DISTRESS_SPECS: FieldSpec[] = [
   { key: 'tax_delinquent', label: 'Tax Delinquent', columns: ['tax_delinquent'], format: fmtBool },
-  { key: 'tax_delinquent_year', label: 'Tax Delinquent Year', columns: ['tax_delinquent_year'], format: fmtIntField },
+  { key: 'tax_delinquent_year', label: 'Tax Delinquent Year', columns: ['tax_delinquent_year'], format: fmtYearField },
   { key: 'past_due_amount', label: 'Past Due Amount', columns: ['past_due_amount'], format: fmtMoneyField },
   { key: 'active_lien', label: 'Active Lien', columns: ['active_lien'], format: fmtBool },
   { key: 'lienholder', label: 'Lienholder', columns: ['lienholder_name'], format: fmtText },
@@ -374,9 +379,11 @@ export const buildOperationalStateLine = (
     return `New reply: ${lastInbound.slice(0, 120)}`
   }
   if (statusLabel.toLowerCase().includes('follow')) return 'Follow-up due'
+  // "not contacted" CONTAINS "contacted", so the negative case must be tested first —
+  // otherwise a never-contacted lead is labelled "Active communication".
+  if (statusLabel.toLowerCase().includes('not contacted')) return 'No contact activity yet'
   if (statusLabel.toLowerCase().includes('contacted') || statusLabel.toLowerCase().includes('active')) {
     return 'Active communication'
   }
-  if (statusLabel.toLowerCase().includes('not contacted')) return 'No contact activity yet'
   return statusLabel
 }

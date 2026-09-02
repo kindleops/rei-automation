@@ -10,6 +10,7 @@ export type NexusGlobalThemeId =
   | 'executive'
   | 'night_vision'
   | 'monochrome'
+  | 'true_black'
   | 'light'
 
 export type AnimationLevel = 'full' | 'reduced' | 'minimal'
@@ -33,6 +34,16 @@ export const nexusGlobalThemes: Record<NexusGlobalThemeId, NexusGlobalThemeDefin
     accent: '#0a84ff',
     personality: 'clean',
     mapThemeId: 'light_street',
+    defaultAnimationLevel: 'full',
+    isHighContrast: false,
+  },
+  true_black: {
+    id: 'true_black',
+    label: 'True Black',
+    description: 'Deep neutral black — OLED-friendly, works with every accent',
+    accent: '#38bdf8',
+    personality: 'command',
+    mapThemeId: 'dark_ops',
     defaultAnimationLevel: 'full',
     isHighContrast: false,
   },

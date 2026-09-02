@@ -1,0 +1,86 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   EDGE-ATTACHED CHROME — visual only, purely additive
+   ══════════════════════════════════════════════════════════════════════════
+
+   The dock roots already span the physical screen edges; their padding
+   positions the controls inside the safe area. That padding is FROZEN and is
+   not touched here. Instead the material is painted by a full-root ::before
+   layer, so the glass reaches the physical edge while every control stays at
+   exactly its current coordinates.
+
+   The pseudo-element is a sibling of the control wrapper, never an ancestor of
+   it, so its backdrop-filter cannot become the controls' containing block. No
+   transform / filter / perspective / contain / will-change / backdrop-filter is
+   applied to the roots themselves.
+
+   Scoped to display-mode: standalone so browser and desktop are untouched.
+   Loaded after mobile-operating-shell.css and pinned-app-dock.css. */
+
+@media (display-mode: standalone) {
+  /* ── The material ─────────────────────────────────────────────────────── */
+  html.is-mobile-layout .nx-mobile-command-dock::before,
+  html.is-mobile-layout .nx-pinned-app-dock::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: rgba(6, 10, 18, 0.5);
+    backdrop-filter: blur(20px) saturate(1.8);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  }
+
+  /* Square at the display edge, refined where it meets the app. Depth sits on
+     the INNER edge only — the outer edge dissolves into the screen. */
+  html.is-mobile-layout .nx-mobile-command-dock::before {
+    border-radius: 0 0 22px 22px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow:
+      0 14px 28px -16px rgba(0, 0, 0, 0.55),
+      inset 0 -1px 0 rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.13);
+  }
+
+  html.is-mobile-layout .nx-pinned-app-dock::before {
+    border-radius: 22px 22px 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow:
+      0 -14px 28px -16px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* ── One continuous surface, not nested glass cards ───────────────────── */
+  /* Neutralise ONLY the material properties of the existing floating panels.
+     Dimensions, padding, margins, flex behaviour, positioning and hit targets
+     are deliberately untouched. */
+  html.is-mobile-layout .nx-mobile-command-dock__inner,
+  html.is-mobile-layout .nx-pinned-app-dock__glass,
+  html.is-mobile-layout .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    z-index: 1;
+    background: transparent !important;
+    border-color: transparent !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* ── Light theme ──────────────────────────────────────────────────────── */
+  html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock::before,
+  html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock::before {
+    background: rgba(255, 255, 255, 0.58);
+  }
+
+  html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock::before {
+    border-bottom-color: rgba(15, 23, 42, 0.08);
+    box-shadow:
+      0 14px 28px -18px rgba(15, 23, 42, 0.28),
+      inset 0 -1px 0 rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.16);
+  }
+
+  html.is-mobile-layout[data-nexus-theme='light'] .nx-pinned-app-dock::before {
+    border-top-color: rgba(15, 23, 42, 0.08);
+    box-shadow:
+      0 -14px 28px -18px rgba(15, 23, 42, 0.24),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+}

@@ -39,7 +39,7 @@ export interface DealIntelligenceLeadStateData {
   manual_temperature_lock?: boolean | null
 }
 
-interface PillOption<T extends string> {
+export interface PillOption<T extends string> {
   value: T
   visual: PillVisual
 }
@@ -233,15 +233,15 @@ function useOptimisticField<T extends string>(initial: T) {
   return { value, pending, error, commit, reset }
 }
 
-const STATUS_OPTIONS: PillOption<ThreadStatus>[] = (Object.keys(threadStatusVisuals) as ThreadStatus[]).map(
+export const STATUS_OPTIONS: PillOption<ThreadStatus>[] = (Object.keys(threadStatusVisuals) as ThreadStatus[]).map(
   (v) => ({ value: v, visual: threadStatusVisuals[v] }),
 )
 
-const STAGE_OPTIONS: PillOption<ThreadStage>[] = (Object.keys(threadStageVisuals) as ThreadStage[]).map(
+export const STAGE_OPTIONS: PillOption<ThreadStage>[] = (Object.keys(threadStageVisuals) as ThreadStage[]).map(
   (v) => ({ value: v, visual: threadStageVisuals[v] }),
 )
 
-const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = LEAD_TEMPERATURE_ORDER.map(
+export const TEMP_OPTIONS: PillOption<ThreadTemperature>[] = LEAD_TEMPERATURE_ORDER.map(
   (v) => ({ value: v, visual: threadTemperatureVisuals[v] }),
 )
 
@@ -259,7 +259,7 @@ function toThreadShape(data: DealIntelligenceLeadStateData) {
   }
 }
 
-function useLeadStateSync(data: DealIntelligenceLeadStateData) {
+export function useLeadStateSync(data: DealIntelligenceLeadStateData) {
   const threadKey = data.threadKey
   const shape = toThreadShape(data)
 

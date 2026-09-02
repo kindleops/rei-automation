@@ -8,7 +8,7 @@
     "predev": "npm run sync:sounds",
     "dev": "vite",
     "prebuild": "npm run sync:sounds",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "guard:css-order": "node scripts/check-css-import-order.mjs",
@@ -52,10 +52,11 @@
     "proof:ui": "playwright test",
     "proof:deal": "playwright test tests/ui/deal-intelligence.spec.ts",
     "proof:headed": "playwright test tests/ui/deal-intelligence.spec.ts --headed",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "proof:dev-runtime": "npx tsx scripts/proof/dev-runtime-diagnostics-proof.ts",
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
-    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api"
+    "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
+    "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

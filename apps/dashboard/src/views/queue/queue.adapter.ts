@@ -7,7 +7,6 @@ const MARKETS = ['Dallas', 'Austin', 'Houston', 'San Antonio', 'Minneapolis', 'D
 
 const MOCK_TEXTGRID_FLEET = PRODUCTION_TEXTGRID_FLEET
 const AGENTS = ['Sarah Johnson', 'Mike Chen', 'Elena Rodriguez', 'James Wilson', 'Lisa Park']
-const TEMPLATES = ['Initial Outreach', 'Follow-up', 'Urgency', 'Closing Push', 'Property Update']
 const USE_CASES = ['listing', 'foreclosure', 'probate', 'distressed', 'investment']
 const SELLERS = [
   'John Smith Realty',
@@ -50,13 +49,49 @@ const FAILURE_REASONS: FailureReason[] = [
   'sync_error',
 ]
 
-const generateQueueItem = (index: number): QueueItem => {
-  const status: QueueItemStatus = Object.keys(STATUS_DISTRIBUTION)[
-    Math.floor(Math.random() * Object.keys(STATUS_DISTRIBUTION).length)
-  ] as QueueItemStatus
+// Market → city/state, so a mock row never claims a Dallas market with a
+// Minneapolis city. Visual-proof screenshots must not look like cross-lead
+// corruption.
+const MARKET_GEO: Record<string, { city: string; state: string; zip: string }> = {
+  Dallas: { city: 'Dallas', state: 'TX', zip: '75201' },
+  Austin: { city: 'Austin', state: 'TX', zip: '78701' },
+  Houston: { city: 'Houston', state: 'TX', zip: '77002' },
+  'San Antonio': { city: 'San Antonio', state: 'TX', zip: '78205' },
+  Minneapolis: { city: 'Minneapolis', state: 'MN', zip: '55401' },
+  Denver: { city: 'Denver', state: 'CO', zip: '80202' },
+}
 
+const STREETS = ['Hoefner Ave', 'Bellaire Dr', 'Cedar Springs Rd', 'Loma Vista Ln', 'Grandview St', 'Winnetka Ave']
+const FIRST_NAMES = ['Rodolfo', 'Marisol', 'Dwayne', 'Priya', 'Hector', 'Alanna']
+const LAST_NAMES = ['Nunez', 'Alvarez', 'Whitfield', 'Raman', 'Delgado', 'Boone']
+
+const STAGE_CONTEXT = {
+  S1: { label: 'Ownership Confirmation', canonical: 'ownership_check', template: 'Ownership Check' },
+  S2: { label: 'Selling Interest', canonical: 'selling_interest', template: 'Interest Follow-Up' },
+  S3: { label: 'Asking Price', canonical: 'asking_price_received', template: 'Asking Price Follow-Up' },
+  S4: { label: 'Condition & Underwriting', canonical: 'condition_disclosed', template: 'Condition Questions' },
+  S5: { label: 'Offer & Negotiation', canonical: 'offer_presented', template: 'Offer Presentation' },
+} as const
+
+type MockStage = keyof typeof STAGE_CONTEXT
+
+// Status → what the provider actually reported. The generator previously
+// hardcoded lastEventStatus:'delivered' on every row, which made canonical
+// delivery truth (correctly) render every row as Delivered.
+const LAST_EVENT_STATUS: Partial<Record<QueueItemStatus, string>> = {
+  delivered: 'delivered',
+  sent: 'sent',
+  failed: 'failed',
+  retry: 'failed',
+  sending: 'sent',
+}
+
+// The status is an input, not a second random draw. adaptQueueModel used to
+// overwrite `item.status` after generation, so every status-derived field
+// (failure category, sentAt, provider ids, last event) described a different
+// row than the one that was rendered.
+const generateQueueItem = (index: number, status: QueueItemStatus): QueueItem => {
   const now = new Date()
-  const scheduledTime = new Date(now.getTime() + (Math.random() * 7 * 24 * 60 * 60 * 1000))
   const createdTime = new Date(now.getTime() - (Math.random() * 30 * 24 * 60 * 60 * 1000))
 
   const retryCount = Math.floor(Math.random() * 4)
@@ -64,26 +99,62 @@ const generateQueueItem = (index: number): QueueItem => {
   const riskLevel: RiskLevel = ['low', 'medium', 'high'][Math.floor(Math.random() * 3)] as RiskLevel
   const aiConfidence = Math.floor(Math.random() * 40) + 60
 
+  // ── One coherent lead per row ──────────────────────────────────────────────
+  // Every downstream field derives from these, so the seller, the property, the
+  // market, the rendered message and the stage always describe the same deal.
+  const market = MARKETS[index % MARKETS.length]
+  const geo = MARKET_GEO[market]
+  const streetNumber = 100 + ((index * 37) % 9800)
+  const street = STREETS[index % STREETS.length]
+  const propertyAddress = `${streetNumber} ${street}`
+  const firstName = FIRST_NAMES[index % FIRST_NAMES.length]
+  const lastName = LAST_NAMES[(index * 3) % LAST_NAMES.length]
+  const sellerFullName = `${firstName} ${lastName}`
+  const entity = SELLERS[index % SELLERS.length]
+  const stageCode: MockStage = (['S1', 'S2', 'S3', 'S4', 'S5'] as const)[index % 5]
+  const stage = STAGE_CONTEXT[stageCode]
+  const toPhone = `+1214${String(5550000 + (index % 9999)).padStart(7, '0')}`
+  // Route from a sender that actually serves this market where one exists.
+  const marketSenders = MOCK_TEXTGRID_FLEET.filter((n) => n.market === market)
+  const sender = (marketSenders.length > 0 ? marketSenders : MOCK_TEXTGRID_FLEET)[index % Math.max(marketSenders.length || MOCK_TEXTGRID_FLEET.length, 1)]
+
+  const failedRow = status === 'failed' || status === 'retry'
+  const blockedRow = status === 'blocked' || status.startsWith('paused_')
+  const sentAt = status === 'sent' || status === 'delivered' || status === 'sending'
+    ? new Date(now.getTime() - Math.random() * 24 * 60 * 60 * 1000).toISOString()
+    : null
+  // Delivery implies dispatch — never emit deliveredAt without sentAt.
+  const deliveredAt = status === 'delivered'
+    ? new Date(new Date(sentAt!).getTime() + 45_000).toISOString()
+    : null
+  // A dispatched row was scheduled *before* it sent; only pending work is in the
+  // future. The generator previously always scheduled forward, so a delivered
+  // row read "Scheduled just now · Sent 16h ago".
+  const scheduledTime = sentAt
+    ? new Date(new Date(sentAt).getTime() - 5 * 60_000)
+    : new Date(now.getTime() + (Math.random() * 7 * 24 * 60 * 60 * 1000))
+
   return {
     id: `queue-${index}`,
     queueId: `q-${Math.random().toString(36).substring(7)}`,
-    sellerName: SELLERS[Math.floor(Math.random() * SELLERS.length)],
-    sellerDisplayName: SELLERS[Math.floor(Math.random() * SELLERS.length)],
-    propertyAddress: `${Math.floor(Math.random() * 10000) + 1} Main St`,
-    market: MARKETS[Math.floor(Math.random() * MARKETS.length)],
-    phone: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
-    toPhoneNumber: `+1${Math.floor(Math.random() * 9000000000 + 2000000000)}`,
-    fromPhoneNumber: MOCK_TEXTGRID_FLEET[Math.floor(Math.random() * MOCK_TEXTGRID_FLEET.length)].phone,
+    sellerName: sellerFullName,
+    sellerDisplayName: sellerFullName,
+    propertyAddress,
+    market,
+    phone: toPhone,
+    toPhoneNumber: toPhone,
+    fromPhoneNumber: sender.phone,
     agent: AGENTS[Math.floor(Math.random() * AGENTS.length)],
-    templateName: TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)],
+    templateName: stage.template,
     templateId: `tpl-${index}`,
     selectedTemplateId: `tpl-${index}`,
     templateSource: ['system', 'custom', 'ai'][Math.floor(Math.random() * 3)] as 'system' | 'custom' | 'ai',
-    useCase: USE_CASES[Math.floor(Math.random() * USE_CASES.length)],
-    stage: ['lead', 'follow-up', 'negotiation', 'closing'][Math.floor(Math.random() * 4)],
-    stageBefore: 'ownership_check',
+    useCase: USE_CASES[index % USE_CASES.length],
+    stage: stage.canonical,
+    stageBefore: null,
     stageAfter: null,
-    messageText: `Hi there! I wanted to follow up on the property at ${Math.floor(Math.random() * 10000) + 1} Main St. We have a qualified buyer interested. Would you like to discuss further?`,
+    // The rendered message must reference this row's own property.
+    messageText: `Hi ${firstName}, following up on ${propertyAddress} in ${geo.city}. We have a qualified buyer interested — is there a number you'd take for it?`,
     scheduledForLocal: scheduledTime.toISOString(),
     scheduledForUtc: scheduledTime.toISOString(),
     timezone: 'America/Chicago',
@@ -91,30 +162,30 @@ const generateQueueItem = (index: number): QueueItem => {
     status,
     statusLabel: status.replace(/_/g, ' '),
     priority,
-    touchNumber: Math.floor(Math.random() * 5) + 1,
-    language: Math.random() > 0.8 ? 'es' : 'en',
+    touchNumber: (index % 5) + 1,
+    language: 'en',
     retryCount,
     maxRetries: 3,
     failureReason: status === 'failed' || status === 'retry' ? FAILURE_REASONS[Math.floor(Math.random() * FAILURE_REASONS.length)] : null,
-    failedReason: status === 'failed' ? 'carrier_error' : null,
+    failedReason: failedRow ? 'Carrier rejected the message (30007)' : null,
     pausedReason: status.startsWith('paused_') ? status : null,
-    blockedReason: status === 'blocked' ? 'routing_blocked' : null,
+    blockedReason: blockedRow ? 'No active sender configured for this market' : null,
     deliveryStatus: (['pending', 'sent', 'delivered', 'failed', 'bounced'] as DeliveryStatus[])[status === 'delivered' ? 2 : status === 'sent' ? 1 : 0],
     createdAt: createdTime.toISOString(),
     updatedAt: now.toISOString(),
-    sentAt: status === 'sent' || status === 'delivered' ? new Date(now.getTime() - Math.random() * 24 * 60 * 60 * 1000).toISOString() : null,
-    deliveredAt: status === 'delivered' ? new Date(now.getTime() - Math.random() * 12 * 60 * 60 * 1000).toISOString() : null,
+    sentAt,
+    deliveredAt,
     approvedByOperator: status === 'sent' || status === 'delivered' ? 'ops-team' : null,
     requiresApproval: status === 'approval' || (riskLevel === 'high' && Math.random() > 0.7),
     riskLevel,
     aiConfidence,
     estimatedCost: Math.random() * 0.025 + 0.01,
-    textgridNumber: MOCK_TEXTGRID_FLEET[Math.floor(Math.random() * MOCK_TEXTGRID_FLEET.length)].phone,
+    textgridNumber: sender.phone,
     linkedInboxThreadId: Math.random() > 0.4 ? `thread-${Math.random().toString(36).substring(7)}` : null,
     linkedPropertyId: `prop-${Math.random().toString(36).substring(7)}`,
     linkedOwnerId: `owner-${Math.random().toString(36).substring(7)}`,
     propertyType: ['Single Family', 'Multifamily', 'Land'][Math.floor(Math.random() * 3)],
-    safetyStatus: 'ok',
+    safetyStatus: 'clear',
     routingAllowed: true,
     smsEligible: true,
     providerMessageId: status === 'sent' || status === 'delivered' ? `provider-${index}` : null,
@@ -124,40 +195,44 @@ const generateQueueItem = (index: number): QueueItem => {
     missingProviderMessageId: false,
     overdue: status === 'scheduled' && scheduledTime.getTime() < now.getTime(),
     sellerTemperature: ['cold', 'warm', 'hot', 'dnc', 'unknown'][Math.floor(Math.random() * 5)] as any,
-    currentStage: ['Lead', 'Nurture', 'Negotiation', 'Follow-up'][Math.floor(Math.random() * 4)],
+    currentStage: stage.canonical,
     nextBestAction: ['Call seller', 'Send offer', 'Review comps', 'Wait'][Math.floor(Math.random() * 4)],
     memoryStatus: ['none', 'partial', 'rich'][Math.floor(Math.random() * 3)] as any,
     urgencyScore: Math.floor(Math.random() * 100),
     extractedIntent: ['Wants higher price', 'Needs to sell fast', 'Not interested right now', null][Math.floor(Math.random() * 4)],
     routingReason: ['High confidence', 'Matches filter', 'Operator requested', null][Math.floor(Math.random() * 4)],
-    failureGroup: ['Carrier', 'Compliance', 'Routing', 'Template', 'Webhook', 'Contact Window', 'Duplicate', 'Payload', 'Unknown', null][Math.floor(Math.random() * 10)] as any,
-    retryEligible: Math.random() > 0.5,
+    failureGroup: failedRow ? 'Carrier' : blockedRow ? 'Routing' : null,
+    retryEligible: failedRow ? retryCount < 3 : false,
     approvalReason: status === 'approval' ? 'High risk message' : null,
     priorThreadSummary: 'Discussed pricing and timeline last week.',
     campaignId: `camp-${index}`,
-    campaignName: 'Mock Campaign',
+    campaignName: `${market} Q3 Acquisition`,
     campaignTargetId: `target-${index}`,
     campaignTargetStatus: 'active',
-    sellerFirstName: 'Mock',
-    sellerFullName: 'Mock Seller',
-    propertyCity: 'Mock City',
-    propertyState: 'TX',
-    propertyZip: '75001',
+    sellerFirstName: firstName,
+    sellerFullName,
+    propertyCity: geo.city,
+    propertyState: geo.state,
+    propertyZip: geo.zip,
     routingTier: 1,
     routingRuleName: 'Default',
-    lastEventType: 'delivery',
-    lastEventAt: now.toISOString(),
-    lastEventStatus: 'delivered',
-    failureCategory: 'unknown',
+    lastEventType: failedRow ? 'delivery_failed' : blockedRow ? 'guard_block' : 'delivery',
+    // Spread events across the range — a fixture where every row's last event
+    // is "now" makes the 15-minute Live window read as the range total.
+    lastEventAt: new Date(now.getTime() - ((index * 977) % (7 * 24 * 60)) * 60_000).toISOString(),
+    lastEventStatus: LAST_EVENT_STATUS[status] ?? null,
+    // `failure_category` only belongs on a row that actually failed or blocked.
+    failureCategory: failedRow ? 'carrier_failure' : blockedRow ? 'no_valid_sender' : null,
     diagnosticFlags: [],
     rowSource: 'campaign',
     guardReason: null,
     automationSource: 'campaign_launch_execution',
     workflowId: null,
     queueKey: `feed-${index}`,
-    stageCode: (['S1', 'S2', 'S3', 'S4', 'S5'] as const)[Math.floor(Math.random() * 5)],
-    stageLabel: null,
-    sellerFullNameResolved: 'Mock Seller',
+    stageCode,
+    stageLabel: stage.label,
+    sellerFullNameResolved: sellerFullName,
+    masterOwnerDisplayName: entity,
   }
 }
 
@@ -168,9 +243,7 @@ export const adaptQueueModel = (): QueueModel => {
 
   for (const [status, count] of Object.entries(STATUS_DISTRIBUTION)) {
     for (let i = 0; i < count; i++) {
-      const item = generateQueueItem(id)
-      item.status = status as QueueItemStatus
-      items.push(item)
+      items.push(generateQueueItem(id, status as QueueItemStatus))
       id++
     }
   }

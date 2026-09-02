@@ -9,6 +9,7 @@ import './modules/mobile/pinned-app-dock.css'
 import './styles/nx-glass-system.css'
 import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
+import './modules/mobile/mobile-edge-chrome.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
 

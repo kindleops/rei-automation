@@ -3,6 +3,9 @@ import { formatInteger } from '../../shared/formatters'
 import { Icon, type IconName } from '../../shared/icons'
 import { buildPropertyExternalLinks } from '../../domain/inbox/inbox-normalization'
 import { useDealIntelligenceDossier } from '../../domain/deal-intelligence/useDealIntelligenceDossier'
+import { useBreakpoint } from '../mobile/useBreakpoint'
+import { MobileSellerCommandCenter } from './mobile/MobileSellerCommandCenter'
+import type { MobileSellerSeed } from './mobile/MobileSellerCommandCenter'
 import type { EngineRunPhase } from '../../domain/deal-intelligence/useDealIntelligenceDossier'
 import type {
   ActivityEvent,
@@ -26,6 +29,8 @@ import {
   fmtDiUnits,
   fmtPhoneType,
   scoreTone,
+  AOS_SCORE_MAX,
+  BASELINE_SCORE_MAX,
 } from '../../domain/deal-intelligence/deal-intelligence-format'
 import { DealIntelligenceMedia, type MediaTab } from './DealIntelligenceMedia'
 import {
@@ -243,6 +248,7 @@ const ScoreRadial = ({
   size = 'md',
   variant = 'default',
   showDenom = false,
+  max = BASELINE_SCORE_MAX,
 }: {
   score?: number | null
   label: string
@@ -250,10 +256,12 @@ const ScoreRadial = ({
   size?: 'md' | 'lg'
   variant?: 'default' | 'aos'
   showDenom?: boolean
+  /** Upper bound of the score's domain. AOS is 0-1000; baseline scores are 0-100. */
+  max?: number
 }) => {
   const numeric = score != null && Number.isFinite(Number(score)) ? Number(score) : null
-  const tone = numeric != null ? scoreTone(numeric) : 'muted'
-  const progress = numeric != null ? Math.min(100, Math.max(0, numeric)) : 0
+  const tone = numeric != null ? scoreTone(numeric, max) : 'muted'
+  const progress = numeric != null ? Math.min(100, Math.max(0, (numeric / Math.max(max, 1)) * 100)) : 0
   const display = numeric != null ? (fmtDiScore(numeric) ?? '—') : '—'
 
   return (
@@ -265,7 +273,7 @@ const ScoreRadial = ({
       >
         <div className="nx-di25-radial-dial__inner">
           <strong className="nx-di25-radial-dial__score">{display}</strong>
-          {showDenom ? <span className="nx-di25-radial-dial__denom">/100</span> : null}
+          {showDenom ? <span className="nx-di25-radial-dial__denom">/{max}</span> : null}
         </div>
       </div>
       <div className="nx-di25-radial__caption">
@@ -537,12 +545,12 @@ const EngineHero = ({
   const confidenceFill = confidenceNumeric != null
     ? Math.min(100, Math.max(0, confidenceNumeric <= 1 ? confidenceNumeric * 100 : confidenceNumeric))
     : 0
-  const aosTone = aos != null && Number.isFinite(Number(aos)) ? scoreTone(Number(aos)) : 'muted'
+  const aosTone = aos != null && Number.isFinite(Number(aos)) ? scoreTone(Number(aos), AOS_SCORE_MAX) : 'muted'
 
   return (
     <div className="nx-di25-engine-hero">
       <div className={cls('nx-di25-engine-hero__anchor', `is-${aosTone}`)}>
-        <ScoreRadial score={aos} label="AOS" sublabel="Decision engine" size="lg" variant="aos" showDenom />
+        <ScoreRadial score={aos} label="AOS" sublabel="Decision engine" size="lg" variant="aos" showDenom max={AOS_SCORE_MAX} />
       </div>
       <div className="nx-di25-engine-hero-meta">
         {tier ? <span className="nx-di25-tier">{humanizeEnum(String(tier))}</span> : null}
@@ -1513,19 +1521,41 @@ const EngineGroup = ({
   </section>
 )
 
-export const DealIntelligence25Panel = ({
-  threadKey, propertyId, prospectId, masterOwnerId, canonicalE164, fallbackAddress,
-}: {
+export interface DealIntelligencePanelProps {
   threadKey?: string
   propertyId?: string
   prospectId?: string
   masterOwnerId?: string
   canonicalE164?: string
   fallbackAddress?: string | null
-}) => {
-  const { dossier, loading, error, refresh, runDecisionEngine, engineRunning, engineRunPhase, engineError, engineProgress } = useDealIntelligenceDossier({
+  /** Already-loaded host state, used by the mobile surface to paint instantly. */
+  seed?: MobileSellerSeed | null
+  /** Returns to the in-app conversation for this thread (mobile "Message"). */
+  onOpenConversation?: (() => void) | null
+}
+
+/**
+ * Portrait phones get the rebuilt Seller Command Center; every other viewport
+ * keeps this panel unchanged. Only `useBreakpoint` runs before the branch, so
+ * hook order stays stable across the switch.
+ */
+export const DealIntelligence25Panel = (props: DealIntelligencePanelProps) => {
+  const { isMobile } = useBreakpoint()
+  if (isMobile) return <MobileSellerCommandCenter {...props} />
+  return <DealIntelligenceDesktopPanel {...props} />
+}
+
+const DealIntelligenceDesktopPanel = ({
+  threadKey, propertyId, prospectId, masterOwnerId, canonicalE164, fallbackAddress,
+}: DealIntelligencePanelProps) => {
+  const { dossier, detailReady, error, refresh, runDecisionEngine, engineRunning, engineRunPhase, engineError, engineProgress } = useDealIntelligenceDossier({
     threadKey, propertyId, prospectId, masterOwnerId, canonicalE164,
   })
+  // The dossier hook now streams in two phases (summary, then full). This
+  // desktop panel is laid out around the complete payload, so it keeps waiting
+  // for the full one — progressive section rendering is the mobile surface's
+  // job. Behaviour here is unchanged; it just gets there faster.
+  const loading = !detailReady && !error
 
   const [mediaTab, setMediaTab] = useState<MediaTab>('street')
   const [showAllComps, setShowAllComps] = useState(false)
