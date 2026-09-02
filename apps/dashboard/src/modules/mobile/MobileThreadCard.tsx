@@ -49,7 +49,13 @@ export const MobileThreadCard = ({
           <span className="nx-mobile-thread-card__chip is-muted">{thread.inboxStatus.replace(/_/g, ' ')}</span>
         ) : null}
         {decision.lead_temperature ? (
-          <span className={cls('nx-mobile-thread-card__chip', 'is-temp')}>
+          <span
+            className={cls(
+              'nx-mobile-thread-card__chip',
+              'is-temp',
+              `is-temp-${String(decision.lead_temperature).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            )}
+          >
             {decision.lead_temperature.replace(/_/g, ' ')}
           </span>
         ) : null}

@@ -1,0 +1,749 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LEAD COMMAND — MOBILE LIQUID SURFACES
+   Visual material for the mobile Map peek card, bottom sheets, Inbox thread
+   cards and the conversation composer. Same language as the shell layer:
+   glass depth instead of boxes, large confident identity, dense tabular
+   data, tactile pressed states. Geometry (fixed positions, snap heights,
+   safe-area offsets) is untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Map: bottom sheet material ───────────────────────────────────────── */
+
+html.is-mobile-layout .nx-mobile-bottom-sheet {
+  font-family: var(--lc-font-sans);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 28%),
+    var(--lc-glass-bg);
+  border-color: transparent;
+  border-radius: var(--lc-shell-radius) var(--lc-shell-radius) 0 0;
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  box-shadow:
+    inset 0 1px 0 var(--lc-highlight),
+    0 -24px 60px -20px rgba(0, 0, 0, 0.7);
+  transition: max-height 320ms var(--lc-ease-out);
+}
+
+html.is-mobile-layout .nx-mobile-bottom-sheet__handle {
+  width: 40px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* ── Map: seller / property peek card ─────────────────────────────────── */
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-shell.is-mobile {
+  border-radius: 0;
+  border-color: transparent;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  --smc-text: var(--lc-ink);
+  --smc-muted: var(--lc-ink-2);
+}
+
+/* Image-led hero: much larger Street View, identity sits over its lower edge. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-image.is-mobile-hero {
+  height: 160px;
+  border-radius: var(--lc-shell-radius) var(--lc-shell-radius) 0 0;
+  background: rgba(8, 12, 20, 0.35);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-shell.is-focus .smc-image.is-mobile-hero,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-image.is-mobile-hero.is-focus {
+  height: 148px;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-image.is-mobile-hero img {
+  filter: saturate(1.05) contrast(1.04);
+  transform: scale(1.02);
+  transition: transform 600ms var(--lc-ease-out);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-image.is-mobile-hero .smc-image__gradient {
+  background:
+    linear-gradient(180deg, rgba(5, 9, 18, 0.34) 0%, rgba(5, 9, 18, 0) 34%, rgba(5, 9, 18, 0.12) 56%, rgba(9, 13, 21, 0.94) 100%);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-image.is-placeholder {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet.is-collapsed .nx-mobile-bottom-sheet__handle {
+  top: 8px;
+  width: 36px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* The summary rises into the image's lower gradient. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--peek,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--focus-head {
+  position: relative;
+  z-index: 2;
+  margin-top: -62px;
+  padding: 0 16px 8px;
+  gap: 10px;
+}
+
+/* Collapsed peek: identity + numbers + actions only; signals and state
+   detail arrive as the sheet is pulled to half / expanded. */
+html.is-mobile-layout .smc-mobile-bottom-sheet.is-collapsed .smc-body--peek .smc-flags--weighted,
+html.is-mobile-layout .smc-mobile-bottom-sheet.is-collapsed .smc-body--peek .smc-operational-state {
+  display: none;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-flags--weighted {
+  gap: 6px;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-operational-state {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-sticky-summary {
+  gap: 8px;
+}
+
+/* Badges: readable, no shouting. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-state-row {
+  gap: 6px;
+  max-height: none;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-badge {
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(9, 13, 21, 0.55);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-badge--stage,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-badge--status,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-badge--temp {
+  background: color-mix(in srgb, var(--smc-stage-color, var(--smc-status-color, var(--smc-temp-color, #68d9ff))) 18%, rgba(9, 13, 21, 0.6));
+}
+
+/* Identity: large, confident. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-identity__name,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--mobile-header .smc-identity__name {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-identity__address,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--mobile-header .smc-identity__address {
+  margin-top: 3px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--lc-ink-2);
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-identity__asset-line {
+  font-size: 12.5px;
+  color: var(--lc-ink-3);
+}
+
+/* Metrics: numbers first, no box per number. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metrics,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--mobile-expanded .smc-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 2px;
+  padding: 10px 0 8px;
+  border-top: 1px solid var(--lc-hairline);
+  border-bottom: 1px solid var(--lc-hairline);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metric,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--mobile-expanded .smc-metric {
+  min-height: 0;
+  padding: 2px 10px 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metric + .smc-metric {
+  padding-left: 12px;
+  box-shadow: inset 1px 0 0 var(--lc-hairline);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metric span {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metric strong,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-body--mobile-expanded .smc-metric strong {
+  margin-top: 3px;
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-metric.is-primary strong {
+  color: rgb(var(--lc-accent-rgb));
+}
+
+/* Actions: 44px targets, one solid primary, one glass secondary. */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-actions {
+  gap: 10px;
+  padding: 10px 16px 26px;
+  border-top: 0;
+  background: transparent;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-actions--sticky {
+  background: linear-gradient(180deg, transparent, rgba(9, 13, 21, 0.75) 40%);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-action {
+  height: 44px;
+  border-radius: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: transform 140ms var(--lc-ease-out), background 160ms ease, box-shadow 160ms ease;
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-action:active {
+  transform: scale(0.97);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-action--message {
+  color: #05121c;
+  border-color: transparent;
+  background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 1), rgba(var(--lc-accent-rgb), 0.86));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 10px 24px -10px rgba(var(--lc-accent-rgb), 0.7);
+}
+
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-action--message:disabled {
+  color: var(--lc-ink-3);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+
+/* Signals / tags */
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-tag,
+html.is-mobile-layout .smc-mobile-bottom-sheet .smc-weighted-tag {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Inbox: thread cards ──────────────────────────────────────────────── */
+
+html.is-mobile-layout .nx-mobile-swipe-card {
+  border-radius: 18px;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card {
+  gap: 5px;
+  padding: 13px 14px 12px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--lc-ink);
+  font-family: var(--lc-font-sans);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: transform 140ms var(--lc-ease-out), background 160ms ease, border-color 160ms ease;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card:active {
+  transform: scale(0.985);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card.is-unread {
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 3px 0 0 rgba(var(--lc-accent-rgb), 0.9);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card.is-selected {
+  border-color: rgba(var(--lc-accent-rgb), 0.32);
+  background: rgba(var(--lc-accent-rgb), 0.1);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card.is-unread .nx-mobile-thread-card__name {
+  font-weight: 700;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__time {
+  font-family: var(--lc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card.is-unread .nx-mobile-thread-card__time {
+  color: rgb(var(--lc-accent-rgb));
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__address {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__preview {
+  font-size: 14px;
+  line-height: 1.38;
+  color: var(--lc-ink-2);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card.is-unread .nx-mobile-thread-card__preview {
+  color: var(--lc-ink);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__direction {
+  opacity: 0.5;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__meta {
+  gap: 6px;
+  margin-top: 4px;
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__chip {
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--lc-ink-2);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__chip.is-temp {
+  color: #ffb4ae;
+  background: rgba(255, 76, 85, 0.14);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__chip.is-temp-warm {
+  color: #ffd28a;
+  background: rgba(255, 184, 76, 0.16);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__chip.is-temp-cold {
+  color: #9fd6ff;
+  background: rgba(66, 196, 255, 0.14);
+}
+
+html.is-mobile-layout .nx-mobile-thread-card__chip.is-muted {
+  opacity: 0.7;
+}
+
+html.is-mobile-layout .nx-mobile-swipe-card__action {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Light theme ──────────────────────────────────────────────────────── */
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-bottom-sheet {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.3) 30%),
+    var(--lc-glass-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 -24px 60px -24px rgba(15, 23, 42, 0.35);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-bottom-sheet__handle {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-image.is-mobile-hero .smc-image__gradient {
+  background:
+    linear-gradient(180deg, rgba(5, 9, 18, 0.28) 0%, rgba(5, 9, 18, 0) 34%, rgba(250, 251, 253, 0.1) 56%, rgba(250, 251, 253, 0.96) 100%);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__name {
+  text-shadow: none;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-badge {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action--message {
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 1), rgba(var(--lc-accent-rgb), 0.88));
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-actions--sticky {
+  background: linear-gradient(180deg, transparent, rgba(250, 251, 253, 0.85) 40%);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card:active {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card.is-unread {
+  background: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 3px 0 0 rgba(var(--lc-accent-rgb), 0.9),
+    0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card.is-selected {
+  background: rgba(var(--lc-accent-rgb), 0.08);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card__chip {
+  background: rgba(15, 23, 42, 0.06);
+  box-shadow: none;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card__chip.is-temp {
+  color: #b42318;
+  background: rgba(255, 76, 85, 0.12);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card__chip.is-temp-warm {
+  color: #9a5b00;
+  background: rgba(255, 184, 76, 0.18);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-thread-card__chip.is-temp-cold {
+  color: #075985;
+  background: rgba(66, 196, 255, 0.16);
+}
+
+/* ── Inbox: conversation composer (compact, native-feeling) ───────────── */
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer {
+  font-family: var(--lc-font-sans);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 40%),
+    var(--lc-glass-bg);
+  backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--lc-glass-blur)) saturate(var(--lc-glass-saturate));
+  border-top: 1px solid var(--lc-hairline);
+  box-shadow: 0 -12px 32px -20px rgba(0, 0, 0, 0.6);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock {
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px 6px;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side {
+  gap: 0;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__main {
+  gap: 0;
+}
+
+/* One pill: text + voice. Everything else lives behind the command affordance. */
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap {
+  min-height: 42px;
+  padding: 5px 6px 5px 14px;
+  border-radius: 21px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: border-color 160ms ease, box-shadow 200ms var(--lc-ease-out), background 160ms ease;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap:focus-within {
+  border-color: rgba(var(--lc-accent-rgb), 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 3px rgba(var(--lc-accent-rgb), 0.12);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea {
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: 24px;
+  padding: 4px 0;
+  font-size: 16px; /* prevents iOS focus zoom */
+  line-height: 1.4;
+  color: var(--lc-ink);
+  caret-color: rgb(var(--lc-accent-rgb));
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea::placeholder {
+  color: var(--lc-ink-3);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__tools {
+  gap: 2px;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  color: var(--lc-ink-2);
+  transition: transform 140ms var(--lc-ease-out), background 160ms ease, color 160ms ease;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:active {
+  transform: scale(0.9);
+  background: var(--lc-press);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Polish and schedule stay reachable from the quick-actions menu; the pill keeps
+   only translate + voice so the typing area stays wide. */
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__tools .nx-composer-tool-btn:not(.nx-composer-tool-btn--essential) {
+  display: none;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__tools .nx-composer-tool-btn[aria-label='Schedule message'] {
+  display: none;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  color: var(--lc-ink-2);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn.is-active {
+  color: rgb(var(--lc-accent-rgb));
+  background: rgba(var(--lc-accent-rgb), 0.16);
+  border-color: rgba(var(--lc-accent-rgb), 0.3);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane-surface--sms-thread .nx-send-button,
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-send-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 21px;
+  border-color: transparent;
+  color: var(--lc-ink-3);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 160ms var(--lc-ease-spring), background 180ms ease, color 180ms ease, box-shadow 220ms ease;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-ready {
+  color: #05121c;
+  background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 1), rgba(var(--lc-accent-rgb), 0.86));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 8px 20px -8px rgba(var(--lc-accent-rgb), 0.75);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-send-button:active {
+  transform: scale(0.9);
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap.is-listening {
+  border-color: rgba(255, 76, 85, 0.45);
+  box-shadow: 0 0 0 3px rgba(255, 76, 85, 0.14);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-composer {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.4) 40%),
+    var(--lc-glass-bg);
+  box-shadow: 0 -12px 32px -22px rgba(15, 23, 42, 0.3);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap:focus-within {
+  background: #ffffff;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__side .nx-composer-tool-btn,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-send-button {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-ready {
+  color: #ffffff;
+  background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 1), rgba(var(--lc-accent-rgb), 0.88));
+}
+
+/* ── Inbox: conversation bubbles on a phone ───────────────────────────── */
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg {
+  max-width: 82% !important;
+  margin-bottom: 6px !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__bubble {
+  padding: 10px 14px 9px !important;
+  font-family: var(--lc-font-sans) !important;
+  font-size: 15px !important;
+  font-weight: 450 !important;
+  line-height: 1.42 !important;
+  letter-spacing: -0.005em !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__bubble {
+  color: var(--lc-ink) !important;
+  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 18px 18px 18px 5px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__tail {
+  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble {
+  color: #05121c !important;
+  background: linear-gradient(180deg, rgba(var(--lc-accent-rgb), 1), rgba(var(--lc-accent-rgb), 0.86)) !important;
+  border-color: transparent !important;
+  border-radius: 18px 18px 5px 18px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 8px 20px -10px rgba(var(--lc-accent-rgb), 0.55) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__tail {
+  background: rgba(var(--lc-accent-rgb), 0.86) !important;
+  border-color: transparent !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble:hover,
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__bubble:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-failed .nx-msg__bubble {
+  background: rgba(255, 76, 85, 0.14) !important;
+  border-color: rgba(255, 76, 85, 0.35) !important;
+  color: var(--lc-ink) !important;
+  box-shadow: none !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__meta {
+  gap: 6px !important;
+  margin-top: 3px !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg__time {
+  font-family: var(--lc-font-mono) !important;
+  font-variant-numeric: tabular-nums !important;
+  font-size: 11px !important;
+  letter-spacing: 0 !important;
+  color: var(--lc-ink-3) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-day {
+  margin: 12px 0 8px !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-day span {
+  padding: 3px 10px !important;
+  border: 0 !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: none !important;
+  font-family: var(--lc-font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  color: var(--lc-ink-3) !important;
+}
+
+html.is-mobile-layout .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-composer-dock {
+  box-shadow: none !important;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__bubble {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-inbound .nx-msg__tail {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg.is-outbound .nx-msg__bubble {
+  color: #ffffff !important;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] .nx-premium-inbox .nx-workspace-pane-surface--sms-thread .nx-conv-live .nx-msg-day span {
+  background: rgba(15, 23, 42, 0.06) !important;
+}
