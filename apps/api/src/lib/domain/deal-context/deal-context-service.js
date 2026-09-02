@@ -335,6 +335,54 @@ export async function getDealContextByProperty(propertyId, deps = {}) {
   return data ? hydrateDealContextRow(data) : null
 }
 
+/**
+ * Ambiguity probe for the as-of deal-context resolution (§6).
+ *
+ * getDealContextByThread returns a bare null for BOTH "no context" and "a
+ * multi-owner tie at the as-of instant" -- lossy for the caller, who cannot
+ * tell a missing thread from a genuinely ambiguous one. This probe runs the
+ * same tie logic and reports it as a VALUE. It is read-only, mirrors the
+ * id-event bound used by the resolver, and never throws (an error reads as
+ * not-ambiguous with the error attached, so a probe failure can never invent
+ * a hold).
+ */
+export async function probeDealContextAmbiguity(threadKey, deps = {}) {
+  const thread_key = clean(threadKey)
+  const supabase = deps.supabase || defaultSupabase
+  const as_of = clean(deps.asOfTimestamp) || null
+  if (!thread_key || !supabase || !as_of) return { ambiguous: false, distinct_owners: [], top_event_id: null, reason: as_of ? 'no_thread' : 'no_as_of_bound' }
+  try {
+    const { data: idEvent } = await supabase
+      .from('message_events')
+      .select('id,master_owner_id,property_id,created_at')
+      .eq('thread_key', thread_key)
+      .not('property_id', 'is', null)
+      .lte('created_at', as_of)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (!idEvent?.id) return { ambiguous: false, distinct_owners: [], top_event_id: null, reason: 'no_id_carrying_event' }
+    const { data: tiedEvents } = await supabase
+      .from('message_events')
+      .select('id,master_owner_id,created_at')
+      .eq('thread_key', thread_key)
+      .not('property_id', 'is', null)
+      .gte('created_at', idEvent.created_at)
+      .lte('created_at', as_of)
+    const distinct_owners = [...new Set((tiedEvents || []).map((e) => clean(e.master_owner_id)).filter(Boolean))]
+    return {
+      ambiguous: distinct_owners.length > 1,
+      distinct_owners,
+      top_event_id: idEvent.id,
+      top_event_at: idEvent.created_at,
+      reason: distinct_owners.length > 1 ? 'multi_owner_tie_at_as_of_instant' : 'single_owner',
+    }
+  } catch (error) {
+    return { ambiguous: false, distinct_owners: [], top_event_id: null, reason: 'probe_failed', error: error?.message || 'probe_failed' }
+  }
+}
+
 export async function getDealContextByThread(threadKey, deps = {}) {
   const thread_key = clean(threadKey)
   if (!thread_key) return null

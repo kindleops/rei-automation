@@ -17,7 +17,9 @@
 // existing auto-reply gates.
 
 import { normalizeCanonicalIntent, isSuppressionIntent } from "./canonical-intent-aliases.js";
-import { resolveExceptionWorkflow, exceptionSlaDeadline } from "./exception-workflows.js";
+import { resolveExceptionWorkflow, exceptionSlaDeadline,
+  resolveExceptionWorkflowForDecision,
+} from "./exception-workflows.js";
 import { buildSafeFallback, uncertaintyTypeForReason } from "./safe-fallback.js";
 import { assessCoverage, COVERAGE_STATES } from "./coverage-contract.js";
 
@@ -85,7 +87,8 @@ export function ensureInboundCoverage(decision = {}, ctx = {}) {
   let exception_workflow = null;
   let exception_sla_deadline = null;
   if (decision.should_mark_human_review || decision.should_suppress_contact || safety_status !== "allowed") {
-    exception_workflow = resolveExceptionWorkflow(reason);
+    // Specific per-intent workflow beats the generic reason bucket (§5).
+    exception_workflow = resolveExceptionWorkflowForDecision({ reason, canonical_intent });
     exception_sla_deadline = exceptionSlaDeadline(exception_workflow, now);
   }
 

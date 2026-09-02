@@ -32,6 +32,18 @@ function makeFakeSupabase(seed = {}) {
       eq(col, val) { q._filters.push((r) => String(pick(r, col)) === String(val)); return q; },
       in(col, vals) { q._filters.push((r) => vals.map(String).includes(String(pick(r, col)))); return q; },
       is(col, val) { q._filters.push((r) => (val === null ? pick(r, col) == null : pick(r, col) === val)); return q; },
+      // PostgREST `.or("a.is.null,a.eq.value,...")`: any clause matches.
+      or(expr) {
+        const clauses = String(expr).split(",").map((c) => c.trim()).filter(Boolean).map((c) => {
+          const [col, op, ...rest] = c.split(".");
+          const val = rest.join(".");
+          if (op === "is" && val === "null") return (r) => pick(r, col) == null;
+          if (op === "eq") return (r) => String(pick(r, col) ?? "") === val;
+          throw new Error(`unsupported or-clause in fake: ${c}`);
+        });
+        q._filters.push((r) => clauses.some((f) => f(r)));
+        return q;
+      },
       not(col, op, val) { q._filters.push((r) => !(val === null ? pick(r, col) == null : pick(r, col) === val)); return q; },
       lt(col, val) { q._filters.push((r) => String(pick(r, col) ?? "") < String(val)); return q; },
       gte(col, val) { q._filters.push((r) => String(pick(r, col) ?? "") >= String(val)); return q; },
@@ -202,4 +214,76 @@ test("recovery never inserts send_queue rows (no resends)", async () => {
   const before = supabase._state.send_queue.length;
   await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
   assert.equal(supabase._state.send_queue.length, before);
+});
+
+
+// ── §19 precision: the empty-string next_action sentinel is ABSENT, and the canonical record is stamped ──
+// Production carried 3,289 projection rows with next_action = '' that the previous
+// `.is("next_action", null)` filter could not see (a live dry-run saw 3 rows). The
+// sweep must treat '' as absent, and must stamp the canonical opportunity so the
+// canonical record and the projection agree.
+
+test("an EMPTY-STRING next_action projection row is repaired (the sentinel is absent, not present)", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [
+      { thread_key: "+13125550200", operational_status: "new_reply", next_action: "", updated_at: OLD, is_archived: false, is_suppressed: false, lifecycle_stage: "offer_interest" },
+    ],
+    acquisition_opportunities: [
+      { id: "opp-2", primary_thread_key: "+13125550200", next_action: null, next_action_due: null, updated_at: OLD, version: 1, metadata: {} },
+    ],
+  });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_active_without_next_action");
+  assert.equal(sweep.repaired, 1, "the '' row must be seen and repaired");
+  // projection restored to the safe default (no canonical next action existed)
+  assert.equal(supabase._state.inbox_thread_state[0].next_action, "human_review");
+  // canonical opportunity stamped with the SAME resolved action
+  assert.equal(supabase._state.acquisition_opportunities[0].next_action, "human_review");
+});
+
+test("the canonical opportunity is stamped only when it lacks a next action; an existing one is never overwritten", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [
+      { thread_key: "+13125550300", operational_status: "active_communication", next_action: "", updated_at: OLD, is_archived: false, is_suppressed: false },
+    ],
+    acquisition_opportunities: [
+      { id: "opp-3", primary_thread_key: "+13125550300", next_action: "schedule_follow_up", next_action_due: OLD, updated_at: OLD, version: 1, metadata: {} },
+    ],
+  });
+  await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
+  // projection takes the canonical value; canonical is untouched
+  assert.equal(supabase._state.inbox_thread_state[0].next_action, "schedule_follow_up");
+  assert.equal(supabase._state.acquisition_opportunities[0].next_action, "schedule_follow_up");
+  assert.equal(supabase._state.acquisition_opportunities[0].version, 1, "no canonical write when it already had a next action");
+});
+
+test("dry run sees the '' rows but stamps nothing on either record", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [
+      { thread_key: "+13125550400", operational_status: "new_reply", next_action: "", updated_at: OLD, is_archived: false, is_suppressed: false },
+    ],
+    acquisition_opportunities: [
+      { id: "opp-4", primary_thread_key: "+13125550400", next_action: null, updated_at: OLD, version: 1, metadata: {} },
+    ],
+  });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: true, now: NOW });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_active_without_next_action");
+  assert.equal(sweep.scanned, 1);
+  assert.equal(supabase._state.inbox_thread_state[0].next_action, "");
+  assert.equal(supabase._state.acquisition_opportunities[0].next_action, null);
+});
+
+test("a suppressed thread with an empty next_action is left alone (terminal, not a dead end)", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [
+      { thread_key: "+13125550500", operational_status: "new_reply", next_action: "", updated_at: OLD, is_archived: false, is_suppressed: true },
+    ],
+    acquisition_opportunities: [
+      { id: "opp-5", primary_thread_key: "+13125550500", next_action: null, updated_at: OLD, version: 1, metadata: {} },
+    ],
+  });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_active_without_next_action");
+  assert.equal(sweep.repaired, 0);
+  assert.equal(supabase._state.acquisition_opportunities[0].next_action, null);
 });

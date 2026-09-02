@@ -21,6 +21,7 @@ import {
   NEGOTIATION_ZONES,
   resolveNegotiationPolicy,
   evaluateConcession,
+  resolveMarginProtectedCeiling,
 } from "@/lib/domain/seller-flow/negotiation-policy.js";
 import { CONTRACT_READINESS } from "@/lib/domain/seller-flow/negotiation-state.js";
 
@@ -349,6 +350,15 @@ export function routeNegotiationStrategy({
 
   const ask = num(state.current_asking_price);
   const ceiling = num(state.authorized_offer_ceiling);
+  // MINIMUM-MARGIN BOUND (§8, P0 #4). The concession ladder already stops at
+  // (ceiling - minimum_margin); the three DIRECT monetary paths below -- final
+  // authorized offer, ask-within-authority accept, counter accept -- must honor
+  // the same bound or they authorize a zero-fee deal. Opt-in: no margin on the
+  // state -> protectedCeiling === ceiling and behaviour is exactly as before.
+  const marginBound = resolveMarginProtectedCeiling(state);
+  const protectedCeiling = marginBound.protected_ceiling;
+  const boundToProtected = (amount) =>
+    amount !== null && protectedCeiling !== null ? Math.min(amount, protectedCeiling) : amount;
   const recommended = num(state.recommended_offer);
   const offersMade = arr(state.offers_made);
   const latestOffer = num(state.latest_offer);
@@ -409,15 +419,23 @@ export function routeNegotiationStrategy({
         events: ["strategy_selected"],
       });
     }
-    const acceptedAmount = ceiling !== null && ask !== null ? Math.min(ask, ceiling) : ask;
-    return decision(S.ACCEPT_SELLER_TERMS, {
-      reason_code: "ASK_WITHIN_AUTHORITY_CONDITIONAL_ACCEPT",
-      template_use_case: "accept_terms",
-      // Never more than the seller requested.
-      monetary: { amount: acceptedAmount, floor: acceptedAmount, ceiling: acceptedAmount },
-      trace,
-      events: ["terms_accepted"],
-    });
+    // An ask that sits INSIDE the margin band (above the protected ceiling but
+    // at/below the raw ceiling) is NOT within authority: accepting it would
+    // leave less than the minimum assignment margin. Fall through to the
+    // ladder, which is bounded at the same protected ceiling.
+    if (marginBound.margin_bound_active && ask !== null && protectedCeiling !== null && ask > protectedCeiling) {
+      note(S.ACCEPT_SELLER_TERMS, false, "ask_inside_minimum_margin_band");
+    } else {
+      const acceptedAmount = protectedCeiling !== null && ask !== null ? Math.min(ask, protectedCeiling) : ask;
+      return decision(S.ACCEPT_SELLER_TERMS, {
+        reason_code: "ASK_WITHIN_AUTHORITY_CONDITIONAL_ACCEPT",
+        template_use_case: "accept_terms",
+        // Never more than the seller requested; never inside the margin band.
+        monetary: { amount: acceptedAmount, floor: acceptedAmount, ceiling: acceptedAmount, margin_protected_ceiling: protectedCeiling },
+        trace,
+        events: ["terms_accepted"],
+      });
+    }
   }
 
   // ── 4. Insufficient confidence → discover facts, never fabricate ─────────
@@ -462,14 +480,20 @@ export function routeNegotiationStrategy({
   });
 
   // ── 5. Ceiling exhausted → final offer once, then alternates ─────────────
+  // Exhaustion is reached at the PROTECTED ceiling, not the raw one, and the
+  // ladder's own margin verdict counts as exhaustion too.
   const ceilingExhausted =
-    (latestOffer !== null && ceiling !== null && latestOffer >= ceiling) ||
-    concession.reason_code === "MAX_MONETARY_TURNS_REACHED";
+    (latestOffer !== null && protectedCeiling !== null && latestOffer >= protectedCeiling) ||
+    concession.reason_code === "MAX_MONETARY_TURNS_REACHED" ||
+    concession.reason_code === "MINIMUM_MARGIN_REACHED" ||
+    concession.reason_code === "CEILING_REACHED";
   if (ceilingExhausted || zoneKey === NEGOTIATION_ZONES.LARGE_GAP) {
     if (!finalOfferMade && ceilingExhausted && ask !== null) {
+      // The final authorized offer is the most we can pay while KEEPING the
+      // minimum margin -- never the raw ceiling.
       return decision(S.FINAL_AUTHORIZED_OFFER, {
         reason_code: "CEILING_REACHED_COMMUNICATE_FINALITY",
-        monetary: { amount: ceiling, floor: num(state.authorized_offer_floor), ceiling },
+        monetary: { amount: protectedCeiling, floor: num(state.authorized_offer_floor), ceiling: protectedCeiling, margin_protected_ceiling: protectedCeiling },
         trace,
         events: ["final_offer_reached"],
       });
@@ -540,14 +564,18 @@ export function routeNegotiationStrategy({
 
   // ── 7. Seller counter → accept if within authority, else ladder ──────────
   const counterAmount = num(engine_decision?.counter_offer);
-  if (counterAmount !== null && ceiling !== null && counterAmount <= ceiling) {
+  if (counterAmount !== null && protectedCeiling !== null && counterAmount <= protectedCeiling) {
     return decision(S.ACCEPT_SELLER_TERMS, {
       reason_code: "COUNTER_WITHIN_AUTHORITY_ACCEPT",
       template_use_case: "accept_terms",
-      monetary: { amount: Math.min(counterAmount, ceiling), floor: counterAmount, ceiling: counterAmount },
+      monetary: { amount: Math.min(counterAmount, protectedCeiling), floor: counterAmount, ceiling: counterAmount, margin_protected_ceiling: protectedCeiling },
       trace,
       events: ["terms_accepted"],
     });
+  }
+  if (counterAmount !== null && marginBound.margin_bound_active && ceiling !== null && counterAmount > protectedCeiling && counterAmount <= ceiling) {
+    // A counter inside the margin band is not accepted; the ladder decides.
+    note(S.ACCEPT_SELLER_TERMS, false, "counter_inside_minimum_margin_band");
   }
 
   // ── 8. Near gap ladder (spec §6) ──────────────────────────────────────────
@@ -556,9 +584,12 @@ export function routeNegotiationStrategy({
       return decision(S.INITIAL_OFFER, {
         reason_code: "NEAR_GAP_INITIAL_OFFER",
         monetary: {
-          amount: ask !== null ? Math.min(recommended, ask) : recommended,
+          // Bounded at the protected ceiling: never trust that the
+          // recommendation already honors the margin.
+          amount: boundToProtected(ask !== null ? Math.min(recommended, ask) : recommended),
           floor: num(state.authorized_offer_floor),
           ceiling,
+          margin_protected_ceiling: protectedCeiling,
         },
         trace,
         events: ["offer_authorized"],
@@ -599,9 +630,10 @@ export function routeNegotiationStrategy({
     return decision(S.CONDITIONAL_OFFER, {
       reason_code: "MODERATE_GAP_ADE_AUTHORIZED_OFFER",
       monetary: {
-        amount: ask !== null ? Math.min(recommended, ask) : recommended,
+        amount: boundToProtected(ask !== null ? Math.min(recommended, ask) : recommended),
         floor: num(state.authorized_offer_floor),
         ceiling,
+        margin_protected_ceiling: protectedCeiling,
       },
       trace,
       events: ["offer_authorized"],

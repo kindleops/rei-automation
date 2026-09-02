@@ -19,8 +19,9 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { patchUniversalLeadState } from "@/lib/domain/lead-state/patch-universal-lead-state.js";
 import { STATE_SOURCE_CODES, lifecycleStageNumber } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
-import { transitionOpportunityStage } from "@/lib/domain/opportunity/opportunity-service.js";
+import { transitionOpportunityStage, updateOpportunity } from "@/lib/domain/opportunity/opportunity-service.js";
 import { NEXT_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-transition.js";
+import { finalizeSellerAcceptance } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
@@ -87,7 +88,12 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         .from("inbox_thread_state")
         .select("thread_key,lifecycle_stage,operational_status,next_action,updated_at,is_archived,is_suppressed")
         .in("operational_status", ["active_communication", "new_reply"])
-        .is("next_action", null)
+        // ABSENT means null OR the empty-string sentinel. Production carried
+        // 3,289 projection rows with next_action = '' (legacy writers; the
+        // canonical writer normalizes '' to null) and the previous
+        // .is("next_action", null) filter was structurally blind to every one
+        // of them: a live dry-run saw 3 rows against a 3,289-row backlog.
+        .or("next_action.is.null,next_action.eq.")
         .lt("updated_at", hoursAgoIso(STALE_ACTIVE_HOURS, now))
         .eq("is_archived", false);
       if (cursor) query = query.gt("thread_key", cursor);
@@ -107,14 +113,16 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
       let nextActionDue = null;
       const { data: opps, error: opps_error } = await supabase
         .from("acquisition_opportunities")
-        .select("next_action,next_action_due")
+        .select("id,next_action,next_action_due")
         .eq("primary_thread_key", row.thread_key)
         .order("updated_at", { ascending: false })
         .limit(1);
       // A failed read keeps the safe default (human review) — never guesses.
-      if (!opps_error && opps?.[0]?.next_action) {
-        nextAction = opps[0].next_action;
-        nextActionDue = opps[0].next_action_due || null;
+      const canonical = !opps_error && opps?.[0] ? opps[0] : null;
+      const canonicalHasNextAction = Boolean(clean(canonical?.next_action));
+      if (canonicalHasNextAction) {
+        nextAction = canonical.next_action;
+        nextActionDue = canonical.next_action_due || null;
       }
 
       if (!dryRun) {
@@ -133,10 +141,28 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
             outcome.results.push({ thread_key: row.thread_key, ok: false, error: patched?.reason || "state_patch_blocked" });
             return;
           }
+          // CANONICAL + PROJECTION MUST AGREE. The opportunity is the canonical
+          // deal record; repairing only the inbox projection left the canonical
+          // next_action null (243 live records). Stamp the same resolved action
+          // there too. Idempotent: same value on replay; skipped when it already
+          // has one. State-only, never a send.
+          let canonical_stamped = false;
+          if (canonical?.id && !canonicalHasNextAction) {
+            try {
+              const stamped = await updateOpportunity(
+                canonical.id,
+                { next_action: nextAction, next_action_due: nextActionDue, source: "seller_execution_gap_recovery", actor: "gap_recovery_sweep" },
+                { supabase }
+              );
+              canonical_stamped = stamped?.ok === true;
+            } catch (canonical_error) {
+              warn("[SELLER_GAP_RECOVERY_CANONICAL_STAMP_FAILED]", { thread_key: row.thread_key, error: canonical_error?.message });
+            }
+          }
           await emitRecoveryEvent(supabase, {
             type: "RECOVERY_NEXT_ACTION_RESTORED",
             subjectId: row.thread_key,
-            payload: { gap_key: row.thread_key, next_action: nextAction },
+            payload: { gap_key: row.thread_key, next_action: nextAction, canonical_stamped },
           });
         } catch (patch_error) {
           outcome.results.push({ thread_key: row.thread_key, ok: false, error: patch_error?.message });
@@ -144,7 +170,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         }
       }
       outcome.repaired += 1;
-      outcome.results.push({ thread_key: row.thread_key, ok: true, next_action: nextAction, dry_run: dryRun });
+      outcome.results.push({ thread_key: row.thread_key, ok: true, next_action: nextAction, dry_run: dryRun, canonical_stamp_needed: Boolean(canonical?.id) && !canonicalHasNextAction });
     },
   });
 
@@ -284,13 +310,36 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
             .then((patched) => patched?.ok === true)
             .catch(() => false);
         }
+        // Self-heal the acceptance -> closing seam: bind the accepted offer and
+        // create the closing case if a prior live turn advanced the stage but
+        // crashed before convergence. Idempotent and fail-closed: no active
+        // offer -> no closing case. The acceptance_event_id is derived from the
+        // opportunity so repeated sweeps cannot double-bind.
+        let converged = null;
+        try {
+          const finalized = await finalizeSellerAcceptance({
+            opportunity_id: opp.id,
+            thread_key: opp.primary_thread_key || null,
+            acceptance_event_id: `gap_recovery:${opp.id}`,
+            acceptance_at: new Date().toISOString(),
+            provenance: { source: "seller_execution_gap_recovery" },
+            supabase,
+          });
+          converged = {
+            offer_id: finalized?.offer_id || null,
+            closing_case_id: finalized?.closing_case_id || null,
+            reason: finalized?.reason || null,
+          };
+        } catch {
+          converged = { reason: "finalize_exception" };
+        }
         await emitRecoveryEvent(supabase, {
           type: "RECOVERY_CONTRACT_ACTION_RESTORED",
           subjectId: opp.primary_thread_key || opp.id,
-          payload: { gap_key: opp.id, advanced: true },
+          payload: { gap_key: opp.id, advanced: true, converged },
         });
         outcome.repaired += 1;
-        outcome.results.push({ opportunity_id: opp.id, ok: true, advanced: true, state_patch_ok });
+        outcome.results.push({ opportunity_id: opp.id, ok: true, advanced: true, state_patch_ok, converged });
       } catch (stage_error) {
         outcome.results.push({ opportunity_id: opp.id, ok: false, reason: stage_error?.message });
       }

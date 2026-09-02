@@ -20,6 +20,7 @@ import {
 } from "@/lib/domain/seller-flow/three-layer-decision-contract.js";
 import { automationDecisionToLegacyPlan } from "@/lib/domain/seller-flow/inbound-decision-adapters.js";
 import { detectInboundConditionOrMotivationIntent } from "@/lib/domain/seller-flow/detect-inbound-condition-intent.js";
+import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { info } from "@/lib/logging/logger.js";
 
@@ -202,6 +203,8 @@ export async function runInboundIntelligencePhase({
   underwriting = null,
   deal_state = null,
   supabaseClient = null,
+  // §6 ContextResolutionResult from the orchestrator (status/confidence/evidence)
+  context_resolution = null,
 } = {}) {
   const relationship = resolveInboundRelationship({
     message,
@@ -224,6 +227,7 @@ export async function runInboundIntelligencePhase({
     classification,
     conversationBrain,
     latestThreadContext,
+    contextResolution: context_resolution,
   });
 
   let canonical_decision = applyRelationshipOverride(raw_canonical_decision, relationship);
@@ -317,6 +321,42 @@ export async function runInboundIntelligencePhase({
       should_queue_reply: false,
       reply_mode: "manual_review",
     };
+  }
+
+  // ── Coverage after EVERY override (§5) ─────────────────────────────────
+  // The coverage net used to run only in the executor, so the persisted
+  // intelligence snapshot (audit row + decision ledger) never carried the
+  // coverage verdict that reflected the FINAL post-override decision. It is
+  // computed here ADDITIVELY: the enriched object is read for its coverage
+  // fields only and is never written back into canonical_decision, so no send
+  // flag is ever flipped by this step. The executor remains the send authority.
+  let coverage = null;
+  try {
+    const enriched = ensureInboundCoverage(canonical_decision, {
+      stage: granular_stage || universal_stage || null,
+      contact_identity: identity_class,
+      classification,
+      now: new Date(),
+    });
+    coverage = {
+      coverage_state: enriched.coverage_state || null,
+      coverage_forced: enriched.coverage_forced === true,
+      exception_workflow: enriched.exception_workflow
+        ? {
+            key: enriched.exception_workflow.key || null,
+            owner: enriched.exception_workflow.owner || null,
+            blocks_outreach: enriched.exception_workflow.blocks_outreach === true,
+            fallback_action: enriched.exception_workflow.fallback_action || null,
+          }
+        : null,
+      exception_sla_deadline: enriched.exception_sla_deadline || null,
+      scheduled_next_action: enriched.scheduled_next_action || null,
+      safe_fallback_prepared: Boolean(enriched.safe_fallback?.suggested_text),
+      audit_reason: enriched.audit_reason || null,
+    };
+  } catch (coverage_error) {
+    // A coverage computation failure must be visible, never silently absent.
+    coverage = { coverage_state: null, error: coverage_error?.message || "coverage_failed" };
   }
 
   const follow_up_suppressed = Boolean(
@@ -498,6 +538,18 @@ export async function runInboundIntelligencePhase({
     automation_execution_status: execution_allowed ? "execution_eligible" : "shadow_only",
     execution_blocked_reason,
     human_review_required,
+    coverage,
+    context_resolution: context_resolution
+      ? {
+          status: context_resolution.status,
+          confidence: context_resolution.confidence ?? null,
+          winner: context_resolution.winner ?? null,
+          reason: context_resolution.reason ?? null,
+          repair: context_resolution.repair ?? null,
+          disagreement: context_resolution.disagreement ?? null,
+          rejected_count: Array.isArray(context_resolution.rejected) ? context_resolution.rejected.length : 0,
+        }
+      : null,
     human_review_status: human_review_required
       ? relationship.referral_detected
         ? "referral_review_required"
