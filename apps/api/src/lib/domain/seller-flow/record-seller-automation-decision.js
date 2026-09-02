@@ -20,6 +20,7 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { POLICY_MANIFEST, POLICY_FINGERPRINT } from "@/lib/domain/seller-flow/policy-manifest.js";
 
 export const DECISION_LEDGER_VERSION = "seller_automation_decision_ledger_v1";
 
@@ -175,7 +176,11 @@ export function deriveDecisionInputFromSnapshot(snapshot = {}, overrides = {}) {
       rendered: Boolean(cd.rendered_message),
       block_reason: cd.block_reason || null,
     },
+    // The policies in force when this decision was made (§15). Answers "why
+    // did the system do this on date X" independent of later deployments.
+    policy_versions: POLICY_MANIFEST,
     lineage: {
+      policy_fingerprint: POLICY_FINGERPRINT,
       source_event_id: snapshot.source_event_id,
       provider_message_sid: snapshot.provider_message_sid,
       thread_key: snapshot.source_thread_key,

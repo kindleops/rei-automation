@@ -34,6 +34,11 @@ function lower(value) {
 // ASSET CLASSES + VALUE BANDS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Bumped when negotiation semantics change. v1_margin_bound: every direct
+// monetary path (final offer, ask accept, counter accept, ADE-authorized offers)
+// honors the margin-protected ceiling (§8, P0 #4).
+export const NEGOTIATION_POLICY_VERSION = "negotiation_policy_v1_margin_bound";
+
 export const ASSET_CLASSES = Object.freeze({
   SFR: "sfr",
   SMALL_MULTIFAMILY: "multi_2_4",
