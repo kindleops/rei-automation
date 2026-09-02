@@ -1,6 +1,7 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { buildReferralDedupeKey } from "@/lib/domain/seller-flow/extract-seller-referral.js";
+import { recordSellerAutomationDecision, deriveDecisionInputFromSnapshot } from "@/lib/domain/seller-flow/record-seller-automation-decision.js";
 import { warn, info } from "@/lib/logging/logger.js";
 
 function clean(value) {
@@ -81,7 +82,30 @@ export async function persistInboundIntelligenceSnapshot({
       canonical_intent: row.canonical_intent,
     });
 
-    return { ok: true, audit_id: data?.id || null };
+    // ── Canonical decision ledger (spec §3/§4) ────────────────────────────
+    // The audit row above is UPSERTed (mutable, latest snapshot). This ledger
+    // write is append-only and immutable: one decision per inbound event, keyed
+    // on the source event id, idempotent, failure-isolated. A ledger failure
+    // never fails the intelligence persist. It is written from the SAME snapshot
+    // so the two stay in lockstep without re-deriving the decision.
+    let decision_ledger = null;
+    try {
+      decision_ledger = await recordSellerAutomationDecision({
+        supabase,
+        input: deriveDecisionInputFromSnapshot(intelligence_snapshot, {
+          event_id: row.source_event_id,
+          provider_message_sid: row.provider_message_sid,
+        }),
+      });
+    } catch (ledger_error) {
+      decision_ledger = { ok: false, reason: "ledger_exception" };
+      warn("[INBOUND_DECISION_LEDGER_SKIPPED]", {
+        source_event_id: row.source_event_id,
+        error: ledger_error?.message || "ledger_failed",
+      });
+    }
+
+    return { ok: true, audit_id: data?.id || null, decision_ledger };
   } catch (error) {
     const schema_missing = isSchemaMissingError(error);
     warn("[INBOUND_INTELLIGENCE_PERSIST_FAILED]", {

@@ -287,6 +287,7 @@ function buildDecisionResult({
   next_action = "none",
   audit_reason = "none",
   compound_opportunity = null,
+  context_resolution = null,
 } = {}) {
   return {
     should_queue_reply: Boolean(should_queue_reply),
@@ -304,6 +305,9 @@ function buildDecisionResult({
     // address candidates that survived a leading negative intent. Persisted
     // in decision snapshots so review lanes see the full message meaning.
     compound_opportunity: compound_opportunity || null,
+    // §6 identity provenance (status / confidence / evidence / repair) when the
+    // orchestrator resolved context for this turn; null for legacy callers.
+    context_resolution: context_resolution || null,
   };
 }
 
@@ -353,6 +357,9 @@ function resolveCompoundOpportunitySignal(classification = {}) {
 }
 
 function computeInboundAutomationDecisionRaw({
+  // §6 ContextResolutionResult (status / confidence / evidence); the wrapper
+  // passes its args straight through, so this arrives from applyInboundAutomationDecision(args).
+  contextResolution = null,
   message,
   threadKey,
   propertyId,
@@ -398,15 +405,21 @@ function computeInboundAutomationDecisionRaw({
   }
 
   if (!usable_context) {
+    // §6: a GENUINELY AMBIGUOUS resolution (two contexts, no authority to pick)
+    // is not "missing context" -- it routes to the owned
+    // conflicting_property_identity workflow, never the generic clarifier.
+    const ambiguous = contextResolution?.status === "ambiguous";
+    const reason = ambiguous ? "conflicting_property" : "missing_context";
     return buildDecisionResult({
       should_mark_human_review: true,
       reply_mode: "manual_review",
-      human_review_reason: "missing_context",
+      human_review_reason: reason,
       route_hint,
       stage_hint,
       allowed_template_stages,
       next_action: "mark_human_review",
-      audit_reason: "missing_context",
+      audit_reason: reason,
+      context_resolution: contextResolution || null,
     });
   }
 
@@ -1997,6 +2010,7 @@ export async function executeInboundAutomationDecision({
   inboundTo = "",
   inboundEventId = null,
   inboundReceivedAt = null,
+  contextResolution = null,
   enableQueueInsert = false,
   applySuppression = true,
   dryRun = true,
@@ -2036,6 +2050,7 @@ export async function executeInboundAutomationDecision({
     threadAllowlist: auto_reply_scope_config.threadAllowlist,
   });
   let base_decision = applyInboundAutomationDecision({
+    contextResolution,
     message,
     threadKey,
     propertyId,

@@ -1,3 +1,5 @@
+import { buildContextResolutionResult } from "@/lib/domain/context/context-resolution-result.js";
+import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
 import {
@@ -94,6 +96,7 @@ const defaultDeps = {
   scoreProperty: null,
   getSupabaseClient: getDefaultSupabaseClient,
   getDealContextByThread,
+  probeDealContextAmbiguity: probeDealContextAmbiguityDefault,
   info,
   warn,
 };
@@ -681,6 +684,7 @@ export async function processSellerInboundMessage({
   // lookup; no Podio, no new resolver; classification, stage transition,
   // send-authority, compliance, and transport are untouched.
   const hydration_thread_key = clean(threadKey) || clean(inboundFrom);
+  let context_resolution = null;
   const has_usable_context_id = Boolean(
     clean(propertyId) ||
       clean(prospectId) ||
@@ -698,26 +702,58 @@ export async function processSellerInboundMessage({
     runtimeDeps.getDealContextByThread
   ) {
     try {
-      const deal_context = await runtimeDeps.getDealContextByThread(
-        hydration_thread_key,
-        // Bind resolution to the inbound's received-at instant so a multi-context
-        // thread (or a replayed/recovered historical inbound) resolves the campaign
-        // context in force at reply time — never a later or unrelated property.
-        { supabase, asOfTimestamp: inboundReceivedAt }
-      );
-      const hydrated_property_id = clean(deal_context?.property_id) || null;
-      const hydrated_owner_id = clean(deal_context?.master_owner_id) || null;
-      const hydrated_prospect_id = clean(deal_context?.prospect_id) || null;
-      if (hydrated_property_id || hydrated_owner_id || hydrated_prospect_id) {
-        propertyId = propertyId || hydrated_property_id;
-        ownerId = ownerId || hydrated_owner_id;
-        prospectId = prospectId || hydrated_prospect_id;
+      // §6: resolve with PROVENANCE. The as-of deal context and the ambiguity
+      // probe run together; the pure builder ranks every source, retains what
+      // it rejected, and fails closed on a genuine tie instead of the old lossy
+      // null. Ids are adopted ONLY from a RESOLVED result.
+      const [deal_context, tie] = await Promise.all([
+        runtimeDeps.getDealContextByThread(
+          hydration_thread_key,
+          // Bind resolution to the inbound's received-at instant so a multi-context
+          // thread (or a replayed/recovered historical inbound) resolves the campaign
+          // context in force at reply time — never a later or unrelated property.
+          { supabase, asOfTimestamp: inboundReceivedAt }
+        ),
+        runtimeDeps.probeDealContextAmbiguity
+          ? runtimeDeps.probeDealContextAmbiguity(hydration_thread_key, { supabase, asOfTimestamp: inboundReceivedAt })
+          : Promise.resolve({ ambiguous: false }),
+      ]);
+      context_resolution = buildContextResolutionResult({
+        deal_context: tie?.ambiguous
+          ? { ambiguous: true, distinct_owners: tie.distinct_owners || [] }
+          : deal_context
+            ? { property_id: deal_context.property_id, master_owner_id: deal_context.master_owner_id, prospect_id: deal_context.prospect_id }
+            : null,
+        outbound_pair: context?.fallback_pair_match
+          ? {
+              property_id: context?.ids?.property_id,
+              master_owner_id: context?.ids?.master_owner_id,
+              prospect_id: context?.ids?.prospect_id,
+              strategy: context?.fallback_match_data?.match_strategy || null,
+              context_linked: context?.fallback_match_data?.context_linked === true,
+              verified: context?.fallback_match_data?.context_verified === true,
+            }
+          : null,
+      });
+      if (context_resolution.status === "resolved" && context_resolution.chosen) {
+        propertyId = propertyId || context_resolution.chosen.property_id || null;
+        ownerId = ownerId || context_resolution.chosen.master_owner_id || null;
+        prospectId = prospectId || context_resolution.chosen.prospect_id || null;
         runtimeDeps.info?.("[INBOUND_CONTEXT_HYDRATED_SUPABASE]", {
           thread_key: hydration_thread_key,
           property_id: propertyId,
           master_owner_id: ownerId,
           prospect_id: prospectId,
-          source: "getDealContextByThread",
+          source: context_resolution.winner,
+          confidence: context_resolution.confidence,
+          repair: context_resolution.repair || null,
+        });
+      } else if (context_resolution.status === "ambiguous") {
+        runtimeDeps.warn?.("[INBOUND_CONTEXT_AMBIGUOUS]", {
+          thread_key: hydration_thread_key,
+          reason: context_resolution.reason,
+          disagreement: context_resolution.disagreement || null,
+          distinct_owners: tie?.distinct_owners || null,
         });
       }
     } catch (hydration_error) {
@@ -725,6 +761,34 @@ export async function processSellerInboundMessage({
         thread_key: hydration_thread_key,
         error: hydration_error?.message || "hydration_failed",
       });
+    }
+  }
+
+  // With explicit ids in hand no extra read is needed: rank them against the
+  // outbound-pair evidence already loaded, so an explicit-vs-pair disagreement
+  // (the dirty-canary class) is detected and recorded as a repair.
+  if (!context_resolution) {
+    context_resolution = buildContextResolutionResult({
+      explicit_ids: has_usable_context_id
+        ? {
+            property_id: clean(propertyId) || clean(context?.ids?.property_id) || null,
+            master_owner_id: clean(ownerId) || clean(context?.ids?.master_owner_id) || null,
+            prospect_id: clean(prospectId) || clean(context?.ids?.prospect_id) || null,
+          }
+        : null,
+      outbound_pair: context?.fallback_pair_match
+        ? {
+            property_id: context?.ids?.property_id,
+            master_owner_id: context?.ids?.master_owner_id,
+            prospect_id: context?.ids?.prospect_id,
+            strategy: context?.fallback_match_data?.match_strategy || null,
+            context_linked: context?.fallback_match_data?.context_linked === true,
+            verified: context?.fallback_match_data?.context_verified === true,
+          }
+        : null,
+    });
+    if (context_resolution.repair) {
+      runtimeDeps.warn?.("[INBOUND_CONTEXT_REPAIRED]", { thread_key: hydration_thread_key, repair: context_resolution.repair });
     }
   }
 
@@ -1019,6 +1083,7 @@ export async function processSellerInboundMessage({
   });
 
   const intelligence = await runtimeDeps.runInboundIntelligencePhase({
+    context_resolution,
     message,
     threadKey: threadKey || inboundFrom,
     propertyId,
@@ -1537,6 +1602,7 @@ export async function processSellerInboundMessage({
   }
 
   const execution = await runtimeDeps.executeInboundAutomationDecision({
+    contextResolution: context_resolution,
     opportunityId: offer_opportunity_id,
     message,
     threadKey: threadKey || inboundFrom,

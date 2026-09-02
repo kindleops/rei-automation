@@ -203,6 +203,41 @@ export async function persistActiveOffer({
     emd_due_business_days: policy_terms.emd_due_business_days,
   });
 
+  // ── OFFER VERSION-CHURN PREVENTION (spec §9) ──────────────────────────────
+  // A fresh computation that yields economically and contractually IDENTICAL
+  // terms must REUSE the active version, not supersede it and mint a new
+  // seller-visible version. Semantic equality = identical terms_hash AND
+  // identical policy_version AND the same direction (a seller counter is never
+  // conflated with our own proposal). A new valuation alone therefore does not
+  // churn the offer version; only a real term change does.
+  let activeForReuse = null;
+  try {
+    activeForReuse = await loadActiveOffer({ opportunity_id, supabase });
+  } catch {
+    activeForReuse = null;
+  }
+  if (
+    activeForReuse &&
+    clean(activeForReuse.terms_hash) === clean(terms_hash) &&
+    clean(activeForReuse.policy_version) === clean(policy_terms.policy_version) &&
+    (clean(activeForReuse.direction) || "outbound") === (clean(direction) || "outbound")
+  ) {
+    info("[OFFER_VERSION_REUSED]", {
+      offer_id: activeForReuse.offer_id,
+      offer_version: activeForReuse.offer_version,
+      terms_hash,
+    });
+    return {
+      ok: true,
+      reused: true,
+      offer_id: activeForReuse.offer_id,
+      offer_version: activeForReuse.offer_version,
+      purchase_price: money(activeForReuse.purchase_price),
+      terms_hash: activeForReuse.terms_hash,
+      offer: activeForReuse,
+    };
+  }
+
   // Supersede the prior active offer FIRST so the one-active unique index can
   // never reject the new row. History is preserved (status change only).
   try {

@@ -181,6 +181,28 @@ const REASON_TO_WORKFLOW = Object.freeze({
   legal: "legal_compliance_hold",
   legal_sensitive: "legal_compliance_hold",
   timing_complaint_manual_review: "legal_compliance_hold",
+  // legal / authority DISCLOSURE tier (§5). These canonical intents previously
+  // had no entry and fell to ambiguous_context, whose SLA fallback is
+  // send_safe_clarifier with blocks_outreach:false — a seller disclosing a
+  // lien or bankruptcy could be sent an automated clarifier. They are a legal
+  // hold: outreach blocked until a human looks.
+  title_issue: "legal_compliance_hold",
+  lien_tax_issue: "legal_compliance_hold",
+  bankruptcy_disclosed: "legal_compliance_hold",
+  trust_ownership: "legal_compliance_hold",
+  llc_corporation: "legal_compliance_hold",
+  legal_authority_disclosure: "legal_compliance_hold",
+  // respondent / identity classes (§5): the contact is not (or not solely)
+  // the owner. Identity clarification, never the generic clarifier.
+  tenant_respondent: "identity_clarification",
+  property_manager_respondent: "identity_clarification",
+  family_member_respondent: "identity_clarification",
+  agent_representative_respondent: "identity_clarification",
+  executor_heir_respondent: "identity_clarification",
+  entity_representative_respondent: "identity_clarification",
+  co_owner_respondent: "identity_clarification",
+  non_owner_referral: "identity_clarification",
+  respondent_identity_review: "identity_clarification",
   // identity
   missing_context: "identity_clarification",
   identity_unclear: "identity_clarification",
@@ -236,6 +258,29 @@ export function resolveExceptionWorkflow(reason = null) {
   return EXCEPTION_WORKFLOWS[workflow_key];
 }
 
+/**
+ * Decision-aware workflow resolution with explicit PRECEDENCE (§5).
+ *
+ * The executor labels every respondent-class turn with the generic
+ * human_review_reason "unhandled_classification", and ensureInboundCoverage
+ * prefers the reason over the canonical intent -- so the specific per-intent
+ * workflow (identity_clarification / legal_compliance_hold) was never
+ * consulted and the turn fell to the generic ambiguous_context clarifier.
+ *
+ * Rule: a SPECIFIC per-intent owned workflow beats the generic bucket, and
+ * only the generic bucket. A specific reason is never downgraded:
+ *   1. reason resolves to something other than ambiguous_context -> use it;
+ *   2. else, if the canonical intent resolves to something specific -> use it;
+ *   3. else ambiguous_context (unchanged behaviour).
+ */
+export function resolveExceptionWorkflowForDecision({ reason = null, canonical_intent = null } = {}) {
+  const byReason = resolveExceptionWorkflow(reason);
+  if (byReason?.key !== "ambiguous_context") return byReason;
+  const byIntent = resolveExceptionWorkflow(canonical_intent);
+  if (byIntent?.key && byIntent.key !== "ambiguous_context") return byIntent;
+  return byReason;
+}
+
 /** Compute the absolute SLA deadline ISO string from a workflow + now. */
 export function exceptionSlaDeadline(workflow, now = new Date()) {
   const base = now instanceof Date ? now.getTime() : new Date(now).getTime();
@@ -247,5 +292,6 @@ export default {
   EXCEPTION_OWNERS,
   EXCEPTION_WORKFLOWS,
   resolveExceptionWorkflow,
+  resolveExceptionWorkflowForDecision,
   exceptionSlaDeadline,
 };
