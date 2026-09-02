@@ -158,7 +158,11 @@ export function deriveDecisionInputFromSnapshot(snapshot = {}, overrides = {}) {
     offer_version: cd.offer_version,
     terms_hash: cd.offer_terms_hash,
     ade_snapshot_id: cd.ade_snapshot_id,
-    required_next_event: cd.next_action || cd.required_next_event,
+    // The durable "what happens next" (§5/§10): the coverage net's scheduled
+    // next action wins (it is the owned-workflow fallback when a human holds
+    // the turn), then the resolver's next action.
+    required_next_event:
+      snapshot.coverage?.scheduled_next_action || cd.next_action || cd.required_next_event,
     queue_row_id: cd.queue_row_id,
     closing_case_id: cd.closing_case_id,
     // action-derivation signals lifted from the canonical decision
@@ -181,6 +185,13 @@ export function deriveDecisionInputFromSnapshot(snapshot = {}, overrides = {}) {
     policy_versions: POLICY_MANIFEST,
     lineage: {
       policy_fingerprint: POLICY_FINGERPRINT,
+      // Coverage verdict of the final post-override decision (§5): which owned
+      // workflow holds the turn, its SLA, and whether coverage had to be forced.
+      coverage_state: snapshot.coverage?.coverage_state || null,
+      exception_workflow: snapshot.coverage?.exception_workflow?.key || null,
+      exception_sla_deadline: snapshot.coverage?.exception_sla_deadline || null,
+      coverage_forced: snapshot.coverage?.coverage_forced === true,
+      review_hold_tier: cd.transition?.review_hold_tier || null,
       source_event_id: snapshot.source_event_id,
       provider_message_sid: snapshot.provider_message_sid,
       thread_key: snapshot.source_thread_key,

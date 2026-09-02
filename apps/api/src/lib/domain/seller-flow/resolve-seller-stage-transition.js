@@ -353,6 +353,69 @@ const BLOCKING_INTENTS = Object.freeze({
   },
 });
 
+// ─── Review-hold intents (§5 zero silent dead-ends) ─────────────────────────
+// These are real classified intents that are neither BLOCKING nor ambiguous,
+// so before this registry existed they fell through to the DEFAULT return:
+// ACTIVE_COMMUNICATION, the stage's normal script/template, and the pending
+// follow-up cancelled with nothing replacing it. "I'm in bankruptcy" was being
+// answered with the asking-price script. Each tier now resolves to an explicit,
+// deterministic review hold with a tier-specific reason that the coverage net
+// maps to an OWNED workflow (legal_compliance_hold / identity_clarification),
+// never to the generic ambiguous-context clarifier.
+const REVIEW_HOLD_TIERS = Object.freeze({
+  legal_authority: Object.freeze({
+    intents: Object.freeze([
+      "title_issue",
+      "lien_tax_issue",
+      "bankruptcy_disclosed",
+      "trust_ownership",
+      "llc_corporation",
+    ]),
+    review_reason: "legal_authority_disclosure",
+    // Legal / authority disclosures block automated outreach until a human
+    // has looked; the reply-pending follow-up is cancelled, not replaced.
+    cancel_followups: true,
+  }),
+  respondent_identity: Object.freeze({
+    intents: Object.freeze([
+      "tenant_respondent",
+      "property_manager_respondent",
+      "family_member_respondent",
+      "agent_representative_respondent",
+      "executor_heir_respondent",
+      "entity_representative_respondent",
+      "co_owner_respondent",
+      "non_owner_referral",
+    ]),
+    review_reason: "respondent_identity_review",
+    // Identity clarification may still proceed; keep the follow-up.
+    cancel_followups: false,
+  }),
+  property_correction: Object.freeze({
+    intents: Object.freeze(["property_correction"]),
+    review_reason: "property_correction",
+    cancel_followups: false,
+  }),
+});
+
+const REVIEW_HOLD_INTENTS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(REVIEW_HOLD_TIERS).flatMap(([tier, def]) =>
+      def.intents.map((intent) => [intent, { tier, ...def }])
+    )
+  )
+);
+
+/** Exported for the coverage proof: every review-hold intent + its tier. */
+export function listReviewHoldIntents() {
+  return Object.entries(REVIEW_HOLD_INTENTS).map(([intent, def]) => ({
+    intent,
+    tier: def.tier,
+    review_reason: def.review_reason,
+    cancel_followups: def.cancel_followups,
+  }));
+}
+
 /** Nurture windows (days) by disengaging intent. */
 const NURTURE_DAYS = Object.freeze({
   not_interested: 30,
@@ -526,6 +589,39 @@ export function resolveSellerStageTransition({
       workflow_event_types: [blocking.workflow_event].filter(Boolean),
       follow_up: { create: false, cancel: Boolean(blocking.cancel_followups), replace: false, days: null, due_at: null },
       evaluate_alternate_contact: Boolean(blocking.evaluate_alternate_contact),
+    };
+  }
+
+  // ── 1b. Review-hold intents: deterministic hold, never the stage script ──
+  // Same shape as the blocking hold. Stage never moves, no template is
+  // selected, nothing is written to contactability or ownership (the
+  // relationship resolver owns identity; a respondent class is not evidence
+  // about the owner), and the tier-specific review_reason routes the coverage
+  // net to an owned workflow.
+  const reviewHold = REVIEW_HOLD_INTENTS[intentKey];
+  if (reviewHold) {
+    return {
+      ...base,
+      stage_after: beforeCode,
+      stage_after_number: beforeIdx + 1,
+      advanced: false,
+      stages_advanced: 0,
+      operational_status: OPERATIONAL_STATUS_CODES.NEEDS_REVIEW,
+      lead_temperature: normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED),
+      disposition: current_disposition || null,
+      contactability_patch: null,
+      ownership_patch: null,
+      next_action: NEXT_ACTIONS.HUMAN_REVIEW,
+      next_action_due_at: null,
+      required_template_use_case: null,
+      ade_action: ADE_ACTIONS.NONE,
+      review_required: true,
+      review_reason: reviewHold.review_reason,
+      review_hold_tier: reviewHold.tier,
+      reasoning_code: `${stageShort(beforeCode)}_HOLD_${intentKey.toUpperCase()}_REVIEW`,
+      workflow_event_types: ["AUTOMATION_NEEDS_REVIEW"],
+      follow_up: { create: false, cancel: Boolean(reviewHold.cancel_followups), replace: false, days: null, due_at: null },
+      evaluate_alternate_contact: false,
     };
   }
 
