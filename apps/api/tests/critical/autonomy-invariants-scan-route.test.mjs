@@ -28,7 +28,7 @@ function makeSupabase(tables = {}, { failTable = null } = {}) {
       const rows = tables[name] || [];
       const q = {
         select: () => q,
-        gte: () => q, in: () => q, eq: () => q, order: () => q,
+        gte: () => q, in: () => q, eq: () => q, order: () => q, or: () => q,
         limit: async () => (failTable === name ? { data: null, error: { message: `${name} unavailable` } } : { data: rows, error: null }),
         insert: () => { writes.push(name); throw new Error("read-only scan must not write"); },
         update: () => { writes.push(name); throw new Error("read-only scan must not write"); },
@@ -116,4 +116,18 @@ test("the report is machine-readable: version, counts, summary by code", async (
   assert.equal(typeof body.counts.opportunities, "number");
   assert.equal(body.summary.by_code[INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION], 1);
   assert.equal(body.summary.fail_closed, false, "a missing next action is an error, not fatal");
+});
+
+
+test("the scan loads suppressed/archived thread states so terminal threads are not reported as dead ends", async () => {
+  const supabase = makeSupabase({
+    acquisition_opportunities: [
+      { id: OPP, primary_thread_key: THREAD, acquisition_stage: "offer", next_action: null },
+    ],
+    inbox_thread_state: [{ thread_key: THREAD, is_suppressed: true }],
+  });
+  const res = await handleAutonomyInvariantsScanRequest(req(), { requireInternalSecret: authOk, supabase });
+  const body = await res.json();
+  assert.equal(typeof body.counts.thread_states, "number");
+  assert.equal(body.summary.by_code[INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION], undefined, "suppressed thread must be exempt");
 });

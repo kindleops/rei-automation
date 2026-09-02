@@ -104,6 +104,10 @@ export function evaluateAutonomyInvariants({
   queue_rows = [],
   opportunities = [],
   followups = [],
+  // inbox_thread_state rows: suppression/archival lives on the projection, not
+  // the canonical opportunity, so it is needed to avoid flagging a terminal
+  // (suppressed / archived) thread as a missing-next-action dead end.
+  thread_states = [],
   now = null,
 } = {}) {
   const out = [];
@@ -118,6 +122,13 @@ export function evaluateAutonomyInvariants({
   queue_rows = rows(queue_rows);
   opportunities = rows(opportunities);
   followups = rows(followups);
+  thread_states = rows(thread_states);
+  const terminalThreads = new Set(
+    thread_states
+      .filter((t) => t.is_suppressed === true || t.is_archived === true)
+      .map((t) => clean(t.thread_key))
+      .filter(Boolean)
+  );
 
   const offerById = new Map((offers || []).map((o) => [clean(o.offer_id), o]));
   const oppById = new Map((opportunities || []).map((o) => [clean(o.id), o]));
@@ -280,6 +291,9 @@ export function evaluateAutonomyInvariants({
     const stage = clean(opp.acquisition_stage).toLowerCase();
     const status = clean(opp.opportunity_status).toLowerCase();
     if (TERMINAL_STAGES.has(stage) || TERMINAL_STAGES.has(status)) continue;
+    // A suppressed / archived thread is terminal for the seller; no next action
+    // is expected and it is not a dead end.
+    if (terminalThreads.has(clean(opp.primary_thread_key))) continue;
     if (!clean(opp.next_action)) {
       out.push(violation({
         code: INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION,
@@ -300,6 +314,7 @@ export function evaluateAutonomyInvariants({
     const dueMs = due ? new Date(due).getTime() : NaN;
     const wantsFollowup = clean(opp.next_action).toLowerCase().includes("follow");
     if (!wantsFollowup || !Number.isFinite(dueMs) || dueMs > nowMs) continue;
+    if (terminalThreads.has(clean(opp.primary_thread_key))) continue;
     const thread = clean(opp.primary_thread_key);
     if (!(scheduledByThread.get(thread) || []).length) {
       out.push(violation({

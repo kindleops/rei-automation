@@ -53,12 +53,13 @@ async function readWindow(supabase, table, build) {
  */
 export async function loadInvariantWindows(supabase, { window_hours, row_limit, now_ms }) {
   const since = hoursAgoIso(window_hours, now_ms);
-  const [offers, closing_cases, queue_rows, opportunities, followups] = await Promise.all([
+  const [offers, closing_cases, queue_rows, opportunities, followups, thread_states] = await Promise.all([
     readWindow(supabase, "seller_offers", (q) => q.order("created_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "closing_cases", (q) => q.order("created_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "send_queue", (q) => q.gte("created_at", since).order("created_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "acquisition_opportunities", (q) => q.order("updated_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "send_queue", (q) => q.in("queue_status", ["scheduled", "queued", "pending"]).eq("message_type", "follow_up").limit(row_limit)),
+    readWindow(supabase, "inbox_thread_state", (q) => q.or("is_suppressed.eq.true,is_archived.eq.true").limit(row_limit)),
   ]);
   return {
     windows: {
@@ -67,9 +68,10 @@ export async function loadInvariantWindows(supabase, { window_hours, row_limit, 
       queue_rows: queue_rows.rows,
       opportunities: opportunities.rows,
       followups: followups.rows.map((r) => ({ thread_key: r.thread_key || r.to_phone_number, status: "scheduled", due_at: r.scheduled_for })),
+      thread_states: thread_states.rows,
     },
     read_errors: Object.fromEntries(
-      [["seller_offers", offers], ["closing_cases", closing_cases], ["send_queue", queue_rows], ["acquisition_opportunities", opportunities], ["followups", followups]]
+      [["seller_offers", offers], ["closing_cases", closing_cases], ["send_queue", queue_rows], ["acquisition_opportunities", opportunities], ["followups", followups], ["inbox_thread_state", thread_states]]
         .filter(([, r]) => r.error)
         .map(([k, r]) => [k, r.error])
     ),

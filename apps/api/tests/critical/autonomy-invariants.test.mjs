@@ -228,3 +228,35 @@ test("every violation is machine-readable and frozen", () => {
   assert.equal(s.total, vs.length);
   assert.equal(s.fatal, vs.filter((v) => v.fatal).length);
 });
+
+
+// ── §19 precision: suppression lives on the projection, not the canonical record ──
+
+test("a suppressed or archived thread is NOT a missing-next-action dead end", () => {
+  const suppressed = opp({ id: "opp-s", primary_thread_key: "+15550100001", next_action: null });
+  const archived = opp({ id: "opp-a", primary_thread_key: "+15550100002", next_action: null });
+  const live = opp({ id: "opp-l", primary_thread_key: "+15550100003", next_action: null });
+  const vs = evaluateAutonomyInvariants({
+    opportunities: [suppressed, archived, live],
+    thread_states: [
+      { thread_key: "+15550100001", is_suppressed: true },
+      { thread_key: "+15550100002", is_archived: true },
+    ],
+    now: NOW,
+  });
+  const ids = vs.filter((v) => v.code === INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION).map((v) => v.entity_id);
+  assert.deepEqual(ids, ["opp-l"], "only the live thread is a dead end");
+});
+
+test("a due follow-up on a suppressed thread is not flagged", () => {
+  const due = opp({ id: "opp-d", primary_thread_key: "+15550100009", next_action: "schedule_follow_up", next_action_due: "2026-09-01T09:00:00.000Z" });
+  const vs = evaluateAutonomyInvariants({
+    opportunities: [due], followups: [], thread_states: [{ thread_key: "+15550100009", is_suppressed: true }], now: NOW,
+  });
+  assert.ok(!codes(vs).includes(INVARIANT_CODES.FOLLOWUP_DUE_NOT_SCHEDULED));
+});
+
+test("an EMPTY-STRING next_action on the canonical record is absent (a dead end), matching the sweep", () => {
+  const vs = evaluateAutonomyInvariants({ opportunities: [opp({ next_action: "" })], now: NOW });
+  assert.ok(codes(vs).includes(INVARIANT_CODES.STAGE_WITHOUT_NEXT_ACTION));
+});
