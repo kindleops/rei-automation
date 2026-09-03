@@ -904,3 +904,101 @@ html.is-mobile-layout .nx-cat-nav__item {
   min-height: 22px !important;
 }
 html.is-mobile-layout .nx-cat-nav__bar { min-height: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   STRUCTURE PASS — one control row
+   Device review: the control region ate roughly a third of the screen across
+   three stacked rows (search+filter+reset / selector / save+manage). It is now
+   ONE row, and the admin actions are gone from the canvas entirely.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* [ Priority ▾ ] [ search .......... ] [ filter ] [ ✕ ] — single 44px line. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The selector is now a control in that row, not a banner above it. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-top .nx-cat-nav__toggle {
+  flex: 0 0 auto;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-width: 108px;
+  padding: 0 9px 0 11px;
+  gap: 6px;
+  border-radius: 11px;
+  border: 1px solid rgba(var(--nx-accent-rgb, 120 140 255), 0.34);
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.13);
+  color: var(--nx-ib-text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+html.is-mobile-layout .nx-cat-nav__toggle-active {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The old standalone selector bar no longer exists. */
+html.is-mobile-layout .nx-cat-nav__bar { display: none !important; }
+
+/* Search keeps the remaining width. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Admin actions off the canvas entirely ──────────────────────────────────
+   "Save Current Filter" and "Manage Lists" are gone from the thread canvas on
+   mobile. Nothing is lost: the filter sheet already carries Save View, which
+   is the same action. Desktop is unaffected. */
+html.is-mobile-layout .nx-sidebar-rebuilt__secondary-controls > button:not(.nx-sidebar-rebuilt__telemetry-indicator) {
+  display: none !important;
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__secondary-controls:not(:has(.nx-sidebar-rebuilt__telemetry-indicator)) {
+  display: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+/* Fallback for engines without :has() — collapse the block's own box. */
+html.is-mobile-layout .nx-sidebar-rebuilt__secondary-controls {
+  padding: 0 var(--nx-ib-gutter);
+  margin: 0;
+  min-height: 0;
+  border: 0;
+  background: none;
+}
+
+/* Header slab hugs the controls now that it holds one row. */
+html.is-mobile-layout .nx-inbox-header-shell__inner {
+  padding: 5px 10px 7px;
+}
+html.is-mobile-layout .nx-cat-nav { margin-top: 6px; }
+
+/* ── Richer liquid accent ───────────────────────────────────────────────────
+   The motion was too subtle to read as alive. Three offset pools now drift and
+   breathe on different periods, so the accent light genuinely fades in and out
+   inside the glass rather than sitting still. Still the active accent family,
+   still low-contrast — no neon, no rainbow. */
+html.is-mobile-layout .nx-inbox-header-shell__inner::after {
+  background:
+    radial-gradient(44% 62% at 18% 30%, rgba(var(--nx-accent-rgb, 120 140 255), 0.30) 0%, transparent 70%),
+    radial-gradient(40% 56% at 74% 64%, rgba(var(--nx-accent-rgb, 120 140 255), 0.20) 0%, transparent 72%),
+    radial-gradient(34% 48% at 48% 12%, rgba(var(--nx-accent-rgb, 120 140 255), 0.14) 0%, transparent 76%);
+  filter: blur(16px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.is-mobile-layout .nx-inbox-header-shell__inner::after {
+    animation:
+      nx-ib-liquid 19s ease-in-out infinite alternate,
+      nx-ib-breathe 7.5s ease-in-out infinite;
+  }
+}
+@keyframes nx-ib-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}

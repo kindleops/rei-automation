@@ -1460,6 +1460,18 @@ export const InboxSidebar = ({
     <div className="nx-inbox-header-shell">
       <div className={cls('nx-inbox-header-shell__inner', 'nx-sidebar-rebuilt__top-glow', `is-${activeBucketConfig.accentClass.replace('is-', '')}`)}>
       <div className="nx-sidebar-rebuilt__search-top">
+        {/* Inbox selector lives IN the control row: selector + search + filter +
+            reset on one line, instead of spending a second row on the selector. */}
+        <button
+          type="button"
+          className={cls('nx-cat-nav__toggle', catRailCollapsed && 'is-collapsed')}
+          onClick={toggleCatRail}
+          aria-expanded={!catRailCollapsed}
+          aria-label={catRailCollapsed ? 'Show inbox categories' : 'Hide inbox categories'}
+        >
+          <span className="nx-cat-nav__toggle-active">{activeBucketConfig.shortLabel}</span>
+          <span className="nx-cat-nav__toggle-caret" aria-hidden="true" />
+        </button>
         <div className="nx-sidebar-rebuilt__search-input-wrap">
           <Icon name="search" className="nx-sidebar-rebuilt__search-icon" />
           <input value={searchQuery} onChange={(e) => onSearchQueryChange?.(e.target.value)} placeholder="Search operator inbox..." aria-label="Search inbox threads" />
@@ -1485,18 +1497,6 @@ export const InboxSidebar = ({
           ))}
         </div>
       )}
-      <div className="nx-cat-nav__bar">
-        <button
-          type="button"
-          className={cls('nx-cat-nav__toggle', catRailCollapsed && 'is-collapsed')}
-          onClick={toggleCatRail}
-          aria-expanded={!catRailCollapsed}
-          aria-label={catRailCollapsed ? 'Show inbox categories' : 'Hide inbox categories'}
-        >
-          <span className="nx-cat-nav__toggle-active">{activeBucketConfig.label}</span>
-          <span className="nx-cat-nav__toggle-caret" aria-hidden="true" />
-        </button>
-      </div>
       <div
         className={cls('nx-cat-nav', catRailCollapsed && 'is-collapsed')}
         ref={catNavRef}

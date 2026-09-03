@@ -1882,7 +1882,16 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     totalCount: metaRef.current.totalCount ?? 0,
     aiDraftCount: metaRef.current.aiDraftCount ?? 0,
     mapPins: metaRef.current.mapPins,
-    pagination: metaRef.current.pagination,
+    // Load More must follow the bucket you are LOOKING AT. metaRef.current.pagination
+    // is a single global ref written by whichever request finished last, so after a
+    // bucket switch it described a different list -- Priority reported hasMore:false
+    // while the API had has_more:true, and Load More never appeared outside All
+    // Threads. The per-bucket flag is the authoritative one.
+    pagination: {
+      ...(metaRef.current.pagination ?? {}),
+      hasMore: Boolean(activeBucket?.hasMore),
+      nextCursor: activeBucket?.cursor ?? metaRef.current.pagination?.nextCursor ?? null,
+    },
     loadedCount: metaRef.current.loadedCount ?? 0,
     fullyHydratedCount: metaRef.current.fullyHydratedCount ?? 0,
     partiallyHydratedCount: metaRef.current.partiallyHydratedCount ?? 0,
