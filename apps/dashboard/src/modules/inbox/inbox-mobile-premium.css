@@ -1,0 +1,685 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   INBOX — MOBILE OPERATOR PASS
+   ══════════════════════════════════════════════════════════════════════════
+
+   Final-authority mobile stylesheet for the Inbox. Imported LAST in
+   InboxPage.tsx so it wins the cascade over inbox-premium.css (659KB) and
+   inbox-polish.css (235KB) without editing either.
+
+   SCOPE: every rule is nested under html.is-mobile-layout. Desktop Inbox, and
+   every other surface, is untouched. That class gate (not a media query) is
+   the convention already used by pinned-app-dock.css, so Safari's
+   desktop-website mode still gets mobile styling.
+
+   FULLSCREEN CONTRACT: this file sets no heights. No 100dvh, no 100lvh, no
+   height/min-height on any element in the fullscreen ancestry — only padding,
+   colour, radius, spacing and type. The audited geometry is untouched and
+   `npm run assert:fullscreen` still governs it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout {
+  --nx-ib-gutter: 12px;
+  --nx-ib-radius: 14px;
+  --nx-ib-radius-sm: 10px;
+  --nx-ib-row-gap: 6px;
+
+  /* Deep neutral base — charcoal with a blue cast, not black, not navy. */
+  --nx-ib-surface: rgba(15, 19, 28, 0.72);
+  --nx-ib-surface-solid: #10141d;
+  --nx-ib-surface-raised: rgba(24, 30, 42, 0.78);
+  --nx-ib-hairline: rgba(255, 255, 255, 0.07);
+  --nx-ib-hairline-strong: rgba(255, 255, 255, 0.12);
+
+  --nx-ib-text: rgba(238, 242, 249, 0.96);
+  --nx-ib-text-2: rgba(178, 189, 206, 0.88);
+  --nx-ib-text-3: rgba(132, 145, 166, 0.72);
+
+  /* Reserve exactly the dock the other mobile surfaces reserve. */
+  --nx-ib-dock-clear: calc(
+    var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 14px
+  );
+}
+
+/* ── P0.1 — kill the decorative side strips ─────────────────────────────────
+   The coloured vertical bar on every conversation card was pure decoration:
+   it encoded the bucket, which the operator has already selected and which the
+   chips restate. It read as generic AI-dashboard styling. Bucket identity now
+   lives in the chip row and the accent hairline of the active rail. */
+html.is-mobile-layout .nx-premium-inbox .nx-row25::before,
+html.is-mobile-layout .nx-row25::before,
+html.is-mobile-layout .nx-cc-row::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* ── P0.2 / P7 — the scroll container must clear the dock ───────────────────
+   Inbox was the only mobile surface not reserving dock height (Queue, Map and
+   Campaigns all do). Load More sat under the dock and could not be reached.
+   Load More is now inside this scrollport, and the scrollport ends above the
+   dock, so the footer is always scrollable into view. */
+html.is-mobile-layout .nx-sidebar-rebuilt__threads-scroll {
+  padding-bottom: var(--nx-ib-dock-clear);
+  scroll-padding-bottom: var(--nx-ib-dock-clear);
+  overscroll-behavior-y: contain;
+}
+
+html.is-mobile-layout .nx-sidebar-rebuilt__load-more {
+  position: static !important;
+  margin: 10px var(--nx-ib-gutter) 0;
+  padding: 0;
+  background: none !important;
+  border-top: 0 !important;
+}
+
+html.is-mobile-layout .nx-load-more-btn {
+  width: 100%;
+  min-height: 44px;
+  border-radius: var(--nx-ib-radius-sm);
+  border: 1px solid var(--nx-ib-hairline-strong);
+  background: var(--nx-ib-surface-raised);
+  color: var(--nx-ib-text);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+html.is-mobile-layout .nx-load-more-btn:active { transform: scale(0.985); }
+html.is-mobile-layout .nx-load-more-btn.is-loading { color: var(--nx-ib-text-2); }
+html.is-mobile-layout .nx-load-more-spinner {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid rgba(var(--nx-accent-rgb, 120 140 255), 0.28);
+  border-top-color: var(--nx-accent, #7f8cff);
+  animation: nx-ib-spin 620ms linear infinite;
+}
+@keyframes nx-ib-spin { to { transform: rotate(360deg); } }
+
+/* Newly appended rows fade in rather than snapping. */
+@media (prefers-reduced-motion: no-preference) {
+  html.is-mobile-layout .nx-sidebar-rebuilt__threads > div { animation: nx-ib-row-in 260ms ease both; }
+}
+@keyframes nx-ib-row-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── P1 — top command shell: premium liquid slab ────────────────────────────
+   Sits closer under the Dynamic Island, reclaiming vertical space, while the
+   safe-area inset is still honoured. Top edge is square so the slab reads as
+   physically integrated with the device; only the lower corners are rounded. */
+html.is-mobile-layout .nx-inbox-header-shell {
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+html.is-mobile-layout .nx-inbox-header-shell__inner {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: 6px var(--nx-ib-gutter) 8px;
+  border-radius: 0 0 18px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--nx-ib-hairline);
+  background:
+    linear-gradient(180deg, rgba(20, 25, 36, 0.92) 0%, rgba(14, 18, 27, 0.86) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 10px 26px -18px rgba(0, 0, 0, 0.85);
+}
+
+/* Internal liquid light in the ACTIVE ACCENT FAMILY — two slow, offset
+   radial pools drifting under the glass. Deliberately low-contrast: it should
+   read as light moving inside a material, never as neon. */
+html.is-mobile-layout .nx-inbox-header-shell__inner::after {
+  content: '';
+  position: absolute;
+  inset: -40% -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 58% at 22% 34%, rgba(var(--nx-accent-rgb, 120 140 255), 0.20) 0%, transparent 70%),
+    radial-gradient(38% 52% at 78% 62%, rgba(var(--nx-accent-rgb, 120 140 255), 0.13) 0%, transparent 72%);
+  filter: blur(14px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.is-mobile-layout .nx-inbox-header-shell__inner::after {
+    animation: nx-ib-liquid 22s ease-in-out infinite alternate;
+  }
+}
+@keyframes nx-ib-liquid {
+  0%   { transform: translate3d(-4%, -2%, 0) scale(1.00); }
+  50%  { transform: translate3d( 3%,  2%, 0) scale(1.06); }
+  100% { transform: translate3d(-2%,  3%, 0) scale(1.02); }
+}
+
+/* The old bucket-tinted glow bar is replaced by a single accent hairline. */
+html.is-mobile-layout .nx-sidebar-rebuilt__top-glow::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(var(--nx-accent-rgb, 120 140 255), 0.55) 50%,
+    transparent 100%
+  );
+}
+
+/* ── P2 — search / filter / clear row ───────────────────────────────────────
+   [ search ] [ filter ] [ clear ] — search dominant, controls the same height,
+   one shared geometry. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+}
+
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: var(--nx-ib-radius-sm);
+  border: 1px solid var(--nx-ib-hairline);
+  background: rgba(255, 255, 255, 0.045);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap:focus-within {
+  border-color: rgba(var(--nx-accent-rgb, 120 140 255), 0.5);
+  background: rgba(255, 255, 255, 0.06);
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--nx-ib-text);
+  font-size: 14px;
+  line-height: 1.2;
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap input::placeholder { color: var(--nx-ib-text-3); }
+html.is-mobile-layout .nx-sidebar-rebuilt__search-icon {
+  flex: 0 0 auto; width: 15px; height: 15px; opacity: 0.55;
+}
+
+/* The clear-X keeps its behaviour, but becomes a small integrated affordance
+   instead of a full-size button. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-clear {
+  flex: 0 0 auto;
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--nx-ib-text-2);
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__search-clear svg { width: 10px; height: 10px; }
+
+html.is-mobile-layout .nx-sidebar-rebuilt__top-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+html.is-mobile-layout .nx-sidebar__icon-button {
+  position: relative;
+  width: 38px; height: 38px;
+  min-width: 0; min-height: 0;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--nx-ib-radius-sm);
+  border: 1px solid var(--nx-ib-hairline);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--nx-ib-text-2);
+}
+html.is-mobile-layout .nx-sidebar__icon-button svg { width: 15px; height: 15px; }
+html.is-mobile-layout .nx-sidebar__filter-badge {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 15px; height: 15px; padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: var(--nx-accent, #7f8cff);
+  color: var(--nx-accent-contrast, #0b0e14);
+  font-size: 9px; font-weight: 700; line-height: 1;
+}
+
+/* ── P3 — category rail: compact operator modes, collapsible ────────────────
+   No chunky SaaS pills, no emoji. */
+html.is-mobile-layout .nx-cat-nav__bar { display: flex; padding: 7px 0 0; }
+html.is-mobile-layout .nx-cat-nav__toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 8px 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-ib-hairline);
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.12);
+  color: var(--nx-ib-text);
+  font-size: 11px; font-weight: 650; letter-spacing: 0.02em;
+}
+html.is-mobile-layout .nx-cat-nav__toggle-caret {
+  width: 0; height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.7;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+html.is-mobile-layout .nx-cat-nav__toggle.is-collapsed .nx-cat-nav__toggle-caret { transform: rotate(-90deg); }
+
+html.is-mobile-layout .nx-cat-nav {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  opacity: 1;
+  transition: opacity 180ms ease, margin-top 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+html.is-mobile-layout .nx-cat-nav::-webkit-scrollbar { display: none; }
+html.is-mobile-layout .nx-cat-nav.is-collapsed {
+  display: none;
+}
+
+html.is-mobile-layout .nx-cat-nav__item {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--nx-ib-text-2);
+  font-size: 11.5px; font-weight: 550; letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+/* Emoji icons removed — they were the loudest "AI slop" signal in the shell. */
+html.is-mobile-layout .nx-cat-nav__icon { display: none !important; }
+
+html.is-mobile-layout .nx-cat-nav__count {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--nx-ib-text-3);
+  font-variant-numeric: tabular-nums;
+}
+html.is-mobile-layout .nx-cat-nav__item.is-active {
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.16);
+  border-color: rgba(var(--nx-accent-rgb, 120 140 255), 0.42);
+  color: var(--nx-ib-text);
+}
+html.is-mobile-layout .nx-cat-nav__item.is-active .nx-cat-nav__count { color: var(--nx-accent-text, var(--nx-accent, #7f8cff)); }
+html.is-mobile-layout .nx-cat-nav__unread {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--nx-accent, #7f8cff);
+}
+
+/* ── P5 — conversation rows ─────────────────────────────────────────────────
+   Hierarchy: identity + time / address / preview / restrained chips. */
+html.is-mobile-layout .nx-sidebar-rebuilt__threads { padding: 6px var(--nx-ib-gutter) 0; }
+html.is-mobile-layout .nx-sidebar-rebuilt__threads > div { margin-bottom: var(--nx-ib-row-gap); }
+
+html.is-mobile-layout .nx-row25 {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border-radius: var(--nx-ib-radius);
+  border: 1px solid var(--nx-ib-hairline);
+  background: var(--nx-ib-surface);
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+html.is-mobile-layout .nx-row25:active { transform: scale(0.992); }
+html.is-mobile-layout .nx-row25.is-selected {
+  border-color: rgba(var(--nx-accent-rgb, 120 140 255), 0.46);
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.07);
+}
+/* Unread is carried by weight and one dot — not by a coloured bar. */
+html.is-mobile-layout .nx-row25.is-unread .nx-row25__name { font-weight: 700; }
+html.is-mobile-layout .nx-row25__unread-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--nx-accent, #7f8cff);
+  flex: 0 0 auto;
+}
+
+html.is-mobile-layout .nx-row25__zone--conversation {
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+html.is-mobile-layout .nx-row25__head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+}
+html.is-mobile-layout .nx-row25__name-wrap {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+}
+html.is-mobile-layout .nx-row25__name {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.005em;
+  color: var(--nx-ib-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+html.is-mobile-layout .nx-row25__time {
+  flex: 0 0 auto;
+  font-size: 11px; font-weight: 500;
+  color: var(--nx-ib-text-3);
+  font-variant-numeric: tabular-nums;
+}
+html.is-mobile-layout .nx-row25__addr {
+  font-size: 12px; font-weight: 500;
+  color: var(--nx-ib-text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+html.is-mobile-layout .nx-row25__preview {
+  font-size: 12.5px; line-height: 1.35;
+  color: var(--nx-ib-text-3);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Redundant secondary metadata is suppressed on mobile: it duplicated the
+   address and chips and was the main source of row noise. */
+html.is-mobile-layout .nx-row25__context { display: none !important; }
+html.is-mobile-layout .nx-row25__zone--metrics { display: none !important; }
+html.is-mobile-layout .nx-row25__receipt-label { display: none; }
+html.is-mobile-layout .nx-row25__footer {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 1px; min-height: 0;
+}
+html.is-mobile-layout .nx-row25__receipt.is-muted { display: none; }
+html.is-mobile-layout .nx-row25__receipt svg { width: 12px; height: 12px; opacity: 0.6; }
+
+/* Chips: semantic only, capped, no over-tagging. */
+html.is-mobile-layout .nx-row25 .nx-flag-badges { gap: 4px; flex-wrap: nowrap; overflow: hidden; }
+html.is-mobile-layout .nx-row25 .nx-flag-badge {
+  height: 18px; padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--nx-ib-hairline);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--nx-ib-text-2);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.015em;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+/* ── P6 — property / Street View image ──────────────────────────────────────
+   Kept, but presented as part of the row: square-ish, matched radius, no
+   placeholder shimmer, graceful empty state. */
+html.is-mobile-layout .nx-row25__zone--media {
+  position: relative;
+  width: 52px; height: 52px;
+  border-radius: var(--nx-ib-radius-sm);
+  overflow: hidden;
+  background: linear-gradient(150deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+  border: 1px solid var(--nx-ib-hairline);
+}
+html.is-mobile-layout .nx-row25__zone--media img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* The dark veil over the thumbnail served the old strip/gradient look. */
+html.is-mobile-layout .nx-row25__media-veil { display: none !important; }
+
+/* ── P8 — bottom dock: same material family as the top shell ────────────────
+   Geometry is NOT touched — position, height and safe-area handling stay
+   exactly as the audited fullscreen contract left them. Material only. */
+html.is-mobile-layout .nx-pinned-app-dock__shelf {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-top: 1px solid var(--nx-ib-hairline);
+  background: linear-gradient(0deg, rgba(20, 25, 36, 0.94) 0%, rgba(14, 18, 27, 0.88) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+html.is-mobile-layout .nx-pinned-app-dock__shelf::after {
+  content: '';
+  position: absolute; inset: -60% -20%;
+  z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 60% at 30% 70%, rgba(var(--nx-accent-rgb, 120 140 255), 0.16) 0%, transparent 72%),
+    radial-gradient(36% 54% at 74% 30%, rgba(var(--nx-accent-rgb, 120 140 255), 0.10) 0%, transparent 74%);
+  filter: blur(14px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html.is-mobile-layout .nx-pinned-app-dock__shelf::after {
+    animation: nx-ib-liquid 26s ease-in-out infinite alternate-reverse;
+  }
+}
+
+/* ── P9 — light mode: warm neutral, soft contrast, not sterile ──────────────*/
+html.is-mobile-layout[data-nexus-theme="light"],
+[data-nexus-theme="light"] html.is-mobile-layout {
+  --nx-ib-surface: rgba(255, 255, 255, 0.86);
+  --nx-ib-surface-solid: #fbfaf8;
+  --nx-ib-surface-raised: rgba(255, 255, 255, 0.94);
+  --nx-ib-hairline: rgba(24, 28, 36, 0.10);
+  --nx-ib-hairline-strong: rgba(24, 28, 36, 0.16);
+  --nx-ib-text: rgba(22, 26, 33, 0.94);
+  --nx-ib-text-2: rgba(74, 83, 96, 0.90);
+  --nx-ib-text-3: rgba(116, 126, 141, 0.82);
+}
+[data-nexus-theme="light"] html.is-mobile-layout .nx-inbox-header-shell__inner,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-inbox-header-shell__inner {
+  background: linear-gradient(180deg, rgba(253, 252, 250, 0.94) 0%, rgba(246, 245, 242, 0.88) 100%);
+  border-bottom-color: rgba(24, 28, 36, 0.10);
+  box-shadow: 0 10px 24px -20px rgba(28, 32, 40, 0.55);
+}
+[data-nexus-theme="light"] html.is-mobile-layout .nx-pinned-app-dock__shelf {
+  background: linear-gradient(0deg, rgba(253, 252, 250, 0.95) 0%, rgba(246, 245, 242, 0.90) 100%);
+  border-top-color: rgba(24, 28, 36, 0.10);
+}
+[data-nexus-theme="light"] html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-sidebar__icon-button,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-cat-nav__item {
+  background: rgba(24, 28, 36, 0.035);
+}
+[data-nexus-theme="light"] html.is-mobile-layout .nx-row25 { background: rgba(255, 255, 255, 0.88); }
+
+/* ── P9 — noise reduction ───────────────────────────────────────────────────
+   Glow, heavy shadows and decorative borders inherited from the large legacy
+   sheets are neutralised inside the mobile list. */
+html.is-mobile-layout .nx-sidebar-rebuilt .nx-row25,
+html.is-mobile-layout .nx-sidebar-rebuilt__threads {
+  box-shadow: none !important;
+  filter: none !important;
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__empty {
+  padding: 28px var(--nx-ib-gutter);
+  color: var(--nx-ib-text-3);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ── P4 — mobile filter experience ──────────────────────────────────────────
+   The filter modal was a desktop two-pane (category rail on the left, fields
+   on the right) shown as a centred dialog. On a phone that wasted most of the
+   width on the rail and pushed the actions off-screen.
+
+   Restructured in CSS only — no change to the filter domain, the fields, or
+   any handler. It becomes a bottom sheet; the rail becomes a horizontal
+   category strip; the action bar sticks to the bottom above the safe area. */
+html.is-mobile-layout .nx-ifm-overlay {
+  align-items: flex-end;
+  padding: 0;
+  background: rgba(4, 6, 11, 0.58);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+html.is-mobile-layout .nx-ifm-modal {
+  width: 100%;
+  max-width: 100%;
+  max-height: 88%;
+  margin: 0;
+  border-radius: 20px 20px 0 0;
+  border: 1px solid var(--nx-ib-hairline);
+  border-bottom: 0;
+  background: var(--nx-ib-surface-solid);
+  box-shadow: 0 -18px 44px -20px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  animation: nx-ib-sheet-up 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes nx-ib-sheet-up { from { transform: translateY(6%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+
+/* Grab handle — signals "sheet", and gives the header a physical anchor. */
+html.is-mobile-layout .nx-ifm-header {
+  position: relative;
+  padding: 16px var(--nx-ib-gutter) 10px;
+  border-bottom: 1px solid var(--nx-ib-hairline);
+}
+html.is-mobile-layout .nx-ifm-header::before {
+  content: '';
+  position: absolute;
+  top: 7px; left: 50%;
+  width: 34px; height: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--nx-ib-hairline-strong);
+}
+
+/* Two-pane → stacked. */
+html.is-mobile-layout .nx-ifm-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Category rail becomes a horizontal strip of compact modes. */
+html.is-mobile-layout .nx-ifm-rail {
+  display: flex;
+  flex-direction: row;
+  gap: 5px;
+  width: 100%;
+  max-width: none;
+  padding: 9px var(--nx-ib-gutter);
+  border-right: 0;
+  border-bottom: 1px solid var(--nx-ib-hairline);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+html.is-mobile-layout .nx-ifm-rail::-webkit-scrollbar { display: none; }
+html.is-mobile-layout .nx-ifm-rail > * {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+/* Decorative rail glyphs carry no information on a 28px chip. */
+html.is-mobile-layout .nx-ifm-rail-icon { display: none !important; }
+
+html.is-mobile-layout .nx-ifm-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px var(--nx-ib-gutter);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fields: single column, tighter, no dead space. */
+html.is-mobile-layout .nx-ifm-fields { grid-template-columns: 1fr !important; gap: 10px; }
+html.is-mobile-layout .nx-ifm-field { min-width: 0; }
+html.is-mobile-layout .nx-ifm-field input,
+html.is-mobile-layout .nx-ifm-field select,
+html.is-mobile-layout .nx-ifm-search-input {
+  width: 100%;
+  height: 38px;
+  border-radius: var(--nx-ib-radius-sm);
+  border: 1px solid var(--nx-ib-hairline);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--nx-ib-text);
+  font-size: 14px; /* 16px-safe: prevents iOS zoom-on-focus at >=14px with no user-scalable */
+  padding: 0 10px;
+}
+
+/* Active filters must be visible without scrolling the sheet. */
+html.is-mobile-layout .nx-ifm-active {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 0;
+  background: var(--nx-ib-surface-solid);
+}
+html.is-mobile-layout .nx-ifm-chips { gap: 5px; flex-wrap: wrap; }
+html.is-mobile-layout .nx-ifm-chip {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(var(--nx-accent-rgb, 120 140 255), 0.35);
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.13);
+  color: var(--nx-ib-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Action bar: Clear / Save View / Apply, always reachable above the dock. */
+html.is-mobile-layout .nx-ifm-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--nx-ib-gutter)
+           calc(10px + var(--nx-mobile-safe-bottom, 0px));
+  border-top: 1px solid var(--nx-ib-hairline);
+  background: var(--nx-ib-surface-solid);
+}
+html.is-mobile-layout .nx-ifm-footer-right { margin-left: auto; display: flex; gap: 8px; }
+html.is-mobile-layout .nx-ifm-btn-primary,
+html.is-mobile-layout .nx-ifm-btn-secondary,
+html.is-mobile-layout .nx-ifm-btn-ghost {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: var(--nx-ib-radius-sm);
+  font-size: 13px;
+  font-weight: 620;
+}
+html.is-mobile-layout .nx-ifm-btn-primary {
+  background: var(--nx-accent, #7f8cff);
+  color: var(--nx-accent-contrast, #0b0e14);
+  border: 0;
+}
+html.is-mobile-layout .nx-ifm-btn-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--nx-ib-text);
+  border: 1px solid var(--nx-ib-hairline);
+}
+html.is-mobile-layout .nx-ifm-btn-ghost {
+  background: none;
+  color: var(--nx-ib-text-2);
+  border: 0;
+  padding: 0 8px;
+}
+
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-modal,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-active,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-footer {
+  background: #fbfaf8;
+}
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-field input,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-search-input,
+[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-btn-secondary {
+  background: rgba(24, 28, 36, 0.035);
+}
+
+/* ── P0.1 (cont.) — the second side strip ───────────────────────────────────
+   nx-ui-foundation-final.css:341 paints the selected row with
+   `box-shadow: inset 2px 0 0 var(--nx-accent) !important`, which is a coloured
+   left strip by another name, and it is !important so ordinary rules lose to
+   it. Selection on mobile is carried by the border and fill instead.
+   Specificity here is (0,3,1) + !important, so this wins. */
+html.is-mobile-layout .nx-premium-inbox .nx-row25.is-selected,
+html.is-mobile-layout .nx-premium-inbox .nx-thread-row.is-selected {
+  box-shadow: none !important;
+  background: rgba(var(--nx-accent-rgb, 120 140 255), 0.07) !important;
+}
