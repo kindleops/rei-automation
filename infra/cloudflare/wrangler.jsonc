@@ -48,15 +48,18 @@
   // All 14 schedules, expressions preserved verbatim from apps/api/vercel.json.
   // scheduled() is INERT unless CRON_ENABLED=true, so a staging deploy does not
   // fire real work against production data.
+  // BLAST RADIUS. Staging shares the PRODUCTION database, so it registers only
+  // the schedules it is actually allowed to run. This was 6 expressions
+  // covering 13 jobs (including the send-queue runner and the campaign feed),
+  // restrained solely by CRON_ENABLED="false" -- one var flip from firing all
+  // 13 against real seller data.
+  //
+  // Now: one expression, and worker/index.ts maps it to exactly one
+  // send-incapable reconciliation job. Cloudflare cannot invoke scheduled()
+  // for an expression that is not listed here, so the unlisted jobs are
+  // unreachable by schedule even if CRON_ENABLED were flipped to "true".
   "triggers": {
-    "crons": [
-      "* * * * *",
-      "*/2 * * * *",
-      "*/5 * * * *",
-      "*/10 * * * *",
-      "*/15 * * * *",
-      "30 8 * * *"
-    ]
+    "crons": ["*/5 * * * *"]
   },
 
   // Non-secret vars. Credentials are Worker SECRETS (wrangler secret put /
