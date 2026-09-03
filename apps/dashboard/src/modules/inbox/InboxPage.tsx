@@ -266,6 +266,12 @@ import './conversation-composer-premium.css'
 import './conversation-header-timeline.css'
 import './conversation-live.css'
 // !! IMPORT ORDER LOCKED — nx-ui-foundation-final.css MUST remain the last CSS import here !!
+// Mobile Inbox authority. Sits before nx-ui-foundation-final.css because
+// RISK-013 (check-css-import-order.mjs) requires that file to be the last
+// CSS import. Order is not load-bearing here: every rule is scoped
+// html.is-mobile-layout (0,2,1+), which outranks the bare-class rules in
+// the legacy sheets on specificity alone.
+import './inbox-mobile-premium.css'
 import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'

@@ -1256,6 +1256,20 @@ export const InboxSidebar = ({
   const { isMobile } = useBreakpoint()
   const groupsRef = useRef<HTMLDivElement | null>(null)
   const catNavRef = useRef<HTMLDivElement | null>(null)
+  // Mobile: the category rail can be collapsed to reclaim vertical space. The
+  // active bucket stays visible when collapsed, so the operator never loses
+  // track of which mode they are in. Bucket behaviour itself is unchanged.
+  const [catRailCollapsed, setCatRailCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('nx.inbox.catRailCollapsed') === '1' } catch { return false }
+  })
+  const toggleCatRail = useCallback(() => {
+    setCatRailCollapsed((v) => {
+      const next = !v
+      try { localStorage.setItem('nx.inbox.catRailCollapsed', next ? '1' : '0') } catch { /* private mode */ }
+      return next
+    })
+  }, [])
+
   // Stores scroll position before a Load More so it can be restored after new rows paint.
   const scrollPreserveRef = useRef<{ top: number; height: number } | null>(null)
   const loadMoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1464,7 +1478,25 @@ export const InboxSidebar = ({
           ))}
         </div>
       )}
-      <div className="nx-cat-nav" ref={catNavRef} role="tablist" aria-label="Inbox categories">
+      <div className="nx-cat-nav__bar">
+        <button
+          type="button"
+          className={cls('nx-cat-nav__toggle', catRailCollapsed && 'is-collapsed')}
+          onClick={toggleCatRail}
+          aria-expanded={!catRailCollapsed}
+          aria-label={catRailCollapsed ? 'Show inbox categories' : 'Hide inbox categories'}
+        >
+          <span className="nx-cat-nav__toggle-active">{activeBucketConfig.label}</span>
+          <span className="nx-cat-nav__toggle-caret" aria-hidden="true" />
+        </button>
+      </div>
+      <div
+        className={cls('nx-cat-nav', catRailCollapsed && 'is-collapsed')}
+        ref={catNavRef}
+        role="tablist"
+        aria-label="Inbox categories"
+        aria-hidden={catRailCollapsed || undefined}
+      >
         {VISIBLE_INBOX_CHIPS.map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
@@ -1654,14 +1686,17 @@ export const InboxSidebar = ({
             </div>
           )}
         </div>
+        {/* Load More lives INSIDE the scroll container. As a sibling it sat below
+            the scrollport, so on mobile the bottom dock covered it and it could
+            never be reached in Priority / New Replies / Needs Review. */}
+        {canLoadMore && (
+          <div className="nx-sidebar-rebuilt__load-more">
+            <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
+              {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
+            </button>
+          </div>
+        )}
       </div>
-      {canLoadMore && (
-        <div className="nx-sidebar-rebuilt__load-more">
-          <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
-            {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
-          </button>
-        </div>
-      )}
     </>
   )
 
