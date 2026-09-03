@@ -116,7 +116,11 @@ html.is-mobile-layout .nx-inbox-header-shell {
 html.is-mobile-layout .nx-inbox-header-shell__inner {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  /* `clip`, not `hidden`: overflow:hidden still allows PROGRAMMATIC scrolling,
+     and the scroll-active-category-into-view logic was scrolling this shell
+     sideways, dragging the search row and the rail toggle off screen.
+     overflow:clip makes the box a non-scroll container, so it cannot happen. */
+  overflow: clip;
   padding: 6px var(--nx-ib-gutter) 8px;
   border-radius: 0 0 18px 18px;
   border: 0;
@@ -451,8 +455,7 @@ html.is-mobile-layout .nx-pinned-app-dock__shelf::after {
 }
 
 /* ── P9 — light mode: warm neutral, soft contrast, not sterile ──────────────*/
-html.is-mobile-layout[data-nexus-theme="light"],
-[data-nexus-theme="light"] html.is-mobile-layout {
+html.is-mobile-layout[data-nexus-theme="light"] {
   --nx-ib-surface: rgba(255, 255, 255, 0.86);
   --nx-ib-surface-solid: #fbfaf8;
   --nx-ib-surface-raised: rgba(255, 255, 255, 0.94);
@@ -462,22 +465,22 @@ html.is-mobile-layout[data-nexus-theme="light"],
   --nx-ib-text-2: rgba(74, 83, 96, 0.90);
   --nx-ib-text-3: rgba(116, 126, 141, 0.82);
 }
-[data-nexus-theme="light"] html.is-mobile-layout .nx-inbox-header-shell__inner,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-inbox-header-shell__inner,
 html.is-mobile-layout[data-nexus-theme="light"] .nx-inbox-header-shell__inner {
   background: linear-gradient(180deg, rgba(253, 252, 250, 0.94) 0%, rgba(246, 245, 242, 0.88) 100%);
   border-bottom-color: rgba(24, 28, 36, 0.10);
   box-shadow: 0 10px 24px -20px rgba(28, 32, 40, 0.55);
 }
-[data-nexus-theme="light"] html.is-mobile-layout .nx-pinned-app-dock__shelf {
+html.is-mobile-layout[data-nexus-theme="light"] .nx-pinned-app-dock__shelf {
   background: linear-gradient(0deg, rgba(253, 252, 250, 0.95) 0%, rgba(246, 245, 242, 0.90) 100%);
   border-top-color: rgba(24, 28, 36, 0.10);
 }
-[data-nexus-theme="light"] html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-sidebar__icon-button,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-cat-nav__item {
+html.is-mobile-layout[data-nexus-theme="light"] .nx-sidebar-rebuilt__search-input-wrap,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-sidebar__icon-button,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-cat-nav__item {
   background: rgba(24, 28, 36, 0.035);
 }
-[data-nexus-theme="light"] html.is-mobile-layout .nx-row25 { background: rgba(255, 255, 255, 0.88); }
+html.is-mobile-layout[data-nexus-theme="light"] .nx-row25 { background: rgba(255, 255, 255, 0.88); }
 
 /* ── P9 — noise reduction ───────────────────────────────────────────────────
    Glow, heavy shadows and decorative borders inherited from the large legacy
@@ -661,14 +664,14 @@ html.is-mobile-layout .nx-ifm-btn-ghost {
   padding: 0 8px;
 }
 
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-modal,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-active,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-footer {
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-modal,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-active,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-footer {
   background: #fbfaf8;
 }
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-field input,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-search-input,
-[data-nexus-theme="light"] html.is-mobile-layout .nx-ifm-btn-secondary {
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-field input,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-search-input,
+html.is-mobile-layout[data-nexus-theme="light"] .nx-ifm-btn-secondary {
   background: rgba(24, 28, 36, 0.035);
 }
 
