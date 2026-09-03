@@ -1260,7 +1260,14 @@ export const InboxSidebar = ({
   // active bucket stays visible when collapsed, so the operator never loses
   // track of which mode they are in. Bucket behaviour itself is unchanged.
   const [catRailCollapsed, setCatRailCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('nx.inbox.catRailCollapsed') === '1' } catch { return false }
+    try {
+      const stored = localStorage.getItem('nx.inbox.catRailCollapsed')
+      if (stored != null) return stored === '1'
+      // No stored preference: collapse by default on phones so the default
+      // canvas is `active inbox selector + toggle`, not a permanent block
+      // dedicated to every bucket. Desktop keeps the rail open.
+      return typeof window !== 'undefined' && window.innerWidth <= 820
+    } catch { return false }
   })
   const toggleCatRail = useCallback(() => {
     setCatRailCollapsed((v) => {
@@ -1550,7 +1557,7 @@ export const InboxSidebar = ({
 
   const renderSecondaryControls = () => (
     <>
-      <div className="nx-sidebar-rebuilt__secondary-controls">
+      <div className={cls('nx-sidebar-rebuilt__secondary-controls', catRailCollapsed && 'is-rail-collapsed')}>
         {inboxLoadFailed && (
           <button
             type="button"
