@@ -170,6 +170,13 @@ test("processSendQueueItem skips TextGrid send when destination phone is invalid
   });
 
   const result = await processSendQueueItem(queue_item, {
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     updateItem: async (item_id, payload) => {
       updates.push({ item_id, payload });
       return { item_id, payload };
@@ -196,6 +203,13 @@ test("processSendQueueItem never calls TextGrid with a blank destination when ph
   });
 
   const result = await processSendQueueItem(queue_item, {
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     updateItem: async (item_id, payload) => ({ item_id, payload }),
     sendTextgridSMS: async (payload) => {
       send_args = payload;

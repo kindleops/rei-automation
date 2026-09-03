@@ -133,7 +133,15 @@ function makeDeps(supabase, overrides = {}) {
     provider_calls: () => provider_calls,
     deps: {
       supabase,
-      getSystemValue: async () => null,
+      // The canonical runtime send authority is fail-closed, so a fixture that
+      // means to exercise the FINAL GUARD must state that the control plane
+      // permits the send. Otherwise the brake denies first and the guard under
+      // test never runs.
+      getSystemValue: async (key) => {
+        if (key === "queue_processor_mode") return "live";
+        if (key === "queue_execution_mode") return "normal";
+        return null;
+      },
       createQueueRowImpl: async (input) => ({
         ok: true,
         queue_row_id,

@@ -231,6 +231,13 @@ test("executeManualInboxSendNow claim metadata preserves map_command and message
 
   const result = await executeManualInboxSendNow(MAP_PAYLOAD, {
     supabase,
+    // Authorize the runtime layer: this test is about map_command provenance
+    // in claim metadata, not about the brake.
+    getSystemValue: async (key) => {
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     createQueueRowImpl: async (input) => {
       supabase.setInserted(input);
       return {

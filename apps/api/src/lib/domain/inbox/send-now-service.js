@@ -9,9 +9,9 @@ import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/utils/phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
   insertSupabaseSendQueueRow,
   checkBlacklistPriorFailure,
@@ -654,11 +654,13 @@ async function isHardComplianceBlocked({
   try {
     const { data: thread_state } = await supabase
       .from("deal_thread_state")
-      .select("thread_key,universal_status,inbox_bucket,primary_intent,universal_stage,opt_out")
+      // NOTE: primary_intent does NOT exist on production deal_thread_state.
+      // Selecting it made PostgREST fail the whole query (42703), the catch
+      // below swallowed it, and this entire branch was dead in production.
+      .select("thread_key,universal_status,inbox_bucket,universal_stage,opt_out")
       .eq("thread_key", thread_key)
       .maybeSingle();
 
-    const thread_intent = clean(thread_state?.primary_intent).toLowerCase();
     const status_bucket = clean(thread_state?.inbox_bucket).toLowerCase();
     const stage = clean(thread_state?.universal_stage).toLowerCase();
     
@@ -666,7 +668,6 @@ async function isHardComplianceBlocked({
       thread_state?.opt_out === true ||
       thread_state?.universal_status === "suppressed" ||
       status_bucket === "suppressed" ||
-      blocked_intents.has(thread_intent) ||
       blocked_intents.has(stage)
     ) {
       return { blocked: true, reason: "compliance_suppressed_thread" };
@@ -1496,17 +1497,47 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
 
   const get_system_value =
     deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-  const runtime_settings = {
-    campaign_mode: await get_system_value("campaign_mode"),
-    queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
-  };
-  const runtime_brake = evaluateQueueCreationRuntimeBrakes(
-    runtime_settings,
-    { action: "manual_inbox_send_now_queue_create", failClosed: false }
-  );
-  const bypassed_runtime_brake = runtime_brake.ok === false;
-  const bypassed_queue_emergency_stop =
-    bypassed_runtime_brake && runtime_brake.reason === "queue_emergency_stop_active";
+
+  // ── CANONICAL RUNTIME SEND AUTHORITY ────────────────────────────────────
+  // This block previously evaluated the brake, recorded the blocked verdict as
+  // METADATA (bypassed_runtime_brake / bypassed_queue_emergency_stop) and then
+  // proceeded to claim the row and call the provider anyway. A manual operator
+  // action is not an authority to cross the emergency stop, and an internal
+  // secret is not a send licence. The verdict is now BINDING: a denial returns
+  // before any claim, any provider call, or any durable send state.
+  //
+  // Same authority the queue runner uses; no second implementation. Fails
+  // closed on an absent, malformed, or unreadable control value.
+  const send_authority = await evaluateCanonicalSendAuthority({
+    getSystemValue: get_system_value,
+    action: "manual_inbox_send_now",
+    scopedCanary: deps.scoped_canary === true,
+  });
+  if (!send_authority.ok) {
+    logger.warn("inbox_send_now.denied_by_runtime_authority", {
+      reason: send_authority.reason,
+      queue_execution_mode: send_authority.queue_execution_mode ?? null,
+    });
+    return {
+      ok: false,
+      sent: false,
+      queue_created: false,
+      status: send_authority.status || 423,
+      error: send_authority.reason,
+      reason: send_authority.reason,
+      message: send_authority.message,
+      provider_attempted: false,
+      provider_message_id: null,
+      provider_message_sid: null,
+      diagnostics: send_authority.diagnostics || null,
+      authority_version: send_authority.authority_version,
+    };
+  }
+  // Reaching here means the canonical authority AUTHORIZED the send, so no
+  // bypass ever occurred. The flags are retained (always false) because
+  // downstream metadata consumers read them.
+  const bypassed_runtime_brake = false;
+  const bypassed_queue_emergency_stop = false;
 
   const input_metadata = objectMetadata(input.metadata);
   const resolved_source =

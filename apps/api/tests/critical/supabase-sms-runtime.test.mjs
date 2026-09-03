@@ -570,7 +570,13 @@ test("processSendQueueItem accepts a UUID string and does not fail with missing_
   });
 
   const result = await processSendQueueItem("sq-process-uuid-1", {
-    getSystemValue: async () => null,
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     supabaseClient: makeIdempotencySupabase(),
     loadQueueRowById: async (id) => {
       loaded_ids.push(id);
@@ -619,7 +625,13 @@ test("processSendQueueItem accepts a normalized Supabase row object directly", a
   });
 
   const result = await processSendQueueItem(row, {
-    getSystemValue: async () => null,
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     supabaseClient: makeIdempotencySupabase(),
     loadQueueRowById: async () => {
       throw new Error("should_not_load_queue_row_by_id");
@@ -674,7 +686,13 @@ test("processSendQueueItem resolves seller_first_name from candidate_snapshot.ph
   });
 
   const result = await processSendQueueItem(row, {
-    getSystemValue: async () => null,
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     supabaseClient: makeIdempotencySupabase(),
     evaluateContactWindow: () => ({
       allowed: true,
@@ -730,7 +748,13 @@ test("processSendQueueItem sends manual inbox body as-is without template requir
   });
 
   const result = await processSendQueueItem(row, {
-    getSystemValue: async () => null,
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     supabaseClient: makeIdempotencySupabase(),
     evaluateContactWindow: () => ({
       allowed: true,
