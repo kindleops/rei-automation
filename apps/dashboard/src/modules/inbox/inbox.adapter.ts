@@ -1889,7 +1889,12 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     // Threads. The per-bucket flag is the authoritative one.
     pagination: {
       ...(metaRef.current.pagination ?? {}),
-      hasMore: Boolean(activeBucket?.hasMore),
+      // A next cursor exists only when the server has more rows, so it is a
+      // sound second source for hasMore. The response carries has_more AND
+      // next_cursor, but they travel through different normalisation paths and
+      // the boolean was arriving false for Priority while the cursor was set.
+      // Either one being truthy means there is more to load.
+      hasMore: Boolean(activeBucket?.hasMore || activeBucket?.cursor),
       nextCursor: activeBucket?.cursor ?? metaRef.current.pagination?.nextCursor ?? null,
     },
     loadedCount: metaRef.current.loadedCount ?? 0,
