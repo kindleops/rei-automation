@@ -1432,13 +1432,35 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     const activeBucket = stateRef.current.buckets[stateRef.current.activeBucketKey]
     if (activeBucket?.loading) return null
     const cursor = activeBucket?.cursor ?? null
-    const offset = cursor ? undefined : (activeBucket?.rows.length ?? 0)
+    const loaded = activeBucket?.rows.length ?? 0
+
+    // Buckets WITHOUT a cursor cannot be paged. The server computes has_more and
+    // next_cursor from the raw page, then post-filters it, so a bucket can report
+    // has_more:false and no cursor while most of its rows are still unfetched.
+    // Measured on new_replies (badge 168): limit 25 -> 18 rows, 50 -> 31,
+    // 100 -> 57, 200 -> 101, 400 -> 168, with has_more:false at every step.
+    // Offset paging is unreliable for the same reason -- the offset applies to
+    // the pre-filter query. Asking for a bigger page and replacing is the only
+    // thing that reliably surfaces more rows for these buckets.
+    if (!cursor) {
+      const nextLimit = Math.min(Math.max(loaded, 25) * 2, 500)
+      return runLoad({
+        ...lastFetchRef.current,
+        ...options,
+        sourceMode,
+        cursor: null,
+        offset: undefined,
+        maxRows: nextLimit,
+        limit: nextLimit,
+      }, 'refresh')
+    }
+
     return runLoad({
       ...lastFetchRef.current,
       ...options,
       sourceMode,
       cursor,
-      offset,
+      offset: undefined,
       maxRows: options.maxRows ?? 50,
       limit: options.limit ?? options.maxRows ?? 50,
     }, 'append')

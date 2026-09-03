@@ -1641,6 +1641,17 @@ export const InboxSidebar = ({
     )
   }, [activeViewFilter, decisionMap, inboxMode, onSelect, onThreadAction, selectedId])
 
+  // The server's has_more is unreliable: it is computed from the raw page and
+  // then the page is post-filtered, so a bucket reports has_more:false while
+  // most of its rows are unfetched (new_replies: badge 168, first page 18).
+  // The authoritative bucket count is trustworthy, so "loaded < count" is the
+  // honest test for whether more exists. needs_review (17 of 17) and waiting
+  // (0 of 0) correctly show no button under this rule.
+  const activeBucketCount = numberOrNull(viewCounts[activeBucketConfig.countKey])
+  const moreRowsExist = activeBucketCount != null
+    && activeBucketCount > displayedActiveThreads.length
+  const showLoadMore = canLoadMore || moreRowsExist
+
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
@@ -1696,7 +1707,7 @@ export const InboxSidebar = ({
         {/* Load More lives INSIDE the scroll container. As a sibling it sat below
             the scrollport, so on mobile the bottom dock covered it and it could
             never be reached in Priority / New Replies / Needs Review. */}
-        {canLoadMore && (
+        {showLoadMore && (
           <div className="nx-sidebar-rebuilt__load-more">
             <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
               {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
