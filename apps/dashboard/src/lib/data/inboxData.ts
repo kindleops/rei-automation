@@ -1785,7 +1785,17 @@ export const fetchLiveInbox = async ({
     limit,
     map: map ? '1' : '0',
     advanced: advanced && Object.keys(advanced).length > 0 ? JSON.stringify(advanced) : undefined,
-    timeout_mode: timeoutMode,
+    // The server strips the property/owner enrichment join for
+    // timeout_mode=initial_boot: that request returns rows with NO
+    // property_address_full and NO owner_name, which is why a freshly launched
+    // app showed only phone numbers, "No Address" and placeholder thumbnails --
+    // and stayed that way, because nothing re-fetches with enrichment.
+    // Measured on staging: 0.33s unenriched vs 0.90s enriched. 0.9s is a fine
+    // first paint, and useless rows are not. The local _timeoutMode is
+    // untouched, so page size, skip flags and client timeouts still apply;
+    // only the server hint is withheld. manual_bucket_switch and auto_refresh
+    // enrich correctly and are passed through unchanged.
+    timeout_mode: timeoutMode === 'initial_boot' ? undefined : timeoutMode,
     refresh_reason: refreshReason,
     skip_counts: skipCounts ? '1' : undefined,
     skip_delivery: skipDelivery ? '1' : undefined,

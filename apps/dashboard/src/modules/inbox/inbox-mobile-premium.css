@@ -1002,3 +1002,71 @@ html.is-mobile-layout .nx-inbox-header-shell__inner::after {
   0%, 100% { opacity: 0.55; }
   50%      { opacity: 1; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DEVICE REVIEW 3 — rail spacing + filter tab visibility
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Filter sheet: category tabs were clipped ───────────────────────────────
+   The tab strip sat inside a fixed-height box, so "Inbox & Conversation /
+   Property / Financials / Condition / Dist…" was sliced horizontally through
+   the middle of the text. The strip now sizes to its content and scrolls. */
+html.is-mobile-layout .nx-ifm-rail {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  align-items: center;
+  padding: 10px var(--nx-ib-gutter) 11px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+html.is-mobile-layout .nx-ifm-rail > * {
+  height: 32px !important;
+  min-height: 32px !important;
+  line-height: 1;
+  padding: 0 12px;
+  font-size: 12.5px;
+  border-radius: 9px;
+  overflow: visible;
+}
+/* The header above it must not clip the tabs either. */
+html.is-mobile-layout .nx-ifm-body,
+html.is-mobile-layout .nx-ifm-header { overflow: visible; }
+html.is-mobile-layout .nx-ifm-body { overflow-x: hidden; }
+
+/* ── Bucket rail: correct spacing, nothing clipped ──────────────────────────
+   Expanded, the rail chips were cramped against the slab edge with dead space
+   below. The rail is now a properly padded row that ends the slab cleanly. */
+html.is-mobile-layout .nx-cat-nav {
+  margin-top: 7px;
+  padding: 0 0 1px;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+html.is-mobile-layout .nx-cat-nav__item {
+  height: 34px !important;
+  min-height: 34px !important;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0;
+  padding: 0 10px;
+  border-radius: 9px;
+  line-height: 1.15;
+}
+html.is-mobile-layout .nx-cat-nav__item .nx-cat-nav__label {
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.86;
+}
+html.is-mobile-layout .nx-cat-nav__count {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+/* Slab hugs the rail instead of leaving a dead band under it. */
+html.is-mobile-layout .nx-inbox-header-shell__inner { padding-bottom: 8px; }
