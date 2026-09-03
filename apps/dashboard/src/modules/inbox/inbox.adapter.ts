@@ -1431,7 +1431,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const loadMore = useCallback(async (options: InboxFetchOptions = {}) => {
     const activeBucket = stateRef.current.buckets[stateRef.current.activeBucketKey]
     if (activeBucket?.loading) return null
-    const cursor = activeBucket?.cursor ?? null
+    // Real keyset cursors are base64 and ~90 chars. A 1-character placeholder
+    // was reaching the server on every request, which made this look like a
+    // cursor-pageable bucket, sent a cursor the server ignores, and returned
+    // page 1 again -- Load More appeared but added no rows. Anything too short
+    // to be a keyset cursor is treated as absent so the grow-the-page path runs.
+    const rawCursor = activeBucket?.cursor ?? null
+    const cursor = rawCursor && String(rawCursor).length > 20 ? rawCursor : null
     const loaded = activeBucket?.rows.length ?? 0
 
     // Buckets WITHOUT a cursor cannot be paged. The server computes has_more and
