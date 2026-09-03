@@ -878,3 +878,29 @@ html.is-mobile-layout .nx-row25__zone--conversation { gap: 1px; }
 /* The receipt row only earns its height when it actually says something. */
 html.is-mobile-layout .nx-row25__footer:empty { display: none; }
 html.is-mobile-layout .nx-row25 .nx-flag-badge { height: 16px; font-size: 9.5px; padding: 0 5px; }
+
+/* ── Measured corrections (from the live staging DOM) ───────────────────────
+   Two controls did not land on their target height, measured rather than
+   assumed:
+
+   - The search wrap rendered 30px, not 44px. A legacy rule,
+     `.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__search-input-wrap`,
+     carries three classes and outranks the two-class mobile scope.
+   - The rail toggle rendered 44px, not 22px, from a min-height this file
+     cannot outrank by specificity alone.
+
+   Both are forced here. This is the documented escape hatch for competing
+   rules inside the 659KB legacy sheets, not a blanket habit. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap {
+  height: 44px !important;
+  min-height: 44px !important;
+}
+html.is-mobile-layout .nx-cat-nav__toggle {
+  height: 22px !important;
+  min-height: 22px !important;
+}
+html.is-mobile-layout .nx-cat-nav__item {
+  height: 22px !important;
+  min-height: 22px !important;
+}
+html.is-mobile-layout .nx-cat-nav__bar { min-height: 0; }
