@@ -79,6 +79,7 @@ import {
   callBackend,
   getBackendHealth,
   fetchPropertyParticipants,
+  updateThreadState,
 } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
@@ -3372,6 +3373,28 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       mutation = () => cancelQueueItem(queueId!, thread)
       optimisticAction = 'edit_queue'
       // Additional logic to focus composer could go here
+    } else if (action.startsWith('set_stage:')
+      || action.startsWith('set_status:')
+      || action.startsWith('set_temperature:')) {
+      // Manual state overrides. The patch keys below are the ones the API
+      // actually accepts -- verified against /api/cockpit/inbox/thread-state
+      // with dry_run, which reports `stage` -> stage_source:'manual' +
+      // manual_stage_lock:true, so a manual choice is not overwritten by
+      // automation. automation_status is NOT accepted by that endpoint
+      // (no_allowed_patch_fields) and is therefore not offered.
+      const [kind, ...rest] = action.split(':')
+      const value = rest.join(':')
+      const field = kind === 'set_stage' ? 'stage'
+        : kind === 'set_status' ? 'status'
+        : 'temperature'
+      label = kind === 'set_stage' ? 'Stage Updated'
+        : kind === 'set_status' ? 'Status Updated'
+        : 'Temperature Updated'
+      mutation = async () => {
+        const res = await updateThreadState(thread.threadKey || thread.id, { [field]: value })
+        return { ok: Boolean(res.ok), threadKey: thread.id }
+      }
+      optimisticAction = null
     } else if (action === 'refetch') {
       setMessageRefetchKey((k) => k + 1)
       void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })

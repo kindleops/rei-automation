@@ -1300,6 +1300,45 @@ export const InboxSidebar = ({
     [canonicalActiveView],
   )
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
+
+  // Values are grounded in what the system actually uses, not invented:
+  // stages are the canonical seller lifecycle registry (which matches the
+  // ownership_confirmation / offer_interest values present in production),
+  // statuses are the distinct conversation_status values observed live.
+  // Temperature has no production values at all yet, so hot/warm/cold
+  // establishes the scale the row chips already speak.
+  const BULK_FIELD_OPTIONS: Record<'stage' | 'status' | 'temperature', Array<{ value: string; label: string }>> = {
+    stage: [
+      { value: 'ownership_confirmation', label: 'Ownership Confirmation' },
+      { value: 'offer_interest', label: 'Offer Interest' },
+      { value: 'asking_price', label: 'Asking Price' },
+      { value: 'property_condition', label: 'Property Condition' },
+      { value: 'offer', label: 'Offer' },
+      { value: 'formal_contract', label: 'Formal Contract' },
+      { value: 'under_contract', label: 'Under Contract' },
+      { value: 'prepared_to_close', label: 'Prepared To Close' },
+      { value: 'closed', label: 'Closed' },
+    ],
+    status: [
+      { value: 'active', label: 'Active' },
+      { value: 'not_contacted', label: 'Not Contacted' },
+      { value: 'new_reply', label: 'New Reply' },
+      { value: 'needs_review', label: 'Needs Review' },
+      { value: 'scheduled', label: 'Scheduled' },
+      { value: 'snoozed', label: 'Snoozed' },
+    ],
+    temperature: [
+      { value: 'hot', label: 'Hot' },
+      { value: 'warm', label: 'Warm' },
+      { value: 'cold', label: 'Cold' },
+    ],
+  }
+
+  const [bulkSheet, setBulkSheet] = useState<'stage' | 'status' | 'temperature' | null>(null)
+  const [bulkConfirm, setBulkConfirm] = useState<{ action: string; label: string; ids: string[] } | null>(null)
+  const [bulkUndo, setBulkUndo] = useState<{ label: string; revert: () => void } | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const longPressRef = useRef<{ timer: number | null; fired: boolean }>({ timer: null, fired: false })
   const [savedFilters, setSavedFilters] = useState<LocalSavedFilter[]>([])
   const [showManageLists, setShowManageLists] = useState(false)
   // Cold follow-up stale-age sub-filter (null = all cold, number = min days since last outbound)
@@ -1361,10 +1400,29 @@ export const InboxSidebar = ({
   }
   void _handleToggleBulk
 
-  const handleBulkAction = (action: string) => {
-    if (bulkSelectedIds.size === 0) return
-    console.warn('BACKEND_ENDPOINT_NOT_READY', { action, selected: Array.from(bulkSelectedIds) })
-  }
+  /** Applies `action` to every selected thread through the existing per-thread
+   *  dispatcher, so bulk and single-thread edits share one code path. */
+  const applyBulk = useCallback(async (action: string, ids: string[]) => {
+    setBulkBusy(true)
+    for (const id of ids) {
+      try { await onThreadAction?.(id, action) } catch { /* one failure must not abort the rest */ }
+    }
+    setBulkBusy(false)
+    setBulkSelectedIds(new Set())
+    setBulkConfirm(null)
+    setBulkSheet(null)
+    // Archive is the only destructive one, and it is the one worth undoing.
+    if (action === 'archive') {
+      setBulkUndo({
+        label: `${ids.length} archived`,
+        revert: () => { void applyBulkRef.current?.('unarchive', ids) },
+      })
+      window.setTimeout(() => setBulkUndo(null), 8000)
+    }
+  }, [onThreadAction])
+  const applyBulkRef = useRef<typeof applyBulk | null>(null)
+  applyBulkRef.current = applyBulk
+
 
   const handleClearFilters = useCallback(() => {
     setColdStaleDays(null)
@@ -1602,9 +1660,15 @@ export const InboxSidebar = ({
       <div className="nx-inbox-rebuilt-floating-bar">
         <div className="nx-inbox-rebuilt-floating-bar__count"><strong>{bulkSelectedIds.size}</strong> selected</div>
         <div className="nx-inbox-rebuilt-floating-bar__actions">
-          {['Mark Reviewed', 'Change Status', 'Schedule', 'Archive', 'Flag Hot', 'Suppress'].map((action) => (
-            <button key={action} type="button" onClick={() => handleBulkAction(action)} title="BACKEND_ENDPOINT_NOT_READY">{action}</button>
-          ))}
+          <button type="button" onClick={() => setBulkSheet('stage')}>Stage</button>
+          <button type="button" onClick={() => setBulkSheet('status')}>Status</button>
+          <button type="button" onClick={() => setBulkSheet('temperature')}>Temp</button>
+          <button
+            type="button"
+            className="is-destructive"
+            onClick={() => setBulkConfirm({ action: 'archive', label: 'Archive', ids: Array.from(bulkSelectedIds) })}
+          >Archive</button>
+          <button type="button" onClick={() => setBulkSelectedIds(new Set())}>Cancel</button>
         </div>
       </div>
     )
@@ -1696,9 +1760,55 @@ export const InboxSidebar = ({
                 onScrollOffsetChange={onListScrollOffsetChange}
                 renderRow={(thread) => renderThreadRow(thread)}
               />
-            ) : displayedActiveThreads.map((thread) => (
-              <div key={thread.threadKey || thread.id}>{renderThreadRow(thread)}</div>
-            ))
+            ) : displayedActiveThreads.map((thread) => {
+              const id = thread.id
+              const isPicked = bulkSelectedIds.has(id)
+              const beginPress = () => {
+                longPressRef.current.fired = false
+                longPressRef.current.timer = window.setTimeout(() => {
+                  longPressRef.current.fired = true
+                  // Long press selects. Once anything is selected, plain taps
+                  // toggle instead of opening the thread.
+                  setBulkSelectedIds((prev) => {
+                    const next = new Set(prev)
+                    next.has(id) ? next.delete(id) : next.add(id)
+                    return next
+                  })
+                  if (navigator.vibrate) navigator.vibrate(12)
+                }, 420)
+              }
+              const endPress = () => {
+                if (longPressRef.current.timer != null) {
+                  window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                }
+              }
+              return (
+                <div
+                  key={thread.threadKey || id}
+                  className={cls('nx-row-pick', isPicked && 'is-picked', bulkSelectedIds.size > 0 && 'is-selecting')}
+                  onPointerDown={beginPress}
+                  onPointerUp={endPress}
+                  onPointerLeave={endPress}
+                  onPointerCancel={endPress}
+                  onClickCapture={(e) => {
+                    // Suppress the tap that ends a long press, and make taps
+                    // toggle selection while a selection is active.
+                    if (longPressRef.current.fired) { e.preventDefault(); e.stopPropagation(); longPressRef.current.fired = false; return }
+                    if (bulkSelectedIds.size > 0) {
+                      e.preventDefault(); e.stopPropagation()
+                      setBulkSelectedIds((prev) => {
+                        const next = new Set(prev)
+                        next.has(id) ? next.delete(id) : next.add(id)
+                        return next
+                      })
+                    }
+                  }}
+                >
+                  {renderThreadRow(thread)}
+                </div>
+              )
+            })
           ) : (
             <div className={cls('nx-sidebar-rebuilt__empty', inboxLoadFailed && 'is-degraded')}>
               {inboxLoadFailed ? (
@@ -1723,6 +1833,65 @@ export const InboxSidebar = ({
     </>
   )
 
+  const renderBulkSheets = () => (
+    <>
+      {/* Value picker for stage / status / temperature */}
+      {bulkSheet && (
+        <div className="nx-bulk-sheet__overlay" role="presentation" onMouseDown={() => setBulkSheet(null)}>
+          <div className="nx-bulk-sheet" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="nx-bulk-sheet__title">
+              Set {bulkSheet} for {bulkSelectedIds.size} {bulkSelectedIds.size === 1 ? 'lead' : 'leads'}
+            </div>
+            <div className="nx-bulk-sheet__options">
+              {BULK_FIELD_OPTIONS[bulkSheet].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    const action = `set_${bulkSheet}:${opt.value}`
+                    void applyBulk(action, Array.from(bulkSelectedIds))
+                  }}
+                >{opt.label}</button>
+              ))}
+            </div>
+            <button type="button" className="nx-bulk-sheet__cancel" onClick={() => setBulkSheet(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm step — only the destructive action gets one */}
+      {bulkConfirm && (
+        <div className="nx-bulk-sheet__overlay" role="presentation" onMouseDown={() => setBulkConfirm(null)}>
+          <div className="nx-bulk-sheet is-confirm" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="nx-bulk-sheet__title">
+              {bulkConfirm.label} {bulkConfirm.ids.length} {bulkConfirm.ids.length === 1 ? 'lead' : 'leads'}?
+            </div>
+            <p className="nx-bulk-sheet__body">
+              They leave this inbox and move to Archived. All Threads still shows them.
+            </p>
+            <div className="nx-bulk-sheet__confirm-actions">
+              <button type="button" onClick={() => setBulkConfirm(null)}>Cancel</button>
+              <button
+                type="button"
+                className="is-destructive"
+                disabled={bulkBusy}
+                onClick={() => void applyBulk(bulkConfirm.action, bulkConfirm.ids)}
+              >{bulkBusy ? 'Working…' : bulkConfirm.label}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Undo window after archive */}
+      {bulkUndo && (
+        <div className="nx-bulk-undo" role="status">
+          <span>{bulkUndo.label}</span>
+          <button type="button" onClick={() => { bulkUndo.revert(); setBulkUndo(null) }}>Undo</button>
+        </div>
+      )}
+    </>
+  )
+
   const sidebarShellClass = cls(
     'nx-sidebar-rebuilt',
     `nx-sidebar--mode-${inboxMode}`,
@@ -1738,6 +1907,7 @@ export const InboxSidebar = ({
         {renderMultiSelectBar()}
         {renderListContent()}
       </div>
+      {renderBulkSheets()}
     </aside>
   )
 }
