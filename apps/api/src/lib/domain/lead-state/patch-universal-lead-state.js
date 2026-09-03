@@ -238,8 +238,12 @@ function buildRowPatch(canonicalPatch, meta = {}) {
   if ('is_read' in canonicalPatch) {
     rowPatch.is_read = asBoolean(canonicalPatch.is_read, false);
     rowPatch.last_read_at = rowPatch.is_read ? now : null;
-    // Legacy mirror: the dashboard inbox route historically wrote read_at.
-    rowPatch.read_at = rowPatch.last_read_at;
+    // `last_read_at` is the canonical read timestamp and the only one that
+    // exists on inbox_thread_state. The legacy `read_at` mirror was removed:
+    // the column was never created, so PostgREST rejected the whole upsert with
+    //   Could not find the 'read_at' column of 'inbox_thread_state'
+    // and EVERY is_read write failed -- true and false alike. That is why
+    // opening a thread never cleared it from New Replies.
   }
   if ('is_pinned' in canonicalPatch) rowPatch.is_pinned = asBoolean(canonicalPatch.is_pinned, false);
   if ('is_starred' in canonicalPatch) rowPatch.is_starred = asBoolean(canonicalPatch.is_starred, false);

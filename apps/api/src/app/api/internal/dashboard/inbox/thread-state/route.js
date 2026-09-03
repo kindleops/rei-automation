@@ -59,7 +59,7 @@ export async function GET(request) {
 
     const { data, error } = await supabase
       .from("inbox_thread_state")
-      .select("thread_key,master_owner_id,property_id,is_read,is_archived,read_at,archived_at,updated_at,updated_by")
+      .select("thread_key,master_owner_id,property_id,is_read,is_archived,last_read_at,archived_at,updated_at,updated_by")
       .eq("thread_key", thread_key)
       .maybeSingle();
 
@@ -157,7 +157,8 @@ export async function PUT(request) {
         property_id: clean(body?.property_id) || row.property_id || null,
         is_read: next_is_read,
         is_archived: next_is_archived,
-        read_at: next_is_read ? now : null,
+        // read_at does not exist on inbox_thread_state; last_read_at is canonical.
+        last_read_at: next_is_read ? now : null,
         archived_at: next_is_archived ? now : null,
         updated_at: now,
         updated_by,

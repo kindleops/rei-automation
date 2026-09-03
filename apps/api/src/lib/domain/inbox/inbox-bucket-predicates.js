@@ -208,6 +208,13 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       return threadMatchesWaitingFacts(thread, nowMs);
     case "unlinked":
       return !thread.property_id;
+    case "archived":
+      // Without this case, "archived" fell through to `default: return true`,
+      // so filter=archived matched EVERY thread and returned output identical
+      // to filter=all -- mixed buckets, is_archived null throughout. The count
+      // path (threadMatchesInboxTab) already gated archived correctly; only the
+      // list path was missing it.
+      return isArchivedThread(thread);
     default:
       return true;
   }
