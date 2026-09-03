@@ -1070,3 +1070,21 @@ html.is-mobile-layout .nx-cat-nav__count {
 }
 /* Slab hugs the rail instead of leaving a dead band under it. */
 html.is-mobile-layout .nx-inbox-header-shell__inner { padding-bottom: 8px; }
+
+/* ── Gap under the header slab ──────────────────────────────────────────────
+   With the rail expanded a dark band sat between the slab and the first row:
+   the slab reserved space for the secondary-controls block, which is now empty
+   on mobile, and the threads container added its own top padding on top of the
+   slab's bottom padding. Both are collapsed so the list starts immediately. */
+html.is-mobile-layout .nx-sidebar-rebuilt__secondary-controls:empty {
+  display: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+  height: 0 !important;
+}
+html.is-mobile-layout .nx-inbox-header-shell { margin-bottom: 0; padding-bottom: 0; }
+html.is-mobile-layout .nx-sidebar-rebuilt__threads-scroll { padding-top: 0; margin-top: 0; }
+html.is-mobile-layout .nx-sidebar-rebuilt__threads { padding-top: 6px; }
+/* The saved-filter panel only earns height when it is actually open. */
+html.is-mobile-layout .nx-sidebar-rebuilt__saved-list-panel:empty { display: none !important; }

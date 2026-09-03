@@ -1420,9 +1420,14 @@ export const InboxSidebar = ({
     requestAnimationFrame(() => {
       const el = groupsRef.current
       if (!el) return
-      const newScrollHeight = el.scrollHeight
-      el.scrollTop = saved.top + (newScrollHeight - saved.height)
-      console.log('[InboxUX] restored scroll', { scrollTop: el.scrollTop })
+      // Load More APPENDS below the viewport, so the content above the scroll
+      // position is unchanged and the position must simply be held. The old
+      // `saved.top + (newScrollHeight - saved.height)` added the height of every
+      // newly loaded row to scrollTop -- the compensation you need when
+      // PREPENDING -- which is why the list jumped to the bottom on every tap.
+      // Holding the position leaves the last row you were reading exactly where
+      // it was, with the new rows waiting below.
+      el.scrollTop = saved.top
     })
   }, [displayedActiveThreads.length])
 
