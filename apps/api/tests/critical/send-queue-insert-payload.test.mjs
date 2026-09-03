@@ -267,14 +267,17 @@ test("manual inbox send remains blocked for suppressed recipient", async () => {
   assert.equal(insert_called, false);
 });
 
-test("executeManualInboxSendNow bypasses campaign/emergency runtime brakes", async () => {
+test("executeManualInboxSendNow is DENIED by campaign/emergency runtime brakes", async () => {
+  // Previously this asserted the brakes were bypassed. A manual operator action
+  // is not an authority to cross the emergency stop; the verdict is binding.
+  let provider_called = false;
   const result = await executeManualInboxSendNow(
     {
       thread_key: "+12146072916",
       to_phone_number: "+12146072916",
       from_phone_number: "+18885551212",
-      message_body: "Runtime brake bypass proof",
-      queue_key: "inbox:send_now:runtime-bypass",
+      message_body: "Runtime brake enforcement proof",
+      queue_key: "inbox:send_now:runtime-enforced",
     },
     {
       getSystemValue: async (key) => {
@@ -284,35 +287,21 @@ test("executeManualInboxSendNow bypasses campaign/emergency runtime brakes", asy
       },
       supabase: {
         from() {
-          return {
-            update() {
-              return this;
-            },
-            eq() {
-              return this;
-            },
-            in() {
-              return this;
-            },
-            select() {
-              return this;
-            },
-            maybeSingle: async () => ({ data: null, error: null }),
-          };
+          throw new Error("send_queue must not be touched under an active brake");
         },
       },
-      createQueueRowImpl: async (input) => ({
-        ok: true,
-        queue_row_id: "runtime-bypass-row",
-        queue_key: input.queue_key,
-        result: { raw: { metadata: input.metadata } },
-        warning_codes: [],
-      }),
+      createQueueRowImpl: async () => {
+        throw new Error("no queue row may be created under an active brake");
+      },
+      sendTextgridImpl: async () => {
+        provider_called = true;
+        return { ok: true };
+      },
     }
   );
 
-  assert.notEqual(result.reason, "runtime_brake_active");
-  assert.notEqual(result.reason, "queue_emergency_stop_active");
-  assert.notEqual(result.reason, "campaign_paused");
-  assert.equal(result.reason, "queue_item_claim_conflict");
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "queue_emergency_stop_active");
+  assert.equal(result.provider_attempted, false);
+  assert.equal(provider_called, false);
 });
