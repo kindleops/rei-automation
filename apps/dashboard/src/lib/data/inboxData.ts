@@ -1781,7 +1781,13 @@ export const fetchLiveInbox = async ({
     direction,
     q,
     keywordGroup,
-    cursor,
+    // Only send a real keyset cursor. Some callers pass a numeric 0, and
+    // toQueryParam(0) stringifies it to "0", so cursor=0 was going out on every
+    // request including boot. That made every bucket look cursor-pageable:
+    // Load More sent a cursor the server cannot use and got page one back, so
+    // the button appeared but no rows were ever added. Real cursors here are
+    // base64 keysets (~90 chars).
+    cursor: cursor && String(cursor).length > 20 ? cursor : undefined,
     limit,
     map: map ? '1' : '0',
     advanced: advanced && Object.keys(advanced).length > 0 ? JSON.stringify(advanced) : undefined,
