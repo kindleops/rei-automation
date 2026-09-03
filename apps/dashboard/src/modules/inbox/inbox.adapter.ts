@@ -1456,6 +1456,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         sourceMode,
         cursor: null,
         offset: undefined,
+        // lastFetchRef carries _timeoutMode from the bucket switch, and
+        // inboxData caps page_size to BUCKET_SWITCH_LIVE_LIMIT (30) for that
+        // mode -- so Load More was clamped to 30 whatever limit it asked for.
+        _timeoutMode: undefined,
         maxRows: nextLimit,
         limit: nextLimit,
       }, 'refresh')
@@ -1467,6 +1471,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       sourceMode,
       cursor,
       offset: undefined,
+      _timeoutMode: undefined,
       maxRows: options.maxRows ?? 50,
       limit: options.limit ?? options.maxRows ?? 50,
     }, 'append')
