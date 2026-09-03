@@ -121,7 +121,11 @@ interface Env {
   ASSETS: Fetcher;
   API_CONTAINER: DurableObjectNamespace<ApiContainer>;
   CRON_SECRET?: string;
+  /** Master switch. Necessary but NOT sufficient: each job also needs its own flag. */
   CRON_ENABLED?: string;
+  /** Per-job authority. Absent => "false" => that job does not run. */
+  CRON_SELLER_STATE_RECONCILE_ENABLED?: string;
+  CRON_DELIVERY_RECONCILE_ENABLED?: string;
   // Commissioning credentials. Deliberately a SHORT list -- see ApiContainer.
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -184,16 +188,35 @@ export default {
       return;
     }
 
-    // DEFAULT DENY, TWICE OVER. An unrecognised DEPLOYMENT_ENV resolves to an
-    // EMPTY job table, and an expression absent from that table resolves to an
-    // empty job list. A schedule can therefore only ever fire a job that was
-    // written down for THAT environment by name.
+    // DEFAULT DENY, THREE TIMES OVER. An unrecognised DEPLOYMENT_ENV resolves to
+    // an EMPTY job table; an expression absent from that table resolves to an
+    // empty job list; and each surviving job must ALSO name an env flag that is
+    // explicitly "true". A schedule can therefore only fire a job that was
+    // written down for THAT environment by name AND separately switched on.
     const table = CRON_JOBS_BY_ENV[String(env.DEPLOYMENT_ENV ?? "")] ?? {};
-    const jobs = table[event.cron] ?? [];
-    if (jobs.length === 0) {
+    const registered = table[event.cron] ?? [];
+    if (registered.length === 0) {
       console.log(
         `cron.skipped cron=${event.cron} env=${env.DEPLOYMENT_ENV ?? "unset"} reason=no_job_registered`
       );
+      return;
+    }
+
+    // PER-JOB AUTHORITY. CRON_ENABLED is a master switch, never a job switch:
+    // flipping it must not awaken a job nobody approved. Each job carries its
+    // own flag, so adding a future job to the registry leaves it OFF until it
+    // is separately commissioned.
+    const jobs = registered.filter((job) => {
+      const enabled = String((env as never as Record<string, string | undefined>)[job.enabledBy] ?? "false")
+        .toLowerCase() === "true";
+      if (!enabled) {
+        console.log(`cron.skipped cron=${event.cron} job=${job.id} reason=${job.enabledBy}_not_true`);
+      }
+      return enabled;
+    });
+
+    if (jobs.length === 0) {
+      console.log(`cron.skipped cron=${event.cron} reason=no_job_enabled`);
       return;
     }
 
@@ -213,8 +236,8 @@ export default {
           }),
           env
         ).then(
-          (r) => console.log(`cron.done cron=${event.cron} path=${job.path} status=${r.status}`),
-          (e) => console.error(`cron.failed cron=${event.cron} path=${job.path} error=${e}`)
+          (r) => console.log(`cron.done cron=${event.cron} job=${job.id} path=${job.path} status=${r.status}`),
+          (e) => console.error(`cron.failed cron=${event.cron} job=${job.id} path=${job.path} error=${e}`)
         )
       );
     }
@@ -247,46 +270,76 @@ export default {
  *   /api/internal/webhooks/recover-inbound       drives the auto-reply pipeline
  *   /api/internal/offers/recalculate             mutates monetary state
  */
-type CronJob = { path: string; body?: Record<string, unknown> };
+type CronJob = {
+  /** Stable identifier used in logs and in the scheduler proof. */
+  id: string;
+  /** Env var that must be exactly "true" for this job to run. Per-job authority. */
+  enabledBy: string;
+  path: string;
+  body?: Record<string, unknown>;
+};
 
 /**
- * THE reconciliation job. Chosen because it is send-incapable STRUCTURALLY,
- * not because a flag happens to be off:
+ * SELLER-STATE RECONCILIATION - the job this mission commissions.
  *
- *   - it filters to delivery/status/outbound webhook rows, so it never enters
- *     the seller inbound automation lane at all;
- *   - the only send_queue statuses it can write are delivered/sent/terminal.
- *     The processor claims queued/scheduled/pending/approved/ready -- disjoint
- *     sets, so it cannot produce a claimable row;
- *   - its status merge is monotonic (greatest(current, incoming) rank), so a
- *     row can only move toward terminal, never back toward sendable;
- *   - its setSystemValues call carries no operator authority, so every brake
- *     key is stripped before write. It cannot relax containment.
+ * Repairs canonical seller lifecycle state: inbox_thread_state rows that are
+ * active, non-archived, non-suppressed and stale, whose next_action is NULL or
+ * the legacy empty-string sentinel. For each it copies the next_action already
+ * present on the canonical acquisition_opportunities row; with no canonical
+ * evidence it writes the non-send sentinel `human_review`.
  *
- * include_polling_fallback:false disables its one outbound provider call (a
- * READ of already-sent message status). With it off the job is pure database
- * reconciliation and makes no external contact whatsoever.
+ * It is send-incapable STRUCTURALLY, not because a flag happens to be off:
+ *   - the route passes an explicit ONE-ENTRY sweep allowlist, so six unsafe
+ *     sweeps (offer enqueue, follow-up scheduling, closing-case creation,
+ *     decision-engine runs, negotiation/monetary rewrites, transition replay)
+ *     never execute;
+ *   - the one sweep writes exactly one table, inbox_thread_state, via
+ *     patchUniversalLeadState. It touches no send_queue, seller_offers or
+ *     closing_cases row;
+ *   - it never invents an outbound action. Absent canonical evidence it surfaces
+ *     the lead to a human instead of guessing;
+ *   - the API side additionally requires an unambiguous cloudflare:production
+ *     identity, so a staging deploy holding this secret is refused.
  */
-const RECONCILE_DELIVERY_OUTCOMES: CronJob = {
+const SELLER_STATE_RECONCILIATION: CronJob = {
+  id: "seller_state_reconciliation",
+  enabledBy: "CRON_SELLER_STATE_RECONCILE_ENABLED",
+  path: "/api/internal/seller-flow/reconcile-state",
+  body: { limit: 100 },
+};
+
+/**
+ * DELIVERY RECONCILIATION - approved and proven send-incapable previously.
+ *
+ * Distinct from seller-state reconciliation: this reconciles provider DELIVERY
+ * outcomes that were never written back. The only send_queue statuses it can
+ * write are delivered/sent/terminal, which are disjoint from the five the
+ * processor claims, so it cannot produce a claimable row. Its status merge is
+ * monotonic. include_polling_fallback:false disables its one outbound provider
+ * call, leaving pure database reconciliation with no external contact.
+ */
+const DELIVERY_RECONCILIATION: CronJob = {
+  id: "delivery_reconciliation",
+  enabledBy: "CRON_DELIVERY_RECONCILE_ENABLED",
   path: "/api/internal/webhooks/recover-delivery",
   body: { include_polling_fallback: false },
 };
 
 const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
-  "*/5 * * * *": [RECONCILE_DELIVERY_OUTCOMES],
+  "*/5 * * * *": [SELLER_STATE_RECONCILIATION, DELIVERY_RECONCILIATION],
 };
 
 /**
- * STAGING SHARES THE PRODUCTION DATABASE. Its cron surface is therefore held to
- * the same standard as production rather than to a "it is only staging" one.
- * It previously registered 6 expressions covering 13 jobs -- including the send
- * queue runner and the campaign feed -- restrained solely by CRON_ENABLED being
- * the string "false". A single var flip would have run all 13 against real
- * seller data. Staging now mirrors production exactly.
+ * STAGING RUNS NOTHING.
+ *
+ * Staging shares the PRODUCTION database, so a staging cron is a
+ * production-affecting cron. There is no such thing as a "safe staging
+ * reconciliation" against real seller rows. The table is empty and
+ * wrangler.jsonc declares no triggers, so Cloudflare never even invokes
+ * scheduled() there. Even if a trigger were re-added, this empty table denies
+ * every expression - and the API would refuse a staging identity anyway.
  */
-const STAGING_CRON_JOBS: Record<string, CronJob[]> = {
-  "*/5 * * * *": [RECONCILE_DELIVERY_OUTCOMES],
-};
+const STAGING_CRON_JOBS: Record<string, CronJob[]> = {};
 
 const CRON_JOBS_BY_ENV: Record<string, Record<string, CronJob[]>> = {
   production: PRODUCTION_CRON_JOBS,

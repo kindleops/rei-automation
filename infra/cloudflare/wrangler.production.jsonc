@@ -63,7 +63,15 @@
   },
 
   "vars": {
-    "CRON_ENABLED": "false",
+    // COMMISSIONED. The master switch is necessary but not sufficient: each job
+    // in worker/index.ts names its own flag, so turning this on cannot awaken a
+    // job that was not separately approved below.
+    "CRON_ENABLED": "true",
+    // Per-job authority. Both are RECONCILIATION lanes and both are
+    // send-incapable. No queue runner, campaign feed, campaign activation,
+    // autopilot or DocuSign job is registered for any environment.
+    "CRON_SELLER_STATE_RECONCILE_ENABLED": "true",
+    "CRON_DELIVERY_RECONCILE_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
