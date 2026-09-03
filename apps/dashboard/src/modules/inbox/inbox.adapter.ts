@@ -1456,10 +1456,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         sourceMode,
         cursor: null,
         offset: undefined,
-        // lastFetchRef carries _timeoutMode from the bucket switch, and
-        // inboxData caps page_size to BUCKET_SWITCH_LIVE_LIMIT (30) for that
-        // mode -- so Load More was clamped to 30 whatever limit it asked for.
-        _timeoutMode: undefined,
+        // inboxData caps page_size by _timeoutMode: initial_boot and
+        // manual_bucket_switch are clamped, auto_refresh is not. lastFetchRef
+        // carries manual_bucket_switch from the bucket switch, so Load More was
+        // clamped to 30 whatever limit it asked for. Clearing the field does not
+        // help -- resolveLiveInboxTimeoutMode defaults right back to
+        // manual_bucket_switch -- so the uncapped mode must be set explicitly.
+        _timeoutMode: 'auto_refresh',
         maxRows: nextLimit,
         limit: nextLimit,
       }, 'refresh')
@@ -1471,7 +1474,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       sourceMode,
       cursor,
       offset: undefined,
-      _timeoutMode: undefined,
+      _timeoutMode: 'auto_refresh',
       maxRows: options.maxRows ?? 50,
       limit: options.limit ?? options.maxRows ?? 50,
     }, 'append')
