@@ -790,14 +790,35 @@ export async function updateOpportunity(id, patch = {}, deps = {}) {
     });
   }
 
-  const eventType = 'opportunity_status' in patch ? 'opportunity_status_changed' : 'opportunity_manual_override';
-  await emitOpportunityWorkflowEvent({
-    event_type: eventType,
-    opportunity_id: id,
-    subject_id: data.primary_thread_key,
-    payload: { updates, reason: patch.reason || null },
-    source: patch.source || 'operator',
-  }, deps);
+  // WORKFLOW FAN-OUT, AND WHY IT CAN BE SUPPRESSED.
+  //
+  // This emit reaches ingestWorkflowEvent -> processEvent -> runEnrollment ->
+  // executeActionNode. An `action.enqueue_sms` node there calls
+  // insertSupabaseSendQueueRow with queue_status 'queued' -- which is inside the
+  // processor's claim set. The `live_send_blocked: true` that comes back is
+  // stamped onto the RESULT after the insert (queue-adapter.js:114 then :144),
+  // so it is a reporting label, not a gate.
+  //
+  // Today nothing matches: no workflow_definitions row has trigger_type
+  // 'opportunity_manual_override', and matchDefinitions also requires
+  // status='active'. But that is DATA-dependent safety -- adding such a
+  // workflow later would silently make any caller of this function
+  // send-capable.
+  //
+  // A RECONCILIATION caller repairing missing bookkeeping state is not
+  // performing a business transition and must not trigger seller-facing
+  // workflows. It passes emitWorkflowEvents:false to make its safety
+  // structural rather than contingent on what rows happen to exist.
+  if (deps.emitWorkflowEvents !== false) {
+    const eventType = 'opportunity_status' in patch ? 'opportunity_status_changed' : 'opportunity_manual_override';
+    await emitOpportunityWorkflowEvent({
+      event_type: eventType,
+      opportunity_id: id,
+      subject_id: data.primary_thread_key,
+      payload: { updates, reason: patch.reason || null },
+      source: patch.source || 'operator',
+    }, deps);
+  }
 
   return { ok: true, opportunity: normalizeOpportunityRow(data) };
 }
