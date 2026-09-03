@@ -30,9 +30,12 @@ export class ApiContainer extends Container<Env> {
     // decision: TEXTGRID_*, SMTP_*, BREVO_*, INTERNAL_API_SECRET, CRON_SECRET,
     // *_WEBHOOK_SECRET, QUEUE_ENGINE_SHARED_SECRET, OPENAI_KEY.
     //
-    // Note: the live-send flags below do NOT govern /api/internal/inbox/send-now,
-    // which bypasses the queue emergency stop by design. That path is contained
-    // solely by the absence of TEXTGRID_* and INTERNAL_API_SECRET.
+    // Note: /api/internal/inbox/send-now NO LONGER bypasses the queue emergency
+    // stop. It now goes through the same canonical runtime send authority as
+    // normal queue execution (emergency stop + queue_processor_mode +
+    // queue_execution_mode, fail-closed), so containment no longer rests solely
+    // on withholding TEXTGRID_* and INTERNAL_API_SECRET. Those remain withheld
+    // as defence in depth, not as the only guard.
     this.envVars = {
       NODE_ENV: "production",
       // Must be postgres. The durability layer throws rather than falling back
@@ -93,13 +96,17 @@ export class ApiContainer extends Container<Env> {
       //   2. queue_processor_mode        = off    (DB)
       //   3. queue_execution_mode        = scoped_canary_only (DB)
       //   4. ENABLE_LIVE_SENDING/AUTOMATION_/WORKFLOW_ = false (env, default-deny)
-      // plus cron is unregistered, so nothing invokes a runner.
       //
-      // KNOWN EXCEPTION: /api/internal/inbox/send-now evaluates the runtime
-      // brake with failClosed:false and proceeds anyway, recording
-      // bypassed_queue_emergency_stop. It is guarded only by
-      // INTERNAL_API_SECRET and its own compliance/suppression checks. That is
-      // existing product behaviour, deliberately unchanged here.
+      // The one registered schedule does not weaken this. It maps to a single
+      // delivery-outcome reconciler that cannot write a claimable queue row,
+      // and no queue runner, campaign feed or autopilot job is registered for
+      // any environment. See CRON_JOBS_BY_ENV.
+      //
+      // FORMER EXCEPTION, NOW CLOSED: /api/internal/inbox/send-now used to
+      // evaluate the runtime brake with failClosed:false and proceed anyway,
+      // recording the blocked verdict as metadata. It now goes through the same
+      // canonical runtime send authority as normal queue execution. An internal
+      // secret authenticates a caller; it does not confer send authority.
       ...(env.TEXTGRID_ACCOUNT_SID
         ? { TEXTGRID_ACCOUNT_SID: env.TEXTGRID_ACCOUNT_SID }
         : {}),
@@ -177,23 +184,37 @@ export default {
       return;
     }
 
-    const routes = CRON_ROUTES[event.cron] ?? [];
-    for (const path of routes) {
+    // DEFAULT DENY, TWICE OVER. An unrecognised DEPLOYMENT_ENV resolves to an
+    // EMPTY job table, and an expression absent from that table resolves to an
+    // empty job list. A schedule can therefore only ever fire a job that was
+    // written down for THAT environment by name.
+    const table = CRON_JOBS_BY_ENV[String(env.DEPLOYMENT_ENV ?? "")] ?? {};
+    const jobs = table[event.cron] ?? [];
+    if (jobs.length === 0) {
+      console.log(
+        `cron.skipped cron=${event.cron} env=${env.DEPLOYMENT_ENV ?? "unset"} reason=no_job_registered`
+      );
+      return;
+    }
+
+    for (const job of jobs) {
       ctx.waitUntil(
         forwardToApi(
-          new Request(`https://internal.invalid${path}`, {
+          new Request(`https://internal.invalid${job.path}`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${env.CRON_SECRET}`,
               // Provider-neutral provenance. NOT an authenticator.
               "x-internal-cron-source": "cloudflare",
               "user-agent": "cloudflare-cron/1.0",
+              ...(job.body ? { "content-type": "application/json" } : {}),
             },
+            ...(job.body ? { body: JSON.stringify(job.body) } : {}),
           }),
           env
         ).then(
-          (r) => console.log(`cron.done cron=${event.cron} path=${path} status=${r.status}`),
-          (e) => console.error(`cron.failed cron=${event.cron} path=${path} error=${e}`)
+          (r) => console.log(`cron.done cron=${event.cron} path=${job.path} status=${r.status}`),
+          (e) => console.error(`cron.failed cron=${event.cron} path=${job.path} error=${e}`)
         )
       );
     }
@@ -201,31 +222,73 @@ export default {
 };
 
 /**
- * Expressions preserved verbatim from apps/api/vercel.json. Cloudflare fires
- * one scheduled() per distinct expression, so routes sharing a schedule are
- * grouped here rather than duplicated as separate triggers.
+ * CRON JOB TABLE -- scoped BY DEPLOYMENT ENVIRONMENT.
+ *
+ * Previously a single shared map keyed only by cron expression. That made the
+ * schedule list the ONLY thing standing between production and 13 jobs,
+ * including queue/run, campaign feed and campaign activation. Adding one
+ * trigger expression to production would have fired every job sharing it.
+ *
+ * Now the environment selects the table first. Production physically cannot
+ * reach a job that is not written in PRODUCTION_CRON_JOBS, whatever triggers a
+ * wrangler config declares and whatever CRON_ENABLED is set to.
+ *
+ * DELIBERATELY ABSENT FROM EVERY TABLE (each can cause a seller-visible send,
+ * or arm a row that a later processor would send):
+ *   /api/internal/queue/run                      dispatches the send queue
+ *   /api/internal/queue/retry                    re-arms failed sends
+ *   /api/internal/queue/force-due                pulls schedules forward to now
+ *   /api/internal/campaigns/feed                 builds outbound campaign work
+ *   /api/internal/campaigns/activate-due         activates campaigns
+ *   /api/internal/campaigns/recover-stale-expired  inserts live `scheduled` rows
+ *   /api/internal/autopilot/run                  broad autopilot
+ *   /api/internal/seller-flow/flush-inbound-bursts   unbraked follow-up leg
+ *   /api/internal/seller-flow/recover-inbound        unbraked follow-up leg
+ *   /api/internal/webhooks/recover-inbound       drives the auto-reply pipeline
+ *   /api/internal/offers/recalculate             mutates monetary state
  */
-const CRON_ROUTES: Record<string, string[]> = {
-  "* * * * *": [
-    "/api/internal/queue/run",
-    "/api/internal/seller-flow/flush-inbound-bursts",
-  ],
-  "*/2 * * * *": [
-    "/api/internal/webhooks/recover-delivery",
-    "/api/internal/webhooks/recover-inbound",
-  ],
-  "*/5 * * * *": [
-    "/api/internal/autopilot/run",
-    "/api/internal/campaigns/activate-due",
-    "/api/internal/campaigns/feed",
-    "/api/internal/seller-flow/recover-inbound",
-    "/api/internal/inbound/disposition-slo-scan",
-  ],
-  "*/10 * * * *": [
-    "/api/internal/queue/retry",
-    "/api/internal/outbound/feed-master-owners",
-    "/api/internal/maintenance/reap-graph-runs",
-  ],
-  "*/15 * * * *": ["/api/internal/queue/reconcile"],
-  "30 8 * * *": ["/api/internal/inbound/ledger-retention-purge"],
+type CronJob = { path: string; body?: Record<string, unknown> };
+
+/**
+ * THE reconciliation job. Chosen because it is send-incapable STRUCTURALLY,
+ * not because a flag happens to be off:
+ *
+ *   - it filters to delivery/status/outbound webhook rows, so it never enters
+ *     the seller inbound automation lane at all;
+ *   - the only send_queue statuses it can write are delivered/sent/terminal.
+ *     The processor claims queued/scheduled/pending/approved/ready -- disjoint
+ *     sets, so it cannot produce a claimable row;
+ *   - its status merge is monotonic (greatest(current, incoming) rank), so a
+ *     row can only move toward terminal, never back toward sendable;
+ *   - its setSystemValues call carries no operator authority, so every brake
+ *     key is stripped before write. It cannot relax containment.
+ *
+ * include_polling_fallback:false disables its one outbound provider call (a
+ * READ of already-sent message status). With it off the job is pure database
+ * reconciliation and makes no external contact whatsoever.
+ */
+const RECONCILE_DELIVERY_OUTCOMES: CronJob = {
+  path: "/api/internal/webhooks/recover-delivery",
+  body: { include_polling_fallback: false },
+};
+
+const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
+  "*/5 * * * *": [RECONCILE_DELIVERY_OUTCOMES],
+};
+
+/**
+ * STAGING SHARES THE PRODUCTION DATABASE. Its cron surface is therefore held to
+ * the same standard as production rather than to a "it is only staging" one.
+ * It previously registered 6 expressions covering 13 jobs -- including the send
+ * queue runner and the campaign feed -- restrained solely by CRON_ENABLED being
+ * the string "false". A single var flip would have run all 13 against real
+ * seller data. Staging now mirrors production exactly.
+ */
+const STAGING_CRON_JOBS: Record<string, CronJob[]> = {
+  "*/5 * * * *": [RECONCILE_DELIVERY_OUTCOMES],
+};
+
+const CRON_JOBS_BY_ENV: Record<string, Record<string, CronJob[]>> = {
+  production: PRODUCTION_CRON_JOBS,
+  staging: STAGING_CRON_JOBS,
 };
