@@ -3694,6 +3694,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       void callBackend('/api/cockpit/inbox/thread-state', {
         method: 'PATCH',
         body: JSON.stringify({ thread_key: writeKey.threadKey, patch: { is_read: true } }),
+      }).then((res) => {
+        // Opening a thread marks it read, which moves it out of New Replies on
+        // the server. This write bypasses handleThreadAction, so the list
+        // consequence has to be applied here too -- otherwise the row stayed
+        // visible in New Replies until an unrelated refetch, which is exactly
+        // what it did. Only on confirmed success, and only for the bucket the
+        // read actually disqualifies it from.
+        if (!res?.ok) return
+        const id = thread?.id ?? threadKey
+        if (id && String(viewFilter) === 'new_replies') hideThreadLocally(String(id))
+        void refreshInboxCounts()
       })
     } else {
       // Surface it. The operator clicked the thread, so it will stay unread; silently
