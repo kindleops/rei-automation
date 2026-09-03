@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   describeRuntimeEnvironment,
   isExplicitNonProductionRuntime,
+  resolveRuntimeIdentity,
 } from "@/lib/config/runtime-environment.js";
 import {
   getSharedSecretAuthResult,
@@ -200,6 +201,64 @@ export async function requireCronOrEngineAuth(request, logger = null) {
     via: engine_result.via || null,
   });
   return cron_result;
+}
+
+/**
+ * THE gate for a scheduled job that MUTATES production state.
+ *
+ * requireCronAuth proves the CALLER holds the cron secret. It does not prove
+ * WHICH DEPLOYMENT is running, and that gap matters here: the Cloudflare Worker
+ * sets NODE_ENV=production for the staging container too, and staging SHARES
+ * THE PRODUCTION DATABASE. A job gated only on "is production" would therefore
+ * also run from staging, against real seller rows.
+ *
+ * So a scheduled mutation additionally requires an unambiguous deployment
+ * identity:
+ *
+ *   cloudflare:production  -> allowed   (the real production deployment)
+ *   cloudflare:staging     -> DENIED    (shares the prod DB; not authoritative)
+ *   anything:test/dev      -> allowed   (provably harmless local/test runtime)
+ *   unknown identity       -> DENIED    (a missing binding is a config error)
+ *
+ * Default-deny: only a POSITIVE production binding, or POSITIVE proof of a
+ * non-production runtime, may proceed. This is deliberately stricter than
+ * requireCronAuth and is composed WITH it, never instead of it.
+ */
+export function requireScheduledMutationAuth(request, logger = null) {
+  const cron_result = requireCronAuth(request, logger);
+  if (!cron_result.authorized) return cron_result;
+
+  const identity = resolveRuntimeIdentity();
+  const allowed = identity.is_production_deployment || identity.is_explicit_non_production;
+
+  if (!allowed) {
+    logger?.warn?.("scheduled_mutation.denied_by_runtime_identity", {
+      provider: identity.provider,
+      environment: identity.environment,
+      label: identity.label,
+    });
+    return {
+      authorized: false,
+      auth: { ...cron_result.auth, runtime_identity: identity },
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: "scheduled_mutation_runtime_not_authorized",
+          runtime_identity: identity.label,
+          message:
+            "A scheduled mutation requires an unambiguous production deployment identity. " +
+            "Staging shares the production database and is never authoritative.",
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return {
+    authorized: true,
+    auth: { ...cron_result.auth, runtime_identity: identity },
+    response: null,
+  };
 }
 
 export default requireCronAuth;
