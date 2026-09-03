@@ -996,6 +996,35 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
 
   const [error, setError] = useState<unknown>(null)
   const [recentlyUpdatedThreadIds, setRecentlyUpdatedThreadIds] = useState<Set<string>>(new Set())
+
+  /**
+   * Optimistic list consequence. InboxSidebar already drops any thread marked
+   * `hidden:<id>` from the visible list, so a server-confirmed write that
+   * disqualifies a thread from the CURRENT bucket can take effect immediately
+   * without waiting for a refetch. Undo simply unhides.
+   *
+   * This only affects the local view; bucket membership itself is still the
+   * server's, derived canonically. Counts are deliberately NOT adjusted here --
+   * the store reconciles them via refreshCounts against the server's own bucket
+   * semantics, never by local +1/-1 arithmetic.
+   */
+  const hideThreadLocally = useCallback((threadId: string) => {
+    if (!threadId) return
+    setRecentlyUpdatedThreadIds((prev) => {
+      const next = new Set(prev)
+      next.add(`hidden:${threadId}`)
+      return next
+    })
+  }, [])
+
+  const unhideThreadLocally = useCallback((threadId: string) => {
+    if (!threadId) return
+    setRecentlyUpdatedThreadIds((prev) => {
+      const next = new Set(prev)
+      next.delete(`hidden:${threadId}`)
+      return next
+    })
+  }, [])
   const pausedRef = useRef(paused)
   pausedRef.current = paused
 
@@ -1963,6 +1992,8 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     refreshCounts,
     loadMore,
     recentlyUpdatedThreadIds,
+    hideThreadLocally,
+    unhideThreadLocally,
     sourceMode,
     setSourceMode: setMode,
   }

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
+import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { pushRoutePath } from '../../app/router'
@@ -673,6 +674,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     refreshCounts: refreshInboxCounts,
     loadMore,
     recentlyUpdatedThreadIds,
+    hideThreadLocally,
+    unhideThreadLocally,
     sourceMode,
     setSourceMode
   } = useInboxData({ paused: messagesLoading })
@@ -3321,7 +3324,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       
       if (result && 'ok' in result && !result.ok) {
         emitNotification({ title: 'Error', detail: result.errorMessage || 'Unknown error', severity: 'critical' })
-        return
+        return false
       }
       if (!options?.skipRefresh) {
         if (DEV) console.log(`[NexusInbox] Refreshing data for: ${label}`)
@@ -3473,7 +3476,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       })
     }
 
-    await handleWorkflowMutation(label, mutation, {
+    const mutationOk = await handleWorkflowMutation(label, mutation, {
       skipRefresh: true,
       action: action === 'archive'
         ? {
@@ -3495,6 +3498,47 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           }
         : undefined,
     })
+
+    // ---- optimistic list consequence -------------------------------------
+    // Only after the server confirms. Bucket membership is re-derived with the
+    // SAME canonical classifier the list uses (classifyInboxBucket); no bucket
+    // semantics are invented here. Counts are not adjusted locally --
+    // handleWorkflowMutation already reconciles them against the server.
+    if (mutationOk !== false) {
+      const VIEW_TO_BUCKET: Record<string, string> = {
+        priority: 'priority',
+        new_replies: 'new_replies',
+        needs_review: 'needs_review',
+        waiting: 'waiting',
+        follow_up: 'follow_up',
+        cold: 'cold',
+        dead: 'dead',
+        suppressed: 'suppressed',
+        all_conversations: 'all_messages',
+        archived: 'archived',
+      }
+      const activeBucket = VIEW_TO_BUCKET[String(viewFilter)] ?? 'all_messages'
+      const staysVisibleEverywhere = activeBucket === 'all_messages'
+
+      if (action === 'archive') {
+        // Archived threads leave every operational bucket. They remain in All
+        // Threads and appear under Archived.
+        if (!staysVisibleEverywhere && activeBucket !== 'archived') hideThreadLocally(thread.id)
+      } else if (action === 'unarchive' || action === 'unread') {
+        unhideThreadLocally(thread.id)
+      } else {
+        const patch: Record<string, unknown> = {}
+        if (action === 'read') { patch.isRead = true; patch.is_read = true; patch.unreadCount = 0 }
+        else if (action.startsWith('set_status:')) patch.inboxStatus = action.split(':').slice(1).join(':')
+        else if (action.startsWith('set_stage:')) patch.conversationStage = action.split(':').slice(1).join(':')
+        if (Object.keys(patch).length > 0 && !staysVisibleEverywhere) {
+          try {
+            const derived = classifyInboxBucket({ ...thread, ...patch } as InboxWorkflowThread)?.bucket
+            if (derived && derived !== activeBucket) hideThreadLocally(thread.id)
+          } catch { /* classification must never break the action */ }
+        }
+      }
+    }
   }, [threads, handleWorkflowMutation, DEV])
 
   const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
