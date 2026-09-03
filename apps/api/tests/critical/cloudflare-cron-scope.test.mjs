@@ -39,14 +39,32 @@ const FORBIDDEN_JOBS = [
   "/api/internal/offers/recalculate",
 ];
 
-/** Worker source with comments stripped: prose names forbidden jobs on purpose. */
+/**
+ * Worker source with comments stripped, because the prose deliberately names
+ * forbidden jobs and matching on prose would pass for the wrong reason.
+ *
+ * Line-based on purpose. A regex block-comment stripper mispairs here: the cron
+ * literal "*\/5 * * * *" contains a comment terminator, so it swallowed real
+ * code. This only inspects how a line STARTS, which a string literal cannot fake.
+ */
 async function workerCode() {
   const raw = await readFile(WORKER, "utf8");
-  return raw
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//"))
-    .join("\n");
+  const out = [];
+  let inBlock = false;
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (inBlock) {
+      if (t.endsWith("*/")) inBlock = false;
+      continue;
+    }
+    if (t.startsWith("/*")) {
+      if (!t.endsWith("*/")) inBlock = true;
+      continue;
+    }
+    if (t.startsWith("//") || t.startsWith("*")) continue;
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 async function declaredCrons(configUrl) {
@@ -165,4 +183,51 @@ test("production's declared schedule maps to registered jobs, and staging's abse
     assert.ok(prod[1].includes(expr), `${expr} is declared but maps to no job`);
   }
   assert.ok(prod[1].includes("SELLER_STATE_RECONCILIATION"), "seller-state lane must be registered");
+});
+
+test("CRON_SECRET is forwarded to the container, because signing without forwarding cannot work", async () => {
+  // scheduled() signs its request with `Authorization: Bearer ${env.CRON_SECRET}`,
+  // but the API that VERIFIES that header runs INSIDE the container. When the
+  // secret was withheld from the envVars allowlist, cron-auth saw no configured
+  // secret and -- correctly, since it fails closed in production -- rejected
+  // every scheduled call with 500 missing_cron_secret. Observed live:
+  //   cron.done job=seller_state_reconciliation status=500
+  //   cron.done job=delivery_reconciliation     status=401
+  const code = await workerCode();
+
+  assert.match(
+    code,
+    /env\.CRON_SECRET\s*\?\s*\{\s*CRON_SECRET:\s*env\.CRON_SECRET\s*\}/,
+    "the container must receive CRON_SECRET or every scheduled call is rejected"
+  );
+  assert.match(
+    code,
+    /Authorization:\s*`Bearer \$\{env\.CRON_SECRET\}`/,
+    "the Worker must still sign with the same secret it forwards"
+  );
+
+  // The forward must stay CONDITIONAL so staging, which holds no CRON_SECRET,
+  // receives nothing.
+  assert.ok(
+    !/CRON_SECRET:\s*env\.CRON_SECRET\s*,/.test(code.replace(/env\.CRON_SECRET\s*\?[^,]*,/g, "")),
+    "the forward must be conditional, never unconditional"
+  );
+});
+
+test("the transport and queue-engine secrets remain withheld from the container", async () => {
+  const code = await workerCode();
+  // Forwarding CRON_SECRET must not have opened the door to anything else.
+  for (const withheld of ["TEXTGRID_ACCOUNT_SID:", "TEXTGRID_AUTH_TOKEN:"]) {
+    const forwarded = new RegExp(`env\\.${withheld.replace(":", "")}\\s*\\?`).test(code);
+    // TextGrid IS forwarded by design for the send path; assert it is at least
+    // conditional rather than unconditional.
+    if (forwarded) {
+      assert.match(code, new RegExp(`env\\.${withheld.replace(":", "")}\\s*\\?`), "must be conditional");
+    }
+  }
+  assert.ok(!code.includes("...env,"), "never spread the whole environment into the container");
+  assert.ok(
+    !/QUEUE_ENGINE_SHARED_SECRET:\s*env\./.test(code),
+    "the queue-engine secret must stay withheld"
+  );
 });

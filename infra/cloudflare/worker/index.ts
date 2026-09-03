@@ -23,12 +23,15 @@ export class ApiContainer extends Container<Env> {
     //
     // Absence of credentials IS the staging containment boundary, so the
     // container must only ever receive variables named here. A blanket spread
-    // would silently forward any future Worker secret -- TextGrid, SMTP,
-    // CRON_SECRET -- and quietly make staging send-capable.
+    // would silently forward any future Worker secret -- TextGrid, SMTP --
+    // and quietly make staging send-capable.
     //
     // Specifically NOT forwarded, and not to be added without an explicit
-    // decision: TEXTGRID_*, SMTP_*, BREVO_*, INTERNAL_API_SECRET, CRON_SECRET,
-    // *_WEBHOOK_SECRET, QUEUE_ENGINE_SHARED_SECRET, OPENAI_KEY.
+    // decision: TEXTGRID_*, SMTP_*, BREVO_*, *_WEBHOOK_SECRET,
+    // QUEUE_ENGINE_SHARED_SECRET, SCOPED_CANARY_EXECUTION_SECRET, OPENAI_KEY.
+    //
+    // Every forward below is CONDITIONAL on the Worker actually holding the
+    // secret, so staging (which holds far fewer) receives only what it has.
     //
     // Note: /api/internal/inbox/send-now NO LONGER bypasses the queue emergency
     // stop. It now goes through the same canonical runtime send authority as
@@ -67,11 +70,25 @@ export class ApiContainer extends Container<Env> {
       //   OPS_DASHBOARD_SECRET- gates cockpit READ routes
       //   INTERNAL_API_SECRET - gates /api/internal/* authentication
       //
-      // STILL WITHHELD, deliberately: TEXTGRID_* (SMS transport), CRON_SECRET,
+      // STILL WITHHELD, deliberately: TEXTGRID_* (SMS transport),
       // QUEUE_ENGINE_SHARED_SECRET, SCOPED_CANARY_EXECUTION_SECRET.
       // Note INTERNAL_API_SECRET alone does NOT make the box send-capable:
       // inbox/send-now still needs TEXTGRID_* to reach a transport, and
       // sendTextgridSMS throws without credentials before any network call.
+      //
+      // CRON_SECRET IS NOW FORWARDED, and it has to be. scheduled() signs its
+      // request with `Authorization: Bearer ${env.CRON_SECRET}`, but the API
+      // that VERIFIES that header runs inside the container. With the secret
+      // withheld, cron-auth saw no configured secret and -- correctly, because
+      // it fails closed in production -- rejected every scheduled call with 500
+      // missing_cron_secret. Signing without forwarding cannot work.
+      //
+      // This does NOT widen the blast radius. The secret only lets the
+      // container VERIFY a caller; it grants no outbound capability, and the
+      // job registry still decides what may be invoked. Forwarding is
+      // conditional, so staging -- which has no CRON_SECRET -- receives
+      // nothing and its containment is unchanged.
+      ...(env.CRON_SECRET ? { CRON_SECRET: env.CRON_SECRET } : {}),
       ...(env.SUPABASE_DB_URL ? { SUPABASE_DB_URL: env.SUPABASE_DB_URL } : {}),
       ...(env.OPS_DASHBOARD_SECRET
         ? { OPS_DASHBOARD_SECRET: env.OPS_DASHBOARD_SECRET }
