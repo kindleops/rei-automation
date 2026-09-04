@@ -1645,6 +1645,15 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         : query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
+    case "archived":
+      // Without this case the switch fell through to `default: return query`,
+      // i.e. the query was returned COMPLETELY UNFILTERED, so filter=archived
+      // produced the same rows as filter=all. This is the SQL-level gate; the
+      // in-memory predicate (threadMatchesBucketFilter) is a second pass and
+      // was missing the case too.
+      return typeof query.eq === "function"
+        ? query.eq("is_archived", toSupabaseBoolean(true))
+        : query;
     default:
       return query;
   }
