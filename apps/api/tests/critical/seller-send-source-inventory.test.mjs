@@ -173,7 +173,12 @@ test("random queue identity is confined to the KNOWN sites", () => {
     "app/api/internal/discord/reply-sms/route.js:505": "PENDING_CONVERGENCE",
     "app/api/internal/discord/reply-sms/route.js:506": "PENDING_CONVERGENCE",
     "lib/domain/acquisition/inbound-dispatcher.js:420": "PENDING_CONVERGENCE",
-    "lib/domain/inbox/send-now-service.js:482": "PENDING_CONVERGENCE",
+    // CONVERGED. This queue_key is still random, but it is no longer SEMANTIC
+    // identity: the manual send now keys its logical communication on a durable
+    // operator_action_id, so a retry of one click resolves to one communication
+    // regardless of what this scheduling label says. The random value survives
+    // only as a queue row label.
+    "lib/domain/inbox/send-now-service.js:484": "CONVERGED_NON_SEMANTIC",
     "lib/domain/queue/canonical-queue-writer.js:149": "PENDING_CONVERGENCE",
     "lib/supabase/sms-engine.js:4241": "PENDING_CONVERGENCE",
     "lib/supabase/sms-engine.js:4242": "PENDING_CONVERGENCE",
@@ -211,29 +216,95 @@ test("the Discord operator reply has NO deterministic identity at all", () => {
     "if this gained a deterministic derivation, update the inventory severity note");
 });
 
-// ── the new seam is dormant until the migration gate ───────────────────────
+// ── DIRECT_PROVIDER_BYPASS = 0 ────────────────────────────────────────────
+//
+// These replace the earlier dormancy assertions. Those checked that NOTHING
+// imported the seam, which was right while §11 was inert and became VACUOUS the
+// moment convergence landed: both adapters live under lib/domain/communications/,
+// so the old scan excluded exactly the files that now do the wiring. A guard
+// that cannot fail is worse than no guard, so it is replaced by its inverse.
 
-test("the canonical dispatch seam is not wired into any live path", () => {
-  // §11's tables do not exist in production (verified: 0 tables, 0 RPCs). Until
-  // they do, the seam must remain unreachable, so landing this branch cannot
-  // change what any seller receives. When convergence begins, this test is
-  // replaced by the inverse assertion: that every PENDING_CONVERGENCE source
-  // reaches the provider ONLY through it.
-  const importers = FILES
-    .filter((f) => !rel(f).startsWith("lib/domain/communications/"))
-    .filter((f) => /canonical-communication-dispatch|executeSellerCommunicationAttempt/.test(code(f)))
-    .map(rel);
-  assert.deepEqual(importers, [],
-    `the seam became reachable before the migration was applied:\n  ${importers.join("\n  ")}`);
+/** Provider invocation, as opposed to merely naming or injecting the function. */
+function providerInvocations(file) {
+  const hits = [];
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const t = line.trim();
+    if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) return;
+    // `await sendTextgridSMS(` / `await send_textgrid_sms(` = calling it.
+    // `sendProvider: (args) => sendTextgridImpl({` = handing it to the seam,
+    // which is the converged shape and must NOT be flagged.
+    if (/await\s+(sendTextgridSMS|send_textgrid_sms|sendTextgridImpl)\s*\(/.test(line)) {
+      hits.push(`${rel(file)}:${i + 1}: ${t}`);
+    }
+  });
+  return hits;
+}
+
+test("the ONLY module that invokes the provider is the canonical seam", () => {
+  // The seam calls its injected sendProvider; everyone else must hand the
+  // function TO the seam rather than calling it.
+  const offenders = [];
+  for (const f of FILES) {
+    const r = rel(f);
+    if (r === "lib/providers/textgrid.js") continue;                 // the definition
+    if (r === "lib/domain/buyers/send-buyer-blast.js") continue;      // buyer, out of scope
+    if (r === "lib/verification/live-textgrid.js") continue;          // HARD_FENCED canary
+    if (r === "app/api/dev/force-send/route.js") continue;            // TEST_ONLY, 404 in prod
+    if (r === "lib/domain/queue/process-send-queue.js") {
+      // The legacy Podio body is retained for review but unreachable; the live
+      // supabase path must contain no invocation at all.
+      const live = providerInvocations(f).filter((h) => !/UnreachableLegacy/.test(h));
+      const src = fs.readFileSync(f, "utf8");
+      assert.ok(src.includes("processLegacyQueueItemUnreachable"),
+        "the legacy body must remain fenced behind the unreachable marker");
+      // Only the retained (unreachable) legacy body may still invoke it.
+      assert.ok(live.length <= 1,
+        `process-send-queue may not invoke the provider on the live path:\n  ${live.join("\n  ")}`);
+      continue;
+    }
+    offenders.push(...providerInvocations(f));
+  }
+  assert.deepEqual(offenders, [],
+    `seller-visible provider invocation outside the canonical seam:\n  ${offenders.join("\n  ")}`);
+});
+
+test("both former bypasses now route through the canonical seam", () => {
+  const queue = code(path.join(SRC, "lib/domain/queue/process-send-queue.js"));
+  assert.match(queue, /dispatchSellerQueueRow\(/,
+    "process-send-queue must dispatch through the seam");
+
+  const manual = code(path.join(SRC, "lib/domain/inbox/send-now-service.js"));
+  assert.match(manual, /dispatchManualOperatorSend\(/,
+    "send-now must dispatch through the seam");
+  assert.match(manual, /resolveOperatorAction\(/,
+    "a manual send must establish durable operator identity BEFORE dispatch");
+});
+
+test("the legacy Podio path is hard-fenced before any provider work", () => {
+  const src = fs.readFileSync(path.join(SRC, "lib/domain/queue/process-send-queue.js"), "utf8");
+  assert.match(src, /legacy_podio_path_fenced_by_s11/,
+    "the legacy path must refuse rather than reach a seller");
+  // The fence must come BEFORE the retained body, or it fences nothing.
+  assert.ok(
+    src.indexOf("legacy_podio_path_fenced_by_s11") < src.indexOf("processLegacyQueueItemUnreachable"),
+    "the fence must precede the retained legacy body");
 });
 
 test("the seam refuses rather than falling back when its store is missing", () => {
-  // The failure mode that would quietly undo the whole slice: a dispatcher that
-  // shrugs and calls the old send path when the ledger is unavailable. Pin the
-  // absence of any such fallback.
+  // The change that would quietly undo the whole slice: a dispatcher that
+  // shrugs and calls the old send path when the ledger is unavailable.
   const seam = code(path.join(SRC, "lib/domain/communications/canonical-communication-dispatch.js"));
   assert.match(seam, /logical_communication_store_unavailable/,
     "a missing store must produce a refusal");
   assert.ok(!/sendTextgridSMS/.test(seam),
     "the seam must reach the provider only through its injected sendProvider");
+});
+
+test("a queue row whose action cannot be named is refused, not sent", () => {
+  const resolver = code(path.join(SRC, "lib/domain/communications/queue-row-identity.js"));
+  assert.match(resolver, /queue_row_identity_underivable/,
+    "an underivable row must produce a refusal reason");
+  assert.ok(!/randomUUID|Math\.random/.test(resolver),
+    "identity must never be invented when it cannot be derived");
 });

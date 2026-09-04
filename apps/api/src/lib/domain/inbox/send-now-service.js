@@ -10,6 +10,8 @@ import { normalizePhone } from "@/lib/utils/phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { sendTextgridSMS } from "@/lib/providers/textgrid.js";
+import { dispatchManualOperatorSend } from "@/lib/domain/communications/dispatch-manual-operator-send.js";
+import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
@@ -1768,15 +1770,61 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
     source: resolved_source,
   });
 
+  // ── DURABLE OPERATOR ACTION, BEFORE ANY SEND ────────────────────────────
+  // Created here rather than inside dispatch so the operator's intent has an
+  // identity that survives a crash between this line and the provider call.
+  const operator_action = await resolveOperatorAction({
+    action_type: "manual_inbox_send_now",
+    operator_action_id: clean(manual_input.operator_action_id),
+    request_idempotency_key: clean(manual_input.request_idempotency_key)
+      || clean(manual_input.idempotency_key),
+    thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
+    to_phone_number: to_phone,
+    operator_email: clean(manual_input.operator_email) || null,
+    prior_logical_communication_id: clean(manual_input.prior_logical_communication_id) || null,
+  }, { supabase });
+
+  if (!operator_action.ok) {
+    logger.warn("inbox_send_now.operator_action_not_durable", { reason: operator_action.reason });
+    return {
+      ok: false,
+      sent: false,
+      queue_created: Boolean(queue_row_id),
+      status: 503,
+      error: operator_action.reason,
+      reason: operator_action.reason,
+      provider_attempted: false,
+      provider_message_id: null,
+    };
+  }
+  const operator_action_id = operator_action.operator_action_id;
+
   let send_result = null;
   let provider_error = null;
 
-  // 3. Provider Dispatch
+  // 3. Provider Dispatch — via §11 CANONICAL DISPATCH
+  //
+  // A manual send is a domain action before it is a message. The operator
+  // action is created durably ABOVE this point, so retrying one click resolves
+  // to one logical communication instead of minting a fresh
+  // `inbox:send_now:${randomUUID()}` identity on every execution.
+  //
+  // The seam still owns everything it owns elsewhere: ambiguity is absorbing,
+  // an unresolved sibling attempt blocks a new one, and
+  // provider_request_started is committed before the network. An operator's
+  // urgency is not an argument for sending a seller a second copy.
   try {
-    send_result = await sendTextgridImpl({
-      to: to_phone,
-      from: from_phone,
-      body: message_body,
+    const dispatch = await dispatchManualOperatorSend({
+      operator_action_id,
+      thread_key: clean(normalized_row.thread_key) || clean(manual_input.thread_key) || null,
+      to_phone_number: to_phone,
+      message: { to: to_phone, from: from_phone, body: message_body },
+      queue_row_id: clean(queue_row_id) || null,
+      supabase,
+      getSystemValue: get_system_value,
+      scoped_canary: deps.scoped_canary === true,
+      sendProvider: (args) => sendTextgridImpl({
+        ...args,
       client_reference_id: clean(queue_row_id) || clean(audit_result?.queue_key) || null,
       bypass_system_control: true,
       bypass_reason: "manual_operator_send",
@@ -1790,7 +1838,27 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
         manual_operator_send: true,
         ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
       },
+      }),
     });
+
+    if (dispatch.provider_invoked === false) {
+      logger.warn("inbox_send_now.canonical_dispatch_refused", {
+        queue_row_id, stage: dispatch.stage, reason: dispatch.reason,
+      });
+      return {
+        ok: false,
+        sent: false,
+        queue_created: Boolean(queue_row_id),
+        status: 409,
+        error: dispatch.reason,
+        reason: dispatch.reason,
+        provider_attempted: false,
+        provider_message_id: null,
+        operator_action_id,
+        logical_communication_id: dispatch.logical_communication_id || null,
+      };
+    }
+    send_result = dispatch.raw_provider_result;
   } catch (error) {
     provider_error = error;
     logger.error("inbox_send_now.dispatch_failed", {

@@ -90,7 +90,29 @@ export async function executeSellerCommunicationAttempt(input = {}, deps = {}) {
 
   const emit = (event, payload = {}) => logger?.info?.(event, payload);
 
+  if (!store?.getOrCreateLogicalCommunication) {
+    // No durable authority available means no send. Never fall back to legacy.
+    return denied("store", "logical_communication_store_unavailable");
+  }
+
   // ── 1-2. domain action -> deterministic identity ─────────────────────────
+  //
+  // A caller may arrive with the action ALREADY identified (a queue row bound
+  // to a logical communication). Then identity is a fact to read, not to
+  // re-derive: re-deriving would let a drifting anchor silently mint a second
+  // action for a row that already has one.
+  const preresolved = clean(input.preresolved_logical_communication_id);
+  if (preresolved) {
+    const loaded = await store.getLogicalCommunicationById(preresolved);
+    if (!loaded?.ok) {
+      emit("logical_communication.load_refused", {
+        logical_communication_id: preresolved, reason: loaded?.reason,
+      });
+      return denied("identity", loaded?.reason || "logical_communication_not_found");
+    }
+    return runAttempt(loaded.communication, input, deps, emit);
+  }
+
   const key = buildLogicalCommunicationKey({
     communication_type: input.communication_type,
     ...(input.anchors || {}),
@@ -101,11 +123,6 @@ export async function executeSellerCommunicationAttempt(input = {}, deps = {}) {
       communication_type: input.communication_type, reason: key.reason, missing: key.missing,
     });
     return denied("identity", key.reason, { missing: key.missing });
-  }
-
-  if (!store?.getOrCreateLogicalCommunication) {
-    // No durable authority available means no send. Never fall back to legacy.
-    return denied("store", "logical_communication_store_unavailable");
   }
 
   // ── 3-5. atomic get-or-create, with lineage conflict refusal ─────────────
@@ -131,6 +148,24 @@ export async function executeSellerCommunicationAttempt(input = {}, deps = {}) {
   emit(resolved.reused ? "logical_communication.reused" : "logical_communication.created", {
     logical_communication_id: comm.id, logical_key: comm.logical_key,
   });
+
+  return runAttempt(comm, input, deps, emit);
+}
+
+/**
+ * Everything after identity is settled. Shared verbatim by both entry paths so
+ * a bound queue row and a freshly-derived action cannot diverge in what they
+ * are allowed to do.
+ */
+async function runAttempt(comm, input, deps, emit) {
+  const {
+    store,
+    evaluateRuntimeAuthority,
+    assertOutboundContent,
+    sendProvider,
+    classifyProviderError,
+    now = new Date().toISOString(),
+  } = deps;
 
   // ── 6-9. TRANSPORT authority: would another attempt risk duplication? ────
   const transport = canAllocateAttempt(comm);

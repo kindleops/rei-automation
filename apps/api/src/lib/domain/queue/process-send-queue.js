@@ -21,6 +21,8 @@ import {
   normalizePhone,
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
+import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-seller-queue-row.js";
+import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import {
@@ -1092,6 +1094,36 @@ export async function finalizeSuccessfulQueueSend(
 
 async function processLegacyQueueItem(resolved_queue_row, deps = {}) {
   const queue_row_id = getQueueRowId(resolved_queue_row);
+
+  // ── §11 HARD FENCE: the Podio-shaped path may not reach a seller ─────────
+  //
+  // This path predates the Supabase queue and reaches the provider directly,
+  // so it is a seller-visible bypass of canonical dispatch. It cannot be
+  // converged, because a Podio item carries none of the durable anchors an
+  // lck_v1 identity requires, and Podio is dead in production
+  // (podio_business_writes is permanently false, and this function has zero
+  // production callers).
+  //
+  // Deriving an identity for it would mean inventing one. Fencing is the
+  // honest option: if a legacy-shaped row ever appears again, it stops here
+  // instead of quietly becoming the one send nobody can account for.
+  warn("queue.legacy_path_fenced", {
+    queue_row_id,
+    reason: "legacy_podio_path_fenced_by_s11",
+  });
+  return {
+    ok: true,
+    skipped: true,
+    sent: false,
+    reason: "legacy_podio_path_fenced_by_s11",
+    queue_row_id,
+    queue_item_id: queue_row_id,
+  };
+}
+
+/** Retained only so the pre-fence body is still reviewable in one place. */
+async function processLegacyQueueItemUnreachable(resolved_queue_row, deps = {}) {
+  const queue_row_id = getQueueRowId(resolved_queue_row);
   const retry_count = asNonNegativeInteger(resolved_queue_row?.retry_count, 0);
   const message_fields = pickMessageFields(resolved_queue_row);
   const started_at = Date.now();
@@ -1958,18 +1990,53 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       return compliance_block.result;
     }
 
-    const send_result = await send_textgrid_sms({
-      to: message_fields.to,
-      from: message_fields.from,
-      body: message_fields.body,
-      seller_first_name,
-    });
+    // ── §11 CANONICAL DISPATCH ──────────────────────────────────────────────
+    // This used to be a direct send_textgrid_sms() call, which made the queue
+    // runner the send authority: a row being `queued` with retry budget left
+    // was, by itself, enough to put a message in front of a seller.
+    //
+    // The runner no longer decides. It selects work and hands the row to the
+    // canonical seam, which establishes the domain action, refuses a row whose
+    // identity it cannot derive, allocates a numbered attempt (refusing if a
+    // sibling is unresolved or a prior outcome was ambiguous), commits
+    // provider_request_started BEFORE the network, and only then calls out.
+    const dispatch = await dispatchSellerQueueRow(
+      queue_row,
+      { to: message_fields.to, from: message_fields.from, body: message_fields.body },
+      {
+        supabase: getSupabase(deps),
+        sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name }),
+        classifyProviderError: classifyTextGridProviderError,
+        getSystemValue: deps.getSystemValue || getSystemValue,
+        scoped_canary: deps.scoped_canary === true,
+        now,
+      }
+    );
 
-    console.log("TEXTGRID RAW RESPONSE", send_result?.raw ?? null);
-    console.log("SEND RESULT", send_result);
-    console.log("MESSAGE SEND COMPLETE");
+    // A refusal BEFORE the wire is not a provider failure: it must not consume
+    // a retry or be recorded as a delivery attempt. Release the row and say why.
+    if (dispatch.provider_invoked === false) {
+      warn("queue.canonical_dispatch_refused", {
+        queue_row_id,
+        stage: dispatch.stage,
+        reason: dispatch.reason,
+        logical_communication_id: dispatch.logical_communication_id || null,
+      });
+      await releaseSkippedQueueRow(queue_row, lock_token, dispatch.reason, { ...deps, now });
+      return {
+        ok: true,
+        skipped: true,
+        sent: false,
+        reason: dispatch.reason || "canonical_dispatch_refused",
+        queue_status: queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+        logical_communication_id: dispatch.logical_communication_id || null,
+      };
+    }
 
-    const provider_message_sid = getConfirmedProviderMessageSid(send_result);
+    const send_result = dispatch.raw_provider_result;
+    const provider_message_sid = dispatch.provider_message_id;
     if (!provider_message_sid) {
       // Ambiguous accept: the provider may have taken the message even though
       // no SID came back — a retry risks a DUPLICATE seller SMS. The marker
