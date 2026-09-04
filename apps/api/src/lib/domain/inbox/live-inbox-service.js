@@ -69,6 +69,20 @@ const BOOT_FAST_THREAD_FIELDS = [
   "latest_delivery_status",
   "is_read",
   "is_suppressed",
+  "is_archived",
+  // Universal lead state. This list serves filter=all -- the DEFAULT view --
+  // and omitted every state column, so operational_status / seller_stage /
+  // lead_temperature came back null on the rows the dashboard shows first.
+  // Third field list with the same omission: the authoritative and summary
+  // lists were fixed earlier, this one still starved the default view.
+  "status",
+  "operational_status",
+  "conversation_status",
+  "stage",
+  "seller_stage",
+  "lifecycle_stage",
+  "lead_temperature",
+  "disposition",
   "updated_at",
 ].join(",");
 const DEFAULT_LIMIT = 100;
