@@ -240,6 +240,35 @@ test("attempt allocation locks the parent and refuses ambiguity", () => {
   assert.ok(hasSql("state_forbids_attempt"));
 });
 
+test("text[] accumulation cannot be written as bare `|| 'literal'`", () => {
+  // FOUND BY REAL INSTALL, NOT BY THIS FILE.
+  //
+  // The conflict path originally read `v_conflict := v_conflict || 'decision_id'`.
+  // PL/pgSQL resolves `text[] || <untyped literal>` as ARRAY concatenation and
+  // then tries to parse the string as an array literal:
+  //
+  //   ERROR 22P02: malformed array literal: "decision_id"
+  //
+  // So every identity-conflict return threw instead of reporting the conflict.
+  // That path is the safety net for an lck_v1 bug or a genuine hash collision --
+  // precisely the case where a silent throw is worst -- and it would have stayed
+  // invisible until it mattered.
+  //
+  // No amount of static SQL scanning could have caught this: the text is
+  // syntactically valid and only fails at EXECUTION. The lesson is the reason
+  // the safe-install phase exists. This test pins the corrected form so the
+  // shorter spelling cannot come back.
+  const bad = [];
+  for (const [i, line] of SQL.split("\n").entries()) {
+    if (/:=\s*\w+\s*\|\|\s*'/.test(line)) bad.push(`${i + 1}: ${line.trim()}`);
+  }
+  assert.deepEqual(bad, [],
+    `use array_append(); bare || with a literal is parsed as an array literal:\n  ${bad.join("\n  ")}`);
+
+  assert.ok(SQL.includes("array_append(v_conflict,"),
+    "the conflict path must accumulate via array_append");
+});
+
 test("an unresolved attempt blocks allocation of a sibling", () => {
   // The parent-state guards alone are NOT sufficient. Allocation sets the
   // parent to 'claimed', which is deliberately not a forbidden state, and the

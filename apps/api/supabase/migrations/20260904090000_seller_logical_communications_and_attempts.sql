@@ -464,19 +464,19 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'reason', 'logical_communication_upsert_failed');
   END IF;
 
-  IF v_existing.communication_type   IS DISTINCT FROM p_communication_type                                  THEN v_conflict := v_conflict || 'communication_type'; END IF;
-  IF v_existing.decision_id          IS DISTINCT FROM NULLIF(p_lineage->>'decision_id','')                  THEN v_conflict := v_conflict || 'decision_id'; END IF;
-  IF v_existing.message_event_id     IS DISTINCT FROM NULLIF(p_lineage->>'message_event_id','')             THEN v_conflict := v_conflict || 'message_event_id'; END IF;
-  IF v_existing.campaign_target_id   IS DISTINCT FROM (NULLIF(p_lineage->>'campaign_target_id',''))::uuid   THEN v_conflict := v_conflict || 'campaign_target_id'; END IF;
-  IF v_existing.touch_number         IS DISTINCT FROM (NULLIF(p_lineage->>'touch_number',''))::integer      THEN v_conflict := v_conflict || 'touch_number'; END IF;
-  IF v_existing.follow_up_id         IS DISTINCT FROM (NULLIF(p_lineage->>'follow_up_id',''))::uuid         THEN v_conflict := v_conflict || 'follow_up_id'; END IF;
-  IF v_existing.referral_id          IS DISTINCT FROM NULLIF(p_lineage->>'referral_id','')                  THEN v_conflict := v_conflict || 'referral_id'; END IF;
-  IF v_existing.source_event_id      IS DISTINCT FROM NULLIF(p_lineage->>'source_event_id','')              THEN v_conflict := v_conflict || 'source_event_id'; END IF;
-  IF v_existing.seller_offer_id      IS DISTINCT FROM NULLIF(p_lineage->>'seller_offer_id','')              THEN v_conflict := v_conflict || 'seller_offer_id'; END IF;
-  IF v_existing.seller_offer_version IS DISTINCT FROM (NULLIF(p_lineage->>'seller_offer_version',''))::integer THEN v_conflict := v_conflict || 'seller_offer_version'; END IF;
-  IF v_existing.operator_action_id   IS DISTINCT FROM NULLIF(p_lineage->>'operator_action_id','')           THEN v_conflict := v_conflict || 'operator_action_id'; END IF;
-  IF v_existing.canary_run_id        IS DISTINCT FROM NULLIF(p_lineage->>'canary_run_id','')                THEN v_conflict := v_conflict || 'canary_run_id'; END IF;
-  IF v_existing.canary_leg           IS DISTINCT FROM NULLIF(p_lineage->>'canary_leg','')                   THEN v_conflict := v_conflict || 'canary_leg'; END IF;
+  IF v_existing.communication_type   IS DISTINCT FROM p_communication_type                                  THEN v_conflict := array_append(v_conflict, 'communication_type'); END IF;
+  IF v_existing.decision_id          IS DISTINCT FROM NULLIF(p_lineage->>'decision_id','')                  THEN v_conflict := array_append(v_conflict, 'decision_id'); END IF;
+  IF v_existing.message_event_id     IS DISTINCT FROM NULLIF(p_lineage->>'message_event_id','')             THEN v_conflict := array_append(v_conflict, 'message_event_id'); END IF;
+  IF v_existing.campaign_target_id   IS DISTINCT FROM (NULLIF(p_lineage->>'campaign_target_id',''))::uuid   THEN v_conflict := array_append(v_conflict, 'campaign_target_id'); END IF;
+  IF v_existing.touch_number         IS DISTINCT FROM (NULLIF(p_lineage->>'touch_number',''))::integer      THEN v_conflict := array_append(v_conflict, 'touch_number'); END IF;
+  IF v_existing.follow_up_id         IS DISTINCT FROM (NULLIF(p_lineage->>'follow_up_id',''))::uuid         THEN v_conflict := array_append(v_conflict, 'follow_up_id'); END IF;
+  IF v_existing.referral_id          IS DISTINCT FROM NULLIF(p_lineage->>'referral_id','')                  THEN v_conflict := array_append(v_conflict, 'referral_id'); END IF;
+  IF v_existing.source_event_id      IS DISTINCT FROM NULLIF(p_lineage->>'source_event_id','')              THEN v_conflict := array_append(v_conflict, 'source_event_id'); END IF;
+  IF v_existing.seller_offer_id      IS DISTINCT FROM NULLIF(p_lineage->>'seller_offer_id','')              THEN v_conflict := array_append(v_conflict, 'seller_offer_id'); END IF;
+  IF v_existing.seller_offer_version IS DISTINCT FROM (NULLIF(p_lineage->>'seller_offer_version',''))::integer THEN v_conflict := array_append(v_conflict, 'seller_offer_version'); END IF;
+  IF v_existing.operator_action_id   IS DISTINCT FROM NULLIF(p_lineage->>'operator_action_id','')           THEN v_conflict := array_append(v_conflict, 'operator_action_id'); END IF;
+  IF v_existing.canary_run_id        IS DISTINCT FROM NULLIF(p_lineage->>'canary_run_id','')                THEN v_conflict := array_append(v_conflict, 'canary_run_id'); END IF;
+  IF v_existing.canary_leg           IS DISTINCT FROM NULLIF(p_lineage->>'canary_leg','')                   THEN v_conflict := array_append(v_conflict, 'canary_leg'); END IF;
 
   RETURN jsonb_build_object(
     'ok', false,
