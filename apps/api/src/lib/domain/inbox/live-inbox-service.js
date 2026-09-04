@@ -1547,7 +1547,7 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
       // showed every thread. The sibling applyQueryFilter covers the fallback
       // source; both need the case.
       if (typeof query.eq === "function") query = query.eq("is_archived", true);
-      break;
+      return query;
     case "all_messages":
       break;
     default:
@@ -2506,7 +2506,17 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const normalizedListFilter = normalizeLiveFilter(filter);
   const FACT_DERIVED_LIST_FILTERS = new Set(["waiting", "new_replies", "all_messages", "cold"]);
   const trustBucketQuery = !FACT_DERIVED_LIST_FILTERS.has(normalizedListFilter);
+  // Archived threads leave every OPERATIONAL bucket. Archiving moved a lead
+  // into Archived but never removed it from Priority/New Replies, which defeats
+  // the point. Done here rather than in SQL deliberately: `row.is_archived !==
+  // true` keeps rows whose flag is absent or null, whereas a SQL predicate
+  // dropped them. "all"/"all_messages" still show archived rows, and the
+  // "archived" filter obviously keeps them.
+  const HIDES_ARCHIVED = normalizedListFilter !== "archived"
+    && normalizedListFilter !== "all"
+    && normalizedListFilter !== "all_messages";
   const postFiltered = sortThreads(rows)
+    .filter((row) => !HIDES_ARCHIVED || row.is_archived !== true)
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
 
