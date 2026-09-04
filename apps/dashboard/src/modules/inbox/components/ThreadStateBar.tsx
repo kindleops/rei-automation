@@ -58,6 +58,7 @@ function GlassControl<T extends string>({
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const current = options.find((o) => o.value === value) ?? options[0]
 
   useLayoutEffect(() => {
@@ -82,16 +83,29 @@ function GlassControl<T extends string>({
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: Event) => {
       const target = e.target as Node
       if (btnRef.current?.contains(target)) return
+      // The menu is rendered through a portal into document.body, so it is
+      // NEVER inside btnRef. Checking only the trigger meant that pressing an
+      // option fired mousedown -> setOpen(false) -> the option unmounted, and
+      // the click never landed, so onChange never ran. Every real press of
+      // Stage / Status / Temperature silently did nothing; only a synthetic
+      // .click() (which skips mousedown) appeared to work.
+      if (panelRef.current?.contains(target)) return
       setOpen(false)
     }
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onDown)
+    // Touch devices never fire mousedown before the tap resolves, so the menu
+    // also needs the touch/pointer equivalents to dismiss correctly.
+    document.addEventListener('touchstart', onDown, { passive: true })
+    document.addEventListener('pointerdown', onDown)
     return () => {
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('touchstart', onDown)
+      document.removeEventListener('pointerdown', onDown)
     }
   }, [open])
 
@@ -112,6 +126,7 @@ function GlassControl<T extends string>({
   const menu = open && menuPos && typeof document !== 'undefined'
     ? createPortal(
       <div
+        ref={panelRef}
         className="nx-conv-dropdown-portal"
         role="listbox"
         aria-label={label}
@@ -124,7 +139,8 @@ function GlassControl<T extends string>({
             role="option"
             aria-selected={opt.value === value}
             className={cls('nx-conv-dropdown-option', opt.value === value && 'is-selected')}
-            onClick={() => { onChange(opt.value); setOpen(false) }}
+            onPointerDown={(e) => { e.preventDefault(); onChange(opt.value); setOpen(false) }}
+            onClick={(e) => { e.preventDefault() }}
           >
             <span className="nx-conv-dropdown-option__dot" style={{ background: opt.visual.color }} />
             <span>{opt.visual.label}</span>

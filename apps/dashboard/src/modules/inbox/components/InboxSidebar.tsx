@@ -1301,6 +1301,10 @@ export const InboxSidebar = ({
     [canonicalActiveView],
   )
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
+  // Rows archived through the bulk dock. Bulk writes call the API directly, so
+  // they bypass the dispatcher's list consequence -- the archive persisted but
+  // the row stayed on screen in the bucket it had just left. Undo clears this.
+  const [bulkHiddenIds, setBulkHiddenIds] = useState<Set<string>>(new Set())
 
   // Values are grounded in what the system actually uses, not invented:
   // stages are the canonical seller lifecycle registry (which matches the
@@ -1357,8 +1361,12 @@ export const InboxSidebar = ({
   }
 
   const searchableThreads = useMemo(() => {
-    return threads.filter((thread) => !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`) && matchesSearch(thread, searchQuery))
-  }, [threads, recentlyUpdatedThreadIds, searchQuery])
+    return threads.filter((thread) => (
+      !recentlyUpdatedThreadIds.has(`hidden:${thread.id}`)
+      && !bulkHiddenIds.has(thread.id)
+      && matchesSearch(thread, searchQuery)
+    ))
+  }, [threads, recentlyUpdatedThreadIds, bulkHiddenIds, searchQuery])
 
   const decisionMap = useMemo(() => {
     const map = new Map<string, ConversationDecision>()
@@ -1416,7 +1424,14 @@ export const InboxSidebar = ({
         const row = threads.find((t) => t.id === id || t.threadKey === id)
         const key = row ? (row.threadKey || row.id) : id
         if (action === 'archive' || action === 'unarchive') {
-          await backendClient.updateThreadState(String(key), { is_archived: action === 'archive' })
+          const res = await backendClient.updateThreadState(String(key), { is_archived: action === 'archive' })
+          if (res?.ok) {
+            setBulkHiddenIds((prev) => {
+              const next = new Set(prev)
+              if (action === 'archive') next.add(id); else next.delete(id)
+              return next
+            })
+          }
         } else if (action.startsWith('set_')) {
           const [kind, ...rest] = action.split(':')
           const value = rest.join(':')
@@ -1734,6 +1749,8 @@ export const InboxSidebar = ({
   // The authoritative bucket count is trustworthy, so "loaded < count" is the
   // honest test for whether more exists. needs_review (17 of 17) and waiting
   // (0 of 0) correctly show no button under this rule.
+  useEffect(() => { setBulkHiddenIds(new Set()) }, [activeViewFilter])
+
   const activeBucketCount = numberOrNull(viewCounts[activeBucketConfig.countKey])
   const moreRowsExist = activeBucketCount != null
     && activeBucketCount > displayedActiveThreads.length
