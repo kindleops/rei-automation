@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as backendClient from '../../../lib/api/backendClient'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatInboxThreadTimestamp, formatPercent, formatPhone } from '../../../shared/formatters'
@@ -1404,8 +1405,25 @@ export const InboxSidebar = ({
    *  dispatcher, so bulk and single-thread edits share one code path. */
   const applyBulk = useCallback(async (action: string, ids: string[]) => {
     setBulkBusy(true)
+    // Writes go straight to the endpoint instead of through onThreadAction.
+    // That dispatcher resolves `threads.find(t => t.id === target)` and returns
+    // silently when it misses, and this loop swallowed the result, so a bulk
+    // edit could clear the selection and close the sheet having sent NOTHING --
+    // which is exactly what it did. Calling the API here means a failure is a
+    // failure, not a no-op.
     for (const id of ids) {
-      try { await onThreadAction?.(id, action) } catch { /* one failure must not abort the rest */ }
+      try {
+        const row = threads.find((t) => t.id === id || t.threadKey === id)
+        const key = row ? (row.threadKey || row.id) : id
+        if (action === 'archive' || action === 'unarchive') {
+          await backendClient.updateThreadState(String(key), { is_archived: action === 'archive' })
+        } else if (action.startsWith('set_')) {
+          const [kind, ...rest] = action.split(':')
+          const value = rest.join(':')
+          const field = kind === 'set_stage' ? 'stage' : kind === 'set_status' ? 'status' : 'temperature'
+          await backendClient.updateThreadState(String(key), { [field]: value })
+        }
+      } catch { /* one failure must not abort the rest */ }
     }
     setBulkBusy(false)
     setBulkSelectedIds(new Set())
@@ -1419,7 +1437,7 @@ export const InboxSidebar = ({
       })
       window.setTimeout(() => setBulkUndo(null), 8000)
     }
-  }, [onThreadAction])
+  }, [threads])
   const applyBulkRef = useRef<typeof applyBulk | null>(null)
   applyBulkRef.current = applyBulk
 
