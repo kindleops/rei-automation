@@ -294,7 +294,17 @@ export const ThreadStateBar = ({
     const result = await patchLeadStateFromView(sourceView, threadKey, patch, {
       execute_next_action: executeNextAction,
     })
-    if (result.ok) onRefetch?.(threadKey)
+    // Deliberately NOT refetching on success. useOptimisticField has already
+    // committed the chosen value and the server has confirmed it, so the
+    // control is correct. Refetching re-rendered this bar from the list row,
+    // and the list row does not carry operational_status / seller_stage /
+    // lead_temperature -- so the refresh replaced a correct value with a stale
+    // one and the control snapped back. That is exactly what "nothing changes"
+    // looked like: the write landed every time, the refresh undid the display.
+    //
+    // Only a FAILED write refetches, to resync against whatever the server
+    // actually holds.
+    if (!result.ok) onRefetch?.(threadKey)
     return { ok: result.ok }
   }
 
