@@ -1502,6 +1502,19 @@ function toSupabaseBoolean(value) {
 }
 
 function applyInboxThreadStateBucketFilter(query, normalized) {
+  // Actively snoozed threads are withheld from every ACTIONABLE key list, at
+  // the authoritative source. This has to happen here rather than only in the
+  // in-memory post-filter: the fallback sources (canonical_inbox_threads,
+  // v_inbox_threads_live_v2) do not carry snoozed_until, so a row that reaches
+  // them unfiltered arrives with the field undefined and reads as "not
+  // snoozed" -- it would sit in Priority/New Replies for the whole snooze.
+  // Written as an OR so rows with a NULL snoozed_until are kept; a bare
+  // comparison would silently drop every never-snoozed thread.
+  const SNOOZE_EXEMPT_FILTERS = new Set(["snoozed", "all", "all_messages", "archived"]);
+  if (!SNOOZE_EXEMPT_FILTERS.has(normalized) && typeof query.or === "function") {
+    query = query.or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
+  }
+
   switch (normalized) {
     case "priority":
       query = query.eq("inbox_bucket", "priority");
@@ -1559,7 +1572,9 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
       if (typeof query.is === "function") query = query.is("property_id", null);
       break;
     case "snoozed":
-      // AUTHORITATIVE path counterpart of the fallback gate above.
+      // Authoritative source (inbox_thread_state) genuinely has the column.
+      // An expired snoozed_until is simply a past timestamp, so this bound lets
+      // a thread age out on its own -- no sweeper, nothing to get stuck.
       if (typeof query.gt === "function") query = query.gt("snoozed_until", new Date().toISOString());
       return query;
     case "archived":
@@ -1704,13 +1719,14 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
     case "snoozed":
-      // Fallback-source gate for the Snoozed view. Only rows still under an
-      // active snooze belong here; an expired snoozed_until is simply a past
-      // timestamp, so the `gt now` bound lets the thread age out on its own
-      // without any sweeper or cron.
-      return typeof query.gt === "function"
-        ? query.gt("snoozed_until", new Date().toISOString())
-        : query;
+      // Deliberately NO SQL predicate here. This function runs against the
+      // FALLBACK sources (canonical_inbox_threads, v_inbox_threads_live_v2),
+      // and neither carries snoozed_until -- PostgREST fails the WHOLE query on
+      // one unknown column, so a .gt("snoozed_until", ...) here would 500 the
+      // Snoozed view outright. Snooze is resolved authoritatively instead:
+      // fetchAuthoritativeThreadKeysForFilter reads inbox_thread_state (which
+      // does have the column) and constrains these sources by thread_key.
+      return query;
     case "archived":
       // Without this case the switch fell through to `default: return query`,
       // i.e. the query was returned COMPLETELY UNFILTERED, so filter=archived
