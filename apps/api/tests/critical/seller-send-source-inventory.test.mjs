@@ -277,8 +277,13 @@ test("both former bypasses now route through the canonical seam", () => {
   const manual = code(path.join(SRC, "lib/domain/inbox/send-now-service.js"));
   assert.match(manual, /dispatchManualOperatorSend\(/,
     "send-now must dispatch through the seam");
-  assert.match(manual, /resolveOperatorAction\(/,
+  // The resolver is injectable, so the call site reads resolve_operator_action().
+  // Match the CALL, not the import: an unused import would satisfy the latter.
+  assert.match(manual, /await resolve_operator_action\(/,
     "a manual send must establish durable operator identity BEFORE dispatch");
+  assert.ok(
+    manual.indexOf("await resolve_operator_action(") < manual.indexOf("dispatchManualOperatorSend("),
+    "the operator action must be durable BEFORE dispatch, not created during it");
 });
 
 test("the legacy Podio path is hard-fenced before any provider work", () => {
