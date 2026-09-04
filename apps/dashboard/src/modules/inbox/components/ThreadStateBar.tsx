@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { resolveDealDeskWritableThreadKey } from '../../../domain/inbox/deal-desk-thread-reference'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { IconName } from '../../../shared/icons'
@@ -260,7 +261,14 @@ export const ThreadStateBar = ({
   compact = false,
   sourceView = 'thread',
 }: ThreadStateBarProps) => {
-  const threadKey = thread.threadKey || thread.id
+  // The API rejects anything that is not a canonical phone key with
+  // invalid_canonical_thread_key. thread.threadKey / thread.id can be a
+  // composite selection key (ct:property:...|owner:...|phone:+1...), so passing
+  // it raw meant EVERY composer state write was blocked -- and the failure was
+  // swallowed, which is why changing Stage/Status/Temperature did nothing at
+  // all. This is the same DD-003 resolver the read-on-open path already uses.
+  const writableKey = resolveDealDeskWritableThreadKey(thread as unknown as Record<string, unknown>)
+  const threadKey = writableKey?.ok ? writableKey.threadKey : (thread.threadKey || thread.id)
 
   const status = useOptimisticField<ThreadStatus>(resolveThreadStatus(thread))
   const stage = useOptimisticField<ThreadStage>(resolveThreadStage(thread))

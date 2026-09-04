@@ -71,12 +71,49 @@ function toMutationResult(
   }
 }
 
+
+/**
+ * Reduce any thread identifier to the canonical +1XXXXXXXXXX the lead-state API
+ * requires. Accepts the canonical form unchanged, extracts the `phone:` segment
+ * from a composite selection key, and normalises a bare 10/11-digit number.
+ * Anything else is returned trimmed so the caller still gets the API's explicit
+ * invalid_canonical_thread_key rather than a silent no-op.
+ */
+export function canonicalizeLeadStateThreadKey(raw: unknown): string {
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  if (/^\+1\d{10}$/.test(value)) return value
+
+  const embedded = value.match(/phone:(\+?1?\d{10})/i)
+  if (embedded?.[1]) {
+    const digits = embedded[1].replace(/\D/g, '')
+    if (digits.length === 10) return `+1${digits}`
+    if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  }
+
+  const digitsOnly = value.replace(/\D/g, '')
+  if (digitsOnly.length === 10) return `+1${digitsOnly}`
+  if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) return `+${digitsOnly}`
+
+  return value
+}
+
 export async function persistUniversalLeadState(
   threadKey: string,
   patch: UniversalLeadStatePatch,
   meta: UniversalLeadStateMeta = {},
 ): Promise<UniversalLeadStateMutationResult> {
-  const key = String(threadKey ?? '').trim()
+  // GLOBAL WRITE CONTRACT.
+  // Every surface -- inbox, composer, pipeline, map -- funnels lead-state
+  // writes through here, but they do not all hold the same identifier. Some
+  // carry the canonical phone, others a composite selection key such as
+  // `ct:property:123|owner:mo_ab|phone:+15551234567`. The API accepts ONLY the
+  // canonical phone and answers invalid_canonical_thread_key for anything else,
+  // so a surface holding the composite silently failed every write.
+  //
+  // Canonicalising here means one rule for the whole system instead of each app
+  // remembering to resolve its own key.
+  const key = canonicalizeLeadStateThreadKey(threadKey)
   const canonicalPatch = normalizePatchToCanonical(patch)
   if (!key) {
     return {
