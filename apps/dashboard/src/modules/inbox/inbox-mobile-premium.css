@@ -1222,3 +1222,30 @@ html.is-mobile-layout .nx-bulk-undo button {
   color: var(--nx-accent-contrast, #0b0e14);
   font-size: 12px; font-weight: 700;
 }
+
+/* ── Selection dock: slim, and the list stays visible behind it ─────────────
+   A legacy rule pins `top: 10px` on this bar. Setting only left/right/bottom
+   left that in force, so with position:fixed the box stretched between both
+   edges -- 870px tall, covering the entire list, which made it impossible to
+   see or pick further rows. Releasing `top` lets it size to its content. */
+html.is-mobile-layout .nx-inbox-rebuilt-floating-bar {
+  top: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  /* Liquid glass: the conversations stay readable through the dock. */
+  background: rgba(16, 21, 31, 0.72) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  backdrop-filter: blur(26px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+html.is-mobile-layout .nx-inbox-rebuilt-floating-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 120% at 20% 0%, rgba(var(--nx-accent-rgb, 120 140 255), 0.16) 0%, transparent 70%),
+    radial-gradient(50% 120% at 85% 100%, rgba(var(--nx-accent-rgb, 120 140 255), 0.10) 0%, transparent 72%);
+}
