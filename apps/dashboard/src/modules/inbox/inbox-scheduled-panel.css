@@ -189,3 +189,112 @@ html.is-mobile-layout .nx-scheduled-row__actions button {
 html.is-mobile-layout .nx-scheduled-panel {
   padding-bottom: calc(var(--nx-pinned-dock-collapsed, 40px) + var(--nx-mobile-safe-bottom, 0px) + 14px);
 }
+
+/* ── Bulk "Conversation Restart" sheet ──────────────────────────────────────
+   Compact bottom sheet, not a wizard: counts, timing, a few rendered examples,
+   and one commit button. Sets no heights on any ancestor. */
+
+.nx-followup-sheet { gap: 10px; }
+
+.nx-followup-sheet__status,
+.nx-followup-sheet__error {
+  padding: 10px 2px;
+  font-size: 12.5px;
+  color: var(--nx-text-dim, rgba(226, 232, 240, 0.62));
+}
+.nx-followup-sheet__error { color: rgba(252, 165, 165, 0.95); }
+
+.nx-followup-counts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0 6px;
+  font-size: 12px;
+  color: var(--nx-text-dim, rgba(226, 232, 240, 0.6));
+}
+.nx-followup-counts strong { color: var(--nx-text, rgba(241, 245, 249, 0.95)); font-size: 14px; }
+.nx-followup-counts .is-ok strong { color: rgba(134, 239, 172, 0.95); }
+.nx-followup-counts button.is-warn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: rgba(252, 211, 77, 0.9);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.nx-followup-counts button.is-warn strong { color: rgba(252, 211, 77, 0.98); }
+
+.nx-followup-timing {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  font-size: 12px;
+}
+.nx-followup-timing__label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  color: var(--nx-text-dim, rgba(226, 232, 240, 0.55));
+}
+.nx-followup-timing__value { color: rgba(125, 211, 252, 0.95); }
+
+.nx-followup-excluded {
+  list-style: none; margin: 0; padding: 6px 0 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 132px; overflow-y: auto;
+}
+.nx-followup-excluded li {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 6px 9px; border-radius: 8px;
+  background: rgba(251, 191, 36, 0.07);
+  border: 1px solid rgba(251, 191, 36, 0.16);
+  font-size: 11.5px;
+}
+.nx-followup-excluded__who { color: rgba(241, 245, 249, 0.9); }
+.nx-followup-excluded__why { color: rgba(252, 211, 77, 0.85); text-align: right; }
+
+.nx-followup-previews {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 40vh; overflow-y: auto;
+}
+.nx-followup-preview {
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+.nx-followup-preview__who {
+  font-size: 12.5px; font-weight: 600;
+  color: var(--nx-text, rgba(241, 245, 249, 0.95));
+  margin-bottom: 3px;
+}
+.nx-followup-preview__body {
+  font-size: 12.5px; line-height: 1.5;
+  color: rgba(226, 232, 240, 0.82);
+}
+.nx-followup-preview__when {
+  margin-top: 5px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(125, 211, 252, 0.8);
+}
+
+.nx-followup-more {
+  align-self: flex-start;
+  border: 0; background: transparent; padding: 2px;
+  font-size: 11.5px; cursor: pointer;
+  color: rgba(148, 197, 253, 0.9);
+  text-decoration: underline;
+}
+
+.nx-bulk-undo.is-notice { justify-content: center; }
+
+html.is-mobile-layout .nx-followup-previews { max-height: 34vh; }
+html.is-mobile-layout .nx-followup-preview__body { font-size: 13px; }

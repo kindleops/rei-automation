@@ -102,6 +102,7 @@ type BucketConfig = {
 }
 
 import ScheduledFollowupsPanel from './ScheduledFollowupsPanel'
+import BulkFollowUpSheet from './BulkFollowUpSheet'
 
 const BUCKETS: BucketConfig[] = [
   { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'Evidence-driven high-intent threads (list shows top 50; count is full population)', accentClass: 'is-hot', countKey: 'priority' },
@@ -1365,6 +1366,10 @@ export const InboxSidebar = ({
   }
 
   const [bulkSheet, setBulkSheet] = useState<'stage' | 'status' | 'temperature' | null>(null)
+  // Follow Up has its own sheet: it needs a server round-trip for eligibility
+  // and rendered previews, unlike the pure option-list bulk sheets.
+  const [followUpOpen, setFollowUpOpen] = useState(false)
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null)
   const [bulkConfirm, setBulkConfirm] = useState<{ action: string; label: string; ids: string[] } | null>(null)
   const [bulkUndo, setBulkUndo] = useState<{ label: string; revert: () => void } | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -1547,23 +1552,33 @@ export const InboxSidebar = ({
     })
   }, [displayedActiveThreads.length])
 
-  // Bucket SWITCH starts at the top. Re-entering the SAME bucket -- which is
-  // what happens after opening a lead and coming back -- restores where the
-  // operator was.
+  // Declared before the bucket-switch effect below, which resets this latch.
+  const scrollRestoredRef = useRef(false)
+
+  // Switching buckets must NOT destroy where the operator was standing.
+  //
+  // This previously did `listScrollMemory.delete(bucket)` on every switch, so
+  // leaving New Replies for Priority and coming back always landed at the top.
+  // Memory is per bucket and lives for the session: each bucket keeps its own
+  // position, and re-entering any of them restores it. Switching only resets
+  // the RESTORE LATCH so the new bucket gets its own restore pass.
   useEffect(() => {
     const el = groupsRef.current
     if (!el) return
     const bucket = String(activeBucketConfig.bucket)
     if (lastMountedBucket !== null && lastMountedBucket !== bucket) {
-      listScrollMemory.delete(bucket)
-      el.scrollTop = 0
+      // Park the outgoing bucket's position before the rows swap underneath us.
+      if (lastMountedBucket) listScrollMemory.set(lastMountedBucket, el.scrollTop)
+      scrollRestoredRef.current = false
+      // Start the incoming bucket at ITS remembered position (0 if never seen)
+      // rather than inheriting the outgoing bucket's offset.
+      el.scrollTop = listScrollMemory.get(bucket) ?? 0
     }
     lastMountedBucket = bucket
   }, [activeBucketConfig.bucket])
 
   // Restore once rows exist. The list is populated asynchronously, so setting
   // scrollTop before the rows paint would clamp to 0.
-  const scrollRestoredRef = useRef(false)
   useEffect(() => {
     if (scrollRestoredRef.current) return
     if (displayedActiveThreads.length === 0) return
@@ -1758,6 +1773,7 @@ export const InboxSidebar = ({
       <div className="nx-inbox-rebuilt-floating-bar">
         <div className="nx-inbox-rebuilt-floating-bar__count"><strong>{bulkSelectedIds.size}</strong> selected</div>
         <div className="nx-inbox-rebuilt-floating-bar__actions">
+          <button type="button" className="is-primary" onClick={() => setFollowUpOpen(true)}>Follow Up</button>
           <button type="button" onClick={() => setBulkSheet('stage')}>Stage</button>
           <button type="button" onClick={() => setBulkSheet('status')}>Status</button>
           <button type="button" onClick={() => setBulkSheet('temperature')}>Temp</button>
@@ -1973,6 +1989,35 @@ export const InboxSidebar = ({
   const renderBulkSheets = () => (
     <>
       {/* Value picker for stage / status / temperature */}
+      {followUpOpen && (
+        <BulkFollowUpSheet
+          threadKeys={Array.from(bulkSelectedIds).map((id) => {
+            const row = threads.find((t) => t.id === id || t.threadKey === id)
+            return String(row ? (row.threadKey || row.id) : id)
+          })}
+          onClose={() => setFollowUpOpen(false)}
+          onScheduled={(scheduledKeys) => {
+            // Only rows the SERVER confirmed leave the list. Scheduled is not
+            // sent, so nothing here claims delivery.
+            setBulkHiddenIds((prev) => {
+              const next = new Set(prev)
+              for (const key of scheduledKeys) {
+                const row = threads.find((t) => t.threadKey === key || t.id === key)
+                if (row) next.add(row.id)
+              }
+              return next
+            })
+            setFollowUpOpen(false)
+            setBulkSelectedIds(new Set())
+            // Deliberately no Undo affordance here: an undo button whose revert
+            // does nothing is a lying control, and cancelling a scheduled send
+            // is a real action that belongs in the Scheduled view where the
+            // queued row can actually be cancelled.
+            setBulkNotice(`${scheduledKeys.length} follow-up${scheduledKeys.length === 1 ? '' : 's'} scheduled`)
+            window.setTimeout(() => setBulkNotice(null), 6000)
+          }}
+        />
+      )}
       {bulkSheet && (
         <div className="nx-bulk-sheet__overlay" role="presentation" onMouseDown={() => setBulkSheet(null)}>
           <div className="nx-bulk-sheet" onMouseDown={(e) => e.stopPropagation()}>
@@ -2024,6 +2069,12 @@ export const InboxSidebar = ({
         <div className="nx-bulk-undo" role="status">
           <span>{bulkUndo.label}</span>
           <button type="button" onClick={() => { bulkUndo.revert(); setBulkUndo(null) }}>Undo</button>
+        </div>
+      )}
+      {/* Same toast shape, no action: scheduling has no honest one-tap undo. */}
+      {bulkNotice && (
+        <div className="nx-bulk-undo is-notice" role="status">
+          <span>{bulkNotice}</span>
         </div>
       )}
     </>

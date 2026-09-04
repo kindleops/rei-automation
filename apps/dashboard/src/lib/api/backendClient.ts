@@ -979,6 +979,53 @@ export function listScheduledFollowups(
   return callBackend(`/api/cockpit/inbox/scheduled${suffix}`, { method: 'GET' })
 }
 
+export type FollowUpRecipient = {
+  thread_key: string | null
+  seller_name: string | null
+  property_address: string | null
+  template_id: string | null
+  template_name: string | null
+  agent_name: string | null
+  eligible: boolean
+  reason: string | null
+  missing?: string[] | null
+  message_body?: string
+  rotation_reason?: string | null
+  schedule?: {
+    scheduled_for_utc: string
+    timezone: string
+    local_send_date: string
+    local_send_hour: number
+    effective_local_label: string
+    deferred: boolean
+  }
+}
+
+export type BulkFollowUpPlan = {
+  ok: boolean
+  label: string
+  timing: string
+  selected_count: number
+  eligible_count: number
+  needs_review_count: number
+  template_pool_size: number
+  distinct_templates_selected: number
+  recipients: FollowUpRecipient[]
+  error?: string
+}
+
+// POST /api/cockpit/inbox/bulk-follow-up
+// mode=preview renders + resolves schedules and writes NOTHING.
+// mode=schedule routes each recipient through the canonical schedule-reply path.
+export function bulkFollowUp(
+  body: { mode: 'preview' | 'schedule'; thread_keys: string[]; agent_name?: string | null },
+): Promise<BackendResult<BulkFollowUpPlan & { scheduled_count?: number; results?: unknown[] }>> {
+  return callBackend('/api/cockpit/inbox/bulk-follow-up', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 // POST /api/cockpit/inbox/auto-reply
 // Auto-reply engine queues a reply based on detected intent.
 export function autoQueueReply(payload: Record<string, unknown>): Promise<BackendResult<QueueReplyResult>> {

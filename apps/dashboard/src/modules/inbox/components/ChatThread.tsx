@@ -481,21 +481,64 @@ export const ChatThread = ({
   const scrollSnapshotRef = useRef<{ height: number; top: number; nearBottom: boolean }>({
     height: 0, top: 0, nearBottom: true,
   })
+  // Which thread the snapshot above belongs to, and per-thread session positions
+  // for operators who deliberately scrolled back through history.
+  const snapshotThreadKeyRef = useRef<string | null>(null)
+  const threadScrollMemory = useRef<Map<string, number>>(new Map())
 
   useLayoutEffect(() => {
     const node = listRef.current
     if (!node) return
+
+    // Thread IDENTITY gate. scrollSnapshotRef used to survive a thread change,
+    // so opening seller B inherited seller A's height/offset: `previous.height`
+    // was non-zero, the "jump to latest" branch was skipped, and the new thread
+    // opened at a stale offset from a different conversation. A saved position
+    // for thread A must never influence thread B.
+    const threadId = String(thread?.id ?? thread?.threadKey ?? '')
+    if (snapshotThreadKeyRef.current !== threadId) {
+      const outgoing = snapshotThreadKeyRef.current
+      if (outgoing) {
+        // Keep the operator's own position if they deliberately scrolled up.
+        const snap = scrollSnapshotRef.current
+        if (snap.height > 0 && !snap.nearBottom) {
+          threadScrollMemory.current.set(outgoing, snap.top)
+        } else {
+          threadScrollMemory.current.delete(outgoing)
+        }
+      }
+      snapshotThreadKeyRef.current = threadId
+      // Zero-state: this thread has contributed no geometry yet.
+      scrollSnapshotRef.current = { height: 0, top: 0, nearBottom: true }
+    }
+
+    // Never scroll before hydration. Measuring an empty/loading list yields a
+    // scrollHeight that is not the real content height, which is what produced
+    // the visible jump.
+    if (loading) return
+    if (!messages || messages.length === 0) return
+
     const previous = scrollSnapshotRef.current
     const nextHeight = node.scrollHeight
+
     if (previous.height > 0) {
       if (previous.nearBottom) {
         node.scrollTop = Math.max(0, nextHeight - node.clientHeight)
       } else {
         node.scrollTop = previous.top + (nextHeight - previous.height)
       }
-    } else if (nextHeight > node.clientHeight) {
-      node.scrollTop = nextHeight - node.clientHeight
+    } else {
+      // First measured paint for THIS thread. Restore a deliberate saved
+      // position if the operator had scrolled up earlier in the session;
+      // otherwise the contract is simply: latest message visible.
+      const saved = threadScrollMemory.current.get(threadId)
+      if (saved != null && saved > 0 && saved < nextHeight - node.clientHeight) {
+        node.scrollTop = saved
+      } else if (nextHeight > node.clientHeight) {
+        node.scrollTop = nextHeight - node.clientHeight
+      }
     }
+
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }
   }, [messages, loading, thread?.id])
