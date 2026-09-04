@@ -38,6 +38,8 @@ import {
 } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { fetchAllCampaignTargets, paginateRows } from '@/lib/domain/campaigns/campaign-target-pagination.js'
+import { releaseOrphanedCampaignTargets } from '@/lib/domain/campaigns/campaign-target-orphan-recovery.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
 import {
   acquireCampaignExecutionLock,
@@ -6642,14 +6644,39 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const globalStop = await globalEmergencyStopActive(deps)
   const campaignStop = isEmergencyStopActive(campaign.emergency_stop_at)
 
-  const { data: targets, error: targetError } = await supabase
-    .from('campaign_targets')
-    .select('*')
-    .eq('campaign_id', campaignId)
-    .eq('target_status', 'ready')
-    .order('priority_score', { ascending: false, nullsFirst: false })
-    .limit(10000)
-  if (targetError) throw targetError
+  /**
+   * Recover targets stranded in 'planned' before selecting.
+   *
+   * `target_status` only ever moves ready -> planned (see the update below at
+   * the hydration step); nothing moves it back. So once a target's send_queue
+   * rows all go terminal — cancelled by campaign-convert-to-live or
+   * workflow-v2/follow-up-service, or expired in bulk — it can never be
+   * selected again by the `.eq('target_status','ready')` filter below, even
+   * though it is unblocked with nothing live in the queue.
+   *
+   * Running recovery here rather than patching every cancel site keeps the fix
+   * idempotent and covers all causes. It restores eligibility only; it does not
+   * enqueue or send. Skipped on a dry run — a probe must not mutate.
+   */
+  if (!dryRun) {
+    const recovery = await releaseOrphanedCampaignTargets(campaignId, deps)
+    if (recovery.released > 0) {
+      console.log('[CAMPAIGN_TARGET_ORPHAN_RECOVERY]', { campaign_id: campaignId, released: recovery.released })
+    }
+  }
+
+  // Paginated: `.limit(10000)` is clamped to max-rows (1000) with no error, so
+  // a campaign with more than 1000 ready targets silently launched a subset.
+  const targets = await paginateRows((from, to) =>
+    supabase
+      .from('campaign_targets')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .eq('target_status', 'ready')
+      .order('priority_score', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 
   const readyTargets = targets || []
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
@@ -7908,21 +7935,27 @@ export async function getCampaignAwareQueueDiagnostics(deps = {}) {
   let queueRows = []
   let targetRows = []
   if (campaignIds.length) {
-    const [{ data }, { data: targetData }] = await Promise.all([
-      supabase
-      .from('send_queue')
-      .select('id,campaign_id,queue_status,guard_reason,blocked_reason,failed_reason,scheduled_for,metadata')
-      .in('campaign_id', campaignIds)
-      .in('queue_status', ACTIVE_QUEUE_STATUSES)
-      .limit(10000),
-      supabase
-        .from('campaign_targets')
-        .select('id,campaign_id,target_status,block_reason,identity_status,routing_status,suppression_status,template_status')
-        .in('campaign_id', campaignIds)
-        .limit(20000),
+    // Both paginated: `.limit(10000)` / `.limit(20000)` are clamped to max-rows
+    // (1000) with no error, so these diagnostics were computed from a truncated
+    // sample once either table passed 1000 rows for the selected campaigns.
+    const [queueData, targetData] = await Promise.all([
+      paginateRows((from, to) =>
+        supabase
+          .from('send_queue')
+          .select('id,campaign_id,queue_status,guard_reason,blocked_reason,failed_reason,scheduled_for,metadata')
+          .in('campaign_id', campaignIds)
+          .in('queue_status', ACTIVE_QUEUE_STATUSES)
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllCampaignTargets(
+        supabase,
+        campaignIds,
+        'id,campaign_id,target_status,block_reason,identity_status,routing_status,suppression_status,template_status',
+      ),
     ])
-    queueRows = data || []
-    targetRows = targetData || []
+    queueRows = queueData
+    targetRows = targetData
   }
   const queueDepthByCampaign = {}
   const blockedReasonCounts = {}
