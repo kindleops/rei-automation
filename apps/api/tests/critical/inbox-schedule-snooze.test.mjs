@@ -292,3 +292,63 @@ test("CONTAINMENT: the refusal happens before any queue row is built", async () 
   // No effective-time fields leak out of a blocked action.
   assert.equal(result.effective_send_at_utc, undefined);
 });
+
+// ── END-TO-END: snooze through the real live-inbox service ──────────────────
+
+import { makeLiveInboxThreadSupabase } from "../helpers/chainable-supabase.mjs";
+import { getLiveInbox } from "@/lib/domain/inbox/live-inbox-service.js";
+
+const stateRow = (over = {}) => ({
+  thread_key: "+15551230001",
+  seller_phone: "+15551230001",
+  canonical_e164: "+15551230001",
+  inbox_bucket: "new_replies",
+  latest_message_body: "Yes I still own it",
+  latest_message_at: "2026-06-27T12:00:00.000Z",
+  latest_direction: "inbound",
+  is_read: false,
+  is_suppressed: false,
+  is_archived: false,
+  message_count: 2,
+  inbound_count: 1,
+  outbound_count: 1,
+  ...over,
+});
+
+const liveNewReplies = async (supabase) =>
+  getLiveInbox(
+    { filter: "new_replies", timeout_mode: "manual_bucket_switch", limit: 10, skip_counts: "1", skip_delivery: "1" },
+    { listOnly: true, skipCounts: true, skipDelivery: true },
+    { supabase },
+  );
+
+test("E2E: an active snooze removes the thread from New Replies", async () => {
+  const before = await liveNewReplies(
+    makeLiveInboxThreadSupabase([], { stateRows: [stateRow()] }),
+  );
+  assert.equal(before.threads.length, 1, "baseline: the thread IS in New Replies");
+
+  const during = await liveNewReplies(
+    makeLiveInboxThreadSupabase([], {
+      stateRows: [stateRow({ snoozed_until: "2099-01-01T00:00:00.000Z" })],
+    }),
+  );
+  assert.equal(during.threads.length, 0, "snoozed: it must leave New Replies");
+});
+
+test("E2E: an expired snooze returns the thread with no sweeper", async () => {
+  const after = await liveNewReplies(
+    makeLiveInboxThreadSupabase([], {
+      stateRows: [stateRow({ snoozed_until: "2020-01-01T00:00:00.000Z" })],
+    }),
+  );
+  assert.equal(after.threads.length, 1, "expired snooze must restore the bucket");
+  assert.equal(after.threads[0].thread_key, "+15551230001");
+});
+
+test("E2E: unsnooze (cleared timestamp) returns the thread", async () => {
+  const after = await liveNewReplies(
+    makeLiveInboxThreadSupabase([], { stateRows: [stateRow({ snoozed_until: null })] }),
+  );
+  assert.equal(after.threads.length, 1);
+});
