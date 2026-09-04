@@ -220,10 +220,24 @@ function planSupabase() {
           { thread_key: CANARY_B, prospect_first_name: "Marcus", property_address_full: "456 Oak Ave" },
         ]);
       }
+      if (name === "inbox_thread_state") {
+        return table([
+          { thread_key: CANARY_A, master_owner_id: "mo-a" },
+          { thread_key: CANARY_B, master_owner_id: "mo-b" },
+        ]);
+      }
+      if (name === "master_owners") {
+        // The assignment of record: agent_persona is a FULL name; the canonical
+        // personalizer reduces it to a first name.
+        return table([
+          { master_owner_id: "mo-a", agent_persona: "Michael Hargrove", agent_family: "Corporate" },
+          { master_owner_id: "mo-b", agent_persona: "Helen Crawford", agent_family: "General" },
+        ]);
+      }
       if (name === "send_queue") {
         return table([
-          { thread_key: CANARY_A, template_id: "lc-reengage-agent-en-001", timezone: "Central", contact_window: "9AM-8PM CT", agent_name: "Ryan", created_at: "2026-08-01T12:00:00Z" },
-          { thread_key: CANARY_B, template_id: null, timezone: "Pacific", contact_window: "9AM-8PM PT", agent_name: "Ryan", created_at: "2026-08-01T12:00:00Z" },
+          { thread_key: CANARY_A, template_id: "lc-reengage-agent-en-001", timezone: "Central", contact_window: "9AM-8PM CT", agent_name: "Scott", sms_agent_id: "agent-scott", created_at: "2026-08-01T12:00:00Z" },
+          { thread_key: CANARY_B, template_id: null, timezone: "Pacific", contact_window: "9AM-8PM PT", agent_name: "Scott", sms_agent_id: "agent-scott", created_at: "2026-08-01T12:00:00Z" },
         ]);
       }
       return table([]);
@@ -312,4 +326,83 @@ test("PROOF 15: containment refuses every bulk recipient and writes nothing", as
     assert.equal(result.reason, "followup_disabled");
   }
   assert.equal(writes.length, 0, `containment breach: ${JSON.stringify(writes)}`);
+});
+
+
+// ── ASSIGNED AGENT ──────────────────────────────────────────────────────────
+
+test("{{agent_name}} is the agent ASSIGNED TO THAT SELLER, per recipient", async () => {
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A, CANARY_B], now: NOW },
+    { supabase: planSupabase() },
+  );
+  const a = plan.recipients.find((r) => r.thread_key === CANARY_A);
+  const b = plan.recipients.find((r) => r.thread_key === CANARY_B);
+
+  assert.equal(a.assigned_agent_name, "Michael Hargrove");
+  assert.equal(b.assigned_agent_name, "Helen Crawford");
+  // Each seller's copy is signed by THEIR OWN agent.
+  assert.match(a.message_body, /Michael/);
+  assert.match(b.message_body, /Helen/);
+  // And never by the other seller's agent.
+  assert.ok(!/Helen/.test(a.message_body), "seller A must not be signed by Helen");
+  assert.ok(!/Michael/.test(b.message_body), "seller B must not be signed by Michael");
+});
+
+test("no batch-level agent name can override a seller's assigned agent", async () => {
+  // The override parameter no longer exists; passing one must change nothing.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], agentName: "Ryan", now: NOW },
+    { supabase: planSupabase() },
+  );
+  const a = plan.recipients[0];
+  assert.equal(a.assigned_agent_name, "Michael Hargrove");
+  assert.match(a.message_body, /Michael/);
+  assert.ok(!/Ryan/.test(a.message_body), "a batch name must never speak for a seller");
+});
+
+test("a seller with no assigned agent is NEED REVIEW, never signed by someone else", async () => {
+  const noAgent = {
+    from(name) {
+      const t = (rows) => {
+        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+          then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
+        return q;
+      };
+      if (name === "sms_templates") return t(FUS2);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+      if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", agent_name: null, created_at: "2026-08-01T12:00:00Z" }]);
+      return t([]);
+    },
+  };
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: noAgent });
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, false, "unassigned seller must not be scheduled");
+  assert.equal(a.message_body, undefined, "no copy may be rendered");
+  assert.equal(plan.needs_review_count, 1);
+});
+
+
+test("the assigned agent comes from master_owners, not from who texted last", async () => {
+  // Queue history says "Scott" for both threads; the master-owner assignment
+  // says Michael Hargrove / Helen Crawford. The assignment must win.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A, CANARY_B], now: NOW },
+    { supabase: planSupabase() },
+  );
+  for (const r of plan.recipients) {
+    assert.ok(!/Scott/.test(r.message_body), "queue history must not override the assignment");
+  }
+  assert.match(plan.recipients.find((r) => r.thread_key === CANARY_A).message_body, /Michael/);
+  assert.match(plan.recipients.find((r) => r.thread_key === CANARY_B).message_body, /Helen/);
+});
+
+test("a full agent_persona renders as a first name", async () => {
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: planSupabase() },
+  );
+  const body = plan.recipients[0].message_body;
+  assert.match(body, /this is Michael\.|Michael here|it's Michael/);
+  assert.ok(!/Hargrove/.test(body), "surname must not appear in seller-facing copy");
 });

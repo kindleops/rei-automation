@@ -27,10 +27,10 @@ export async function POST(request) {
   const payload = await parseJsonSafe(request)
   const mode = String(payload?.mode || 'preview').toLowerCase()
   const threadKeys = Array.isArray(payload?.thread_keys) ? payload.thread_keys : []
-  const agentName = payload?.agent_name || null
 
   try {
-    const plan = await buildBulkFollowUpPlan({ threadKeys, agentName })
+    // No agent override is accepted: {{agent_name}} is the seller's assigned agent.
+    const plan = await buildBulkFollowUpPlan({ threadKeys })
     if (!plan.ok) return NextResponse.json(plan, { status: 400, headers: cors })
 
     if (mode === 'preview') {

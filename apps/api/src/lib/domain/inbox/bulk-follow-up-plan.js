@@ -54,12 +54,60 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       timezone: null,
       contact_window: null,
       agent_name: null,
+      agent_family: null,
+      master_owner_id: null,
     });
   }
 
+  // ── Assigned agent ────────────────────────────────────────────────────────
+  // The agent assigned to a seller lives on the MASTER OWNER
+  // (master_owners.agent_persona, e.g. "Helen Crawford"), reached through
+  // inbox_thread_state.master_owner_id. That is the assignment of record and it
+  // covers ~99% of threads; the sending number is NOT a proxy for it (a single
+  // number has carried seven different agents). personalizeTemplate applies
+  // firstNameOnly(), so "Helen Crawford" renders as "Helen".
+  const { data: stateRows } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key,master_owner_id")
+    .in("thread_key", keys);
+
+  const ownerByThread = new Map();
+  const ownerIds = [];
+  for (const row of stateRows || []) {
+    const key = clean(row.thread_key);
+    const ownerId = clean(row.master_owner_id);
+    if (!key || !ownerId) continue;
+    ownerByThread.set(key, ownerId);
+    ownerIds.push(ownerId);
+  }
+
+  if (ownerIds.length) {
+    const { data: owners } = await supabase
+      .from("master_owners")
+      .select("master_owner_id,agent_persona,agent_family")
+      .in("master_owner_id", [...new Set(ownerIds)]);
+
+    const agentByOwner = new Map();
+    for (const row of owners || []) {
+      const id = clean(row.master_owner_id);
+      if (id) agentByOwner.set(id, { agent_persona: clean(row.agent_persona), agent_family: clean(row.agent_family) });
+    }
+    for (const [key, ownerId] of ownerByThread.entries()) {
+      const ctx = contexts.get(key);
+      const assigned = agentByOwner.get(ownerId);
+      if (!ctx || !assigned) continue;
+      ctx.agent_name = assigned.agent_persona || null;
+      ctx.agent_family = assigned.agent_family || null;
+      ctx.master_owner_id = ownerId;
+    }
+  }
+
+  // Timezone / contact window still come from the thread's own send history.
+  // agent_name is filled here ONLY as a last resort for the ~1% of threads with
+  // no master-owner assignment -- it is who actually texted this seller before.
   const { data: queueRows } = await supabase
     .from("send_queue")
-    .select("thread_key,timezone,contact_window,agent_name,created_at")
+    .select("thread_key,timezone,contact_window,agent_name,sms_agent_id,created_at")
     .in("thread_key", keys)
     .order("created_at", { ascending: false });
 
@@ -71,6 +119,7 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
     if (!ctx.timezone && clean(row.timezone)) ctx.timezone = clean(row.timezone);
     if (!ctx.contact_window && clean(row.contact_window)) ctx.contact_window = clean(row.contact_window);
     if (!ctx.agent_name && clean(row.agent_name)) ctx.agent_name = clean(row.agent_name);
+    if (!ctx.sms_agent_id && clean(row.sms_agent_id)) ctx.sms_agent_id = clean(row.sms_agent_id);
   }
 
   for (const key of keys) {
@@ -85,9 +134,11 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
 
 /**
  * @param {string[]} threadKeys  Selected threads.
- * @param {string} [agentName]   Operator override for {{agent_name}}.
+ *
+ * Note there is deliberately NO agent-name override. {{agent_name}} always
+ * resolves to the agent assigned to that seller.
  */
-export async function buildBulkFollowUpPlan({ threadKeys = [], agentName = null, now = new Date() } = {}, deps = {}) {
+export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
   if (!keys.length) {
@@ -116,12 +167,19 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], agentName = null,
     const plan = buildRecipientPlan({
       thread: ctx,
       template: selection.ok ? selection.template : null,
-      agentName: clean(agentName) || ctx.agent_name,
+      // The agent ASSIGNED TO THIS SELLER, and nothing else. A batch-level name
+      // must never speak for a seller: the templates say "this is {{agent_name}}",
+      // so borrowing another agent's name misrepresents who is texting them.
+      // No assignment => no agent_name => renderSafeTemplate rejects the
+      // recipient into NEED REVIEW, which is the correct outcome.
+      agentName: ctx.agent_name,
       now,
     });
 
     recipients.push({
       ...plan,
+      assigned_agent_name: ctx.agent_name || null,
+      sms_agent_id: ctx.sms_agent_id || null,
       rotation_reason: selection.rotation_reason || null,
       variants_exhausted: selection.exhausted === true,
     });
