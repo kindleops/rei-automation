@@ -180,9 +180,12 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   "dnc_opt_out",
   "waiting_on_seller",
   "automated",
-  // Inbox Zero surfaces: work intentionally removed from the actionable queue.
+  // Inbox Zero surface. Only snoozed is a THREAD-STATE count and can be
+  // derived here. "scheduled" is deliberately absent: scheduled follow-ups
+  // live in send_queue, not in thread state, so seeding the key would make
+  // buildEmptyCounts report a confident 0 while real scheduled rows existed.
+  // Left undefined, the chip renders "—" (unknown) instead of lying.
   "snoozed",
-  "scheduled",
 ];
 
 export function compactInboxThreadSummaryRow(row = {}) {

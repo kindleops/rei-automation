@@ -1502,19 +1502,6 @@ function toSupabaseBoolean(value) {
 }
 
 function applyInboxThreadStateBucketFilter(query, normalized) {
-  // Actively snoozed threads are withheld from every ACTIONABLE key list, at
-  // the authoritative source. This has to happen here rather than only in the
-  // in-memory post-filter: the fallback sources (canonical_inbox_threads,
-  // v_inbox_threads_live_v2) do not carry snoozed_until, so a row that reaches
-  // them unfiltered arrives with the field undefined and reads as "not
-  // snoozed" -- it would sit in Priority/New Replies for the whole snooze.
-  // Written as an OR so rows with a NULL snoozed_until are kept; a bare
-  // comparison would silently drop every never-snoozed thread.
-  const SNOOZE_EXEMPT_FILTERS = new Set(["snoozed", "all", "all_messages", "archived"]);
-  if (!SNOOZE_EXEMPT_FILTERS.has(normalized) && typeof query.or === "function") {
-    query = query.or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
-  }
-
   switch (normalized) {
     case "priority":
       query = query.eq("inbox_bucket", "priority");
@@ -1598,7 +1585,8 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
 
   let query = supabase
     .from("inbox_thread_state")
-    .select("thread_key")
+    // snoozed_until rides along so active snoozes can be dropped below.
+    .select("thread_key,snoozed_until")
     .not("thread_key", "is", null)
     .neq("thread_key", "");
 
@@ -1607,7 +1595,27 @@ async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
   const { data, error } = await query;
   if (error) throw error;
 
-  const explicitKeys = [...new Set((data || []).map((row) => clean(row.thread_key)).filter(Boolean))];
+  // Actively snoozed threads are withheld from every ACTIONABLE key list.
+  // This has to happen here, not only in the in-memory post-filter: the
+  // fallback sources (canonical_inbox_threads, v_inbox_threads_live_v2) do not
+  // carry snoozed_until, so a snoozed row reaching them arrives with the field
+  // undefined, reads as "not snoozed", and would sit in Priority/New Replies
+  // for the whole snooze. Filtered in JS rather than as a second .or() on the
+  // shared query builder: stacking OR groups is easy to get subtly wrong, and
+  // an absent/NULL snoozed_until must KEEP the row -- a naive comparison drops
+  // every never-snoozed thread, which is nearly all of them.
+  const SNOOZE_EXEMPT_FILTERS = new Set(["snoozed", "all", "all_messages", "archived"]);
+  const dropsSnoozed = !SNOOZE_EXEMPT_FILTERS.has(normalized);
+  const keyNowMs = Date.now();
+  const visibleRows = (data || []).filter((row) => {
+    if (!dropsSnoozed) return true;
+    const until = row?.snoozed_until;
+    if (!until) return true;
+    const ts = new Date(until).getTime();
+    return !(Number.isFinite(ts) && ts > keyNowMs);
+  });
+
+  const explicitKeys = [...new Set(visibleRows.map((row) => clean(row.thread_key)).filter(Boolean))];
   const derivedNullKeys = await fetchDerivedNullBucketThreadKeysForTab(supabase, normalized);
   return [...new Set([...explicitKeys, ...derivedNullKeys])];
 }
