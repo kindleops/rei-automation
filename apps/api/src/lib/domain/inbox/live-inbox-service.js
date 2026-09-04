@@ -122,6 +122,22 @@ function compactBootThreadRow(row = {}) {
     inbox_bucket: row.inbox_bucket || row.inbox_category || null,
     inbox_category: row.inbox_category || row.inbox_bucket || null,
     inbox_status: row.inbox_status || row.inbox_bucket || null,
+    // Universal lead state must survive compaction. This function whitelists
+    // the row it returns, so every state field added upstream was silently
+    // dropped here -- three field lists were fixed and the values still came
+    // back null because THIS is the last gate on the default view. These are
+    // what the composer, pipeline and map resolve their Status/Stage/
+    // Temperature labels from.
+    status: row.status || row.operational_status || null,
+    operational_status: row.operational_status || row.conversation_status || null,
+    conversation_status: row.conversation_status || row.operational_status || null,
+    stage: row.stage || row.seller_stage || row.lifecycle_stage || null,
+    seller_stage: row.seller_stage || row.lifecycle_stage || row.stage || null,
+    lifecycle_stage: row.lifecycle_stage || row.seller_stage || null,
+    lead_temperature: row.lead_temperature || null,
+    temperature: row.lead_temperature || null,
+    disposition: row.disposition || null,
+    is_archived: row.is_archived === true,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || null,
     owner_display_name: row.owner_display_name || row.owner_name || null,
     seller_display_name: row.seller_display_name || row.owner_name || null,
