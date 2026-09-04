@@ -1771,7 +1771,10 @@ export const InboxSidebar = ({
   )
 
   const renderMultiSelectBar = () => (
-    bulkSelectedIds.size > 0 && (
+    // Hidden while a sheet owns the screen: the sheet already states the
+    // selection count, and leaving the dock mounted let it paint over the
+    // sheet's content on mobile.
+    bulkSelectedIds.size > 0 && !followUpOpen && !bulkSheet && !bulkConfirm && (
       <div className="nx-inbox-rebuilt-floating-bar">
         <div className="nx-inbox-rebuilt-floating-bar__count"><strong>{bulkSelectedIds.size}</strong> selected</div>
         <div className="nx-inbox-rebuilt-floating-bar__actions">

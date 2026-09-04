@@ -194,7 +194,16 @@ html.is-mobile-layout .nx-scheduled-panel {
    Compact bottom sheet, not a wizard: counts, timing, a few rendered examples,
    and one commit button. Sets no heights on any ancestor. */
 
-.nx-followup-sheet { gap: 10px; }
+.nx-followup-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Bounded so a long preview list scrolls INSIDE the sheet instead of pushing
+     the Schedule button off-screen. */
+  max-height: 86vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 .nx-followup-sheet__status,
 .nx-followup-sheet__error {
@@ -317,4 +326,17 @@ html.is-mobile-layout .nx-followup-preview__body { font-size: 13px; }
   border: 1px solid rgba(167, 139, 250, 0.3);
   background: rgba(167, 139, 250, 0.12);
   color: rgba(196, 181, 253, 0.95);
+}
+
+/* Mobile: the sheet is the top layer, so its own actions must stay reachable
+   above the home indicator without relying on the dock's spacing. */
+html.is-mobile-layout .nx-followup-sheet {
+  max-height: 88vh;
+  padding-bottom: calc(8px + var(--nx-mobile-safe-bottom, 0px));
+}
+html.is-mobile-layout .nx-bulk-sheet__actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--nx-ib-surface-solid, rgba(12, 17, 26, 0.98));
+  padding-top: 8px;
 }

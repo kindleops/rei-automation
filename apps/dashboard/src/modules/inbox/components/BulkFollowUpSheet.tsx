@@ -88,8 +88,14 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
   const shown = showAll ? eligible : eligible.slice(0, PREVIEW_COUNT)
 
   return (
-    <div className="nx-bulk-sheet-backdrop" onClick={onClose}>
-      <div className="nx-bulk-sheet nx-followup-sheet" onClick={(e) => e.stopPropagation()}>
+    // Canonical sheet chrome: .nx-bulk-sheet__overlay is the class that actually
+    // carries position:fixed + z-index:200, which is what lifts the sheet above
+    // the multi-select dock (z-index 160). The invented class name it used
+    // before had NO styles at all, so the sheet rendered in normal flow and the
+    // dock painted straight over the previews. onMouseDown (not onClick) matches
+    // the sibling sheets and fires before focus/scroll can steal the gesture.
+    <div className="nx-bulk-sheet__overlay" role="presentation" onMouseDown={onClose}>
+      <div className="nx-bulk-sheet nx-followup-sheet" onMouseDown={(e) => e.stopPropagation()}>
         <div className="nx-bulk-sheet__title">{plan?.label ?? 'Conversation Restart'}</div>
 
         {loading && <div className="nx-followup-sheet__status">Checking {threadKeys.length} leads…</div>}
