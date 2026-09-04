@@ -1716,6 +1716,20 @@ const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   // and dropped every one, turning "returns everything" into "returns nothing".
   // Selecting it also stops is_archived reading as null in every API response.
   "is_archived",
+  // Universal lead state. These were absent from the fast path entirely, so the
+  // API returned operational_status/conversation_status/seller_stage/
+  // lead_temperature as null on every row and `status` carried the BUCKET.
+  // The composer resolves its Stage/Status/Temperature labels from exactly
+  // these fields, so a write persisted correctly and the control kept showing
+  // the old value -- indistinguishable from "nothing happens".
+  "status",
+  "operational_status",
+  "conversation_status",
+  "stage",
+  "seller_stage",
+  "lifecycle_stage",
+  "lead_temperature",
+  "disposition",
   "seller_phone",
   "canonical_e164",
   "our_number",
@@ -1814,6 +1828,15 @@ function mapAuthoritativeInboxRow(row = {}) {
     automation_lane: row.automation_lane,
     conversation_stage: row.seller_stage || row.conversation_stage || null,
     universal_stage: row.seller_stage || row.universal_stage || null,
+    // Pass the canonical state through untouched so the dashboard's
+    // resolveThreadStatus / resolveThreadStage / resolveThreadTemperature find
+    // real values instead of falling through to the bucket name.
+    operational_status: row.operational_status || row.conversation_status || row.status || null,
+    conversation_status: row.conversation_status || row.operational_status || null,
+    seller_stage: row.seller_stage || row.lifecycle_stage || row.stage || null,
+    lifecycle_stage: row.lifecycle_stage || row.seller_stage || null,
+    lead_temperature: row.lead_temperature || null,
+    disposition: row.disposition || null,
   };
 }
 
