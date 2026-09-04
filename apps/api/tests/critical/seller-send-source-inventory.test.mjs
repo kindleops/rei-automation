@@ -210,3 +210,30 @@ test("the Discord operator reply has NO deterministic identity at all", () => {
   assert.match(route, /const queue_key = randomUUID\(\);/,
     "if this gained a deterministic derivation, update the inventory severity note");
 });
+
+// ── the new seam is dormant until the migration gate ───────────────────────
+
+test("the canonical dispatch seam is not wired into any live path", () => {
+  // §11's tables do not exist in production (verified: 0 tables, 0 RPCs). Until
+  // they do, the seam must remain unreachable, so landing this branch cannot
+  // change what any seller receives. When convergence begins, this test is
+  // replaced by the inverse assertion: that every PENDING_CONVERGENCE source
+  // reaches the provider ONLY through it.
+  const importers = FILES
+    .filter((f) => !rel(f).startsWith("lib/domain/communications/"))
+    .filter((f) => /canonical-communication-dispatch|executeSellerCommunicationAttempt/.test(code(f)))
+    .map(rel);
+  assert.deepEqual(importers, [],
+    `the seam became reachable before the migration was applied:\n  ${importers.join("\n  ")}`);
+});
+
+test("the seam refuses rather than falling back when its store is missing", () => {
+  // The failure mode that would quietly undo the whole slice: a dispatcher that
+  // shrugs and calls the old send path when the ledger is unavailable. Pin the
+  // absence of any such fallback.
+  const seam = code(path.join(SRC, "lib/domain/communications/canonical-communication-dispatch.js"));
+  assert.match(seam, /logical_communication_store_unavailable/,
+    "a missing store must produce a refusal");
+  assert.ok(!/sendTextgridSMS/.test(seam),
+    "the seam must reach the provider only through its injected sendProvider");
+});
