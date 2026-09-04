@@ -221,8 +221,17 @@ export function compactInboxThreadSummaryRow(row = {}) {
     inbox_bucket: row.inbox_bucket || row.inbox_category || null,
     inbox_category: row.inbox_category || row.inbox_bucket || null,
     conversation_stage: row.conversation_stage || row.stage || row.universal_stage || null,
-    stage: row.stage || row.conversation_stage || row.universal_stage || null,
-    status: row.status || row.universal_status || row.inbox_status || null,
+    stage: row.stage || row.conversation_stage || row.seller_stage || row.universal_stage || null,
+    seller_stage: row.seller_stage || row.stage || row.conversation_stage || null,
+    status: row.status || row.conversation_status || row.universal_status || row.inbox_status || null,
+    operational_status: row.conversation_status || row.status || row.universal_status || null,
+    conversation_status: row.conversation_status || row.status || null,
+    // The mapper builds an explicit object, so a column that is merely SELECTED
+    // never reaches the client unless it is emitted here too. lead_temperature
+    // was added to the select and still came back 0/30 for exactly that reason.
+    lead_temperature: row.lead_temperature || row.temperature || null,
+    temperature: row.lead_temperature || row.temperature || null,
+    is_archived: row.is_archived === true,
     unread_count: Number.isFinite(Number(row.unread_count)) ? Number(row.unread_count) : 0,
     is_suppressed: row.is_suppressed === true || row.opt_out === true,
     suppression_status: row.suppression_status || (row.is_suppressed ? "suppressed" : null),
