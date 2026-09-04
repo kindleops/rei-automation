@@ -23,6 +23,17 @@ import { InboxStreetViewThumb } from './InboxStreetViewThumb'
 import { VirtualizedInboxList } from './VirtualizedInboxList'
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
+/**
+ * Last scroll position per bucket, kept OUTSIDE the component on purpose.
+ * Opening a thread unmounts the sidebar on mobile, so component state cannot
+ * survive it -- the operator scrolled far down through several Load Mores,
+ * opened a lead, came back and was returned to the top every time. Keyed by
+ * bucket so each list remembers its own place; a genuine bucket SWITCH still
+ * starts at the top.
+ */
+const listScrollMemory = new Map<string, number>()
+let lastMountedBucket: string | null = null
+
 export interface AdvancedFilterOptions {
   markets: string[]
   states: string[]
@@ -1522,13 +1533,53 @@ export const InboxSidebar = ({
     })
   }, [displayedActiveThreads.length])
 
-  // Reset scroll to top on every bucket/category switch.
-  // scrollPreserveRef is only set by Load More, so this never conflicts with it.
+  // Bucket SWITCH starts at the top. Re-entering the SAME bucket -- which is
+  // what happens after opening a lead and coming back -- restores where the
+  // operator was.
   useEffect(() => {
     const el = groupsRef.current
     if (!el) return
-    console.log('[BUCKET_SWITCH_RESET_SCROLL]', { bucket: activeBucketConfig.bucket })
-    el.scrollTop = 0
+    const bucket = String(activeBucketConfig.bucket)
+    if (lastMountedBucket !== null && lastMountedBucket !== bucket) {
+      listScrollMemory.delete(bucket)
+      el.scrollTop = 0
+    }
+    lastMountedBucket = bucket
+  }, [activeBucketConfig.bucket])
+
+  // Restore once rows exist. The list is populated asynchronously, so setting
+  // scrollTop before the rows paint would clamp to 0.
+  const scrollRestoredRef = useRef(false)
+  useEffect(() => {
+    if (scrollRestoredRef.current) return
+    if (displayedActiveThreads.length === 0) return
+    const el = groupsRef.current
+    if (!el) return
+    const saved = listScrollMemory.get(String(activeBucketConfig.bucket)) ?? 0
+    scrollRestoredRef.current = true
+    if (saved > 0) requestAnimationFrame(() => { el.scrollTop = saved })
+  }, [displayedActiveThreads.length, activeBucketConfig.bucket])
+
+  // Remember the position as the operator scrolls.
+  useEffect(() => {
+    const el = groupsRef.current
+    if (!el) return
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        listScrollMemory.set(String(activeBucketConfig.bucket), el.scrollTop)
+      })
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      if (frame) cancelAnimationFrame(frame)
+      // Capture the final position on unmount -- opening a thread unmounts this
+      // component, and that is exactly the position worth keeping.
+      listScrollMemory.set(String(activeBucketConfig.bucket), el.scrollTop)
+    }
   }, [activeBucketConfig.bucket])
 
   // Keep the active category tab centered / visible in the horizontal rail (25% and narrow headers).
