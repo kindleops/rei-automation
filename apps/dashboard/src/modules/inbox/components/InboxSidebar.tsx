@@ -91,7 +91,9 @@ interface InboxSidebarProps {
 type BucketConfig = {
   // 'archived' is a terminal, non-operational bucket: it is a valid sidebar
   // filter but deliberately not part of the operational CanonicalBucket set.
-  bucket: CanonicalBucket | 'archived'
+  // 'snoozed' and 'scheduled' are sidebar sub-views like 'archived': valid
+  // filters, deliberately not part of the operational CanonicalBucket set.
+  bucket: CanonicalBucket | 'archived' | 'snoozed' | 'scheduled'
   view: InboxViewSelectValue
   label: string
   shortLabel: string
@@ -1849,7 +1851,8 @@ export const InboxSidebar = ({
               const match = threads.find(
                 (t) => t.threadKey === threadKey || t.id === threadKey,
               )
-              if (match) onSelect?.(match)
+              // onSelect takes a thread id, not the row object.
+              if (match) onSelect?.(String(match.id))
             }}
           />
         ) : (

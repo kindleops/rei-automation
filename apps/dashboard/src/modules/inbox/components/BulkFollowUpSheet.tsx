@@ -46,8 +46,13 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     const res = await bulkFollowUp({ mode: 'preview', thread_keys: threadKeys })
-    if (!res.ok || !res.data?.ok) {
-      setError(res.data?.error ?? res.errorMessage ?? 'Could not build follow-up preview')
+    // BackendResult is a discriminated union: `data` only exists on the success
+    // arm, so it has to be narrowed on `ok` before being read.
+    if (!res.ok) {
+      setError(res.message || res.error || 'Could not build follow-up preview')
+      setPlan(null)
+    } else if (!res.data?.ok) {
+      setError(res.data?.error ?? 'Could not build follow-up preview')
       setPlan(null)
     } else {
       setPlan(res.data)
@@ -62,10 +67,14 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
     setBusy(true)
     const res = await bulkFollowUp({ mode: 'schedule', thread_keys: threadKeys })
     setBusy(false)
-    if (!res.ok || !res.data?.ok) {
-      // Scheduled means scheduled. A failure is surfaced, never swallowed into
-      // an optimistic success.
-      setError(res.data?.error ?? res.errorMessage ?? 'Scheduling was refused')
+    // Scheduled means scheduled. A failure is surfaced, never swallowed into an
+    // optimistic success.
+    if (!res.ok) {
+      setError(res.message || res.error || 'Scheduling was refused')
+      return
+    }
+    if (!res.data?.ok) {
+      setError(res.data?.error ?? 'Scheduling was refused')
       return
     }
     const done = (res.data.results ?? [])

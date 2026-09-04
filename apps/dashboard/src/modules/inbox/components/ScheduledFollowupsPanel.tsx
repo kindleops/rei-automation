@@ -39,8 +39,11 @@ export function ScheduledFollowupsPanel({ threadKey, onOpenThread, onCancelSched
     setLoading(true)
     setError(null)
     const result = await listScheduledFollowups({ limit: 50, threadKey })
-    if (!result.ok || !result.data?.ok) {
-      setError(result.errorMessage ?? 'Could not load scheduled follow-ups')
+    if (!result.ok) {
+      setError(result.message || result.error || 'Could not load scheduled follow-ups')
+      setItems([])
+    } else if (!result.data?.ok) {
+      setError('Could not load scheduled follow-ups')
       setItems([])
     } else {
       setItems(result.data.items ?? [])
