@@ -97,6 +97,13 @@ const REPRESENTATIVE_PROVIDER_ERRORS = [
   ["invalid_number", { message: "invalid 'to' phone number" }],
   ["transient_credit", { message: "account out of credit" }],
   ["unknown_transient", { message: "some transient glitch" }],
+  // The canonical RETRY-SAFE class: the socket was refused, so no request left
+  // this process and no SMS can exist. Without a transport case the graph could
+  // not represent bounded retryable recovery at all.
+  ["transport_connect_refused", { message: "fetch failed", cause: { code: "ECONNREFUSED" } }],
+  // The canonical AMBIGUOUS class: a timeout after the request may have been
+  // written. Must be terminal and non-retryable.
+  ["transport_ambiguous_timeout", { name: "TimeoutError", message: "The operation was aborted due to timeout" }],
 ];
 
 // Queue dispositions that represent a bounded, durable outcome of a send

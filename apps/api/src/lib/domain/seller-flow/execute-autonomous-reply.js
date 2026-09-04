@@ -4,6 +4,7 @@ import { normalizePhone } from "@/lib/utils/phones.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { enqueueCanonicalOutboundSms } from "@/lib/domain/queue/canonical-queue-writer.js";
+import { findAmbiguousPriorSend } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
 
 const logger = child({ module: "domain.auto_reply.execute_autonomous_reply" });
 
@@ -64,6 +65,33 @@ export async function executeAutonomousReply(input = {}, deps = {}) {
       if ((duplicate_count ?? 0) > 0) {
         logger.warn("auto_reply.duplicate_body_blocked", { to_phone, thread_key });
         return { ok: false, reason: "24h_duplicate_body" };
+      }
+
+      // AMBIGUOUS PRIOR ATTEMPT. The status filter above deliberately lists
+      // only live/consumed statuses, so a row finalized `failed` does not block
+      // a new reply. That is correct for a provably-unsent failure and WRONG for
+      // an ambiguous one: a timeout may have been delivered, so creating another
+      // reply would be the seller's second message.
+      const ambiguous_prior = await findAmbiguousPriorSend({
+        supabase,
+        to_phone_number: to_phone,
+        since: window_start,
+        transport_fingerprint,
+      });
+      if (ambiguous_prior.found || ambiguous_prior.degraded) {
+        logger.warn("auto_reply.ambiguous_prior_send_blocked", {
+          to_phone,
+          thread_key,
+          prior_row_id: ambiguous_prior.row_id,
+          failure_class: ambiguous_prior.failure_class,
+          degraded: ambiguous_prior.degraded,
+        });
+        return {
+          ok: false,
+          reason: ambiguous_prior.degraded
+            ? "ambiguous_prior_check_unavailable"
+            : "ambiguous_prior_send",
+        };
       }
     } catch (err) {
       logger.error("auto_reply.duplicate_check_error", { error: err.message });
