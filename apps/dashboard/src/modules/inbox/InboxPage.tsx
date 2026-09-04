@@ -3505,6 +3505,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     // semantics are invented here. Counts are not adjusted locally --
     // handleWorkflowMutation already reconciles them against the server.
     if (mutationOk !== false) {
+      // NEVER hide the thread that is currently open. Doing so pulls its row out
+      // from under the conversation pane: the composer stayed on screen but the
+      // messages and the whole state bar vanished, so changing Status appeared
+      // to break the thread. The list still reconciles on the next refetch, and
+      // the operator sees the move when they go back -- which is the moment it
+      // is useful, rather than mid-edit.
+      const isOpenThread = selectedRef.current?.id === thread.id
       const VIEW_TO_BUCKET: Record<string, string> = {
         priority: 'priority',
         new_replies: 'new_replies',
@@ -3523,7 +3530,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (action === 'archive') {
         // Archived threads leave every operational bucket. They remain in All
         // Threads and appear under Archived.
-        if (!staysVisibleEverywhere && activeBucket !== 'archived') hideThreadLocally(thread.id)
+        if (!staysVisibleEverywhere && activeBucket !== 'archived' && !isOpenThread) hideThreadLocally(thread.id)
       } else if (action === 'unarchive' || action === 'unread') {
         unhideThreadLocally(thread.id)
       } else {
@@ -3534,7 +3541,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         if (Object.keys(patch).length > 0 && !staysVisibleEverywhere) {
           try {
             const derived = classifyInboxBucket({ ...thread, ...patch } as InboxWorkflowThread)?.bucket
-            if (derived && derived !== activeBucket) hideThreadLocally(thread.id)
+            if (derived && derived !== activeBucket && !isOpenThread) hideThreadLocally(thread.id)
           } catch { /* classification must never break the action */ }
         }
       }
