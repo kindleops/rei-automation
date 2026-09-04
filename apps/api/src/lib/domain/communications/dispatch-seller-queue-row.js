@@ -47,6 +47,19 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
   const store = deps.store || createSellerCommunicationStore({ supabase: deps.supabase });
   const queue_row_id = clean(queue_row.id) || null;
 
+  // A store that cannot answer is not permission to send, and it must REFUSE
+  // rather than throw: a TypeError escaping the dispatch path is something a
+  // caller may catch and mistake for a transport failure, which is the one
+  // reading that could justify a retry.
+  if (typeof store?.getOrCreateLogicalCommunication !== 'function'
+    || typeof store?.allocateAttempt !== 'function') {
+    logger.error('queue_dispatch.store_unavailable', { queue_row_id });
+    return {
+      ok: false, sent: false, provider_invoked: false,
+      stage: 'store', reason: 'logical_communication_store_unavailable',
+    };
+  }
+
   // ── 1. which action does this row schedule? ──────────────────────────────
   const identity = resolveQueueRowIdentity(queue_row);
   if (!identity.ok) {
