@@ -1171,9 +1171,19 @@ export function updateThreadState(
   patch: Record<string, unknown>,
   meta: Record<string, unknown> = {},
 ): Promise<BackendResult<ThreadStateResult>> {
-  return callBackend<ThreadStateResult>(`/api/cockpit/inbox/threads/${threadKey}`, {
+  // /api/cockpit/inbox/threads/{key} whitelists only is_read, is_pinned,
+  // is_archived, manual_review and assigned_user. Anything else leaves its
+  // `patch` empty and it answers {ok:true, ignored:true} -- a SILENT no-op that
+  // the caller reads as success. Stage, status and temperature were being
+  // dropped there, which is why manual edits appeared to work and changed
+  // nothing.
+  //
+  // /api/cockpit/inbox/thread-state accepts the full contract; verified against
+  // staging that stage, status, temperature, is_archived and is_read all
+  // persist through it. It takes the patch NESTED, not flattened.
+  return callBackend<ThreadStateResult>('/api/cockpit/inbox/thread-state', {
     method: 'PATCH',
-    body: JSON.stringify({ ...patch, ...meta, thread_key: threadKey }),
+    body: JSON.stringify({ thread_key: threadKey, patch, ...meta }),
   })
 }
 

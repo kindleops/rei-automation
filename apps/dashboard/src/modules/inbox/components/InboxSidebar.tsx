@@ -1763,12 +1763,30 @@ export const InboxSidebar = ({
             ) : displayedActiveThreads.map((thread) => {
               const id = thread.id
               const isPicked = bulkSelectedIds.has(id)
-              const beginPress = () => {
+              // Long press must survive a real touch. Pointer events are NOT
+              // usable here: inside a scrollable list the browser claims the
+              // gesture for panning and fires pointercancel within ~100ms, well
+              // before any hold threshold, so a pointercancel-cancels-the-timer
+              // implementation can never fire on a phone. It only ever worked
+              // against synthetic events.
+              //
+              // Touch events are driven by the finger, not the scroller, so the
+              // hold is cancelled by actual MOVEMENT past a threshold rather
+              // than by the browser's gesture decision.
+              const endPress = () => {
+                if (longPressRef.current.timer != null) {
+                  window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                }
+              }
+              const startAt = { x: 0, y: 0 }
+              const armPress = (x: number, y: number) => {
+                startAt.x = x; startAt.y = y
                 longPressRef.current.fired = false
+                endPress()
                 longPressRef.current.timer = window.setTimeout(() => {
+                  longPressRef.current.timer = null
                   longPressRef.current.fired = true
-                  // Long press selects. Once anything is selected, plain taps
-                  // toggle instead of opening the thread.
                   setBulkSelectedIds((prev) => {
                     const next = new Set(prev)
                     next.has(id) ? next.delete(id) : next.add(id)
@@ -1777,20 +1795,24 @@ export const InboxSidebar = ({
                   if (navigator.vibrate) navigator.vibrate(12)
                 }, 420)
               }
-              const endPress = () => {
-                if (longPressRef.current.timer != null) {
-                  window.clearTimeout(longPressRef.current.timer)
-                  longPressRef.current.timer = null
-                }
+              const moveGuard = (x: number, y: number) => {
+                // 12px of slop: a resting finger jitters, a scroll does not.
+                if (Math.abs(x - startAt.x) > 12 || Math.abs(y - startAt.y) > 12) endPress()
               }
               return (
                 <div
                   key={thread.threadKey || id}
                   className={cls('nx-row-pick', isPicked && 'is-picked', bulkSelectedIds.size > 0 && 'is-selecting')}
-                  onPointerDown={beginPress}
-                  onPointerUp={endPress}
-                  onPointerLeave={endPress}
-                  onPointerCancel={endPress}
+                  onTouchStart={(e) => { const t = e.touches[0]; if (t) armPress(t.clientX, t.clientY) }}
+                  onTouchMove={(e) => { const t = e.touches[0]; if (t) moveGuard(t.clientX, t.clientY) }}
+                  onTouchEnd={endPress}
+                  onTouchCancel={endPress}
+                  // Mouse only -- touch is handled above. Without the guard both
+                  // families fire on a phone and race each other.
+                  onPointerDown={(e) => { if (e.pointerType === 'mouse') armPress(e.clientX, e.clientY) }}
+                  onPointerMove={(e) => { if (e.pointerType === 'mouse') moveGuard(e.clientX, e.clientY) }}
+                  onPointerUp={(e) => { if (e.pointerType === 'mouse') endPress() }}
+                  onPointerLeave={(e) => { if (e.pointerType === 'mouse') endPress() }}
                   onClickCapture={(e) => {
                     // Suppress the tap that ends a long press, and make taps
                     // toggle selection while a selection is active.
