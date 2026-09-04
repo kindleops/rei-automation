@@ -1210,9 +1210,13 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         queue_key: normalized.queue_key,
         queue_id,
         queue_status: "queued",
+        // A caller-supplied schedule is authoritative for ALL THREE instant
+        // columns. Pinning utc/local to `now` while scheduled_for pointed at a
+        // future instant left the row internally inconsistent, and any reader
+        // falling back to scheduled_for_utc/_local saw an already-due message.
         scheduled_for: clean(input.scheduled_for) || now,
-        scheduled_for_utc: now,
-        scheduled_for_local: now,
+        scheduled_for_utc: clean(input.scheduled_for_utc) || clean(input.scheduled_for) || now,
+        scheduled_for_local: clean(input.scheduled_for_local) || clean(input.scheduled_for) || now,
         timezone: clean(input.timezone) || "America/Chicago",
         send_priority: 10,
         is_locked: false,

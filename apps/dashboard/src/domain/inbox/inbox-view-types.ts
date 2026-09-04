@@ -20,6 +20,8 @@ export type InboxViewSelectValue =
   | 'pinned'
   | 'unassigned'
   | 'archived'
+  | 'snoozed'
+  | 'scheduled'
   | 'spanish_language'
   | 'auto_replied'
   | 'needs_reply'

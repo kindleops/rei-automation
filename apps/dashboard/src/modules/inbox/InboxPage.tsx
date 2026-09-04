@@ -274,6 +274,8 @@ import './conversation-live.css'
 // html.is-mobile-layout (0,2,1+), which outranks the bare-class rules in
 // the legacy sheets on specificity alone.
 import './inbox-mobile-premium.css'
+import './inbox-scheduled-panel.css'
+// RISK-013: nx-ui-foundation-final.css MUST remain the LAST css import.
 import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'

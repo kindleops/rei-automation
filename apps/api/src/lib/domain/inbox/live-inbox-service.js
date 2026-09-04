@@ -70,6 +70,10 @@ const BOOT_FAST_THREAD_FIELDS = [
   "is_read",
   "is_suppressed",
   "is_archived",
+  // Snooze. Same lesson as is_archived: a column the canonical list never
+  // SELECTs cannot be filtered in memory, so snoozed_until has to travel.
+  "snoozed_until",
+  "snooze_reason",
   // Universal lead state. This list serves filter=all -- the DEFAULT view --
   // and omitted every state column, so operational_status / seller_stage /
   // lead_temperature came back null on the rows the dashboard shows first.
@@ -138,6 +142,8 @@ function compactBootThreadRow(row = {}) {
     temperature: row.lead_temperature || null,
     disposition: row.disposition || null,
     is_archived: row.is_archived === true,
+    snoozed_until: row.snoozed_until || null,
+    snooze_reason: row.snooze_reason || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || null,
     owner_display_name: row.owner_display_name || row.owner_name || null,
     seller_display_name: row.seller_display_name || row.owner_name || null,
@@ -699,6 +705,17 @@ function computeCountsFromThreads(rows = []) {
     if (row.is_archived === true) continue;
     const bucket = lower(row.inbox_bucket);
     counts.all += 1;
+    // An actively snoozed thread is counted ONCE, under snoozed, and withheld
+    // from every actionable counter. Leaving it in Priority/New Replies would
+    // reproduce the archived bug: the row vanishes from the list while its
+    // chip keeps claiming there is work waiting.
+    const snoozedUntilMs = new Date(row?.snoozed_until ?? 0).getTime();
+    if (Number.isFinite(snoozedUntilMs) && snoozedUntilMs > nowMs) {
+      counts.snoozed += 1;
+      if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
+      if (!row.property_id) counts.unlinked += 1;
+      continue;
+    }
     if (threadMatchesBucketFilter(row, "priority", nowMs)) counts.priority += 1;
     if (threadMatchesBucketFilter(row, "new_replies", nowMs)) counts.new_replies += 1;
     if (threadMatchesBucketFilter(row, "needs_review", nowMs)) counts.needs_review += 1;
@@ -1541,6 +1558,10 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
     case "unlinked":
       if (typeof query.is === "function") query = query.is("property_id", null);
       break;
+    case "snoozed":
+      // AUTHORITATIVE path counterpart of the fallback gate above.
+      if (typeof query.gt === "function") query = query.gt("snoozed_until", new Date().toISOString());
+      return query;
     case "archived":
       // The AUTHORITATIVE (fast-bucket) path. Without this the switch hit
       // `default: break` and the query went out unfiltered, so the archived tab
@@ -1682,6 +1703,14 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         : query.eq("inbox_bucket", "waiting");
     case "unlinked":
       return typeof query.is === "function" ? query.is("property_id", null) : query;
+    case "snoozed":
+      // Fallback-source gate for the Snoozed view. Only rows still under an
+      // active snooze belong here; an expired snoozed_until is simply a past
+      // timestamp, so the `gt now` bound lets the thread age out on its own
+      // without any sweeper or cron.
+      return typeof query.gt === "function"
+        ? query.gt("snoozed_until", new Date().toISOString())
+        : query;
     case "archived":
       // Without this case the switch fell through to `default: return query`,
       // i.e. the query was returned COMPLETELY UNFILTERED, so filter=archived
@@ -1746,6 +1775,8 @@ const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   // and dropped every one, turning "returns everything" into "returns nothing".
   // Selecting it also stops is_archived reading as null in every API response.
   "is_archived",
+  "snoozed_until",
+  "snooze_reason",
   // Universal lead state. These were absent from the fast path entirely, so the
   // API returned operational_status/conversation_status/seller_stage/
   // lead_temperature as null on every row and `status` carried the BUCKET.
@@ -2515,8 +2546,27 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const HIDES_ARCHIVED = normalizedListFilter !== "archived"
     && normalizedListFilter !== "all"
     && normalizedListFilter !== "all_messages";
+  // Snoozed threads leave the ACTIONABLE buckets for exactly as long as the
+  // snooze lasts. Deliberately evaluated per request against the current clock
+  // rather than swept by a job: when snoozed_until passes, the row stops
+  // matching this predicate and returns to its canonical bucket on the next
+  // read, so expiry needs no cron and cannot get stuck. Waiting/Snoozed keep
+  // them (that is where the operator goes looking) and All Threads stays a
+  // complete history.
+  const SNOOZE_VISIBLE_FILTERS = new Set([
+    "snoozed", "all", "all_messages", "archived",
+  ]);
+  const HIDES_SNOOZED = !SNOOZE_VISIBLE_FILTERS.has(normalizedListFilter);
+  const postFilterNowMs = Date.now();
+  const isActivelySnoozed = (row) => {
+    const until = row?.snoozed_until;
+    if (!until) return false;
+    const ts = new Date(until).getTime();
+    return Number.isFinite(ts) && ts > postFilterNowMs;
+  };
   const postFiltered = sortThreads(rows)
     .filter((row) => !HIDES_ARCHIVED || row.is_archived !== true)
+    .filter((row) => !HIDES_SNOOZED || !isActivelySnoozed(row))
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
 

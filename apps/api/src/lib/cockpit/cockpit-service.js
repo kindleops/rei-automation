@@ -2,6 +2,7 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { getSystemFlags } from '@/lib/system-control.js'
 import { createInboxSendNowQueueRow, executeManualInboxSendNow } from '@/lib/domain/inbox/send-now-service.js'
 import { child } from '@/lib/logging/logger.js'
+import { resolveInboxSchedule } from '@/lib/domain/inbox/resolve-inbox-schedule.js'
 
 const logger = child({ module: 'cockpit.cockpit_service' })
 
@@ -66,6 +67,51 @@ function isIncidentQuarantine(row) {
 function hasValidPhone(phone) {
   const normalized = clean(phone).replace(/\D/g, '')
   return normalized.length >= 10
+}
+
+/**
+ * Recipient timezone + contact window for a thread.
+ *
+ * Sourced from the thread's own outbound history: the most recent send_queue
+ * row already carries the timezone we previously contacted this seller in, so
+ * scheduling agrees with every prior send instead of inventing a new answer.
+ * Falls back to an explicit payload value, then to the Central default that
+ * `evaluateContactWindow` itself uses.
+ */
+async function loadThreadRecipientWindow(threadKey, payload = {}, deps = {}) {
+  const explicit = clean(payload.timezone)
+  const explicitWindow = clean(payload.contact_window)
+  if (explicit && explicitWindow) {
+    return { timezone: explicit, contact_window: explicitWindow, source: 'payload' }
+  }
+
+  const supabase = deps.supabase || defaultSupabase
+  try {
+    const { data, error } = await supabase
+      .from('send_queue')
+      .select('timezone,contact_window,created_at')
+      .eq('thread_key', threadKey)
+      .not('timezone', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!error && data) {
+      return {
+        timezone: explicit || clean(data.timezone) || null,
+        contact_window: explicitWindow || clean(data.contact_window) || null,
+        source: 'send_queue_history',
+      }
+    }
+  } catch {
+    /* non-fatal: fall through to the default below */
+  }
+
+  return {
+    timezone: explicit || null,
+    contact_window: explicitWindow || null,
+    source: explicit ? 'payload' : 'default',
+  }
 }
 
 function okResponse(action, extras = {}) {
@@ -479,6 +525,30 @@ export async function runInboxAction({
     const useCaseTemplate = clean(payload.use_case_template || payload.useCaseTemplate || (action === 'auto-reply' ? 'auto_reply' : 'manual_reply'))
     const scheduledFor = clean(payload.scheduled_for || payload.scheduled_for_utc || payload.scheduledAt)
 
+    // Resolve an operator-chosen schedule through the SAME contact-window
+    // authority the dispatcher uses, BEFORE persisting it. This is what keeps
+    // the time the Inbox confirms and the time the message actually leaves from
+    // diverging: a quiet-hours request is shifted here and reported back, rather
+    // than silently deferred later. The dispatch-time gate stays in place.
+    let scheduleResolution = null
+    if (action === 'schedule-reply' && scheduledFor) {
+      const recipientWindow = await loadThreadRecipientWindow(threadKey, payload, { supabase })
+      scheduleResolution = resolveInboxSchedule({
+        requested_at: scheduledFor,
+        timezone: recipientWindow.timezone,
+        contact_window: recipientWindow.contact_window,
+      })
+      if (!scheduleResolution.ok) {
+        logger.warn('cockpit_inbox_action.early_exit', { ...logMeta, reason: scheduleResolution.reason })
+        return blockedResponse(action, scheduleResolution.reason, {
+          status: 400,
+          dry_run: dryRun,
+          thread_key: threadKey,
+          diagnostics: { requested_scheduled_for: scheduledFor, timezone: recipientWindow.timezone },
+        })
+      }
+    }
+
     const queueResult = await createInboxSendNowQueueRow(
       {
         ...payload,
@@ -489,7 +559,10 @@ export async function runInboxAction({
         message_type: messageType,
         use_case_template: useCaseTemplate,
         type: 'outbound',
-        scheduled_for: scheduledFor || undefined,
+        scheduled_for: scheduleResolution?.scheduled_for || scheduledFor || undefined,
+        scheduled_for_utc: scheduleResolution?.scheduled_for_utc || undefined,
+        scheduled_for_local: scheduleResolution?.scheduled_for_local || undefined,
+        timezone: scheduleResolution?.timezone || clean(payload.timezone) || undefined,
       },
       { supabase }
     )
@@ -503,12 +576,18 @@ export async function runInboxAction({
       })
     }
 
-    if (action === 'schedule-reply' && scheduledFor) {
+    if (action === 'schedule-reply' && scheduleResolution?.ok) {
+      // All six scheduling columns describe the same effective instant, so the
+      // database can answer "when does this seller receive this, their time?"
+      // without recomputing it.
       const patch = {
         queue_status: 'scheduled',
-        scheduled_for: scheduledFor,
-        scheduled_for_utc: scheduledFor,
-        scheduled_for_local: scheduledFor,
+        scheduled_for: scheduleResolution.scheduled_for,
+        scheduled_for_utc: scheduleResolution.scheduled_for_utc,
+        scheduled_for_local: scheduleResolution.scheduled_for_local,
+        timezone: scheduleResolution.timezone,
+        local_send_date: scheduleResolution.local_send_date,
+        local_send_hour: scheduleResolution.local_send_hour,
         updated_at: new Date().toISOString(),
       }
       const { error: scheduleError } = await supabase
@@ -525,6 +604,22 @@ export async function runInboxAction({
       queue_key: queueResult.queue_key || null,
       queue_created: true,
       queue_status: action === 'schedule-reply' ? 'scheduled' : 'queued',
+      ...(scheduleResolution?.ok
+        ? {
+            // The client MUST render these, not the operator's requested time.
+            scheduled_for: scheduleResolution.scheduled_for_utc,
+            effective_send_at_utc: scheduleResolution.scheduled_for_utc,
+            effective_local_label: scheduleResolution.effective_local_label,
+            effective_local_wall: scheduleResolution.effective_local_wall,
+            local_send_date: scheduleResolution.local_send_date,
+            local_send_hour: scheduleResolution.local_send_hour,
+            timezone: scheduleResolution.timezone,
+            requested_send_at_utc: scheduleResolution.requested_utc,
+            requested_local_label: scheduleResolution.requested_local_label,
+            schedule_deferred: scheduleResolution.deferred,
+            schedule_deferral_reason: scheduleResolution.deferral_reason,
+          }
+        : {}),
     })
   }
 

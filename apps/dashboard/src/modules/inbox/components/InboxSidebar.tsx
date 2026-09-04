@@ -101,6 +101,8 @@ type BucketConfig = {
   countKey: string
 }
 
+import ScheduledFollowupsPanel from './ScheduledFollowupsPanel'
+
 const BUCKETS: BucketConfig[] = [
   { bucket: 'priority', view: 'priority', label: 'Priority', shortLabel: 'Priority', icon: '🔥', description: 'Evidence-driven high-intent threads (list shows top 50; count is full population)', accentClass: 'is-hot', countKey: 'priority' },
   { bucket: 'new_replies', view: 'new_replies', label: 'New Replies', shortLabel: 'New', icon: '📥', description: 'Inbound replies awaiting canonical automation', accentClass: 'is-inbound', countKey: 'new_replies' },
@@ -115,16 +117,28 @@ const BUCKETS: BucketConfig[] = [
   // for this filter and excludes them from every other bucket, so it never inflates the
   // working inbox. It exists so archiving is recoverable rather than one-way.
   { bucket: 'archived', view: 'archived', label: 'Archived', shortLabel: 'Archived', icon: '🗄️', description: 'Archived conversations — restorable', accentClass: 'is-neutral', countKey: 'archived' },
+  // Inbox Zero sub-views: work intentionally parked, kept out of every
+  // actionable bucket by the server so it cannot quietly inflate the queue.
+  // Appended (never inserted) because the chip list below resolves by name.
+  { bucket: 'snoozed', view: 'snoozed', label: 'Snoozed', shortLabel: 'Snoozed', icon: '😴', description: 'Snoozed until a future time — returns automatically', accentClass: 'is-wait', countKey: 'snoozed' },
+  { bucket: 'scheduled', view: 'scheduled', label: 'Scheduled', shortLabel: 'Scheduled', icon: '🗓️', description: 'Follow-ups queued to send later — not yet sent', accentClass: 'is-wait', countKey: 'scheduled' },
 ]
 
+// Resolved BY NAME. This list used to index into BUCKETS positionally, so
+// appending or reordering a bucket silently changed which chips rendered.
+const bucketByName = (name: string): BucketConfig => {
+  const found = BUCKETS.find((entry) => entry.bucket === name)
+  if (!found) throw new Error(`unknown inbox bucket: ${name}`)
+  return found
+}
+
 const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
-  BUCKETS[0],
-  BUCKETS[1],
-  BUCKETS[2],
-  BUCKETS[3],
-  BUCKETS[8],
-  BUCKETS[9], // Archived — the mobile entry point for restore
-]
+  'priority', 'new_replies', 'needs_review', 'waiting',
+  // Waiting's parked-work sub-views sit directly after it.
+  'snoozed', 'scheduled',
+  'all_messages',
+  'archived', // the mobile entry point for restore
+].map(bucketByName)
 
 type LocalSavedFilter = {
   id: string
@@ -1810,6 +1824,19 @@ export const InboxSidebar = ({
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
+        {/* Scheduled is the one view NOT backed by thread rows: it reads
+            send_queue, so it renders its own compact list in place of the
+            thread list rather than pretending to be a bucket. */}
+        {activeViewFilter === 'scheduled' ? (
+          <ScheduledFollowupsPanel
+            onOpenThread={(threadKey) => {
+              const match = threads.find(
+                (t) => t.threadKey === threadKey || t.id === threadKey,
+              )
+              if (match) onSelect?.(match)
+            }}
+          />
+        ) : (
         <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table', shouldVirtualizeList && 'is-virtualized')}>
           {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
             <div className="nx-cc-table__header" aria-hidden="true">
@@ -1927,10 +1954,12 @@ export const InboxSidebar = ({
             </div>
           )}
         </div>
+        )}
         {/* Load More lives INSIDE the scroll container. As a sibling it sat below
             the scrollport, so on mobile the bottom dock covered it and it could
-            never be reached in Priority / New Replies / Needs Review. */}
-        {showLoadMore && (
+            never be reached in Priority / New Replies / Needs Review.
+            Hidden for Scheduled, which is not a paginated thread list. */}
+        {showLoadMore && activeViewFilter !== 'scheduled' && (
           <div className="nx-sidebar-rebuilt__load-more">
             <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
               {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}

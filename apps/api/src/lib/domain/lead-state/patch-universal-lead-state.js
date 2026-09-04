@@ -210,6 +210,20 @@ function buildRowPatch(canonicalPatch, meta = {}) {
     if (canonicalPatch.snoozed_until) {
       rowPatch.operational_status = 'snoozed';
       rowPatch.conversation_status = 'snoozed';
+    } else {
+      // Unsnooze has to undo the status stamp above, the same way clearing
+      // is_archived clears archive_scope/archive_reason below. Without this the
+      // timestamp cleared but operational_status stayed 'snoozed' permanently,
+      // so an unsnoozed thread never returned to its canonical bucket.
+      //
+      // Cleared to null rather than restored: snoozing overwrote whatever status
+      // was there with 'snoozed', so the prior value is already gone and null is
+      // the honest answer -- it makes the bucket classifier re-derive from the
+      // conversation instead of inheriting an invented status. An explicit
+      // status in the same patch still wins.
+      rowPatch.snooze_reason = null;
+      if (!('operational_status' in canonicalPatch)) rowPatch.operational_status = null;
+      if (!('conversation_status' in canonicalPatch)) rowPatch.conversation_status = null;
     }
   }
 

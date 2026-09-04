@@ -180,6 +180,9 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   "dnc_opt_out",
   "waiting_on_seller",
   "automated",
+  // Inbox Zero surfaces: work intentionally removed from the actionable queue.
+  "snoozed",
+  "scheduled",
 ];
 
 export function compactInboxThreadSummaryRow(row = {}) {

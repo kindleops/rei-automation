@@ -2239,6 +2239,10 @@ export const getInboxRowsForView = async (
   else if (normalizedView === 'waiting') inbox_bucket = 'waiting'
   else if (normalizedView === 'unlinked') inbox_bucket = 'unlinked'
   else if (normalizedView === 'archived') inbox_bucket = 'archived'
+  // Snoozed is served by the canonical live filter (the server applies the
+  // snoozed_until > now bound). Scheduled is NOT a thread filter -- it reads
+  // send_queue via /inbox/scheduled -- so it is handled by its own panel.
+  else if (normalizedView === 'snoozed') inbox_bucket = 'snoozed'
   const endpoint = '/api/cockpit/inbox/live'
   const liveFilter = inbox_bucket === 'all_messages' ? 'all' : inbox_bucket
   const threadShellStartedAt = dataLayerNow()

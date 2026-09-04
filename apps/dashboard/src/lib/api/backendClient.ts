@@ -950,6 +950,35 @@ export function scheduleInboxReply(payload: Record<string, unknown>): Promise<Ba
   })
 }
 
+export type ScheduledFollowupItem = {
+  id: string | null
+  thread_key: string | null
+  queue_status: string | null
+  schedule_state: string | null
+  scheduled_for_utc: string | null
+  timezone: string | null
+  local_send_date: string | null
+  local_send_hour: number | null
+  local_send_label: string | null
+  message_preview: string
+  to_phone_number: string | null
+  seller_name: string | null
+  property_address: string | null
+  created_at: string | null
+}
+
+// GET /api/cockpit/inbox/scheduled
+// Read-only list of follow-ups parked in send_queue. Sends nothing.
+export function listScheduledFollowups(
+  params: { limit?: number; threadKey?: string } = {},
+): Promise<BackendResult<{ ok: boolean; items: ScheduledFollowupItem[]; count: number }>> {
+  const qs = new URLSearchParams()
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.threadKey) qs.set('thread_key', params.threadKey)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return callBackend(`/api/cockpit/inbox/scheduled${suffix}`, { method: 'GET' })
+}
+
 // POST /api/cockpit/inbox/auto-reply
 // Auto-reply engine queues a reply based on detected intent.
 export function autoQueueReply(payload: Record<string, unknown>): Promise<BackendResult<QueueReplyResult>> {

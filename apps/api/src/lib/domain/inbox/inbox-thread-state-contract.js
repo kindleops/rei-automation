@@ -131,6 +131,23 @@ export function threadMatchesInboxTab(row = {}, tab = "all", nowMs = Date.now())
 
   if (normalizedTab === "archived") return false;
 
+  // Snooze is a TEMPORAL overlay on top of the bucket, not a bucket of its own:
+  // the thread keeps its canonical bucket the whole time and simply stops being
+  // actionable until snoozed_until passes. Comparing against nowMs on every
+  // evaluation is what makes expiry automatic -- no sweeper, nothing to get
+  // stuck, and a thread whose snooze lapsed is immediately back in its bucket.
+  const snoozedUntilMs = new Date(row?.snoozed_until ?? normalized.snoozed_until ?? 0).getTime();
+  const isActivelySnoozed = Number.isFinite(snoozedUntilMs) && snoozedUntilMs > nowMs;
+  if (normalizedTab === "snoozed") return isActivelySnoozed;
+  // Snoozed work leaves EVERY operational bucket, Waiting included. Waiting has
+  // a factual meaning of its own -- "we sent, the seller has not answered" -- so
+  // parking snoozed threads there would make the one bucket that reports real
+  // outstanding outbound ambiguous. Snoozed is its own view instead, surfaced
+  // under Waiting in the UI; All Threads remains the complete history.
+  if (isActivelySnoozed && normalizedTab !== "all_messages") {
+    return false;
+  }
+
   if (normalizedTab === "all_messages") {
     return threadMatchesBucketFilter(normalized, "all_messages", nowMs);
   }
