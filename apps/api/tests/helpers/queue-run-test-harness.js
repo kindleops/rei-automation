@@ -26,6 +26,15 @@ export function makeQueueTestRpc() {
 }
 
 export function buildSupabaseQueueRow(id, overrides = {}) {
+  // §11: a queue row must be able to name the domain action it schedules, or
+  // the canonical seam refuses it. campaign_target_id + touch_number is the
+  // cheapest real anchor; fixtures whose subject is something else inherit it
+  // here rather than each re-stating it.
+  overrides = {
+    campaign_target_id: "11111111-1111-4111-8111-111111111111",
+    touch_number: 1,
+    ...overrides,
+  };
   return normalizeSendQueueRow({
     id,
     queue_key: `queue-${id}`,

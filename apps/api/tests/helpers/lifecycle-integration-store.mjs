@@ -39,7 +39,15 @@ function cleanStr(value) {
   return String(value ?? "").trim();
 }
 
+// Each lifecycle store is a distinct world, so its §11 campaign anchor must be
+// distinct too. Sharing one anchor across tests made a later test resolve to an
+// earlier test's already-terminal communication and be correctly refused, which
+// looks like a bug in the code under test but is contamination in the fixture.
+let lifecycleAnchorSeq = 0;
+
 export function makeLifecycleStore() {
+  const campaignTargetAnchor =
+    `11111111-1111-4111-8111-${String(++lifecycleAnchorSeq).padStart(12, "0")}`;
   const sendQueueRows = new Map();
   const messageEvents = [];
   const campaigns = new Map();
@@ -111,7 +119,19 @@ export function makeLifecycleStore() {
         };
       }
       const id = cleanStr(payload.id) || `sq_${nextQueueId++}`;
+      // §11: a queue row must name the domain action it schedules or canonical
+      // dispatch refuses it. This fixture's subject is the lifecycle, not
+      // identity derivation, so it inherits a campaign touch anchor unless the
+      // caller supplied its own.
       const stored = { ...payload, id };
+      // Spreading defaults BEFORE payload would lose to an explicit null, which
+      // is exactly what these fixtures carry, so fill only when truly absent.
+      if (stored.campaign_target_id === null || stored.campaign_target_id === undefined) {
+        stored.campaign_target_id = campaignTargetAnchor;
+      }
+      if (stored.touch_number === null || stored.touch_number === undefined) {
+        stored.touch_number = 1;
+      }
       sendQueueRows.set(id, stored);
       return { data: { ...stored }, error: null };
     },
@@ -350,9 +370,12 @@ export function makeLifecycleWriteDeps(store, now) {
 }
 
 /** Builds the deps object needed to run runSendQueue / processSendQueueItem for real with a fake provider. */
-export function makeLifecycleQueueRunDeps(store, { now, sendTextgridSMS }) {
+export function makeLifecycleQueueRunDeps(store, { now, sendTextgridSMS, s11Store = null }) {
   const supabase = makeLifecycleFakeSupabase(store);
   return {
+    // §11 canonical dispatch store; without it the seam builds a real
+    // Supabase store and refuses against this fixture's fake client.
+    store: s11Store,
     now,
     supabase,
     supabaseClient: supabase,

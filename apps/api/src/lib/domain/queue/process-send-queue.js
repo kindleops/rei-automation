@@ -2005,6 +2005,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       { to: message_fields.to, from: message_fields.from, body: message_fields.body },
       {
         supabase: getSupabase(deps),
+        store: deps.store,
         sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name }),
         classifyProviderError: classifyTextGridProviderError,
         getSystemValue: deps.getSystemValue || getSystemValue,

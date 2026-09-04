@@ -73,6 +73,7 @@ function makeFinalizeSuccessImpl(row) {
 }
 
 import { extendSupabaseForHealthyCompliance } from "../helpers/compliance-test-harness.js";
+import { createMemoryS11Store } from "../helpers/s11-memory-store.mjs";
 
 function makeIdempotencySupabase() {
   const base = {
@@ -152,6 +153,15 @@ function makeNumbersSupabase(rows = []) {
 }
 
 function buildSupabaseQueueRow(overrides = {}) {
+  // §11: a queue row must be able to name the domain action it schedules, or
+  // the canonical seam refuses it. campaign_target_id + touch_number is the
+  // cheapest real anchor; fixtures whose subject is something else inherit it
+  // here rather than each re-stating it.
+  overrides = {
+    campaign_target_id: "11111111-1111-4111-8111-111111111111",
+    touch_number: 1,
+    ...overrides,
+  };
   return normalizeSendQueueRow({
     id: "sq-test-uuid-1",
     queue_key: "queue-sq-test-uuid-1",
@@ -570,6 +580,7 @@ test("processSendQueueItem accepts a UUID string and does not fail with missing_
   });
 
   const result = await processSendQueueItem("sq-process-uuid-1", {
+    store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
       // the control plane permits the send.
@@ -625,6 +636,7 @@ test("processSendQueueItem accepts a normalized Supabase row object directly", a
   });
 
   const result = await processSendQueueItem(row, {
+    store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
       // the control plane permits the send.
@@ -686,6 +698,7 @@ test("processSendQueueItem resolves seller_first_name from candidate_snapshot.ph
   });
 
   const result = await processSendQueueItem(row, {
+    store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
       // the control plane permits the send.
@@ -748,6 +761,7 @@ test("processSendQueueItem sends manual inbox body as-is without template requir
   });
 
   const result = await processSendQueueItem(row, {
+    store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
       // the control plane permits the send.

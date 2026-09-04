@@ -11,6 +11,7 @@ import {
   validateInboxSendNowPayload,
 } from "@/lib/domain/inbox/send-now-service.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
+import { createMemoryS11Store, s11ManualSendDeps } from "../helpers/s11-memory-store.mjs";
 
 // Canonical production phones.phone_id is ph_-prefixed TEXT. Guard: no ph_ text may
 // ever be assigned to a UUID column (phone_number_id).
@@ -230,6 +231,7 @@ test("executeManualInboxSendNow claim metadata preserves map_command and message
   let outboundEvent = null;
 
   const result = await executeManualInboxSendNow(MAP_PAYLOAD, {
+      ...s11ManualSendDeps(),
     supabase,
     // Authorize the runtime layer: this test is about map_command provenance
     // in claim metadata, not about the brake.

@@ -11,6 +11,7 @@ import { cancelPendingFollowUpsForThread } from "@/lib/domain/seller-flow/seller
 import { processSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
 import { extendSupabaseForHealthyCompliance } from "../helpers/compliance-test-harness.js";
 import { buildSupabaseQueueRow, makeQueueTestRpc } from "../helpers/queue-run-test-harness.js";
+import { createMemoryS11Store } from "../helpers/s11-memory-store.mjs";
 
 function makeLegacyHealthySupabase() {
   return {
@@ -123,6 +124,7 @@ test("E: processSendQueueItem healthy legacy fake calls provider once", async ()
   const supabase = extendSupabaseForHealthyCompliance({ rpc: makeQueueTestRpc() });
 
   const result = await processSendQueueItem(row, {
+    store: createMemoryS11Store(),
     supabase,
     supabaseClient: supabase,
     getSystemValue: async (key) => {

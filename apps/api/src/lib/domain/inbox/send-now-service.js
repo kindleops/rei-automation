@@ -1773,7 +1773,8 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   // ── DURABLE OPERATOR ACTION, BEFORE ANY SEND ────────────────────────────
   // Created here rather than inside dispatch so the operator's intent has an
   // identity that survives a crash between this line and the provider call.
-  const operator_action = await resolveOperatorAction({
+  const resolve_operator_action = deps.resolveOperatorAction || resolveOperatorAction;
+  const operator_action = await resolve_operator_action({
     action_type: "manual_inbox_send_now",
     operator_action_id: clean(manual_input.operator_action_id),
     request_idempotency_key: clean(manual_input.request_idempotency_key)
@@ -1821,6 +1822,7 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       message: { to: to_phone, from: from_phone, body: message_body },
       queue_row_id: clean(queue_row_id) || null,
       supabase,
+      store: deps.store,
       getSystemValue: get_system_value,
       scoped_canary: deps.scoped_canary === true,
       sendProvider: (args) => sendTextgridImpl({
