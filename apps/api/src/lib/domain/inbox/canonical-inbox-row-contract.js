@@ -34,6 +34,13 @@ export const INBOX_THREAD_SUMMARY_SELECT_FIELDS = [
   "conversation_stage",
   "seller_stage",
   "conversation_status",
+  // seller_stage and conversation_status were already selected (and surface as
+  // stage/status, which the dashboard resolvers read). lead_temperature never
+  // was, so Temperature had no value to display anywhere -- the write landed
+  // and the control had nothing to read back. is_archived is selected for the
+  // same reason: the archive consequence needs it on the row.
+  "lead_temperature",
+  "is_archived",
   "unread_count",
   "is_read",
   "is_suppressed",
