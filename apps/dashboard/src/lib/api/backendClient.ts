@@ -986,6 +986,7 @@ export type FollowUpRecipient = {
   template_id: string | null
   template_name: string | null
   agent_name: string | null
+  assigned_agent_name: string | null
   eligible: boolean
   reason: string | null
   missing?: string[] | null

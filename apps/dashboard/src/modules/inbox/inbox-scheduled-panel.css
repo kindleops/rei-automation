@@ -298,3 +298,23 @@ html.is-mobile-layout .nx-scheduled-panel {
 
 html.is-mobile-layout .nx-followup-previews { max-height: 34vh; }
 html.is-mobile-layout .nx-followup-preview__body { font-size: 13px; }
+
+/* The agent who will sign this specific message. Shown per row because the
+   assignment is PER SELLER -- two recipients in one batch are signed by
+   different agents, and the operator must be able to see that. */
+.nx-followup-preview__who {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nx-followup-preview__agent {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  background: rgba(167, 139, 250, 0.12);
+  color: rgba(196, 181, 253, 0.95);
+}

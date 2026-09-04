@@ -19,9 +19,15 @@ const REASON_LABEL: Record<string, string> = {
 const describeReason = (r: FollowUpRecipient): string => {
   const raw = r.reason ?? ''
   if (REASON_LABEL[raw]) return REASON_LABEL[raw]
+  if (raw.startsWith('seller_language_not_english')) {
+    const lang = raw.split(':')[1]?.trim() ?? ''
+    return lang ? `Seller prefers ${lang}` : 'Seller language not English'
+  }
   if (raw.startsWith('missing_placeholder_values')) {
     const fields = raw.split(':')[1]?.trim() ?? ''
     const pretty = fields.split(',').map((f) => f.trim().replace(/_/g, ' ')).filter(Boolean).join(', ')
+    // agent_name is only ever unresolved when the seller has no assigned agent.
+    if (fields.includes('agent_name')) return 'No agent assigned to this seller'
     return `Missing ${pretty || 'required details'}`
   }
   return raw ? raw.replace(/_/g, ' ') : 'Needs review'
@@ -111,7 +117,12 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
             <ul className="nx-followup-previews">
               {shown.map((r) => (
                 <li key={r.thread_key ?? Math.random()} className="nx-followup-preview">
-                  <div className="nx-followup-preview__who">{r.seller_name}</div>
+                  <div className="nx-followup-preview__who">
+                    <span>{r.seller_name}</span>
+                    {r.assigned_agent_name && (
+                      <span className="nx-followup-preview__agent">{r.assigned_agent_name.split(' ')[0]}</span>
+                    )}
+                  </div>
                   <div className="nx-followup-preview__body">{r.message_body}</div>
                   <div className="nx-followup-preview__when">
                     {r.schedule?.effective_local_label} · {r.schedule?.local_send_date} seller local
