@@ -1703,6 +1703,12 @@ export function applyInboxRowComputedFields(row = {}, query = {}) {
 
 const AUTHORITATIVE_INBOX_THREAD_FIELDS = [
   "thread_key",
+  // PostgREST can FILTER on a column it does not SELECT, so .eq("is_archived",
+  // true) returned the right 10 rows while the mapped rows carried no
+  // is_archived at all -- the in-memory archived predicate then saw undefined
+  // and dropped every one, turning "returns everything" into "returns nothing".
+  // Selecting it also stops is_archived reading as null in every API response.
+  "is_archived",
   "seller_phone",
   "canonical_e164",
   "our_number",
