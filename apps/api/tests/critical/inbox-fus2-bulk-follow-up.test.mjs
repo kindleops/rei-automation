@@ -216,8 +216,14 @@ function planSupabase() {
       if (name === "sms_templates") return table(FUS2);
       if (name === "canonical_inbox_threads") {
         return table([
-          { thread_key: CANARY_A, prospect_first_name: "Sarah", property_address_full: "123 Main St" },
-          { thread_key: CANARY_B, prospect_first_name: "Marcus", property_address_full: "456 Oak Ave" },
+          { thread_key: CANARY_A, prospect_id: "p-a", prospect_first_name: "Sarah", property_address_full: "123 Main St" },
+          { thread_key: CANARY_B, prospect_id: "p-b", prospect_first_name: "Marcus", property_address_full: "456 Oak Ave" },
+        ]);
+      }
+      if (name === "prospects") {
+        return table([
+          { prospect_id: "p-a", language_preference: "English" },
+          { prospect_id: "p-b", language_preference: null },
         ]);
       }
       if (name === "inbox_thread_state") {
@@ -405,4 +411,98 @@ test("a full agent_persona renders as a first name", async () => {
   const body = plan.recipients[0].message_body;
   assert.match(body, /this is Michael\.|Michael here|it's Michael/);
   assert.ok(!/Hargrove/.test(body), "surname must not appear in seller-facing copy");
+});
+
+
+// ── IDENTITY CONTRACT: no stale identity fallback ───────────────────────────
+
+test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", async () => {
+  // The seller has a rich send history signed by "Scott Harper", but no
+  // canonical master-owner assignment. History records who texted them before,
+  // which is NOT who is assigned to them now -- a reassigned or departed agent
+  // must never sign a new message. This must be NEED REVIEW, not "Scott".
+  const noAssignment = {
+    from(name) {
+      const t = (rows) => {
+        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+          then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
+        return q;
+      };
+      if (name === "sms_templates") return t(FUS2);
+      if (name === "canonical_inbox_threads") {
+        return t([{ thread_key: CANARY_A, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+      }
+      // Thread exists but carries NO master_owner_id -> no assignment.
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: null }]);
+      if (name === "master_owners") return t([]);
+      if (name === "send_queue") {
+        return t([{
+          thread_key: CANARY_A, timezone: "Central", contact_window: "9AM-8PM CT",
+          agent_name: "Scott Harper", sms_agent_id: "agent-scott",
+          template_id: "lc-reengage-agent-en-001", created_at: "2026-08-01T12:00:00Z",
+        }]);
+      }
+      return t([]);
+    },
+  };
+
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: noAssignment });
+  const a = plan.recipients[0];
+
+  assert.equal(a.eligible, false, "no assignment must mean NEED REVIEW");
+  assert.equal(plan.needs_review_count, 1);
+  assert.equal(a.assigned_agent_name, null, "no identity may be synthesised");
+  assert.equal(a.message_body, undefined, "no copy may be rendered");
+  // The historical name must appear nowhere in the recipient plan.
+  assert.ok(!JSON.stringify(a).includes("Scott"), "stale queue identity leaked into the plan");
+});
+
+test("queue history is still used for TEMPLATE anti-repeat, just not identity", async () => {
+  // Same fixture shape, but WITH an assignment: history must still steer
+  // rotation away from the previously used variant.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: planSupabase() },
+  );
+  const a = plan.recipients[0];
+  assert.notEqual(a.template_id, "lc-reengage-agent-en-001", "history must still drive anti-repeat");
+  assert.equal(a.assigned_agent_name, "Michael Hargrove", "identity still comes from the assignment");
+});
+
+
+// ── LANGUAGE ────────────────────────────────────────────────────────────────
+
+test("a KNOWN non-English seller is not sent English FUS2 copy", async () => {
+  const spanish = {
+    from(name) {
+      const t = (rows) => {
+        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+          then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
+        return q;
+      };
+      if (name === "sms_templates") return t(FUS2);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_id: "p-a", prospect_first_name: "Sofia", property_address_full: "9 Elm St" }]);
+      if (name === "prospects") return t([{ prospect_id: "p-a", language_preference: "Spanish" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Carlos Mendez", agent_family: "Spanish Local" }]);
+      if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
+      return t([]);
+    },
+  };
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: spanish });
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, false, "a known Spanish seller must not get English copy");
+  assert.match(a.reason, /seller_language_not_english/);
+  assert.equal(a.message_body, undefined);
+});
+
+test("an UNKNOWN language is not treated as a preference, and agent family is not a language signal", async () => {
+  // Canary B has language_preference = null and would previously have been
+  // guessed at. Absence of a preference must not block a seller, and the
+  // assigned agent's family ("Spanish Local") is NOT evidence about the seller.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_B], now: NOW },
+    { supabase: planSupabase() },
+  );
+  assert.equal(plan.recipients[0].eligible, true, "unknown language must not exclude a seller");
 });

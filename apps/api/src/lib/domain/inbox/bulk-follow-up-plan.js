@@ -27,9 +27,10 @@ function firstName(value) {
 /**
  * Per-thread context for personalization + scheduling.
  *
- * Names/addresses come from canonical_inbox_threads; timezone, contact_window
- * and agent_name come from the thread's OWN send_queue history, so a follow-up
- * agrees with how this seller was contacted before instead of inventing values.
+ * Names/addresses come from canonical_inbox_threads. Timezone and contact
+ * window come from the thread's own send_queue history, so scheduling agrees
+ * with how this seller was contacted before. Seller-facing AGENT IDENTITY comes
+ * only from the master-owner assignment -- never from send history.
  */
 export async function loadThreadContexts(threadKeys = [], deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
@@ -39,12 +40,14 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
 
   const { data: rows } = await supabase
     .from("canonical_inbox_threads")
-    .select("thread_key,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
+    .select("thread_key,prospect_id,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
     .in("thread_key", keys);
 
+  const prospectByThread = new Map();
   for (const row of rows || []) {
     const key = clean(row.thread_key);
     if (!key) continue;
+    if (clean(row.prospect_id)) prospectByThread.set(key, clean(row.prospect_id));
     contexts.set(key, {
       thread_key: key,
       seller_first_name: firstName(
@@ -57,6 +60,30 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       agent_family: null,
       master_owner_id: null,
     });
+  }
+
+  // ── Seller language ───────────────────────────────────────────────────────
+  // prospects.language_preference is the canonical, pre-existing source; this
+  // reads it, it does not detect anything. All 15 FUS2 variants are English, so
+  // a seller whose KNOWN preference is not English must not be sent one.
+  // Unknown stays unknown -- absence is not evidence of a preference, and agent
+  // family is explicitly NOT used as a language signal.
+  const prospectIds = [...new Set([...prospectByThread.values()])];
+  if (prospectIds.length) {
+    const { data: prospects } = await supabase
+      .from("prospects")
+      .select("prospect_id,language_preference")
+      .in("prospect_id", prospectIds);
+
+    const langByProspect = new Map();
+    for (const row of prospects || []) {
+      const id = clean(row.prospect_id);
+      if (id) langByProspect.set(id, clean(row.language_preference));
+    }
+    for (const [key, prospectId] of prospectByThread.entries()) {
+      const ctx = contexts.get(key);
+      if (ctx) ctx.language_preference = langByProspect.get(prospectId) || null;
+    }
   }
 
   // ── Assigned agent ────────────────────────────────────────────────────────
@@ -102,12 +129,19 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
     }
   }
 
-  // Timezone / contact window still come from the thread's own send history.
-  // agent_name is filled here ONLY as a last resort for the ~1% of threads with
-  // no master-owner assignment -- it is who actually texted this seller before.
+  // Timezone / contact window come from the thread's own send history.
+  //
+  // agent_name is DELIBERATELY NOT read here. send_queue history is a record of
+  // who texted this seller before, which is not the same thing as who is
+  // assigned to them now -- treating it as identity would let a stale or
+  // reassigned agent sign a message. The master-owner assignment above is the
+  // sole source of seller-facing identity; if it is absent, agent_name stays
+  // unresolved and renderSafeTemplate routes the recipient to NEED REVIEW.
+  // (send_queue remains the history source for TEMPLATE anti-repeat, which is
+  // a different question and lives in loadThreadTemplateHistory.)
   const { data: queueRows } = await supabase
     .from("send_queue")
-    .select("thread_key,timezone,contact_window,agent_name,sms_agent_id,created_at")
+    .select("thread_key,timezone,contact_window,created_at")
     .in("thread_key", keys)
     .order("created_at", { ascending: false });
 
@@ -118,8 +152,6 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
     // Most recent non-null wins; rows arrive newest-first.
     if (!ctx.timezone && clean(row.timezone)) ctx.timezone = clean(row.timezone);
     if (!ctx.contact_window && clean(row.contact_window)) ctx.contact_window = clean(row.contact_window);
-    if (!ctx.agent_name && clean(row.agent_name)) ctx.agent_name = clean(row.agent_name);
-    if (!ctx.sms_agent_id && clean(row.sms_agent_id)) ctx.sms_agent_id = clean(row.sms_agent_id);
   }
 
   for (const key of keys) {
@@ -164,6 +196,20 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       context: { language: "English" },
     });
 
+    const lang = clean(ctx.language_preference);
+    if (lang && lang.toLowerCase() !== "english") {
+      recipients.push({
+        thread_key: key,
+        seller_name: ctx.seller_first_name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: `seller_language_not_english: ${lang}`,
+        assigned_agent_name: ctx.agent_name || null,
+      });
+      continue;
+    }
+
     const plan = buildRecipientPlan({
       thread: ctx,
       template: selection.ok ? selection.template : null,
@@ -179,7 +225,6 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     recipients.push({
       ...plan,
       assigned_agent_name: ctx.agent_name || null,
-      sms_agent_id: ctx.sms_agent_id || null,
       rotation_reason: selection.rotation_reason || null,
       variants_exhausted: selection.exhausted === true,
     });
