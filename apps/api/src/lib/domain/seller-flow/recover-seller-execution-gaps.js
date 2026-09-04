@@ -152,7 +152,12 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
               const stamped = await updateOpportunity(
                 canonical.id,
                 { next_action: nextAction, next_action_due: nextActionDue, source: "seller_execution_gap_recovery", actor: "gap_recovery_sweep" },
-                { supabase }
+                // STRUCTURAL SEND-INCAPABILITY. Suppress the workflow fan-out:
+                // it can reach action.enqueue_sms -> insertSupabaseSendQueueRow
+                // with queue_status 'queued', which the processor claims. This
+                // is a bookkeeping repair, not a business transition, so no
+                // seller-facing workflow should fire from it.
+                { supabase, emitWorkflowEvents: false }
               );
               canonical_stamped = stamped?.ok === true;
             } catch (canonical_error) {
@@ -676,39 +681,96 @@ async function recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }) {
  * Run all execution-gap sweeps. Each sweep is isolated; one failing sweep
  * never blocks the others.
  */
+/**
+ * Canonical sweep names. These are the `gap` labels each sweep already reports,
+ * promoted to constants so a caller can select a SUBSET by name.
+ */
+export const SELLER_GAP_SWEEPS = Object.freeze({
+  STALE_ACTIVE_WITHOUT_NEXT_ACTION: "stale_active_without_next_action",
+  ADE_REQUIRED_NEVER_RAN: "ade_required_never_ran",
+  ACCEPTED_TERMS_WITHOUT_CONTRACT: "accepted_terms_without_contract",
+  TRANSITION_WITHOUT_STATE_PATCH: "transition_without_state_patch",
+  STALE_FOLLOWUP_AFTER_REPLY: "stale_followup_after_reply",
+  NEGOTIATION_STATE_INTEGRITY: "negotiation_state_integrity",
+  OFFER_AUTHORIZED_NEVER_QUEUED: "offer_authorized_never_queued",
+});
+
+/**
+ * The sweeps that are safe to run UNATTENDED on a schedule under containment.
+ *
+ * Only one qualifies. `stale_active_without_next_action` reads
+ * inbox_thread_state, copies a next_action that already exists on the canonical
+ * acquisition_opportunities row, and otherwise writes the non-send sentinel
+ * `human_review`. It writes exactly one table (inbox_thread_state, via
+ * patchUniversalLeadState) and creates no send_queue row, no follow-up, no
+ * offer and no closing case.
+ *
+ * EVERY OTHER SWEEP IS EXCLUDED, and each exclusion is load-bearing:
+ *   ade_required_never_ran            - runs the acquisition decision engine
+ *   accepted_terms_without_contract   - advances stage and creates closing cases
+ *   transition_without_state_patch    - replays transitions
+ *   stale_followup_after_reply        - touches follow-up scheduling
+ *   negotiation_state_integrity       - rewrites negotiation/monetary state
+ *   offer_authorized_never_queued     - ENQUEUES offers, i.e. creates sendable rows
+ */
+export const SCHEDULER_SAFE_SWEEPS = Object.freeze([
+  SELLER_GAP_SWEEPS.STALE_ACTIVE_WITHOUT_NEXT_ACTION,
+]);
+
 export async function recoverSellerExecutionGaps({
   supabaseClient = null,
   limit = 25,
   dryRun = true,
   now = Date.now(),
   deps = {},
+  sweeps: sweep_allowlist = null,
 } = {}) {
   const supabase = supabaseClient || getDefaultSupabaseClient();
   if (!supabase) return { ok: false, reason: "missing_supabase" };
 
-  const sweeps = [
-    () => recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, now }),
-    () => recoverAdeNeverRan(supabase, { limit, dryRun, deps }),
-    () => recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }),
-    () => recoverTransitionWithoutStatePatch(supabase, { limit, dryRun, now }),
-    () => recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now }),
-    () => recoverNegotiationStateIntegrity(supabase, { limit, dryRun }),
-    () => recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun }),
+  const registry = [
+    [SELLER_GAP_SWEEPS.STALE_ACTIVE_WITHOUT_NEXT_ACTION,
+      () => recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, now })],
+    [SELLER_GAP_SWEEPS.ADE_REQUIRED_NEVER_RAN,
+      () => recoverAdeNeverRan(supabase, { limit, dryRun, deps })],
+    [SELLER_GAP_SWEEPS.ACCEPTED_TERMS_WITHOUT_CONTRACT,
+      () => recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun })],
+    [SELLER_GAP_SWEEPS.TRANSITION_WITHOUT_STATE_PATCH,
+      () => recoverTransitionWithoutStatePatch(supabase, { limit, dryRun, now })],
+    [SELLER_GAP_SWEEPS.STALE_FOLLOWUP_AFTER_REPLY,
+      () => recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now })],
+    [SELLER_GAP_SWEEPS.NEGOTIATION_STATE_INTEGRITY,
+      () => recoverNegotiationStateIntegrity(supabase, { limit, dryRun })],
+    [SELLER_GAP_SWEEPS.OFFER_AUTHORIZED_NEVER_QUEUED,
+      () => recoverAuthorizedOfferNeverQueued(supabase, { limit, dryRun })],
   ];
 
+  // ALLOWLIST, not a denylist. `null` preserves the historical "run everything"
+  // behaviour for existing callers. A supplied list selects by canonical name,
+  // and an unrecognised name selects NOTHING rather than silently running all.
+  let selected = registry;
+  let requested = null;
+  if (sweep_allowlist !== null) {
+    requested = Array.isArray(sweep_allowlist) ? sweep_allowlist : [sweep_allowlist];
+    const allowed = new Set(requested.map((name) => String(name ?? "").trim()));
+    selected = registry.filter(([name]) => allowed.has(name));
+  }
+
   const outcomes = [];
-  for (const sweep of sweeps) {
+  for (const [name, sweep] of selected) {
     try {
       outcomes.push(await sweep());
     } catch (sweep_error) {
-      warn("[SELLER_GAP_RECOVERY_SWEEP_FAILED]", { error: sweep_error?.message });
-      outcomes.push({ gap: "sweep_failed", error: sweep_error?.message });
+      warn("[SELLER_GAP_RECOVERY_SWEEP_FAILED]", { sweep: name, error: sweep_error?.message });
+      outcomes.push({ gap: "sweep_failed", sweep: name, error: sweep_error?.message });
     }
   }
 
   const summary = {
     ok: true,
     dry_run: dryRun,
+    sweeps_requested: requested,
+    sweeps_executed: selected.map(([name]) => name),
     total_scanned: outcomes.reduce((sum, o) => sum + (o.scanned || 0), 0),
     total_repaired: outcomes.reduce((sum, o) => sum + (o.repaired || 0), 0),
     sweeps: outcomes,

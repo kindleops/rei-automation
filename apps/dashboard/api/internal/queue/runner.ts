@@ -53,7 +53,35 @@ const toE164 = (value: string): string => {
   return digits ? `+${digits}` : ''
 }
 
+/**
+ * BOUNDARY GUARD -- this runner cannot produce provider evidence.
+ *
+ * There is NO provider/network call anywhere in this file, yet it writes
+ * `queue_status: 'sent'` + `sent_at` on shared send_queue rows and upserts
+ * message_events with `event_type: 'sms_sent'` / `delivery_status: 'sent'`.
+ * Those are canonical PROVIDER-DELIVERY facts, and asserting them without a
+ * provider call makes "sent" an unreliable statement about the real world: it
+ * corrupts duplicate-prevention, delivery reconciliation and the outbound-event
+ * counts used as zero-send proofs. It targets the same Supabase project and the
+ * same tables as the API.
+ *
+ * `run-safe-batch.ts` already carried this exact boundary check; `run.ts` never
+ * did, and `run.ts` has no authentication at all. Rather than rely on either
+ * entrypoint remembering, the guard now lives on the primitive itself.
+ *
+ * Backend mutation belongs to the API service (ops.leadcommand.ai), which has
+ * the provider adapter, the canonical send authority and the runtime brakes.
+ */
+const assertBackendMutationAllowed = (): void => {
+  if (process.env.NEXUS_ALLOW_BACKEND_MUTATION !== 'true') {
+    throw new Error(
+      'BOUNDARY_VIOLATION: the dashboard queue runner cannot mark rows provider-sent because it makes no provider call. Backend mutation must run from the API service.'
+    )
+  }
+}
+
 export const runQueueBatch = async (caps: Partial<QueueRunCaps> = {}): Promise<any> => {
+  assertBackendMutationAllowed()
   const now = new Date().toISOString()
   const resolvedCaps: QueueRunCaps = {
     ...DEFAULT_LIVE_CAPS,

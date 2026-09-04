@@ -514,6 +514,11 @@ test("integration: auto-reply outside the session allowance stays deferred", asy
 });
 
 test("integration: normal (non-canary) dispatch context never bypasses", async () => {
+  // Under queue_execution_mode=scoped_canary_only the canonical send authority
+  // now denies an UNRESTRICTED (non-canary) dispatch before the contact-window
+  // logic is even reached. That is strictly stronger than the original
+  // guarantee: not only is the bypass unavailable, the send is refused outright
+  // and nothing is claimed.
   const row = makePinnedRow({ metadata: { provider_message_sid: "SMevidence5" } });
   const { deps, lock_updates } = makeItemDeps({
     scoped_canary: undefined,
@@ -521,6 +526,35 @@ test("integration: normal (non-canary) dispatch context never bypasses", async (
     canary_run_id: undefined,
     scoped_canary_max_rows: undefined,
     scoped_canary_requested_ids: undefined,
+  });
+  const result = await processSendQueueItem(row, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.sent, false);
+  // Brakes are evaluated before the execution-mode gate, so either canonical
+  // denial is correct here. The guarantee under test is that an unrestricted
+  // context is REFUSED and claims nothing -- not which gate fired first.
+  assert.ok(
+    ["queue_processor_paused", "queue_emergency_stop_active", "queue_execution_mode_scoped_canary_only"].includes(result.reason),
+    `unexpected denial reason: ${result.reason}`
+  );
+  assert.equal(lock_updates.length, 0, "a denied dispatch claims nothing");
+});
+
+test("integration: non-canary dispatch under an AUTHORIZING mode still defers on the contact window", async () => {
+  // The original coverage, preserved: with execution mode `normal` the send
+  // authority permits, so the contact-window rail is the thing under test and
+  // a non-canary context still gets no bypass.
+  const row = makePinnedRow({ metadata: { provider_message_sid: "SMevidence5b" } });
+  const { deps, lock_updates } = makeItemDeps({
+    scoped_canary: undefined,
+    authorization_validated: undefined,
+    canary_run_id: undefined,
+    scoped_canary_max_rows: undefined,
+    scoped_canary_requested_ids: undefined,
+    getSystemValue: makeGetSystemValue({
+      queue_execution_mode: "normal",
+      queue_processor_mode: "live",
+    }),
   });
   const result = await processSendQueueItem(row, deps);
   assert.equal(result.skipped, true);

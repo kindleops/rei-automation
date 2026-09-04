@@ -125,7 +125,13 @@ test("E: processSendQueueItem healthy legacy fake calls provider once", async ()
   const result = await processSendQueueItem(row, {
     supabase,
     supabaseClient: supabase,
-    getSystemValue: async () => null,
+    getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     claimedLockToken: "lock-compat",
     sendTextgridSMS: async () => {
       transport_calls += 1;

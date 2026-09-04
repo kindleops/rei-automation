@@ -238,7 +238,14 @@ test("cockpit immediate send blocks suppression with zero provider calls", async
     },
     {
       supabase,
-      getSystemValue: async () => null,
+      // The canonical runtime authority must AUTHORIZE here, otherwise it would
+      // deny first and this test would stop exercising the compliance guard it
+      // exists to prove. Compliance is the subject; the brake is not.
+      getSystemValue: async (key) => {
+        if (key === "queue_processor_mode") return "live";
+        if (key === "queue_execution_mode") return "normal";
+        return null;
+      },
       createQueueRowImpl: async (input) => ({
         ok: true,
         queue_row_id: "matrix-manual",
@@ -271,7 +278,14 @@ test("processSendQueueItem blocks suppression with zero provider calls", async (
     supabase,
     supabaseClient: supabase,
     claimedLockToken: "lock-matrix",
-    getSystemValue: async () => null,
+    // Authorize at the runtime layer so SUPPRESSION is what blocks this send.
+    // With an absent control plane the canonical brake denies first and the
+    // assertion below would pass without compliance ever running.
+    getSystemValue: async (key) => {
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
     sendTextgridSMS: async () => {
       transport_calls += 1;
       return { sid: "SMblocked" };
@@ -292,6 +306,14 @@ test("processSendQueueItem blocks suppression with zero provider calls", async (
 
   assert.equal(transport_calls, 0);
   assert.equal(result?.blocked || result?.skipped, true);
+  // The block must come from COMPLIANCE, not from a runtime brake that denied
+  // before compliance ran. Otherwise this test proves nothing about suppression.
+  assert.ok(
+    !["queue_processor_paused", "queue_emergency_stop_active",
+      "queue_execution_mode_stopped", "queue_execution_mode_scoped_canary_only",
+      "control_plane_unreadable"].includes(result?.reason),
+    `suppression proof was short-circuited by a runtime brake: ${result?.reason}`
+  );
 });
 
 test("matrix summary export", async () => {

@@ -1232,7 +1232,13 @@ test("disabled acquisition controls also block already-scheduled queue rows", as
   for (const row of rows) {
     let sendCalls = 0;
     const result = await processSendQueueItem(row, {
-      getSystemValue: async () => null,
+      getSystemValue: async (key) => {
+      // Canonical send authority is fail-closed: a send fixture must state that
+      // the control plane permits the send.
+      if (key === "queue_processor_mode") return "live";
+      if (key === "queue_execution_mode") return "normal";
+      return null;
+    },
       sendTextgridSMS: async () => {
         sendCalls += 1;
         return { ok: true };

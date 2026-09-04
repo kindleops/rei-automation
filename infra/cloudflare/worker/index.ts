@@ -23,16 +23,22 @@ export class ApiContainer extends Container<Env> {
     //
     // Absence of credentials IS the staging containment boundary, so the
     // container must only ever receive variables named here. A blanket spread
-    // would silently forward any future Worker secret -- TextGrid, SMTP,
-    // CRON_SECRET -- and quietly make staging send-capable.
+    // would silently forward any future Worker secret -- TextGrid, SMTP --
+    // and quietly make staging send-capable.
     //
     // Specifically NOT forwarded, and not to be added without an explicit
-    // decision: TEXTGRID_*, SMTP_*, BREVO_*, INTERNAL_API_SECRET, CRON_SECRET,
-    // *_WEBHOOK_SECRET, QUEUE_ENGINE_SHARED_SECRET, OPENAI_KEY.
+    // decision: TEXTGRID_*, SMTP_*, BREVO_*, *_WEBHOOK_SECRET,
+    // QUEUE_ENGINE_SHARED_SECRET, SCOPED_CANARY_EXECUTION_SECRET, OPENAI_KEY.
     //
-    // Note: the live-send flags below do NOT govern /api/internal/inbox/send-now,
-    // which bypasses the queue emergency stop by design. That path is contained
-    // solely by the absence of TEXTGRID_* and INTERNAL_API_SECRET.
+    // Every forward below is CONDITIONAL on the Worker actually holding the
+    // secret, so staging (which holds far fewer) receives only what it has.
+    //
+    // Note: /api/internal/inbox/send-now NO LONGER bypasses the queue emergency
+    // stop. It now goes through the same canonical runtime send authority as
+    // normal queue execution (emergency stop + queue_processor_mode +
+    // queue_execution_mode, fail-closed), so containment no longer rests solely
+    // on withholding TEXTGRID_* and INTERNAL_API_SECRET. Those remain withheld
+    // as defence in depth, not as the only guard.
     this.envVars = {
       NODE_ENV: "production",
       // Must be postgres. The durability layer throws rather than falling back
@@ -64,11 +70,25 @@ export class ApiContainer extends Container<Env> {
       //   OPS_DASHBOARD_SECRET- gates cockpit READ routes
       //   INTERNAL_API_SECRET - gates /api/internal/* authentication
       //
-      // STILL WITHHELD, deliberately: TEXTGRID_* (SMS transport), CRON_SECRET,
+      // STILL WITHHELD, deliberately: TEXTGRID_* (SMS transport),
       // QUEUE_ENGINE_SHARED_SECRET, SCOPED_CANARY_EXECUTION_SECRET.
       // Note INTERNAL_API_SECRET alone does NOT make the box send-capable:
       // inbox/send-now still needs TEXTGRID_* to reach a transport, and
       // sendTextgridSMS throws without credentials before any network call.
+      //
+      // CRON_SECRET IS NOW FORWARDED, and it has to be. scheduled() signs its
+      // request with `Authorization: Bearer ${env.CRON_SECRET}`, but the API
+      // that VERIFIES that header runs inside the container. With the secret
+      // withheld, cron-auth saw no configured secret and -- correctly, because
+      // it fails closed in production -- rejected every scheduled call with 500
+      // missing_cron_secret. Signing without forwarding cannot work.
+      //
+      // This does NOT widen the blast radius. The secret only lets the
+      // container VERIFY a caller; it grants no outbound capability, and the
+      // job registry still decides what may be invoked. Forwarding is
+      // conditional, so staging -- which has no CRON_SECRET -- receives
+      // nothing and its containment is unchanged.
+      ...(env.CRON_SECRET ? { CRON_SECRET: env.CRON_SECRET } : {}),
       ...(env.SUPABASE_DB_URL ? { SUPABASE_DB_URL: env.SUPABASE_DB_URL } : {}),
       ...(env.OPS_DASHBOARD_SECRET
         ? { OPS_DASHBOARD_SECRET: env.OPS_DASHBOARD_SECRET }
@@ -93,13 +113,17 @@ export class ApiContainer extends Container<Env> {
       //   2. queue_processor_mode        = off    (DB)
       //   3. queue_execution_mode        = scoped_canary_only (DB)
       //   4. ENABLE_LIVE_SENDING/AUTOMATION_/WORKFLOW_ = false (env, default-deny)
-      // plus cron is unregistered, so nothing invokes a runner.
       //
-      // KNOWN EXCEPTION: /api/internal/inbox/send-now evaluates the runtime
-      // brake with failClosed:false and proceeds anyway, recording
-      // bypassed_queue_emergency_stop. It is guarded only by
-      // INTERNAL_API_SECRET and its own compliance/suppression checks. That is
-      // existing product behaviour, deliberately unchanged here.
+      // The one registered schedule does not weaken this. It maps to a single
+      // delivery-outcome reconciler that cannot write a claimable queue row,
+      // and no queue runner, campaign feed or autopilot job is registered for
+      // any environment. See CRON_JOBS_BY_ENV.
+      //
+      // FORMER EXCEPTION, NOW CLOSED: /api/internal/inbox/send-now used to
+      // evaluate the runtime brake with failClosed:false and proceed anyway,
+      // recording the blocked verdict as metadata. It now goes through the same
+      // canonical runtime send authority as normal queue execution. An internal
+      // secret authenticates a caller; it does not confer send authority.
       ...(env.TEXTGRID_ACCOUNT_SID
         ? { TEXTGRID_ACCOUNT_SID: env.TEXTGRID_ACCOUNT_SID }
         : {}),
@@ -114,7 +138,11 @@ interface Env {
   ASSETS: Fetcher;
   API_CONTAINER: DurableObjectNamespace<ApiContainer>;
   CRON_SECRET?: string;
+  /** Master switch. Necessary but NOT sufficient: each job also needs its own flag. */
   CRON_ENABLED?: string;
+  /** Per-job authority. Absent => "false" => that job does not run. */
+  CRON_SELLER_STATE_RECONCILE_ENABLED?: string;
+  CRON_DELIVERY_RECONCILE_ENABLED?: string;
   // Commissioning credentials. Deliberately a SHORT list -- see ApiContainer.
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
@@ -177,23 +205,56 @@ export default {
       return;
     }
 
-    const routes = CRON_ROUTES[event.cron] ?? [];
-    for (const path of routes) {
+    // DEFAULT DENY, THREE TIMES OVER. An unrecognised DEPLOYMENT_ENV resolves to
+    // an EMPTY job table; an expression absent from that table resolves to an
+    // empty job list; and each surviving job must ALSO name an env flag that is
+    // explicitly "true". A schedule can therefore only fire a job that was
+    // written down for THAT environment by name AND separately switched on.
+    const table = CRON_JOBS_BY_ENV[String(env.DEPLOYMENT_ENV ?? "")] ?? {};
+    const registered = table[event.cron] ?? [];
+    if (registered.length === 0) {
+      console.log(
+        `cron.skipped cron=${event.cron} env=${env.DEPLOYMENT_ENV ?? "unset"} reason=no_job_registered`
+      );
+      return;
+    }
+
+    // PER-JOB AUTHORITY. CRON_ENABLED is a master switch, never a job switch:
+    // flipping it must not awaken a job nobody approved. Each job carries its
+    // own flag, so adding a future job to the registry leaves it OFF until it
+    // is separately commissioned.
+    const jobs = registered.filter((job) => {
+      const enabled = String((env as never as Record<string, string | undefined>)[job.enabledBy] ?? "false")
+        .toLowerCase() === "true";
+      if (!enabled) {
+        console.log(`cron.skipped cron=${event.cron} job=${job.id} reason=${job.enabledBy}_not_true`);
+      }
+      return enabled;
+    });
+
+    if (jobs.length === 0) {
+      console.log(`cron.skipped cron=${event.cron} reason=no_job_enabled`);
+      return;
+    }
+
+    for (const job of jobs) {
       ctx.waitUntil(
         forwardToApi(
-          new Request(`https://internal.invalid${path}`, {
+          new Request(`https://internal.invalid${job.path}`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${env.CRON_SECRET}`,
               // Provider-neutral provenance. NOT an authenticator.
               "x-internal-cron-source": "cloudflare",
               "user-agent": "cloudflare-cron/1.0",
+              ...(job.body ? { "content-type": "application/json" } : {}),
             },
+            ...(job.body ? { body: JSON.stringify(job.body) } : {}),
           }),
           env
         ).then(
-          (r) => console.log(`cron.done cron=${event.cron} path=${path} status=${r.status}`),
-          (e) => console.error(`cron.failed cron=${event.cron} path=${path} error=${e}`)
+          (r) => console.log(`cron.done cron=${event.cron} job=${job.id} path=${job.path} status=${r.status}`),
+          (e) => console.error(`cron.failed cron=${event.cron} job=${job.id} path=${job.path} error=${e}`)
         )
       );
     }
@@ -201,31 +262,103 @@ export default {
 };
 
 /**
- * Expressions preserved verbatim from apps/api/vercel.json. Cloudflare fires
- * one scheduled() per distinct expression, so routes sharing a schedule are
- * grouped here rather than duplicated as separate triggers.
+ * CRON JOB TABLE -- scoped BY DEPLOYMENT ENVIRONMENT.
+ *
+ * Previously a single shared map keyed only by cron expression. That made the
+ * schedule list the ONLY thing standing between production and 13 jobs,
+ * including queue/run, campaign feed and campaign activation. Adding one
+ * trigger expression to production would have fired every job sharing it.
+ *
+ * Now the environment selects the table first. Production physically cannot
+ * reach a job that is not written in PRODUCTION_CRON_JOBS, whatever triggers a
+ * wrangler config declares and whatever CRON_ENABLED is set to.
+ *
+ * DELIBERATELY ABSENT FROM EVERY TABLE (each can cause a seller-visible send,
+ * or arm a row that a later processor would send):
+ *   /api/internal/queue/run                      dispatches the send queue
+ *   /api/internal/queue/retry                    re-arms failed sends
+ *   /api/internal/queue/force-due                pulls schedules forward to now
+ *   /api/internal/campaigns/feed                 builds outbound campaign work
+ *   /api/internal/campaigns/activate-due         activates campaigns
+ *   /api/internal/campaigns/recover-stale-expired  inserts live `scheduled` rows
+ *   /api/internal/autopilot/run                  broad autopilot
+ *   /api/internal/seller-flow/flush-inbound-bursts   unbraked follow-up leg
+ *   /api/internal/seller-flow/recover-inbound        unbraked follow-up leg
+ *   /api/internal/webhooks/recover-inbound       drives the auto-reply pipeline
+ *   /api/internal/offers/recalculate             mutates monetary state
  */
-const CRON_ROUTES: Record<string, string[]> = {
-  "* * * * *": [
-    "/api/internal/queue/run",
-    "/api/internal/seller-flow/flush-inbound-bursts",
-  ],
-  "*/2 * * * *": [
-    "/api/internal/webhooks/recover-delivery",
-    "/api/internal/webhooks/recover-inbound",
-  ],
-  "*/5 * * * *": [
-    "/api/internal/autopilot/run",
-    "/api/internal/campaigns/activate-due",
-    "/api/internal/campaigns/feed",
-    "/api/internal/seller-flow/recover-inbound",
-    "/api/internal/inbound/disposition-slo-scan",
-  ],
-  "*/10 * * * *": [
-    "/api/internal/queue/retry",
-    "/api/internal/outbound/feed-master-owners",
-    "/api/internal/maintenance/reap-graph-runs",
-  ],
-  "*/15 * * * *": ["/api/internal/queue/reconcile"],
-  "30 8 * * *": ["/api/internal/inbound/ledger-retention-purge"],
+type CronJob = {
+  /** Stable identifier used in logs and in the scheduler proof. */
+  id: string;
+  /** Env var that must be exactly "true" for this job to run. Per-job authority. */
+  enabledBy: string;
+  path: string;
+  body?: Record<string, unknown>;
+};
+
+/**
+ * SELLER-STATE RECONCILIATION - the job this mission commissions.
+ *
+ * Repairs canonical seller lifecycle state: inbox_thread_state rows that are
+ * active, non-archived, non-suppressed and stale, whose next_action is NULL or
+ * the legacy empty-string sentinel. For each it copies the next_action already
+ * present on the canonical acquisition_opportunities row; with no canonical
+ * evidence it writes the non-send sentinel `human_review`.
+ *
+ * It is send-incapable STRUCTURALLY, not because a flag happens to be off:
+ *   - the route passes an explicit ONE-ENTRY sweep allowlist, so six unsafe
+ *     sweeps (offer enqueue, follow-up scheduling, closing-case creation,
+ *     decision-engine runs, negotiation/monetary rewrites, transition replay)
+ *     never execute;
+ *   - the one sweep writes exactly one table, inbox_thread_state, via
+ *     patchUniversalLeadState. It touches no send_queue, seller_offers or
+ *     closing_cases row;
+ *   - it never invents an outbound action. Absent canonical evidence it surfaces
+ *     the lead to a human instead of guessing;
+ *   - the API side additionally requires an unambiguous cloudflare:production
+ *     identity, so a staging deploy holding this secret is refused.
+ */
+const SELLER_STATE_RECONCILIATION: CronJob = {
+  id: "seller_state_reconciliation",
+  enabledBy: "CRON_SELLER_STATE_RECONCILE_ENABLED",
+  path: "/api/internal/seller-flow/reconcile-state",
+  body: { limit: 100 },
+};
+
+/**
+ * DELIVERY RECONCILIATION - approved and proven send-incapable previously.
+ *
+ * Distinct from seller-state reconciliation: this reconciles provider DELIVERY
+ * outcomes that were never written back. The only send_queue statuses it can
+ * write are delivered/sent/terminal, which are disjoint from the five the
+ * processor claims, so it cannot produce a claimable row. Its status merge is
+ * monotonic. include_polling_fallback:false disables its one outbound provider
+ * call, leaving pure database reconciliation with no external contact.
+ */
+const DELIVERY_RECONCILIATION: CronJob = {
+  id: "delivery_reconciliation",
+  enabledBy: "CRON_DELIVERY_RECONCILE_ENABLED",
+  path: "/api/internal/webhooks/recover-delivery",
+  body: { include_polling_fallback: false },
+};
+
+const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
+  "*/5 * * * *": [SELLER_STATE_RECONCILIATION, DELIVERY_RECONCILIATION],
+};
+
+/**
+ * STAGING RUNS NOTHING.
+ *
+ * Staging shares the PRODUCTION database, so a staging cron is a
+ * production-affecting cron. There is no such thing as a "safe staging
+ * reconciliation" against real seller rows. The table is empty and
+ * wrangler.jsonc declares no triggers, so Cloudflare never even invokes
+ * scheduled() there. Even if a trigger were re-added, this empty table denies
+ * every expression - and the API would refuse a staging identity anyway.
+ */
+const STAGING_CRON_JOBS: Record<string, CronJob[]> = {};
+
+const CRON_JOBS_BY_ENV: Record<string, Record<string, CronJob[]>> = {
+  production: PRODUCTION_CRON_JOBS,
+  staging: STAGING_CRON_JOBS,
 };

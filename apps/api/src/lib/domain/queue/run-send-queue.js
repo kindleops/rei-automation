@@ -287,12 +287,33 @@ export async function runSendQueue(
     }
   }
 
-  // 1. Stale-lock recovery for stuck "processing" rows
+  // 1. Stale-lock recovery for stuck "processing" rows.
+  //
+  // LEASE EXPIRY DOES NOT PROVE THE PROVIDER REQUEST NEVER STARTED.
+  //
+  // `processing` is the state a row occupies WHILE the provider call is in
+  // flight. A row stuck there may have crashed before the request, during it,
+  // or after TextGrid already accepted and delivered the message. Nothing
+  // durable distinguishes those cases today, so returning the row to `queued`
+  // -- as this did -- hands it back to the runner and can send a seller their
+  // second message.
+  //
+  // This previously survived only by accident: it never cleared `lock_token`,
+  // and shouldRunSendQueueRow refuses locked rows, so the rows stranded rather
+  // than resending. A reasonable "cleanup" adding that clear would have armed a
+  // duplicate-send path. Replace accidental safety with intentional safety.
+  //
+  // Rows now move to the canonical non-dispatchable hold (`expired` +
+  // processing_lease_expired_manual_review), which is outside the claim set
+  // (queued/scheduled/pending/approved/ready), keeps every piece of provider
+  // evidence, and stays recognisable to the coming §11 attempt ledger. A false
+  // hold is acceptable; a duplicate seller message is not.
   try {
     const { data: recycled, error: recycle_error } = await supabase
         .from('send_queue')
         .update({
-            queue_status: 'queued',
+            queue_status: 'expired',
+            failed_reason: 'processing_lease_expired_manual_review',
             is_locked: false,
             locked_at: null,
             processing_run_id: null,

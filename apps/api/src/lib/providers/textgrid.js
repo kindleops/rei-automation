@@ -15,6 +15,7 @@ import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
+import { classifyNetworkFailurePhase } from "@/lib/domain/messaging/transport-failure-phase.js";
 
 // Pre-send content guard patterns.
 const BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
@@ -46,7 +47,22 @@ const TEXTGRID_PROVIDER_CAPABILITIES = Object.freeze({
 // ══════════════════════════════════════════════════════════════════════════
 
 export class TextGridError extends Error {
-  constructor(message, { status, data, raw_text, endpoint, to, from, body } = {}) {
+  constructor(
+    message,
+    {
+      status,
+      data,
+      raw_text,
+      endpoint,
+      to,
+      from,
+      body,
+      cause_name,
+      cause_code,
+      network_phase,
+      may_have_transmitted,
+    } = {}
+  ) {
     super(message);
     this.name = "TextGridError";
     this.status = status ?? null;
@@ -56,8 +72,18 @@ export class TextGridError extends Error {
     this.to = to ?? null;
     this.from = from ?? null;
     this.body = body ?? null;
+    // TRANSPORT EVIDENCE. Without these the classifier cannot tell a
+    // connection that was REFUSED (provably no request left this process, so a
+    // retry is safe) from a timeout AFTER the request was written (the provider
+    // may have accepted it, so a retry would duplicate a seller SMS).
+    this.cause_name = cause_name ?? null;
+    this.cause_code = cause_code ?? null;
+    this.network_phase = network_phase ?? null;
+    this.may_have_transmitted = may_have_transmitted ?? null;
   }
 }
+
+
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -589,6 +615,10 @@ export async function sendTextgridSMS({
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }).catch((error) => {
+      // Preserve the transport evidence BEFORE wrapping. The original name and
+      // cause.code are the only signal distinguishing "never left" from "no
+      // answer", and wrapping without them previously destroyed it.
+      const phase = classifyNetworkFailurePhase(error);
       throw new TextGridError(
         clean(error?.message) || "TextGrid network request failed",
         {
@@ -596,6 +626,10 @@ export async function sendTextgridSMS({
           to: normalized_to,
           from: normalized_from,
           body: trimmed_body,
+          cause_name: clean(error?.name) || null,
+          cause_code: clean(error?.cause?.code || error?.code) || null,
+          network_phase: phase.phase,
+          may_have_transmitted: phase.may_have_transmitted,
         }
       );
     });
@@ -609,6 +643,8 @@ export async function sendTextgridSMS({
     try {
       data = JSON.parse(text);
     } catch {
+      // The request was transmitted and the provider answered; we simply cannot
+      // read the answer. Acceptance cannot be excluded.
       throw new TextGridError(`Invalid JSON response: ${text}`, {
         status: response.status,
         raw_text: text,
@@ -616,6 +652,8 @@ export async function sendTextgridSMS({
         to: normalized_to,
         from: normalized_from,
         body: trimmed_body,
+        network_phase: "inflight",
+        may_have_transmitted: true,
       });
     }
 
@@ -734,3 +772,7 @@ export async function sendTextgridSMS({
     throw tge;
   }
 }
+
+// Re-exported for callers that reach transport-phase classification through the
+// provider adapter. The definition lives in the messaging domain.
+export { classifyNetworkFailurePhase };

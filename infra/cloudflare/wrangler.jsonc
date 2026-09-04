@@ -48,16 +48,18 @@
   // All 14 schedules, expressions preserved verbatim from apps/api/vercel.json.
   // scheduled() is INERT unless CRON_ENABLED=true, so a staging deploy does not
   // fire real work against production data.
-  "triggers": {
-    "crons": [
-      "* * * * *",
-      "*/2 * * * *",
-      "*/5 * * * *",
-      "*/10 * * * *",
-      "*/15 * * * *",
-      "30 8 * * *"
-    ]
-  },
+  // NO TRIGGERS AT ALL. Staging shares the PRODUCTION database, so a staging
+  // cron is a production-affecting cron - there is no "safe staging
+  // reconciliation" against real seller rows. Cloudflare cannot invoke
+  // scheduled() for an environment that declares no expressions.
+  //
+  // Three independent guards, any one of which is sufficient:
+  //   1. no triggers.crons block here
+  //   2. STAGING_CRON_JOBS in worker/index.ts is EMPTY
+  //   3. the API refuses a cloudflare:staging identity for scheduled mutations
+  //
+  // This was 6 expressions covering 13 jobs (including the send-queue runner
+  // and the campaign feed), restrained only by CRON_ENABLED being "false".
 
   // Non-secret vars. Credentials are Worker SECRETS (wrangler secret put /
   // dashboard) and are forwarded to the container by an explicit allowlist in

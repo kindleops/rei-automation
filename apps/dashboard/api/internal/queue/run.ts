@@ -11,6 +11,16 @@ type ApiResponse = {
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
+  // Same boundary this project already enforces in run-safe-batch.ts. This
+  // route had no guard AND no authentication, while writing canonical
+  // provider-sent state without any provider call.
+  if (process.env.NEXUS_ALLOW_BACKEND_MUTATION !== 'true') {
+    res.status(403).json({
+      error: 'BOUNDARY_VIOLATION',
+      message: 'Backend mutation scripts must run from real-estate-automation, not nexus-dashboard.',
+    })
+    return
+  }
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
     return

@@ -1,3 +1,4 @@
+import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
   acquisitionQueueOperation,
   acquisitionRuntimeDisabled,
@@ -20,7 +21,6 @@ import {
   normalizePhone,
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
-import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import {
@@ -2299,16 +2299,22 @@ export async function processSendQueueItem(queue_row, deps = {}) {
   }
 
   const scoped_canary = deps.scoped_canary === true;
-  if (!scoped_canary) {
+  {
+    // CANONICAL RUNTIME SEND AUTHORITY. Previously this evaluated only the
+    // emergency stop + queue_processor_mode with failClosed:false, so an ABSENT
+    // processor mode read as "no opinion" and the send proceeded, and
+    // queue_execution_mode was never consulted at all -- scoped_canary_only did
+    // not restrain unrestricted dispatch through this primitive.
+    //
+    // scoped_canary is passed through rather than skipping the check: the
+    // scoped-canary authorization architecture is then the authority.
     const get_system_value =
       deps.getSystemValue || (hasSupabaseConfig() ? getSystemValue : async () => null);
-    const runtime_brake = evaluateQueueSendRuntimeBrakes(
-      {
-        queue_processor_mode: await get_system_value("queue_processor_mode"),
-        queue_emergency_stop_at: await get_system_value("queue_emergency_stop_at"),
-      },
-      { action: "processSendQueueItem", failClosed: false }
-    );
+    const runtime_brake = await evaluateCanonicalSendAuthority({
+      getSystemValue: get_system_value,
+      action: "processSendQueueItem",
+      scopedCanary: scoped_canary,
+    });
     if (!runtime_brake.ok) {
       return {
         ok: false,

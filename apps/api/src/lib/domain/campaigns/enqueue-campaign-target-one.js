@@ -72,6 +72,7 @@ import { insertSupabaseSendQueueRow } from '@/lib/supabase/sms-engine.js'
 import { normalizeCampaignMode } from '@/lib/domain/queue/queue-control-safety.js'
 import { getSystemValueFresh } from '@/lib/system-control.js'
 import { child } from '@/lib/logging/logger.js'
+import { isAmbiguousSendRow } from '@/lib/domain/messaging/ambiguous-send-evidence.js'
 
 const logger = child({ module: 'domain.campaigns.enqueue_campaign_target_one' })
 
@@ -84,6 +85,10 @@ const LIVE_QUEUE_STATUSES = [
 
 /** Terminal statuses that still count as "this target was already contacted". */
 const CONSUMED_QUEUE_STATUSES = ['sent', 'delivered']
+// Statuses that MAY hold an ambiguous attempt. Fetched, then filtered by
+// isAmbiguousSendRow -- an ordinary provably-unsent failure must NOT block a
+// legitimate new send, so status alone is not sufficient here.
+const AMBIGUOUS_CANDIDATE_STATUSES = ['failed']
 
 /**
  * Campaign modes under which it is meaningful to create a real outbound row.
@@ -423,13 +428,29 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   // twice is the harm, regardless of which target row initiated it.
   const { data: priorRows, error: priorErr } = await supabase
     .from('send_queue')
-    .select('id, queue_status, campaign_target_id')
+    // `metadata` is fetched so an AMBIGUOUS prior attempt can be recognised:
+    // a row finalized `failed` after a timeout may already have reached this
+    // human, and it is not represented by any status alone.
+    .select('id, queue_status, campaign_target_id, metadata')
     .eq('to_phone_number', recipient)
-    .in('queue_status', [...LIVE_QUEUE_STATUSES, ...CONSUMED_QUEUE_STATUSES])
+    .in('queue_status', [...LIVE_QUEUE_STATUSES, ...CONSUMED_QUEUE_STATUSES, ...AMBIGUOUS_CANDIDATE_STATUSES])
     .range(0, 199)
   if (priorErr) throw priorErr
 
-  const live = (priorRows || []).find((r) => LIVE_QUEUE_STATUSES.includes(clean(r.queue_status)))
+  // An ambiguous prior attempt counts as contact: we cannot prove the human did
+  // not receive it, so another message would be their second.
+  const ambiguous = (priorRows || []).find(
+    (r) => AMBIGUOUS_CANDIDATE_STATUSES.includes(clean(r.queue_status)) && isAmbiguousSendRow(r)
+  )
+  if (ambiguous) {
+    return fail(ENQUEUE_REASON.PRIOR_CONTACT, `ambiguous prior attempt ${ambiguous.id}`)
+  }
+  // Ordinary failed rows are provably unsent and must not block a new send.
+  const contactRows = (priorRows || []).filter(
+    (r) => !AMBIGUOUS_CANDIDATE_STATUSES.includes(clean(r.queue_status))
+  )
+
+  const live = contactRows.find((r) => LIVE_QUEUE_STATUSES.includes(clean(r.queue_status)))
   if (live) {
     return {
       created: false,
@@ -439,9 +460,10 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
       resulting_campaign_target_id: live.campaign_target_id ?? null,
     }
   }
-  if ((priorRows || []).length > 0) {
-    return fail(ENQUEUE_REASON.PRIOR_CONTACT, `${priorRows.length} prior row(s)`)
+  if (contactRows.length > 0) {
+    return fail(ENQUEUE_REASON.PRIOR_CONTACT, `${contactRows.length} prior row(s)`)
   }
+
 
   // ── 7. Template + governance (reuses #91) ───────────────────────────────
   const metadata = target.metadata && typeof target.metadata === 'object' && !Array.isArray(target.metadata)

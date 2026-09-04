@@ -46,8 +46,32 @@
 
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
 
+  // THE ONLY PRODUCTION SCHEDULE. Maps -- via the environment-scoped table in
+  // worker/index.ts -- to exactly one job: delivery-outcome reconciliation,
+  // which is structurally incapable of producing a sendable queue row.
+  //
+  // Every send-capable job (queue/run, queue retry, queue force-due, campaign
+  // feed, campaign activation, stale-expired recovery, autopilot, the inbound
+  // burst/recovery follow-up legs) is absent from PRODUCTION_CRON_JOBS, so no
+  // trigger can reach one. This expression fires that single reconciler only.
+  //
+  // Two independent guards still stand in front of it: CRON_ENABLED must be
+  // "true", and CRON_SECRET must be present. Both are deliberate commissioning
+  // acts, not code changes.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
   "vars": {
-    "CRON_ENABLED": "false",
+    // COMMISSIONED. The master switch is necessary but not sufficient: each job
+    // in worker/index.ts names its own flag, so turning this on cannot awaken a
+    // job that was not separately approved below.
+    "CRON_ENABLED": "true",
+    // Per-job authority. Both are RECONCILIATION lanes and both are
+    // send-incapable. No queue runner, campaign feed, campaign activation,
+    // autopilot or DocuSign job is registered for any environment.
+    "CRON_SELLER_STATE_RECONCILE_ENABLED": "true",
+    "CRON_DELIVERY_RECONCILE_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
