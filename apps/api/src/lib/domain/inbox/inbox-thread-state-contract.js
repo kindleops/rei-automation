@@ -55,6 +55,13 @@ export const INBOX_THREAD_STATE_SELECT_FIELDS = [
   "disposition",
   "is_suppressed",
   "is_archived",
+  // Snooze must travel with the row: this list feeds countThreadsMatchingTab,
+  // and threadMatchesInboxTab cannot see a snooze it was never given. Without
+  // it the Priority / New Replies CHIPS kept counting snoozed threads that the
+  // list itself had already (correctly) hidden -- the same lying-count bug the
+  // archived work fixed. inbox_thread_state genuinely has both columns.
+  "snoozed_until",
+  "snooze_reason",
   "automation_lane",
   "automation_status",
   "automation_state",
