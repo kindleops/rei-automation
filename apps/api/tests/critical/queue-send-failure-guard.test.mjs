@@ -109,18 +109,38 @@ test("finalizeSendQueueFailure: error.retryable=false → terminal failed on fir
   assert.equal(payload.next_retry_at, null);
 });
 
-test("finalizeSendQueueFailure: retryable network error → re-queued with backoff on first attempt", async () => {
+test("finalizeSendQueueFailure: a TIMED-OUT send is ambiguous and must NOT re-queue", async () => {
+  // INVERTED, deliberately. This previously asserted that "connection timed
+  // out" re-queues with backoff. That is the duplicate-send path: a timeout can
+  // occur on a request TextGrid already ACCEPTED, so re-queueing puts a second
+  // message in front of the seller. A timeout proves nothing about delivery.
   const captured = [];
   const deps = { updateSendQueueRowWithLock: makeUpdateSendQueueRowWithLock(captured) };
   const error = new Error("Network error: connection timed out");
 
-  const result = await finalizeSendQueueFailure(BASE_ROW, LOCK_TOKEN, error, deps);
+  await finalizeSendQueueFailure(BASE_ROW, LOCK_TOKEN, error, deps);
 
   const { payload } = captured[0];
-  assert.equal(payload.queue_status, "queued", "retryable error must re-queue");
+  assert.notEqual(payload.queue_status, "queued", "an ambiguous outcome must not return to the dispatchable set");
+  assert.equal(payload.next_retry_at, null, "no retry may be scheduled for an unproven outcome");
+  assert.equal(payload.metadata.provider_error.retryable, false);
+});
+
+test("finalizeSendQueueFailure: a PROVABLY unsent network error still re-queues with backoff", async () => {
+  // The complement, so the change above is a narrowing and not a blanket ban.
+  // A refused connection means no request left this process, so no SMS exists
+  // and another attempt cannot duplicate anything.
+  const captured = [];
+  const deps = { updateSendQueueRowWithLock: makeUpdateSendQueueRowWithLock(captured) };
+  const error = new Error("fetch failed");
+  error.cause = { code: "ECONNREFUSED" };
+
+  await finalizeSendQueueFailure(BASE_ROW, LOCK_TOKEN, error, deps);
+
+  const { payload } = captured[0];
+  assert.equal(payload.queue_status, "queued", "a provably unsent error must re-queue");
   assert.ok(payload.next_retry_at !== null, "next_retry_at must be set");
   assert.equal(payload.metadata.provider_error.retryable, true);
-  assert.equal(payload.metadata.failure_bucket, undefined, "no failure_bucket for retryable");
 });
 
 test("finalizeSendQueueFailure: retryable error exhausted at max_retries → terminal failed", async () => {

@@ -39,6 +39,7 @@ import {
 } from "@/lib/domain/queue/queue-send-brake-state.js";
 import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-machine.js";
 import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
+import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const MESSAGE_EVENTS_TABLE = "message_events";
@@ -844,11 +845,16 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   const evaluate_contact_window = deps.evaluateContactWindow || evaluateContactWindow;
   const dry_run = Boolean(deps.dry_run || deps.dryRun);
 
+  // FENCE AUTHORITY FAILS CLOSED.
+  //
+  // This defaulted to `?? true`, so ABSENT configuration granted permission to
+  // strip locks off rows. A lock is the fence that stops two workers reaching
+  // the provider for the same row, and missing information must never be read
+  // as permission to remove it. An explicit `true` still enables it.
   const stale_lock_recovery_enabled =
-    deps.stale_lock_recovery_enabled ??
-    deps.enableStaleLockRecovery ??
-    deps.staleLockRecoveryEnabled ??
-    true;
+    (deps.stale_lock_recovery_enabled ??
+      deps.enableStaleLockRecovery ??
+      deps.staleLockRecoveryEnabled) === true;
 
   const stale_lock_minutes = Number(deps.stale_lock_minutes ?? deps.staleLockMinutes ?? 15);
 
@@ -871,6 +877,11 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
         .or("queue_status.eq.queued,queue_status.eq.ready,queue_status.eq.scheduled")
         .eq("is_locked", true)
         .lt("locked_at", cutoff_iso)
+        // Never unfence a row that already carries provider evidence. A row
+        // holding a SID or a sent_at has reached the provider, and removing its
+        // lock would make it claimable for a second dispatch.
+        .is("provider_message_id", null)
+        .is("sent_at", null)
         .select("id");
 
       if (unlock_error) throw unlock_error;
@@ -2054,9 +2065,29 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   // same-body behavior. Idempotency is content-keyed, so the rotated body is a
   // fresh key that still cannot duplicate the original blocked body.
   const rotation_failure_class = classified.failure_class || normalized_failure.failure_class || null;
+  // ROTATION REQUIRES PROOF THE SELLER NEVER SAW THE FIRST MESSAGE.
+  //
+  // Rotation exists for content_filter_blocked: TextGrid ACCEPTED the request,
+  // returned a sid, then filtered the message, so nothing reached the seller
+  // and an alternate body is safe. That proof comes from the provider.
+  //
+  // The old condition also rotated on `classified.retryable === true`. Because
+  // an unclassified failure (including a 15s timeout on a message TextGrid had
+  // already accepted) defaulted to retryable, a timeout took this branch, had
+  // its provider identifiers cleared below, and sent a SECOND differently
+  // worded SMS to the seller. A broad "retryable" boolean must never govern
+  // rotation: retry-safety and rotation-safety are different questions.
+  //
+  // NOTE: `no_sender_rotation` is deliberately NOT consulted here. It gates
+  // rotating the FROM NUMBER, and content_filter_blocked legitimately sets it
+  // while still needing TEMPLATE rotation. Gating on it would have silently
+  // disabled the one rotation that is actually safe.
+  //
+  // The allowlist is the gate: exactly one failure class may rotate, and it is
+  // the one where provider evidence proves the seller saw nothing.
   const rotation_eligible =
     next_retry_count <= normalized.max_retries &&
-    (rotation_failure_class === "content_filter_blocked" || classified.retryable === true);
+    rotation_failure_class === "content_filter_blocked";
   const tried_template_ids = [
     ...(Array.isArray(normalized.metadata?.tried_template_ids)
       ? normalized.metadata.tried_template_ids
@@ -2082,10 +2113,21 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     }
   }
 
+  // RETRY BUDGET DOES NOT CREATE SEND AUTHORITY.
+  //
+  // The final branch used to return "queued" whenever retries remained, without
+  // consulting `classified.retryable`. An ambiguous outcome on its first
+  // failure therefore went straight back into the dispatchable set with
+  // next_retry_at = now + 5 minutes -- a duplicate path entirely independent of
+  // rotation. Retry eligibility now derives from the OUTCOME first and the
+  // retry counter only afterwards.
+  const retry_permitted = classified.retryable === true;
   const terminal_queue_status = rotation
     ? "queued"
-    : is_final_failure && !classified.retryable
-      ? (classified.queue_disposition || "failed")
+    : !retry_permitted
+      ? (classified.queue_disposition && classified.queue_disposition !== "queued"
+          ? classified.queue_disposition
+          : "failed")
       : is_final_failure
         ? "failed"
         : "queued";
@@ -2094,7 +2136,10 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
     queue_status: terminal_queue_status,
     failed_reason: error_message,
     retry_count: next_retry_count,
-    next_retry_at: rotation || !is_final_failure ? addMinutesIso(now, 5) : null,
+    // A scheduled retry time on a non-retry-safe outcome is a loaded gun: any
+    // scanner reading next_retry_at would treat the row as due.
+    next_retry_at:
+      rotation || (retry_permitted && !is_final_failure) ? addMinutesIso(now, 5) : null,
     is_locked: false,
     locked_at: null,
     lock_token: null,
@@ -2884,6 +2929,32 @@ export async function recycleClaimedSendingRow(row, lock_token, reason = "finali
   }
 
   if (!hasCurrentProcessingRun(latest, options)) {
+    return null;
+  }
+
+  // RETRY COUNTERS DO NOT OVERRIDE AMBIGUITY.
+  //
+  // Below, `final_queue_status` becomes "queued" purely because
+  // `next_retry_count < max_retries`. That is retry-counter authority: it asks
+  // "are attempts left?" and never "is another attempt SAFE?".
+  //
+  // The input to this function is a `sending`/`processing` row -- exactly the
+  // state a row occupies while a provider request is in flight. If the row
+  // carries provider evidence, or its recorded outcome was ambiguous, another
+  // dispatch could put a second message in front of the seller.
+  //
+  // This primitive currently has no production caller (only
+  // finalizeClaimedSendQueueRows, which nothing in src/ invokes), so this is a
+  // future-safety guard: it makes wiring it up FAIL rather than silently
+  // resend. Rows it refuses are left untouched for canonical lease handling.
+  if (rowHasSendEvidence(latest) || isAmbiguousSendRow(latest)) {
+    warn("queue_recycle_denied_possible_provider_execution", {
+      queue_row_id,
+      queue_status: latest.queue_status,
+      has_provider_id: Boolean(clean(latest.provider_message_id)),
+      ambiguous: isAmbiguousSendRow(latest),
+      reason: clean(reason) || null,
+    });
     return null;
   }
 

@@ -89,12 +89,30 @@ test("mapTextgridFailureBucket: HTTP 404 -> Hard Bounce", () => {
   assert.equal(bucket, "Hard Bounce");
 });
 
-test("mapTextgridFailureBucket: HTTP 500 -> Soft Bounce", () => {
+test("mapTextgridFailureBucket: HTTP 500 -> Unknown Outcome, NOT Soft Bounce", () => {
+  // Changed deliberately. "Soft Bounce" asserts the message did not arrive and
+  // maps downstream to the retry-flavoured reason "Network Error". A 5xx cannot
+  // prove TextGrid did not already create and deliver the message, so telling
+  // an operator (or a retry worker) that it bounced is the wrong signal.
   const bucket = mapTextgridFailureBucket({
     success: false,
     ok: false,
     error_status: 500,
     error_message: "Internal Server Error",
+  });
+  assert.equal(bucket, "Unknown Outcome");
+  assert.notEqual(bucket, "Soft Bounce");
+});
+
+test("mapTextgridFailureBucket: a refused connection IS a Soft Bounce", () => {
+  // The complement: no request left the process, so "did not arrive" is exactly
+  // right and the retry-flavoured mapping is correct.
+  const bucket = mapTextgridFailureBucket({
+    success: false,
+    ok: false,
+    error_message: "fetch failed",
+    raw: null,
+    error_code: "ECONNREFUSED",
   });
   assert.equal(bucket, "Soft Bounce");
 });
