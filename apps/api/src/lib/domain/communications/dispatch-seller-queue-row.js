@@ -27,6 +27,7 @@ import { createSellerCommunicationStore } from '@/lib/domain/communications/sell
 import { resolveQueueRowIdentity } from '@/lib/domain/communications/queue-row-identity.js';
 import { buildLogicalCommunicationKey, LOGICAL_COMMUNICATION_KEY_VERSION } from '@/lib/domain/communications/logical-communication-key.js';
 import { evaluateCanonicalSendAuthority } from '@/lib/domain/queue/canonical-send-authority.js';
+import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
 
 const logger = child({ module: 'domain.communications.queue_dispatch' });
@@ -93,6 +94,43 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
     await store.bindQueueRow({ queue_row_id, logical_communication_id });
   }
 
+  // ── 2b. MONETARY TERMS MAY NOT DRIFT UNDER A RETRY ───────────────────────
+  //
+  // A transport retry re-sends an ALREADY AUTHORISED message. If the row now
+  // points at a different offer version than the communication it is bound to,
+  // something upstream re-underwrote between attempts, and delivering it would
+  // put terms in front of a seller that were never authorised under this
+  // communication. Changed terms require a NEW offer version and therefore a
+  // NEW domain action, which is a decision with a name -- not a side effect of
+  // a delivery failure.
+  //
+  // Refuse loudly rather than silently repairing: a silent repair is how the
+  // wrong number reaches a seller with a straight face.
+  if (identity.bound && identity.monetary) {
+    const bound_comm = await store.getLogicalCommunicationById(logical_communication_id);
+    if (bound_comm?.ok) {
+      const stored_version = clean(bound_comm.communication.seller_offer_version);
+      const stored_offer = clean(bound_comm.communication.seller_offer_id);
+      const row_version = clean(identity.monetary.seller_offer_version);
+      const row_offer = clean(identity.monetary.seller_offer_id);
+      if ((stored_version && stored_version !== row_version)
+        || (stored_offer && stored_offer !== row_offer)) {
+        logger.error('queue_dispatch.monetary_offer_mismatch', {
+          queue_row_id,
+          logical_communication_id,
+          stored_offer_id: stored_offer, stored_offer_version: stored_version,
+          row_offer_id: row_offer, row_offer_version: row_version,
+        });
+        return {
+          ok: false, sent: false, provider_invoked: false,
+          stage: 'monetary_authority',
+          reason: 'monetary_communication_offer_mismatch',
+          logical_communication_id,
+        };
+      }
+    }
+  }
+
   // ── 3. canonical seam ────────────────────────────────────────────────────
   // The raw provider payload is captured on the way past so the queue runner's
   // existing finalisation keeps working unchanged. It is telemetry for the
@@ -121,7 +159,12 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
     {
       store,
       sendProvider,
-      classifyProviderError: deps.classifyProviderError,
+      // Defaulted, not required. Without a classifier the seam treats EVERY
+      // failure as unknown and therefore ambiguous, which is the correct
+      // fail-closed posture for a genuinely unrecognised outcome but would
+      // permanently wedge a communication whose caller merely forgot to pass
+      // one. Fail closed on unknown outcomes, not on unknown wiring.
+      classifyProviderError: deps.classifyProviderError || classifyTextGridProviderError,
       now: deps.now || new Date().toISOString(),
       logger,
       // Re-evaluated per attempt: see the header note on STOP between retries.

@@ -30,8 +30,40 @@
 
 import { COMMUNICATION_TYPES } from '@/lib/domain/communications/logical-communication-key.js';
 
+/**
+ * A message that states a price. Identity must be the OFFER and its VERSION,
+ * never the rendered amount, the template or the send time, so that a transport
+ * retry cannot quietly deliver different terms than the ones authorised.
+ */
+const MONETARY_USE_CASES = new Set([
+  'initial_offer', 'conditional_offer', 'counter_offer', 'final_offer', 'offer_reveal_cash',
+]);
+
+/** offer_id has the shape `offer:<opportunity_id>:v<N>`; N is the version. */
+function parseOfferVersion(offer_id) {
+  const match = /:v(\d+)$/.exec(String(offer_id ?? ''));
+  return match ? match[1] : null;
+}
+
 function clean(value) {
   return String(value ?? '').trim();
+}
+
+/**
+ * Monetary details of a row, whether or not it is already bound. `present` is
+ * true when an offer anchor exists at all; `is_monetary` is true when the row's
+ * use case says it states a price.
+ */
+function readMonetaryIdentity(queue_row = {}, md = {}) {
+  const use_case = clean(md.use_case || queue_row.use_case_template || queue_row.message_type).toLowerCase();
+  const seller_offer_id = clean(md.offer_id || queue_row.offer_id);
+  const seller_offer_version = clean(md.offer_version) || parseOfferVersion(seller_offer_id) || '';
+  return {
+    use_case,
+    is_monetary: MONETARY_USE_CASES.has(use_case),
+    present: Boolean(seller_offer_id),
+    anchors: { seller_offer_id, seller_offer_version },
+  };
 }
 
 function readMetadata(queue_row = {}) {
@@ -46,12 +78,6 @@ function readMetadata(queue_row = {}) {
  *          |{ok:false, reason:string}}
  */
 export function resolveQueueRowIdentity(queue_row = {}) {
-  // ── already bound: the row names its action outright ─────────────────────
-  const bound = clean(queue_row.logical_communication_id);
-  if (bound) {
-    return { ok: true, bound: true, logical_communication_id: bound };
-  }
-
   const md = readMetadata(queue_row);
   const lineage = {
     thread_key: clean(queue_row.thread_key) || null,
@@ -61,6 +87,53 @@ export function resolveQueueRowIdentity(queue_row = {}) {
     master_owner_id: clean(md.master_owner_id) || null,
     source_event_id: clean(queue_row.source_event_id) || null,
   };
+
+  // Computed BEFORE the bound short-circuit on purpose. A bound row still has to
+  // surface its monetary details, because the caller compares them against the
+  // stored offer version to catch terms drifting under a retry. Returning early
+  // without them made that check unreachable, which is a guard that reads as
+  // present and does nothing.
+  const monetary = readMonetaryIdentity(queue_row, md);
+
+  // ── already bound: the row names its action outright ─────────────────────
+  const bound = clean(queue_row.logical_communication_id);
+  if (bound) {
+    return {
+      ok: true,
+      bound: true,
+      logical_communication_id: bound,
+      ...(monetary.present ? { monetary: monetary.anchors } : {}),
+    };
+  }
+
+  // ── monetary offer: the OFFER and its VERSION are the action ─────────────
+  // Checked before campaign touch: a priced message sent as part of a campaign
+  // is still a monetary communication, and binding it to the touch instead of
+  // the offer would let a retry deliver a different authorised amount under the
+  // same identity.
+  if (monetary.is_monetary) {
+    const { seller_offer_id, seller_offer_version } = monetary.anchors;
+
+    if (!seller_offer_id || !seller_offer_version) {
+      // A priced message with no offer authority behind it must never reach a
+      // seller, and inventing a version would be inventing an authorisation.
+      return {
+        ok: false,
+        reason: 'monetary_communication_without_offer_authority',
+        queue_row_id: clean(queue_row.id) || null,
+        use_case: monetary.use_case,
+      };
+    }
+
+    return {
+      ok: true,
+      bound: false,
+      communication_type: COMMUNICATION_TYPES.MONETARY_OFFER,
+      anchors: { offer_id: seller_offer_id, offer_version: seller_offer_version },
+      lineage: { ...lineage, seller_offer_id, seller_offer_version },
+      monetary: monetary.anchors,
+    };
+  }
 
   // ── campaign touch: target + touch number ARE the action ─────────────────
   // Deliberately not template_id or scheduled_for: re-rendering or

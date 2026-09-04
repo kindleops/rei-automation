@@ -100,7 +100,7 @@ export function createSellerCommunicationStore(deps = {}) {
     async getLogicalCommunicationById(logical_communication_id) {
       const { data, error } = await supabase
         .from('seller_logical_communications')
-        .select('id,logical_key,state,delivery_possibility,retry_authority,retry_after_at')
+        .select('id,logical_key,state,delivery_possibility,retry_authority,retry_after_at,seller_offer_id,seller_offer_version,communication_type')
         .eq('id', logical_communication_id)
         .maybeSingle();
 
