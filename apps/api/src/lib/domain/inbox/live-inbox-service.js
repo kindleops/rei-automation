@@ -1511,6 +1511,13 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
     case "unlinked":
       if (typeof query.is === "function") query = query.is("property_id", null);
       break;
+    case "archived":
+      // The AUTHORITATIVE (fast-bucket) path. Without this the switch hit
+      // `default: break` and the query went out unfiltered, so the archived tab
+      // showed every thread. The sibling applyQueryFilter covers the fallback
+      // source; both need the case.
+      if (typeof query.eq === "function") query = query.eq("is_archived", true);
+      break;
     case "all_messages":
       break;
     default:
