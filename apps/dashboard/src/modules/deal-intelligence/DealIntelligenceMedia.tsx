@@ -12,8 +12,15 @@ export type AerialMode = 'interactive' | 'static' | 'unavailable' | 'loading'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
+/**
+ * The Maps Embed API accepts only `lat,lng` for `location` — unlike Street View
+ * Static, it does not geocode a street address, and passing one returns HTTP 400
+ * with a Google error page inside the iframe. The former address fallback here
+ * broke the embed for every coordinate-less property. Returns null instead so
+ * the caller's fallback UI renders. Resolving addresses would require enabling
+ * the Geocoding API — a separate, explicit decision.
+ */
 export function buildInteractiveStreetViewUrl({
-  address,
   lat,
   lng,
 }: {
@@ -24,11 +31,10 @@ export function buildInteractiveStreetViewUrl({
   const apiKey = getGoogleMapsApiKey()
   if (!apiKey) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const location = hasCoords ? `${lat},${lng}` : address
-  if (!location) return null
+  if (!hasCoords) return null
   const params = new URLSearchParams({
     key: apiKey,
-    location,
+    location: `${lat},${lng}`,
     heading: '210',
     pitch: '2',
     fov: '85',
