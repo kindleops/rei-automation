@@ -65,6 +65,11 @@ import {
   makeLifecycleWriteDeps,
   makeLifecycleQueueRunDeps,
 } from "../helpers/lifecycle-integration-store.mjs";
+import { createMemoryS11Store } from "../helpers/s11-memory-store.mjs";
+
+// Shared across the file so a REPLAY resolves to the same action. Tests stay
+// isolated because each lifecycle store carries its own campaign anchor.
+const s11Store = createMemoryS11Store();
 
 // 10:00 AM America/Chicago on 2026-04-04 — inside the 8am-9pm local send
 // window enforced by evaluateContactWindow(). Fixed throughout; no test in
@@ -166,6 +171,7 @@ test("core lifecycle: guard -> campaign-gated queue -> send -> inbox -> reply ->
   // ── 5. Campaign gates send-eligibility (real runSendQueue) ───────────────
   const textgridCalls = [];
   const runDeps = makeLifecycleQueueRunDeps(store, {
+    s11Store,
     now: NOW,
     sendTextgridSMS: async ({ to, from, body }) => {
       textgridCalls.push({ to, from, body });
@@ -197,7 +203,8 @@ test("core lifecycle: guard -> campaign-gated queue -> send -> inbox -> reply ->
 
   // ── 11 (retry idempotency). Re-processing the already-sent row must not
   // call the provider again and must not write a second message event.
-  const retryResult = await processSendQueueItem(sentRow, { ...runDeps, now: NOW });
+  const retryResult = await processSendQueueItem(sentRow, {
+    store: s11Store, ...runDeps, now: NOW });
   assert.equal(retryResult.sent, true);
   assert.equal(retryResult.reason, "idempotency_blocked_sid_exists");
   assert.equal(textgridCalls.length, 1, "retrying an already-sent row must not re-invoke the provider");
@@ -377,13 +384,15 @@ test("E2E: opt-out reply suppresses this thread's bucket/follow-up and fails clo
   // ── Fail-closed proof: the already-queued second touch must be blocked at
   // send time by the real compliance gate, using the persisted opt-out signal.
   const runDeps = makeLifecycleQueueRunDeps(store, {
+    s11Store,
     now: REPLY_AT,
     sendTextgridSMS: async () => {
       throw new Error("provider must never be called for a suppressed thread");
     },
   });
   const pendingRow = store.sendQueueRows.get(pendingRowId);
-  const blockResult = await processSendQueueItem(pendingRow, { ...runDeps, now: REPLY_AT });
+  const blockResult = await processSendQueueItem(pendingRow, {
+    store: s11Store, ...runDeps, now: REPLY_AT });
   assert.equal(blockResult.sent, false);
   assert.equal(blockResult.final_queue_status, "cancelled");
   assert.equal(store.sendQueueRows.get(pendingRowId).queue_status, "cancelled");
@@ -446,13 +455,15 @@ test("E2E: wrong-number reply fails closed and blocks future sends", async () =>
   assert.equal(transition.contactability_patch.contactability_status, CONTACTABILITY_CODES.INVALID_NUMBER);
 
   const runDeps = makeLifecycleQueueRunDeps(store, {
+    s11Store,
     now: REPLY_AT,
     sendTextgridSMS: async () => {
       throw new Error("provider must never be called for a wrong-number thread");
     },
   });
   const pendingRow = store.sendQueueRows.get(pendingRowId);
-  const blockResult = await processSendQueueItem(pendingRow, { ...runDeps, now: REPLY_AT });
+  const blockResult = await processSendQueueItem(pendingRow, {
+    store: s11Store, ...runDeps, now: REPLY_AT });
   assert.equal(blockResult.sent, false);
   assert.equal(blockResult.final_queue_status, "cancelled");
 });
@@ -506,6 +517,7 @@ test("E2E: duplicate provider webhook event does not double-send", async () => {
 
   const textgridCalls = [];
   const runDeps = makeLifecycleQueueRunDeps(store, {
+    s11Store,
     now: NOW,
     sendTextgridSMS: async ({ to, from, body }) => {
       textgridCalls.push({ to, from, body });
@@ -520,8 +532,10 @@ test("E2E: duplicate provider webhook event does not double-send", async () => {
   // Simulate the provider (or an operator) replaying the same delivery event /
   // re-triggering processing for the same already-sent row.
   const sentRow = store.sendQueueRows.get(queued.insert.queue_row_id);
-  const replay1 = await processSendQueueItem(sentRow, { ...runDeps, now: NOW });
-  const replay2 = await processSendQueueItem(sentRow, { ...runDeps, now: NOW });
+  const replay1 = await processSendQueueItem(sentRow, {
+    store: s11Store, ...runDeps, now: NOW });
+  const replay2 = await processSendQueueItem(sentRow, {
+    store: s11Store, ...runDeps, now: NOW });
 
   assert.equal(replay1.reason, "idempotency_blocked_sid_exists");
   assert.equal(replay2.reason, "idempotency_blocked_sid_exists");

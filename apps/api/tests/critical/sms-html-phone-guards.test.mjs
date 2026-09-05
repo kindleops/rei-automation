@@ -187,9 +187,17 @@ test("processSendQueueItem skips TextGrid send when destination phone is invalid
     },
   });
 
+  // The safety property is unchanged and is what this test exists for: an
+  // invalid destination must never reach the provider.
   assert.equal(send_calls, 0);
-  assert.equal(result.reason, "invalid_phone_number");
-  assert.equal(updates.at(-1)?.payload?.failed_reason, "invalid_phone_number");
+
+  // The REASON is now stronger. This fixture is a Podio-shaped item, and §11
+  // hard-fences that path entirely rather than relying on the per-field phone
+  // check that used to be the last thing standing between it and a send. A
+  // Podio item carries none of the anchors an lck_v1 identity needs, so it
+  // cannot be converged; it is refused before any provider work at all.
+  assert.equal(result.reason, "legacy_podio_path_fenced_by_s11");
+  assert.equal(result.sent, false);
 });
 
 test("processSendQueueItem never calls TextGrid with a blank destination when phone_hidden can be normalized", { skip: "legacy Podio dispatch path (processLegacyQueueItem) has zero production callers and is doubly blocked (missing_dispatch_claim_token + missing_recipient_phone); the live-path guard is pinned below" }, async () => {

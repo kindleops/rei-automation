@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { executeManualInboxSendNow } from "@/lib/domain/inbox/send-now-service.js";
+import { createMemoryS11Store, s11ManualSendDeps } from "../helpers/s11-memory-store.mjs";
 
 // Send-now compliance matrix (Part A).
 //
@@ -108,6 +109,7 @@ async function attemptSend(state) {
       action: "send_now",
     },
     {
+      ...s11ManualSendDeps(),
       supabase: makeSupabase(state),
       getSystemValue: AUTHORIZING,
       createQueueRowImpl: async (input) => ({
