@@ -79,18 +79,55 @@ function buildRowPersonalization(queue_row = {}) {
   };
 }
 
-async function fetchCandidateTemplates(supabase, useCases, language) {
+/**
+ * @param {boolean} allowNoReplyFollowupCapability
+ *   TRUE only for the canonical delivery-triggered no-reply follow-up context.
+ *
+ * safe_for_auto_reply has one narrow meaning: "may this template be sent
+ * automatically IN RESPONSE TO seller-authored inbound content?" A no-reply
+ * follow-up answers no seller message at all -- the seller has said nothing --
+ * so that flag is the wrong gate for it, and overloading it would also make
+ * these templates eligible as autonomous inbound replies, which they must
+ * never be.
+ *
+ * The separate capability metadata.eligible_for_no_reply_followup expresses
+ * "approved to be selected by the no-reply follow-up scheduler". It is honoured
+ * ONLY when this flag is set by the stage_no_reply branch below -- it is not a
+ * generic resolver escape hatch.
+ */
+async function fetchCandidateTemplates(supabase, useCases, language, allowNoReplyFollowupCapability = false) {
   const languages = lower(language) === "english" || !language ? ["English"] : [language, "English"];
-  const { data, error } = await supabase
-    .from("sms_templates")
-    .select("*")
-    .eq("is_active", true)
-    .eq("safe_for_auto_reply", true)
-    .in("language", languages)
-    .in("use_case", useCases)
-    .limit(50);
+  // The discriminating predicate is applied BEFORE .limit(), preserving the
+  // original filter order so existing query builders/mocks keep working.
+  const query = (column, value) =>
+    supabase
+      .from("sms_templates")
+      .select("*")
+      .eq("is_active", true)
+      .eq(column, value)
+      .in("language", languages)
+      .in("use_case", useCases)
+      .limit(50);
+
+  const { data, error } = await query("safe_for_auto_reply", true);
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const autoReplySafe = Array.isArray(data) ? data : [];
+
+  if (!allowNoReplyFollowupCapability) return autoReplySafe;
+
+  const { data: capable, error: capableError } = await query(
+    "metadata->>eligible_for_no_reply_followup",
+    "true",
+  );
+  if (capableError) throw capableError;
+
+  // Union, de-duplicated by template id; a template may legitimately carry both.
+  const byId = new Map();
+  for (const row of [...autoReplySafe, ...(capable || [])]) {
+    const id = row?.template_id || row?.id;
+    if (id && !byId.has(id)) byId.set(id, row);
+  }
+  return [...byId.values()];
 }
 
 /**
@@ -124,9 +161,18 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
     candidates = NURTURE_TEMPLATE_CANDIDATES[intent] || NURTURE_TEMPLATE_CANDIDATES.unclear;
   }
 
+  // The capability bypass is scoped to the canonical no-reply follow-up context
+  // ONLY, which is exactly the stage_no_reply branch above.
+  const is_no_reply_followup_context = intent === "stage_no_reply";
+
   let templates = [];
   try {
-    templates = await fetchCandidateTemplates(supabase, candidates, clean(queue_row.language));
+    templates = await fetchCandidateTemplates(
+      supabase,
+      candidates,
+      clean(queue_row.language),
+      is_no_reply_followup_context,
+    );
   } catch (error) {
     warn("[DEFERRED_FOLLOWUP_TEMPLATE_LOOKUP_FAILED]", {
       queue_row_id: queue_row.id || null,
