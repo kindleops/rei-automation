@@ -11,6 +11,7 @@ import {
   loadThreadTemplateHistory,
   selectFus2Template,
   buildRecipientPlan,
+  resolveSellerLanguage,
   FUS2_OPERATOR_LABEL,
 } from "@/lib/domain/inbox/fus2-follow-up-service.js";
 
@@ -40,14 +41,12 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
 
   const { data: rows } = await supabase
     .from("canonical_inbox_threads")
-    .select("thread_key,prospect_id,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
+    .select("thread_key,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
     .in("thread_key", keys);
 
-  const prospectByThread = new Map();
   for (const row of rows || []) {
     const key = clean(row.thread_key);
     if (!key) continue;
-    if (clean(row.prospect_id)) prospectByThread.set(key, clean(row.prospect_id));
     contexts.set(key, {
       thread_key: key,
       seller_first_name: firstName(
@@ -60,30 +59,6 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       agent_family: null,
       master_owner_id: null,
     });
-  }
-
-  // ── Seller language ───────────────────────────────────────────────────────
-  // prospects.language_preference is the canonical, pre-existing source; this
-  // reads it, it does not detect anything. All 15 FUS2 variants are English, so
-  // a seller whose KNOWN preference is not English must not be sent one.
-  // Unknown stays unknown -- absence is not evidence of a preference, and agent
-  // family is explicitly NOT used as a language signal.
-  const prospectIds = [...new Set([...prospectByThread.values()])];
-  if (prospectIds.length) {
-    const { data: prospects } = await supabase
-      .from("prospects")
-      .select("prospect_id,language_preference")
-      .in("prospect_id", prospectIds);
-
-    const langByProspect = new Map();
-    for (const row of prospects || []) {
-      const id = clean(row.prospect_id);
-      if (id) langByProspect.set(id, clean(row.language_preference));
-    }
-    for (const [key, prospectId] of prospectByThread.entries()) {
-      const ctx = contexts.get(key);
-      if (ctx) ctx.language_preference = langByProspect.get(prospectId) || null;
-    }
   }
 
   // ── Assigned agent ────────────────────────────────────────────────────────
@@ -111,13 +86,17 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   if (ownerIds.length) {
     const { data: owners } = await supabase
       .from("master_owners")
-      .select("master_owner_id,agent_persona,agent_family")
+      .select("master_owner_id,agent_persona,agent_family,best_language")
       .in("master_owner_id", [...new Set(ownerIds)]);
 
     const agentByOwner = new Map();
     for (const row of owners || []) {
       const id = clean(row.master_owner_id);
-      if (id) agentByOwner.set(id, { agent_persona: clean(row.agent_persona), agent_family: clean(row.agent_family) });
+      if (id) agentByOwner.set(id, {
+        agent_persona: clean(row.agent_persona),
+        agent_family: clean(row.agent_family),
+        best_language: clean(row.best_language),
+      });
     }
     for (const [key, ownerId] of ownerByThread.entries()) {
       const ctx = contexts.get(key);
@@ -125,6 +104,10 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       if (!ctx || !assigned) continue;
       ctx.agent_name = assigned.agent_persona || null;
       ctx.agent_family = assigned.agent_family || null;
+      // Seller language and agent identity ride on the same master-owner row
+      // but are INDEPENDENT: agent_family ("Spanish Local") describes the
+      // AGENT and is never read as a signal about the seller.
+      ctx.best_language = assigned.best_language || null;
       ctx.master_owner_id = ownerId;
     }
   }
@@ -190,25 +173,33 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
   const recipients = [];
   for (const key of keys) {
     const ctx = contexts.get(key) || { thread_key: key };
-    const selection = selectFus2Template({
-      templates: templateResult.templates,
-      usedTemplateIds: history.get(key) || [],
-      context: { language: "English" },
-    });
+    // Language follows the SELLER. Candidates are scoped to the seller's own
+    // language BEFORE ranking, and a KNOWN language never silently degrades to
+    // English: "we have no information" and "we know this seller reads Spanish"
+    // are different facts, and only the first one justifies English copy.
+    const { language, known } = resolveSellerLanguage(ctx.best_language);
+    const candidates = templateResult.byLanguage.get(language) || [];
 
-    const lang = clean(ctx.language_preference);
-    if (lang && lang.toLowerCase() !== "english") {
+    if (!candidates.length) {
       recipients.push({
         thread_key: key,
         seller_name: ctx.seller_first_name || null,
         property_address: ctx.property_address || null,
         template_id: null,
         eligible: false,
-        reason: `seller_language_not_english: ${lang}`,
+        reason: "no_fus2_template_for_language",
+        seller_language: language,
+        language_known: known,
         assigned_agent_name: ctx.agent_name || null,
       });
       continue;
     }
+
+    const selection = selectFus2Template({
+      templates: candidates,
+      usedTemplateIds: history.get(key) || [],
+      context: { language },
+    });
 
     const plan = buildRecipientPlan({
       thread: ctx,
@@ -225,6 +216,8 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     recipients.push({
       ...plan,
       assigned_agent_name: ctx.agent_name || null,
+      seller_language: language,
+      language_known: known,
       rotation_reason: selection.rotation_reason || null,
       variants_exhausted: selection.exhausted === true,
     });
@@ -241,6 +234,11 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     eligible_count: eligible.length,
     needs_review_count: needsReview.length,
     template_pool_size: templateResult.templates.length,
+    language_breakdown: eligible.reduce((acc, r) => {
+      const l = r.seller_language || "Unknown";
+      acc[l] = (acc[l] || 0) + 1;
+      return acc;
+    }, {}),
     distinct_templates_selected: new Set(eligible.map((r) => r.template_id).filter(Boolean)).size,
     recipients,
   };

@@ -260,12 +260,19 @@ export function personalizeTemplate(template_text, context = {}) {
  * GSM-7: 160 chars / segment (70 if UCS-2 needed).
  * Concatenated: 153 / 67 chars per segment.
  */
+// The GSM-7 basic set. Single source of truth for both encoding classification
+// and segment counting, so callers never have to re-derive one from the other.
+const GSM7_PATTERN = /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\-.\/0-9:;<=>?¡A-ZÄÖÑÜa-zäöñüà§\u000C^{}\\[~\]|€\r\n]*$/;
+
+/** True when the text encodes as GSM-7; false means the carrier uses UCS-2. */
+export function isGsm7(text) {
+  return GSM7_PATTERN.test(String(text ?? ""));
+}
+
 export function countSegments(text) {
   const str = String(text ?? "");
   if (!str) return 0;
-  // Simple UCS-2 detection: any char outside GSM-7 basic set
-  const gsm7 = /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\-.\/0-9:;<=>?¡A-ZÄÖÑÜa-zäöñüà§\u000C^{}\\[~\]|€\r\n]*$/;
-  const is_gsm = gsm7.test(str);
+  const is_gsm = isGsm7(str);
   const single_limit = is_gsm ? 160 : 70;
   const multi_limit = is_gsm ? 153 : 67;
 

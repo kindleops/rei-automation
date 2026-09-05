@@ -12,6 +12,9 @@
 
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { rankTemplateCandidates, renderSafeTemplate } from "@/lib/automation/templateSelector.js";
+import { normalizeLanguage } from "@/lib/sms/language_aliases.js";
+// Reused, not reimplemented: this is the same segment counter the send path uses.
+import { countSegments, isGsm7 } from "@/lib/sms/personalize_template.js";
 import { resolveInboxSchedule } from "@/lib/domain/inbox/resolve-inbox-schedule.js";
 
 export const FUS2_STAGE_CODE = "FUS2";
@@ -47,7 +50,32 @@ export async function loadFus2Templates(deps = {}) {
   if (!templates.length) {
     return { ok: false, error: "no_fus2_templates_available", templates: [] };
   }
-  return { ok: true, templates };
+
+  // Indexed by CANONICAL language so selection is a lookup, not a scan with
+  // ad-hoc string comparisons scattered through callers.
+  const byLanguage = new Map();
+  for (const tpl of templates) {
+    const lang = normalizeLanguage(tpl.language) || clean(tpl.language) || "English";
+    if (!byLanguage.has(lang)) byLanguage.set(lang, []);
+    byLanguage.get(lang).push(tpl);
+  }
+  return { ok: true, templates, byLanguage };
+}
+
+/**
+ * Unknown seller language falls back to English -- the SAME policy the existing
+ * template_resolver already applies (`normalizeLanguage(...) || "English"`).
+ * A KNOWN language never falls back: that is the difference between "we have no
+ * information" and "we know this seller reads Spanish", and only the first one
+ * justifies English copy.
+ */
+export const UNKNOWN_LANGUAGE_DEFAULT = "English";
+
+export function resolveSellerLanguage(rawBestLanguage) {
+  const raw = clean(rawBestLanguage);
+  if (!raw) return { language: UNKNOWN_LANGUAGE_DEFAULT, known: false };
+  const canonical = normalizeLanguage(raw) || raw;
+  return { language: canonical, known: true };
 }
 
 /**
@@ -86,8 +114,11 @@ export async function loadThreadTemplateHistory(threadKeys = [], deps = {}) {
  * only reorders among already-valid candidates. If every variant has prior use
  * we fall back to the highest-ranked one rather than inventing anything.
  */
+/**
+ * @param {object[]} templates  Candidates ALREADY scoped to the seller's language.
+ */
 export function selectFus2Template({ templates = [], usedTemplateIds = [], context = {} } = {}) {
-  if (!templates.length) return { ok: false, reason: "no_fus2_templates_available" };
+  if (!templates.length) return { ok: false, reason: "no_fus2_template_for_language" };
 
   const ranked = rankTemplateCandidates(templates, {
     language: context.language || "English",
@@ -164,11 +195,20 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
     return { ...base, eligible: false, reason: schedule.reason || "schedule_unresolvable" };
   }
 
+  // Segment cost is computed on the FINAL RENDERED text, not template_body:
+  // a long seller name or address can push a message to a second segment, and a
+  // non-Latin name can flip an otherwise GSM-7 message to UCS-2. Reported for
+  // operator cost visibility only -- copy is never auto-edited to reduce it.
+  const segments = countSegments(rendered.text);
+  const encoding = isGsm7(rendered.text) ? "GSM-7" : "Unicode";
+
   return {
     ...base,
     eligible: true,
     reason: null,
     message_body: rendered.text,
+    segments,
+    encoding,
     template_name: clean(template.template_name) || null,
     agent_name: clean(agentName) || clean(thread.agent_name) || null,
     schedule,

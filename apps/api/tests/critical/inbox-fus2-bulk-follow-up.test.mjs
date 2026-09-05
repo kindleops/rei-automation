@@ -236,8 +236,8 @@ function planSupabase() {
         // The assignment of record: agent_persona is a FULL name; the canonical
         // personalizer reduces it to a first name.
         return table([
-          { master_owner_id: "mo-a", agent_persona: "Michael Hargrove", agent_family: "Corporate" },
-          { master_owner_id: "mo-b", agent_persona: "Helen Crawford", agent_family: "General" },
+          { master_owner_id: "mo-a", agent_persona: "Michael Hargrove", agent_family: "Corporate", best_language: "English" },
+          { master_owner_id: "mo-b", agent_persona: "Helen Crawford", agent_family: "General", best_language: null },
         ]);
       }
       if (name === "send_queue") {
@@ -472,7 +472,13 @@ test("queue history is still used for TEMPLATE anti-repeat, just not identity", 
 
 // ── LANGUAGE ────────────────────────────────────────────────────────────────
 
-test("a KNOWN non-English seller is not sent English FUS2 copy", async () => {
+test("a KNOWN Spanish seller now receives SPANISH copy, not English", async () => {
+  const ES = FUS2.slice(0, 5).map((t, i) => ({
+    ...t,
+    template_id: `lc-reengage-agent-es-00${i + 1}`,
+    language: "Spanish",
+    template_body: "Hola {{seller_first_name}}, soy {{agent_name}}. Le doy seguimiento sobre {{property_address}}. Estaria abierto a hablar de numeros?",
+  }));
   const spanish = {
     from(name) {
       const t = (rows) => {
@@ -480,23 +486,51 @@ test("a KNOWN non-English seller is not sent English FUS2 copy", async () => {
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
       };
-      if (name === "sms_templates") return t(FUS2);
-      if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_id: "p-a", prospect_first_name: "Sofia", property_address_full: "9 Elm St" }]);
-      if (name === "prospects") return t([{ prospect_id: "p-a", language_preference: "Spanish" }]);
+      if (name === "sms_templates") return t([...FUS2, ...ES]);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Sofia", property_address_full: "9 Elm St" }]);
       if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
-      if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Carlos Mendez", agent_family: "Spanish Local" }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Crystal Park", agent_family: "Spanish Local", best_language: "Spanish" }]);
       if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
       return t([]);
     },
   };
   const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: spanish });
   const a = plan.recipients[0];
-  assert.equal(a.eligible, false, "a known Spanish seller must not get English copy");
-  assert.match(a.reason, /seller_language_not_english/);
-  assert.equal(a.message_body, undefined);
+
+  assert.equal(a.eligible, true, a.reason || "Spanish seller must now be eligible");
+  assert.equal(a.seller_language, "Spanish");
+  assert.match(a.template_id, /-es-/, "must pick a SPANISH variant");
+  assert.match(a.message_body, /Hola/);
+  assert.ok(!/Hey |following up/.test(a.message_body), "must not be English copy");
+  // P9: language follows the seller, identity follows the assignment.
+  assert.equal(a.assigned_agent_name, "Crystal Park");
+  assert.match(a.message_body, /Crystal/, "Spanish copy still signed by the ASSIGNED agent");
 });
 
-test("an UNKNOWN language is not treated as a preference, and agent family is not a language signal", async () => {
+test("a known language with NO approved FUS2 family is NEED REVIEW, never English", async () => {
+  const thai = {
+    from(name) {
+      const t = (rows) => {
+        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+          then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
+        return q;
+      };
+      if (name === "sms_templates") return t(FUS2); // English only
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Anan", property_address_full: "9 Elm St" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Crystal Park", best_language: "Thai" }]);
+      if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
+      return t([]);
+    },
+  };
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CANARY_A], now: NOW }, { supabase: thai });
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, false, "no Thai family => NEED REVIEW");
+  assert.equal(a.reason, "no_fus2_template_for_language");
+  assert.equal(a.message_body, undefined, "must NOT silently fall back to English");
+});
+
+test("UNKNOWN language uses the existing English default; agent family is never a language signal", async () => {
   // Canary B has language_preference = null and would previously have been
   // guessed at. Absence of a preference must not block a seller, and the
   // assigned agent's family ("Spanish Local") is NOT evidence about the seller.

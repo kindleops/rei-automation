@@ -987,6 +987,10 @@ export type FollowUpRecipient = {
   template_name: string | null
   agent_name: string | null
   assigned_agent_name: string | null
+  seller_language?: string | null
+  language_known?: boolean
+  segments?: number
+  encoding?: 'GSM-7' | 'Unicode'
   eligible: boolean
   reason: string | null
   missing?: string[] | null
@@ -1011,6 +1015,7 @@ export type BulkFollowUpPlan = {
   needs_review_count: number
   template_pool_size: number
   distinct_templates_selected: number
+  language_breakdown?: Record<string, number>
   recipients: FollowUpRecipient[]
   error?: string
 }

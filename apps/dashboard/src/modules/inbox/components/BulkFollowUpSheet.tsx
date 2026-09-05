@@ -19,9 +19,8 @@ const REASON_LABEL: Record<string, string> = {
 const describeReason = (r: FollowUpRecipient): string => {
   const raw = r.reason ?? ''
   if (REASON_LABEL[raw]) return REASON_LABEL[raw]
-  if (raw.startsWith('seller_language_not_english')) {
-    const lang = raw.split(':')[1]?.trim() ?? ''
-    return lang ? `Seller prefers ${lang}` : 'Seller language not English'
+  if (raw === 'no_fus2_template_for_language') {
+    return `No approved follow-up template for ${r.seller_language ?? 'this language'}`
   }
   if (raw.startsWith('missing_placeholder_values')) {
     const fields = raw.split(':')[1]?.trim() ?? ''
@@ -113,6 +112,19 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
               )}
             </div>
 
+            {plan.language_breakdown && Object.keys(plan.language_breakdown).length > 0 && (
+              <div className="nx-followup-langs">
+                {Object.entries(plan.language_breakdown)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([lang, n]) => (
+                    <span key={lang} className="nx-followup-langs__item">
+                      <span className="nx-followup-langs__name">{lang}</span>
+                      <strong>{n}</strong>
+                    </span>
+                  ))}
+              </div>
+            )}
+
             <div className="nx-followup-timing">
               <span className="nx-followup-timing__label">Timing</span>
               <span className="nx-followup-timing__value">Best local time · per seller</span>
@@ -134,13 +146,25 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
                 <li key={r.thread_key ?? Math.random()} className="nx-followup-preview">
                   <div className="nx-followup-preview__who">
                     <span>{r.seller_name}</span>
-                    {r.assigned_agent_name && (
-                      <span className="nx-followup-preview__agent">{r.assigned_agent_name.split(' ')[0]}</span>
-                    )}
+                    <span className="nx-followup-preview__tags">
+                      {r.seller_language && (
+                        <span className="nx-followup-preview__lang">{r.seller_language}</span>
+                      )}
+                      {r.assigned_agent_name && (
+                        <span className="nx-followup-preview__agent">{r.assigned_agent_name.split(' ')[0]}</span>
+                      )}
+                    </span>
                   </div>
                   <div className="nx-followup-preview__body">{r.message_body}</div>
                   <div className="nx-followup-preview__when">
-                    {r.schedule?.effective_local_label} · {r.schedule?.local_send_date} seller local
+                    <span>{r.schedule?.effective_local_label} · {r.schedule?.local_send_date} seller local</span>
+                    {r.segments != null && (
+                      // Cost visibility only. Copy is never auto-shortened.
+                      <span className="nx-followup-preview__seg">
+                        {r.encoding === 'Unicode' ? 'Unicode · ' : ''}
+                        {r.segments} SMS {r.segments === 1 ? 'segment' : 'segments'}
+                      </span>
+                    )}
                   </div>
                 </li>
               ))}
