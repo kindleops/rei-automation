@@ -152,45 +152,29 @@ test("the existing queue idempotency key is template-sensitive", () => {
 });
 
 test("random queue identity is confined to the KNOWN sites", () => {
-  // A DEFECT RATCHET, not an approval.
+  // A DEFECT RATCHET, keyed on FILE + CODE SHAPE rather than file:line.
   //
-  // Each of these mints queue identity from a fresh UUID when the deterministic
-  // derivation yields nothing. A row keyed on a fresh UUID is unique by
-  // construction, so every dedupe lookup against it misses and the guard
-  // silently does nothing. This is the identity hole lck_v1 closes: it derives
-  // identity from durable business anchors and REFUSES rather than inventing.
+  // Line pinning fired on every unrelated edit above these sites (adding one
+  // import to the Discord route shifted two entries and failed the gate while
+  // the site SET was unchanged). A ratchet that cries wolf on formatting gets
+  // silenced, so it keys on what the code DOES.
   //
-  // The worst is the Discord operator reply, which has no deterministic path at
-  // all -- queue_key is ALWAYS a fresh UUID, so two operators (or one operator
-  // clicking twice) produce two unrelated rows for one intent.
-  //
-  // These are NOT removed here. Deleting a fallback without the §11 tables in
-  // place would fail enqueue outright for callers relying on it, and that
-  // migration has not been applied. This freezes the blast radius; a NEW site
-  // fails this test, and the whole test is deleted when convergence lands.
-  const KNOWN = {
-    "app/api/dev/send-test/route.js:68": "TEST_ONLY",
-    "app/api/internal/discord/reply-sms/route.js:505": "PENDING_CONVERGENCE",
-    "app/api/internal/discord/reply-sms/route.js:506": "PENDING_CONVERGENCE",
-    "lib/domain/acquisition/inbound-dispatcher.js:420": "PENDING_CONVERGENCE",
-    // CONVERGED. This queue_key is still random, but it is no longer SEMANTIC
-    // identity: the manual send now keys its logical communication on a durable
-    // operator_action_id, so a retry of one click resolves to one communication
-    // regardless of what this scheduling label says. The random value survives
-    // only as a queue row label.
-    "lib/domain/inbox/send-now-service.js:484": "CONVERGED_NON_SEMANTIC",
-    "lib/domain/queue/canonical-queue-writer.js:149": "PENDING_CONVERGENCE",
-    "lib/supabase/sms-engine.js:4241": "PENDING_CONVERGENCE",
-    "lib/supabase/sms-engine.js:4242": "PENDING_CONVERGENCE",
-    // Same defect shape, different blast radius: these key an EVENT LEDGER, not
-    // send_queue, so a miss duplicates a ledger row rather than a seller SMS.
-    // Listed so the ratchet stays complete; not part of the send convergence.
-    "lib/domain/acquisition/acquisition-event-service.js:59": "EVENT_LEDGER_NOT_SEND",
-    "lib/domain/workflow-v2/events-service.js:64": "EVENT_LEDGER_NOT_SEND",
-  };
+  // Post-§11 these are all TRANSPORT_ONLY: queue_key is listed in
+  // FORBIDDEN_IDENTITY_FIELDS, so a random value structurally cannot mint a
+  // logical communication. They are still pinned because a NEW site is a signal
+  // that someone is building identity out of randomness again.
+  const KNOWN = new Set([
+    "app/api/dev/send-test/route.js",                       // TEST_ONLY
+    "app/api/internal/discord/reply-sms/route.js",          // CONVERGED (operator_action_id anchors it)
+    "lib/domain/acquisition/acquisition-event-service.js",  // EVENT_LEDGER, not a send
+    "lib/domain/acquisition/inbound-dispatcher.js",         // TRANSPORT_ONLY
+    "lib/domain/inbox/send-now-service.js",                 // CONVERGED (operator_action_id)
+    "lib/domain/queue/canonical-queue-writer.js",           // DEAD (both importers quarantined)
+    "lib/domain/workflow-v2/events-service.js",             // EVENT_LEDGER, not a send
+    "lib/supabase/sms-engine.js",                           // TRANSPORT_ONLY
+  ]);
 
-  // Raw lines: comment stripping would shift every line number reported here.
-  const sites = [];
+  const sites = new Set();
   for (const f of FILES) {
     const lines = fs.readFileSync(f, "utf8").split("\n");
     for (let i = 0; i < lines.length; i += 1) {
@@ -199,21 +183,37 @@ test("random queue identity is confined to the KNOWN sites", () => {
       if (line.trim().startsWith("*") || line.trim().startsWith("//")) continue;
       const ctx = lines.slice(Math.max(0, i - 3), i + 4).join("\n");
       if (!/queue_key|dedupe_key/.test(ctx)) continue;
-      sites.push(`${rel(f)}:${i + 1}`);
+      sites.add(rel(f));
     }
   }
-  assert.deepEqual(sites.sort(), Object.keys(KNOWN).sort(),
-    `random queue identity appeared somewhere new:\n  ${sites.join("\n  ")}`);
+  assert.deepEqual([...sites].sort(), [...KNOWN].sort(),
+    "random queue identity appeared in a file not on the known list");
 });
 
-test("the Discord operator reply has NO deterministic identity at all", () => {
-  // Called out separately because it is a different severity. The others fall
-  // back to a UUID only when a deterministic derivation comes up empty; this
-  // one never attempts a derivation, so every single operator reply is
-  // undedupable by construction.
+test("queue_key can never become logical identity, by construction", () => {
+  // The structural reason every site above is TRANSPORT_ONLY rather than a
+  // judgement call: the key builder REFUSES these fields outright.
+  const keyModule = fs.readFileSync(path.join(SRC, "lib/domain/communications/logical-communication-key.js"), "utf8");
+  assert.match(keyModule, /FORBIDDEN_IDENTITY_FIELDS/);
+  for (const field of ["queue_key", "queue_row_id"]) {
+    assert.ok(keyModule.includes(`"${field}"`) || keyModule.includes(`'${field}'`),
+      `${field} must be a forbidden identity field`);
+  }
+});
+
+test("the Discord operator reply now has DURABLE operator identity", () => {
+  // This previously asserted the opposite: queue_key = randomUUID() with no
+  // deterministic path at all. Converging it was not optional -- once dispatch
+  // began refusing identity-underivable rows, every Discord reply became a
+  // silent dead end where the operator saw success and the seller got nothing.
   const route = fs.readFileSync(path.join(SRC, "app/api/internal/discord/reply-sms/route.js"), "utf8");
-  assert.match(route, /const queue_key = randomUUID\(\);/,
-    "if this gained a deterministic derivation, update the inventory severity note");
+  assert.match(route, /resolveOperatorAction\(/,
+    "a Discord reply must create a durable operator action");
+  assert.match(route, /operator_action_id: operator_action\.operator_action_id/,
+    "the queue row must carry the anchor dispatch derives identity from");
+  assert.ok(
+    route.indexOf("await resolveOperatorAction(") < route.indexOf("const payload = {"),
+    "the action must be durable BEFORE the row is enqueued");
 });
 
 // ── DIRECT_PROVIDER_BYPASS = 0 ────────────────────────────────────────────
