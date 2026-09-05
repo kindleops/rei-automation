@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { executeManualInboxSendNow } from "@/lib/domain/inbox/send-now-service.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
+import { createMemoryS11Store, s11ManualSendDeps } from "../helpers/s11-memory-store.mjs";
 
 const THREAD = "+15005550006";
 const FROM = "+15005550001";
@@ -177,7 +178,7 @@ test("race: suppression after enqueue blocks manual send with zero TextGrid call
   );
   const harness = makeDeps(supabase);
 
-  const result = await executeManualInboxSendNow(BASE_PAYLOAD, harness.deps);
+  const result = await executeManualInboxSendNow(BASE_PAYLOAD, { ...harness.deps, ...s11ManualSendDeps() });
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, "compliance_blocked_at_send_time");
@@ -222,7 +223,7 @@ test("race: wrong-number after enqueue blocks manual send", async () => {
   })(supabase.from.bind(supabase));
 
   const harness = makeDeps(supabase, { queue_row_id: "manual-wrong-row" });
-  const result = await executeManualInboxSendNow(BASE_PAYLOAD, harness.deps);
+  const result = await executeManualInboxSendNow(BASE_PAYLOAD, { ...harness.deps, ...s11ManualSendDeps() });
 
   assert.equal(result.ok, false);
   assert.equal(result.compliance_reason_code, "wrong_number_at_send_time");
@@ -268,7 +269,7 @@ test("race: cancelled row after enqueue blocks manual send", async () => {
   };
 
   const harness = makeDeps(supabase, { queue_row_id: "manual-cancel-row" });
-  const result = await executeManualInboxSendNow(BASE_PAYLOAD, harness.deps);
+  const result = await executeManualInboxSendNow(BASE_PAYLOAD, { ...harness.deps, ...s11ManualSendDeps() });
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, "compliance_blocked_at_send_time");
@@ -301,7 +302,7 @@ test("race: suppression lookup error at final dispatch fails closed for manual s
   };
 
   const harness = makeDeps(supabase, { queue_row_id: "manual-failclosed-row" });
-  const result = await executeManualInboxSendNow(BASE_PAYLOAD, harness.deps);
+  const result = await executeManualInboxSendNow(BASE_PAYLOAD, { ...harness.deps, ...s11ManualSendDeps() });
 
   assert.equal(result.ok, false);
   assert.equal(result.detail_reason, "suppression_lookup_failed_fail_closed");
@@ -320,7 +321,7 @@ test("race: healthy manual send reaches provider exactly once", async () => {
   });
   const harness = makeDeps(supabase, { queue_row_id: "manual-healthy-row" });
 
-  const result = await executeManualInboxSendNow(BASE_PAYLOAD, harness.deps);
+  const result = await executeManualInboxSendNow(BASE_PAYLOAD, { ...harness.deps, ...s11ManualSendDeps() });
 
   assert.equal(result.ok, true);
   assert.equal(harness.provider_calls(), 1);

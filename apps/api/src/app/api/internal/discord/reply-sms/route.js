@@ -7,6 +7,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { resolveOperatorAction } from "@/lib/domain/communications/operator-action-store.js";
 import { randomUUID } from "crypto";
 
 import { child } from "@/lib/logging/logger.js";
@@ -540,6 +541,30 @@ async function queueReplyWhenSmsSendQueue(
     }
   }
 
+  // ── §11: give the operator's reply a DURABLE action before enqueueing ────
+  //
+  // Without this the row carries no lck_v1 anchor, canonical dispatch refuses
+  // it as identity-underivable, and the operator sees "Reply queued" while the
+  // seller receives nothing -- forever. A green tick over a silent dead end is
+  // worse than an honest failure.
+  //
+  // The idempotency key is the inbound event plus the reply hash, so clicking
+  // the same reply twice resolves to ONE action. That is strictly stronger than
+  // the route's existing 10-minute duplicate window, which fails open on error
+  // and forgets entirely after the window closes.
+  const operator_action = await resolveOperatorAction({
+    action_type: "operator_reply",
+    request_idempotency_key: `discord:${clean(message_event_id)}:${clean(reply_hash)}`,
+    thread_key: clean(inbound_event.thread_key) || to_phone,
+    to_phone_number: to_phone,
+    operator_email: clean(discord_user_id) ? `discord:${clean(discord_user_id)}` : null,
+  }, { supabase });
+
+  if (!operator_action.ok) {
+    // Refuse rather than enqueue something that can never be dispatched.
+    throw new Error(`operator_action_not_durable:${operator_action.reason}`);
+  }
+
   const payload = {
     queue_key,
     queue_id,
@@ -582,6 +607,10 @@ async function queueReplyWhenSmsSendQueue(
       stage_before: inbound_event.metadata?.current_stage || null,
       stage_after: selected_stage_code || inbound_event.metadata?.current_stage || null,
       ...ensureObject(inbound_event.metadata),
+      // AFTER the inbound spread on purpose: this is the anchor canonical
+      // dispatch derives manual_operator_send identity from, and an inbound
+      // event carrying a stale operator_action_id must not overwrite it.
+      operator_action_id: operator_action.operator_action_id,
     },
   };
 
