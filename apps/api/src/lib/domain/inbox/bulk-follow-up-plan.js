@@ -6,6 +6,7 @@
 // schedule per recipient. Produces a plan only -- it inserts nothing.
 
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { resolveFromPhoneNumber } from "@/lib/domain/inbox/send-now-service.js";
 import {
   loadFus2Templates,
   loadThreadTemplateHistory,
@@ -148,6 +149,69 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
 }
 
 /**
+ * Active sender registry, loaded once per plan.
+ *
+ * A historical conversation number is only usable if it is STILL a registered
+ * active sender: a number the seller once recognised but that has since been
+ * released or suspended is not a valid line to text from.
+ */
+async function loadActiveSenderNumbers(supabase) {
+  try {
+    const { data } = await supabase
+      .from("textgrid_numbers")
+      .select("phone_number,status,daily_limit,messages_sent_today")
+      .eq("status", "active");
+    const set = new Set();
+    for (const row of data || []) {
+      const num = clean(row.phone_number);
+      if (!num) continue;
+      // Respect the registry's own operational ceiling.
+      const sent = Number(row.messages_sent_today);
+      const cap = Number(row.daily_limit);
+      if (Number.isFinite(sent) && Number.isFinite(cap) && cap > 0 && sent >= cap) continue;
+      set.add(num);
+    }
+    return set;
+  } catch {
+    // Unreadable registry => no number can be validated => NEED REVIEW rather
+    // than sending from an unverified line.
+    return new Set();
+  }
+}
+
+/**
+ * Per-recipient sending line.
+ *
+ * Reuses the canonical resolver (send-now-service.resolveFromPhoneNumber),
+ * which already walks thread state -> send_queue history -> message_events
+ * (outbound from_phone_number, inbound to_phone_number) -> market registry.
+ * This adds only the eligibility check the brief requires, and never invents a
+ * default number: an unverifiable result becomes NEED REVIEW.
+ *
+ * Deliberately independent of agent identity and seller language. A number has
+ * carried many agents historically; that does not make it an identity source.
+ */
+async function resolveSenderForRecipient({ threadKey, toPhone, activeSenders }, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase;
+  let resolved = null;
+  try {
+    resolved = await resolveFromPhoneNumber({
+      thread_key: threadKey,
+      to_phone_number: toPhone,
+      supabase,
+    });
+  } catch {
+    resolved = null;
+  }
+  const number = clean(resolved);
+  if (!number) return { ok: false, reason: "no_eligible_sender_number" };
+  if (!activeSenders.has(number)) {
+    return { ok: false, reason: "no_eligible_sender_number", stale_number: true };
+  }
+  return { ok: true, from_phone_number: number };
+}
+
+/**
  * @param {string[]} threadKeys  Selected threads.
  *
  * Note there is deliberately NO agent-name override. {{agent_name}} always
@@ -165,9 +229,10 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     return { ok: false, error: templateResult.error, label: FUS2_OPERATOR_LABEL };
   }
 
-  const [contexts, history] = await Promise.all([
+  const [contexts, history, activeSenders] = await Promise.all([
     loadThreadContexts(keys, { supabase }),
     loadThreadTemplateHistory(keys, { supabase }),
+    loadActiveSenderNumbers(supabase),
   ]);
 
   const recipients = [];
@@ -201,6 +266,27 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       context: { language },
     });
 
+    // Sending line, resolved server-side per recipient. Bulk recipients may
+    // legitimately resolve to DIFFERENT numbers -- continuity is per
+    // conversation, not per batch.
+    const sender = await resolveSenderForRecipient(
+      { threadKey: key, toPhone: key, activeSenders },
+      { supabase },
+    );
+    if (!sender.ok) {
+      recipients.push({
+        thread_key: key,
+        seller_name: ctx.seller_first_name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: sender.reason,
+        seller_language: language,
+        assigned_agent_name: ctx.agent_name || null,
+      });
+      continue;
+    }
+
     const plan = buildRecipientPlan({
       thread: ctx,
       template: selection.ok ? selection.template : null,
@@ -216,6 +302,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     recipients.push({
       ...plan,
       assigned_agent_name: ctx.agent_name || null,
+      from_phone_number: sender.from_phone_number,
       seller_language: language,
       language_known: known,
       rotation_reason: selection.rotation_reason || null,
