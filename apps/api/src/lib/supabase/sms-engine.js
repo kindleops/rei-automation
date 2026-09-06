@@ -1,4 +1,9 @@
 import crypto from "node:crypto";
+import { reconcileProviderCallback } from "@/lib/domain/communications/reconcile-provider-callback.js";
+import {
+  normalizeProvenance,
+  mayAdvanceCanonicalTruth,
+} from "@/lib/domain/communications/callback-evidence-provenance.js";
 
 import {
   mapTextgridFailureBucket,
@@ -3863,6 +3868,62 @@ export async function syncClassifiedInboxThreadState({
 export async function syncDeliveryEvent(payload, options = {}) {
   const now = options.now || nowIso();
   const provider_message_sid = clean(payload?.message_id || payload?.provider_message_sid || payload?.sid);
+
+  // ── §11 SLICE 2: CANONICAL CALLBACK RECONCILIATION ──────────────────────
+  //
+  // Every lane that can change what we believe about a delivery funnels through
+  // this function, so this is the one place canonical provider truth can be
+  // established before the legacy projection runs.
+  //
+  // Provenance is NOT trust. The three lanes are different KINDS of evidence:
+  // a live receipt was pushed to us, a replay is us re-reading something we
+  // already stored, and a poll is us asking. Only the first two are receipts,
+  // and only they may advance canonical truth -- the repository has never
+  // verified that TextGrid's status-lookup-by-SID is authoritative, so treating
+  // a poll answer as provider truth would be inventing semantics.
+  //
+  // The legacy projection below still runs for every lane. It writes
+  // message_events / send_queue, which §11 Slice 1 already demoted to
+  // projections; it is no longer the authority on whether a seller was reached.
+  const evidence_provenance = normalizeProvenance(options.evidence_provenance);
+  let canonical_reconciliation = null;
+
+  if (provider_message_sid && mayAdvanceCanonicalTruth(evidence_provenance)) {
+    const reconcileImpl = options.reconcileProviderCallback || reconcileProviderCallback;
+    const callbackStore = options.callbackStore || null;
+    if (callbackStore) {
+      try {
+        canonical_reconciliation = await reconcileImpl(
+          {
+            provider: "textgrid",
+            message_id: provider_message_sid,
+            status: payload?.status || payload?.provider_delivery_status,
+            error_code: payload?.error_status,
+            error_message: payload?.error_message,
+            delivered_at: payload?.delivered_at,
+            to: payload?.to || payload?.to_phone_number,
+            from: payload?.from || payload?.from_phone_number,
+            status_detail: payload?.raw?.SmsStatusDetail || payload?.status_detail,
+            source_route: options.source_route || null,
+          },
+          {
+            store: callbackStore,
+            verification: options.verification || {},
+            now,
+          }
+        );
+      } catch (error) {
+        // Canonical reconciliation failing must not take the projection down
+        // with it, and must never be read as a transport failure that could
+        // justify a resend. Record and continue to projection.
+        warn("callback.canonical_reconciliation_failed", {
+          provider_message_sid,
+          evidence_provenance,
+          error: clean(error?.message) || "reconcile_threw",
+        });
+      }
+    }
+  }
   if (!provider_message_sid) {
     return {
       provider_message_sid: null,

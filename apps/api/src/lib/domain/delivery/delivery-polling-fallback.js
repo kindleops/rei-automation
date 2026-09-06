@@ -3,6 +3,7 @@ import ENV from '@/lib/config/env.js'
 import { syncDeliveryEvent } from '@/lib/supabase/sms-engine.js'
 import { buildSyncPayloadFromTerminalEvent, normalizeProviderEventPayload } from '@/lib/domain/webhooks/provider-event-state-machine.js'
 import { warn, info } from '@/lib/logging/logger.js'
+import { EVIDENCE_PROVENANCE } from '@/lib/domain/communications/callback-evidence-provenance.js'
 
 const POLL_AFTER_MS = 30 * 60 * 1000
 const MAX_POLL_BATCH = 50
@@ -125,7 +126,16 @@ export async function pollMissingDeliveryCallbacks(options = {}, deps = {}) {
     })
 
     const sync_payload = buildSyncPayloadFromTerminalEvent(synthetic)
-    const sync_result = await syncDeliveryEvent(sync_payload, { supabase, now })
+    // WE asked the provider; nothing was pushed to us. This is an observation,
+    // not a receipt, so it must never mint a callback event nor advance
+    // canonical provider truth -- TextGrid's status-lookup-by-SID has never been
+    // verified as authoritative in this repository.
+    const sync_result = await syncDeliveryEvent(sync_payload, {
+      supabase,
+      now,
+      evidence_provenance: EVIDENCE_PROVENANCE.PROVIDER_POLL_OBSERVATION,
+      source_route: 'delivery-polling-fallback',
+    })
 
     info('delivery_polling_fallback.reconciled', {
       queue_row_id: row.id,
