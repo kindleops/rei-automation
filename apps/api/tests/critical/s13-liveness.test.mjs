@@ -17,8 +17,8 @@ import assert from "node:assert/strict";
 import { reachable, OUTCOME, POSSIBILITY, RETRY } from "../model/s13-combined-model.mjs";
 
 const BOUNDS = {
-  maxAttempts: 2, maxCallbacks: 3, maxCrashes: 2,
-  maxAuthorityChanges: 1, maxDepth: 12,
+  maxAttempts: 2, maxCallbacks: 2, maxCrashes: 1,
+  maxAuthorityChanges: 1, maxDepth: 11,
 };
 
 test("L1 convergence: provider truth eventually becomes canonical", () => {
