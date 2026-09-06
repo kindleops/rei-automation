@@ -393,3 +393,149 @@ test("L: language, agent identity and sending line come from three sources", asy
   assert.equal(agentChanged.seller_language, "English", "agent must not change the language");
   assert.equal(agentChanged.from_phone_number, "+15551110001", "agent must not change the sending line");
 });
+
+// ── M: the bug that blocked the feature ─────────────────────────────────────
+
+const CAN_M = "+15555550100";
+const bulkStore = ({ ourNumber, active }) => ({
+  from(name) {
+    const t = (rows) => { const q = { select: () => q, eq: () => q, in: () => q, not: () => q,
+      order: () => q, limit: () => q,
+      maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+      then: (r) => Promise.resolve({ data: rows, error: null }).then(r) }; return q; };
+    if (name === "sms_templates") return t([A, B]);
+    if (name === "canonical_inbox_threads") return t([{ thread_key: CAN_M, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+    if (name === "inbox_thread_state") return t([{ thread_key: CAN_M, master_owner_id: "mo", our_number: ourNumber }]);
+    if (name === "master_owners") return t([{ master_owner_id: "mo", agent_persona: "Michael Hargrove", best_language: "English" }]);
+    if (name === "textgrid_numbers") return t(active.map((n) => ({ phone_number: n, status: "active", daily_limit: 500, messages_sent_today: 3 })));
+    if (name === "send_queue") return t([{ thread_key: CAN_M, timezone: "Central", created_at: "2026-08-01" }]);
+    return t([]);
+  },
+});
+
+test("M: payload has NO from_phone_number, server resolves it from history", async () => {
+  const { buildBulkFollowUpPlan } = await import("@/lib/domain/inbox/bulk-follow-up-plan.js");
+  // This is exactly the shape that produced invalid_from_phone_number: the
+  // sheet supplies no sending line at all.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CAN_M], now: new Date("2026-09-07T18:00:00Z") },
+    { supabase: bulkStore({ ourNumber: "+15551110001", active: ["+15551110001"] }) },
+  );
+  const r = plan.recipients[0];
+  assert.equal(r.eligible, true, r.reason || "");
+  assert.equal(r.from_phone_number, "+15551110001", "server must resolve the line");
+  assert.notEqual(r.reason, "invalid_from_phone_number");
+});
+
+test("M: an INACTIVE historical number is not blindly reused", async () => {
+  const { buildBulkFollowUpPlan } = await import("@/lib/domain/inbox/bulk-follow-up-plan.js");
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CAN_M], now: new Date("2026-09-07T18:00:00Z") },
+    // History points at a number that is no longer in the active registry.
+    { supabase: bulkStore({ ourNumber: "+15559998888", active: ["+15551110001"] }) },
+  );
+  const r = plan.recipients[0];
+  assert.equal(r.eligible, false);
+  assert.equal(r.reason, "no_eligible_sender_number");
+  assert.equal(r.from_phone_number, undefined, "a released line must never be used");
+});
+
+test("M: a number over its daily limit is not eligible", async () => {
+  const { buildBulkFollowUpPlan } = await import("@/lib/domain/inbox/bulk-follow-up-plan.js");
+  const overLimit = {
+    from(name) {
+      const t = (rows) => { const q = { select: () => q, eq: () => q, in: () => q, not: () => q,
+        order: () => q, limit: () => q,
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        then: (r) => Promise.resolve({ data: rows, error: null }).then(r) }; return q; };
+      if (name === "sms_templates") return t([A]);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CAN_M, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CAN_M, master_owner_id: "mo", our_number: "+15551110001" }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo", agent_persona: "Michael Hargrove", best_language: "English" }]);
+      if (name === "textgrid_numbers") return t([{ phone_number: "+15551110001", status: "active", daily_limit: 100, messages_sent_today: 100 }]);
+      if (name === "send_queue") return t([{ thread_key: CAN_M, timezone: "Central", created_at: "2026-08-01" }]);
+      return t([]);
+    },
+  };
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CAN_M], now: new Date("2026-09-07T18:00:00Z") }, { supabase: overLimit });
+  assert.equal(plan.recipients[0].eligible, false);
+  assert.equal(plan.recipients[0].reason, "no_eligible_sender_number");
+});
+
+test("M: an unreadable registry yields NEED REVIEW, never an unverified line", async () => {
+  const { buildBulkFollowUpPlan } = await import("@/lib/domain/inbox/bulk-follow-up-plan.js");
+  const broken = {
+    from(name) {
+      const t = (rows) => { const q = { select: () => q, eq: () => q, in: () => q, not: () => q,
+        order: () => q, limit: () => q,
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        then: (r) => Promise.resolve({ data: rows, error: null }).then(r) }; return q; };
+      if (name === "textgrid_numbers") throw new Error("registry unavailable");
+      if (name === "sms_templates") return t([A]);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CAN_M, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CAN_M, master_owner_id: "mo", our_number: "+15551110001" }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo", agent_persona: "Michael Hargrove", best_language: "English" }]);
+      if (name === "send_queue") return t([{ thread_key: CAN_M, timezone: "Central", created_at: "2026-08-01" }]);
+      return t([]);
+    },
+  };
+  const plan = await buildBulkFollowUpPlan({ threadKeys: [CAN_M], now: new Date("2026-09-07T18:00:00Z") }, { supabase: broken });
+  assert.equal(plan.recipients[0].eligible, false, "an unverifiable line must not be used");
+  assert.equal(plan.recipients[0].reason, "no_eligible_sender_number");
+});
+
+// ── D (extended): exhaustion fallback ───────────────────────────────────────
+
+test("D: when every variant has prior use, the ranked best is reused, flagged", () => {
+  const all = [A.template_id, B.template_id, D_.template_id];
+  const chosen = selectFus2Template({ templates: [A, B, D_], usedTemplateIds: all });
+  assert.equal(chosen.ok, true);
+  assert.ok(chosen.template, "must still return a template rather than stall");
+  assert.equal(chosen.exhausted, true);
+  assert.equal(chosen.rotation_reason, "all_variants_used_least_recent");
+});
+
+// ── L (extended): two fixtures that would diverge if coupled ───────────────
+
+test("L: Portuguese/Ana and Korean/Jin keep language, agent and sender separate", async () => {
+  const { buildBulkFollowUpPlan } = await import("@/lib/domain/inbox/bulk-follow-up-plan.js");
+  const KO = tpl("lc-reengage-agent-ko-001", "Korean");
+  const mk = ({ lang, agent, ourNumber, templates }) => ({
+    from(name) {
+      const t = (rows) => { const q = { select: () => q, eq: () => q, in: () => q, not: () => q,
+        order: () => q, limit: () => q,
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        then: (r) => Promise.resolve({ data: rows, error: null }).then(r) }; return q; };
+      if (name === "sms_templates") return t(templates);
+      if (name === "canonical_inbox_threads") return t([{ thread_key: CAN_M, prospect_first_name: "Jorge", property_address_full: "9 Elm St" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CAN_M, master_owner_id: "mo", our_number: ourNumber }]);
+      if (name === "master_owners") return t([{ master_owner_id: "mo", agent_persona: agent, agent_family: "General", best_language: lang }]);
+      if (name === "textgrid_numbers") return t([
+        { phone_number: "+15551110001", status: "active", daily_limit: 500, messages_sent_today: 1 },
+        { phone_number: "+15552220002", status: "active", daily_limit: 500, messages_sent_today: 1 },
+      ]);
+      if (name === "send_queue") return t([{ thread_key: CAN_M, timezone: "Central", created_at: "2026-08-01" }]);
+      return t([]);
+    },
+  });
+  const now = new Date("2026-09-07T18:00:00Z");
+
+  const pt = (await buildBulkFollowUpPlan({ threadKeys: [CAN_M], now },
+    { supabase: mk({ lang: "Portuguese", agent: "Ana Ferreira", ourNumber: "+15551110001", templates: [A, PT, KO] }) })).recipients[0];
+  assert.equal(pt.seller_language, "Portuguese");
+  assert.equal(pt.assigned_agent_name, "Ana Ferreira");
+  assert.equal(pt.from_phone_number, "+15551110001");
+
+  const ko = (await buildBulkFollowUpPlan({ threadKeys: [CAN_M], now },
+    { supabase: mk({ lang: "Korean", agent: "Jin Park", ourNumber: "+15552220002", templates: [A, PT, KO] }) })).recipients[0];
+  assert.equal(ko.seller_language, "Korean");
+  assert.equal(ko.assigned_agent_name, "Jin Park");
+  assert.equal(ko.from_phone_number, "+15552220002");
+
+  // All three differ across the two fixtures, and none was inferred from another:
+  // language came from best_language, the agent from agent_persona, the line
+  // from conversation history.
+  assert.notEqual(pt.seller_language, ko.seller_language);
+  assert.notEqual(pt.assigned_agent_name, ko.assigned_agent_name);
+  assert.notEqual(pt.from_phone_number, ko.from_phone_number);
+});

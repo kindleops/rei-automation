@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { bulkFollowUp, type BulkFollowUpPlan, type FollowUpRecipient } from '../../../lib/api/backendClient'
+import { describeFailureReason } from '../followup-failure-reasons'
 
 type Props = {
   threadKeys: string[]
@@ -30,36 +31,6 @@ const describeReason = (r: FollowUpRecipient): string => {
     return `Missing ${pretty || 'required details'}`
   }
   return raw ? raw.replace(/_/g, ' ') : 'Needs review'
-}
-
-// Failure presentation. The critical distinction: a CONTAINMENT refusal means a
-// deliberate safety control said no; a VALIDATION failure means the software
-// could not assemble a valid send. Labelling the second as the first hides real
-// bugs behind a reassuring message -- which is exactly what happened when an
-// unresolved sending number was reported as "blocked by containment".
-const CONTAINMENT_REASONS: Record<string, string> = {
-  followup_disabled: 'Blocked by containment: follow-up automation is disabled. Nothing was queued.',
-  queue_runner_disabled: 'Blocked by containment: the queue runner is disabled. Nothing was queued.',
-  outbound_sms_disabled: 'Blocked by containment: outbound SMS is disabled. Nothing was queued.',
-  auto_reply_disabled: 'Blocked by containment: auto-reply is disabled. Nothing was queued.',
-  paused_operator_review: 'Blocked: this conversation is paused for operator review. Nothing was queued.',
-}
-
-const VALIDATION_REASONS: Record<string, string> = {
-  invalid_from_phone_number: 'No valid sending number could be resolved. Nothing was queued.',
-  no_eligible_sender_number: 'No eligible sending number is available for this conversation. Nothing was queued.',
-  invalid_to_phone_number: 'The recipient number is not valid. Nothing was queued.',
-  invalid_canonical_thread_key: 'This conversation could not be identified. Nothing was queued.',
-  no_fus2_templates_available: 'No approved templates are available. Nothing was queued.',
-}
-
-const describeBlocked = (reason?: string | null): string | null => {
-  if (!reason) return null
-  if (CONTAINMENT_REASONS[reason]) return CONTAINMENT_REASONS[reason]
-  if (VALIDATION_REASONS[reason]) return VALIDATION_REASONS[reason]
-  // Unknown: neutral failure plus the raw code. Never claim containment for
-  // something we have not positively identified as a safety control.
-  return `Scheduling failed. Nothing was queued. (${reason})`
 }
 
 const PREVIEW_COUNT = 3
@@ -104,7 +75,7 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
     }
     if (!res.data?.ok) {
       setError(
-        describeBlocked(res.data?.blocked_reason)
+        describeFailureReason(res.data?.blocked_reason)
           ?? res.data?.error
           ?? 'Scheduling was refused',
       )
