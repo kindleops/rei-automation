@@ -32,6 +32,25 @@ const describeReason = (r: FollowUpRecipient): string => {
   return raw ? raw.replace(/_/g, ' ') : 'Needs review'
 }
 
+// A refusal an operator can act on. "Scheduling was refused" alone is
+// indistinguishable from a bug; a deliberate safety brake should say so, and
+// say that nothing was queued.
+const BLOCKED_REASON_LABEL: Record<string, string> = {
+  followup_disabled:
+    'Blocked by containment: follow-up automation is set to internal_only. Nothing was queued.',
+  queue_runner_disabled:
+    'Blocked by containment: the queue runner is disabled. Nothing was queued.',
+  outbound_sms_disabled:
+    'Blocked by containment: outbound SMS is disabled. Nothing was queued.',
+  auto_reply_disabled:
+    'Blocked by containment: auto-reply is disabled. Nothing was queued.',
+}
+
+const describeBlocked = (reason?: string | null): string | null => {
+  if (!reason) return null
+  return BLOCKED_REASON_LABEL[reason] ?? `Scheduling was refused: ${reason.replace(/_/g, ' ')}. Nothing was queued.`
+}
+
 const PREVIEW_COUNT = 3
 
 export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
@@ -73,7 +92,11 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
       return
     }
     if (!res.data?.ok) {
-      setError(res.data?.error ?? 'Scheduling was refused')
+      setError(
+        describeBlocked(res.data?.blocked_reason)
+          ?? res.data?.error
+          ?? 'Scheduling was refused',
+      )
       return
     }
     const done = (res.data.results ?? [])

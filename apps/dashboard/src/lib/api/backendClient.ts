@@ -1016,6 +1016,8 @@ export type BulkFollowUpPlan = {
   template_pool_size: number
   distinct_templates_selected: number
   language_breakdown?: Record<string, number>
+  blocked_reason?: string | null
+  failure_reasons?: string[]
   recipients: FollowUpRecipient[]
   error?: string
 }
