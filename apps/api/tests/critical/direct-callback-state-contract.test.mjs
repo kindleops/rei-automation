@@ -7,10 +7,13 @@
  * can put a message in front of a seller". Here it is "who can change what we
  * believe the provider did". Both must have exactly one answer.
  *
- * This file MEASURES the remaining bypass rather than asserting it is already
- * zero. Pinning an aspirational zero would either fail forever or tempt someone
- * to weaken the check; pinning the real number makes the gap visible and makes
- * any NEW bypass fail loudly.
+  * A note on what turned out NOT to be a bypass. The legacy RPC's
+ * `coalesce(v_queue.textgrid_message_id, p_provider_message_sid)` was carried for
+ * several passes as an orphan-SID-adoption path. Verified against the real
+ * production RPC, it is not: the row must already carry that exact SID to be
+ * selected, so the coalesce is a same-row backfill. The dangerous property lives
+ * in the WHERE clause, and that is what is pinned below -- widening the selection
+ * to correlate on recipient or time is what would create the bypass.
  */
 
 import "../helpers/critical-test-environment.mjs";
@@ -78,35 +81,50 @@ test("canonical truth is gated on provenance, not on reaching the function", () 
 
 // ── the measured, remaining bypass ────────────────────────────────────────
 
-test("DIRECT_CALLBACK_STATE_BYPASS is exactly the known legacy SID stamp", () => {
-  // The one place a callback can still bind a provider SID outside canonical
-  // authority: the legacy RPC coalesces the incoming SID onto an unbound queue
-  // row.
+test("the legacy SID coalesce cannot adopt an orphan, by construction", () => {
+  // CORRECTED FINDING. This was carried for several passes as "a callback can
+  // stamp a SID onto an unbound queue row". It cannot, and the reason is the
+  // row SELECTION, not the assignment:
   //
-  //   textgrid_message_id = coalesce(v_queue.textgrid_message_id, p_provider_message_sid)
+  //   FOR v_queue IN SELECT * FROM public.send_queue
+  //     WHERE provider_message_id = p_provider_message_sid
+  //        OR textgrid_message_id  = p_provider_message_sid
   //
-  // It is NOT merely cosmetic projection, which is why it is measured rather
-  // than deleted in passing: find-recent-outbound-pair and
-  // enrich-message-event-context both correlate INBOUND seller replies on
-  // textgrid_message_id. Removing the stamp without replacing that correlation
-  // would degrade reply attribution, so fencing it needs its own migration and
-  // its own proof.
-  const migrations = walk(path.join(ROOT, "supabase/migrations"), ".sql");
-  const stamps = migrations
-    .filter((f) => /coalesce\(\s*v_queue\.textgrid_message_id\s*,\s*p_provider_message_sid\s*\)/i
-      .test(fs.readFileSync(f, "utf8")))
-    .map((f) => path.basename(f))
-    .sort();
+  // A row must ALREADY carry that exact SID to be selected at all, so the
+  // coalesce can only copy the SID from provider_message_id onto the sibling
+  // textgrid_message_id ON A ROW ALREADY BOUND TO IT. An orphan row -- no SID in
+  // either column -- is never in the loop.
+  //
+  // Proven against the REAL production RPC in a rolled-back transaction:
+  //   unbound row -> textgrid_message_id NULL, provider_message_id NULL, untouched
+  //   bound row   -> textgrid_message_id = provider_message_id (same-row backfill)
+  //   send_queue_updated = 1
+  //
+  // The property therefore lives in the WHERE clause. If someone widens that
+  // selection -- matching on to/from, or on a time window -- the coalesce WOULD
+  // become an adoption path. That is what this test guards.
+  const f = path.join(ROOT, "supabase/migrations/20260701193000_restore_delivery_receipt_rpc.sql");
+  const sql = fs.readFileSync(f, "utf8");
 
-  // It appears in TWO files: the original and the later CREATE OR REPLACE that
-  // supersedes it. 20260701193000 is the LIVE definition; 20260624230000 is
-  // historical and no longer the installed body. Both are pinned so a third
-  // occurrence -- a new migration reintroducing the stamp -- fails here.
-  assert.deepEqual(stamps, [
-    "20260624230000_atomic_delivery_receipt_reconciliation.sql",
-    "20260701193000_restore_delivery_receipt_rpc.sql",
-  ], "the unfenced SID stamp must remain confined to the two known migrations");
+  const loop = sql.slice(sql.indexOf("FOR v_queue IN"), sql.indexOf("LOOP", sql.indexOf("FOR v_queue IN")));
+  assert.match(loop, /provider_message_id\s*=\s*p_provider_message_sid/,
+    "selection must require the row to already carry the SID");
+  assert.match(loop, /textgrid_message_id\s*=\s*p_provider_message_sid/,
+    "selection must require the row to already carry the SID");
+
+  // No correlation predicate may creep into the selection: matching on
+  // recipient or time is what would turn a backfill into an adoption.
+  for (const widening of ["to_phone_number", "from_phone_number", "scheduled_for", "created_at"]) {
+    assert.ok(!loop.includes(widening),
+      `the queue selection must not correlate on ${widening}; that would make the ` +
+      `coalesce an orphan-adoption path`);
+  }
+
+  // And the write stays scoped to the selected row.
+  assert.match(sql, /WHERE id = v_queue\.id/,
+    "the update must remain scoped to the row that matched the SID");
 });
+
 
 test("no APPLICATION module binds a provider SID outside the canonical store", () => {
   // The database-side stamp is measured above. On the application side the
