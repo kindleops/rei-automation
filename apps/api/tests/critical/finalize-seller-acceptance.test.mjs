@@ -180,7 +180,14 @@ test("a bound acceptance produces an accepted offer AND exactly one closing case
     opportunity_id: OPP,
     thread_key: THREAD,
     acceptance_event_id: "evt-accept-1",
-    acceptance_at: "2026-09-06T15:00:00.000Z",
+    // Derived from the clock, NOT hardcoded.
+    //
+    // This previously read "2026-09-06T15:00:00.000Z". seedActiveOffer stamps
+    // the offer with `new Date()`, so the test only passed while the wall clock
+    // was before 15:00 UTC on that specific day, and began failing with
+    // `acceptance_predates_offer` every run thereafter. An acceptance must
+    // simply be after the offer it accepts; the absolute instant is irrelevant.
+    acceptance_at: new Date(Date.now() + 1000).toISOString(),
     supabase,
   });
 

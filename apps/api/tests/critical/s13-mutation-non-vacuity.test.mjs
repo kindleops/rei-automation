@@ -19,8 +19,8 @@ import assert from "node:assert/strict";
 import { search } from "../model/s13-combined-model.mjs";
 
 const BASE = {
-  maxAttempts: 2, maxCallbacks: 3, maxCrashes: 2,
-  maxAuthorityChanges: 2, maxDepth: 14,
+  maxAttempts: 2, maxCallbacks: 2, maxCrashes: 1,
+  maxAuthorityChanges: 1, maxDepth: 11,
   // BFS visits in depth order, so the first violation IS a minimal-length
   // counterexample. Continuing past it only re-derives the same defect.
   stopOnFirstViolation: true,
@@ -62,6 +62,11 @@ const MUTATIONS = [
   { id: 'projection_is_authority',
     removes: 'projection non-authority',
     expect: ['ANY'] },
+  { id: 'no_trust_gate',
+    removes: 'the callback receipt trust gate (Slice 4)',
+    // The forged-callback adversary: an unauthenticated POST claiming an
+    // outcome for a SID it does not own.
+    expect: ['S17_UNTRUSTED_CANNOT_ADVANCE_TRUSTED_TRUTH'] },
   { id: 'dedupe_on_recorded',
     removes: 'dedupe-on-processed (reproduces the Slice 2 stranded-callback defect)',
     expect: ['LIVENESS'] },

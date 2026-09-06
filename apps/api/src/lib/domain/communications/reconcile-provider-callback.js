@@ -38,6 +38,13 @@ import {
   PROVIDER_STATUS_POLICY_VERSION,
   PROVIDER_LATTICE_POLICY_VERSION,
 } from '@/lib/domain/communications/provider-outcome-lattice.js';
+import {
+  TRUST_CLASS,
+  mayAdvanceCanonicalTruthWithTrust,
+  mayAdoptOrphanWithTrust,
+  untrustedRefusal,
+  CALLBACK_TRUST_POLICY_VERSION,
+} from '@/lib/domain/communications/callback-trust-policy.js';
 
 const logger = child({ module: 'domain.communications.callback_reconcile' });
 
@@ -59,13 +66,13 @@ export const CALLBACK_ADOPTION_POLICY_VERSION = 'cb_adopt_v1';
  */
 export const ORPHAN_ADOPTION_WINDOW_MS = 30 * 60 * 1000;
 
-/** Receipt-time trust. Immutable once recorded; never retroactively upgraded. */
-export const TRUST_CLASS = Object.freeze({
-  AUTHENTICATED: 'authenticated_provider_callback',
-  UNAUTHENTICATED: 'network_received_unauthenticated',
-  INTERNAL_REPLAY: 'internal_replay',
-  TEST_FIXTURE: 'test_fixture',
-});
+/**
+ * Receipt-time trust. Immutable once recorded; never retroactively upgraded.
+ *
+ * Re-exported from the trust policy module, which owns the vocabulary. Existing
+ * callers importing TRUST_CLASS from here keep working.
+ */
+export { TRUST_CLASS };
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -206,8 +213,48 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
     has_sid: Boolean(evidence.provider_message_sid),
   });
 
+  // ── 6b. TRUST GATE ──────────────────────────────────────────────────────
+  //
+  // The evidence is already durable at this point, and that is deliberate: an
+  // untrusted receipt is still a fact about what arrived, and discarding it
+  // would destroy the only record that someone tried. What it may NOT do is
+  // change what we believe.
+  //
+  // This runs BEFORE binding, because orphan adoption is itself a mutation --
+  // it writes a caller-supplied SID onto one of our attempts on the strength of
+  // a phone number and a time window.
+  if (!mayAdvanceCanonicalTruthWithTrust(trust_class)) {
+    const refusal_meta = untrustedRefusal(trust_class);
+    await store.markCallbackEvent({
+      callback_event_id: event_id,
+      adoption_status: refusal_meta.adoption_status,
+      adoption_reason: refusal_meta.adoption_reason,
+      adoption_policy_version: CALLBACK_TRUST_POLICY_VERSION,
+      processing_status: refusal_meta.processing_status,
+      at: now,
+    });
+    emit('provider_callback.untrusted_receipt', {
+      callback_event_id: event_id, trust_class, fingerprint,
+    });
+    return {
+      ok: true,
+      applied: false,
+      provider_send_triggered: false,
+      stage: 'trust',
+      reason: refusal_meta.adoption_reason,
+      trust_class,
+      callback_event_id: event_id,
+    };
+  }
+
   // ── 7. resolve which attempt this evidence is about ─────────────────────
-  const binding = await resolveBinding(evidence, { store, now, emit });
+  const binding = await resolveBinding(evidence, {
+    store, now, emit,
+    // Orphan adoption carries its own, never-lower threshold. Known-SID at
+    // least proves the caller knew a SID we issued; adoption proves nothing.
+    may_adopt_orphan: mayAdoptOrphanWithTrust(trust_class),
+    trust_class,
+  });
   if (!binding.ok) {
     await store.markCallbackEvent({
       callback_event_id: event_id,
@@ -397,7 +444,9 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
  * callback token -- StatusCallback is configured provider-side, so SID +
  * To/From + a bounded window is the only correlation evidence we have.
  */
-async function resolveBinding(evidence, { store, now, emit }) {
+async function resolveBinding(evidence, {
+  store, now, emit, may_adopt_orphan = false, trust_class = null,
+}) {
   const sid = evidence.provider_message_sid;
 
   if (sid) {
@@ -439,6 +488,19 @@ async function resolveBinding(evidence, { store, now, emit }) {
   });
 
   const count = candidates?.candidate_count ?? 0;
+
+  // TRUST GATE FOR ADOPTION, checked before cardinality so the refusal reason
+  // names the real cause. A caller who cannot be authenticated must never be
+  // able to attach their claim to one of our unresolved attempts, no matter how
+  // cleanly the candidate set resolves.
+  if (!may_adopt_orphan) {
+    return {
+      ok: false,
+      adoption_status: 'unprocessed',
+      reason: `orphan_adoption_requires_trust:${trust_class || 'unknown'}`,
+      candidate_count: count,
+    };
+  }
 
   if (count === 0) {
     return { ok: false, adoption_status: 'orphan_unmatched', reason: 'orphan_zero_candidates', candidate_count: 0 };

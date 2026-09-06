@@ -14,12 +14,16 @@ import assert from "node:assert/strict";
 
 import { search, INVARIANTS } from "../model/s13-combined-model.mjs";
 
+// Retuned in Slice 4: modelling an unauthenticated forged-callback source
+// roughly doubled the branching factor. The bounds are lowered so the search
+// still terminates, and they are printed below so "exhaustive" keeps meaning
+// something specific rather than something flattering.
 const BOUNDS = {
   maxAttempts: 2,
-  maxCallbacks: 3,
-  maxCrashes: 2,
-  maxAuthorityChanges: 2,
-  maxDepth: 14,
+  maxCallbacks: 2,
+  maxCrashes: 1,
+  maxAuthorityChanges: 1,
+  maxDepth: 11,
 };
 
 test("BOUNDED SEARCH: no reachable state violates any safety invariant", () => {
@@ -55,5 +59,5 @@ test("the search reaches the states that matter, not just easy ones", () => {
   // Coverage guard. Without this, a model could pass by never reaching the
   // interesting region at all.
   const { stats } = search(BOUNDS);
-  assert.ok(stats.maxDepth >= 8, `search never went deep: ${stats.maxDepth}`);
+  assert.ok(stats.maxDepth >= 10, `search never went deep: ${stats.maxDepth}`);
 });

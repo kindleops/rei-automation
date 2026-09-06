@@ -68,6 +68,12 @@ export const TRUST = Object.freeze({
   REPLAY: 'internal_replay',
 });
 
+/**
+ * Trust threshold, mirroring callback-trust-policy. Only an authenticated
+ * receipt may advance canonical truth or adopt an orphan.
+ */
+export const trustSufficient = (t) => t === TRUST.AUTHENTICATED;
+
 /** Only these provenances may advance canonical truth. Mirrors the module. */
 export const mayAdvance = (p) => p === PROVENANCE.LIVE || p === PROVENANCE.REPLAY;
 
@@ -147,8 +153,9 @@ export function key(s) {
     s.attempts.map((a) => [a.n, a.started, a.sid, a.completed, a.outcome,
       a.calledProvider === true, a.authorityAtCall === true, a.abandoned === true]),
     s.events.map((e) => [e.fp, e.status, e.provenance, e.processing, e.bound,
-      e.ambiguousAdoption === true, e.strandedOnce === true]).sort(),
-    s.inflight.map((c) => [c.status, c.sid, c.provenance]).sort(),
+      e.ambiguousAdoption === true, e.strandedOnce === true,
+      e.untrusted === true, e.appliedWithTrust ?? null]).sort(),
+    s.inflight.map((c) => [c.status, c.sid, c.provenance, c.trust]).sort(),
     s.providerCalls, s.sellerVisibleSends, s.runtime, s.compliance,
     s.queueStatus, s.projectionFailed, s.crashes, s.authorityChanges,
   ]);
@@ -303,6 +310,21 @@ export function transitions(s, bounds) {
     out.push(...deliverCallback(s, cb, idx, bounds));
   });
 
+  // 4a-bis. AN UNAUTHENTICATED PARTY POSTS A CALLBACK-SHAPED REQUEST.
+  //
+  // This is the adversary the trust gate exists for: someone who knows or
+  // guesses a SID and claims an outcome. It must be recorded and change nothing.
+  if (s.attempts.some((a) => a.sid) && s.inflight.length < bounds.maxCallbacks) {
+    const fsid = s.attempts.find((a) => a.sid).sid;
+    for (const st of ['delivered', 'failed']) {
+      emit('forged_callback:' + st, (n) => {
+        n.inflight.push({
+          status: st, sid: fsid, provenance: PROVENANCE.LIVE, trust: TRUST.UNAUTHENTICATED,
+        });
+      });
+    }
+  }
+
   // 4b. WE poll the provider for status. This is our question and their answer,
   // never a receipt -- and it must not be able to advance canonical truth.
   if (s.attempts.some((a) => a.sid) && s.inflight.length < bounds.maxCallbacks) {
@@ -410,6 +432,16 @@ function deliverCallback(s, cb, idx, bounds) {
     return out;
   }
 
+  // TRUST GATE. Recorded above, refused here: evidence is kept, belief is not
+  // moved. Placed BEFORE binding because adoption is itself a mutation.
+  if (m !== 'no_trust_gate' && !trustSufficient(cb.trust)) {
+    ev.processing = 'no_action';
+    ev.adoption = 'untrusted_receipt';
+    ev.untrusted = true;
+    out.push({ name: 'callback:' + status + ':untrusted_refused', next: n });
+    return out;
+  }
+
   // BINDING. Known SID first, then strict orphan.
   let target = n.attempts.find((a) => a.sid && a.sid === cb.sid);
   if (!target) {
@@ -456,6 +488,7 @@ function deliverCallback(s, cb, idx, bounds) {
   // retry authority, never allocates, never sends.
   target.outcome = incoming;
   ev.processing = 'applied';
+  ev.appliedWithTrust = cb.trust;
   const poss = possibilityFor(incoming);
   if (poss) n.possibility = poss;
   n.retry = RETRY.DENIED;
@@ -543,6 +576,13 @@ export const INVARIANTS = [
       + 'every provider invocation must have held authority at the moment of the call',
     check: (s) => s.attempts.filter((a) => a.calledProvider)
       .every((a) => a.authorityAtCall === true),
+  },
+  {
+    id: 'S17_UNTRUSTED_CANNOT_ADVANCE_TRUSTED_TRUTH',
+    why: 'a receipt nobody could authenticate must never decide whether a seller '
+      + 'received a message; it is recorded as evidence and left inert',
+    check: (s) => s.events.every((e) => e.processing !== 'applied'
+      || e.appliedWithTrust === TRUST.AUTHENTICATED),
   },
   {
     id: 'S15_NO_AMBIGUOUS_ORPHAN_ADOPTION',
