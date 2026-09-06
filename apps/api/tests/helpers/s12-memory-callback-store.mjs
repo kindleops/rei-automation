@@ -25,7 +25,17 @@ export function createMemoryCallbackStore() {
     async getOrCreateCallbackEvent({ fingerprint, evidence, trust }) {
       const existing = state.events.get(fingerprint);
       if (existing) {
-        return { ok: true, duplicate: true, created: false, callback_event_id: existing.id };
+        // Mirrors the RPC, which returns the canonical row's processing_status so
+        // the caller can tell "already ruled on" from "recorded but never ruled on".
+        return {
+          ok: true,
+          duplicate: true,
+          created: false,
+          callback_event_id: existing.id,
+          processing_status: existing.processing_status,
+          adoption_status: existing.adoption_status,
+          bound_attempt_id: existing.bound_attempt_id ?? null,
+        };
       }
       const row = {
         id: `cbe-${state.events.size + 1}`,
@@ -83,9 +93,17 @@ export function createMemoryCallbackStore() {
       return { ok: true };
     },
 
-    async applyCallbackOutcome({ attempt_id, outcome_class, delivery_possibility, provider_status }) {
+    async applyCallbackOutcome({
+      attempt_id, expected_outcome_class, outcome_class, delivery_possibility, provider_status,
+    }) {
       const a = state.attempts.get(attempt_id);
       if (!a) return { ok: false, reason: 'attempt_not_found' };
+      // Mirrors the SQL `.eq('outcome_class', expected)` predicate. Without this
+      // the fake would accept a blind write and hide the exact race the real
+      // database refuses.
+      const current = a.outcome_class ?? null;
+      const expected = expected_outcome_class ?? null;
+      if (current !== expected) return { ok: false, reason: 'outcome_changed_under_us' };
       a.outcome_class = outcome_class;
       a.delivery_possibility = delivery_possibility;
       a.provider_status = provider_status;

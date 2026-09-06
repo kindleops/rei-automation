@@ -247,21 +247,33 @@ BEGIN
     COALESCE((p_trust->>'signature_verified')::boolean, false),
     NULLIF(p_evidence->>'source_route','')
   )
-  ON CONFLICT (callback_fingerprint) DO NOTHING
+  -- DO UPDATE, NOT DO NOTHING -- and the difference is not cosmetic.
+  --
+  -- With DO NOTHING, a race loser gets zero rows back and must re-SELECT. Under
+  -- READ COMMITTED that SELECT does not block on the winner's uncommitted row,
+  -- so it finds nothing and the function reports a spurious failure. With DO
+  -- UPDATE the loser takes the row lock, waits for the winner to commit, and is
+  -- handed the canonical row -- which is the entire contract of this function.
+  --
+  -- The SET is deliberately a self-assignment: it writes no new information, and
+  -- the immutability trigger passes it precisely because nothing is DISTINCT.
+  ON CONFLICT (callback_fingerprint) DO UPDATE
+    SET provider = public.seller_provider_callback_events.provider
   RETURNING * INTO v_row;
 
-  IF FOUND THEN
-    v_created := true;
-  ELSE
-    -- The race loser, or a genuine redelivery. Read the canonical row.
-    SELECT * INTO v_row
-    FROM public.seller_provider_callback_events
-    WHERE callback_fingerprint = p_fingerprint;
-
-    IF NOT FOUND THEN
-      RETURN jsonb_build_object('ok', false, 'reason', 'callback_event_upsert_failed');
-    END IF;
+  IF NOT FOUND THEN
+    -- Unreachable via the conflict path now that DO UPDATE always returns a row.
+    -- Retained as a fail-closed guard: no row means no evidence, and no evidence
+    -- is never permission to advance truth.
+    RETURN jsonb_build_object('ok', false, 'reason', 'callback_event_upsert_failed');
   END IF;
+
+  -- INSERTED vs CONFLICTED, without depending on xmax. The insert path is the
+  -- only one that can leave processed_at NULL *and* a fresh created_at, so
+  -- rather than infer it we ask the row: an event we just created has never been
+  -- ruled on. Callers gate on processing_status regardless (see below), so this
+  -- flag is advisory, not load-bearing.
+  v_created := (v_row.processing_status = 'pending' AND v_row.processed_at IS NULL);
 
   RETURN jsonb_build_object(
     'ok', true,

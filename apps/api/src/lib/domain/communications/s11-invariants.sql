@@ -102,6 +102,58 @@ lineage_missing AS (
   FROM public.seller_logical_communications
   WHERE logical_key !~ '^lck_v[0-9]+:[a-z_]+:[0-9a-f]{64}$'
 ),
+-- ── Slice 2: callback reconciliation ──────────────────────────────────────
+-- These REQUIRE migration 20260906060000. A plain SELECT against a missing
+-- relation is a hard error, not an empty result, so this evaluator does not
+-- run against a database that lacks the callback ledger. Stating that plainly
+-- beats a guard that would silently report "no violations" for invariants it
+-- never actually evaluated.
+callback_duplicate_fingerprint AS (
+  SELECT 'CALLBACK_DUPLICATE_FINGERPRINT', 'fatal', callback_fingerprint, count(*)
+  FROM public.seller_provider_callback_events
+  GROUP BY callback_fingerprint HAVING count(*) > 1
+),
+callback_orphan_multi_adopt AS (
+  -- One SID may be adopted onto at most one attempt. Two adoptions of the same
+  -- SID means a callback was attributed to a message it does not describe.
+  SELECT 'CALLBACK_SID_MULTI_ADOPT', 'fatal', provider_message_sid, count(DISTINCT bound_attempt_id)
+  FROM public.seller_provider_callback_events
+  WHERE bound_attempt_id IS NOT NULL AND provider_message_sid IS NOT NULL
+  GROUP BY provider_message_sid HAVING count(DISTINCT bound_attempt_id) > 1
+),
+callback_applied_without_binding AS (
+  SELECT 'CALLBACK_APPLIED_WITHOUT_BINDING', 'fatal', id::text, 1
+  FROM public.seller_provider_callback_events
+  WHERE processing_status = 'applied' AND bound_attempt_id IS NULL
+),
+callback_delivered_regressed AS (
+  -- An attempt whose canonical outcome is weaker than a callback we recorded as
+  -- APPLIED against it. Truth moved backwards.
+  SELECT 'CALLBACK_DELIVERED_REGRESSED', 'fatal', a.id::text, 1
+  FROM public.seller_communication_attempts a
+  JOIN public.seller_provider_callback_events e ON e.bound_attempt_id = a.id
+  WHERE e.processing_status = 'applied'
+    AND e.provider_status = 'delivered'
+    AND a.outcome_class IS DISTINCT FROM 'delivered'
+),
+callback_definitely_not_sent AS (
+  -- No provider callback may conclude the seller never saw the message: every
+  -- callback describes a message the provider had already accepted.
+  SELECT 'CALLBACK_CLAIMED_DEFINITELY_NOT_SENT', 'fatal', a.id::text, 1
+  FROM public.seller_communication_attempts a
+  WHERE a.provider_response_received_at IS NOT NULL
+    AND a.delivery_possibility = 'definitely_not_sent'
+),
+callback_unbound_sid_write AS (
+  -- A callback that bound an attempt whose SID does not match the callback's own
+  -- SID: misattribution, the failure orphan adoption exists to prevent.
+  SELECT 'CALLBACK_SID_MISATTRIBUTED', 'fatal', e.id::text, 1
+  FROM public.seller_provider_callback_events e
+  JOIN public.seller_communication_attempts a ON a.id = e.bound_attempt_id
+  WHERE e.processing_status = 'applied'
+    AND e.provider_message_sid IS NOT NULL
+    AND a.provider_message_id IS DISTINCT FROM e.provider_message_sid
+),
 legacy_unbound AS (
   SELECT 'LEGACY_UNBOUND_QUEUE_ROW', 'info', 'aggregate', count(*)
   FROM public.send_queue
@@ -124,5 +176,11 @@ UNION ALL SELECT * FROM queue_logical_parent_mismatch
 UNION ALL SELECT * FROM monetary_offer_mismatch
 UNION ALL SELECT * FROM attempt_without_parent
 UNION ALL SELECT * FROM lineage_missing
+UNION ALL SELECT * FROM callback_duplicate_fingerprint
+UNION ALL SELECT * FROM callback_orphan_multi_adopt
+UNION ALL SELECT * FROM callback_applied_without_binding
+UNION ALL SELECT * FROM callback_delivered_regressed
+UNION ALL SELECT * FROM callback_definitely_not_sent
+UNION ALL SELECT * FROM callback_unbound_sid_write
 UNION ALL SELECT * FROM legacy_unbound
 ORDER BY severity, code;

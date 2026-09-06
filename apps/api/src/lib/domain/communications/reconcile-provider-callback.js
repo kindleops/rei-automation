@@ -167,8 +167,27 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
 
   const event_id = recorded.callback_event_id;
 
-  // ── 6. EXACT DUPLICATE: evidence reused, transition NOT re-applied ──────
-  if (recorded.duplicate === true) {
+  // ── 6. EXACT DUPLICATE ──────────────────────────────────────────────────
+  //
+  // DEDUPE ON PROCESSED, NOT ON RECORDED.
+  //
+  // Recording the evidence and applying its transition are two writes. A crash
+  // between them leaves a row whose fingerprint exists but whose transition
+  // never landed. Short-circuiting on "the fingerprint is already there" would
+  // make the provider's redelivery -- our one chance to recover -- a no-op, and
+  // canonical truth would lag forever, silently.
+  //
+  // So a duplicate is inert only once its processing actually REACHED a verdict.
+  // 'pending' means we recorded a claim and never ruled on it: work to resume,
+  // not work to skip.
+  //
+  // Note the gate is the ROW'S OWN verdict, not whether we believe we created it.
+  // "Did I insert this?" is a race-sensitive inference; "has this been ruled on?"
+  // is a fact the row states directly. Only the second is safe to branch on.
+  const processing_status = clean(recorded.processing_status);
+  const already_processed = processing_status !== '' && processing_status !== 'pending';
+
+  if (already_processed) {
     emit('provider_callback.duplicate', { callback_event_id: event_id, fingerprint });
     return {
       ok: true,
@@ -176,7 +195,7 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
       duplicate: true,
       provider_send_triggered: false,
       stage: 'duplicate',
-      reason: 'callback_already_recorded',
+      reason: 'callback_already_processed',
       callback_event_id: event_id,
     };
   }
@@ -216,7 +235,16 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
 
   // ── 8-9. provider status -> outcome, then the MONOTONIC gate ────────────
   const normalized = normalizeProviderStatus(evidence.provider_status);
-  const current = binding.attempt.outcome_class || PROVIDER_OUTCOME.UNKNOWN;
+  // TWO DIFFERENT READS OF THE SAME FIELD, deliberately not merged.
+  //
+  //   stored_outcome  the literal persisted value, NULL included
+  //   current         that value interpreted for the lattice, where an absent
+  //                   outcome MEANS unknown
+  //
+  // The lattice needs the interpretation. The compare-and-swap below needs the
+  // literal: `WHERE outcome_class = 'unknown'` never matches a NULL column.
+  const stored_outcome = binding.attempt.outcome_class ?? null;
+  const current = stored_outcome || PROVIDER_OUTCOME.UNKNOWN;
   const verdict = advanceProviderOutcome(current, normalized.outcome);
 
   if (verdict.action !== 'advance') {
@@ -276,9 +304,18 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
   // ── 11-12. canonical provider truth ─────────────────────────────────────
   const delivery_possibility = deliveryPossibilityFor(normalized.outcome);
 
-  await store.applyCallbackOutcome({
+  // COMPARE-AND-SWAP, not a blind write.
+  //
+  // The lattice verdict above was computed against `current`. Between that read
+  // and this write another callback may have advanced the same attempt. Writing
+  // blindly would let two concurrent claims both pass the gate on the same stale
+  // value and let the second overwrite the first -- which is precisely how a
+  // late `failed` erases a delivery the seller received. Found by the integrated
+  // race matrix; the sequential path never exposes it.
+  const applied = await store.applyCallbackOutcome({
     attempt_id: binding.attempt.id,
     logical_communication_id: binding.attempt.logical_communication_id,
+    expected_outcome_class: stored_outcome,
     outcome_class: normalized.outcome,
     delivery_possibility,
     provider_status: evidence.provider_status,
@@ -292,6 +329,31 @@ export async function reconcileProviderCallback(callback = {}, deps = {}) {
       adoption: CALLBACK_ADOPTION_POLICY_VERSION,
     },
   });
+
+  if (applied && applied.ok === false) {
+    // Someone else advanced this attempt first. Our verdict was computed against
+    // a value that no longer holds, so it is not ours to apply. Record the claim
+    // and leave the winner's truth alone.
+    await store.markCallbackEvent({
+      callback_event_id: event_id,
+      adoption_status: 'conflict',
+      adoption_reason: applied.reason || 'outcome_changed_under_us',
+      adoption_policy_version: CALLBACK_ADOPTION_POLICY_VERSION,
+      processing_status: 'no_action',
+      bound_attempt_id: binding.attempt.id,
+      bound_logical_communication_id: binding.attempt.logical_communication_id,
+      at: now,
+    });
+    emit('provider_callback.status_conflict', {
+      callback_event_id: event_id, reason: applied.reason, expected: current,
+    });
+    return {
+      ok: true, applied: false, provider_send_triggered: false,
+      stage: 'lattice', reason: applied.reason || 'outcome_changed_under_us',
+      lattice_action: 'conflict', callback_event_id: event_id,
+      attempt_id: binding.attempt.id,
+    };
+  }
 
   await store.markCallbackEvent({
     callback_event_id: event_id,
@@ -395,7 +457,10 @@ async function resolveBinding(evidence, { store, now, emit }) {
     attempt: {
       id: candidates.attempt_id,
       logical_communication_id: candidates.logical_communication_id,
-      outcome_class: candidates.outcome_class || PROVIDER_OUTCOME.UNKNOWN,
+      // The LITERAL stored value, un-normalized. Coercing NULL to 'unknown'
+      // here would make the compare-and-swap below compare against a value the
+      // column never held. Interpretation happens in exactly one place.
+      outcome_class: candidates.outcome_class ?? null,
       to_phone_number: evidence.to_phone_number,
     },
     adoption_status: 'orphan_adopted',
