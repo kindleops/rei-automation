@@ -25,7 +25,19 @@ async function runRecovery(body = {}) {
   const supabase = getDefaultSupabaseClient()
   const provider_id_batch_size = Number(body.provider_id_batch_size ?? body.batch_size ?? 500)
   const max_duration_ms = Number(body.max_duration_ms ?? 55_000)
-  const include_polling = body.include_polling_fallback !== false
+  // EXPLICIT OPT-IN, not opt-out.
+  //
+  // This previously defaulted ON (`!== false`), so any caller that omitted the
+  // flag would reach out to TextGrid. The audit found exactly one caller of
+  // pollMissingDeliveryCallbacks (this route) and exactly one production caller
+  // of this route (the */5 Cloudflare cron), which already passes false. So the
+  // default protected nobody and armed everybody else.
+  //
+  // It matters because §11 treats a poll answer as an OBSERVATION, never a
+  // provider receipt: TextGrid's status-lookup-by-SID has never been verified as
+  // authoritative here, so polling must not become canonical provider truth by
+  // default. Opting in is now a deliberate act.
+  const include_polling = body.include_polling_fallback === true
 
   const recovery = await recoverDeliveryWebhookBacklog(
     {
