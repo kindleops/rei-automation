@@ -206,7 +206,8 @@ const CANARY_B = "+15555550101"; // Pacific
 function planSupabase() {
   const table = (rows) => {
     const q = {
-      select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+      select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+      maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       then: (res) => Promise.resolve({ data: rows, error: null }).then(res),
     };
     return q;
@@ -228,10 +229,12 @@ function planSupabase() {
       }
       if (name === "inbox_thread_state") {
         return table([
-          { thread_key: CANARY_A, master_owner_id: "mo-a" },
-          { thread_key: CANARY_B, master_owner_id: "mo-b" },
+          { thread_key: CANARY_A, master_owner_id: "mo-a", our_number: "+15551110001" },
+          { thread_key: CANARY_B, master_owner_id: "mo-b", our_number: "+15551110001" },
         ]);
       }
+      if (name === "textgrid_numbers") return table([{ phone_number: "+15551110001", status: "active", daily_limit: 500, messages_sent_today: 1 }]);
+
       if (name === "master_owners") {
         // The assignment of record: agent_persona is a FULL name; the canonical
         // personalizer reduces it to a first name.
@@ -371,7 +374,8 @@ test("a seller with no assigned agent is NEED REVIEW, never signed by someone el
   const noAgent = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+          maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
       };
@@ -424,7 +428,8 @@ test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", as
   const noAssignment = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+          maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
       };
@@ -433,7 +438,8 @@ test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", as
         return t([{ thread_key: CANARY_A, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
       }
       // Thread exists but carries NO master_owner_id -> no assignment.
-      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: null }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: null, our_number: "+15551110001" }]);
+      if (name === "textgrid_numbers") return t([{ phone_number: "+15551110001", status: "active", daily_limit: 500, messages_sent_today: 1 }]);
       if (name === "master_owners") return t([]);
       if (name === "send_queue") {
         return t([{
@@ -482,13 +488,15 @@ test("a KNOWN Spanish seller now receives SPANISH copy, not English", async () =
   const spanish = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+          maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
       };
       if (name === "sms_templates") return t([...FUS2, ...ES]);
       if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Sofia", property_address_full: "9 Elm St" }]);
-      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a", our_number: "+15551110001" }]);
+      if (name === "textgrid_numbers") return t([{ phone_number: "+15551110001", status: "active", daily_limit: 500, messages_sent_today: 1 }]);
       if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Crystal Park", agent_family: "Spanish Local", best_language: "Spanish" }]);
       if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
       return t([]);
@@ -511,13 +519,15 @@ test("a known language with NO approved FUS2 family is NEED REVIEW, never Englis
   const thai = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+          maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
       };
       if (name === "sms_templates") return t(FUS2); // English only
       if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Anan", property_address_full: "9 Elm St" }]);
-      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
+      if (name === "inbox_thread_state") return t([{ thread_key: CANARY_A, master_owner_id: "mo-a", our_number: "+15551110001" }]);
+      if (name === "textgrid_numbers") return t([{ phone_number: "+15551110001", status: "active", daily_limit: 500, messages_sent_today: 1 }]);
       if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Crystal Park", best_language: "Thai" }]);
       if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
       return t([]);
@@ -539,4 +549,70 @@ test("UNKNOWN language uses the existing English default; agent family is never 
     { supabase: planSupabase() },
   );
   assert.equal(plan.recipients[0].eligible, true, "unknown language must not exclude a seller");
+});
+
+// ── SENDER ROUTING ──────────────────────────────────────────────────────────
+
+const senderSupabase = ({ threadOurNumber = null, activeNumbers = ["+15551110001"] } = {}) => ({
+  from(name) {
+    const t = (rows) => {
+      const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
+      return q;
+    };
+    if (name === "sms_templates") return t(FUS2);
+    if (name === "canonical_inbox_threads") return t([{ thread_key: CANARY_A, prospect_first_name: "Sarah", property_address_full: "123 Main St" }]);
+    if (name === "inbox_thread_state") return t(threadOurNumber ? [{ thread_key: CANARY_A, master_owner_id: "mo-a", our_number: threadOurNumber }] : [{ thread_key: CANARY_A, master_owner_id: "mo-a" }]);
+    if (name === "master_owners") return t([{ master_owner_id: "mo-a", agent_persona: "Michael Hargrove", best_language: "English" }]);
+    if (name === "textgrid_numbers") return t(activeNumbers.map((n) => ({ phone_number: n, status: "active", daily_limit: 500, messages_sent_today: 10 })));
+    if (name === "send_queue") return t([{ thread_key: CANARY_A, timezone: "Central", created_at: "2026-08-01T12:00:00Z" }]);
+    return t([]);
+  },
+});
+
+test("SENDER: conversation-local number is reused when still an active sender", async () => {
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: senderSupabase({ threadOurNumber: "+15551110001", activeNumbers: ["+15551110001"] }) },
+  );
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, true, a.reason || "");
+  assert.equal(a.from_phone_number, "+15551110001", "must preserve the number the seller recognises");
+});
+
+test("SENDER: a historical number that is NO LONGER active is refused, not reused", async () => {
+  // The thread's number exists in history but has been released from the
+  // registry. Sending from it would come from a line we no longer control.
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: senderSupabase({ threadOurNumber: "+15559998888", activeNumbers: ["+15551110001"] }) },
+  );
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, false, "a stale sender must not be used");
+  assert.equal(a.reason, "no_eligible_sender_number");
+  assert.equal(a.message_body, undefined, "nothing may be rendered for an unsendable recipient");
+});
+
+test("SENDER: no resolvable number => NEED REVIEW, never an arbitrary default", async () => {
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: senderSupabase({ threadOurNumber: null, activeNumbers: [] }) },
+  );
+  const a = plan.recipients[0];
+  assert.equal(a.eligible, false);
+  assert.equal(a.reason, "no_eligible_sender_number");
+  assert.equal(a.from_phone_number, undefined, "no default number may be substituted");
+});
+
+test("SENDER: the sending line is independent of agent identity and language", async () => {
+  const plan = await buildBulkFollowUpPlan(
+    { threadKeys: [CANARY_A], now: NOW },
+    { supabase: senderSupabase({ threadOurNumber: "+15551110001", activeNumbers: ["+15551110001"] }) },
+  );
+  const a = plan.recipients[0];
+  // Same recipient carries all three dimensions, resolved from different sources.
+  assert.equal(a.from_phone_number, "+15551110001");   // conversation continuity
+  assert.equal(a.assigned_agent_name, "Michael Hargrove"); // master-owner assignment
+  assert.equal(a.seller_language, "English");           // master_owners.best_language
 });

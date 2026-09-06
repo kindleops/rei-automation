@@ -53,7 +53,9 @@ export async function POST(request) {
         payload: {
           thread_key: recipient.thread_key,
           to_phone_number: recipient.thread_key,
-          from_phone_number: payload?.from_phone_number || null,
+          // Routing authority is server-side: the sheet never manufactures a
+          // sending line. Resolved per recipient from conversation continuity.
+          from_phone_number: recipient.from_phone_number,
           message_body: recipient.message_body,
           scheduled_for: recipient.schedule.scheduled_for_utc,
           timezone: recipient.schedule.timezone,
