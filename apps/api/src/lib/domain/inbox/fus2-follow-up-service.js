@@ -153,7 +153,7 @@ export function selectFus2Template({ templates = [], usedTemplateIds = [], conte
  * Build the per-recipient plan: eligibility, rendered copy, and an individually
  * resolved schedule. Renders nothing itself and schedules nothing itself.
  */
-export function buildRecipientPlan({ thread = {}, template = null, agentName = null, now = new Date() } = {}) {
+export function buildRecipientPlan({ thread = {}, template = null, agentName = null, scheduleOverride = null, now = new Date() } = {}) {
   const threadKey = clean(thread.thread_key) || clean(thread.threadKey);
   const base = {
     thread_key: threadKey,
@@ -181,7 +181,9 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
     };
   }
 
-  const schedule = resolveInboxSchedule({
+  // A caller that already resolved the schedule (bulk mode selection) supplies
+  // it; otherwise fall back to the next eligible instant.
+  const schedule = scheduleOverride || resolveInboxSchedule({
     // "Best local time": the next eligible moment in the recipient's own window.
     // Deliberately resolved PER RECIPIENT -- a bulk selection must never collapse
     // to one wall-clock instant across timezones.

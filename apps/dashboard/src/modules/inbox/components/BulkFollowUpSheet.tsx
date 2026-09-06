@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { bulkFollowUp, type BulkFollowUpPlan, type FollowUpRecipient } from '../../../lib/api/backendClient'
 import { describeFailureReason } from '../followup-failure-reasons'
+import FollowUpSchedulePicker, { validateSchedule } from './FollowUpSchedulePicker'
+import type { FollowUpScheduleConfig } from '../../../lib/api/backendClient'
 
 type Props = {
   threadKeys: string[]
@@ -42,10 +44,12 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [showExcluded, setShowExcluded] = useState(false)
+  const [scheduleConfig, setScheduleConfig] = useState<FollowUpScheduleConfig>({ mode: 'best_contact_time' })
+  const scheduleError = validateSchedule(scheduleConfig)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    const res = await bulkFollowUp({ mode: 'preview', thread_keys: threadKeys })
+    const res = await bulkFollowUp({ mode: 'preview', thread_keys: threadKeys, schedule: scheduleConfig })
     // BackendResult is a discriminated union: `data` only exists on the success
     // arm, so it has to be narrowed on `ok` before being read.
     if (!res.ok) {
@@ -58,14 +62,14 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
       setPlan(res.data)
     }
     setLoading(false)
-  }, [threadKeys])
+  }, [threadKeys, scheduleConfig])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { if (!scheduleError) void load() }, [load, scheduleError])
 
   const schedule = async () => {
     if (!plan || plan.eligible_count === 0) return
     setBusy(true)
-    const res = await bulkFollowUp({ mode: 'schedule', thread_keys: threadKeys })
+    const res = await bulkFollowUp({ mode: 'schedule', thread_keys: threadKeys, schedule: scheduleConfig })
     setBusy(false)
     // Scheduled means scheduled. A failure is surfaced, never swallowed into an
     // optimistic success.
@@ -130,10 +134,7 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
               </div>
             )}
 
-            <div className="nx-followup-timing">
-              <span className="nx-followup-timing__label">Timing</span>
-              <span className="nx-followup-timing__value">Best local time · per seller</span>
-            </div>
+            <FollowUpSchedulePicker value={scheduleConfig} onChange={setScheduleConfig} error={scheduleError} />
 
             {showExcluded && excluded.length > 0 && (
               <ul className="nx-followup-excluded">
@@ -162,7 +163,16 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
                   </div>
                   <div className="nx-followup-preview__body">{r.message_body}</div>
                   <div className="nx-followup-preview__when">
-                    <span>{r.schedule?.effective_local_label} · {r.schedule?.local_send_date} seller local</span>
+                    <span>
+                      {r.schedule?.effective_local_label} · {r.schedule?.local_send_date} seller local
+                      {r.schedule?.deferred && r.requested_local_label && (
+                        // Never claim the requested time when the queue row will
+                        // actually send later.
+                        <span className="nx-followup-preview__adjusted">
+                          {' '}(requested {r.requested_local_label})
+                        </span>
+                      )}
+                    </span>
                     {r.segments != null && (
                       // Cost visibility only. Copy is never auto-shortened.
                       <span className="nx-followup-preview__seg">
@@ -192,7 +202,7 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
           <button
             type="button"
             className="is-primary"
-            disabled={busy || loading || !plan || plan.eligible_count === 0}
+            disabled={busy || loading || !plan || plan.eligible_count === 0 || Boolean(scheduleError)}
             onClick={() => void schedule()}
           >
             {busy ? 'Scheduling…' : `Schedule ${plan?.eligible_count ?? 0}`}

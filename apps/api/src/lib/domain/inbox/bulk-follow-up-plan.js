@@ -7,6 +7,7 @@
 
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { resolveFromPhoneNumber } from "@/lib/domain/inbox/send-now-service.js";
+import { resolveBulkScheduleMode } from "@/lib/domain/inbox/resolve-bulk-schedule-mode.js";
 import {
   loadFus2Templates,
   loadThreadTemplateHistory,
@@ -87,7 +88,7 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   if (ownerIds.length) {
     const { data: owners } = await supabase
       .from("master_owners")
-      .select("master_owner_id,agent_persona,agent_family,best_language")
+      .select("master_owner_id,agent_persona,agent_family,best_language,routing_timezone,best_contact_window,best_contact_slot")
       .in("master_owner_id", [...new Set(ownerIds)]);
 
     const agentByOwner = new Map();
@@ -109,6 +110,10 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
       // but are INDEPENDENT: agent_family ("Spanish Local") describes the
       // AGENT and is never read as a signal about the seller.
       ctx.best_language = assigned.best_language || null;
+      // Canonical per-seller contact intelligence for Best Contact Time.
+      ctx.routing_timezone = assigned.routing_timezone || null;
+      ctx.best_contact_window = assigned.best_contact_window || null;
+      ctx.best_contact_slot = assigned.best_contact_slot ?? null;
       ctx.master_owner_id = ownerId;
     }
   }
@@ -217,7 +222,7 @@ async function resolveSenderForRecipient({ threadKey, toPhone, activeSenders }, 
  * Note there is deliberately NO agent-name override. {{agent_name}} always
  * resolves to the agent assigned to that seller.
  */
-export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() } = {}, deps = {}) {
+export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, now = new Date() } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
   if (!keys.length) {
@@ -287,8 +292,42 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       continue;
     }
 
+    // Scheduling mode is resolved PER RECIPIENT against that seller's own
+    // timezone and contact window; a batch never collapses to one instant.
+    const modeResult = resolveBulkScheduleMode({
+      mode: schedule?.mode || "best_contact_time",
+      date: schedule?.date || null,
+      time: schedule?.time || null,
+      window_start: schedule?.window_start || null,
+      window_end: schedule?.window_end || null,
+      recipient: {
+        thread_key: key,
+        timezone: ctx.timezone,
+        contact_window: ctx.contact_window,
+        routing_timezone: ctx.routing_timezone,
+        best_contact_window: ctx.best_contact_window,
+      },
+      now,
+    });
+
+    if (!modeResult.ok) {
+      recipients.push({
+        thread_key: key,
+        seller_name: ctx.seller_first_name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: modeResult.reason,
+        seller_language: language,
+        assigned_agent_name: ctx.agent_name || null,
+        from_phone_number: sender.from_phone_number,
+      });
+      continue;
+    }
+
     const plan = buildRecipientPlan({
       thread: ctx,
+      scheduleOverride: modeResult,
       template: selection.ok ? selection.template : null,
       // The agent ASSIGNED TO THIS SELLER, and nothing else. A batch-level name
       // must never speak for a seller: the templates say "this is {{agent_name}}",
@@ -316,7 +355,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
   return {
     ok: true,
     label: FUS2_OPERATOR_LABEL,
-    timing: "best_local_time",
+    timing: schedule?.mode || "best_contact_time",
     selected_count: recipients.length,
     eligible_count: eligible.length,
     needs_review_count: needsReview.length,

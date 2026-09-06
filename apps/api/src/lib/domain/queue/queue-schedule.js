@@ -290,7 +290,7 @@ function pickDeterministicSecond(distribution_key = null, salt = "second") {
   return Math.abs(hashString(`${distribution_key}:${salt}`)) % 60;
 }
 
-function pickMinuteInRange(min_minutes, max_minutes, distribution_key = null, salt = "minute") {
+export function pickMinuteInRange(min_minutes, max_minutes, distribution_key = null, salt = "minute") {
   const min = clampToPositiveInteger(min_minutes, 0);
   const max = clampToPositiveInteger(max_minutes, min);
 

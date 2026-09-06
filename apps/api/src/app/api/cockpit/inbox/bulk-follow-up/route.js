@@ -27,10 +27,13 @@ export async function POST(request) {
   const payload = await parseJsonSafe(request)
   const mode = String(payload?.mode || 'preview').toLowerCase()
   const threadKeys = Array.isArray(payload?.thread_keys) ? payload.thread_keys : []
+  // Scheduling mode config. Times are seller-LOCAL wall clocks; the server
+  // converts each one in that recipient's own timezone.
+  const schedule = payload?.schedule && typeof payload.schedule === 'object' ? payload.schedule : null
 
   try {
     // No agent override is accepted: {{agent_name}} is the seller's assigned agent.
-    const plan = await buildBulkFollowUpPlan({ threadKeys })
+    const plan = await buildBulkFollowUpPlan({ threadKeys, schedule })
     if (!plan.ok) return NextResponse.json(plan, { status: 400, headers: cors })
 
     if (mode === 'preview') {

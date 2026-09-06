@@ -988,6 +988,8 @@ export type FollowUpRecipient = {
   agent_name: string | null
   assigned_agent_name: string | null
   seller_language?: string | null
+  requested_local_label?: string | null
+  schedule_deferred?: boolean
   language_known?: boolean
   segments?: number
   encoding?: 'GSM-7' | 'Unicode'
@@ -1025,8 +1027,18 @@ export type BulkFollowUpPlan = {
 // POST /api/cockpit/inbox/bulk-follow-up
 // mode=preview renders + resolves schedules and writes NOTHING.
 // mode=schedule routes each recipient through the canonical schedule-reply path.
+export type FollowUpScheduleConfig = {
+  mode: 'best_contact_time' | 'exact' | 'starting_at' | 'window'
+  /** Seller-LOCAL date, YYYY-MM-DD. */
+  date?: string | null
+  /** Seller-LOCAL wall clock for exact / starting_at. */
+  time?: string | null
+  window_start?: string | null
+  window_end?: string | null
+}
+
 export function bulkFollowUp(
-  body: { mode: 'preview' | 'schedule'; thread_keys: string[]; agent_name?: string | null },
+  body: { mode: 'preview' | 'schedule'; thread_keys: string[]; schedule?: FollowUpScheduleConfig },
 ): Promise<BackendResult<BulkFollowUpPlan & { scheduled_count?: number; results?: unknown[] }>> {
   return callBackend('/api/cockpit/inbox/bulk-follow-up', {
     method: 'POST',
