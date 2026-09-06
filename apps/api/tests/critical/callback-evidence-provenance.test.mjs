@@ -110,3 +110,35 @@ test("a canonical reconciliation failure cannot read as a transport failure", ()
   assert.match(engine, /callback\.canonical_reconciliation_failed/,
     "a reconciliation throw must be caught and recorded, not propagated");
 });
+
+// ── polling posture ───────────────────────────────────────────────────────
+
+test("provider polling is explicit opt-in, never a default", () => {
+  // Audit result: pollMissingDeliveryCallbacks has exactly ONE caller (this
+  // route), and this route has exactly ONE production caller (the */5 cron),
+  // which already passes false. The old `!== false` default therefore protected
+  // nobody and armed every other caller.
+  const route = read("app/api/internal/webhooks/recover-delivery/route.js");
+  assert.match(route, /include_polling_fallback === true/,
+    "polling must require explicit opt-in");
+  assert.ok(!/include_polling_fallback !== false/.test(route),
+    "the opt-out default must not come back");
+});
+
+test("polling has exactly one caller, and it is the audited route", () => {
+  const walk = (dir, acc = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, acc);
+      else if (e.name.endsWith(".js")) acc.push(full);
+    }
+    return acc;
+  };
+  const callers = walk(SRC)
+    .filter((f) => /pollMissingDeliveryCallbacks/.test(fs.readFileSync(f, "utf8")))
+    .map((f) => path.relative(SRC, f))
+    .filter((r) => r !== "lib/domain/delivery/delivery-polling-fallback.js")
+    .sort();
+  assert.deepEqual(callers, ["app/api/internal/webhooks/recover-delivery/route.js"],
+    "a new polling caller must be reviewed against the observation-not-receipt rule");
+});
