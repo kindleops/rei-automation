@@ -22,6 +22,7 @@ import {
   isInboundWebhookRow,
   inboundProcessingPriority,
 } from '@/lib/domain/webhooks/provider-event-state-machine.js'
+import { EVIDENCE_PROVENANCE } from '@/lib/domain/communications/callback-evidence-provenance.js'
 
 const DELIVERY_EVENT_TYPES = ['delivery', 'status', 'outbound']
 
@@ -175,6 +176,12 @@ export async function processDeliveryWebhookLive(webhook_log_row, options = {}, 
       now,
       webhook_log_id: webhook_log_row?.id || null,
       force_local_delivery_reconcile: options.force_local_delivery_reconcile === true,
+      // The provider pushed this to us, once, just now. This is the only lane
+      // that originates a callback receipt.
+      evidence_provenance: EVIDENCE_PROVENANCE.LIVE_PROVIDER_RECEIPT,
+      verification: options.verification || normalized?.verification || {},
+      callbackStore: options.callbackStore || null,
+      source_route: 'webhooks/textgrid/delivery',
     })
 
     const matched =
@@ -361,6 +368,14 @@ export async function processDeliveryProviderGroup(
       now,
       webhook_log_id: terminal.webhook_log_id || null,
       force_local_delivery_reconcile: options.force_local_delivery_reconcile === true,
+      // Re-reading a receipt we already stored. It must resolve to the SAME
+      // ledger row (fingerprint identity guarantees that), and it must NOT be
+      // promoted to authenticated just because an internal worker replayed it:
+      // the worker is trusted, the original claim is not.
+      evidence_provenance: EVIDENCE_PROVENANCE.RECORDED_CALLBACK_REPLAY,
+      verification: options.verification || terminal?.verification || {},
+      callbackStore: options.callbackStore || null,
+      source_route: 'internal/webhooks/recover-delivery',
     })
 
     const matched =

@@ -227,6 +227,46 @@ export function createSellerCommunicationStore(deps = {}) {
       return { ok: true };
     },
 
+    /**
+     * Apply a callback-derived outcome, CONDITIONAL on the value the caller's
+     * lattice decision was based on.
+     *
+     * The `.eq('outcome_class', expected)` predicate is the whole point: two
+     * concurrent callbacks that both read the same prior value would otherwise
+     * both pass the lattice gate and the later write would win, silently
+     * overwriting a terminal verdict with a contradictory one.
+     */
+    async applyCallbackOutcome({
+      attempt_id, expected_outcome_class, outcome_class, delivery_possibility,
+      provider_status, at,
+    }) {
+      let query = supabase
+        .from('seller_communication_attempts')
+        .update({
+          outcome_class,
+          delivery_possibility,
+          provider_status: provider_status || null,
+          provider_response_received_at: at,
+        })
+        .eq('id', attempt_id);
+
+      query = expected_outcome_class === null || expected_outcome_class === undefined
+        ? query.is('outcome_class', null)
+        : query.eq('outcome_class', expected_outcome_class);
+
+      const { data, error } = await query.select('id');
+
+      if (error) {
+        logger.error('callback.outcome_write_failed', { attempt_id, error: clean(error.message) });
+        return { ok: false, reason: 'callback_outcome_write_failed' };
+      }
+      if (!Array.isArray(data) || data.length !== 1) {
+        // Zero rows means the outcome moved between our read and our write.
+        return { ok: false, reason: 'outcome_changed_under_us' };
+      }
+      return { ok: true };
+    },
+
     /** Binds a queue row to the action it schedules. */
     async bindQueueRow({ queue_row_id, logical_communication_id }) {
       if (!queue_row_id) return { ok: true, skipped: true };
