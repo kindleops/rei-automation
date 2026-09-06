@@ -334,12 +334,27 @@ html.is-mobile-layout .nx-followup-sheet {
   max-height: 88vh;
   padding-bottom: calc(8px + var(--nx-mobile-safe-bottom, 0px));
 }
-html.is-mobile-layout .nx-bulk-sheet__actions {
+/* Keep the commit row reachable: it sticks to the bottom of the scrolling
+   sheet so a long preview list can never push Schedule past the viewport,
+   and clears the home indicator. Layout/button styling comes from the
+   canonical .nx-bulk-sheet__confirm-actions rule, not from here. */
+html.is-mobile-layout .nx-followup-actions {
   position: sticky;
   bottom: 0;
+  z-index: 1;
   background: var(--nx-ib-surface-solid, rgba(12, 17, 26, 0.98));
-  padding-top: 8px;
+  padding-top: 10px;
+  padding-bottom: calc(4px + var(--nx-mobile-safe-bottom, 0px));
+  margin-top: 4px;
 }
+/* The primary action needs to read as primary; the canonical rule only styles
+   the neutral and destructive variants. */
+html.is-mobile-layout .nx-followup-actions button.is-primary {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.18);
+  color: rgba(125, 211, 252, 0.98);
+}
+html.is-mobile-layout .nx-followup-actions button:disabled { opacity: 0.5; }
 
 /* Language consequence in the bulk preview: a compact breakdown, not a
    multilingual dashboard. */
