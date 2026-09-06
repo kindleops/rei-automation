@@ -71,14 +71,32 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
   // manual modes still resolve in the seller's own zone.
   const tzLabel = clean(recipient.routing_timezone) || clean(recipient.timezone);
   const timeZone = resolveIanaTimezone(tzLabel);
-  const contactWindow = clean(recipient.best_contact_window) || clean(recipient.contact_window) || null;
+  // TWO DIFFERENT WINDOWS, deliberately not merged:
+  //
+  //   PREFERENCE  master_owners.best_contact_window ("9AM-11AM CT") is inferred
+  //               seller intelligence. It OPTIMISES Best Contact Time. It is
+  //               not a permission boundary, and an operator choosing 2 PM is
+  //               not doing anything disallowed.
+  //   HARD RAIL   evaluateContactWindow's 08:00-21:00 local limit plus
+  //               compliance/quiet-hour rules. This binds every mode.
+  //
+  // Passing the preference window as the contact_window made all three manual
+  // modes fail whenever the operator picked a time outside it: EXACT 2 PM
+  // against a 9-11 AM preference returned contact_window_unresolvable, and
+  // WINDOW 2-5 PM returned no_valid_window_overlap. An operator override was
+  // being treated as a rule violation.
+  const preferenceWindow = clean(recipient.best_contact_window) || clean(recipient.contact_window) || null;
+  // Manual modes deliberately pass NO contact_window, so evaluateContactWindow
+  // applies the hard rail alone.
+  const HARD_OPEN_MINUTES = 8 * 60;
+  const HARD_CLOSE_MINUTES = 21 * 60;
 
   if (mode === "best_contact_time") {
     // Schedule INTO the seller's best contact window rather than "as soon as
     // allowed". parseQueueContactWindow reads the canonical "12PM-1PM ET" form
     // and pickMinuteInRange places each seller deterministically inside it, so
     // two sellers with different windows genuinely differ.
-    const parsed = parseQueueContactWindow(contactWindow);
+    const parsed = parseQueueContactWindow(preferenceWindow);
     const lo = parsed?.start ?? 9 * 60;
     const hi = Math.max(lo, parsed?.end ?? 20 * 60);
     const minute = pickMinuteInRange(lo, hi, threadKey, "best_contact_time");
@@ -95,10 +113,10 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
 
     const resolved = resolveInboxSchedule({
       requested_at: localUtc.toISOString(), timezone: tzLabel,
-      contact_window: contactWindow, now,
+      contact_window: preferenceWindow, now,
     });
     return { ok: resolved.ok, mode, ...resolved,
-      requested_local_minutes: minute, contact_window_used: contactWindow };
+      requested_local_minutes: minute, contact_window_used: preferenceWindow };
   }
 
   if (!date) return { ok: false, mode, reason: "missing_date" };
@@ -111,9 +129,9 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
     if (mode === "starting_at") {
       // Deterministic stagger AT OR AFTER the requested start, bounded by the
       // end of the local send day. Same key => same offset, every render.
-      const parsed = parseQueueContactWindow(contactWindow);
-      const upper = Math.min(parsed?.end ?? 21 * 60, 21 * 60);
-      const ceiling = Math.max(minutes, upper);
+      // Bounded by the HARD close only; the preference window must not pull a
+      // deliberate operator start time back.
+      const ceiling = Math.max(minutes, HARD_CLOSE_MINUTES);
       targetMinutes = pickMinuteInRange(minutes, ceiling, threadKey, "starting_at");
     }
 
@@ -121,10 +139,11 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
     if (!localUtc) return { ok: false, mode, reason: "invalid_date" };
     const resolved = resolveInboxSchedule({
       requested_at: localUtc.toISOString(), timezone: tzLabel,
-      contact_window: contactWindow, now,
+      contact_window: null, now,
     });
     return { ok: resolved.ok, mode, ...resolved,
-      requested_local_minutes: targetMinutes, contact_window_used: contactWindow };
+      requested_local_minutes: targetMinutes,
+      preference_window: preferenceWindow, honours_preference: false };
   }
 
   if (mode === "window") {
@@ -135,12 +154,13 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
 
     // Intersect the operator's window with the seller's canonical contact
     // window. Scheduling outside the chosen range is never silently allowed.
-    const parsed = parseQueueContactWindow(contactWindow);
-    const lo = Math.max(start, parsed?.start ?? 8 * 60);
-    const hi = Math.min(end, parsed?.end ?? 21 * 60);
+    // Intersect with the HARD permitted hours only. A window that merely
+    // disagrees with the seller's inferred preference is still schedulable.
+    const lo = Math.max(start, HARD_OPEN_MINUTES);
+    const hi = Math.min(end, HARD_CLOSE_MINUTES);
     if (hi <= lo) {
       return { ok: false, mode, reason: "no_valid_window_overlap",
-        requested_window: [start, end], contact_window_used: contactWindow };
+        requested_window: [start, end], hard_window: [HARD_OPEN_MINUTES, HARD_CLOSE_MINUTES] };
     }
 
     const minute = pickMinuteInRange(lo, hi, threadKey, "window");
@@ -148,10 +168,11 @@ export function resolveBulkScheduleMode({ mode = "best_contact_time", date = nul
     if (!localUtc) return { ok: false, mode, reason: "invalid_date" };
     const resolved = resolveInboxSchedule({
       requested_at: localUtc.toISOString(), timezone: tzLabel,
-      contact_window: contactWindow, now,
+      contact_window: null, now,
     });
     return { ok: resolved.ok, mode, ...resolved,
-      requested_local_minutes: minute, overlap_window: [lo, hi], contact_window_used: contactWindow };
+      requested_local_minutes: minute, overlap_window: [lo, hi],
+      preference_window: preferenceWindow, honours_preference: false };
   }
 
   return { ok: false, mode, reason: "unsupported_mode" };

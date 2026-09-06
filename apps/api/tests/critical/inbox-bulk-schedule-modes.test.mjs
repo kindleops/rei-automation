@@ -159,3 +159,109 @@ test("zonedWallClockToUtc lands on the exact local wall clock", () => {
   assert.equal(parseClockToMinutes("14:30"), 14 * 60 + 30);
   assert.equal(parseClockToMinutes(""), null);
 });
+
+// ── HARD RAIL vs PREFERENCE WINDOW ─────────────────────────────────────────
+// best_contact_window is inferred seller INTELLIGENCE that optimises Best
+// Contact Time. It is NOT a permission boundary. Only the canonical
+// 08:00-21:00 local rail (plus compliance) binds a manual operator choice.
+
+const PREF = (over = {}) => ({ thread_key: "+15555550100", routing_timezone: "Central",
+  best_contact_window: "9AM-11AM CT", ...over });
+
+test("EXACT: an operator time outside the PREFERENCE window is still honoured", () => {
+  const r = resolveBulkScheduleMode({ mode: "exact", date: "2026-09-10", time: "2:00 PM",
+    recipient: PREF(), now: NOW });
+  assert.equal(r.ok, true, r.reason || "");
+  assert.equal(r.local_send_hour, 14, "2 PM must remain 2 PM");
+  assert.equal(r.deferred, false, "a preference mismatch is not a deferral");
+  assert.equal(r.honours_preference, false, "manual deliberately overrides preference");
+});
+
+test("EXACT: the HARD rail still binds a manual choice", () => {
+  const r = resolveBulkScheduleMode({ mode: "exact", date: "2026-09-10", time: "7:15 AM",
+    recipient: PREF(), now: NOW });
+  assert.equal(r.ok, true, r.reason || "");
+  assert.equal(r.requested_local_hour, 7);
+  assert.equal(r.deferred, true, "before the 08:00 rail must adjust");
+  assert.equal(r.local_send_hour, 8);
+});
+
+test("WINDOW: a range outside the preference window is schedulable", () => {
+  const r = resolveBulkScheduleMode({ mode: "window", date: "2026-09-10",
+    window_start: "2:00 PM", window_end: "5:00 PM", recipient: PREF(), now: NOW });
+  assert.equal(r.ok, true, r.reason || "");
+  assert.ok(r.local_send_hour >= 14 && r.local_send_hour < 17,
+    `must land in 2-5 PM, got ${r.local_send_hour}`);
+});
+
+test("WINDOW: no_valid_window_overlap means no HARD overlap, not a preference miss", () => {
+  // 5-7 AM is entirely before the 08:00 hard opening.
+  const hard = resolveBulkScheduleMode({ mode: "window", date: "2026-09-10",
+    window_start: "5:00 AM", window_end: "7:00 AM", recipient: PREF(), now: NOW });
+  assert.equal(hard.ok, false);
+  assert.equal(hard.reason, "no_valid_window_overlap");
+  assert.deepEqual(hard.hard_window, [8 * 60, 21 * 60]);
+
+  // Same range, but a seller whose preference happens to be 9-11 AM: still the
+  // HARD rail doing the rejecting, never the preference.
+  const pref = resolveBulkScheduleMode({ mode: "window", date: "2026-09-10",
+    window_start: "12:00 PM", window_end: "3:00 PM",
+    recipient: PREF({ best_contact_window: "9AM-11AM CT" }), now: NOW });
+  assert.equal(pref.ok, true, "a preference mismatch must remain schedulable");
+});
+
+test("STARTING AT: staggering is bounded by the hard close, not the preference end", () => {
+  const r = resolveBulkScheduleMode({ mode: "starting_at", date: "2026-09-10", time: "2:00 PM",
+    recipient: PREF(), now: NOW });
+  assert.equal(r.ok, true, r.reason || "");
+  assert.ok(r.local_send_hour >= 14, "must not be pulled back into the 9-11 AM preference");
+  assert.ok(r.local_send_hour < 21, "must stay inside the hard close");
+});
+
+test("BEST CONTACT TIME still optimises INSIDE the preference window", () => {
+  const r = resolveBulkScheduleMode({ mode: "best_contact_time",
+    recipient: PREF({ best_contact_window: "9AM-11AM CT" }), now: NOW });
+  assert.equal(r.ok, true, r.reason || "");
+  assert.equal(r.contact_window_used, "9AM-11AM CT");
+  assert.ok(r.local_send_hour >= 9 && r.local_send_hour <= 11,
+    `best contact time must sit in the preference window, got ${r.local_send_hour}`);
+});
+
+// ── DST EDGES ──────────────────────────────────────────────────────────────
+
+test("DST spring-forward: a NONEXISTENT wall clock resolves deterministically", () => {
+  // 2026-03-08 America/Chicago: 02:00 CST jumps to 03:00 CDT, so 02:30 never
+  // occurs. The helper must still yield one real instant, not NaN, and must not
+  // silently land on a different DAY.
+  const d = zonedWallClockToUtc("2026-03-08", 2 * 60 + 30, "America/Chicago");
+  assert.ok(d instanceof Date && Number.isFinite(d.getTime()), "must be a real instant");
+  assert.equal(d.toISOString(), "2026-03-08T07:30:00.000Z");
+  const again = zonedWallClockToUtc("2026-03-08", 2 * 60 + 30, "America/Chicago");
+  assert.equal(d.toISOString(), again.toISOString(), "must be stable");
+});
+
+test("DST fall-back: an AMBIGUOUS wall clock resolves to one stable instant", () => {
+  // 2026-11-01 America/Chicago: 01:00-02:00 occurs twice. Either choice is
+  // defensible; repeating it must not oscillate.
+  const first = zonedWallClockToUtc("2026-11-01", 90, "America/Chicago");
+  const second = zonedWallClockToUtc("2026-11-01", 90, "America/Chicago");
+  assert.equal(first.toISOString(), "2026-11-01T06:30:00.000Z");
+  assert.equal(first.toISOString(), second.toISOString(), "must not oscillate");
+});
+
+test("DST: a normal afternoon on both transition days uses the correct offset", () => {
+  const spring = zonedWallClockToUtc("2026-03-08", 14 * 60, "America/Chicago");
+  const fall = zonedWallClockToUtc("2026-11-01", 14 * 60, "America/Chicago");
+  assert.equal(spring.toISOString().slice(11, 16), "19:00", "CDT after the jump");
+  assert.equal(fall.toISOString().slice(11, 16), "20:00", "CST after the fall back");
+});
+
+test("DST: scheduling across a transition keeps the seller's wall clock", () => {
+  for (const [date, expectedUtc] of [["2026-03-08", "19:00"], ["2026-11-01", "20:00"]]) {
+    const r = resolveBulkScheduleMode({ mode: "exact", date, time: "2:00 PM",
+      recipient: PREF({ best_contact_window: null }), now: new Date("2026-03-01T15:00:00Z") });
+    assert.equal(r.ok, true, `${date}: ${r.reason || ""}`);
+    assert.equal(r.local_send_hour, 14, `${date} must stay 2 PM to the seller`);
+    assert.equal(r.scheduled_for_utc.slice(11, 16), expectedUtc, `${date} offset`);
+  }
+});
