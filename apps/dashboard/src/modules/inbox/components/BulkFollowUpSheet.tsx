@@ -178,7 +178,11 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
           </>
         )}
 
-        <div className="nx-bulk-sheet__actions">
+        {/* Canonical class: .nx-bulk-sheet__confirm-actions is the one that
+            actually carries the flex layout and 46px button styling. The
+            invented .nx-bulk-sheet__actions had no rule anywhere, so both
+            buttons collapsed into unstyled inline text ("CancelSchedule 5"). */}
+        <div className="nx-bulk-sheet__confirm-actions nx-followup-actions">
           <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
           <button
             type="button"
