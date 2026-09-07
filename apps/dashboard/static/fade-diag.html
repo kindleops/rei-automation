@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fade diagnostic</title>
+<style>
+  body { margin:0; background:#000; color:#e5e7eb; font:13px/1.45 -apple-system,system-ui,sans-serif; padding:12px; }
+  h1 { font-size:15px; margin:0 0 8px; }
+  p  { margin:0 0 10px; color:#94a3b8; font-size:12px; }
+  pre{ white-space:pre-wrap; word-break:break-word; background:#0b1220; border:1px solid #1e293b;
+       border-radius:8px; padding:10px; font:12px/1.4 ui-monospace,Menlo,monospace; color:#e2e8f0; }
+  .bad { color:#fca5a5; }
+  iframe { position:fixed; left:-9999px; top:0; width:390px; height:844px; border:0; }
+</style>
+</head>
+<body>
+<h1>Queue fade diagnostic</h1>
+<p>Reports what THIS browser computes. Screenshot the block below.</p>
+<pre id="out">loading /queue …</pre>
+<iframe id="f" src="/queue"></iframe>
+<script>
+// Renders the queue offscreen in this browser, then reports every element that
+// dims its subtree. Chrome shows none; if WebKit shows one, it names the bug.
+var out = document.getElementById('out');
+var f = document.getElementById('f');
+function run() {
+  try {
+    var w = f.contentWindow, d = w.document;
+    var lines = [];
+    lines.push('ua: ' + navigator.userAgent.slice(0, 110));
+    lines.push('frame: ' + w.innerWidth + 'x' + w.innerHeight + '  dpr=' + w.devicePixelRatio);
+    lines.push('standalone: ' + (window.matchMedia('(display-mode: standalone)').matches ? 'y' : 'n'));
+    lines.push('reducedMotion: ' + (w.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'y' : 'n'));
+    var stage = d.querySelector('main.nx-stage');
+    lines.push('stage.opacity: ' + (stage ? w.getComputedStyle(stage).opacity : 'no stage'));
+    lines.push('stage.anim: ' + (stage ? w.getComputedStyle(stage).animationName : '-'));
+    var dim = [];
+    var all = d.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i], cs = w.getComputedStyle(el);
+      var op = parseFloat(cs.opacity);
+      var hasF = cs.filter && cs.filter !== 'none';
+      var hasB = (cs.backdropFilter && cs.backdropFilter !== 'none') ||
+                 (cs.webkitBackdropFilter && cs.webkitBackdropFilter !== 'none');
+      if (op < 0.95 || hasF || hasB) {
+        var r = el.getBoundingClientRect();
+        if (r.width > 150 && r.height > 120) {
+          dim.push('  ' + el.tagName + '.' + String(el.className).slice(0, 40) +
+                   '  op=' + cs.opacity + ' filter=' + cs.filter +
+                   ' backdrop=' + (cs.backdropFilter || cs.webkitBackdropFilter || 'none') +
+                   ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+        }
+      }
+    }
+    lines.push('');
+    lines.push(dim.length ? 'DIMMING ELEMENTS (' + dim.length + '):' : 'DIMMING ELEMENTS: none');
+    out.className = dim.length ? 'bad' : '';
+    out.textContent = lines.concat(dim).join('\n');
+  } catch (e) {
+    out.textContent = 'error: ' + (e && e.message ? e.message : String(e));
+  }
+}
+f.addEventListener('load', function () { setTimeout(run, 6000); });
+setTimeout(function () { if (/loading/.test(out.textContent)) run(); }, 15000);
+</script>
+</body>
+</html>
