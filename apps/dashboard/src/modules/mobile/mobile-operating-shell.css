@@ -2421,7 +2421,15 @@ html.is-mobile-layout {
     left: 0;
     right: 0;
     bottom: var(--nx-mobile-safe-bottom);
-    z-index: 140;
+    /* MUST stay above .nx-mobile-sheet-backdrop (148), which paints
+       rgba(0,0,0,0.48) + blur(4px) across the whole viewport.
+       At 140 the backdrop rendered ON TOP of the sheet it was supposed to sit
+       behind, so opening a bottom sheet -- a queue row, for one -- dimmed and
+       blurred its own content by 48%, while the command dock at 150 escaped
+       and stayed crisp. That read as "the queue is faded".
+       .nx-mobile-sheet already uses 149 for exactly this reason; the bottom
+       sheet variant was never raised with it. */
+    z-index: 149;
     display: flex;
     flex-direction: column;
     background: rgba(10, 14, 22, 0.98);
