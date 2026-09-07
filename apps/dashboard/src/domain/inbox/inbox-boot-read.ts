@@ -209,7 +209,27 @@ export function mapAuthoritativeCountsFromPayload(
     archived: Number(rawCounts.archived ?? 0),
     active: Number(rawCounts.active ?? 0),
     automated: Number(rawCounts.automated ?? 0),
+    // Snoozed and Scheduled are SERVER-ONLY and, unlike every key above, are
+    // spread conditionally rather than coerced with `?? 0`.
+    //
+    // Neither can be derived on the client -- snoozed threads are withheld
+    // from the list, and Scheduled is computed from send_queue, which the
+    // client never sees. A `?? 0` would therefore turn "the server did not
+    // tell us" into a confident zero over real parked follow-ups. Absent, the
+    // chip renders "-" (unknown), which is the honest answer.
+    //
+    // This whitelist is why both chips read "-" permanently: the keys were
+    // simply never copied out of the payload, however correct the server was.
+    ...optionalCount(rawCounts.snoozed, 'snoozed'),
+    ...optionalCount(rawCounts.scheduled, 'scheduled'),
   }
+}
+
+/** Emits the key only when the server actually sent a usable number. */
+function optionalCount(value: unknown, key: string): Record<string, number> {
+  if (value === null || value === undefined) return {}
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric >= 0 ? { [key]: numeric } : {}
 }
 
 export function applyInboxCountsFetchResult(input: {

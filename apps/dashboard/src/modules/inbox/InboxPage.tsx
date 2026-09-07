@@ -1021,6 +1021,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       // as a fallback. Never page-length arithmetic.
       archived: readStoreCount('archived') ?? local.archived,
       archived_leads: readStoreCount('archived') ?? local.archived,
+      // Snoozed and Scheduled are SERVER-ONLY counts. Neither can be derived
+      // from the loaded page of threads: snoozed threads are withheld from the
+      // list, and Scheduled is computed from send_queue, which the client
+      // never sees. So there is deliberately no `?? local.x` fallback -- an
+      // undefined value renders "-" (unknown), which is honest, whereas a
+      // visible-row guess would confidently under-report real scheduled sends.
+      //
+      // Without these two lines the keys were absent entirely and both chips
+      // rendered "-" permanently, even while /api/cockpit/inbox/counts was
+      // returning the correct numbers.
+      snoozed: readStoreCount('snoozed'),
+      scheduled: readStoreCount('scheduled'),
       wrong_numbers: local.wrong_number,
       sent_today: sentToday,
       replies_today: repliesToday,

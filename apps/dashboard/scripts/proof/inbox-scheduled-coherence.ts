@@ -14,6 +14,7 @@ import {
   scheduledPendingCount,
 } from '../../src/domain/inbox/format-scheduled-send-time'
 import { applyBulkScheduleResult } from '../../src/domain/inbox/apply-bulk-schedule-result'
+import { mapAuthoritativeCountsFromPayload } from '../../src/domain/inbox/inbox-boot-read'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -153,6 +154,40 @@ check('a confirmed recipient with no effective time still moves, without inventi
   const outcome = applyBulkScheduleResult({ results: [{ thread_key: 'q', ok: true }] })
   assert.equal(outcome.scheduledThreadKeys.length, 1)
   assert.equal(outcome.patchByThreadKey.q.next_scheduled_send_at_utc, null)
+})
+
+console.log('\nCOUNTS WHITELIST')
+
+check('scheduled and snoozed survive the authoritative counts mapping', () => {
+  // Found on staging: /api/cockpit/inbox/counts returned scheduled:1 while the
+  // sidebar chip showed "-", because this mapper is a fixed whitelist and
+  // neither key was in it. Both chips were dead regardless of the server.
+  const mapped = mapAuthoritativeCountsFromPayload({
+    counts: { priority: 150, new_replies: 164, scheduled: 1, snoozed: 3 },
+  })
+  assert.equal(mapped.scheduled, 1)
+  assert.equal(mapped.snoozed, 3)
+  assert.equal(mapped.priority, 150)
+})
+
+check('an absent scheduled count stays UNKNOWN rather than becoming 0', () => {
+  const mapped = mapAuthoritativeCountsFromPayload({ counts: { priority: 150 } })
+  assert.equal('scheduled' in mapped, false, 'absent must render "-", never a confident 0')
+  assert.equal('snoozed' in mapped, false)
+  // The other keys keep their existing coerce-to-zero behaviour.
+  assert.equal(mapped.new_replies, 0)
+})
+
+check('a zero scheduled count is reported as a real zero', () => {
+  const mapped = mapAuthoritativeCountsFromPayload({ counts: { priority: 1, scheduled: 0 } })
+  assert.equal(mapped.scheduled, 0)
+})
+
+check('a malformed scheduled count does not poison the chip', () => {
+  for (const bad of ['nonsense', -1, NaN, {}]) {
+    const mapped = mapAuthoritativeCountsFromPayload({ counts: { priority: 1, scheduled: bad } })
+    assert.equal('scheduled' in mapped, false, `${String(bad)} must not become a count`)
+  }
 })
 
 console.log(`\nPASS  ${passed} checks\n`)

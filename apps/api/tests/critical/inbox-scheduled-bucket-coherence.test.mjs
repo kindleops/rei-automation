@@ -231,3 +231,31 @@ test("a seller reply after scheduling keeps the thread in the actionable count",
   assert.equal(counts.scheduled, 0);
   assert.equal(counts.priority, 1);
 });
+
+test("the LIST response carries scheduled counts -- the chips are rendered from it, not from /counts", async () => {
+  // Caught on staging: /api/cockpit/inbox/counts correctly returned
+  // scheduled:1 while the sidebar still showed "-", because the client reads
+  // its chips from the list response and several of that endpoint's count
+  // paths rebuild counts from CANONICAL_COUNT_KEYS, which omits scheduled.
+  const stateRows = [stateRow(SCHEDULED_THREAD, "priority"), stateRow(ACTIONABLE_THREAD, "priority")];
+  const supabase = makeLiveInboxThreadSupabase(stateRows, {
+    stateRows,
+    sendQueueRows: [queueRow(SCHEDULED_THREAD)],
+  });
+
+  // Deliberately NOT manual_bucket_switch: that mode sets fastBucketMode,
+  // which forces skipCounts, and a response that returns no counts at all
+  // cannot demonstrate anything about this one.
+  const result = await getLiveInbox(
+    { filter: "all", limit: 20 },
+    { listOnly: true },
+    { supabase },
+  );
+
+  assert.equal(
+    Number.isFinite(Number(result.counts?.scheduled)),
+    true,
+    'scheduled must be a number in the list response, or the chip renders "-"',
+  );
+  assert.equal(Number(result.counts.scheduled), 1);
+});

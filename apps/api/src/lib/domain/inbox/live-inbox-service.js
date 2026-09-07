@@ -2850,6 +2850,17 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
         derived_visible_counts: countFloor.approximate,
       });
     }
+
+    // The Inbox chips are rendered from THIS response, not from /counts, so
+    // `scheduled` has to survive whichever count path won above. Several of
+    // them rebuild counts from CANONICAL_COUNT_KEYS -- which deliberately
+    // omits scheduled, because it is not a thread-state column -- and the key
+    // then disappears and the chip renders "-" while a real follow-up is
+    // parked in the queue. Guarded so the common path, where the shared count
+    // authority already resolved it, does not pay for a second query.
+    if (!Number.isFinite(Number(liveCounts?.scheduled))) {
+      liveCounts = await applyScheduledCountOverlay(supabase, liveCounts || {});
+    }
   }
 
   const linkedContextHydrationStartedAt = nowMs();
