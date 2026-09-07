@@ -146,6 +146,24 @@ export class ApiContainer extends Container<Env> {
       ...(env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL
         ? { TEXTGRID_WEBHOOK_PUBLIC_BASE_URL: env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL }
         : {}),
+      // SCOPED CANARY EXECUTION AUTHORITY -- forwarded deliberately, §11 Slice 4G.
+      //
+      // This gates ONLY the scoped-canary lane on /api/internal/queue/run, which
+      // is itself bounded to one canary_run_id, one campaign, an explicit
+      // queue-row manifest and max_rows, with single-use consumption enforced
+      // atomically in queue_atomic_claim_send_row. It grants no broad send
+      // capability: queue_execution_mode must still be scoped_canary_only,
+      // campaign_mode stays paused, queue_processor_mode stays off, and the
+      // emergency brake still applies.
+      //
+      // Note this was never a complete fence on its own: resolveScopedCanarySecret
+      // already falls back to QUEUE_ENGINE_SHARED_SECRET and then to the
+      // `queue_engine_shared_secret` row in system_control, which IS populated.
+      // Forwarding an explicit value makes the authority deterministic rather
+      // than resolved from a database row.
+      ...(env.SCOPED_CANARY_EXECUTION_SECRET
+        ? { SCOPED_CANARY_EXECUTION_SECRET: env.SCOPED_CANARY_EXECUTION_SECRET }
+        : {}),
     };
   }
 }
@@ -171,6 +189,7 @@ interface Env {
   APP_BASE_URL?: string;
   INTERNAL_API_BASE_URL?: string;
   TEXTGRID_WEBHOOK_PUBLIC_BASE_URL?: string;
+  SCOPED_CANARY_EXECUTION_SECRET?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
   DEPLOY_GIT_SHA?: string;
