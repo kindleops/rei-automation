@@ -290,6 +290,44 @@ async function runAttempt(comm, input, deps, emit) {
 
   const outcome = mapTransportOutcome(classified);
 
+  // ── 16b. the transport diagnostic envelope ───────────────────────────────
+  // WHY this exists: §11 Slice 4H. The first live canary failed and left behind
+  // `failure_class = unknown_failure`, `http_status = null` and nothing else.
+  // Those three facts were compatible with a refused socket, a timeout, a 500,
+  // an unparseable body AND a local brake, so the outcome could not be
+  // diagnosed from the ledger at all -- it had to be reconstructed by reading
+  // the source. The columns to prevent that already existed on the attempt row
+  // and simply were not written.
+  //
+  // The envelope carries EVIDENCE, never authority. Nothing below reads it to
+  // decide retry or delivery; those come from `outcome` alone. Improving
+  // diagnostics must never be able to move the safety verdict.
+  //
+  // Nothing here can carry a secret or a phone number: it is a status code, a
+  // provider status string, a documented provider error code and a phase label.
+  const diagnostics = {
+    http_status: Number.isFinite(Number(provider_error?.status))
+      ? Number(provider_error.status)
+      : null,
+    provider_status:
+      clean(classified.provider_status || provider_result?.status) || null,
+    provider_error_code: clean(classified.provider_code) || null,
+    transport_phase:
+      clean(classified.transport_phase)
+      || (provider_error ? "unknown" : "response_received"),
+    outcome_policy_version: outcome.policy_version || null,
+  };
+
+  emit("attempt.transport_diagnostics", {
+    logical_communication_id: comm.id,
+    attempt_id: allocated.attempt_id,
+    ...diagnostics,
+    failure_class: outcome.reason,
+    may_have_transmitted: classified.may_have_transmitted ?? null,
+    local_refusal_reason: clean(provider_error?.local_refusal_reason) || null,
+    sid_present: Boolean(classified.provider_message_id),
+  });
+
   // ── 17. persist the attempt outcome (evidence first) ─────────────────────
   await store.recordAttemptOutcome({
     attempt_id: allocated.attempt_id,
@@ -300,6 +338,7 @@ async function runAttempt(comm, input, deps, emit) {
     retry_authority: outcome.retry_authority,
     failure_class: outcome.reason,
     at: now,
+    ...diagnostics,
   });
   emit(`attempt.${outcome.attempt_state}`, {
     logical_communication_id: comm.id, attempt_id: allocated.attempt_id, reason: outcome.reason,

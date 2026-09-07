@@ -57,6 +57,36 @@ export function mapTransportOutcome(classified = {}) {
   const failure_class = clean(classified.failure_class);
   const may_have_transmitted = classified.may_have_transmitted === true;
 
+  // ── REFUSED LOCALLY, BEFORE THE WIRE ─────────────────────────────────────
+  // Checked FIRST, because it is the only outcome backed by proof rather than
+  // inference: the adapter returned before `fetch` was reached, so no request
+  // bytes ever existed and no SMS can exist either.
+  //
+  // §11 Slice 4H found this the hard way. The first live canary was refused by
+  // the adapter's own emergency-stop brake, which threw a bare error carrying
+  // no transport evidence. The classifier could not recognise it, the model
+  // fell through to its fail-closed default, and a message that provably never
+  // left the process was recorded `may_have_been_sent` + `retry_denied` --
+  // burning a logical identity to absorb an ambiguity that did not exist.
+  //
+  // retry_authority is OPERATOR_HOLD, NOT retry_allowed. Nothing was sent, so
+  // a retry is physically safe, but whatever refused (a brake, a missing
+  // credential, a blank greeting) will refuse again identically. Automatic
+  // retry would spin against it and burn an attempt per cycle. A human clears
+  // the cause, then CONFIGURATION_HOLD releases the hold -- the one documented
+  // path back to retry authority.
+  if (failure_class === "local_refusal_before_request") {
+    return {
+      logical_state: LOGICAL_STATES.FAILED_RETRY_ALLOWED,
+      delivery_possibility: DELIVERY_POSSIBILITY.DEFINITELY_NOT_SENT,
+      retry_authority: RETRY_AUTHORITY.OPERATOR_HOLD,
+      attempt_state: ATTEMPT_STATES.FAILED_PROVABLY_UNSENT,
+      cause: TRANSITION_CAUSES.LOCAL_REFUSAL_BEFORE_REQUEST,
+      policy_version,
+      reason: "local_refusal_before_request",
+    };
+  }
+
   // ── AMBIGUOUS: acceptance cannot be excluded ─────────────────────────────
   // Covers timeout/abort/reset/socket-hangup/body+headers-timeout/malformed
   // response/5xx, plus the sid-less accept. Absence of a sid means the provider

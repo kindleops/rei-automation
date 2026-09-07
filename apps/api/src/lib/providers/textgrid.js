@@ -61,6 +61,8 @@ export class TextGridError extends Error {
       cause_code,
       network_phase,
       may_have_transmitted,
+      local_refusal,
+      local_refusal_reason,
     } = {}
   ) {
     super(message);
@@ -80,10 +82,37 @@ export class TextGridError extends Error {
     this.cause_code = cause_code ?? null;
     this.network_phase = network_phase ?? null;
     this.may_have_transmitted = may_have_transmitted ?? null;
+    // LOCAL REFUSAL EVIDENCE. Set only by refusals that happen before `fetch`
+    // is reached, so the classifier can prove non-delivery instead of guessing.
+    this.local_refusal = local_refusal === true;
+    this.local_refusal_reason = local_refusal_reason ?? null;
   }
 }
 
 
+
+/**
+ * A refusal raised BEFORE any request bytes exist.
+ *
+ * Every guard below `sendTextgridSMS` returns before `fetch`, so each one is
+ * proof of non-delivery. That proof used to be thrown away: the guards raised
+ * bare TextGridErrors, the classifier could not tell them from a provider
+ * failure, and §11 fail-closed them to `may_have_been_sent`. The first live
+ * canary was lost to exactly that, refused by the emergency-stop brake and then
+ * recorded as possibly-delivered.
+ *
+ * Funnelling them through one constructor is the point: a new guard cannot
+ * silently omit the evidence, because there is no other way to build one.
+ */
+function localRefusal(reason, message, fields = {}) {
+  return new TextGridError(message, {
+    ...fields,
+    local_refusal: true,
+    local_refusal_reason: reason,
+    network_phase: "not_attempted",
+    may_have_transmitted: false,
+  });
+}
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -473,7 +502,8 @@ export async function sendTextgridSMS({
         send_source: send_context.send_source,
         manual_operator_send: send_context.manual_operator_send,
       });
-      throw new TextGridError(
+      throw localRefusal(
+        runtime_brake_decision.reason || "runtime_brake_active",
         `sendTextgridSMS: ${runtime_brake_decision.reason} - send blocked by runtime safety brake`,
         { to, from, body }
       );
@@ -500,7 +530,8 @@ export async function sendTextgridSMS({
       to_input: to,
       client_reference_id,
     });
-    throw new TextGridError(
+    throw localRefusal(
+      "outbound_sms_disabled",
       "sendTextgridSMS: outbound_sms_enabled flag is false — send blocked by system_control",
       { to, from, body }
     );
@@ -519,16 +550,16 @@ export async function sendTextgridSMS({
   const credentials = getTextgridSendCredentials();
 
   if (!normalized_to) {
-    throw new TextGridError(`sendTextgridSMS: invalid 'to' number — "${to}"`);
+    throw localRefusal("invalid_to_number", `sendTextgridSMS: invalid 'to' number — "${to}"`);
   }
 
   if (!normalized_from) {
-    throw new TextGridError(`sendTextgridSMS: invalid 'from' number — "${from}"`);
+    throw localRefusal("invalid_from_number", `sendTextgridSMS: invalid 'from' number — "${from}"`);
   }
 
   const trimmed_body = String(body ?? "").trim();
   if (!trimmed_body) {
-    throw new TextGridError("sendTextgridSMS: message body is empty");
+    throw localRefusal("empty_message_body", "sendTextgridSMS: message body is empty");
   }
 
   // ── Content guards ────────────────────────────────────────────────────
@@ -539,7 +570,8 @@ export async function sendTextgridSMS({
       client_reference_id,
       to: normalized_to,
     });
-    throw new TextGridError(
+    throw localRefusal(
+      "blank_seller_greeting",
       "sendTextgridSMS: message contains blank greeting (missing seller_first_name)",
       { to: normalized_to, from: normalized_from, body: trimmed_body }
     );
@@ -552,7 +584,8 @@ export async function sendTextgridSMS({
       client_reference_id,
       to: normalized_to,
     });
-    throw new TextGridError(
+    throw localRefusal(
+      "unresolved_placeholder",
       "sendTextgridSMS: message contains unresolved placeholder",
       { to: normalized_to, from: normalized_from, body: trimmed_body }
     );
@@ -565,7 +598,8 @@ export async function sendTextgridSMS({
       client_reference_id,
       to: normalized_to,
     });
-    throw new TextGridError(
+    throw localRefusal(
+      "seller_first_name_blank",
       "sendTextgridSMS: seller_first_name is blank — send blocked",
       { to: normalized_to, from: normalized_from, body: trimmed_body }
     );
@@ -585,7 +619,7 @@ export async function sendTextgridSMS({
         source: send_context.source,
         send_source: send_context.send_source,
       });
-      throw new TextGridError(configuration_error.message, {
+      throw localRefusal("provider_configuration_missing", configuration_error.message, {
         endpoint: getTextgridSendEndpoint(),
         to: normalized_to,
         from: normalized_from,

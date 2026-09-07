@@ -93,6 +93,17 @@ export const TRANSITION_CAUSES = Object.freeze({
   INTERNAL_NO_SEND: "internal_no_send",
   CONFIGURATION_HOLD: "configuration_hold",
   RECONCILIATION: "reconciliation",
+  // The send was refused by THIS process before any request bytes existed.
+  //
+  // Distinct from PROVIDER_DEFINITIVE_REJECTION on purpose: that cause claims
+  // the provider saw the request and said no. This one claims the opposite --
+  // the provider never saw anything, because a local brake, guard or missing
+  // credential returned before `fetch` was reached. Reusing the provider cause
+  // here would put a rejection the provider never issued into the ledger.
+  //
+  // It is the STRONGEST possible evidence of non-delivery: not "the socket was
+  // refused", but "no socket was ever opened".
+  LOCAL_REFUSAL_BEFORE_REQUEST: "local_refusal_before_request",
 });
 
 // ── logical state edges ────────────────────────────────────────────────────
@@ -202,6 +213,8 @@ const CAUSE_ALLOWED_DELIVERY = Object.freeze({
   [TRANSITION_CAUSES.PROVIDER_SID_OBSERVED]: [D.PROVIDER_ACCEPTED],
   [TRANSITION_CAUSES.PROVIDER_DELIVERY_OBSERVED]: [D.DELIVERED],
   [TRANSITION_CAUSES.RECONCILIATION]: [D.PROVIDER_ACCEPTED, D.DELIVERED, D.MAY_HAVE_BEEN_SENT],
+  // Proven unsent, because the request was never constructed on the wire.
+  [TRANSITION_CAUSES.LOCAL_REFUSAL_BEFORE_REQUEST]: [D.DEFINITELY_NOT_SENT],
 });
 
 /** Causes that may drive a communication into a non-send terminal state. */

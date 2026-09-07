@@ -180,6 +180,7 @@ export function createSellerCommunicationStore(deps = {}) {
     async recordAttemptOutcome({
       attempt_id, provider_message_id, attempt_state, delivery_possibility,
       retry_authority, failure_class, at, http_status = null, provider_status = null,
+      provider_error_code = null, transport_phase = null, outcome_policy_version = null,
     }) {
       const { error } = await supabase
         .from('seller_communication_attempts')
@@ -192,6 +193,12 @@ export function createSellerCommunicationStore(deps = {}) {
           failure_class: failure_class || null,
           http_status,
           provider_status,
+          provider_error_code,
+          // Overwrites the `request_started` marker written before the network
+          // with what actually happened to the request. Both matter: the marker
+          // proves we committed BEFORE calling out, this proves how it ended.
+          ...(transport_phase ? { transport_phase } : {}),
+          ...(outcome_policy_version ? { outcome_policy_version } : {}),
           ...(provider_message_id ? { provider_message_id } : {}),
         })
         .eq('id', attempt_id);

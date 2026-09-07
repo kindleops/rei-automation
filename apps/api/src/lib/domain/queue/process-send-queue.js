@@ -2039,13 +2039,34 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     const send_result = dispatch.raw_provider_result;
     const provider_message_sid = dispatch.provider_message_id;
     if (!provider_message_sid) {
-      // Ambiguous accept: the provider may have taken the message even though
-      // no SID came back — a retry risks a DUPLICATE seller SMS. The marker
-      // routes the failure classifier to a terminal manual-review disposition
-      // instead of the 5-minute retry loop.
-      const ambiguous_error = new Error("SEND FAILED - NO SID");
-      ambiguous_error.no_sid_ambiguous_send = true;
+      // NO SID. Two very different things reach here, and §11 Slice 4H is the
+      // record of what it costs to conflate them.
+      //
+      // The first live canary was refused by the provider adapter's own
+      // emergency-stop brake, before any request existed. This branch minted a
+      // bare Error("SEND FAILED - NO SID") that carried no status and no
+      // reason, the classifier saw only that synthetic error, and the failure
+      // was filed as `provider_no_sid` -- "the provider answered without a
+      // SID". The provider had never been contacted at all. Every diagnostic
+      // the seam had already established was discarded one frame above.
+      //
+      // So carry the seam's verdict instead of re-deriving one from a string.
+      const local_refusal = dispatch.reason === "local_refusal_before_request";
+      const ambiguous_error = new Error(
+        local_refusal
+          ? "SEND REFUSED BEFORE REQUEST"
+          : "SEND FAILED - NO SID"
+      );
+      // Only claim provider ambiguity when the provider was actually reachable.
+      ambiguous_error.no_sid_ambiguous_send = !local_refusal;
+      ambiguous_error.local_refusal = local_refusal;
+      ambiguous_error.local_refusal_reason = local_refusal ? dispatch.reason : null;
       ambiguous_error.retryable = false;
+      // Evidence for the operator, never an input to any authority decision.
+      ambiguous_error.dispatch_reason = dispatch.reason || null;
+      ambiguous_error.delivery_possibility = dispatch.delivery_possibility || null;
+      ambiguous_error.logical_communication_id = dispatch.logical_communication_id || null;
+      ambiguous_error.attempt_id = dispatch.attempt_id || null;
       throw ambiguous_error;
     }
 

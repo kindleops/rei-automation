@@ -82,6 +82,52 @@ export function classifyTextGridProviderError(error = {}, context = {}) {
     raw: ensureObject(error.data),
   });
 
+  // ── REFUSED LOCALLY, BEFORE ANY REQUEST EXISTED ──────────────────────────
+  // Checked before every transport branch below, because those all reason about
+  // what MIGHT have reached TextGrid. Here nothing did: the adapter returned
+  // before `fetch`, so there is no socket, no request and no message.
+  //
+  // Keyed on an explicit marker the adapter stamps, never on message text. The
+  // §11 Slice 4H canary failed precisely because these refusals were textually
+  // indistinguishable from provider failures, and string matching on provider
+  // prose is exactly how that ambiguity gets re-created.
+  //
+  // Deliberately NOT folded into `provider_unreachable_before_request`. That
+  // class is retryable because a refused socket is usually transient. A local
+  // refusal is the opposite: the brake, guard or missing credential that said
+  // no will say no identically on the next call, so it is held for a human.
+  if (error?.local_refusal === true) {
+    const refusal_reason = clean(error?.local_refusal_reason) || "local_send_refusal";
+    return {
+      provider_code: null,
+      provider_message: provider_message || clean(error?.message) || "Send refused before request",
+      provider_payload: null,
+      failure_class: "local_refusal_before_request",
+      failure_bucket: "local_refusal",
+      normalized_reason: refusal_reason,
+      non_retryable_reason: refusal_reason,
+      retryable: false,
+      is_terminal: false,
+      compliance_related: false,
+      queue_disposition: "failed",
+      suppression_action: null,
+      sentry_level: "warning",
+      operator_reason:
+        `Send refused locally before any provider request (${refusal_reason}); nothing was sent`,
+      no_sender_rotation: true,
+      no_alternate_number_retry: true,
+      no_campaign_reenqueue: false,
+      transport_phase: "not_attempted",
+      may_have_transmitted: false,
+      metrics: {
+        event: "queue.send.local_refusal",
+        reason: refusal_reason,
+        campaign_id: context.campaign_id || null,
+        market: context.market || null,
+      },
+    };
+  }
+
   // ── TRANSPORT OUTCOME ────────────────────────────────────────────────────
   // A network failure is NOT automatically retry-safe. What matters is whether
   // the request could already have reached the provider.
