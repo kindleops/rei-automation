@@ -2021,6 +2021,17 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 
   query = applyInboxThreadStateBucketFilter(query, normalizedFilter);
 
+  // Scheduled has no representation in inbox_thread_state -- send_queue decides
+  // it -- so the bucket filter above cannot express it and leaves the query
+  // unfiltered. This is the FAST bucket path and it returns early whenever it
+  // finds rows, so without this constraint the Scheduled tab returned the
+  // ordinary thread page and the in-memory pass then discarded all of it,
+  // leaving the view empty while the chip correctly said 1.
+  if (normalizedFilter === "scheduled" && typeof query.in === "function") {
+    const scheduledIndexForKeys = await fetchScheduledThreadIndex(supabase, null);
+    query = query.in("thread_key", scheduledIndexForKeys ? [...scheduledIndexForKeys.keys()] : []);
+  }
+
   const q = clean(params.q).toLowerCase();
   if (q && typeof query.or === "function") {
     const qStr = `%${q}%`;
@@ -2325,6 +2336,21 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     }
 
     query = applyQueryFilter(query, filter, sourceConfig);
+
+    // Scheduled membership is a property of send_queue, not of any thread
+    // source, so applyQueryFilter cannot express it and deliberately falls
+    // through unfiltered. Constrain by the exact thread keys instead -- the
+    // same shape Snoozed uses.
+    //
+    // Without this the Scheduled tab issued an UNFILTERED query, got the first
+    // page of threads by activity, and the in-memory pass then found none of
+    // them scheduled -- so the view rendered empty while the chip correctly
+    // said 1. An empty key list is passed through as-is: matching nothing is
+    // the safe direction when we cannot resolve the queue.
+    if (normalizeLiveFilter(filter) === "scheduled" && typeof query.in === "function") {
+      const scheduledIndexForKeys = await fetchScheduledThreadIndex(supabase, null);
+      query = query.in("thread_key", scheduledIndexForKeys ? [...scheduledIndexForKeys.keys()] : []);
+    }
 
     if (params.q && typeof query.or === "function") {
       const qStr = `%${clean(params.q)}%`;

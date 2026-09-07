@@ -259,3 +259,24 @@ test("the LIST response carries scheduled counts -- the chips are rendered from 
   );
   assert.equal(Number(result.counts.scheduled), 1);
 });
+
+test("Scheduled finds its thread even when it is NOT in the first page by activity", async () => {
+  // The bug this pins: the Scheduled query was issued UNFILTERED, so it got
+  // the most recently active threads and the in-memory pass found none of them
+  // scheduled. The view rendered empty while the chip correctly said 1. The
+  // scheduled conversation here is deliberately the LEAST recently active, so
+  // an unfiltered page would miss it.
+  const noisy = Array.from({ length: 25 }, (_, i) =>
+    stateRow(`+1555999${String(i).padStart(4, "0")}`, "priority", { latest_message_at: past(1) }));
+  const stale = stateRow(SCHEDULED_THREAD, "priority", { latest_message_at: past(2000) });
+
+  const fixture = {
+    stateRows: [...noisy, stale],
+    sendQueueRows: [queueRow(SCHEDULED_THREAD)],
+  };
+
+  const result = await run("scheduled", fixture);
+  assert.deepEqual(keys(result), [SCHEDULED_THREAD]);
+  assert.equal(result.threads[0].is_schedule_suppressed, true);
+  assert.ok(result.threads[0].next_scheduled_send_at_utc);
+});
