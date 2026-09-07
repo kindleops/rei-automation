@@ -2,67 +2,84 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fade diagnostic</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Queue fade A/B</title>
 <style>
-  body { margin:0; background:#000; color:#e5e7eb; font:13px/1.45 -apple-system,system-ui,sans-serif; padding:12px; }
-  h1 { font-size:15px; margin:0 0 8px; }
-  p  { margin:0 0 10px; color:#94a3b8; font-size:12px; }
-  pre{ white-space:pre-wrap; word-break:break-word; background:#0b1220; border:1px solid #1e293b;
-       border-radius:8px; padding:10px; font:12px/1.4 ui-monospace,Menlo,monospace; color:#e2e8f0; }
-  .bad { color:#fca5a5; }
-  iframe { position:fixed; left:-9999px; top:0; width:390px; height:844px; border:0; }
+  body { margin:0; background:#000; color:#e5e7eb; font:13px/1.4 -asystem-ui,-apple-system,sans-serif; }
+  .bar { padding:10px 12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button { flex:1 1 auto; padding:12px 10px; border-radius:10px; border:1px solid #334155;
+           background:#111827; color:#e5e7eb; font-size:14px; font-weight:600; }
+  button.on { background:#065f46; border-color:#10b981; }
+  #state { font-size:12px; color:#94a3b8; padding:0 12px 8px; }
+  pre { margin:0 12px 10px; white-space:pre-wrap; word-break:break-word; background:#0b1220;
+        border:1px solid #1e293b; border-radius:8px; padding:9px;
+        font:11px/1.35 ui-monospace,Menlo,monospace; color:#e2e8f0; }
+  iframe { display:block; width:100%; height:70vh; border:0; border-top:1px solid #1e293b; }
 </style>
 </head>
 <body>
-<h1>Queue fade diagnostic</h1>
-<p>Reports what THIS browser computes. Screenshot the block below.</p>
-<pre id="out">loading /queue …</pre>
+<div class="bar">
+  <button id="btn">Tap: turn GLASS OFF</button>
+</div>
+<div id="state">glass: ON (current app behaviour)</div>
+<pre id="out">measuring…</pre>
 <iframe id="f" src="/queue"></iframe>
 <script>
-// Renders the queue offscreen in this browser, then reports every element that
-// dims its subtree. Chrome shows none; if WebKit shows one, it names the bug.
-var out = document.getElementById('out');
-var f = document.getElementById('f');
-function run() {
+// Visual A/B. Measurement already came back clean on iOS, so this stops
+// measuring and just removes the three backdrop-filter surfaces to see whether
+// the fade goes with them. Blur cannot be detected from script; it can be seen.
+var f = document.getElementById('f'), out = document.getElementById('out'),
+    btn = document.getElementById('btn'), state = document.getElementById('state'), on = true;
+
+var KILL = '.nx-liquid-surface, .nx-mobile-command-dock__inner, .nx-pinned-app-dock__glass,' +
+           '.nx-kpi-orb, [class*="liquid"], [class*="glass"] {' +
+           'backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}';
+
+function report() {
   try {
-    var w = f.contentWindow, d = w.document;
-    var lines = [];
-    lines.push('ua: ' + navigator.userAgent.slice(0, 110));
-    lines.push('frame: ' + w.innerWidth + 'x' + w.innerHeight + '  dpr=' + w.devicePixelRatio);
-    lines.push('standalone: ' + (window.matchMedia('(display-mode: standalone)').matches ? 'y' : 'n'));
-    lines.push('reducedMotion: ' + (w.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'y' : 'n'));
-    var stage = d.querySelector('main.nx-stage');
-    lines.push('stage.opacity: ' + (stage ? w.getComputedStyle(stage).opacity : 'no stage'));
-    lines.push('stage.anim: ' + (stage ? w.getComputedStyle(stage).animationName : '-'));
-    var dim = [];
-    var all = d.querySelectorAll('*');
+    var w = f.contentWindow, d = w.document, out2 = [];
+    // No size threshold this time -- the previous build hid a 370x44 surface.
+    var all = d.querySelectorAll('*'), n = 0;
     for (var i = 0; i < all.length; i++) {
       var el = all[i], cs = w.getComputedStyle(el);
-      var op = parseFloat(cs.opacity);
-      var hasF = cs.filter && cs.filter !== 'none';
-      var hasB = (cs.backdropFilter && cs.backdropFilter !== 'none') ||
-                 (cs.webkitBackdropFilter && cs.webkitBackdropFilter !== 'none');
-      if (op < 0.95 || hasF || hasB) {
+      var bf = cs.backdropFilter || cs.webkitBackdropFilter || 'none';
+      if (bf !== 'none' || (cs.filter && cs.filter !== 'none') || parseFloat(cs.opacity) < 0.95) {
         var r = el.getBoundingClientRect();
-        if (r.width > 150 && r.height > 120) {
-          dim.push('  ' + el.tagName + '.' + String(el.className).slice(0, 40) +
-                   '  op=' + cs.opacity + ' filter=' + cs.filter +
-                   ' backdrop=' + (cs.backdropFilter || cs.webkitBackdropFilter || 'none') +
-                   ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+        n++;
+        if (out2.length < 14) {
+          out2.push('  ' + String(el.className).slice(0, 34) +
+            ' | ' + Math.round(r.width) + 'x' + Math.round(r.height) + ' @y' + Math.round(r.top) +
+            ' | op=' + cs.opacity + ' | bf=' + bf.slice(0, 26));
         }
       }
     }
-    lines.push('');
-    lines.push(dim.length ? 'DIMMING ELEMENTS (' + dim.length + '):' : 'DIMMING ELEMENTS: none');
-    out.className = dim.length ? 'bad' : '';
-    out.textContent = lines.concat(dim).join('\n');
-  } catch (e) {
-    out.textContent = 'error: ' + (e && e.message ? e.message : String(e));
-  }
+    out.textContent = 'frame ' + w.innerWidth + 'x' + w.innerHeight +
+      '  ·  effects found: ' + n + '\n' + out2.join('\n');
+  } catch (e) { out.textContent = 'error: ' + e.message; }
 }
-f.addEventListener('load', function () { setTimeout(run, 6000); });
-setTimeout(function () { if (/loading/.test(out.textContent)) run(); }, 15000);
+
+function apply() {
+  try {
+    var d = f.contentWindow.document;
+    var s = d.getElementById('kill-glass');
+    if (on && s) s.remove();
+    if (!on && !s) {
+      s = d.createElement('style'); s.id = 'kill-glass'; s.textContent = KILL;
+      d.head.appendChild(s);
+    }
+  } catch (e) {}
+}
+
+btn.addEventListener('click', function () {
+  on = !on;
+  btn.textContent = on ? 'Tap: turn GLASS OFF' : 'Tap: turn GLASS BACK ON';
+  btn.className = on ? '' : 'on';
+  state.textContent = on ? 'glass: ON (current app behaviour)' : 'glass: OFF (backdrop-filter removed)';
+  apply();
+});
+
+f.addEventListener('load', function () { setTimeout(function () { report(); apply(); }, 5000); });
+setTimeout(function () { if (/measuring/.test(out.textContent)) report(); }, 14000);
 </script>
 </body>
 </html>
