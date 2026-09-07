@@ -8,6 +8,8 @@
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { resolveFromPhoneNumber } from "@/lib/domain/inbox/send-now-service.js";
 import { resolveBulkScheduleMode } from "@/lib/domain/inbox/resolve-bulk-schedule-mode.js";
+import { resolveFollowUpEligibility } from "@/lib/domain/inbox/resolve-followup-eligibility.js";
+import { resolveSellerSalutation } from "@/lib/domain/inbox/resolve-seller-salutation.js";
 import {
   loadFus2Templates,
   loadThreadTemplateHistory,
@@ -51,6 +53,11 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
     if (!key) continue;
     contexts.set(key, {
       thread_key: key,
+      // The RAW strings travel; the seller-facing name is decided later by
+      // resolveSellerSalutation. Taking firstName() of owner_name here is what
+      // turned "Randy & Tammy Reid" into "Randy" and "D & S LLC" into "D".
+      owner_name: clean(row.owner_name || row.seller_display_name),
+      confirmed_contact_first_name: clean(row.prospect_first_name),
       seller_first_name: firstName(
         row.prospect_first_name || row.prospect_name || row.seller_display_name || row.owner_name,
       ),
@@ -222,6 +229,53 @@ async function resolveSenderForRecipient({ threadKey, toPhone, activeSenders }, 
  * Note there is deliberately NO agent-name override. {{agent_name}} always
  * resolves to the agent assigned to that seller.
  */
+/**
+ * Conversation evidence for the eligibility gate: what the seller actually
+ * said, and what we said back.
+ *
+ * Loaded for the WHOLE batch in one query. Eligibility is a question about the
+ * conversation, so it cannot be answered from the thread summary alone -- the
+ * decline that mattered ("I'm not looking to sell") lives in message_events,
+ * correctly classified, and was simply never read.
+ */
+async function loadThreadEvidence(threadKeys = [], { supabase } = {}) {
+  const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
+  const evidence = new Map();
+  for (const key of keys) evidence.set(key, { messages: [], is_suppressed: false, wrong_number: false });
+  if (!keys.length) return evidence;
+
+  const { data: rows } = await supabase
+    .from("message_events")
+    .select("thread_key,direction,message_body,detected_intent,created_at")
+    .in("thread_key", keys)
+    .order("created_at", { ascending: true });
+
+  for (const row of rows || []) {
+    const key = clean(row.thread_key);
+    const bucket = evidence.get(key);
+    if (!bucket) continue;
+    bucket.messages.push({
+      direction: clean(row.direction),
+      body: clean(row.message_body),
+      intent: clean(row.detected_intent),
+      at: row.created_at,
+    });
+  }
+
+  const { data: stateRows } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key,is_suppressed,disposition")
+    .in("thread_key", keys);
+  for (const row of stateRows || []) {
+    const bucket = evidence.get(clean(row.thread_key));
+    if (!bucket) continue;
+    bucket.is_suppressed = row.is_suppressed === true;
+    bucket.disposition = clean(row.disposition) || null;
+  }
+
+  return evidence;
+}
+
 export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, now = new Date() } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
@@ -239,6 +293,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
     loadThreadTemplateHistory(keys, { supabase }),
     loadActiveSenderNumbers(supabase),
   ]);
+  const evidenceByThread = await loadThreadEvidence(keys, { supabase });
 
   const recipients = [];
   /**
@@ -254,6 +309,46 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
     // language BEFORE ranking, and a KNOWN language never silently degrades to
     // English: "we have no information" and "we know this seller reads Spanish"
     // are different facts, and only the first one justifies English copy.
+    // ── CONTEXTUAL GATE, BEFORE ANY COPY IS RENDERED ──────────────────────
+    // Ordered so the strongest objection wins and nothing below can overrule
+    // it: regulatory, wrong number, explicit decline, price already named,
+    // offer already made, identity. Rendering first and discovering the
+    // premise is wrong at send time is how "would you be open to talking
+    // numbers?" reached ten sellers who had already answered.
+    const evidence = evidenceByThread.get(key) || { messages: [] };
+    const outboundBodies = (evidence.messages || [])
+      .filter((m) => String(m.direction || "").toLowerCase() === "outbound")
+      .map((m) => m.body);
+
+    // ONE authority for the seller-facing name; never the first token of an
+    // owner string.
+    const salutation = resolveSellerSalutation({
+      confirmedContactFirstName: ctx.confirmed_contact_first_name,
+      outboundBodies,
+      ownerName: ctx.owner_name,
+    });
+
+    const gate = resolveFollowUpEligibility({
+      thread_key: key,
+      is_suppressed: evidence.is_suppressed === true,
+      messages: evidence.messages,
+      salutation,
+    });
+
+    if (!gate.eligible) {
+      recipients.push({
+        thread_key: key,
+        seller_name: salutation.name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: gate.reason,
+        reason_detail: gate.detail || null,
+        assigned_agent_name: ctx.agent_name || null,
+      });
+      continue;
+    }
+
     const { language, known } = resolveSellerLanguage(ctx.best_language);
     if (!batchUsageByLanguage.has(language)) batchUsageByLanguage.set(language, new Map());
     const candidates = templateResult.byLanguage.get(language) || [];
@@ -343,7 +438,11 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
     }
 
     const plan = buildRecipientPlan({
-      thread: ctx,
+      // The salutation the AUTHORITY resolved, not the owner string's first
+      // token. A null name is deliberate (entity owner) and the renderer's
+      // missing-variable gate then routes it to review rather than inventing
+      // a person.
+      thread: { ...ctx, seller_first_name: salutation.name || "" },
       scheduleOverride: modeResult,
       template: selection.ok ? selection.template : null,
       // The agent ASSIGNED TO THIS SELLER, and nothing else. A batch-level name
