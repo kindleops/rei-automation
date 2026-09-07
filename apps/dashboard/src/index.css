@@ -9791,12 +9791,30 @@ Motion
 /* ── Room Enter Transition ─────────────────────────────────────────────── */
 
 .nx-stage {
+  /* Content is readable FIRST; the entry motion is decoration on top of it.
+     This used to read `animation: stage-enter ... both` with a from-frame of
+     opacity 0, which made every stage invisible until a 500ms animation
+     completed -- so anything that interrupted or never ran that animation left
+     the whole view faded or blank with no way back. A backgrounded tab during
+     mount, a bfcache restore, or an iOS PWA suspend/resume all do exactly
+     that: the timeline stops, the animation holds its 0% frame, and the stage
+     stays dimmed. Observed directly: with the timeline frozen, .nx-stage
+     computed opacity 0 while every other animation on the page sat at
+     currentTime 0 too.
+     Opacity is therefore no longer animated. The slide remains, so the
+     transition still reads as motion, but a stage that never animates is a
+     fully legible stage rather than an invisible one. */
+  opacity: 1;
   animation: stage-enter 500ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 @keyframes stage-enter {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { transform: translateY(8px); }
+  to   { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-stage { animation: none; }
 }
 /* ═══════════════════════════════════════════════════════════════════════════
    Copilot Orb + Utility Modules
