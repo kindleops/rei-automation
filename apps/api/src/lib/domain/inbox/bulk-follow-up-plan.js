@@ -241,6 +241,13 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
   ]);
 
   const recipients = [];
+  /**
+   * template_id -> times chosen so far in THIS batch, one map per language.
+   * Seeded lazily; see selectFus2Template for why batch scope is needed on top
+   * of each thread's own history.
+   */
+  const batchUsageByLanguage = new Map();
+
   for (const key of keys) {
     const ctx = contexts.get(key) || { thread_key: key };
     // Language follows the SELLER. Candidates are scoped to the seller's own
@@ -248,6 +255,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
     // English: "we have no information" and "we know this seller reads Spanish"
     // are different facts, and only the first one justifies English copy.
     const { language, known } = resolveSellerLanguage(ctx.best_language);
+    if (!batchUsageByLanguage.has(language)) batchUsageByLanguage.set(language, new Map());
     const candidates = templateResult.byLanguage.get(language) || [];
 
     if (!candidates.length) {
@@ -269,7 +277,16 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], schedule = null, 
       templates: candidates,
       usedTemplateIds: history.get(key) || [],
       context: { language },
+      // Spreads variants ACROSS this batch as well as across a thread's own
+      // history. Counted per language, because the pools are disjoint: an
+      // English pick must not make a Spanish variant look "used".
+      batchUsage: batchUsageByLanguage.get(language) || null,
     });
+    if (selection.ok && selection.template) {
+      const chosen = String(selection.template.template_id ?? "").trim();
+      const usage = batchUsageByLanguage.get(language);
+      if (chosen && usage) usage.set(chosen, (usage.get(chosen) || 0) + 1);
+    }
 
     // Sending line, resolved server-side per recipient. Bulk recipients may
     // legitimately resolve to DIFFERENT numbers -- continuity is per

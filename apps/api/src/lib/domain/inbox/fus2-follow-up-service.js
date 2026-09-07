@@ -117,7 +117,22 @@ export async function loadThreadTemplateHistory(threadKeys = [], deps = {}) {
 /**
  * @param {object[]} templates  Candidates ALREADY scoped to the seller's language.
  */
-export function selectFus2Template({ templates = [], usedTemplateIds = [], context = {} } = {}) {
+export function selectFus2Template({
+  templates = [],
+  usedTemplateIds = [],
+  context = {},
+  /**
+   * How many times each template has already been chosen EARLIER IN THIS BATCH.
+   * Mutated by the caller as it walks recipients.
+   *
+   * Without this, anti-repeat was per-thread only: it stopped one seller seeing
+   * the same words twice, but every recipient in a batch ranks identically, so
+   * a fresh thread always resolved to ranked[0]. Thirteen sellers were queued
+   * the same sentence on the same day -- which is exactly what a blast looks
+   * like, and precisely what fifteen curated variants exist to avoid.
+   */
+  batchUsage = null,
+} = {}) {
   if (!templates.length) return { ok: false, reason: "no_fus2_template_for_language" };
 
   const ranked = rankTemplateCandidates(templates, {
@@ -131,6 +146,28 @@ export function selectFus2Template({ templates = [], usedTemplateIds = [], conte
   const unused = ranked.filter((tpl) => !used.has(clean(tpl.template_id)));
 
   if (unused.length > 0) {
+    // Per-thread history still outranks batch variety: a seller must never be
+    // re-sent copy they have already had just to spread a batch. Among the
+    // variants this thread has NOT seen, prefer the one used least so far in
+    // this batch, with rank breaking ties. That distributes evenly and stays
+    // deterministic -- same batch in, same assignment out.
+    if (batchUsage) {
+      let best = unused[0];
+      let bestCount = batchUsage.get(clean(best.template_id)) || 0;
+      for (const tpl of unused) {
+        const count = batchUsage.get(clean(tpl.template_id)) || 0;
+        if (count < bestCount) {
+          best = tpl;
+          bestCount = count;
+        }
+      }
+      return {
+        ok: true,
+        template: best,
+        rotation_reason: bestCount === 0 ? "unused_variant_preferred" : "batch_rotation_least_used",
+        exhausted: false,
+      };
+    }
     return { ok: true, template: unused[0], rotation_reason: "unused_variant_preferred", exhausted: false };
   }
 
