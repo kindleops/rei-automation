@@ -15,6 +15,7 @@ import {
 } from '../../src/domain/inbox/format-scheduled-send-time'
 import { applyBulkScheduleResult } from '../../src/domain/inbox/apply-bulk-schedule-result'
 import { mapAuthoritativeCountsFromPayload } from '../../src/domain/inbox/inbox-boot-read'
+import { getSavedPresetConfig } from '../../src/modules/inbox/inbox-ui-helpers'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -188,6 +189,29 @@ check('a malformed scheduled count does not poison the chip', () => {
     const mapped = mapAuthoritativeCountsFromPayload({ counts: { priority: 1, scheduled: bad } })
     assert.equal('scheduled' in mapped, false, `${String(bad)} must not become a count`)
   }
+})
+
+console.log('\nCATEGORY CHIP NAVIGATION')
+
+check('every sidebar sub-view resolves to a preset that selects that same view', () => {
+  // Found on staging: clicking Scheduled (and Snoozed) switched the Inbox to
+  // All Threads. Category chips route through viewToPreset -> applySavedPreset
+  // -> getSavedPresetConfig, and a view with no preset falls through to
+  // 'all_messages'. Nothing throws, so the chip just appears inert.
+  for (const view of ['archived', 'snoozed', 'scheduled'] as const) {
+    const config = getSavedPresetConfig(view)
+    assert.equal(
+      config.view,
+      view,
+      `preset "${view}" must select the "${view}" view, not silently fall back`,
+    )
+  }
+})
+
+check('the primary category presets still resolve to their own views', () => {
+  assert.equal(getSavedPresetConfig('my_priority').view, 'priority')
+  assert.equal(getSavedPresetConfig('new_inbounds').view, 'new_replies')
+  assert.equal(getSavedPresetConfig('review_required').view, 'needs_review')
 })
 
 console.log(`\nPASS  ${passed} checks\n`)

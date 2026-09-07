@@ -765,6 +765,11 @@ export const getSavedPresetConfig = (preset: InboxSavedFilterPreset): Partial<In
   if (preset === 'all_messages') return { view: 'all_conversations' }
   // Archived is a terminal bucket; the server returns archived rows only for this view.
   if (preset === 'archived') return { view: 'archived' }
+  // Snoozed and Scheduled are server-resolved sub-views on the same footing:
+  // the backend decides membership (snoozed_until, and send_queue for
+  // Scheduled), so the client only has to name the view.
+  if (preset === 'snoozed') return { view: 'snoozed' }
+  if (preset === 'scheduled') return { view: 'scheduled' }
   if (preset === 'waiting') return { view: 'waiting' }
   if (preset === 'inbound_only') return { view: 'inbound' }
   if (preset === 'outbound_only') return { view: 'outbound' }

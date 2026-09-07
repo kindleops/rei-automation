@@ -1,5 +1,10 @@
 export type InboxSavedFilterPreset =
   | 'archived'
+  // Sidebar sub-views, exactly like 'archived'. Every category chip routes its
+  // click through viewToPreset -> applySavedPreset, so a view with no preset
+  // silently resolves to 'all_messages' and the chip appears to do nothing.
+  | 'snoozed'
+  | 'scheduled'
   | 'my_priority'
   | 'new_inbounds'
   | 'offer_needed'

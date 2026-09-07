@@ -2160,6 +2160,10 @@ const viewToPreset = (view: InboxViewSelectValue | string): InboxSavedFilterPres
   if (view === 'dead' || view === 'wrong_number') return 'wrong_numbers'
   if (view === 'suppressed' || view === 'dnc_opt_out') return 'suppressed'
   if (view === 'archived') return 'archived'
+  if (view === 'snoozed') return 'snoozed'
+  if (view === 'scheduled') return 'scheduled'
+  // Anything unmapped lands here, which is why a missing case does not error:
+  // the chip quietly switches the operator to All Threads instead.
   return 'all_messages'
 }
 
