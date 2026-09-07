@@ -150,6 +150,31 @@ export function selectFus2Template({ templates = [], usedTemplateIds = [], conte
 }
 
 /**
+ * The street line only, for use INSIDE seller-facing copy.
+ *
+ * A restart text that reads "...talking numbers on 8111 N El Dorado St,
+ * Stockton, Ca 95210." reads like a mail-merge blast, because a real person
+ * referring to a house someone owns says the street, not the postal address.
+ * The city/state/ZIP add nothing the seller does not already know and are the
+ * strongest visual tell that the message is automated.
+ *
+ * Only the RENDERED COPY is trimmed. Every stored and returned
+ * property_address stays the full canonical value, so queue rows, lineage and
+ * operator-facing UI are unchanged -- this is a copy decision, not a data one.
+ */
+export function streetAddressOnly(value) {
+  const full = clean(value);
+  if (!full) return "";
+  const [firstSegment] = full.split(",");
+  const street = clean(firstSegment);
+  // A leading comma, or an address that is somehow only punctuation, must not
+  // collapse to an empty string: an empty address would either trip the
+  // renderer's missing-variable gate or produce "...numbers on ." Falling back
+  // to the full value is the safe direction.
+  return street || full;
+}
+
+/**
  * Build the per-recipient plan: eligibility, rendered copy, and an individually
  * resolved schedule. Renders nothing itself and schedules nothing itself.
  */
@@ -169,7 +194,9 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
   const rendered = renderSafeTemplate(template, {
     seller_first_name: clean(thread.seller_first_name),
     agent_name: clean(agentName) || clean(thread.agent_name),
-    property_address: clean(thread.property_address),
+    // Street line only: see streetAddressOnly. base.property_address above
+    // keeps the full canonical address.
+    property_address: streetAddressOnly(thread.property_address),
   });
 
   if (!rendered.ok) {

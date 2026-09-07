@@ -57,7 +57,8 @@
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
     "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
     "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs",
-    "proof:inbox-scheduled": "npx tsx scripts/proof/inbox-scheduled-coherence.ts"
+    "proof:inbox-scheduled": "npx tsx scripts/proof/inbox-scheduled-coherence.ts",
+    "proof:inbox-load-more": "npx tsx scripts/proof/inbox-load-more-growth.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

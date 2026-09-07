@@ -1501,7 +1501,24 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     // the pre-filter query. Asking for a bigger page and replacing is the only
     // thing that reliably surfaces more rows for these buckets.
     if (!cursor) {
-      const nextLimit = Math.min(Math.max(loaded, 25) * 2, 500)
+      // Grow from the PAGE SIZE WE LAST ASKED FOR, not from the number of rows
+      // that survived filtering.
+      //
+      // These buckets post-filter server-side, so a 50-row page can yield 16
+      // visible rows. Doubling `loaded` meant Math.max(16, 25) * 2 = 50 -- the
+      // same request that had just produced those 16 rows. Load More issued an
+      // identical query, appended nothing, and the button then disappeared as
+      // though the bucket were exhausted, with New Replies showing 16 of 164.
+      // Any bucket whose filtered yield stays under 25 was permanently pinned
+      // at a 50-row page.
+      const lastLimit = Number(lastFetchRef.current?.limit ?? lastFetchRef.current?.maxRows ?? 0)
+      const growthBase = Math.max(Number.isFinite(lastLimit) ? lastLimit : 0, loaded, 25)
+      const nextLimit = Math.min(growthBase * 2, 500)
+
+      // At the cap a further request would be byte-for-byte identical, so there
+      // is nothing left to fetch. Returning null rather than re-issuing it lets
+      // the caller stop offering Load More instead of spinning on a no-op.
+      if (Number.isFinite(lastLimit) && lastLimit >= 500 && nextLimit <= lastLimit) return null
       return runLoad({
         ...lastFetchRef.current,
         ...options,
