@@ -1058,6 +1058,11 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   } = vars
 
   const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
+  // CompactRow25 is the row the operator actually sees in rail25/review50 --
+  // the default modes. The treatment has to live here too, not only on the
+  // full100 card, or a scheduled conversation shows no send time at all.
+  const scheduledSend = readScheduledSendTime(thread as unknown as Record<string, unknown>)
+  const scheduledPending = scheduledPendingCount(thread as unknown as Record<string, unknown>)
   const bucketAccentClass = resolveStatusChipClass(thread).replace('is-', 'is-bucket-')
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
@@ -1105,6 +1110,16 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
         </div>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
+        {scheduledSend && (
+          <div className="nx-row25__scheduled">
+            <span className="nx-row25__scheduled-label">Scheduled</span>
+            <span className="nx-row25__scheduled-time">{scheduledSend.label}</span>
+            <span className="nx-row25__scheduled-zone">Seller local</span>
+            {scheduledPending > 1 && (
+              <span className="nx-row25__scheduled-more">{scheduledPending} scheduled</span>
+            )}
+          </div>
+        )}
         <div className="nx-row25__footer">
           {deliveryReceipt ? (
             <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={deliveryReceipt.label}>

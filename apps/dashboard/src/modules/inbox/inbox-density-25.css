@@ -94,3 +94,47 @@
 [data-nexus-theme="light"] .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-sidebar-rebuilt__empty {
   color: #636366;
 }
+
+/* ── Scheduled follow-up treatment (compact rows) ────────────────────────────
+   The rail25/review50 sibling of .nx-thread-card-rebuilt__scheduled. These are
+   the default modes, so this is the treatment most operators actually see: a
+   conversation is sitting out of New Replies because a send is already booked,
+   and the row has to say when. Quiet on purpose -- this is resolved work. */
+.nx-row25__scheduled {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.nx-row25__scheduled-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 8px;
+  font-weight: 700;
+  color: #7dd3fc;
+  opacity: 0.9;
+}
+
+.nx-row25__scheduled-time {
+  font-weight: 600;
+  color: #e4e4e7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.nx-row25__scheduled-zone,
+.nx-row25__scheduled-more {
+  font-size: 9px;
+  color: #71717a;
+  white-space: nowrap;
+}
+
+[data-nexus-theme="light"] .nx-row25__scheduled-label { color: #0369a1; }
+[data-nexus-theme="light"] .nx-row25__scheduled-time { color: #18181b; }
+[data-nexus-theme="light"] .nx-row25__scheduled-zone,
+[data-nexus-theme="light"] .nx-row25__scheduled-more { color: #52525b; }
