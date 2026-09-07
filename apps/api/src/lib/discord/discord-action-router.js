@@ -160,6 +160,10 @@ import {
 } from "./discord-followups.js";
 import { info, warn, error as logError } from "../logging/logger.js";
 import { getSystemFlag } from "@/lib/system-control.js";
+import {
+  resolveInternalApiOrigin,
+  mayCarryPrivilegedInternalCredentials,
+} from "@/lib/security/internal-api-origin.js";
 
 // ---------------------------------------------------------------------------
 // Test dependency injection
@@ -360,10 +364,29 @@ async function callInternal(path, options = {}) {
   if (_router_deps.callInternal_override) {
     return _router_deps.callInternal_override(path, options);
   }
-  const base   = String(process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
-  const url    = `${base}${path}`;
+  // PRIVILEGED ROUTING. Deliberately NOT APP_BASE_URL.
+  //
+  // This request carries x-internal-api-secret AND a CRON_SECRET bearer token.
+  // APP_BASE_URL is a general application URL with mixed semantics (webhook
+  // canonicalization, emailed storage links, alert links); in production it
+  // pointed at a stale pre-§11 Vercel deployment, so these two credentials were
+  // being posted there and operator actions ran on 693-commit-old code.
+  //
+  // Fail closed. A privileged call with nowhere safe to go makes no call.
+  const resolved = resolveInternalApiOrigin(process.env);
+  if (!resolved.ok) {
+    return { ok: false, error: "internal_origin_refused", reason: resolved.reason };
+  }
+  const url    = `${resolved.origin}${path}`;
   const secret = String(process.env.INTERNAL_API_SECRET ?? "");
   const cron   = String(process.env.CRON_SECRET ?? secret);
+
+  // Contract check BEFORE the network call: credentials must never leave the
+  // allowlisted origin, even if the resolver is later changed.
+  const permitted = mayCarryPrivilegedInternalCredentials(url, process.env);
+  if (!permitted.ok) {
+    return { ok: false, error: "privileged_origin_refused", reason: permitted.reason };
+  }
 
   const controller = new AbortController();
   const timeout_ms = options.timeout_ms ?? CALL_TIMEOUT_MS;
