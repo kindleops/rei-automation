@@ -130,6 +130,22 @@ export class ApiContainer extends Container<Env> {
       ...(env.TEXTGRID_AUTH_TOKEN
         ? { TEXTGRID_AUTH_TOKEN: env.TEXTGRID_AUTH_TOKEN }
         : {}),
+      // NOT a secret. The canonical origin for privileged server-to-server
+      // calls, kept separate from APP_BASE_URL on purpose: APP_BASE_URL also
+      // drives webhook canonicalization and emailed links, and when it pointed
+      // at the stale Vercel deployment those internal calls carried
+      // INTERNAL_API_SECRET and CRON_SECRET there. The app fails closed if this
+      // is absent in production rather than falling back to a generic URL.
+      ...(env.INTERNAL_API_BASE_URL
+        ? { INTERNAL_API_BASE_URL: env.INTERNAL_API_BASE_URL }
+        : {}),
+      // NOT a secret. The exact public origin TextGrid POSTs callbacks to, used
+      // as signature material. Separate from APP_BASE_URL because that value
+      // also drives emailed links and operator alerts, and a change made for a
+      // link would otherwise silently break every callback.
+      ...(env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL
+        ? { TEXTGRID_WEBHOOK_PUBLIC_BASE_URL: env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL }
+        : {}),
     };
   }
 }
@@ -153,6 +169,8 @@ interface Env {
   TEXTGRID_ACCOUNT_SID?: string;
   TEXTGRID_AUTH_TOKEN?: string;
   APP_BASE_URL?: string;
+  INTERNAL_API_BASE_URL?: string;
+  TEXTGRID_WEBHOOK_PUBLIC_BASE_URL?: string;
   DEPLOYMENT_ENV?: string;
   DEPLOYMENT_ID?: string;
   DEPLOY_GIT_SHA?: string;

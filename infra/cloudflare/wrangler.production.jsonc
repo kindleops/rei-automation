@@ -66,6 +66,16 @@
     // COMMISSIONED. The master switch is necessary but not sufficient: each job
     // in worker/index.ts names its own flag, so turning this on cannot awaken a
     // job that was not separately approved below.
+    // Canonical origin for privileged internal server-to-server calls.
+    // Deliberately distinct from APP_BASE_URL, which has mixed semantics and
+    // previously routed these credential-bearing calls to a stale deployment.
+    "INTERNAL_API_BASE_URL": "https://ops.leadcommand.ai",
+
+    // The exact public origin TextGrid POSTs delivery callbacks to. This is the
+    // signature material, so it must match the provider-side configuration
+    // exactly. Kept distinct from APP_BASE_URL on purpose.
+    "TEXTGRID_WEBHOOK_PUBLIC_BASE_URL": "https://ops.leadcommand.ai",
+
     "CRON_ENABLED": "true",
     // Per-job authority. Both are RECONCILIATION lanes and both are
     // send-incapable. No queue runner, campaign feed, campaign activation,
