@@ -6,7 +6,12 @@ import {
   parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 import { transitionStaleWaitingThreads } from "@/lib/domain/inbox/reconcile-inbox-thread-state.js";
-import { threadMatchesBucketFilter } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
+import { threadMatchesBucketFilter, isScheduleSuppressedThread } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
+import {
+  PENDING_QUEUE_STATUSES,
+  buildScheduledThreadIndex,
+  applyScheduledThreadFields,
+} from "@/lib/domain/inbox/resolve-scheduled-thread-state.js";
 import { deriveInboxBucketFromThreadState } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import {
   INBOX_THREAD_STATE_SELECT_FIELDS,
@@ -143,6 +148,17 @@ function compactBootThreadRow(row = {}) {
     disposition: row.disposition || null,
     is_archived: row.is_archived === true,
     snoozed_until: row.snoozed_until || null,
+    // Same reasoning as snoozed_until: a fixed projection that omits these
+    // does not degrade Scheduled, it empties it. Conditional for the same
+    // reason as the summary projection -- boot rows have a key budget, and an
+    // unscheduled conversation must not pay for this feature.
+    ...(row.is_schedule_suppressed === true
+      ? {
+        is_schedule_suppressed: true,
+        next_scheduled_send_at_utc: row.next_scheduled_send_at_utc || null,
+        next_scheduled_timezone: row.next_scheduled_timezone || null,
+      }
+      : {}),
     snooze_reason: row.snooze_reason || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || null,
     owner_display_name: row.owner_display_name || row.owner_name || null,
@@ -698,9 +714,14 @@ function countFromRow(row = {}) {
   return counts;
 }
 
-function computeCountsFromThreads(rows = []) {
+function computeCountsFromThreads(rows = [], options = {}) {
   const counts = buildEmptyCounts();
   const nowMs = Date.now();
+  // "scheduled" is reported ONLY when the send_queue index actually loaded.
+  // Seeded blindly it would render a confident 0 while real follow-ups sat in
+  // the queue; left absent the chip renders "-" (unknown), which is honest.
+  const scheduledKnown = options.scheduledIndexLoaded === true;
+  if (scheduledKnown) counts.scheduled = 0;
   for (const row of rows) {
     if (row.is_archived === true) continue;
     const bucket = lower(row.inbox_bucket);
@@ -712,6 +733,16 @@ function computeCountsFromThreads(rows = []) {
     const snoozedUntilMs = new Date(row?.snoozed_until ?? 0).getTime();
     if (Number.isFinite(snoozedUntilMs) && snoozedUntilMs > nowMs) {
       counts.snoozed += 1;
+      if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
+      if (!row.property_id) counts.unlinked += 1;
+      continue;
+    }
+    // Same shape as the snooze block above: a scheduled conversation is
+    // counted ONCE, under scheduled, and withheld from every actionable
+    // counter -- otherwise the chips keep advertising work the operator has
+    // already dealt with.
+    if (scheduledKnown && isScheduleSuppressedThread(row)) {
+      counts.scheduled += 1;
       if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
       if (!row.property_id) counts.unlinked += 1;
       continue;
@@ -742,8 +773,8 @@ function computeCountsFromThreads(rows = []) {
   return counts;
 }
 
-function computeApproximateCountsFromVisibleRows(rows = [], filter = "all") {
-  const counts = computeCountsFromThreads(rows);
+function computeApproximateCountsFromVisibleRows(rows = [], filter = "all", options = {}) {
+  const counts = computeCountsFromThreads(rows, options);
   const approximate = removeZeroApproximateCounts(counts);
   const normalizedFilter = normalizeLiveFilter(filter);
   if (rows.length > 0 && normalizedFilter !== "all" && approximate[normalizedFilter] == null) {
@@ -756,8 +787,8 @@ function computeApproximateCountsFromVisibleRows(rows = [], filter = "all") {
   return approximate;
 }
 
-function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all") {
-  const approximate = computeApproximateCountsFromVisibleRows(rows, filter);
+function applyVisibleRowsCountFloor(counts = {}, rows = [], filter = "all", options = {}) {
+  const approximate = computeApproximateCountsFromVisibleRows(rows, filter, options);
   if (Object.keys(approximate).length === 0) return { counts, applied: false, approximate };
 
   let applied = false;
@@ -1579,9 +1610,56 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
   return query;
 }
 
+/**
+ * Load the future, still-runnable send_queue rows that make threads Scheduled.
+ *
+ * Scoped to the thread keys already on screen when we have them, so the Inbox
+ * never pays for a full queue scan; unscoped (and capped) only when the
+ * Scheduled tab itself is being opened and the keys are what we are looking
+ * for. Returns null -- NOT an empty index -- when the read fails, so callers
+ * can tell "nothing is scheduled" apart from "we could not find out", and
+ * report the count as unknown instead of a confident zero.
+ */
+const SCHEDULED_QUEUE_SCAN_LIMIT = 2000;
+
+async function fetchScheduledThreadIndex(supabase, threadKeys = null) {
+  const keys = Array.isArray(threadKeys)
+    ? [...new Set(threadKeys.map((key) => clean(key)).filter(Boolean))]
+    : null;
+  if (keys && keys.length === 0) return new Map();
+
+  try {
+    let query = supabase
+      .from("send_queue")
+      .select("id,queue_id,thread_key,queue_status,scheduled_for,scheduled_for_utc,scheduled_for_local,timezone,local_send_hour,local_send_date,created_at")
+      .in("queue_status", PENDING_QUEUE_STATUSES)
+      // Only rows genuinely parked in the future. A due-but-unsent row belongs
+      // to the queue runner and must not hold a thread out of the Inbox.
+      .gt("scheduled_for", new Date().toISOString())
+      .order("scheduled_for", { ascending: true })
+      .limit(SCHEDULED_QUEUE_SCAN_LIMIT);
+
+    if (keys) query = query.in("thread_key", keys);
+
+    const { data, error } = await query;
+    if (error) return null;
+    return buildScheduledThreadIndex(data || [], Date.now());
+  } catch {
+    return null;
+  }
+}
+
 async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
   const normalized = normalizeLiveFilter(filter);
   if (normalized === "all") return null;
+
+  // Scheduled is the one tab whose membership is not a property of
+  // inbox_thread_state at all: send_queue decides it. Asking the thread table
+  // for a bucket it does not have would return everything.
+  if (normalized === "scheduled") {
+    const index = await fetchScheduledThreadIndex(supabase, null);
+    return index ? [...index.keys()] : [];
+  }
 
   let query = supabase
     .from("inbox_thread_state")
@@ -2408,7 +2486,79 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   return counts;
 }
 
+/**
+ * Counts have several possible sources (a pre-aggregated view, the
+ * authoritative thread-state scan, fallback scans) and none of them can see
+ * send_queue. Rather than teach every source about scheduling, the scheduled
+ * adjustment is applied ONCE to whichever source won.
+ *
+ * Two things happen here: scheduled is reported, and the threads it covers are
+ * decremented out of the attention counters. Without the decrement the chips
+ * would still advertise work the operator has already handled -- the exact bug
+ * this pass exists to fix, just moved from the list into the badge.
+ */
+const SCHEDULE_DECREMENTED_COUNT_KEYS = ["priority", "new_replies", "needs_review", "follow_up", "active"];
+
+async function applyScheduledCountOverlay(supabase, counts = {}) {
+  const index = await fetchScheduledThreadIndex(supabase, null);
+  // Unknown stays unknown: leaving the key absent renders "-" rather than a
+  // confident 0 over real scheduled follow-ups.
+  if (!index) return counts;
+
+  const next = { ...counts, scheduled: 0 };
+  const keys = [...index.keys()];
+  if (!keys.length) return next;
+
+  let rows = [];
+  try {
+    const { data, error } = await supabase
+      .from("inbox_thread_state")
+      .select(INBOX_THREAD_STATE_SELECT_FIELDS)
+      .in("thread_key", keys);
+    if (error) throw error;
+    rows = Array.isArray(data) ? data : [];
+  } catch {
+    // We know a schedule exists but not which buckets it came out of. Report
+    // the count and leave the other counters untouched rather than guess.
+    next.scheduled = keys.length;
+    return next;
+  }
+
+  const overlayNowMs = Date.now();
+  for (const row of rows) {
+    const entry = index.get(clean(row?.thread_key));
+    // Deliberately evaluated on the RAW row: applyScheduledThreadFields would
+    // mark it suppressed, and every attention predicate would then return
+    // false, decrementing nothing.
+    if (!applyScheduledThreadFields(row, entry, overlayNowMs).is_schedule_suppressed) continue;
+    next.scheduled += 1;
+    for (const key of SCHEDULE_DECREMENTED_COUNT_KEYS) {
+      if (!Number.isFinite(Number(next[key]))) continue;
+      if (threadMatchesBucketFilter(row, key, overlayNowMs)) {
+        next[key] = Math.max(0, Number(next[key]) - 1);
+      }
+    }
+  }
+
+  // Legacy aliases must not contradict the keys they mirror.
+  if (Number.isFinite(Number(next.priority))) next.hot_leads = next.priority;
+  if (Number.isFinite(Number(next.new_replies))) {
+    next.new_inbound = next.new_replies;
+    next.needs_reply = next.new_replies;
+  }
+  if (Number.isFinite(Number(next.needs_review))) next.manual_review = next.needs_review;
+  if (Number.isFinite(Number(next.follow_up))) next.outbound_active = next.follow_up;
+
+  return next;
+}
+
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
+  const result = await getLiveCountsWithMetaBase(params, deps);
+  const supabase = deps.supabase || defaultSupabase;
+  return { ...result, counts: await applyScheduledCountOverlay(supabase, result.counts) };
+}
+
+async function getLiveCountsWithMetaBase(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
   const nowMs = Date.now();
@@ -2558,6 +2708,26 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       inbox_category: effectiveBucket,
     };
   });
+  // Scheduled state is derived from send_queue for exactly the rows on screen.
+  // Merged onto the rows here so counts, list filtering and the client all read
+  // ONE derived truth instead of each re-deriving it from queue rows.
+  // Deliberately NOT skipped in boot mode. Boot trades accuracy for speed on
+  // several fields, but skipping this one would make every scheduled
+  // conversation flash back into New Replies on first paint and then vanish --
+  // which reads as a bug, and is the exact behaviour this pass removes. The
+  // query is one indexed lookup scoped to the thread keys already on screen.
+  const scheduledIndex = await fetchScheduledThreadIndex(
+    supabase,
+    (rows || []).map((row) => row.thread_key || row.canonical_thread_key),
+  );
+  const scheduledRows = scheduledIndex
+    ? rows.map((row) => applyScheduledThreadFields(
+      row,
+      scheduledIndex.get(clean(row.thread_key || row.canonical_thread_key)) || null,
+      Date.now(),
+    ))
+    : rows;
+
   const normalizedListFilter = normalizeLiveFilter(filter);
   const FACT_DERIVED_LIST_FILTERS = new Set(["waiting", "new_replies", "all_messages", "cold"]);
   const trustBucketQuery = !FACT_DERIVED_LIST_FILTERS.has(normalizedListFilter);
@@ -2581,6 +2751,13 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     "snoozed", "all", "all_messages", "archived",
   ]);
   const HIDES_SNOOZED = !SNOOZE_VISIBLE_FILTERS.has(normalizedListFilter);
+  // A conversation whose next action is already booked leaves the ACTIONABLE
+  // lists until it runs, is cancelled, or the seller speaks again. Scheduled,
+  // All and All Threads keep it -- those are where the operator looks for it.
+  const SCHEDULE_VISIBLE_FILTERS = new Set([
+    "scheduled", "all", "all_messages", "archived", "snoozed",
+  ]);
+  const HIDES_SCHEDULED = !SCHEDULE_VISIBLE_FILTERS.has(normalizedListFilter);
   const postFilterNowMs = Date.now();
   const isActivelySnoozed = (row) => {
     const until = row?.snoozed_until;
@@ -2588,11 +2765,24 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     const ts = new Date(until).getTime();
     return Number.isFinite(ts) && ts > postFilterNowMs;
   };
-  const postFiltered = sortThreads(rows)
+  const postFiltered = sortThreads(scheduledRows)
     .filter((row) => !HIDES_ARCHIVED || row.is_archived !== true)
     .filter((row) => !HIDES_SNOOZED || !isActivelySnoozed(row))
+    .filter((row) => !HIDES_SCHEDULED || !isScheduleSuppressedThread(row))
+    // The Scheduled tab shows exactly the threads with a future runnable row.
+    .filter((row) => normalizedListFilter !== "scheduled" || isScheduleSuppressedThread(row))
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
+
+  // Scheduled sorts by the NEXT thing that will actually happen to the seller,
+  // not by thread activity: the operator is reading a timeline of future sends.
+  if (normalizedListFilter === "scheduled") {
+    postFiltered.sort((a, b) => {
+      const at = Date.parse(a?.next_scheduled_send_at_utc ?? "") || Number.MAX_SAFE_INTEGER;
+      const bt = Date.parse(b?.next_scheduled_send_at_utc ?? "") || Number.MAX_SAFE_INTEGER;
+      return at - bt;
+    });
+  }
 
   const hasMore = postFiltered.length > limit;
   let finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
@@ -2620,7 +2810,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
         countsDegraded = true;
         countsApproximate = true;
         countsSource = "visible_rows_approximate";
-        liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
+        liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter, { scheduledIndexLoaded: scheduledIndex != null });
         countPreservedReason = Object.keys(liveCounts).length > 0
           ? "count_views_failed_visible_rows_approximate"
           : "count_views_failed_preserve_client_counts";
@@ -2636,7 +2826,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
       countsDegraded = true;
       countsApproximate = true;
       countsSource = "visible_rows_approximate";
-      liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter);
+      liveCounts = computeApproximateCountsFromVisibleRows(finalRows, filter, { scheduledIndexLoaded: scheduledIndex != null });
       countPreservedReason = Object.keys(liveCounts).length > 0
         ? "fallback_thread_source_visible_rows_approximate"
         : "fallback_thread_source_preserve_client_counts";
@@ -2646,7 +2836,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   }
 
   if (!skipCounts) {
-    const countFloor = applyVisibleRowsCountFloor(liveCounts, finalRows, filter);
+    const countFloor = applyVisibleRowsCountFloor(liveCounts, finalRows, filter, { scheduledIndexLoaded: scheduledIndex != null });
     if (countFloor.applied) {
       liveCounts = countFloor.counts;
       countsDegraded = true;

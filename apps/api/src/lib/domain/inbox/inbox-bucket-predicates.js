@@ -5,6 +5,30 @@ import {
   parseTimestampMs,
 } from "@/lib/domain/inbox/resolve-waiting-cold-state.js";
 
+/**
+ * Buckets that mean "the operator has to deal with this now". A thread whose
+ * next action is already booked in send_queue is withheld from exactly these
+ * and nothing else: it stays in All, and its lifecycle/temperature/priority
+ * are untouched. Lead importance and current attention requirement are
+ * orthogonal, and conflating them is what made a scheduled conversation keep
+ * shouting from New Replies.
+ */
+const ATTENTION_BUCKETS = new Set([
+  "priority",
+  "new_replies",
+  "needs_review",
+  "follow_up",
+  "active",
+]);
+
+/**
+ * Derived upstream by resolve-scheduled-thread-state.js from real send_queue
+ * rows. Read as a plain flag here so this module stays synchronous and pure.
+ */
+export function isScheduleSuppressedThread(row = {}) {
+  return row?.is_schedule_suppressed === true;
+}
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -169,6 +193,12 @@ export function isStaleExplicitInboxBucket(row = {}, explicitBucket = "", nowMs 
 export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = Date.now()) {
   const bucket = lower(thread.inbox_bucket);
   const direction = normalizeDirection(thread.latest_message_direction || thread.latest_direction || thread.direction);
+
+  // Scheduled is derived from send_queue, so it is answered before any
+  // inbox_bucket reasoning -- and it removes the thread from the attention
+  // buckets rather than changing what the thread IS.
+  if (filter === "scheduled") return isScheduleSuppressedThread(thread);
+  if (ATTENTION_BUCKETS.has(filter) && isScheduleSuppressedThread(thread)) return false;
 
   switch (filter) {
     case "all":

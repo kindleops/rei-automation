@@ -234,6 +234,9 @@ function rowMatchesOrClause(row = {}, clause = "") {
 export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
   const stateRows = options.stateRows || deriveInboxThreadStateRows(threadRows);
   const countRows = options.countRows || [buildInboxCountRowFromThreads(threadRows)];
+  // send_queue drives the Scheduled bucket, so tests need to be able to park a
+  // real future follow-up. Defaults to empty, which is the previous behaviour.
+  const sendQueueRows = options.sendQueueRows || [];
 
   function rowsForTable(table) {
     if (table === "inbox_thread_state") return [...stateRows];
@@ -243,7 +246,8 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
     if (table === "canonical_inbox_counts" || table === "v_inbox_thread_counts_live_v2") {
       return [...countRows];
     }
-    if (table === "message_events" || table === "send_queue") return [];
+    if (table === "send_queue") return [...sendQueueRows];
+    if (table === "message_events") return [];
     return [];
   }
 
@@ -283,6 +287,10 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
         },
         lt(column, value) {
           queryState.filters.push((row) => asInboxTime(row?.[column]) < asInboxTime(value));
+          return api;
+        },
+        gt(column, value) {
+          queryState.filters.push((row) => asInboxTime(row?.[column]) > asInboxTime(value));
           return api;
         },
         not(column, operator, value) {

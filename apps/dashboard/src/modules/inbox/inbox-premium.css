@@ -25626,3 +25626,50 @@ no clipping */
     background: rgba(255, 255, 255, 0.03);
   }
 }
+
+/* ── Scheduled follow-up treatment ───────────────────────────────────────────
+   Shown on a thread whose next action is already parked in send_queue. It has
+   to read as a state, not as another metadata crumb, because it is the reason
+   the conversation is NOT in New Replies. Deliberately quiet: this is a
+   resolved conversation, not one demanding attention. */
+.nx-thread-card-rebuilt__scheduled {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.nx-thread-card-rebuilt__scheduled-label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+  font-weight: 600;
+  color: #7dd3fc;
+  opacity: 0.85;
+}
+
+/* The time itself is the one thing an operator scans for, so it carries the
+   weight rather than the label. */
+.nx-thread-card-rebuilt__scheduled-time {
+  font-weight: 600;
+  color: #e5e7eb;
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-thread-card-rebuilt__scheduled-zone {
+  font-size: 10px;
+  color: #71717a;
+}
+
+.nx-thread-card-rebuilt__scheduled-more {
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+[data-nexus-theme="light"] .nx-thread-card-rebuilt__scheduled-label { color: #0369a1; }
+[data-nexus-theme="light"] .nx-thread-card-rebuilt__scheduled-time { color: #18181b; }
+[data-nexus-theme="light"] .nx-thread-card-rebuilt__scheduled-zone { color: #71717a; }
+[data-nexus-theme="light"] .nx-thread-card-rebuilt__scheduled-more { color: #52525b; }

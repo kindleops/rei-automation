@@ -853,6 +853,18 @@ const buildRealtimeThreadPatch = (
     conversation_thread_id: conversationThreadId,
     threadKey,
     thread_key: threadKey,
+    // Scheduled state, derived server-side from send_queue. This object is a
+    // FIXED projection with no spread, so a field omitted here simply never
+    // reaches the UI: the Scheduled view would render empty and every
+    // scheduled conversation would stay in New Replies, with no error anywhere.
+    is_schedule_suppressed: row.is_schedule_suppressed === true,
+    next_scheduled_send_at_utc: row.next_scheduled_send_at_utc ?? null,
+    next_scheduled_send_local: row.next_scheduled_send_local ?? null,
+    next_scheduled_timezone: row.next_scheduled_timezone ?? null,
+    next_scheduled_queue_row_id: row.next_scheduled_queue_row_id ?? null,
+    scheduled_pending_count: Number.isFinite(Number(row.scheduled_pending_count))
+      ? Number(row.scheduled_pending_count)
+      : 0,
     preview: body,
     latestMessageBody: body,
     latest_message_body: body,

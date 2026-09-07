@@ -17,6 +17,7 @@ import {
   type ConversationDecision,
 } from '../../../domain/inbox/inbox-decisioning'
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
+import { readScheduledSendTime, scheduledPendingCount } from '../../../domain/inbox/format-scheduled-send-time'
 import { isInboxDebugEnabled } from '../inbox.adapter'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { InboxStreetViewThumb } from './InboxStreetViewThumb'
@@ -103,7 +104,6 @@ type BucketConfig = {
   countKey: string
 }
 
-import ScheduledFollowupsPanel from './ScheduledFollowupsPanel'
 import BulkFollowUpSheet from './BulkFollowUpSheet'
 
 const BUCKETS: BucketConfig[] = [
@@ -804,6 +804,9 @@ const HoverActions = ({ selectedForBulk, onToggleBulk, threadId }: any) => (
 )
 
 const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedForBulk, onToggleBulk }: any) => {
+  // Derived server-side from send_queue; read, never recomputed.
+  const scheduledSend = readScheduledSendTime(thread as Record<string, unknown>)
+  const scheduledPending = scheduledPendingCount(thread as Record<string, unknown>)
   const {
     name,
     address,
@@ -899,6 +902,26 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
           {intelTags.length > 0 && <><span className="nx-thread-card-rebuilt__dot">•</span><span style={{color: '#a1a1aa'}}>{intelTags[0]}</span></>}
         </div>
         <div className="nx-thread-card-rebuilt__preview">{latestMessageBody}</div>
+        {/* The effective send time the SERVER resolved -- never a re-derived or
+            operator-requested one. "Seller local" is stated because the hour
+            means nothing without knowing whose clock it is. */}
+        {scheduledSend && (
+          <div className="nx-thread-card-rebuilt__scheduled">
+            <span className="nx-thread-card-rebuilt__scheduled-label">Scheduled</span>
+            <span className="nx-thread-card-rebuilt__scheduled-time">{scheduledSend.label}</span>
+            <span className="nx-thread-card-rebuilt__scheduled-zone">Seller local</span>
+            {scheduledPending > 1 && (
+              <span className="nx-thread-card-rebuilt__scheduled-more">{scheduledPending} scheduled actions</span>
+            )}
+          </div>
+        )}
+        {scheduledSend && (
+          <div className="nx-thread-card-rebuilt__metadata is-detail-meta">
+            <span>Zone {scheduledSend.timezone ?? 'operator local'}</span>
+            <span className="nx-thread-card-rebuilt__dot">•</span>
+            <span>UTC {scheduledSend.iso}</span>
+          </div>
+        )}
         {/* Mobile reads identity -> latest message -> address, so the address
             repeats here and the header copy is hidden at mobile widths. Desktop
             keeps the header placement; this element is display:none there. */}
@@ -1845,20 +1868,13 @@ export const InboxSidebar = ({
   const renderListContent = () => (
     <>
       <div className="nx-sidebar-rebuilt__threads-scroll" ref={groupsRef}>
-        {/* Scheduled is the one view NOT backed by thread rows: it reads
-            send_queue, so it renders its own compact list in place of the
-            thread list rather than pretending to be a bucket. */}
-        {activeViewFilter === 'scheduled' ? (
-          <ScheduledFollowupsPanel
-            onOpenThread={(threadKey) => {
-              const match = threads.find(
-                (t) => t.threadKey === threadKey || t.id === threadKey,
-              )
-              // onSelect takes a thread id, not the row object.
-              if (match) onSelect?.(String(match.id))
-            }}
-          />
-        ) : (
+        {/* Scheduled is now a REAL thread bucket. It used to render a separate
+            list of send_queue rows, which meant one conversation with two
+            future follow-ups appeared twice, none of the rows carried thread
+            identity, and selection/scroll restoration did not work there.
+            send_queue is still the authority -- the server derives it into
+            per-thread fields -- but the operator sees conversations, once
+            each, in the same list as every other view. */}
         <div className={cls('nx-sidebar-rebuilt__threads', inboxMode === 'full100' && 'nx-cc-table', shouldVirtualizeList && 'is-virtualized')}>
           {inboxMode === 'full100' && displayedActiveThreads.length > 0 && (
             <div className="nx-cc-table__header" aria-hidden="true">
@@ -1976,12 +1992,12 @@ export const InboxSidebar = ({
             </div>
           )}
         </div>
-        )}
         {/* Load More lives INSIDE the scroll container. As a sibling it sat below
             the scrollport, so on mobile the bottom dock covered it and it could
             never be reached in Priority / New Replies / Needs Review.
-            Hidden for Scheduled, which is not a paginated thread list. */}
-        {showLoadMore && activeViewFilter !== 'scheduled' && (
+            Scheduled is a paginated thread list like any other now, so it is
+            no longer excluded here. */}
+        {showLoadMore && (
           <div className="nx-sidebar-rebuilt__load-more">
             <button type="button" className={cls('nx-load-more-btn', loadMoreLoading && 'is-loading')} disabled={loadMoreLoading} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLoadMorePreservingScroll() }}>
               {loadMoreLoading ? <><span className="nx-load-more-spinner" aria-hidden="true" /><span>Loading…</span></> : 'Load More'}
@@ -2002,24 +2018,37 @@ export const InboxSidebar = ({
             return String(row ? (row.threadKey || row.id) : id)
           })}
           onClose={() => setFollowUpOpen(false)}
-          onScheduled={(scheduledKeys) => {
+          onScheduled={(outcome) => {
             // Only rows the SERVER confirmed leave the list. Scheduled is not
-            // sent, so nothing here claims delivery.
+            // sent, so nothing here claims delivery. Hiding is a bridge until
+            // the next read: the server now derives is_schedule_suppressed from
+            // send_queue, so the refetch reaches the same conclusion on its own
+            // and these ids stop being special.
+            const idFor = (key: string) => {
+              const row = threads.find((t) => t.threadKey === key || t.id === key)
+              return row ? row.id : null
+            }
             setBulkHiddenIds((prev) => {
               const next = new Set(prev)
-              for (const key of scheduledKeys) {
-                const row = threads.find((t) => t.threadKey === key || t.id === key)
-                if (row) next.add(row.id)
+              for (const key of outcome.scheduledThreadKeys) {
+                const id = idFor(key)
+                if (id) next.add(id)
               }
               return next
             })
             setFollowUpOpen(false)
-            setBulkSelectedIds(new Set())
+            // Refused recipients STAY selected. They are the operator's
+            // remaining work, and clearing them would quietly drop the two
+            // conversations that still need a decision.
+            const stillSelected = new Set(
+              outcome.needsReviewThreadKeys.map(idFor).filter((id): id is string => Boolean(id)),
+            )
+            setBulkSelectedIds(stillSelected)
             // Deliberately no Undo affordance here: an undo button whose revert
             // does nothing is a lying control, and cancelling a scheduled send
             // is a real action that belongs in the Scheduled view where the
             // queued row can actually be cancelled.
-            setBulkNotice(`${scheduledKeys.length} follow-up${scheduledKeys.length === 1 ? '' : 's'} scheduled`)
+            setBulkNotice(outcome.summary)
             window.setTimeout(() => setBulkNotice(null), 6000)
           }}
         />

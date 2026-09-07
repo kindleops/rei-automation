@@ -3,11 +3,14 @@ import { bulkFollowUp, type BulkFollowUpPlan, type FollowUpRecipient } from '../
 import { describeFailureReason } from '../followup-failure-reasons'
 import FollowUpSchedulePicker, { validateSchedule } from './FollowUpSchedulePicker'
 import type { FollowUpScheduleConfig } from '../../../lib/api/backendClient'
+import { applyBulkScheduleResult, type BulkScheduleOutcome } from '../../../domain/inbox/apply-bulk-schedule-result'
 
 type Props = {
   threadKeys: string[]
   onClose: () => void
-  onScheduled: (scheduledThreadKeys: string[]) => void
+  /** Receives the FULL per-recipient outcome, not just the winners: the
+   *  caller has to keep the refused ones actionable and say why. */
+  onScheduled: (outcome: BulkScheduleOutcome) => void
 }
 
 // Human wording for the canonical rejection reasons. An operator should never
@@ -85,10 +88,9 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
       )
       return
     }
-    const done = (res.data.results ?? [])
-      .filter((r): r is { thread_key: string; ok: boolean } => Boolean((r as { ok?: boolean })?.ok))
-      .map((r) => r.thread_key)
-    onScheduled(done)
+    // One reducer decides who moved and who did not, so the sheet and the list
+    // can never disagree about the outcome of the same response.
+    onScheduled(applyBulkScheduleResult(res.data))
   }
 
   const eligible = plan?.recipients.filter((r) => r.eligible) ?? []

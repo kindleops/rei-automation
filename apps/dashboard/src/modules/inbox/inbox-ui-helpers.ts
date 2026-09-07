@@ -15,6 +15,7 @@ import {
   resolveInboxThreadState,
   type CanonicalBucket,
 } from '../../domain/inbox/resolveInboxThreadState'
+import { isScheduleSuppressedThread } from '../../domain/inbox/format-scheduled-send-time'
 
 import type { InboxStageSelectValue, InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
 export type { InboxStageSelectValue, InboxViewSelectValue } from '../../domain/inbox/inbox-view-types'
@@ -508,11 +509,32 @@ const resolveApiExecutionBucket = (thread: InboxWorkflowThread): string => {
   return raw
 }
 
+/**
+ * Views that mean "the operator has to deal with this now". A conversation
+ * whose next action is already booked in send_queue is withheld from exactly
+ * these, and from nothing else -- it keeps its bucket, temperature and
+ * priority, and it still appears in All.
+ */
+const ATTENTION_VIEWS = new Set<string>([
+  'new_replies', 'needs_reply', 'new_inbound', 'new_inbounds',
+  'priority', 'hot_leads', 'positive_hot',
+  'needs_review', 'manual_review',
+  'follow_up', 'follow_up_due',
+  'active',
+])
+
 export const matchesViewSelection = (thread: InboxWorkflowThread, view: InboxViewSelectValue): boolean => {
   const decision = buildConversationDecision(thread)
   const canonical = resolveInboxThreadState(thread)
   const isArchived = Boolean(thread.isArchived || thread.inboxStatus === 'closed')
   const apiBucket = resolveApiExecutionBucket(thread)
+
+  // Scheduled is decided by send_queue, which the server has already resolved
+  // into one flag (including the seller-reply override). It is answered before
+  // any bucket reasoning and is never recomputed here.
+  const scheduleSuppressed = isScheduleSuppressedThread(thread as unknown as Record<string, unknown>)
+  if (view === 'scheduled') return scheduleSuppressed && !isArchived
+  if (scheduleSuppressed && ATTENTION_VIEWS.has(String(view))) return false
 
   let matches = true
   if (view === 'archived') matches = isArchived

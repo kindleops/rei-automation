@@ -252,6 +252,28 @@ export function compactInboxThreadSummaryRow(row = {}) {
     matching_flags: row.matching_flags || null,
     person_flags_text: row.person_flags_text || null,
     contact_identity_class: row.contact_identity_class || null,
+    // Scheduled state, derived from send_queue by
+    // resolve-scheduled-thread-state.js. This is a FIXED projection, so
+    // omitting it here does not degrade the Scheduled view -- it silently
+    // empties it, and every scheduled conversation snaps back into New Replies
+    // on the compact path only.
+    //
+    // Spread conditionally because compact rows carry a deliberate key budget
+    // (they exist to keep a several-hundred-row boot payload small). The vast
+    // majority of conversations have nothing scheduled, and they must not pay
+    // for this feature: unscheduled rows gain ZERO keys, scheduled ones gain
+    // three. pending_count rides along only when there is genuinely more than
+    // one future action to disclose.
+    ...(row.is_schedule_suppressed === true
+      ? {
+        is_schedule_suppressed: true,
+        next_scheduled_send_at_utc: row.next_scheduled_send_at_utc || null,
+        next_scheduled_timezone: row.next_scheduled_timezone || null,
+        ...(Number(row.scheduled_pending_count) > 1
+          ? { scheduled_pending_count: Number(row.scheduled_pending_count) }
+          : {}),
+      }
+      : {}),
   };
 }
 

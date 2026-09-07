@@ -180,7 +180,12 @@ test("a bound acceptance produces an accepted offer AND exactly one closing case
     opportunity_id: OPP,
     thread_key: THREAD,
     acceptance_event_id: "evt-accept-1",
-    acceptance_at: "2026-09-06T15:00:00.000Z",
+    // Relative to the seeded offer, not an absolute wall clock. The offer stub
+    // stamps created_at with the REAL clock, so a fixed instant made this test
+    // pass only while the machine clock happened to be earlier in the same day
+    // and fail as `acceptance_predates_offer` from then on. The guard it was
+    // tripping is correct; the fixture was the time bomb.
+    acceptance_at: new Date(Date.now() + 60_000).toISOString(),
     supabase,
   });
 
