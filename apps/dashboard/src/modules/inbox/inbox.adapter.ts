@@ -1055,6 +1055,16 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
   const metaRef = useRef<Partial<InboxModel>>({ countsFetchWarning: null })
 
   const lastFetchRef = useRef<InboxFetchOptions>({ sourceMode: initialSourceMode })
+  /**
+   * Page size actually REQUESTED per bucket, recorded in runLoad because that
+   * is the one place every request passes through.
+   *
+   * lastFetchRef is written by `refresh`, and Load More calls runLoad directly,
+   * so it never advanced: Load More kept reading the bucket-switch limit of 30
+   * and asking for 60 forever. Keyed by bucket and refreshed by any load, so a
+   * bucket switch resets it to that switch's page size on its own.
+   */
+  const lastRequestedLimitRef = useRef<Record<string, number>>({})
   const abortByBucketRef = useRef<Record<string, AbortController>>({})
   const latestRequestIdByBucketRef = useRef<Record<string, string>>({})
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1080,6 +1090,11 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
     const normalizedOptions: InboxFetchOptions = options.filters?.view && options.filters.view !== bucketKey
       ? { ...options, filters: { ...options.filters, view: bucketKey as any } }
       : options
+    const requestedLimit = Number(normalizedOptions.limit)
+    if (Number.isFinite(requestedLimit) && requestedLimit > 0) {
+      lastRequestedLimitRef.current[bucketKey] = requestedLimit
+    }
+
     const requestId = `${bucketKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
     const existingController = abortByBucketRef.current[bucketKey]
@@ -1511,7 +1526,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       // though the bucket were exhausted, with New Replies showing 16 of 164.
       // Any bucket whose filtered yield stays under 25 was permanently pinned
       // at a 50-row page.
-      const lastLimit = Number(lastFetchRef.current?.limit ?? lastFetchRef.current?.maxRows ?? 0)
+      const recordedLimit = lastRequestedLimitRef.current[stateRef.current.activeBucketKey]
+      const lastLimit = Number(
+        recordedLimit ?? lastFetchRef.current?.limit ?? lastFetchRef.current?.maxRows ?? 0,
+      )
       const growthBase = Math.max(Number.isFinite(lastLimit) ? lastLimit : 0, loaded, 25)
       const nextLimit = Math.min(growthBase * 2, 500)
 

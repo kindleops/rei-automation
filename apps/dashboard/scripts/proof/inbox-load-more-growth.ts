@@ -13,6 +13,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -77,6 +78,33 @@ check('the very first Load More still opens up the page', () => {
   // Boot page is 30 and yields 10; the first click must exceed 30.
   assert.ok(nextLimit(30, 10) > 30)
   assert.equal(nextLimit(30, 10), 60)
+})
+
+check('the growth base must come from the RECORDED request, not lastFetchRef', () => {
+  // Second staging failure: the fix read lastFetchRef.limit, but that ref is
+  // written by `refresh` and Load More calls runLoad directly -- so it stayed
+  // at the bucket-switch value of 30 and every click asked for 60. Measured:
+  // 30 -> 10 rows, click 1 -> limit 60 (21 rows), click 2 -> limit 60 again.
+  const source = readFileSync(
+    new URL('../../src/modules/inbox/inbox.adapter.ts', import.meta.url), 'utf8')
+
+  assert.ok(
+    /lastRequestedLimitRef\.current\[bucketKey\] = requestedLimit/.test(source),
+    'runLoad must record the page size it actually requested',
+  )
+  assert.ok(
+    /const recordedLimit = lastRequestedLimitRef\.current\[stateRef\.current\.activeBucketKey\]/.test(source),
+    'loadMore must grow from that recorded value',
+  )
+  // Simulate the real sequence with a recorded base that advances.
+  let recorded = 30
+  const seen: number[] = []
+  for (let i = 0; i < 4; i += 1) {
+    const loaded = Math.floor(recorded / 3)
+    recorded = nextLimit(recorded, loaded)
+    seen.push(recorded)
+  }
+  assert.deepEqual(seen, [60, 120, 240, 480], 'each click must advance')
 })
 
 console.log(`\nPASS  ${passed} checks\n`)
