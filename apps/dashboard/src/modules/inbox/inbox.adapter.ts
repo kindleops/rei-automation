@@ -84,8 +84,19 @@ const COUNTS_REFRESH_DEBOUNCE_MS = 350
 export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
   onWarning?: (warning: string | null) => void,
+  options?: { force?: boolean },
 ) => {
-  void backendClient.fetchInboxCounts().then((res) => {
+  // /api/cockpit/inbox/counts is GET-cached for 60s. That is right for polling
+  // and wrong immediately after a mutation: scheduling a follow-up moves a
+  // conversation out of Priority and into Scheduled, and re-reading the cache
+  // returns the pre-mutation numbers, so the chips sit visibly stale until the
+  // TTL lapses or the operator reloads.
+  //
+  // callBackend skips the cache whenever a signal is present ("abortable
+  // requests must not join cached/in-flight GETs"), so a forced refresh passes
+  // one. The controller is never aborted; the signal exists only to opt out.
+  const signal = options?.force === true ? new AbortController().signal : undefined
+  void backendClient.fetchInboxCounts(signal).then((res) => {
     const applied = applyInboxCountsFetchResult({
       ok: res.ok,
       status: res.status,
@@ -1528,10 +1539,10 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
    * membership, so the chip counts must be reconciled against the server's own
    * bucket semantics — never by local +1/-1 arithmetic.
    */
-  const refreshCounts = useCallback(async () => {
+  const refreshCounts = useCallback(async (options?: { force?: boolean }) => {
     refreshAuthoritativeViewCounts(dispatch, (warning) => {
       metaRef.current.countsFetchWarning = warning
-    })
+    }, options)
   }, [])
 
   // ── Realtime subscription + polling heartbeat ─────────────────────────────

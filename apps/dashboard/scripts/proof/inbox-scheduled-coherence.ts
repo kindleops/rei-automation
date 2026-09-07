@@ -7,6 +7,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   formatScheduledSendTime,
   readScheduledSendTime,
@@ -20,6 +21,12 @@ import { getSavedPresetConfig } from '../../src/modules/inbox/inbox-ui-helpers'
 let passed = 0
 const check = (name: string, fn: () => void) => {
   fn()
+  passed += 1
+  console.log(`  ok  ${name}`)
+}
+
+const checkAsync = async (name: string, fn: () => Promise<void>) => {
+  await fn()
   passed += 1
   console.log(`  ok  ${name}`)
 }
@@ -212,6 +219,44 @@ check('the primary category presets still resolve to their own views', () => {
   assert.equal(getSavedPresetConfig('my_priority').view, 'priority')
   assert.equal(getSavedPresetConfig('new_inbounds').view, 'new_replies')
   assert.equal(getSavedPresetConfig('review_required').view, 'needs_review')
+})
+
+console.log('\nPOST-SCHEDULE COUNT RECONCILIATION')
+
+await checkAsync('a forced counts refresh bypasses the GET cache; an unforced one does not', async () => {
+  // /inbox/counts is GET-cached for 60s. callBackend skips the cache only when
+  // a signal is present, so a refresh issued right after scheduling must pass
+  // one -- otherwise the chips re-read the pre-schedule numbers and appear
+  // frozen until the TTL lapses.
+  const mod = await import('../../src/modules/inbox/inbox.adapter')
+  const source = readFileSync(
+    new URL('../../src/modules/inbox/inbox.adapter.ts', import.meta.url), 'utf8')
+
+  assert.ok(
+    /options\?\.force === true \? new AbortController\(\)\.signal : undefined/.test(source),
+    'forced refresh must supply a signal, which is what opts out of the GET cache',
+  )
+  assert.ok(
+    /fetchInboxCounts\(signal\)/.test(source),
+    'the signal must actually reach fetchInboxCounts',
+  )
+  assert.equal(typeof mod.refreshAuthoritativeViewCounts, 'function')
+})
+
+check('a confirmed schedule is what triggers reconciliation, not the tap', () => {
+  const sidebar = readFileSync(
+    new URL('../../src/modules/inbox/components/InboxSidebar.tsx', import.meta.url), 'utf8')
+  assert.ok(
+    /if \(outcome\.scheduledThreadKeys\.length > 0\) onSchedulingCommitted\?\.\(\)/.test(sidebar),
+    'reconciliation must be gated on server-confirmed recipients',
+  )
+
+  const page = readFileSync(
+    new URL('../../src/modules/inbox/InboxPage.tsx', import.meta.url), 'utf8')
+  assert.ok(
+    /refreshInboxCounts\(\{ force: true \}\)/.test(page),
+    'the post-schedule counts refresh must be forced',
+  )
 })
 
 console.log(`\nPASS  ${passed} checks\n`)

@@ -71,6 +71,13 @@ interface InboxSidebarProps {
   onRemoveFilterChip?: (key: string) => void
   onClearFilters?: () => void
   onRetryLoad?: () => void
+  /**
+   * Fired after the SERVER confirms at least one scheduled follow-up.
+   * Scheduling moves a conversation between buckets, so the category
+   * counts have to be reconciled against the server -- they are
+   * authoritative values, never derived from the loaded page.
+   */
+  onSchedulingCommitted?: () => void
   onLoadMore: () => void
   canLoadMore: boolean
   recentlyUpdatedThreadIds?: Set<string>
@@ -1309,7 +1316,7 @@ const _DealSnapshotPlaceholder = ({ thread, decision }: any) => {
 export const InboxSidebar = ({
   threads, selectedId, activeViewFilter, onSelect, onThreadAction, savedPreset, onApplySavedPreset,
   viewCounts, onOpenAdvancedFilters, activeFilterChips = [], activeFilterCount = 0,
-  onRemoveFilterChip, onClearFilters, onRetryLoad, onLoadMore, canLoadMore,
+  onRemoveFilterChip, onClearFilters, onRetryLoad, onSchedulingCommitted, onLoadMore, canLoadMore,
   recentlyUpdatedThreadIds = new Set(), searchQuery = '', onSearchQueryChange,
   visibleThreadCount = 1000, loadingError, inboxMode = 'rail25', densityMode = 'compact',
   loading = false,
@@ -2065,6 +2072,12 @@ export const InboxSidebar = ({
             // queued row can actually be cancelled.
             setBulkNotice(outcome.summary)
             window.setTimeout(() => setBulkNotice(null), 6000)
+            // Counts are server-authoritative, so a confirmed schedule has to
+            // be reconciled rather than adjusted locally: the source bucket
+            // loses the conversation and Scheduled gains it. Without this the
+            // chips kept their pre-schedule numbers until an unrelated refresh
+            // or a reload happened to fire.
+            if (outcome.scheduledThreadKeys.length > 0) onSchedulingCommitted?.()
           }}
         />
       )}

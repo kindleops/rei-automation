@@ -1086,6 +1086,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     advanced: serverAdvancedPayload,
   }), [searchQuery, serverAdvancedPayload, stageFilter, viewFilter])
 
+  /**
+   * A scheduled follow-up changes bucket membership, so both the list and the
+   * category counts are re-read from the server. The counts refresh is FORCED:
+   * /inbox/counts is GET-cached for 60s, and an unforced re-read right after
+   * the mutation returns the pre-schedule numbers.
+   */
+  const handleSchedulingCommitted = useCallback(() => {
+    void refreshInbox({ filters: currentInboxQuery, cursor: null, limit: 100 })
+    void refreshInboxCounts({ force: true })
+  }, [refreshInbox, refreshInboxCounts, currentInboxQuery])
+
   const activeAdvancedFilterCount = useMemo(
     () => countActiveAdvancedFilters(advancedFilters),
     [advancedFilters],
@@ -4957,6 +4968,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onRemoveFilterChip={handleRemoveAdvancedFilterChip}
         onClearFilters={handleResetFilters}
         onRetryLoad={handleRetryInboxLoad}
+        onSchedulingCommitted={handleSchedulingCommitted}
         onLoadMore={handleLoadMore}
         canLoadMore={Boolean(data.pagination?.hasMore)}
         recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
@@ -5513,6 +5525,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onRemoveFilterChip={handleRemoveAdvancedFilterChip}
             onClearFilters={handleResetFilters}
             onRetryLoad={handleRetryInboxLoad}
+            onSchedulingCommitted={handleSchedulingCommitted}
             onLoadMore={handleLoadMore}
             canLoadMore={Boolean(data.pagination?.hasMore)}
             recentlyUpdatedThreadIds={recentlyUpdatedThreadIds}
