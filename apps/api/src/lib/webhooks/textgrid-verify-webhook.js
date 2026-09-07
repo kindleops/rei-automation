@@ -68,8 +68,24 @@ export function getTextgridWebhookSignatureMode(override = null) {
 
 // override_base: explicit base URL (for testing without relying on process.env at call time)
 export function buildCanonicalWebhookUrl(request_url, override_base = null) {
+  // PURPOSE-SPECIFIC CONFIG, checked before APP_BASE_URL.
+  //
+  // The signature is computed over the URL the provider POSTed to, so this
+  // value is security-critical. APP_BASE_URL is not: it also drives storage
+  // links emailed to title companies, operator alert links, and (until this
+  // slice) privileged internal routing. One variable serving both meant a value
+  // that was right for a link could silently break every callback -- and in
+  // production it pointed at a stale Vercel host, so the canonical URL used for
+  // verification was a host this runtime does not even serve.
+  //
+  // Falls back to APP_BASE_URL when the dedicated value is absent so this is a
+  // strict improvement rather than a behaviour change; the fallback is reported
+  // in diagnostics as `canonical_source` so a degraded config is visible.
+  const dedicated = clean(
+    ENV.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL || process.env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL
+  );
   const base = clean(
-    override_base || ENV.APP_BASE_URL || process.env.APP_BASE_URL
+    override_base || dedicated || ENV.APP_BASE_URL || process.env.APP_BASE_URL
   ).replace(/\/+$/, "");
 
   try {
@@ -82,6 +98,21 @@ export function buildCanonicalWebhookUrl(request_url, override_base = null) {
   } catch {
     return request_url;
   }
+}
+
+/**
+ * Which configuration supplied the canonical base. Diagnostics only.
+ *
+ * `app_base_url_fallback` means the dedicated setting is missing and signature
+ * verification is riding on a general-purpose URL -- the exact coupling this
+ * slice exists to remove.
+ */
+export function canonicalWebhookUrlSource(env = process.env) {
+  if (clean(ENV.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL || env.TEXTGRID_WEBHOOK_PUBLIC_BASE_URL)) {
+    return "textgrid_webhook_public_base_url";
+  }
+  if (clean(ENV.APP_BASE_URL || env.APP_BASE_URL)) return "app_base_url_fallback";
+  return "none";
 }
 
 function getRequestPath(request_url = "") {
