@@ -118,6 +118,39 @@ ambiguous branch. **This has a real cost — a rate-limited send is held rather
 than retried — and upgrading it is an EMAIL-2 task requiring evidence from a live
 probe, not a reading of the documentation.**
 
+### 4b. The second half of the collision, found by executing the migration
+
+The static contract test passed while the migration was still incomplete.
+Applying it to a throwaway Postgres found that three partial unique indexes
+created by the §11 migration enforce "one communication per anchor" at the
+database level, and every one of them is channel-blind:
+
+```
+uq_seller_logical_communications_decision_action  (decision_id, communication_type)
+uq_seller_logical_communications_campaign_touch   (campaign_target_id, touch_number)
+uq_seller_logical_communications_offer_action     (seller_offer_id, seller_offer_version, communication_type)
+```
+
+With `channel` in the logical key but not in these indexes, an SMS touch and an
+email touch on the same campaign target produce two *different* keys — and the
+second insert then dies on `uq_..._campaign_touch`. The collision moves from the
+hash to the index and the email is still refused.
+
+Each index now includes `channel`. What each still guarantees is what it was
+written to guarantee: one communication per anchor **per channel**, which is what
+"this touch must happen once" always meant once more than one transport exists.
+
+`npm run proof:email-migration` is the executed contract that caught this. It
+applies the real §11 and EMAIL-1 migrations to a throwaway cluster and
+interrogates the result — 18 checks, including that an SMS touch and an email
+touch on the same target actually coexist. Reverting the index widening turns
+exactly five of them red, so the proof is not vacuous. It skips loudly rather
+than failing when no local Postgres is installed, and drops to an unprivileged
+account when run as root so it still runs in CI.
+
+`email-channel-migration-contract.test.mjs` gained a static guard for the same
+thing, so a revert turns red even where no Postgres is available.
+
 ### 5. Migration — `20260908120000_email_channel_canonical_domain.sql`
 
 * `seller_logical_communications`: `channel` (NOT NULL, no surviving default,
@@ -137,9 +170,12 @@ probe, not a reading of the documentation.**
   email twin of the long-standing `(owner, phone)` unique key. Without it the
   email path had no upsert target and recorded no outreach at all, so every
   downstream cooldown check found nothing.
+* the three anchor uniqueness indexes above, widened to include `channel`.
 
-Additive only: no `DROP`, no `TRUNCATE`, no `DELETE`. One `UPDATE`, the channel
-backfill. Single transaction, re-runnable.
+No `DROP TABLE`, no `DROP COLUMN`, no `TRUNCATE`, no `DELETE`. The only drops are
+three indexes, recreated in the same transaction with `channel` added. One
+`UPDATE`, the channel backfill. Single transaction, re-runnable — both asserted
+statically and proven by applying it twice.
 
 ## Apply ordering — required, and not yet done
 
@@ -180,7 +216,9 @@ renders "unavailable" rather than zeros, using its existing styles.
 | `email-eligibility-store.test.mjs` | 14 | failed read ≠ pass, production column names, cross-channel row folding |
 | `email-transport-brevo.test.mjs` | 26 | ambiguity never retried, no silent success, credential never leaks, header injection |
 | `logical-communication-channel-identity.test.mjs` | 15 | the collision closed for every anchor type; lck_v1 guarantees preserved |
-| `email-channel-migration-contract.test.mjs` | 22 | the statements a reviewer approved are the statements that run |
+| `email-channel-migration-contract.test.mjs` | 24 | the statements a reviewer approved are the statements that run |
+
+Plus `npm run proof:email-migration`: 18 executed checks against a real Postgres.
 
 Existing §11 suites were updated where the contract deliberately changed (fixtures
 must now name a channel): `logical-communication-key`,

@@ -326,10 +326,14 @@ Rules:
 
 ## 8. Architectural risks found
 
-1. **Channel collision in the logical key (highest severity).** Without a channel component,
+1. **Channel collision, in two places (highest severity).** Without a channel component,
    `campaign_target_id + touch_number` identifies one action across both channels. Turning email on
    would make an email touch look like a duplicate of the SMS touch and be refused — or, worse,
-   adopt the SMS attempt's provider evidence.
+   adopt the SMS attempt's provider evidence. The same blindness exists a second time in the three
+   partial unique indexes on `seller_logical_communications`
+   (`uq_..._decision_action`, `uq_..._campaign_touch`, `uq_..._offer_action`), so fixing only the
+   key moves the collision from the hash to the index rather than removing it. Both are closed in
+   EMAIL-1.
 2. **Silent cross-channel guard failure.** `hasRecentSmsOutreach()` queries columns that do not
    exist, catches the error, and returns `false`. The one existing duplicate-contact protection
    fails *open*.

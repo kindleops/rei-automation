@@ -103,6 +103,50 @@ COMMENT ON COLUMN public.seller_logical_communications.channel IS
 COMMENT ON COLUMN public.seller_logical_communications.to_email IS
   'Recipient address for channel = email. Mutually exclusive with to_phone_number.';
 
+-- ── 1b. the anchor uniqueness indexes must learn channel too ────────────────
+--
+-- FOUND BY EXECUTING THIS MIGRATION, NOT BY READING IT.
+--
+--   Putting channel into the logical key is necessary and was not sufficient.
+--   Three partial unique indexes enforce "one communication per anchor" at the
+--   database level, and every one of them is channel-blind:
+--
+--     uq_..._decision_action  (decision_id, communication_type)
+--     uq_..._campaign_touch   (campaign_target_id, touch_number)
+--     uq_..._offer_action     (seller_offer_id, seller_offer_version, communication_type)
+--
+--   With lck_v2 alone, an SMS touch and an email touch on the same campaign
+--   target produce two DIFFERENT logical keys -- and the second insert then dies
+--   on uq_..._campaign_touch. The collision simply moves from the hash to the
+--   index, and the email is still refused.
+--
+--   So each index gains channel, for exactly the reason the key did: the same
+--   domain action on two transports is two communications. What each index still
+--   guarantees is the thing it was written to guarantee -- one communication per
+--   anchor PER CHANNEL -- which is what "this touch must happen once" always
+--   meant once more than one transport exists.
+--
+--   These are indexes, not data. Dropping and recreating them inside this
+--   transaction rewrites no rows and loses no history.
+
+DROP INDEX IF EXISTS public.uq_seller_logical_communications_decision_action;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_logical_communications_decision_action
+  ON public.seller_logical_communications (decision_id, communication_type, channel)
+  WHERE decision_id IS NOT NULL;
+
+DROP INDEX IF EXISTS public.uq_seller_logical_communications_campaign_touch;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_logical_communications_campaign_touch
+  ON public.seller_logical_communications (campaign_target_id, touch_number, channel)
+  WHERE campaign_target_id IS NOT NULL AND touch_number IS NOT NULL;
+
+DROP INDEX IF EXISTS public.uq_seller_logical_communications_offer_action;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_logical_communications_offer_action
+  ON public.seller_logical_communications (seller_offer_id, seller_offer_version, communication_type, channel)
+  WHERE seller_offer_id IS NOT NULL;
+
+COMMENT ON INDEX public.uq_seller_logical_communications_campaign_touch IS
+  'One communication per (campaign target, touch) PER CHANNEL. Without channel this index re-created the cross-channel collision that lck_v2 removed from the key.';
+
 -- ── 2. the get-or-create RPC learns channel and to_email ────────────────────
 --
 -- Two changes, and nothing else:

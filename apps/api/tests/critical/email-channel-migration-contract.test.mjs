@@ -203,6 +203,46 @@ test("the email unique index is NOT partial: PostgREST cannot infer a predicate"
     "a partial index would silently fail to match PostgREST's ON CONFLICT");
 });
 
+// ── the anchor uniqueness indexes: found by EXECUTION, guarded here ─────────
+
+test("every anchor uniqueness index carries channel", () => {
+  // This is the assertion the original version of this file did not have, and
+  // could not have had, because the defect was invisible in the migration's own
+  // text: three partial unique indexes created by the §11 migration enforce
+  // "one communication per anchor" and are channel-blind. With channel in the
+  // logical key but not in these indexes, the cross-channel collision simply
+  // moves from the hash to the index and the email is still refused.
+  //
+  // The executed proof (npm run proof:email-migration) is what caught it. This
+  // static guard exists so a revert turns red even where no Postgres is
+  // available.
+  for (const index of [
+    "uq_seller_logical_communications_decision_action",
+    "uq_seller_logical_communications_campaign_touch",
+    "uq_seller_logical_communications_offer_action",
+  ]) {
+    const created = SQL.match(
+      new RegExp(`CREATE UNIQUE INDEX IF NOT EXISTS ${index}[\\s\\S]*?;`)
+    );
+    assert.ok(created, `${index} is not recreated by this migration`);
+    assert.ok(/\bchannel\b/.test(created[0]), `${index} does not include channel`);
+    assert.ok(
+      SQL.includes(`DROP INDEX IF EXISTS public.${index};`),
+      `${index} must be dropped before being recreated, or the widened definition never takes effect`
+    );
+  }
+});
+
+test("only indexes are dropped, never a table, column or constraint", () => {
+  const drops = SQL.match(/DROP\s+\w+/gi) || [];
+  for (const drop of drops) {
+    assert.ok(
+      /DROP\s+(INDEX|DEFAULT)/i.test(drop),
+      `unexpected destructive statement: ${drop}`
+    );
+  }
+});
+
 // ── the whole thing applies or none of it does ──────────────────────────────
 
 test("the migration is a single transaction", () => {
