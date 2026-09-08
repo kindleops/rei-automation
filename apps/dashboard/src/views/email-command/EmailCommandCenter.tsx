@@ -83,8 +83,16 @@ const KpiCard = ({
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 
-const OverviewTab = ({ overview }: { overview: EmailOverview | null }) => {
-  if (!overview) return <div className="ecc__loading">Loading overview…</div>
+const OverviewTab = ({ overview, loaded }: { overview: EmailOverview | null; loaded: boolean }) => {
+  // Null after loading means the backend could not answer. Rendering zeros here
+  // would present a failed query as a real, empty database.
+  if (!overview) {
+    return (
+      <div className="ecc__loading">
+        {loaded ? 'Overview unavailable. The email backend did not return data.' : 'Loading overview…'}
+      </div>
+    )
+  }
   return (
     <div className="ecc__overview">
       <div className="ecc__kpi-grid">
@@ -920,8 +928,16 @@ const SuppressionTab = ({ entries }: { entries: SuppressionEntry[] }) => {
 
 // ── Brevo Health Tab ──────────────────────────────────────────────────────────
 
-const BrevoHealthTab = ({ health }: { health: BrevoHealth | null }) => {
-  if (!health) return <div className="ecc__loading">Loading health data…</div>
+const BrevoHealthTab = ({ health, loaded: healthLoaded }: { health: BrevoHealth | null; loaded: boolean }) => {
+  // Unknown provider health is not the same as unhealthy, and must not be shown
+  // as a confident "disconnected".
+  if (!health) {
+    return (
+      <div className="ecc__loading">
+        {healthLoaded ? 'Provider health unavailable. Brevo status could not be read.' : 'Loading health data…'}
+      </div>
+    )
+  }
   return (
     <div className="ecc__health">
       <div className="ecc__health-section">
@@ -1061,9 +1077,12 @@ export const EmailCommandCenter = ({
   const [campaigns, setCampaigns] = useState<EmailCampaignDraft[]>([])
   const [suppression, setSuppression] = useState<SuppressionEntry[]>([])
 
+  const [overviewLoaded, setOverviewLoaded] = useState(false)
+  const [healthLoaded, setHealthLoaded] = useState(false)
+
   useEffect(() => {
-    getEmailOverview().then(setOverview)
-    getBrevoHealth().then(setHealth)
+    getEmailOverview().then((value) => { setOverview(value); setOverviewLoaded(true) })
+    getBrevoHealth().then((value) => { setHealth(value); setHealthLoaded(true) })
     getEmailTemplates().then(setTemplates)
     getEmailCampaigns().then(setCampaigns)
     getSuppressionList().then(setSuppression)
@@ -1125,14 +1144,14 @@ export const EmailCommandCenter = ({
       </nav>
 
       <main className="ecc__body">
-        {activeTab === 'overview'     && <OverviewTab overview={overview} />}
+        {activeTab === 'overview'     && <OverviewTab overview={overview} loaded={overviewLoaded} />}
         {activeTab === 'inbox'        && <InboxTab paneWidth={paneWidth} />}
         {activeTab === 'records'      && <RecordsTab />}
         {activeTab === 'composer'     && <ComposerTab templates={templates} health={health} />}
         {activeTab === 'campaigns'    && <CampaignsTab campaigns={campaigns} />}
         {activeTab === 'templates'    && <TemplatesTab templates={templates} />}
         {activeTab === 'suppression'  && <SuppressionTab entries={suppression} />}
-        {activeTab === 'brevo-health' && <BrevoHealthTab health={health} />}
+        {activeTab === 'brevo-health' && <BrevoHealthTab health={health} loaded={healthLoaded} />}
       </main>
     </div>
   )

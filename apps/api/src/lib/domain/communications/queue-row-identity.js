@@ -28,7 +28,19 @@
  * do encode their action, not a general-purpose guesser.
  */
 
-import { COMMUNICATION_TYPES } from '@/lib/domain/communications/logical-communication-key.js';
+import {
+  COMMUNICATION_CHANNELS,
+  COMMUNICATION_TYPES,
+} from '@/lib/domain/communications/logical-communication-key.js';
+
+/**
+ * This resolver reads `send_queue`, which is the SMS queue and nothing else.
+ * Since lck_v2 the channel is part of a communication's identity, so it is
+ * stated here rather than defaulted downstream: a resolver that knows exactly
+ * which transport it speaks for should say so, and an email queue row must go
+ * through its own resolver rather than inheriting this one's answer.
+ */
+const QUEUE_CHANNEL = COMMUNICATION_CHANNELS.SMS;
 
 /**
  * A message that states a price. Identity must be the OFFER and its VERSION,
@@ -80,6 +92,7 @@ function readMetadata(queue_row = {}) {
 export function resolveQueueRowIdentity(queue_row = {}) {
   const md = readMetadata(queue_row);
   const lineage = {
+    channel: QUEUE_CHANNEL,
     thread_key: clean(queue_row.thread_key) || null,
     to_phone_number: clean(queue_row.to_phone_number) || null,
     campaign_id: clean(queue_row.campaign_id) || null,
@@ -129,8 +142,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.MONETARY_OFFER,
-      anchors: { offer_id: seller_offer_id, offer_version: seller_offer_version },
-      lineage: { ...lineage, seller_offer_id, seller_offer_version },
+      anchors: { channel: QUEUE_CHANNEL, offer_id: seller_offer_id, offer_version: seller_offer_version },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, seller_offer_id, seller_offer_version },
       monetary: monetary.anchors,
     };
   }
@@ -145,8 +158,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH,
-      anchors: { campaign_target_id, touch_number: String(touch_number) },
-      lineage: { ...lineage, campaign_target_id, touch_number: String(touch_number) },
+      anchors: { channel: QUEUE_CHANNEL, campaign_target_id, touch_number: String(touch_number) },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, campaign_target_id, touch_number: String(touch_number) },
     };
   }
 
@@ -158,8 +171,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.INTERNAL_CANARY,
-      anchors: { canary_run_id, canary_leg },
-      lineage: { ...lineage, canary_run_id, canary_leg },
+      anchors: { channel: QUEUE_CHANNEL, canary_run_id, canary_leg },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, canary_run_id, canary_leg },
     };
   }
 
@@ -170,8 +183,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.AUTONOMOUS_REPLY,
-      anchors: { decision_id },
-      lineage: { ...lineage, decision_id },
+      anchors: { channel: QUEUE_CHANNEL, decision_id },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, decision_id },
     };
   }
 
@@ -181,8 +194,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.FOLLOW_UP,
-      anchors: { follow_up_id },
-      lineage: { ...lineage, follow_up_id },
+      anchors: { channel: QUEUE_CHANNEL, follow_up_id },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, follow_up_id },
     };
   }
 
@@ -192,8 +205,8 @@ export function resolveQueueRowIdentity(queue_row = {}) {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.MANUAL_OPERATOR_SEND,
-      anchors: { operator_action_id },
-      lineage: { ...lineage, operator_action_id },
+      anchors: { channel: QUEUE_CHANNEL, operator_action_id },
+      lineage: { ...lineage, channel: QUEUE_CHANNEL, operator_action_id },
     };
   }
 

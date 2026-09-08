@@ -63,7 +63,11 @@ test("a priced message is identified by its offer and version", () => {
   const identity = resolveQueueRowIdentity(monetaryRow());
   assert.equal(identity.ok, true);
   assert.equal(identity.communication_type, "monetary_offer");
-  assert.deepEqual(identity.anchors, { offer_id: "offer:opp-1:v1", offer_version: "1" });
+  // channel joins the anchors at lck_v2: send_queue is the SMS queue, and the
+  // resolver names that rather than leaving it to a downstream default.
+  assert.deepEqual(identity.anchors, {
+    channel: "sms", offer_id: "offer:opp-1:v1", offer_version: "1",
+  });
 });
 
 test("monetary identity beats campaign identity on the same row", () => {
@@ -125,10 +129,10 @@ test("a NEW offer version is a NEW communication", async () => {
 
 test("the two offer versions produce DIFFERENT logical keys", () => {
   const v1 = buildLogicalCommunicationKey({
-    communication_type: "monetary_offer", offer_id: "offer:opp-1:v1", offer_version: "1",
+    communication_type: "monetary_offer", channel: "sms", offer_id: "offer:opp-1:v1", offer_version: "1",
   });
   const v2 = buildLogicalCommunicationKey({
-    communication_type: "monetary_offer", offer_id: "offer:opp-1:v1", offer_version: "2",
+    communication_type: "monetary_offer", channel: "sms", offer_id: "offer:opp-1:v1", offer_version: "2",
   });
   assert.equal(v1.ok, true);
   assert.equal(v2.ok, true);

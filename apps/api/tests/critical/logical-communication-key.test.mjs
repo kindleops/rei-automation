@@ -24,8 +24,12 @@ import {
   LOGICAL_COMMUNICATION_KEY_VERSION,
 } from "@/lib/domain/communications/logical-communication-key.js";
 
+// Since lck_v2 the channel is part of identity, so every fixture must name one.
+// Channel-crossing behaviour has its own file:
+// logical-communication-channel-identity.test.mjs.
 const reply = (over = {}) => ({
   communication_type: COMMUNICATION_TYPES.AUTONOMOUS_REPLY,
+  channel: "sms",
   decision_id: "decision:evt-123",
   ...over,
 });
@@ -79,11 +83,12 @@ test("different domain actions produce different keys", () => {
     ["decision A", reply({ decision_id: "decision:evt-1" })],
     ["decision B", reply({ decision_id: "decision:evt-2" })],
     ["same decision, next turn", reply({ decision_id: "decision:evt-1", action_sequence: "2" })],
-    ["offer v1", { communication_type: COMMUNICATION_TYPES.MONETARY_OFFER, offer_id: "offer:o1", offer_version: 1 }],
-    ["offer v2", { communication_type: COMMUNICATION_TYPES.MONETARY_OFFER, offer_id: "offer:o1", offer_version: 2 }],
-    ["campaign t1", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, campaign_target_id: "ct-1", touch_number: 1 }],
-    ["campaign t2", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, campaign_target_id: "ct-1", touch_number: 2 }],
-    ["other target", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, campaign_target_id: "ct-2", touch_number: 1 }],
+    ["offer v1", { communication_type: COMMUNICATION_TYPES.MONETARY_OFFER, channel: "sms", offer_id: "offer:o1", offer_version: 1 }],
+    ["offer v2", { communication_type: COMMUNICATION_TYPES.MONETARY_OFFER, channel: "sms", offer_id: "offer:o1", offer_version: 2 }],
+    ["campaign t1", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, channel: "sms", campaign_target_id: "ct-1", touch_number: 1 }],
+    ["campaign t2", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, channel: "sms", campaign_target_id: "ct-1", touch_number: 2 }],
+    ["other target", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, channel: "sms", campaign_target_id: "ct-2", touch_number: 1 }],
+    ["same touch, by email", { communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH, channel: "email", campaign_target_id: "ct-1", touch_number: 1 }],
   ];
   for (const [label, input] of cases) {
     const r = buildLogicalCommunicationKey(input);
@@ -96,10 +101,10 @@ test("different domain actions produce different keys", () => {
 test("the communication TYPE is part of identity", () => {
   // The same anchor string under two types must not collide.
   const a = buildLogicalCommunicationKey({
-    communication_type: COMMUNICATION_TYPES.AUTONOMOUS_REPLY, decision_id: "x",
+    communication_type: COMMUNICATION_TYPES.AUTONOMOUS_REPLY, channel: "sms", decision_id: "x",
   });
   const b = buildLogicalCommunicationKey({
-    communication_type: COMMUNICATION_TYPES.CLARIFICATION_REPLY, decision_id: "x",
+    communication_type: COMMUNICATION_TYPES.CLARIFICATION_REPLY, channel: "sms", decision_id: "x",
   });
   assert.notEqual(a.key, b.key);
 });

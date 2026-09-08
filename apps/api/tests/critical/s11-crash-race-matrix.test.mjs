@@ -71,7 +71,9 @@ test("a Discord operator reply row resolves to a manual operator send", () => {
   });
   assert.equal(identity.ok, true, "a Discord reply must be dispatchable");
   assert.equal(identity.communication_type, "manual_operator_send");
-  assert.deepEqual(identity.anchors, { operator_action_id: "op-9" });
+  // send_queue is the SMS queue, and since lck_v2 the resolver says so rather
+  // than leaving the channel for a downstream default to invent.
+  assert.deepEqual(identity.anchors, { channel: "sms", operator_action_id: "op-9" });
 });
 
 test("a Discord row WITHOUT a durable operator action is still refused", () => {

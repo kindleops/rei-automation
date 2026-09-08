@@ -305,7 +305,13 @@ test("processEmailQueue dry_run=false calls Brevo and updates queue row", async 
 
   __setProcessEmailQueueDeps({
     supabase_override:      mock_supabase,
-    is_suppressed_override: async () => ({ ok: true, suppressed: false }),
+    // Suppression, opt-outs, DNC, pauses and the cross-channel duplicate window
+    // are now one canonical verdict rather than two ad-hoc lookups, so the test
+    // stubs the verdict. The verdict's own rules are proven in
+    // email-outreach-eligibility.test.mjs.
+    resolve_eligibility_override: async () => ({
+      ok: true, eligible: true, reason: null, blocking_reasons: [], next_eligible_at: null,
+    }),
     send_brevo_override:    async () => { brevo_called = true; return { ok: true, message_id: "brevo_msg_abc" }; },
     get_system_flag_override: async () => true,
   });

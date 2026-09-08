@@ -29,6 +29,26 @@
  *   returns a reason. It never invents an identity, never hashes a timestamp, and
  *   never generates a UUID. A caller that cannot name its domain action has not
  *   earned the right to send, and failing closed is the only correct answer.
+ *
+ * CHANNEL IS PART OF IDENTITY (lck_v2).
+ *   "Touch 3 of campaign target T by SMS" and "touch 3 of campaign target T by
+ *   email" are two communications, not one. Every anchor set in this module is
+ *   channel-blind -- campaign_target_id + touch_number, decision_id, follow_up_id
+ *   and offer_id + offer_version all describe a domain action without saying how
+ *   it travels -- so under lck_v1 those two touches collapsed onto a SINGLE
+ *   logical communication. The consequences are both bad and opposite:
+ *
+ *     the email is REFUSED as a duplicate attempt on the SMS communication, or
+ *     the email ADOPTS the SMS attempt's provider evidence and delivery state.
+ *
+ *   Neither is recoverable after the fact, so channel is a REQUIRED component
+ *   rather than a defaulted one. A caller that does not say which channel it is
+ *   sending on is refused exactly like a caller with no anchors.
+ *
+ *   The version bump is mandatory, not cosmetic: an lck_v1 key and an lck_v2 key
+ *   for the same SMS action are different strings, so they must never be compared
+ *   or deduplicated against each other. Bumping makes that impossible by
+ *   construction rather than by convention.
  */
 
 import crypto from "node:crypto";
@@ -37,7 +57,21 @@ import crypto from "node:crypto";
  * Version the SEMANTICS, not the value. If the components of a key ever change,
  * bump this so old and new keys cannot silently collide or be compared.
  */
-export const LOGICAL_COMMUNICATION_KEY_VERSION = "lck_v1";
+export const LOGICAL_COMMUNICATION_KEY_VERSION = "lck_v2";
+
+/**
+ * The transports a seller-visible communication can travel on.
+ *
+ * This is a closed set on purpose. An unrecognised channel is a refusal, not a
+ * new identity namespace minted on the spot -- a typo ("emails", "e-mail") would
+ * otherwise create a parallel communication that duplicates a real one.
+ */
+export const COMMUNICATION_CHANNELS = Object.freeze({
+  SMS: "sms",
+  EMAIL: "email",
+});
+
+const KNOWN_CHANNELS = new Set(Object.values(COMMUNICATION_CHANNELS));
 
 /** Every seller-visible communication source, from the domain-action map. */
 export const COMMUNICATION_TYPES = Object.freeze({
@@ -109,6 +143,17 @@ export const FORBIDDEN_IDENTITY_FIELDS = Object.freeze([
   "timestamp",
   "from_phone_number",
   "textgrid_number_id",
+  // Email transport details. The SENDER is not identity for the same reason a
+  // TextGrid number is not: rotating which mailbox or which warmed domain
+  // carries a touch does not make it a different touch.
+  "from_email",
+  "sender_email",
+  "sender_key",
+  "email_sender_id",
+  "reply_to_email",
+  "subject",
+  "html_body",
+  "text_body",
 ]);
 
 function clean(value) {
@@ -151,6 +196,18 @@ export function buildLogicalCommunicationKey(input = {}) {
     return { ok: false, reason: "missing_required_anchors", type, missing };
   }
 
+  // Checked AFTER the anchors on purpose. A caller missing both has a bigger
+  // problem than its transport, and every pre-existing refusal reason stays
+  // exactly what it was so that an anchor gap is never reported as a channel gap.
+  // Channel is required with NO default. Defaulting to "sms" would mean an email
+  // caller that forgot to say so silently collides with the SMS communication for
+  // the same action -- the exact failure this component exists to prevent.
+  const channel = clean(input.channel).toLowerCase();
+  if (!channel) return { ok: false, reason: "missing_communication_channel", type };
+  if (!KNOWN_CHANNELS.has(channel)) {
+    return { ok: false, reason: "unknown_communication_channel", type, channel };
+  }
+
   // Deliberate, caller-supplied ordinal. Defaults to "1"; never a clock.
   // BOUNDED on purpose. A real ordinal is small; a clock value is enormous.
   // Without the bound, String(Date.now()) is all digits and would pass, minting
@@ -164,6 +221,7 @@ export function buildLogicalCommunicationKey(input = {}) {
   const parts = [
     LOGICAL_COMMUNICATION_KEY_VERSION,
     type,
+    channel,
     ...required.map((field) => anchors[field]),
     action_sequence,
   ];
@@ -173,7 +231,8 @@ export function buildLogicalCommunicationKey(input = {}) {
     key: `${LOGICAL_COMMUNICATION_KEY_VERSION}:${type}:${stableHash(parts)}`,
     version: LOGICAL_COMMUNICATION_KEY_VERSION,
     type,
-    anchors: { ...anchors, action_sequence },
+    channel,
+    anchors: { ...anchors, channel, action_sequence },
   };
 }
 

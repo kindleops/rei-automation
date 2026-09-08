@@ -14,33 +14,16 @@ import type {
   InboxFilters,
 } from './email.types'
 
-// ── Mock data (fallback on backend error) ─────────────────────────────────────
-
-const MOCK_OVERVIEW: EmailOverview = {
-  total_emails: 0,
-  email_eligible: 0,
-  high_confidence: 0,
-  suppressed: 0,
-  bounced: 0,
-  unsubscribed: 0,
-  sent_today: 0,
-  replies_today: 0,
-  ready_for_campaign: 0,
-  brevo_status: 'disconnected',
-  last_updated: new Date().toISOString(),
-}
-
-const MOCK_HEALTH: BrevoHealth = {
-  connected: false,
-  api_key_valid: false,
-  sender_identities: [],
-  domain_auth_status: 'unknown',
-  bounce_rate_7d: 0,
-  send_failure_rate_7d: 0,
-  api_latency_ms: null,
-  webhook_configured: false,
-  last_checked: new Date().toISOString(),
-}
+// ── No fabricated fallbacks ───────────────────────────────────────────────────
+//
+// This file used to answer a failed backend call with MOCK_OVERVIEW (every
+// counter zero) and MOCK_HEALTH (connected: false, every rate zero). That made a
+// broken backend indistinguishable from a healthy, empty one: an operator saw
+// "0 suppressed, 0 bounced, Brevo offline" and had no way to tell whether that
+// was the truth or a failed query.
+//
+// The reads below now return null when the backend does not answer with real
+// data, and the view renders that as unavailable rather than as zero.
 
 // ── Normalizers ───────────────────────────────────────────────────────────────
 
@@ -105,7 +88,7 @@ function normalizeHealth(raw: any): BrevoHealth {
 
 // ── Adapter methods ───────────────────────────────────────────────────────────
 
-export const getEmailOverview = async (): Promise<EmailOverview> => {
+export const getEmailOverview = async (): Promise<EmailOverview | null> => {
   const res = await callBackend('/api/cockpit/email/overview')
   if (res.ok && (res as any).data) {
     const d = (res as any).data
@@ -142,7 +125,8 @@ export const getEmailOverview = async (): Promise<EmailOverview> => {
       last_updated: body.last_updated ?? new Date().toISOString(),
     }
   }
-  return MOCK_OVERVIEW
+  // The backend did not return a recognisable overview. Say so.
+  return null
 }
 
 export const getEmailRecords = async (filters?: Partial<RecordFilters>): Promise<EmailRecord[]> => {
@@ -226,14 +210,15 @@ export const getEmailThread = async (threadId: string): Promise<EmailThreadDetai
   }
 }
 
-export const getBrevoHealth = async (): Promise<BrevoHealth> => {
+export const getBrevoHealth = async (): Promise<BrevoHealth | null> => {
   const res = await callBackend('/api/cockpit/email/brevo-health')
   const body = res as any
   const raw = body?.data ?? body
   if (raw?.provider === 'brevo' || raw?.connected !== undefined) {
     return normalizeHealth(raw)
   }
-  return MOCK_HEALTH
+  // Provider health is unknown, which is not the same as unhealthy.
+  return null
 }
 
 export const getEmailTemplates = async (): Promise<EmailTemplate[]> => {

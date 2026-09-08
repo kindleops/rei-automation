@@ -10,7 +10,8 @@
  * again" are different claims and some outcomes assert one without the other:
  *
  *   invalid recipient  definitely_not_sent + terminal
- *                      (proven undelivered, yet retrying is pointless forever)
+ *                      (proven undelivered, yet retrying is pointless forever;
+ *                       invalid_to_number for SMS, invalid_to_address for email)
  *   auth/config error  definitely_not_sent + operator_hold
  *                      (proven undelivered, and a human must fix something)
  *   timeout / 5xx      may_have_been_sent  + retry_denied
@@ -97,6 +98,11 @@ export function mapTransportOutcome(classified = {}) {
   // nothing, and repeating the identical request cannot change that.
   const TERMINAL_REJECTIONS = new Set([
     "invalid_to_number",
+    // The email-side twin of invalid_to_number. It is named separately rather
+    // than folded into it because an operator reading a ledger row must be able
+    // to tell which address kind the provider refused without also knowing the
+    // channel.
+    "invalid_to_address",
     "recipient_opted_out",
     "provider_blacklist_pair",
     "content_filter_blocked",
@@ -143,10 +149,12 @@ export function mapTransportOutcome(classified = {}) {
   // An outcome we do not understand is treated as possibly-delivered. Guessing
   // "probably fine, retry it" is precisely how a duplicate reaches a seller.
   //
-  // NOTE ON 429: it is deliberately NOT special-cased. TextGrid's rate-limit
-  // acceptance semantics are unverified in this repo, and inventing a
-  // retry_after from an unproven assumption is exactly the guess this model
-  // forbids. It therefore lands here, held, until provider semantics are proven.
+  // NOTE ON 429: it is deliberately NOT special-cased, for TextGrid or for
+  // Brevo. Neither provider's rate-limit acceptance semantics are verified in
+  // this repo, and inventing a retry_after from an unproven assumption is
+  // exactly the guess this model forbids. Both therefore land here, held, until
+  // provider semantics are proven -- Brevo's under the explicitly named class
+  // `provider_rate_limited`, so the hold is greppable rather than anonymous.
   return {
     logical_state: LOGICAL_STATES.AMBIGUOUS,
     delivery_possibility: DELIVERY_POSSIBILITY.MAY_HAVE_BEEN_SENT,

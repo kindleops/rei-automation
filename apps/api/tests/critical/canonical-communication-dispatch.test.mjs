@@ -115,8 +115,9 @@ const CONTENT_OK = async () => ({ ok: true });
 
 const REPLY = {
   communication_type: "autonomous_reply",
-  anchors: { decision_id: "decision:evt-1" },
-  lineage: { thread_key: "+13125550100", decision_id: "decision:evt-1" },
+  // lck_v2 makes the channel part of identity, so a caller must name it.
+  anchors: { channel: "sms", decision_id: "decision:evt-1" },
+  lineage: { channel: "sms", thread_key: "+13125550100", decision_id: "decision:evt-1" },
   message: { to: "+13125550100", from: "+18885551212", body: "Are you open to an offer?" },
 };
 

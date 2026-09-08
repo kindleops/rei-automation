@@ -1,12 +1,34 @@
+/**
+ * process-email-queue.js
+ *
+ * NOTE ON SCOPE (EMAIL-1).
+ *   This module still reads `email_send_queue`, a table that does not exist in
+ *   production. Retargeting it onto the real `email_queue` table and routing its
+ *   sends through the canonical dispatch seam is EMAIL-2 work, and is not done
+ *   here. What IS done here is the eligibility check, because the previous one
+ *   was actively unsafe rather than merely inert:
+ *
+ *     hasRecentSmsOutreach() filtered contact_outreach_state on master_owner_id,
+ *     property_id and last_outreach_at. Production has podio_master_owner_id,
+ *     podio_property_id, and no last_outreach_at at all. The query errored, the
+ *     helper caught the error and returned false, and the ONLY cross-channel
+ *     duplicate-contact protection in the system silently passed every row.
+ *
+ *   That is now the canonical eligibility engine, which reads the columns the
+ *   database actually has and treats a failed read as a refusal rather than as
+ *   permission.
+ */
+
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { sendBrevoTransactionalEmail } from "@/lib/email/brevo-client.js";
-import { isEmailSuppressed } from "@/lib/email/email-suppression.js";
+import { resolveEmailOutreachEligibility } from "@/lib/domain/email/email-eligibility-store.js";
 import { getSystemFlag } from "@/lib/system-control.js";
+import { info, warn } from "@/lib/logging/logger.js";
 
 let _deps = {
   supabase_override: null,
   send_brevo_override: null,
-  is_suppressed_override: null,
+  resolve_eligibility_override: null,
   now_iso_override: null,
   get_system_flag_override: null,
 };
@@ -19,8 +41,8 @@ function getSendBrevo() {
   return _deps.send_brevo_override || sendBrevoTransactionalEmail;
 }
 
-function getIsSuppressed() {
-  return _deps.is_suppressed_override || isEmailSuppressed;
+function getResolveEligibility() {
+  return _deps.resolve_eligibility_override || resolveEmailOutreachEligibility;
 }
 
 function nowIso() {
@@ -43,44 +65,54 @@ function isDue(row = {}, now_ts = Date.now()) {
   return Number.isFinite(ts) ? ts <= now_ts : true;
 }
 
-async function hasRecentSmsOutreach(db, row = {}) {
-  const owner_id = clean(row.owner_id);
-  const property_id = clean(row.property_id);
-  if (!owner_id || !property_id) return false;
-
-  const since_iso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await db
-    .from("contact_outreach_state")
-    .select("id")
-    .eq("master_owner_id", owner_id)
-    .eq("property_id", property_id)
-    .in("channel", ["sms", "discord_manual_sms"])
-    .gte("last_outreach_at", since_iso)
-    .limit(1)
-    .maybeSingle();
-
-  if (error) return false;
-  return Boolean(data?.id);
-}
-
+/**
+ * Record that this seller has now been emailed, so the next eligibility check
+ * sees it. Column names are the ones production has: the previous version wrote
+ * master_owner_id / property_id / last_outreach_at, none of which exist on this
+ * table, and upserted on a constraint that does not exist either -- so no
+ * outreach was ever recorded and every subsequent cooldown check had nothing to
+ * find.
+ */
 async function recordEmailOutreach(db, row = {}, message_id = null) {
   const owner_id = clean(row.owner_id);
   const property_id = clean(row.property_id);
-  if (!owner_id || !property_id) return;
+  const to_email = clean(row.email_address).toLowerCase();
+  if (!owner_id || !to_email) return;
 
-  await db
+  const at = nowIso();
+  const { error } = await db
     .from("contact_outreach_state")
     .upsert(
       {
-        master_owner_id: owner_id,
-        property_id,
+        podio_master_owner_id: owner_id,
+        podio_property_id: property_id || null,
+        to_email,
         channel: "email",
-        last_outreach_at: nowIso(),
-        last_queue_id: clean(row.queue_id) || null,
-        last_provider_message_id: clean(message_id) || null,
+        last_email_at: at,
+        // The cross-channel clock. An email that advanced only last_email_at
+        // would leave the shared window untouched and let an SMS follow it
+        // immediately.
+        last_outbound_at: at,
+        last_touch_at: at,
+        updated_at: at,
       },
-      { onConflict: "master_owner_id,property_id,channel" }
+      // Matches uq_contact_outreach_state_owner_email, the email twin of the
+      // long-standing (owner, phone) key. Conflict targets must name a real
+      // unique index; the previous code named one that does not exist, so the
+      // write failed every time and no outreach was ever recorded.
+      { onConflict: "podio_master_owner_id,to_email" }
     );
+
+  if (error) {
+    // Loud, not silent. A failure here does not undo the send, but it does mean
+    // the next eligibility check will not see this contact, so it must be
+    // visible rather than swallowed the way the old helper swallowed its own.
+    warn("email.outreach_state_write_failed", {
+      queue_id: clean(row.queue_id) || null,
+      reason: clean(error.message) || "unknown",
+      provider_message_id: clean(message_id) || null,
+    });
+  }
 }
 
 async function resolveSenderIdentity(db, row = {}) {
@@ -123,7 +155,7 @@ export function __resetProcessEmailQueueDeps() {
   _deps = {
     supabase_override: null,
     send_brevo_override: null,
-    is_suppressed_override: null,
+    resolve_eligibility_override: null,
     now_iso_override: null,
     get_system_flag_override: null,
   };
@@ -194,42 +226,47 @@ export async function processEmailQueue({ limit = 25, dry_run = false } = {}) {
   for (const row of rows) {
     const normalized_email = clean(row.email_address).toLowerCase();
 
-    const has_recent_sms = await hasRecentSmsOutreach(db, row);
-    if (has_recent_sms) {
+    // ONE eligibility question, asked once, with every reason it refuses.
+    // Suppression, opt-outs, DNC, pauses, the cross-channel duplicate window and
+    // the touch budget are all inside it, and a read that FAILS refuses instead
+    // of passing.
+    const eligibility = await getResolveEligibility()(
+      {
+        email_address: row.email_address,
+        master_owner_id: row.owner_id || null,
+        property_id: row.property_id || null,
+      },
+      { supabase: db }
+    );
+
+    if (!eligibility.eligible) {
       await db
         .from("email_send_queue")
         .update({
           status: "failed",
-          failure_reason: "overlap_recent_sms_24h",
+          failure_reason: eligibility.reason || "email_not_eligible",
           updated_at: nowIso(),
         })
         .eq("id", row.id);
 
-      result.failed_count += 1;
-      result.results.push({
-        queue_id: row.queue_id,
-        status: "failed",
-        reason: "overlap_recent_sms_24h",
+      // The operator question this must always answer is "why did this seller
+      // not get an email", so the full reason set travels with the result, not
+      // just the headline.
+      info("email.queue_row_ineligible", {
+        queue_id: clean(row.queue_id) || null,
+        reason: eligibility.reason,
+        blocking_reasons: eligibility.blocking_reasons,
+        next_eligible_at: eligibility.next_eligible_at,
+        policy_version: eligibility.policy_version,
       });
-      continue;
-    }
-
-    const suppression = await getIsSuppressed()(normalized_email);
-    if (suppression?.suppressed) {
-      await db
-        .from("email_send_queue")
-        .update({
-          status: "failed",
-          failure_reason: "email_suppressed",
-          updated_at: nowIso(),
-        })
-        .eq("id", row.id);
 
       result.failed_count += 1;
       result.results.push({
         queue_id: row.queue_id,
         status: "failed",
-        reason: "email_suppressed",
+        reason: eligibility.reason || "email_not_eligible",
+        blocking_reasons: eligibility.blocking_reasons,
+        next_eligible_at: eligibility.next_eligible_at,
       });
       continue;
     }

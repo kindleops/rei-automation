@@ -22,7 +22,19 @@ import { createSellerCommunicationStore } from '@/lib/domain/communications/sell
 import { evaluateCanonicalSendAuthority } from '@/lib/domain/queue/canonical-send-authority.js';
 import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
-import { COMMUNICATION_TYPES } from '@/lib/domain/communications/logical-communication-key.js';
+import {
+  COMMUNICATION_CHANNELS,
+  COMMUNICATION_TYPES,
+} from '@/lib/domain/communications/logical-communication-key.js';
+
+/**
+ * This adapter speaks SMS: it takes to_phone_number and classifies TextGrid
+ * errors. Since lck_v2 the channel is part of a communication's identity, so it
+ * is stated rather than assumed. An operator sending an email goes through the
+ * email dispatch path, which names its own channel; sharing this one would make
+ * the two operator sends the same communication.
+ */
+const MANUAL_SEND_CHANNEL = COMMUNICATION_CHANNELS.SMS;
 
 const logger = child({ module: 'domain.communications.manual_dispatch' });
 
@@ -54,8 +66,9 @@ export async function dispatchManualOperatorSend(input = {}) {
   const outcome = await executeSellerCommunicationAttempt(
     {
       communication_type: COMMUNICATION_TYPES.MANUAL_OPERATOR_SEND,
-      anchors: { operator_action_id },
+      anchors: { channel: MANUAL_SEND_CHANNEL, operator_action_id },
       lineage: {
+        channel: MANUAL_SEND_CHANNEL,
         operator_action_id,
         thread_key: input.thread_key || null,
         to_phone_number: input.to_phone_number || null,

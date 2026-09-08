@@ -29,7 +29,7 @@ function clean(value) {
 
 /** Only lineage the RPC understands; unknown keys would be silently dropped. */
 const LINEAGE_FIELDS = Object.freeze([
-  'thread_key', 'to_phone_number', 'property_id', 'opportunity_id', 'master_owner_id',
+  'channel', 'thread_key', 'to_phone_number', 'to_email', 'property_id', 'opportunity_id', 'master_owner_id',
   'decision_id', 'message_event_id', 'campaign_id', 'campaign_target_id', 'touch_number',
   'follow_up_id', 'referral_id', 'source_event_id', 'seller_offer_id', 'seller_offer_version',
   'operator_action_id', 'canary_run_id', 'canary_leg', 'supersedes_communication_id',
