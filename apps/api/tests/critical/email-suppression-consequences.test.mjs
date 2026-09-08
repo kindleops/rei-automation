@@ -148,7 +148,7 @@ test("an address whose two forms are identical is written once, not twice", asyn
 test("suppression upserts on the address, so a stronger reason can replace a weaker one", async () => {
   const db = makeDb();
   const store = createEmailProviderEventStore({ supabase: db });
-  await store.applySuppression({ email_address: "a@b.com", reason: "soft_bounce" });
+  await store.applySuppression({ email_address: "a@example.net", reason: "soft_bounce" });
   assert.equal(db.writes[0].options.onConflict, "email_address");
 });
 
@@ -159,7 +159,7 @@ test("a failed suppression write REPORTS failure rather than claiming success", 
   // who asked us to stop.
   const db = makeDb({ email_suppression: { error: { message: "permission denied" } } });
   const store = createEmailProviderEventStore({ supabase: db });
-  const result = await store.applySuppression({ email_address: "a@b.com", reason: "unsubscribed" });
+  const result = await store.applySuppression({ email_address: "a@example.net", reason: "unsubscribed" });
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, "suppression_write_failed");

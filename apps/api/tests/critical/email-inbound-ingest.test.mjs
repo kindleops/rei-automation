@@ -369,7 +369,7 @@ test("a payload with no sender refuses at the adapter, before ingestion", async 
 });
 
 test("ingestion never throws on a hostile normalized payload", async () => {
-  for (const normalized of [{}, { from: {} }, { from: { email: "a@b.com" }, attachments: "nope" }]) {
+  for (const normalized of [{}, { from: {} }, { from: { email: "a@example.net" }, attachments: "nope" }]) {
     const store = withAlias();
     await assert.doesNotReject(() =>
       ingestInboundEmail({ normalized, trust_class: TRUST_CLASS.AUTHENTICATED }, store));

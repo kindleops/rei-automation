@@ -181,7 +181,7 @@ export const unicodeReply = () => ({
   ...plainTextReply(),
   Uuid: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   MessageId: "<seller-reply-011@mail.example.net>",
-  From: { Address: "vendedor@example.net", Name: "Jose Munoz" },
+  From: { Address: "vendedor@example.net", Name: "Vendedora Ficticia" },
   Subject: "Re: Su propiedad en la calle Olmo",
   RawTextBody: "Si, me interesa. Cuanto ofrecen? Saludos cordiales.",
 });
