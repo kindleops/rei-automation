@@ -61,6 +61,37 @@ function clean(value) {
 }
 
 /**
+ * Strip attachment BYTES out of a payload before it is stored as evidence.
+ *
+ * A malformed payload is kept because it is the only trace that something
+ * arrived, and it may be a provider change worth seeing. But keeping it verbatim
+ * means a 25MB attachment lands base64-encoded inside a jsonb column -- roughly
+ * 33MB of row, per message, for evidence nobody will read as bytes anyway.
+ *
+ * Anyone who can reach the endpoint could otherwise bloat the database on
+ * purpose by sending malformed payloads full of attachments. The descriptors are
+ * kept, because their filenames and sizes are the diagnostically useful part;
+ * only the content is replaced.
+ */
+function withoutAttachmentBytes(payload) {
+  if (!payload || typeof payload !== "object") return {};
+
+  const attachments = payload.Attachments ?? payload.attachments;
+  if (!Array.isArray(attachments)) return payload;
+
+  const stripped = attachments.map((entry) => {
+    if (!entry || typeof entry !== "object") return entry;
+    const { Content, content, data, ...rest } = entry;
+    const bytes = Content ?? content ?? data;
+    return bytes === undefined ? rest : { ...rest, content_omitted_bytes: String(bytes).length };
+  });
+
+  return payload.Attachments
+    ? { ...payload, Attachments: stripped }
+    : { ...payload, attachments: stripped };
+}
+
+/**
  * Make a provider-supplied filename safe to store and to show.
  *
  * Path separators, traversal, control characters and right-to-left override
@@ -134,7 +165,7 @@ export function createInboundEmailStore(deps = {}) {
         // The whole payload, kept. Reprocessing a stored event must not depend on
         // the provider still being willing to send it again.
         raw_payload: normalized.raw_payload && typeof normalized.raw_payload === "object"
-          ? normalized.raw_payload
+          ? withoutAttachmentBytes(normalized.raw_payload)
           : { normalized },
       };
 
@@ -201,7 +232,7 @@ export function createInboundEmailStore(deps = {}) {
         processing_status: "quarantined",
         processing_reason: input.reason || "inbound_payload_malformed",
         message_class: "malformed",
-        raw_payload: input.raw_item && typeof input.raw_item === "object" ? input.raw_item : {},
+        raw_payload: withoutAttachmentBytes(input.raw_item),
       });
       // A duplicate malformed payload is fine to swallow: it is the same
       // unreadable thing arriving twice.

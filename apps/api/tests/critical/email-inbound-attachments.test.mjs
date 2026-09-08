@@ -316,3 +316,72 @@ test("no attachment is ever counted as stored while storage is unimplemented", a
   assert.equal(inserts[0].storage_status, "pending");
   assert.equal(inserts[0].storage_key ?? null, null);
 });
+
+// ── stored evidence must not carry the bytes ───────────────────────────────
+
+test("a malformed payload is kept as evidence WITHOUT its attachment bytes", async () => {
+  // The payload is kept because it is the only trace something arrived and may
+  // be a provider change worth seeing. Keeping it verbatim would put a 25MB
+  // attachment, base64-encoded, inside a jsonb column -- and anyone who can
+  // reach the endpoint could bloat the database on purpose.
+  const rows = [];
+  const store = createInboundEmailStore({
+    supabase: { from: () => ({ async insert(row) { rows.push(row); return { error: null }; } }) },
+  });
+
+  const bytes = Buffer.alloc(50_000, 0x41).toString("base64");
+  await store.recordMalformed({
+    reason: "inbound_payload_missing_sender",
+    raw_item: {
+      Subject: "no sender",
+      Attachments: [{ Name: "huge.bin", ContentType: "application/pdf", Content: bytes }],
+    },
+  });
+
+  const stored = JSON.stringify(rows[0].raw_payload);
+  assert.equal(stored.includes(bytes.slice(0, 200)), false, "the attachment bytes were stored");
+  assert.ok(stored.length < 2000, `the stored payload was ${stored.length} bytes`);
+});
+
+test("the attachment DESCRIPTOR survives, because that is the useful part", async () => {
+  const rows = [];
+  const store = createInboundEmailStore({
+    supabase: { from: () => ({ async insert(row) { rows.push(row); return { error: null }; } }) },
+  });
+
+  await store.recordMalformed({
+    reason: "inbound_payload_missing_sender",
+    raw_item: {
+      Attachments: [{ Name: "deed.pdf", ContentType: "application/pdf", Content: Buffer.from("abc").toString("base64") }],
+    },
+  });
+
+  const attachment = rows[0].raw_payload.Attachments[0];
+  assert.equal(attachment.Name, "deed.pdf");
+  assert.equal(attachment.ContentType, "application/pdf");
+  assert.equal(attachment.Content, undefined);
+  // How big it was is recorded, so an operator can tell a stripped attachment
+  // apart from one that never had any content.
+  assert.equal(attachment.content_omitted_bytes, 4);
+});
+
+test("a payload with no attachments passes through unchanged", async () => {
+  const rows = [];
+  const store = createInboundEmailStore({
+    supabase: { from: () => ({ async insert(row) { rows.push(row); return { error: null }; } }) },
+  });
+  await store.recordMalformed({ reason: "x", raw_item: { Subject: "hello", From: null } });
+  assert.equal(rows[0].raw_payload.Subject, "hello");
+});
+
+test("stripping never throws on a hostile payload shape", async () => {
+  const store = createInboundEmailStore({
+    supabase: { from: () => ({ async insert() { return { error: null }; } }) },
+  });
+  for (const raw_item of [
+    null, undefined, "", 0, [], { Attachments: "nope" }, { Attachments: [null, 0, "x"] },
+    { attachments: [{ content: 5 }] },
+  ]) {
+    await assert.doesNotReject(() => store.recordMalformed({ reason: "x", raw_item }), String(raw_item));
+  }
+});
