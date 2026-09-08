@@ -1,30 +1,74 @@
 import { lazy, Suspense, type ReactNode } from 'react'
 
 import { FullscreenAppShell } from '../shared/FullscreenAppShell'
-import { InboxView } from '../views/inbox/InboxView'
-import { EntityGraphView } from '../views/entity-graph/EntityGraphView'
 
-import { PropertyIntelligenceApp } from '../views/deal-intelligence/PropertyIntelligenceApp'
-import { DealIntelligenceInboxRoute } from '../views/deal-intelligence/DealIntelligenceInboxRoute'
-import { loadAcquisitionWorkspace } from '../domain/acquisition/acquisition.adapter'
 import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
-import { ConversationView } from '../views/conversation/ConversationView'
-
-import { BuyerMatchView } from '../views/buyer-match/BuyerMatchView'
-import { loadBuyer } from '../domain/buyer/buyer.adapter'
 import type { BuyerModel } from '../domain/buyer/buyer.adapter'
-
-import { QueueView } from '../views/queue/QueueView'
-import { loadQueue } from '../views/queue/queue.adapter'
 import type { QueueModel } from '../domain/queue/queue.types'
 
-import { KpiIntelligencePage } from '../views/analytics/KpiIntelligencePage'
-import { ClosingDeskView } from '../views/closing-desk/ClosingDeskView'
+/**
+ * ── Route-level code splitting ────────────────────────────────────────────────
+ * Every view below used to be imported statically, which collapsed the entire app
+ * into ONE chunk: production shipped a single 4.3 MB JS file and a single 2.5 MB
+ * CSS file (measured on ops.leadcommand.ai — the built output contained exactly two
+ * asset files). On a cold load that meant ~5.2s of asset transfer before any React
+ * code ran, and domInteractive at ~10.3s on desktop broadband. On a phone over
+ * cellular that window is long enough that the operator sees a blank page and
+ * concludes the surface crashed.
+ *
+ * Splitting per route means a cold load only pays for the shell plus the one view
+ * being opened, and Vite emits that view's CSS as a separate chunk too. The data
+ * loaders are imported dynamically for the same reason — their domain/adapter
+ * dependency trees are large and are only needed by the route that uses them.
+ *
+ * These MUST stay lazy: adding a static import of any view back into this file
+ * silently re-merges it into the entry chunk.
+ */
+const InboxView = lazy(() =>
+  import('../views/inbox/InboxView').then((m) => ({ default: m.InboxView })),
+)
+const EntityGraphView = lazy(() =>
+  import('../views/entity-graph/EntityGraphView').then((m) => ({ default: m.EntityGraphView })),
+)
+const PropertyIntelligenceApp = lazy(() =>
+  import('../views/deal-intelligence/PropertyIntelligenceApp').then((m) => ({
+    default: m.PropertyIntelligenceApp,
+  })),
+)
+const DealIntelligenceInboxRoute = lazy(() =>
+  import('../views/deal-intelligence/DealIntelligenceInboxRoute').then((m) => ({
+    default: m.DealIntelligenceInboxRoute,
+  })),
+)
+const ConversationView = lazy(() =>
+  import('../views/conversation/ConversationView').then((m) => ({ default: m.ConversationView })),
+)
+const BuyerMatchView = lazy(() =>
+  import('../views/buyer-match/BuyerMatchView').then((m) => ({ default: m.BuyerMatchView })),
+)
+const QueueView = lazy(() =>
+  import('../views/queue/QueueView').then((m) => ({ default: m.QueueView })),
+)
+const KpiIntelligencePage = lazy(() =>
+  import('../views/analytics/KpiIntelligencePage').then((m) => ({ default: m.KpiIntelligencePage })),
+)
+const ClosingDeskView = lazy(() =>
+  import('../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })),
+)
+const CampaignsPage = lazy(() =>
+  import('../views/campaign-command/CampaignsPage').then((m) => ({ default: m.CampaignsPage })),
+)
+const EmailCommandCenter = lazy(() =>
+  import('../views/email-command/EmailCommandCenter').then((m) => ({
+    default: m.EmailCommandCenter,
+  })),
+)
+const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
 
-
-import { CampaignsPage } from '../views/campaign-command/CampaignsPage'
-import { EmailCommandCenter } from '../views/email-command/EmailCommandCenter'
-import WorkflowStudioV2 from '../views/workflow-studio/v2/WorkflowStudioV2'
+const loadAcquisitionWorkspace = () =>
+  import('../domain/acquisition/acquisition.adapter').then((m) => m.loadAcquisitionWorkspace())
+const loadBuyer = () => import('../domain/buyer/buyer.adapter').then((m) => m.loadBuyer())
+const loadQueue = () => import('../views/queue/queue.adapter').then((m) => m.loadQueue())
 
 interface AppRoute<TData> {
   path: string

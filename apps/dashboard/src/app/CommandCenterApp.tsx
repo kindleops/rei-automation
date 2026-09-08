@@ -1,8 +1,9 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { pushRoutePath, replaceRoutePath, useRoutePath } from './router'
 import { resolveRoute } from './routes'
 import { useCommandGrammar, type CommandBinding } from '../shared/command-grammar'
 import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../shared/copilot'
+import { isCopilotSurfaceEnabled } from '../shared/copilot/copilot-availability'
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
 import { NotificationToasts } from '../shared/NotificationToast'
 import { NotificationIntelligenceProvider, useNotificationIntelligence } from '../domain/notifications/useNotificationIntelligence'
@@ -164,7 +165,13 @@ const GlobalNotificationShell = ({
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
   const { unreadCount } = useNotificationIntelligence()
   const showGlobalBell = routePath !== '/inbox' && !isMobile
-  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
+  // Campaigns owns its own mobile chrome: a native large-title bar with search
+  // and New. Stacking the seven-icon portable rail above it made the screen read
+  // as internal tooling and cost 60px before any content. The bottom PinnedAppDock
+  // still renders, so global navigation is unchanged.
+  // '/campaigns' is an alias; the resolved route path is '/campaign-command'.
+  const routeOwnsMobileChrome = routePath === '/campaign-command' || routePath === '/campaigns'
+  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath) && !routeOwnsMobileChrome
 
   return (
     <>
@@ -605,7 +612,16 @@ export const CommandCenterApp = () => {
 
           <main className="nx-stage">
             <ErrorBoundary label={route.title} resetKey={route.path}>
-              {route.render(routeState.data)}
+              {/*
+                Views are lazy-loaded per route (see routes.tsx), so the first render of a
+                surface suspends while its chunk downloads. The boundary lives HERE rather
+                than around the whole app so the shell — command dock, nav, notifications —
+                stays mounted and interactive while a surface loads, instead of the screen
+                blanking back to the boot state on every navigation.
+              */}
+              <Suspense fallback={<div className="nx-stage-suspense" aria-busy="true" />}>
+                {route.render(routeState.data)}
+              </Suspense>
             </ErrorBoundary>
           </main>
 
@@ -626,16 +642,18 @@ export const CommandCenterApp = () => {
 
           <NotificationToasts />
 
-          <CopilotShell
-            open={copilotOpen}
-            context={copilotContext}
-            onClose={() => setCopilotOpen(false)}
-            onToggle={() => setCopilotOpen((previous) => {
-              if (!previous) playSound('copilot-wake')
-              return !previous
-            })}
-            onAction={handleCopilotAction}
-          />
+          {isCopilotSurfaceEnabled(isMobile) ? (
+            <CopilotShell
+              open={copilotOpen}
+              context={copilotContext}
+              onClose={() => setCopilotOpen(false)}
+              onToggle={() => setCopilotOpen((previous) => {
+                if (!previous) playSound('copilot-wake')
+                return !previous
+              })}
+              onAction={handleCopilotAction}
+            />
+          ) : null}
 
           <BriefingPanel
             open={briefingOpen}

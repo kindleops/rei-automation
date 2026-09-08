@@ -654,6 +654,12 @@ function resolveBuildCacheVersion(devIdentity: { commitSha: string }) {
 
 const MAIN_ENTRY_PLACEHOLDER = '__NEXUS_MAIN_ENTRY__'
 const MAIN_CSS_PLACEHOLDER = '__NEXUS_MAIN_CSS__'
+// Kept out of the raw href so Vite's HTML asset pass cannot resolve the
+// project-root manifest.webmanifest into a second, content-hashed copy under
+// /assets/. An installed iOS home-screen app pins the manifest URL it saw at
+// install time, and a hashed URL 404s on the very next deploy.
+const MANIFEST_PLACEHOLDER = '__NEXUS_MANIFEST__'
+const MANIFEST_URL = '/manifest.webmanifest'
 
 const swRecoveryBootPlugin = (): Plugin => {
   let outDir = 'dist'
@@ -710,11 +716,22 @@ const pwaManifestPlugin = (cacheVersion: string): Plugin => {
     res.setHeader('Cache-Control', 'no-cache, must-revalidate')
     res.end(swSource())
   }
+  let outDir = 'dist'
   return {
     name: 'pwa-manifest',
+    configResolved(config) {
+      outDir = config.build.outDir
+    },
     configureServer(server) {
       server.middlewares.use('/manifest.webmanifest', serveManifest)
       server.middlewares.use('/sw.js', serveSw)
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!ctx.server) return html
+        return html.replaceAll(MANIFEST_PLACEHOLDER, MANIFEST_URL)
+      },
     },
     generateBundle() {
       this.emitFile({
@@ -727,6 +744,15 @@ const pwaManifestPlugin = (cacheVersion: string): Plugin => {
         fileName: 'sw.js',
         source: swSource(),
       })
+    },
+    closeBundle() {
+      const indexPath = path.join(outDir, 'index.html')
+      if (!fs.existsSync(indexPath)) return
+      const html = fs.readFileSync(indexPath, 'utf8')
+      if (!html.includes(MANIFEST_PLACEHOLDER)) {
+        throw new Error('pwa-manifest: expected manifest placeholder in build output')
+      }
+      fs.writeFileSync(indexPath, html.replaceAll(MANIFEST_PLACEHOLDER, MANIFEST_URL))
     },
   }
 }
@@ -754,10 +780,29 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     build: {
+      // The single-bundle build shipped 4.3 MB of JS and 2.5 MB of CSS as exactly two
+      // files, which is what made cold loads on a phone look like a crashed blank page.
+      // Routes are split in src/app/routes.tsx; these vendor chunks keep the big
+      // third-party libraries out of the entry so the shell can boot before them.
+      chunkSizeWarningLimit: 1200,
       rollupOptions: {
         input: {
           main: fileURLToPath(new URL('./src/main.tsx', import.meta.url)),
           index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        },
+        output: {
+          // Vite 8 builds with rolldown, which requires manualChunks to be a function
+          // (the object form throws "manualChunks is not a function" at generate time).
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return undefined
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+              return 'vendor-react'
+            }
+            if (id.includes('maplibre-gl')) return 'vendor-maplibre'
+            if (id.includes('framer-motion')) return 'vendor-motion'
+            if (id.includes('@supabase')) return 'vendor-supabase'
+            return undefined
+          },
         },
       },
     },
