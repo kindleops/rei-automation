@@ -120,7 +120,7 @@ the wrong house. There is no alert for that.
 | Tier | Evidence | Resolves when |
 |---|---|---|
 | 1 | **Reply alias** | 128 random bits that only ever appeared in mail we sent to this conversation |
-| 2 | **RFC headers** | `In-Reply-To` / `References` naming a Message-ID we issued, spanning exactly one conversation |
+| 2 | **RFC headers** | `In-Reply-To` / `References` naming a Message-ID we issued, spanning exactly one conversation. Resolved through the canonical attempt ledger, which is where an outbound provider message id actually lives |
 | 3 | **Provider thread** | Present and deliberately **inert** — Brevo documents no stable thread id, and building on an undocumented field is building on something they can change without telling anyone |
 | 4 | **Sender context** | The address maps to **exactly one** active conversation |
 
@@ -217,6 +217,19 @@ that justifies a **retry**. So a null argument that throws does not merely fail;
 it can become a duplicate send or a seller reply that vanishes into a catch
 block. Fixed as a class — a shared `asObject` guard plus a contract test that
 calls every entry point with thirteen hostile shapes.
+
+**Tier 2 could never have matched anything.** The RFC-header lookup read
+`email_queue.rfc_message_id` — a column that does not exist and that nothing
+writes. Every query would have errored, been logged, and returned an empty list,
+so the tier would have failed to match forever while looking like a working
+control. A silently inert tier is worse than an absent one: an absent tier is a
+known gap, an inert one is a documented protection that is not there.
+
+This is the same defect EMAIL-0 found twice in the pre-existing code — a code
+path targeting a table shape nobody built — written fresh in this phase by
+someone who had just finished writing that finding up. It now resolves through
+the canonical attempt ledger, and the test's Supabase stand-in throws on any
+direct table access so the ownership is proven rather than asserted.
 
 **The migration proof found a defect in itself.** `psql` prints the command tag
 alongside a `RETURNING` value, so an id came back with `INSERT 0 1` glued to it;
