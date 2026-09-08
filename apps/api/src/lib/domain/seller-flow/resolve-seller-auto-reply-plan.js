@@ -169,7 +169,11 @@ export function normalizeSellerInboundIntent(input) {
     return "timing_complaint";
   }
 
-  if (isMatch(["stop", "unsubscribe", "remove me", "take me off", "no me contactes", "elimíname", "borrar de lista"]) || classification.compliance_flag === "stop_texting") {
+  // "lose my number" / "don't text me" are contact-cessation requests in the
+  // same class as STOP. Added to the EXISTING opt-out set rather than given a
+  // separate flag: the operational meaning is identical, and a parallel policy
+  // would be one more thing to keep in sync with compliance.
+  if (isMatch(["stop", "unsubscribe", "remove me", "take me off", "lose my number", "loose my number", "dont text me", "don't text me", "do not text me", "stop texting", "no me contactes", "elimíname", "borrar de lista", "no me escribas"]) || classification.compliance_flag === "stop_texting") {
     return "opt_out";
   }
 

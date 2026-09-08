@@ -403,7 +403,32 @@ function deriveStageFromIntent(thread = {}) {
  */
 export function mapThreadToUniversalStage(thread = {}) {
   const terminalStatus = normalizeKey(thread.universal_status || thread.inbox_bucket);
+  // CANONICAL disposition is consulted alongside the legacy status/bucket.
+  //
+  // This used to read universal_status || inbox_bucket plus a `not_interested`
+  // BOOLEAN, and never `disposition`. After declines were promoted to
+  // disposition='not_interested', the stored inbox_bucket still said
+  // priority/new_replies -- so a canonically declined seller derived a
+  // NON-closed universal stage. Same one-sided read that let a thread be both
+  // Dead and Priority in the Inbox, in a different consumer.
+  //
+  // Reading disposition here means the stale bucket column never has to be
+  // rewritten, and reopening still works: clear the disposition and the stage
+  // derives normally again.
+  const terminalDisposition = normalizeKey(thread.disposition);
+  // Suppression audit (same pass): a contact suppressed via is_suppressed /
+  // contactability_status -- rather than the legacy opt_out boolean or the
+  // bucket -- ALSO derived a non-closed stage. A thread carrying
+  // contactability_status='opted_out' with a stale bucket of 'priority' still
+  // mapped to ownership_confirmation. Compliance state must close the pipeline
+  // by any of its canonical expressions, not just one.
+  const terminalContactability = normalizeKey(thread.contactability_status);
   if (['dead', 'suppressed', 'wrong_number', 'not_interested', 'dnc'].includes(terminalStatus)
+    || ['not_interested', 'wrong_number', 'wrong_person', 'dnc', 'do_not_contact', 'suppressed']
+        .includes(terminalDisposition)
+    || ['dnc', 'opted_out', 'do_not_text', 'invalid_number', 'provider_blacklisted']
+        .includes(terminalContactability)
+    || thread.is_suppressed === true
     || thread.wrong_number || thread.opt_out || thread.not_interested) {
     return UNIVERSAL_STAGE_CODES.CLOSED;
   }
