@@ -196,6 +196,12 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
       initialLoadDone.current = true
     } catch (err) {
       if (requestId !== requestSeq.current) return
+      // Reaching here past the requestId guard means THIS request produced a real
+      // outcome — it threw. That is settled: the error state is what drives the
+      // retry affordance, so staying in `loading` on top of it just hangs the board
+      // on "Loading opportunities…" forever while the stage columns render empty.
+      // Only a superseded/aborted request (filtered out above) may stay unsettled.
+      settled = true
       setError(err instanceof Error ? err.message : 'pipeline_fetch_failed')
       setErrorType('query_failed')
       setRetryable(true)
