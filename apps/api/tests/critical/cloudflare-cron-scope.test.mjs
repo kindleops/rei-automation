@@ -14,17 +14,24 @@ const WORKER = new URL("../../../../infra/cloudflare/worker/index.ts", import.me
 const STAGING = new URL("../../../../infra/cloudflare/wrangler.jsonc", import.meta.url);
 const PRODUCTION = new URL("../../../../infra/cloudflare/wrangler.production.jsonc", import.meta.url);
 
-// The complete set of paths any environment may schedule. Both are
-// reconciliation lanes; neither can produce a dispatchable send_queue row.
-const ALLOWED_JOB_PATHS = [
+// Reconciliation lanes. Neither can produce a dispatchable send_queue row.
+const RECONCILIATION_JOB_PATHS = [
   "/api/internal/seller-flow/reconcile-state",
   "/api/internal/webhooks/recover-delivery",
 ];
 
+// THE ONE SEND-CAPABLE JOB, commissioned by explicit operator authorization.
+// It is singular on purpose: this constant is what keeps "production outbound
+// is on" from drifting into "several routes may now send". Adding a second
+// entry here should be as deliberate as adding the first.
+const SEND_CAPABLE_JOB_PATHS = ["/api/internal/queue/run"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS];
+
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
+// queue/run has MOVED OUT of this list; the rest have not.
 const FORBIDDEN_JOBS = [
-  "/api/internal/queue/run",
   "/api/internal/queue/retry",
   "/api/internal/queue/force-due",
   "/api/internal/campaigns/feed",
@@ -93,13 +100,32 @@ test("no send-capable job appears anywhere in the worker's executable code", asy
   }
 });
 
-test("every registered job path is on the reconciliation allowlist", async () => {
+test("every registered job path is on the allowlist", async () => {
   const code = await workerCode();
   const registered = [...code.matchAll(/path:\s*"([^"]+)"/g)].map((m) => m[1]);
   assert.ok(registered.length > 0, "expected at least one registered job");
   for (const path of registered) {
     assert.ok(ALLOWED_JOB_PATHS.includes(path), `unexpected scheduled job registered: ${path}`);
   }
+});
+
+test("EXACTLY ONE send-capable job is registered, and it is the canonical runner", async () => {
+  // The failure this guards is not "outbound is on" -- that is now intended --
+  // but outbound quietly widening to a second dispatcher, a retry lane or a
+  // force-due lane that nobody separately approved.
+  const code = await workerCode();
+  const registered = [...code.matchAll(/path:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const sendCapable = registered.filter((p) => SEND_CAPABLE_JOB_PATHS.includes(p));
+  assert.deepEqual(sendCapable, ["/api/internal/queue/run"]);
+});
+
+test("the queue runner carries NO body, so system_control owns throughput", async () => {
+  // A body here would let a deployed literal outrank a live operator setting
+  // for limit / batch size / caps. The runner must read those from the DB.
+  const code = await workerCode();
+  const block = code.match(/const QUEUE_RUN: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block, "QUEUE_RUN must be declared");
+  assert.ok(!/body\s*:/.test(block[1]), "the queue runner must not hardcode a body");
 });
 
 test("EVERY job carries its own enable flag, so the master switch cannot awaken it alone", async () => {
@@ -141,8 +167,8 @@ test("the delivery reconciler still runs with its outbound provider call disable
   assert.match(code, /include_polling_fallback:\s*false/);
 });
 
-test("production declares exactly one schedule and commissions only reconciliation flags", async () => {
-  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *"]);
+test("production declares the reconciliation and send schedules, and only approved flags", async () => {
+  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *", "* * * * *"]);
 
   const vars = await configVars(PRODUCTION);
   assert.equal(vars.DEPLOYMENT_ENV, "production");
@@ -153,9 +179,29 @@ test("production declares exactly one schedule and commissions only reconciliati
   const enabled = Object.entries(vars).filter(([k, v]) => k.startsWith("CRON_") && v === "true").map(([k]) => k);
   assert.deepEqual(
     enabled.sort(),
-    ["CRON_DELIVERY_RECONCILE_ENABLED", "CRON_ENABLED", "CRON_SELLER_STATE_RECONCILE_ENABLED"],
+    [
+      "CRON_DELIVERY_RECONCILE_ENABLED",
+      "CRON_ENABLED",
+      "CRON_QUEUE_RUN_ENABLED",
+      "CRON_SELLER_STATE_RECONCILE_ENABLED",
+    ],
     `unexpected enabled cron flags: ${enabled.join(", ")}`
   );
+});
+
+test("the send lane sits on its OWN expression, not bolted onto reconciliation", async () => {
+  // If queue/run shared the */5 entry, retuning send cadence would silently
+  // retune reconciliation too, and a reader could not tell which schedule is
+  // send-capable.
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  assert.ok(table, "PRODUCTION_CRON_JOBS must exist");
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin, "the */5 reconciliation entry must remain");
+  assert.ok(!fiveMin[1].includes("QUEUE_RUN"), "the send lane must not ride the reconciliation schedule");
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(oneMin, "the one-minute send entry must be declared");
+  assert.equal(oneMin[1].trim(), "QUEUE_RUN", "the send schedule carries the runner and nothing else");
 });
 
 test("STAGING declares no schedule and registers no job at all", async () => {

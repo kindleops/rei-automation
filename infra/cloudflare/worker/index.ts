@@ -310,9 +310,16 @@ export default {
  * reach a job that is not written in PRODUCTION_CRON_JOBS, whatever triggers a
  * wrangler config declares and whatever CRON_ENABLED is set to.
  *
+ * COMMISSIONED FOR PRODUCTION OUTBOUND (operator authorization, this commit):
+ *   /api/internal/queue/run   dispatches the send queue. This is the ONLY
+ *   send-capable job in any table. It remains subject to every runtime rail it
+ *   always had -- operator brakes, contact window, DNC/opt-out, suppression,
+ *   sender eligibility, idempotency, global lock and per-run caps -- none of
+ *   which this commit touches. Registering it only lets the runner be ASKED to
+ *   run; system_control still decides whether any row may leave.
+ *
  * DELIBERATELY ABSENT FROM EVERY TABLE (each can cause a seller-visible send,
  * or arm a row that a later processor would send):
- *   /api/internal/queue/run                      dispatches the send queue
  *   /api/internal/queue/retry                    re-arms failed sends
  *   /api/internal/queue/force-due                pulls schedules forward to now
  *   /api/internal/campaigns/feed                 builds outbound campaign work
@@ -379,8 +386,28 @@ const DELIVERY_RECONCILIATION: CronJob = {
   body: { include_polling_fallback: false },
 };
 
+/**
+ * PRODUCTION QUEUE RUNNER -- the send-capable lane.
+ *
+ * Deliberately carries NO body. limit, batch size, hard cap, daily/market/
+ * per-number caps and the contact window all come from system_control, so the
+ * operator control plane stays the single authority over throughput. Passing a
+ * body here would let a deploy silently outrank a live operator setting.
+ *
+ * scheduled_for on the row decides whether it is due; nothing here rewrites it.
+ */
+const QUEUE_RUN: CronJob = {
+  id: "queue_run",
+  enabledBy: "CRON_QUEUE_RUN_ENABLED",
+  path: "/api/internal/queue/run",
+};
+
 const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   "*/5 * * * *": [SELLER_STATE_RECONCILIATION, DELIVERY_RECONCILIATION],
+  // Separate expression: the send lane's cadence must be tunable without
+  // touching reconciliation, and a reader must see at a glance which schedule
+  // is send-capable.
+  "* * * * *": [QUEUE_RUN],
 };
 
 /**

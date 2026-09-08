@@ -9,13 +9,16 @@
   // Uses the SAME proven image as staging (registry reference, so no Docker is
   // needed at deploy time).
   //
-  // INITIAL POSTURE -- deliberately inert:
-  //   * NO triggers.crons block. Cloudflare will not invoke scheduled() at all.
-  //     Stronger than relying on a flag; crons are added at commissioning.
-  //   * CRON_ENABLED=false as a second, independent guard.
-  //   * live-send flags absent => the Worker forwards "false" (default-deny).
-  //   * NO custom domain. Temporary workers.dev hostname only; DNS is a
-  //     separate, explicitly approved step.
+  // POSTURE -- OUTBOUND COMMISSIONED (operator authorization).
+  // This file previously described a deliberately inert deployment. That is no
+  // longer true and the comment is updated rather than left to mislead:
+  //   * triggers.crons declares TWO expressions: the send-incapable */5
+  //     reconciliation lane, and a one-minute lane carrying the queue runner.
+  //   * CRON_ENABLED=true, and CRON_QUEUE_RUN_ENABLED=true names the one
+  //     send-capable job explicitly. Both are required; neither alone suffices.
+  //   * A custom domain IS live (ops.leadcommand.ai).
+  // What has NOT changed: every runtime rail. The operator brakes in
+  // system_control still gate each individual row, and they outrank this file.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "lead-command-production",
   "main": "worker/index.ts",
@@ -59,7 +62,12 @@
   // "true", and CRON_SECRET must be present. Both are deliberate commissioning
   // acts, not code changes.
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    // */5 = reconciliation lane (send-incapable, unchanged).
+    // *   = production send lane. One minute is the finest cadence Cloudflare
+    //       offers and it is what makes a row's scheduled_for operationally
+    //       meaningful: a row due at 13:00 goes out at 13:00, not up to five
+    //       minutes later.
+    "crons": ["*/5 * * * *", "* * * * *"]
   },
 
   "vars": {
@@ -77,11 +85,18 @@
     "TEXTGRID_WEBHOOK_PUBLIC_BASE_URL": "https://ops.leadcommand.ai",
 
     "CRON_ENABLED": "true",
-    // Per-job authority. Both are RECONCILIATION lanes and both are
-    // send-incapable. No queue runner, campaign feed, campaign activation,
-    // autopilot or DocuSign job is registered for any environment.
+    // Per-job authority. These two remain RECONCILIATION lanes and remain
+    // send-incapable. Campaign feed, campaign activation, autopilot, queue
+    // retry, force-due and DocuSign are STILL not registered for any
+    // environment -- commissioning the runner did not commission them.
     "CRON_SELLER_STATE_RECONCILE_ENABLED": "true",
     "CRON_DELIVERY_RECONCILE_ENABLED": "true",
+    // PRODUCTION OUTBOUND COMMISSIONED. Per-job authority for the one
+    // send-capable job. This flag only permits the runner to be invoked; the
+    // operator brakes in system_control (queue_execution_mode,
+    // queue_processor_mode, queue_emergency_stop_at) still decide whether any
+    // individual row is allowed to leave, and they outrank this.
+    "CRON_QUEUE_RUN_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
