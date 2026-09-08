@@ -59,6 +59,34 @@ attempt is a durable claim that a provider request was about to happen; spending
 one on a message we were never going to send corrupts the ledger crash recovery
 reads.
 
+## 2b. The runner that makes the transport reachable
+
+`domain/email/run-email-queue.js` reads the real `email_queue` table and puts
+every row through the seam. It keeps exactly **one** decision — which row to work
+on next. Before §11 the SMS runner decided for itself that `queued` plus a
+remaining retry budget meant "send", and called the provider; every one of those
+decisions now lives elsewhere.
+
+* **The claim is the concurrency boundary.** A conditional `UPDATE` succeeds only
+  while the row is still `queued`, and the lock token is read back — "the update
+  affected a row" is not the same as "the row I updated is the one I hold" when
+  another worker may have taken and released it in between.
+* **A claimed row that is then refused is released, not left locked.** Otherwise
+  a suppressed recipient strands its row as permanently in-flight and the queue
+  fills with work nobody can see is stuck. A known `next_eligible_at` defers the
+  row rather than letting it busy-loop.
+* **A dispatch that throws fails the row rather than releasing it.** A throw is
+  ambiguous by definition: we cannot tell whether a request left the process, so
+  the row must not become available for another worker.
+* **A hard authority denial aborts the run**, rather than producing the same
+  refusal fifty times.
+* Batch size is clamped to 50. This is a transport loop, not a campaign sender.
+
+`POST /api/internal/email/queue/run` is cut over to it. That route previously
+called `processEmailQueue()`, which reads `email_send_queue` — a table that has
+never existed in this database — so every invocation errored on a missing
+relation and the route reported it as a failed run rather than as a broken path.
+
 ## 3. Provider abstraction changes
 
 `domain/email/transport/` is unchanged in shape from EMAIL-1. The adapter still
@@ -373,6 +401,8 @@ unverified, and refusing on absence would stop every existing sender.
 | `email-provider-event-reconcile.test.mjs` | 28 |
 | `email-suppression-consequences.test.mjs` | 16 |
 | `email-rate-limit-policy.test.mjs` | 7 |
+| `email-queue-runner.test.mjs` | 15 |
+| `brevo-webhook-route.test.mjs` | 12 |
 | `email-channel-migration-contract.test.mjs` (extended) | 33 |
 
 Executed proofs: `proof:email-migration` (33 checks against a real Postgres),

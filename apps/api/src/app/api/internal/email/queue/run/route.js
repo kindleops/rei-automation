@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
 import { requireSharedSecretAuth } from "@/lib/security/shared-secret.js";
-import { processEmailQueue } from "@/lib/email/process-email-queue.js";
+import { runEmailQueue } from "@/lib/domain/email/run-email-queue.js";
 import { buildDisabledResponse, getSystemFlag } from "@/lib/system-control.js";
 
 export const runtime = "nodejs";
@@ -28,9 +28,22 @@ function asLimit(value, fallback = 25) {
   return Math.min(Math.trunc(parsed), 200);
 }
 
+/**
+ * CUT OVER to the canonical runner.
+ *
+ * This route previously called processEmailQueue(), which reads
+ * `email_send_queue` -- a table that has never existed in this database. Every
+ * invocation therefore errored on a missing relation, and the route reported it
+ * as a failed run rather than as a broken path.
+ *
+ * It now calls runEmailQueue(), which reads the real `email_queue` table and
+ * puts every row through the canonical dispatch seam: identity, the three
+ * vetoes, the attempt ledger, and provider_request_started_at committed before
+ * the network call.
+ */
 async function runFromPayload(payload = {}) {
-  const result = await processEmailQueue({
-    limit: asLimit(payload.limit, 25),
+  const result = await runEmailQueue({
+    limit: asLimit(payload.limit, 10),
     dry_run: asBoolean(payload.dry_run, false),
   });
 
