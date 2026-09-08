@@ -74,6 +74,14 @@ const PRICE_PATTERNS = [
   /\b\d{2,4}\s?k\b/i,
   /\b\d{2,4}\s?mil\b/i,
   /\b\d{2,3}[\s,]?\d{3}\s?(dollars|usd)\b/i,
+  // Comma-grouped amounts with no currency marker: "400,000", "750,000".
+  // Missing this meant a seller who answered a price question with a bare
+  // "400,000" was not recognised as having named a price at all.
+  /\b\d{1,3}(,\d{3})+\b/,
+  // Spoken millions: "1.5 million", "2 millones". "unless you want to pay 1.5
+  // million" is an asking price, and it matched none of the patterns above.
+  // Bare "m" is deliberately excluded -- far too collision-prone.
+  /\b\d+(\.\d+)?\s*(million|millones|mill)\b/i,
 ];
 
 export function mentionsPrice(body) {
