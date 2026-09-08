@@ -224,20 +224,32 @@ export async function ingestInboundEmail(raw_input, deps = {}) {
     ...(resolution.conversation || {}),
   });
 
-  if (resolution.status !== RESOLUTION_STATUS.RESOLVED) {
-    // Authentic, stored, and deliberately not attached. These are the rows an
+  const resolved = resolution.status === RESOLUTION_STATUS.RESOLVED;
+  if (!resolved) {
+    // Authentic, stored, and deliberately NOT attached. These are the rows an
     // operator reviews. Forcing them onto a plausible conversation is the
     // wrong-property failure this phase is built to avoid.
     logger.info("inbound_email.unresolved", {
       ...log_context, status: resolution.status, reason: resolution.reason,
     });
-    return outcome({ ok: true, event_key, trust_class, inbound_event_id,
-      processing_status: PROCESSING_STATUS.RECEIVED,
-      resolution_status: resolution.status, resolution_reason: resolution.reason,
-      needs_review: true });
   }
 
   // ── 5. the canonical message ─────────────────────────────────────────────
+  //
+  // WRITTEN WHETHER OR NOT THE THREAD RESOLVED, with null conversation anchors
+  // when it did not.
+  //
+  // Deciding which conversation an unmatched reply belongs to means READING it,
+  // and an operator cannot read what was never normalized. Leaving the body in
+  // the raw provider payload would mean a review UI either renders unsanitized
+  // seller HTML or re-does the normalization at display time -- one is a
+  // vulnerability and the other is two implementations of the same rules that
+  // will drift.
+  //
+  // The row is safe to write unattached because attachment is what the anchors
+  // ARE: with opportunity_id, master_owner_id and property_id null, no query
+  // that joins a conversation can reach it. It is a message we hold, not a
+  // message we have filed.
   const body = normalizeInboundBody({
     text_body: normalized.text_body,
     html_body: normalized.html_body,
@@ -248,7 +260,12 @@ export async function ingestInboundEmail(raw_input, deps = {}) {
 
   const persisted = await deps.createInboundMessage?.({
     inbound_event_id,
+    // Null when unresolved. This is the difference between holding a reply and
+    // filing it against a property.
     conversation: resolution.conversation,
+    resolution_status: resolution.status,
+    resolution_tier: resolution.tier,
+    needs_review: !resolved,
     reply_alias_id: resolution.alias_id || alias?.id || null,
     in_reply_to_communication_id: header_matches[0]?.logical_communication_id || null,
     normalized,
@@ -275,6 +292,29 @@ export async function ingestInboundEmail(raw_input, deps = {}) {
       inbound_message_id: persisted.inbound_message_id,
       descriptors: normalized.attachments,
     }) || attachments;
+  }
+
+  if (!resolved) {
+    // The event stays RECEIVED, not PROCESSED. "Processed" is a claim that this
+    // reply reached the conversation it belongs to, and it has not; marking it
+    // processed would hide it from exactly the review queue it needs to be in.
+    await deps.updateInboundEvent?.({
+      inbound_event_id,
+      processing_status: PROCESSING_STATUS.RECEIVED,
+      processing_reason: `awaiting_review:${resolution.status}`,
+      inbound_message_id: persisted.inbound_message_id,
+      attachment_count: attachments.stored + attachments.quarantined,
+    });
+
+    // Stored and readable, but no communication event: evidence is evidence OF a
+    // conversation, and there is not one yet. Emitting against a null
+    // conversation would put an unattributed reply into a stream whose consumers
+    // reasonably assume every entry belongs somewhere.
+    return outcome({ ok: true, event_key, trust_class, inbound_event_id,
+      inbound_message_id: persisted.inbound_message_id,
+      processing_status: PROCESSING_STATUS.RECEIVED,
+      resolution_status: resolution.status, resolution_reason: resolution.reason,
+      attachments, needs_review: true });
   }
 
   await deps.updateInboundEvent?.({

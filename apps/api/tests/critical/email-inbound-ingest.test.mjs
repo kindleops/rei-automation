@@ -120,8 +120,13 @@ test("an unresolvable message is KEPT for review, never discarded", async () => 
   assert.equal(result.ok, true);
   assert.equal(result.needs_review, true);
   assert.equal(result.resolution_status, "unmatched");
-  assert.equal(store.calls.events.length, 1, "the message must still exist");
-  assert.equal(store.calls.messages.length, 0, "but must not be attached to anything");
+  assert.equal(store.calls.events.length, 1, "the receipt must still exist");
+  // The message row IS written -- with a null conversation. Deciding where an
+  // unmatched reply belongs means reading it, and an operator cannot read what
+  // was never normalized. "Not attached" is the null anchors, not a missing row.
+  assert.equal(store.calls.messages.length, 1, "the seller's words must be readable");
+  assert.equal(store.calls.messages[0].conversation, null, "it must not be filed anywhere");
+  assert.equal(store.calls.messages[0].needs_review, true);
 });
 
 test("a HELD channel keeps the event and answers ok, so the provider stops retrying", async () => {
@@ -204,10 +209,13 @@ test("an UNKNOWN reply token is unmatched, not attached by sender fallback", asy
   const result = await run(fixtures.unknownReplyToken(), store);
 
   assert.equal(result.resolution_status, "unmatched");
-  assert.equal(store.calls.messages.length, 0);
+  // Readable, and filed nowhere. Falling through to sender context here is the
+  // exact wrong-property failure this whole path exists to prevent.
+  assert.equal(store.calls.messages[0].conversation, null);
+  assert.equal(store.calls.emitted?.length ?? 0, 0, "no conversation, so no evidence event");
 });
 
-test("ONE SELLER, TWO PROPERTIES is ambiguous and creates no message", async () => {
+test("ONE SELLER, TWO PROPERTIES is ambiguous and is filed against neither", async () => {
   const store = makeStore({
     findReplyAlias: async () => null,
     findConversationsForSender: async () => [
@@ -218,7 +226,7 @@ test("ONE SELLER, TWO PROPERTIES is ambiguous and creates no message", async () 
   const result = await run(fixtures.replyToSenderAddressNotAlias(), store);
 
   assert.equal(result.resolution_status, "ambiguous");
-  assert.equal(store.calls.messages.length, 0);
+  assert.equal(store.calls.messages[0].conversation, null, "neither property may be picked");
   assert.equal(
     store.calls.updates.find((u) => u.resolution_status === "ambiguous")?.resolution_reason,
     "sender_maps_to_multiple_conversations"
