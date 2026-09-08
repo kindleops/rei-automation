@@ -570,7 +570,7 @@ projection_meta: {
 | 3 | **Fallback discards valid API blocked states** | Hook requires `counts.total > 0`; zero-comp API responses trigger direct RPC |
 | 4 | **V3 not integrated in workspace** | `comp-intelligence-v3-projection.js` exists; no route; UI shows V1 outputs only |
 | 5 | **Valuation event bus is dead** | `subscribeValuationEvents` has zero consumers outside `valuation-events.js` |
-| 6 | **Hardcoded Maps API key fallback** | `MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY \|\| 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'` |
+| 6 | **Hardcoded Maps API key fallback** | `MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY \|\| '<literal key redacted 2026-08-17>'` — fallback removed; that key must be revoked in Google Cloud, it remains in git history |
 | 7 | **Institutional / buyer comp signals never populate** | `mapEvidenceToCompCandidate` sets `isInstitutionalBuyer: false`; source filter "Buyer" ineffective |
 | 8 | **`valuationMode` is cosmetic** | No backend call uses selected mode; `inferValuationMode` only sets local state |
 | 9 | **Direct vs API default param drift** | direct-pipeline defaults `radius=3, monthsBack=12` vs hook `1, 6` |
