@@ -203,7 +203,10 @@ const ASYNC_ENTRY_POINTS = (() => {
     ["store.createInboundMessage", (v) => store.createInboundMessage(v)],
     ["store.ingestAttachments", (v) => store.ingestAttachments(v)],
     ["store.emitCommunicationEvent", (v) => store.emitCommunicationEvent(v)],
-    ["ingestInboundEmail", (v) => ingestInboundEmail(v, { store })],
+    // `deps` IS the store: ingestInboundEmail calls its methods directly. An
+    // earlier version of this line wrapped it as `{ store }`, which made every
+    // optional call a silent no-op and proved far less than it looked like.
+    ["ingestInboundEmail", (v) => ingestInboundEmail(v, store)],
     [
       "resolveConversationReplyAddress",
       (v) => resolveConversationReplyAddress(v, {
@@ -248,8 +251,6 @@ test("no async entry point reports a SEND or a STORE on a null argument", async 
   assert.equal(dispatch.sent, false);
   assert.equal(dispatch.provider_invoked, false);
 
-  const ingest = await ingestInboundEmail(null, {
-    store: createInboundEmailStore({ supabase: inert_supabase }),
-  });
+  const ingest = await ingestInboundEmail(null, createInboundEmailStore({ supabase: inert_supabase }));
   assert.equal(ingest?.ok, false);
 });
