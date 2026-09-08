@@ -55,6 +55,7 @@ import { classifyBrevoProviderError } from "@/lib/domain/email/transport/brevo-e
 import { normalizeEmailAddress } from "@/lib/domain/email/normalize-email-address.js";
 import { resolveConversationReplyAddress } from "@/lib/domain/email/reply-alias-store.js";
 import { getSystemFlag } from "@/lib/system-control.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 const logger = child({ module: "domain.email.queue_dispatch" });
 
@@ -87,7 +88,8 @@ function denied(stage, reason, extra = {}) {
  * @param {object} deps           every collaborator is injectable so the ordering
  *                                guarantees are testable with a network spy
  */
-export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
+export async function dispatchEmailQueueRow(raw_queue_row, deps = {}) {
+  const queue_row = asObject(raw_queue_row);
   const queue_row_id = clean(queue_row.id) || null;
   const store = deps.store || createSellerCommunicationStore({ supabase: deps.supabase });
   const transport = deps.transport || createBrevoEmailTransport();

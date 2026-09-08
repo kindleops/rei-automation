@@ -105,7 +105,8 @@ export function buildInboundEventKey(raw_normalized) {
  * @param {string} input.trust_class
  * @param {object} deps              store collaborators, all injectable
  */
-export async function ingestInboundEmail(input = {}, deps = {}) {
+export async function ingestInboundEmail(raw_input, deps = {}) {
+  const input = asObject(raw_input);
   const trust_class = clean(input.trust_class) || TRUST_CLASS.UNAUTHENTICATED;
   const normalized = input.normalized || {};
   const now = input.now || new Date().toISOString();

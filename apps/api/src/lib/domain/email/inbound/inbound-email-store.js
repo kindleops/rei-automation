@@ -24,6 +24,7 @@ import { child } from "@/lib/logging/logger.js";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 import { replyTokenFingerprint } from "@/lib/domain/email/reply-address.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 const logger = child({ module: "domain.email.inbound_store" });
 
@@ -88,7 +89,8 @@ export function createInboundEmailStore(deps = {}) {
      * workers can interleave between. A conflict is reported as `duplicate` so
      * the caller can stop rather than doing the work twice.
      */
-    async recordInboundEvent(input = {}) {
+    async recordInboundEvent(raw_input) {
+      const input = asObject(raw_input);
       const normalized = input.normalized || {};
       const row = {
         event_key: input.event_key,
@@ -146,7 +148,8 @@ export function createInboundEmailStore(deps = {}) {
       return { ok: true, duplicate: false, inbound_event_id: data?.id || null };
     },
 
-    async updateInboundEvent(input = {}) {
+    async updateInboundEvent(raw_input) {
+      const input = asObject(raw_input);
       const { inbound_event_id, ...patch } = input;
       if (!inbound_event_id) return { ok: false, reason: "missing_inbound_event_id" };
 
@@ -165,7 +168,8 @@ export function createInboundEmailStore(deps = {}) {
     },
 
     /** A payload we could not read is kept, not dropped. */
-    async recordMalformed(input = {}) {
+    async recordMalformed(raw_input) {
+      const input = asObject(raw_input);
       const digest = crypto
         .createHash("sha256")
         .update(JSON.stringify(input.raw_item ?? null), "utf8")
@@ -264,7 +268,8 @@ export function createInboundEmailStore(deps = {}) {
       }));
     },
 
-    async createInboundMessage(input = {}) {
+    async createInboundMessage(raw_input) {
+      const input = asObject(raw_input);
       const conversation = input.conversation || {};
       const normalized = input.normalized || {};
       const body = input.body || {};
@@ -330,7 +335,8 @@ export function createInboundEmailStore(deps = {}) {
      * Bytes are pulled DURING ingestion because Brevo's attachment URLs expire.
      * Deferring the fetch would produce a manifest of files that no longer exist.
      */
-    async ingestAttachments(input = {}) {
+    async ingestAttachments(raw_input) {
+      const input = asObject(raw_input);
       const descriptors = (Array.isArray(input.descriptors) ? input.descriptors : [])
         .slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
       const summary = { stored: 0, quarantined: 0, failed: 0, skipped: 0 };
@@ -377,7 +383,8 @@ export function createInboundEmailStore(deps = {}) {
      *
      * Nothing here writes a lead status, a stage, a temperature or an offer.
      */
-    async emitCommunicationEvent(event = {}) {
+    async emitCommunicationEvent(raw_event) {
+      const event = asObject(raw_event);
       const { error } = await supabase.from("email_inbound_events")
         .update({ metadata: { emitted_event: event.type, emitted_at: new Date().toISOString() } })
         .eq("id", event.inbound_event_id);

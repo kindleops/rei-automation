@@ -164,3 +164,92 @@ test("a null sender is NOT ready, and a null recipient is NOT eligible", () => {
   assert.equal(eligibility.eligible, false);
   assert.ok(eligibility.reason, "a refusal must name its reason");
 });
+
+// ── the same class, on the async and IO-bearing entry points ────────────────
+//
+// The pure functions above are the easy half. These take collaborators, so a
+// null argument reaches further before it is read -- which is exactly why the
+// defect kept surviving here: the throw happens inside a promise, and a caller's
+// try/catch turns it into a generic failure that reads like a transport error.
+
+import { createInboundEmailStore } from "../../src/lib/domain/email/inbound/inbound-email-store.js";
+import { ingestInboundEmail } from "../../src/lib/domain/email/inbound/ingest-inbound-email.js";
+import { resolveConversationReplyAddress } from "../../src/lib/domain/email/reply-alias-store.js";
+import { dispatchEmailQueueRow } from "../../src/lib/domain/email/dispatch-email-queue-row.js";
+
+/** A Supabase stand-in that answers everything without a network call. */
+const inert_supabase = {
+  from() {
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      in: () => chain,
+      limit: async () => ({ data: [], error: null }),
+      insert: () => chain,
+      update: () => chain,
+      maybeSingle: async () => ({ data: null, error: null }),
+      single: async () => ({ data: null, error: null }),
+    };
+    return chain;
+  },
+};
+
+const ASYNC_ENTRY_POINTS = (() => {
+  const store = createInboundEmailStore({ supabase: inert_supabase, fetch_impl: async () => null });
+  return [
+    ["store.recordInboundEvent", (v) => store.recordInboundEvent(v)],
+    ["store.updateInboundEvent", (v) => store.updateInboundEvent(v)],
+    ["store.recordMalformed", (v) => store.recordMalformed(v)],
+    ["store.createInboundMessage", (v) => store.createInboundMessage(v)],
+    ["store.ingestAttachments", (v) => store.ingestAttachments(v)],
+    ["store.emitCommunicationEvent", (v) => store.emitCommunicationEvent(v)],
+    ["ingestInboundEmail", (v) => ingestInboundEmail(v, { store })],
+    [
+      "resolveConversationReplyAddress",
+      (v) => resolveConversationReplyAddress(v, {
+        supabase: inert_supabase, reply_domain: "reply.example.net", getSystemFlag: async () => true,
+      }),
+    ],
+    [
+      "dispatchEmailQueueRow",
+      (v) => dispatchEmailQueueRow(v, {
+        supabase: inert_supabase,
+        getSystemFlag: async () => true,
+        resolveEligibility: async () => ({ eligible: false, reason: "test" }),
+        loadSender: async () => null,
+        resolveReplyAddress: async () => ({ ok: false, degrade: true, reason: "test" }),
+        store: { getOrCreateLogicalCommunication: async () => ({ ok: false }), allocateAttempt: async () => ({ ok: false }) },
+      }),
+    ],
+  ];
+})();
+
+for (const [name, call] of ASYNC_ENTRY_POINTS) {
+  test(`${name} refuses hostile input instead of rejecting`, async () => {
+    for (const [shape, value] of HOSTILE) {
+      await assert.doesNotReject(() => call(value), `${name} rejected on ${shape}`);
+    }
+  });
+}
+
+test("no async entry point reports a SEND or a STORE on a null argument", async () => {
+  // The dangerous inverse of throwing. `dispatchEmailQueueRow(null)` reporting
+  // sent:true would be a fabricated send; an ingest reporting ok:true would be a
+  // seller reply recorded as filed when nothing was written.
+  const dispatch = await dispatchEmailQueueRow(null, {
+    supabase: inert_supabase,
+    getSystemFlag: async () => true,
+    resolveEligibility: async () => ({ eligible: true }),
+    loadSender: async () => null,
+    resolveReplyAddress: async () => ({ ok: false, degrade: true, reason: "test" }),
+    store: { getOrCreateLogicalCommunication: async () => ({ ok: false }), allocateAttempt: async () => ({ ok: false }) },
+  });
+  assert.equal(dispatch.ok, false);
+  assert.equal(dispatch.sent, false);
+  assert.equal(dispatch.provider_invoked, false);
+
+  const ingest = await ingestInboundEmail(null, {
+    store: createInboundEmailStore({ supabase: inert_supabase }),
+  });
+  assert.equal(ingest?.ok, false);
+});
