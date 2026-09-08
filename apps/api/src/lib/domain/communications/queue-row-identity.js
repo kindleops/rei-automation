@@ -78,8 +78,8 @@ function readMonetaryIdentity(queue_row = {}, md = {}) {
   };
 }
 
-function readMetadata(queue_row = {}) {
-  const md = queue_row.metadata;
+function readMetadata(queue_row) {
+  const md = queue_row?.metadata;
   if (!md || typeof md !== 'object') return {};
   return md;
 }
@@ -89,7 +89,20 @@ function readMetadata(queue_row = {}) {
  *          |{ok:true, bound:false, communication_type:string, anchors:object, lineage:object}
  *          |{ok:false, reason:string}}
  */
-export function resolveQueueRowIdentity(queue_row = {}) {
+export function resolveQueueRowIdentity(input) {
+  // `= {}` only defaults an UNDEFINED argument, so an explicit null used to reach
+  // the property reads below and throw a TypeError -- while undefined, a string
+  // and a number all correctly refused. That discontinuity is the defect.
+  //
+  // A throw here is worse than a refusal, and this file's own caller says why: a
+  // TypeError escaping the dispatch path "is something a caller may catch and
+  // mistake for a transport failure, which is the one reading that could justify
+  // a retry". A refusal is a decision the seam records; an exception is an
+  // unclassified failure that can be misread as a flaky network for a message
+  // whose domain action was never identified.
+  //
+  // Matches resolveEmailQueueRowIdentity, which was written with this closed.
+  const queue_row = input && typeof input === 'object' ? input : {};
   const md = readMetadata(queue_row);
   const lineage = {
     channel: QUEUE_CHANNEL,

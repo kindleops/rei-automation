@@ -12,6 +12,7 @@
 
 import { child } from "@/lib/logging/logger.js";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { createSellerCommunicationStore } from "@/lib/domain/communications/seller-communication-store.js";
 import { deliveryPossibilityFor } from "@/lib/domain/email/email-provider-outcome-lattice.js";
 
 const logger = child({ module: "domain.email.event_store" });
@@ -22,6 +23,11 @@ function clean(value) {
 
 export function createEmailProviderEventStore(deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
+  // §11 tables are reached ONLY through the canonical store. This module owns
+  // the email-side tables and borrows nothing else, which is what keeps
+  // "one module reads and writes the attempt ledger" true rather than aspirational.
+  const communications = deps.communication_store
+    || createSellerCommunicationStore({ supabase });
 
   return {
     /**
@@ -70,44 +76,14 @@ export function createEmailProviderEventStore(deps = {}) {
     /**
      * Which send does this provider message id describe?
      *
-     * Reads the append-only attempt ledger, never the queue projection. The
-     * queue can be repaired; the ledger is the record of what actually happened.
+     * Delegates to the canonical store rather than querying the attempt ledger
+     * here. Reaching into a §11 table from a channel module would break the
+     * single-owner property that everything else in the seam depends on, and the
+     * contract test that enforces it caught exactly that when this was written
+     * inline.
      */
     async resolveAttempt({ provider_message_id } = {}) {
-      const id = clean(provider_message_id);
-      if (!id) return { ok: false, reason: "missing_provider_message_id" };
-
-      const { data, error } = await supabase
-        .from("seller_communication_attempts")
-        .select("id, logical_communication_id, provider_message_id, outcome_class, delivery_possibility")
-        .eq("provider_message_id", id)
-        .order("attempt_number", { ascending: false })
-        .limit(1);
-
-      if (error) {
-        logger.error("email_event.resolve_failed", { reason: clean(error.message) || "unknown" });
-        return { ok: false, reason: "attempt_lookup_failed" };
-      }
-
-      const attempt = Array.isArray(data) ? data[0] : null;
-      if (!attempt) return { ok: false, reason: "no_attempt_for_provider_message_id" };
-
-      // Read the CURRENT provider outcome from the communication, because the
-      // lattice compares against what we already believe, not against what this
-      // one attempt happened to record.
-      const { data: comm } = await supabase
-        .from("seller_logical_communications")
-        .select("id, state, delivery_possibility, retry_authority")
-        .eq("id", attempt.logical_communication_id)
-        .maybeSingle();
-
-      return {
-        ok: true,
-        attempt_id: attempt.id,
-        logical_communication_id: attempt.logical_communication_id,
-        provider_outcome: clean(attempt.outcome_class) || null,
-        communication: comm || null,
-      };
+      return communications.findAttemptByProviderMessageId(provider_message_id);
     },
 
     /**

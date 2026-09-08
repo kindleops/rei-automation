@@ -267,6 +267,55 @@ export function createSellerCommunicationStore(deps = {}) {
       return { ok: true };
     },
 
+    /**
+     * Which attempt produced this provider message id?
+     *
+     * Lives HERE rather than in the channel that needs it, because this module
+     * is "the only module that reads or writes the §11 tables" and a read that
+     * bypassed it would be the first crack in that claim. The email event store
+     * asked this question directly at first; the contract test in
+     * direct-callback-state-contract.test.mjs caught it, and moving the query
+     * here is the right repair rather than widening the guard.
+     *
+     * Reads the append-only ATTEMPT LEDGER, never a queue projection. A queue row
+     * can be repaired; the ledger is the record of what actually happened.
+     *
+     * Returns the current provider outcome from the ATTEMPT, because the
+     * monotonic lattice compares an incoming event against what that attempt
+     * already established -- not against whatever the communication happens to
+     * say after other attempts.
+     */
+    async findAttemptByProviderMessageId(provider_message_id) {
+      const id = clean(provider_message_id);
+      if (!id) return { ok: false, reason: 'missing_provider_message_id' };
+
+      const { data, error } = await supabase
+        .from('seller_communication_attempts')
+        .select('id, logical_communication_id, provider_message_id, outcome_class, delivery_possibility')
+        .eq('provider_message_id', id)
+        .order('attempt_number', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        // A ledger we cannot read is not an absent attempt. Saying "no match"
+        // here would let a provider event be filed as unresolved and quietly
+        // lose a delivery outcome.
+        logger.error('attempt.lookup_failed', { error: clean(error.message) });
+        return { ok: false, reason: 'attempt_lookup_failed' };
+      }
+
+      const attempt = Array.isArray(data) ? data[0] : null;
+      if (!attempt) return { ok: false, reason: 'no_attempt_for_provider_message_id' };
+
+      return {
+        ok: true,
+        attempt_id: attempt.id,
+        logical_communication_id: attempt.logical_communication_id,
+        provider_outcome: clean(attempt.outcome_class) || null,
+        delivery_possibility: attempt.delivery_possibility || null,
+      };
+    },
+
     /** Binds a queue row to the action it schedules. */
     async bindQueueRow({ queue_row_id, logical_communication_id }) {
       if (!queue_row_id) return { ok: true, skipped: true };
