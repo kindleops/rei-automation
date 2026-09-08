@@ -35,6 +35,7 @@ import {
 } from "@/lib/supabase/client.js";
 import { getSystemValue } from "@/lib/system-control.js";
 import { verifyDispatchAuthorization } from "@/lib/domain/queue/queue-atomic-claim.js";
+import { buildScopedCanaryTransportAuthority } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import {
   claimSendQueueRow,
   evaluateContactWindow,
@@ -1365,6 +1366,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
   // but only while still fresh (aged/backlogged replies respect the window).
   const inbound_auto_reply = isImmediateInboundAutoReply(queue_row, now);
   let lock_token = clean(deps.claimedLockToken || queue_row?.lock_token) || null;
+  let authorization_consumed_at = null;
 
   const acquisition_operation = acquisitionQueueOperation(queue_row);
   if (acquisition_operation) {
@@ -1428,6 +1430,10 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
       queue_row = normalizeSendQueueRow(claim.row || queue_row);
       lock_token = claim.lock_token || lock_token;
+      // Only the claim transaction produces this. It is the proof that THIS
+      // execution spent the scoped-canary authorization, and without it no
+      // transport authority can be built at all.
+      authorization_consumed_at = clean(claim.authorization_consumed_at) || null;
     }
 
     // ── Debug queue key cancellation: never send to TextGrid ─────────────
@@ -2007,6 +2013,21 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         supabase: getSupabase(deps),
         store: deps.store,
         sendProvider: (args) => send_textgrid_sms({ ...args, seller_first_name }),
+        // Claims only. The adapter re-verifies every one of them against
+        // durable rows before it will let a send cross an active brake, and
+        // builds to null for any execution that is not a consumed scoped
+        // canary, which is every ordinary send.
+        scoped_canary_transport_authority: buildScopedCanaryTransportAuthority({
+          scoped_canary: deps.scoped_canary === true,
+          authorization_id: deps.authorization_id,
+          authorization_token: deps.authorization_token,
+          authorization_consumed_at,
+          canary_run_id: deps.canary_run_id,
+          canary_leg: deps.canary_leg,
+          campaign_id: deps.campaign_id,
+          queue_row_id,
+          queue_execution_mode: deps.queue_execution_mode,
+        }),
         classifyProviderError: classifyTextGridProviderError,
         getSystemValue: deps.getSystemValue || getSystemValue,
         scoped_canary: deps.scoped_canary === true,

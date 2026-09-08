@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { TRANSPORT_AUTHORIZED_SCOPE } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -116,16 +118,27 @@ export async function createCanaryAuthorization(
     queue_row_ids = [],
     authorization_token,
     expires_at,
+    canary_leg = null,
     metadata = {},
   } = {}
 ) {
+  // Scope and leg are stamped by DEFAULT rather than left to each caller.
+  //
+  // The transport-authority verifier binds an excused send to an exact canary
+  // leg, and until this default existed no minting path wrote one, so the
+  // exception could never verify. Explicit metadata still wins: enqueue-scoped
+  // authorizations are minted elsewhere and must keep their own scope.
+  const defaults = {
+    scope: TRANSPORT_AUTHORIZED_SCOPE,
+    ...(clean(canary_leg) ? { canary_leg: clean(canary_leg) } : {}),
+  };
   const row = {
     canary_run_id: clean(canary_run_id),
     campaign_id: clean(campaign_id),
     queue_row_ids: sortedIds(queue_row_ids),
     authorization_token_hash: hashToken(authorization_token),
     expires_at,
-    metadata,
+    metadata: { ...defaults, ...metadata },
   };
   const { data, error } = await supabase
     .from("queue_canary_authorizations")

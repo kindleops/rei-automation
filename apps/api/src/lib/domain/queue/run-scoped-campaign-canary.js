@@ -5,6 +5,7 @@ import {
   normalizeSendQueueRow,
   validateSendQueueRowPreclaim,
 } from "@/lib/supabase/sms-engine.js";
+import { assertTransportAuthorityIssuable } from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import { processSendQueueItem as defaultProcessSendQueueItem } from "@/lib/domain/queue/process-send-queue.js";
 import { getSystemValue, getSystemValueFresh } from "@/lib/system-control.js";
 import {
@@ -373,6 +374,42 @@ export async function runScopedCampaignCanary(request = {}, deps = {}) {
 
   const emergency_stop_at = await get_system_value("queue_emergency_stop_at");
   const emergency_stop_active = isEmergencyStopActive(emergency_stop_at);
+
+  // ── PRE-CLAIM: can this authorization reach transport at all? ────────────
+  // Only asked when a brake is actually up, because that is the only time a
+  // transport authority is needed. Asked BEFORE the claim because the claim
+  // CONSUMES the authorization: discovering a mis-issued one afterwards costs
+  // the operator their single-use grant, fails the queue row, and leaves the
+  // logical communication on operator_hold, all for a send that never left.
+  // Refusing here costs nothing and is retryable once the grant is re-minted.
+  const processor_mode_for_transport = await get_system_value("queue_processor_mode");
+  const transport_exception_required =
+    emergency_stop_active || clean(processor_mode_for_transport).toLowerCase() === "off";
+  if (transport_exception_required && !parsed.validate_only && !parsed.dry_run) {
+    const issuable = assertTransportAuthorityIssuable({
+      canary_leg: deps.canary_leg,
+      authorization_scope: deps.authorization_scope,
+      manifest_size: (parsed.queue_row_ids || []).length,
+    });
+    if (!issuable.ok) {
+      return {
+        ok: false,
+        status: 423,
+        reason: issuable.reason,
+        error: issuable.reason,
+        scoped_canary: true,
+        campaign_id: parsed.campaign_id,
+        canary_run_id: parsed.canary_run_id,
+        sent_count: 0,
+        claimed_count: 0,
+        emergency_stop_active,
+        queue_execution_mode: execution_mode,
+        // Nothing was claimed and nothing was consumed, so the operator can
+        // re-mint the authorization with the missing field and run again.
+        authorization_consumed: false,
+      };
+    }
+  }
 
   const lock = await acquireGlobalExecutionLock(supabase, {
     owner_type: GLOBAL_LOCK_OWNER.SCOPED_CANARY,

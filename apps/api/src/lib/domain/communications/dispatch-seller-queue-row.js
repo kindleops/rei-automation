@@ -27,6 +27,7 @@ import { createSellerCommunicationStore } from '@/lib/domain/communications/sell
 import { resolveQueueRowIdentity } from '@/lib/domain/communications/queue-row-identity.js';
 import { buildLogicalCommunicationKey, LOGICAL_COMMUNICATION_KEY_VERSION } from '@/lib/domain/communications/logical-communication-key.js';
 import { evaluateCanonicalSendAuthority } from '@/lib/domain/queue/canonical-send-authority.js';
+import { bindScopedCanaryTransportAuthority } from '@/lib/domain/queue/scoped-canary-transport-authority.js';
 import { classifyTextGridProviderError } from '@/lib/domain/messaging/textgrid-provider-error-classifier.js';
 import { assertNoEmDash } from '@/lib/domain/messaging/outbound-content-guard.js';
 
@@ -149,9 +150,27 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
   // existing finalisation keeps working unchanged. It is telemetry for the
   // caller, never an input to any authority decision here.
   let raw_provider_result = null;
+  // Captured from the per-attempt authority check below. sendProvider always
+  // runs AFTER that check, so by the time transport asks, this holds the verdict
+  // that actually authorised this attempt rather than an earlier, staler one.
+  let canonical_authority_verdict = null;
   const sendProviderImpl = deps.sendProvider;
   const sendProvider = async (args) => {
-    const result = await sendProviderImpl(args);
+    // Bind the scoped-canary transport authority to the communication the seam
+    // just established. Binding happens HERE, once, from the seam's own values
+    // rather than the caller's, so an authority cannot be pointed at a
+    // different row or destination than the one it was issued for. Absent a
+    // scoped-canary run this is null and transport behaves exactly as before.
+    const transport_authority = bindScopedCanaryTransportAuthority(
+      deps.scoped_canary_transport_authority,
+      {
+        logical_communication_id: args?.logical_communication_id,
+        destination: args?.to,
+        queue_row_id,
+        canonical_authority: canonical_authority_verdict,
+      }
+    );
+    const result = await sendProviderImpl({ ...args, transport_authority });
     raw_provider_result = result;
     return result;
   };
@@ -187,6 +206,10 @@ export async function dispatchSellerQueueRow(queue_row = {}, message_fields = {}
           action: 'queue_send',
           scopedCanary: deps.scoped_canary === true,
         });
+        // Recorded, not re-derived. A denial leaves the previous value in place
+        // only because the seam refuses the attempt outright on !ok, so no
+        // provider call can follow a denial.
+        canonical_authority_verdict = authority.ok ? authority : null;
         return authority.ok ? { ok: true } : { ok: false, reason: authority.reason };
       },
       assertOutboundContent: async (message) => {

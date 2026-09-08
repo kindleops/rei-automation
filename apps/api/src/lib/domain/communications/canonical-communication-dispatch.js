@@ -276,6 +276,11 @@ async function runAttempt(comm, input, deps, emit) {
       to: input.message?.to,
       from: input.message?.from,
       body: input.message?.body,
+      // The seam is the only place that knows which communication this call
+      // belongs to. Transport binds its authority to these values, so an
+      // authority minted for one row cannot excuse a send for another.
+      logical_communication_id: comm.id,
+      attempt_id: allocated.attempt_id,
     });
   } catch (error) {
     provider_error = error;

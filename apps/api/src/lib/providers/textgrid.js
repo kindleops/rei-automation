@@ -12,8 +12,11 @@ import { recordSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { evaluateQueueSendRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import { warn, info } from "@/lib/logging/logger.js";
 import { normalizeUsPhoneToE164 } from "@/lib/sms/sanitize.js";
-import { hasSupabaseConfig } from "@/lib/supabase/client.js";
+import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemFlag, getSystemValue } from "@/lib/system-control.js";
+import {
+  verifyScopedCanaryTransportAuthority,
+} from "@/lib/domain/queue/scoped-canary-transport-authority.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { classifyNetworkFailurePhase } from "@/lib/domain/messaging/transport-failure-phase.js";
 
@@ -63,6 +66,7 @@ export class TextGridError extends Error {
       may_have_transmitted,
       local_refusal,
       local_refusal_reason,
+      transport_authority_reason,
     } = {}
   ) {
     super(message);
@@ -86,6 +90,9 @@ export class TextGridError extends Error {
     // is reached, so the classifier can prove non-delivery instead of guessing.
     this.local_refusal = local_refusal === true;
     this.local_refusal_reason = local_refusal_reason ?? null;
+    // Why a presented scoped-canary transport authority did NOT excuse the
+    // brake. Null when none was presented, which is the ordinary case.
+    this.transport_authority_reason = transport_authority_reason ?? null;
   }
 }
 
@@ -472,6 +479,9 @@ export async function sendTextgridSMS({
   manual_operator_send = false,
   metadata = null,
   statusCallback = null,
+  transport_authority = null,
+  logical_communication_id = null,
+  supabaseClient = null,
 }) {
   const send_metadata = { ...objectMetadata(metadata) };
   const send_context = {
@@ -493,22 +503,61 @@ export async function sendTextgridSMS({
     );
     const runtime_brake_decision = evaluateTextgridRuntimeBrakeForSend(runtime_brake, send_context);
     if (!runtime_brake_decision.ok) {
-      info("send.blocked_runtime_brake", {
-        reason: runtime_brake_decision.reason,
-        to_input: to,
-        client_reference_id,
-        bypass_system_control: Boolean(bypass_system_control),
-        source: send_context.source,
-        send_source: send_context.send_source,
-        manual_operator_send: send_context.manual_operator_send,
+      // ── THE ONE EXCEPTION: A VERIFIED SCOPED-CANARY TRANSPORT AUTHORITY ──
+      //
+      // §11 Slice 4H proved this brake makes `scoped_canary_only` an
+      // unreachable mode: canonical scoped-canary authority succeeds upstream
+      // and transport refuses downstream, so no canary can ever reach the
+      // provider while the global emergency stop is set.
+      //
+      // The exception is NOT "a canary said so". `transport_authority` is a
+      // bundle of CLAIMS; the verifier re-checks every one against durable
+      // rows this process does not own, including a consumed_at that only the
+      // claim transaction can produce. A caller that fabricates the object
+      // fails at the database, not here. Ordinary, manual and campaign sends
+      // never construct one and are wholly unaffected: they still stop dead.
+      const exception = await verifyScopedCanaryTransportAuthority(transport_authority, {
+        to: normalizePhone(to),
+        logical_communication_id,
+        supabase: supabaseClient || defaultSupabase,
       });
-      throw localRefusal(
-        runtime_brake_decision.reason || "runtime_brake_active",
-        `sendTextgridSMS: ${runtime_brake_decision.reason} - send blocked by runtime safety brake`,
-        { to, from, body }
-      );
+
+      if (!exception.ok) {
+        info("send.blocked_runtime_brake", {
+          reason: runtime_brake_decision.reason,
+          transport_authority_reason: exception.reason,
+          to_input: to,
+          client_reference_id,
+          bypass_system_control: Boolean(bypass_system_control),
+          source: send_context.source,
+          send_source: send_context.send_source,
+          manual_operator_send: send_context.manual_operator_send,
+        });
+        // The brake is still the refusal. The failed exception is recorded as
+        // the REASON the brake was not lifted, never as a second failure mode.
+        throw localRefusal(
+          runtime_brake_decision.reason || "runtime_brake_active",
+          `sendTextgridSMS: ${runtime_brake_decision.reason} - send blocked by runtime safety brake`,
+          { to, from, body, transport_authority_reason: exception.reason }
+        );
+      }
+
+      // Loud on purpose. A send that crossed an active emergency stop must be
+      // the most conspicuous line in the log, with the evidence that excused it.
+      info("send.scoped_canary_transport_authority_verified", {
+        brake_reason: runtime_brake_decision.reason,
+        client_reference_id,
+        ...exception.evidence,
+      });
+      // The normalized context is still recorded, exactly as on the unblocked
+      // path, so an excused send carries the same provenance as any other.
+      Object.assign(send_metadata, runtime_brake_decision.metadata, {
+        scoped_canary_transport_authority: exception.evidence,
+        brake_excused_reason: runtime_brake_decision.reason,
+      });
+    } else {
+      Object.assign(send_metadata, runtime_brake_decision.metadata);
     }
-    Object.assign(send_metadata, runtime_brake_decision.metadata);
     if (runtime_brake_decision.bypassed_queue_emergency_stop_for_manual_send) {
       info("send.bypassed_runtime_brake", {
         reason: runtime_brake_decision.reason,

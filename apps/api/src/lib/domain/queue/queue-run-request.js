@@ -283,6 +283,11 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
         authorization_validated: true,
         authorization_token: auth_token,
         campaign_id: scoped_canary_request.campaign_id,
+        // Read from the durable authorization, never from the request body. The
+        // transport-authority verifier re-checks it against this same row, so a
+        // caller-chosen leg would simply fail to match.
+        canary_leg: clean(auth_validation.authorization?.metadata?.canary_leg) || null,
+        authorization_scope: clean(auth_validation.authorization?.metadata?.scope) || null,
       });
       return json_response(
         {
