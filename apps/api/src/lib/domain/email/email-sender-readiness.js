@@ -28,6 +28,8 @@
  *   and no warm-up state, so it is not a sender, it is a hole in the policy.
  */
 
+import { asObject } from "@/lib/hostile-input.js";
+
 export const EMAIL_SENDER_READINESS_POLICY_VERSION = "email_sender_readiness_v1";
 
 /**
@@ -100,7 +102,8 @@ function toInt(value) {
  *        "looked, none found"; `undefined` means NOT LOOKED, which is a refusal.
  * @param {boolean} [input.require_domain_verified=true]
  */
-export function evaluateEmailSenderReadiness(input = {}) {
+export function evaluateEmailSenderReadiness(raw_input) {
+  const input = asObject(raw_input);
   const blocking = [];
   const warnings = [];
   const block = (reason, detail = null) => blocking.push({ reason, detail });

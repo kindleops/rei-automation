@@ -55,6 +55,7 @@ import {
   EMAIL_PROVIDER_STATUS_POLICY_VERSION,
 } from "@/lib/domain/email/email-provider-outcome-lattice.js";
 import { normalizeEmailAddress } from "@/lib/domain/email/normalize-email-address.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 const logger = child({ module: "domain.email.event_reconcile" });
 
@@ -92,7 +93,9 @@ function firstNonEmpty(...values) {
  * event, and hashing those would make every duplicate look new, which is exactly
  * the failure the key exists to prevent.
  */
-export function buildEmailEventKey(payload = {}, normalized = {}) {
+export function buildEmailEventKey(raw_payload, raw_normalized) {
+  const payload = asObject(raw_payload);
+  const normalized = asObject(raw_normalized);
   const provider_id = firstNonEmpty(payload.id, payload.event_id, payload.uuid);
   if (provider_id) return `brevo:${provider_id}`;
 

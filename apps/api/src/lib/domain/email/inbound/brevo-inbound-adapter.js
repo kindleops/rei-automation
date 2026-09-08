@@ -51,6 +51,7 @@ import { classifyInboundMessage } from "@/lib/domain/email/inbound/inbound-messa
 import { verifyBrevoWebhook } from "@/lib/domain/email/brevo-webhook-verification.js";
 import { TRUST_CLASS } from "@/lib/domain/communications/callback-trust-policy.js";
 import crypto from "node:crypto";
+import { asObject } from "@/lib/hostile-input.js";
 
 const logger = child({ module: "domain.email.brevo_inbound" });
 
@@ -184,7 +185,8 @@ export function createBrevoInboundProvider(deps = {}) {
      * Fails closed. An absent configuration is a 503-shaped refusal reported
      * separately from a bad credential, because they need different fixes.
      */
-    verify(input = {}) {
+    verify(raw_input) {
+      const input = asObject(raw_input);
       const expected_path_token = clean(
         input.expected_path_token ?? process.env.BREVO_INBOUND_URL_TOKEN
       );

@@ -43,6 +43,7 @@
 import crypto from "node:crypto";
 
 import { TRUST_CLASS } from "@/lib/domain/communications/callback-trust-policy.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 export const BREVO_WEBHOOK_VERIFICATION_POLICY_VERSION = "brevo_webhook_verify_v1";
 
@@ -101,7 +102,8 @@ function headerReader(headers) {
  *
  * @returns {{ok:boolean, trust_class:string, configured:boolean, mode:string|null, reason:string|null}}
  */
-export function verifyBrevoWebhook(input = {}) {
+export function verifyBrevoWebhook(raw_input) {
+  const input = asObject(raw_input);
   const secret = clean(input.secret ?? process.env.BREVO_WEBHOOK_SECRET);
   const raw_body = typeof input.raw_body === "string" ? input.raw_body : "";
   const header = headerReader(input.headers);

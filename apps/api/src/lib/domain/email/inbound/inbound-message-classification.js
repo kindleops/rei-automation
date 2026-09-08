@@ -34,6 +34,8 @@
  *   ten seconds. The asymmetry is not close.
  */
 
+import { asObject } from "@/lib/hostile-input.js";
+
 export const INBOUND_CLASSIFICATION_POLICY_VERSION = "inbound_class_v1";
 
 export const INBOUND_MESSAGE_CLASS = Object.freeze({
@@ -93,7 +95,8 @@ function header(headers, name) {
  * @param {object} normalized  a NormalizedInboundEmail
  * @returns {{message_class, reason, evidence, confidence, policy_version}}
  */
-export function classifyInboundMessage(normalized = {}) {
+export function classifyInboundMessage(raw_normalized) {
+  const normalized = asObject(raw_normalized);
   const headers = normalized.headers && typeof normalized.headers === "object" ? normalized.headers : {};
   const from_email = lower(normalized.from?.email);
   const subject = clean(normalized.subject);

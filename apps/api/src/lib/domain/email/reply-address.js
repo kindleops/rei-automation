@@ -53,6 +53,7 @@
  */
 
 import crypto from "node:crypto";
+import { asObject } from "@/lib/hostile-input.js";
 
 export const REPLY_ADDRESS_POLICY_VERSION = "reply_alias_v1";
 
@@ -92,7 +93,8 @@ export function generateReplyToken() {
  * address) is a deliverability and trust problem, and it is the sender's
  * business to keep them aligned.
  */
-export function buildReplyAddress({ token, reply_domain } = {}) {
+export function buildReplyAddress(raw_input) {
+  const { token, reply_domain } = asObject(raw_input);
   const normalized_token = clean(token);
   const domain = clean(reply_domain).toLowerCase().replace(/^@/, "");
 
@@ -159,7 +161,8 @@ export function extractReplyToken(raw_recipient) {
  * Picking one would be choosing which seller's conversation to attribute a
  * message to on the strength of field ordering.
  */
-export function findReplyTokenInRecipients({ envelope_to = null, to = [], cc = [] } = {}) {
+export function findReplyTokenInRecipients(raw_input) {
+  const { envelope_to = null, to = [], cc = [] } = asObject(raw_input);
   const envelope = extractReplyToken(envelope_to);
   if (envelope.ok) return { ...envelope, source: "envelope_to" };
 

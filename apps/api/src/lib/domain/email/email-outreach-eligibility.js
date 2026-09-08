@@ -37,6 +37,7 @@
  */
 
 import { normalizeEmailAddress } from "@/lib/domain/email/normalize-email-address.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 export const EMAIL_ELIGIBILITY_POLICY_VERSION = "email_eligibility_v1";
 
@@ -132,7 +133,8 @@ function rankOf(reason) {
  * @param {string} [input.now]                      ISO instant; defaults to now
  * @param {object} [input.policy]                   overrides on the default policy
  */
-export function evaluateEmailOutreachEligibility(input = {}) {
+export function evaluateEmailOutreachEligibility(raw_input) {
+  const input = asObject(raw_input);
   const policy = { ...DEFAULT_EMAIL_ELIGIBILITY_POLICY, ...(input.policy || {}) };
   const now_ms = toTime(input.now) ?? Date.now();
 

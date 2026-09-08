@@ -32,6 +32,8 @@
  *   splitting by hand.
  */
 
+import { asObject } from "@/lib/hostile-input.js";
+
 export const BODY_NORMALIZATION_POLICY_VERSION = "inbound_body_v1";
 
 /**
@@ -158,7 +160,8 @@ function splitSignature(text) {
  * @returns {{raw_text, normalized_text, newest_reply, signature, source,
  *            had_html_only, is_empty, policy_version}}
  */
-export function normalizeInboundBody(input = {}) {
+export function normalizeInboundBody(raw_input) {
+  const input = asObject(raw_input);
   const text_body = clean(input.text_body);
   const html_body = clean(input.html_body);
   const provider_reply_text = clean(input.provider_reply_text);

@@ -52,6 +52,7 @@
  */
 
 import crypto from "node:crypto";
+import { asObject } from "@/lib/hostile-input.js";
 
 /**
  * Version the SEMANTICS, not the value. If the components of a key ever change,
@@ -175,7 +176,12 @@ function stableHash(parts) {
  *
  * Never throws, never falls back. A refusal is a legitimate, expected outcome.
  */
-export function buildLogicalCommunicationKey(input = {}) {
+export function buildLogicalCommunicationKey(raw_input) {
+  // A null argument must produce the same readable refusal as a blank one. This
+  // builder sits on the canonical send seam: a TypeError escaping it could be
+  // caught upstream and mistaken for a transport error, which is the one
+  // reading that justifies a retry.
+  const input = asObject(raw_input);
   const type = clean(input.communication_type);
   if (!type) return { ok: false, reason: "missing_communication_type" };
 

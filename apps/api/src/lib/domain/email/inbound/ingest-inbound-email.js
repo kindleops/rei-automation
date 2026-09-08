@@ -48,6 +48,7 @@ import {
   RESOLUTION_STATUS,
 } from "@/lib/domain/email/inbound/resolve-inbound-thread.js";
 import { INBOUND_MESSAGE_CLASS } from "@/lib/domain/email/inbound/inbound-message-classification.js";
+import { asObject } from "@/lib/hostile-input.js";
 
 const logger = child({ module: "domain.email.inbound_ingest" });
 
@@ -82,7 +83,8 @@ function clean(value) {
  * client, so a hostile or broken client could reuse one and collide two genuinely
  * different messages into one.
  */
-export function buildInboundEventKey(normalized = {}) {
+export function buildInboundEventKey(raw_normalized) {
+  const normalized = asObject(raw_normalized);
   const provider_event_id = clean(normalized.provider_event_id);
   if (provider_event_id) return `brevo_in:${provider_event_id}`;
 
