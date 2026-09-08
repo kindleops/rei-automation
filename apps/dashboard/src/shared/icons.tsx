@@ -90,7 +90,20 @@ const commonProps = {
 }
 
 export const Icon = ({ name, size, ...rest }: IconProps) => {
-  const props = size ? { width: size, height: size, ...rest } : rest;
+  /**
+   * Per the SVG spec an <svg> with no width/height attribute defaults to width:100%, and
+   * its height then follows the viewBox ratio. So a bare <Icon /> dropped into a flex or
+   * grid cell that has no rule sizing it does not render as an icon — it expands to fill
+   * the container. That is what inflated the Entity Graph header search icon to 909x909
+   * (collapsing the whole surface) and three Analytics icons to ~324-368px.
+   *
+   * Emitting a 24px default closes that off for every call site at once. Presentation
+   * attributes sit below every author stylesheet in the cascade, so the ~326 icons already
+   * sized by CSS keep their exact current size; only the unconstrained ones change.
+   */
+  const props = size
+    ? { width: size, height: size, ...rest }
+    : { width: 24, height: 24, ...rest };
   switch (name) {
     case 'search':
       return (

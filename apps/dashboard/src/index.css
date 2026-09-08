@@ -11969,3 +11969,126 @@ Motion
   .nx-header-actions-v3 { flex-direction: column; }
   .nx-header-telemetry-rail-v3 { gap: 8px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   APP BOOT / ROUTE STATE  (.app-state)
+   Rendered by CommandCenterApp while a route resolves and on route error.
+   These classes had NO stylesheet anywhere in the app, so the boot screen
+   painted as bare unstyled text in the top-left corner — which reads as a
+   broken blank page rather than "loading", especially on a phone where the
+   cold-load window is long.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app-state {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--surface-0, #06080e);
+  color: var(--text-1, rgba(248, 250, 255, 0.92));
+  z-index: 1;
+}
+
+.app-state__panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  width: 100%;
+  padding: 28px 24px;
+  text-align: center;
+  border-radius: 16px;
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(16, 22, 36, 0.72));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.app-state__eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--tone-primary, #6ea8fe);
+}
+
+.app-state__panel h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-state__panel p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3, rgba(226, 232, 240, 0.6));
+  overflow-wrap: anywhere;
+}
+
+/* Indeterminate progress bar — the cold load can run many seconds, and a static
+   line of text gives the operator no signal that anything is still happening. */
+.app-state__panel::after {
+  content: '';
+  width: 120px;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--tone-primary, #6ea8fe),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: app-state-scan 1.1s ease-in-out infinite;
+}
+
+@keyframes app-state-scan {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.app-state__button {
+  margin-top: 6px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-1, #f8fafc);
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.app-state__button:hover {
+  background: var(--surface-3, rgba(255, 255, 255, 0.1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-state__panel::after { animation: none; }
+}
+
+/* Suspense fallback for a lazily-loaded route surface. Deliberately quiet: the shell
+   (command dock, nav, notifications) stays mounted around it, so a spinner here would
+   read as a second, competing loading state. */
+.nx-stage-suspense {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: var(--surface-0, #06080e);
+}
+
+/* The shell's room label is pinned to the top-left of the stage. Fullscreen surfaces
+   (entity graph, pipeline, queue, analytics, closing desk, campaigns…) render their own
+   header in that exact spot, so the two paint on top of each other — "PIPELINE" over
+   "NEXUS" reads as "PIPELINE|EXUS", and the queue's "OUTBOUND COMMAND CENTER" collides
+   with its own title. closing-desk.css:1109 already tried to patch this for one view, but
+   that selector scopes the label INSIDE .nx-fullscreen-app-shell and the label is actually
+   a SIBLING of .nx-stage, so it never matched. Scope from the shared ancestor instead. */
+.nx-os:has(.nx-fullscreen-app-shell) .nx-room-label {
+  display: none;
+}
