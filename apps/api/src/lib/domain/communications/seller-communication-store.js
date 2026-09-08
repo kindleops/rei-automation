@@ -115,6 +115,40 @@ export function createSellerCommunicationStore(deps = {}) {
     },
 
     /**
+     * The CONVERSATION a communication belongs to.
+     *
+     * Separate from getLogicalCommunicationById on purpose: that method answers
+     * "what is the state of this send" and its select is read by the dispatch
+     * seam, so widening it would change what every caller receives. This answers
+     * "whose relationship is this", which is a different question with a
+     * different set of columns.
+     *
+     * Channel is deliberately NOT among them. The conversation is the seller
+     * relationship -- owner and property -- and a channel climbing into it is
+     * how one seller becomes two leads.
+     */
+    async getConversationForLogicalCommunication(logical_communication_id) {
+      const id = clean(logical_communication_id);
+      if (!id) return null;
+
+      const { data, error } = await supabase
+        .from('seller_logical_communications')
+        .select('id,opportunity_id,master_owner_id,property_id,thread_key')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) {
+        // A ledger we cannot read is not an absent conversation. Returning a
+        // half-populated one would let a reply be attributed on partial anchors.
+        logger.error('logical_communication.conversation_load_failed', {
+          logical_communication_id: id, error: clean(error.message),
+        });
+        return null;
+      }
+      return data || null;
+    },
+
+    /**
      * Allocation is serialised in SQL (FOR UPDATE on the parent) and refuses
      * ambiguity, forbidden states, denied retry authority and -- critically --
      * any unresolved sibling attempt. Do not re-implement those checks here.

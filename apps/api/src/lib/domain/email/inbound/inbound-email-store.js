@@ -25,10 +25,17 @@ import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 import { replyTokenFingerprint } from "@/lib/domain/email/reply-address.js";
 import { asObject } from "@/lib/hostile-input.js";
+import { createSellerCommunicationStore } from "@/lib/domain/communications/seller-communication-store.js";
 
 const logger = child({ module: "domain.email.inbound_store" });
 
 /** Bounds, chosen so one hostile message cannot exhaust storage or memory. */
+/**
+ * A References header can legitimately carry a long chain, and a hostile one can
+ * carry thousands. Each id is a separate ledger lookup, so the list is bounded
+ * before any of them happen.
+ */
+export const MAX_HEADER_LOOKUPS = 25;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
@@ -76,6 +83,10 @@ export function sanitizeAttachmentFilename(raw) {
 export function createInboundEmailStore(deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const fetch_impl = deps.fetch_impl || fetch;
+  // seller_communication_attempts is read through the canonical store and never
+  // directly, which is the ownership rule direct-callback-state-contract
+  // enforces -- and the rule EMAIL-2 broke and the pre-flight repaired.
+  const canonical = deps.canonical_store || createSellerCommunicationStore({ supabase });
 
   return {
     async getSystemFlag(key) {
@@ -220,23 +231,45 @@ export function createInboundEmailStore(deps = {}) {
      * Tier 2 lookup: outbound communications whose RFC Message-ID appears in the
      * inbound In-Reply-To or References.
      */
-    async findCommunicationsByMessageIds({ in_reply_to, references } = {}) {
+    async findCommunicationsByMessageIds(raw_input) {
+      const { in_reply_to, references } = asObject(raw_input);
       const ids = [...new Set([clean(in_reply_to), ...(Array.isArray(references) ? references : [])]
         .map((value) => clean(value))
-        .filter(Boolean))];
+        .filter(Boolean))]
+        .slice(0, MAX_HEADER_LOOKUPS);
       if (!ids.length) return [];
 
-      const { data, error } = await supabase
-        .from("email_queue")
-        .select("logical_communication_id, master_owner_id, property_id, prospect_id, thread_key, rfc_message_id")
-        .in("rfc_message_id", ids)
-        .limit(50);
+      // THE ATTEMPT LEDGER IS WHERE AN OUTBOUND MESSAGE ID LIVES.
+      //
+      // An earlier version of this looked up `email_queue.rfc_message_id`. That
+      // column does not exist and nothing writes it, so every lookup would have
+      // errored, been logged, and returned an empty list -- leaving tier 2
+      // permanently unable to match while looking like it worked. It is the same
+      // defect EMAIL-0 found twice: code targeting a table shape nobody built.
+      //
+      // The provider message id is recorded on the attempt, by the canonical
+      // store, at the moment the provider accepted the send. Brevo's transactional
+      // messageId IS the RFC Message-ID it stamped on the outgoing mail, which is
+      // what a replying client puts in In-Reply-To -- so the two genuinely meet
+      // here, and nowhere else.
+      const communications = await Promise.all(
+        ids.map(async (id) => {
+          const found = await canonical.findAttemptByProviderMessageId(id);
+          if (!found?.ok || !found.logical_communication_id) return null;
+          const conversation = await canonical.getConversationForLogicalCommunication?.(found.logical_communication_id);
+          if (!conversation) return null;
+          return {
+            logical_communication_id: found.logical_communication_id,
+            opportunity_id: conversation.opportunity_id || null,
+            master_owner_id: conversation.master_owner_id || null,
+            property_id: conversation.property_id || null,
+            prospect_id: conversation.prospect_id || null,
+            thread_key: conversation.thread_key || null,
+          };
+        })
+      );
 
-      if (error) {
-        logger.error("inbound_email.header_lookup_failed", { reason: clean(error.message) });
-        return [];
-      }
-      return Array.isArray(data) ? data : [];
+      return communications.filter(Boolean);
     },
 
     /**
