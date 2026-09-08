@@ -85,3 +85,32 @@ create table public.contact_outreach_state (
 );
 create unique index uq_contact_outreach_state_owner_phone
   on public.contact_outreach_state (podio_master_owner_id, to_phone_number);
+
+-- Production shape of email_events, which predates every migration in this repo.
+-- The EMAIL-2 ledger migration ALTERs it, so the proof needs the pre-migration
+-- form to alter.
+create table public.email_events (
+  id uuid primary key default gen_random_uuid(),
+  event_key text not null unique,
+  provider_message_id text,
+  direction text not null,
+  event_type text not null,
+  to_email text,
+  from_email text,
+  subject text,
+  email_body text,
+  queue_id uuid,
+  metadata jsonb,
+  created_at timestamptz default now(),
+  sent_at timestamptz,
+  delivered_at timestamptz,
+  failed_at timestamptz,
+  error_message text,
+  opened_at timestamptz,
+  open_count integer,
+  clicked_at timestamptz,
+  click_count integer,
+  tracking_pixel_id text,
+  last_user_agent text,
+  last_ip inet
+);

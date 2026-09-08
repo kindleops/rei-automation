@@ -195,6 +195,60 @@ check("the EMAIL-1 migration applies", first.status === 0, first.stderr?.trim())
 const second = runFile("emailproof", EMAIL1);
 check("the EMAIL-1 migration is idempotent", second.status === 0, second.stderr?.trim());
 
+// ── the provider event ledger ──────────────────────────────────────────────
+
+const LEDGER = path.join(MIGRATIONS, "20260908150000_email_provider_event_ledger.sql");
+const ledgerApply = runFile("emailproof", LEDGER);
+check("the event-ledger migration applies", ledgerApply.status === 0, ledgerApply.stderr?.trim());
+check("the event-ledger migration is idempotent", runFile("emailproof", LEDGER).status === 0);
+
+check(
+  "an event cannot claim a processing status the reconciler cannot produce",
+  psql(["-d", "emailproof", "-tAc",
+    "insert into public.email_events (event_key, direction, event_type, processing_status) " +
+    "values ('k1','outbound','delivered','definitely_delivered')"]).status !== 0
+);
+
+check(
+  "telemetry counters increment ATOMICALLY, in one statement",
+  (() => {
+    psql(["-d", "emailproof", "-tAc",
+      "insert into public.email_queue (queue_key, queue_status, to_email, subject, email_body, provider_message_id) " +
+      "values ('tq1','sent','a@b.com','s','b','<pm-1@brevo>')"]);
+    for (let i = 0; i < 3; i += 1) {
+      psql(["-d", "emailproof", "-tAc",
+        "select public.email_queue_record_telemetry('<pm-1@brevo>','opened', now())"]);
+    }
+    return query("emailproof", "select open_count from public.email_queue where queue_key='tq1'") === "3";
+  })()
+);
+
+check(
+  "the telemetry function CANNOT touch delivery state",
+  (() => {
+    psql(["-d", "emailproof", "-tAc",
+      "select public.email_queue_record_telemetry('<pm-1@brevo>','clicked', now())"]);
+    const row = query("emailproof",
+      "select coalesce(delivered_at_event::text,'null') || '/' || coalesce(provider_outcome,'null') " +
+      "from public.email_queue where queue_key='tq1'");
+    return row === "null/null";
+  })(),
+  "a telemetry write that could set delivered_at would let a scanner mark a message delivered"
+);
+
+check(
+  "a non-telemetry event through the telemetry function changes nothing",
+  query("emailproof",
+    "select (public.email_queue_record_telemetry('<pm-1@brevo>','delivered', now()))->>'reason'")
+    === "not_a_telemetry_event"
+);
+
+check(
+  "an attempt can be resolved from a provider message id",
+  /provider_message_id/.test(query("emailproof",
+    "select indexdef from pg_indexes where indexname='seller_communication_attempts_provider_message_idx'"))
+);
+
 // ── channel is required, with no default to fall back on ───────────────────
 check(
   "channel is NOT NULL with no default",
