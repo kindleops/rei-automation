@@ -67,13 +67,14 @@ const has = (needle) => SQL.includes(needle);
 
 // ── the channel column, and its absent default ──────────────────────────────
 
-test("seller_logical_communications gains channel and to_email", () => {
-  assert.ok(has("ADD COLUMN IF NOT EXISTS channel  text"));
-  assert.ok(has("ADD COLUMN IF NOT EXISTS to_email text"));
+test("seller_logical_communications gains channel, to_email and channel_source", () => {
+  assert.ok(/ADD COLUMN IF NOT EXISTS channel\s+text/.test(SQL));
+  assert.ok(/ADD COLUMN IF NOT EXISTS to_email\s+text/.test(SQL));
+  assert.ok(/ADD COLUMN IF NOT EXISTS channel_source\s+text/.test(SQL));
 });
 
 test("channel is backfilled, then made NOT NULL", () => {
-  assert.ok(has("SET channel = 'sms'"));
+  assert.ok(/SET channel\s+= 'sms'/.test(SQL));
   assert.ok(has("ALTER COLUMN channel SET NOT NULL"));
 });
 
@@ -89,7 +90,7 @@ test("channel on seller_logical_communications has NO surviving default", () => 
     "the backfill default must be dropped, not left in place");
 
   const block = SQL.match(
-    /ALTER TABLE public\.seller_logical_communications[\s\S]*?ADD COLUMN IF NOT EXISTS to_email text;/
+    /ALTER TABLE public\.seller_logical_communications[\s\S]*?ADD COLUMN IF NOT EXISTS channel_source text;/
   );
   assert.ok(block, "the ADD COLUMN block was not found");
   assert.ok(!/DEFAULT/i.test(block[0]),
@@ -111,16 +112,39 @@ test("a row cannot carry both a phone and an email recipient", () => {
 
 // ── the RPC ─────────────────────────────────────────────────────────────────
 
-test("the RPC writes channel and to_email", () => {
-  assert.ok(has("NULLIF(p_lineage->>'channel','')"));
+test("the RPC writes channel, its provenance, and to_email", () => {
+  assert.ok(has("v_channel := NULLIF(p_lineage->>'channel', '')"));
   assert.ok(has("NULLIF(p_lineage->>'to_email','')"));
+  assert.ok(has("channel, channel_source, thread_key"),
+    "the INSERT must carry channel_source, or the coercion leaves no trace");
 });
 
-test("the RPC never COALESCEs a missing channel into a default", () => {
-  // NOT NULL plus no coalesce means a channel-less caller fails loudly, which is
-  // the correct outcome for a caller that cannot say how its message travels.
-  assert.ok(!/COALESCE\([^)]*'channel'[^)]*'sms'/.test(SQL));
-  assert.ok(!SQL.includes("COALESCE(NULLIF(p_lineage->>'channel',''), 'sms')"));
+test("EXPAND: a channel-less caller is accepted, and the coercion is STAMPED", () => {
+  // The expand step deliberately tolerates a caller compiled before lck_v2,
+  // because a migration and a deploy are not atomic and refusing those callers
+  // would break the live SMS seam for the length of the deploy.
+  //
+  // What makes the tolerance acceptable is that it is never invisible: the row
+  // records where its channel came from, so the contract step can prove nothing
+  // still depends on it.
+  assert.ok(has("v_channel := NULLIF(p_lineage->>'channel', '')"));
+  assert.ok(has("v_channel_source := 'expand_default_sms'"));
+  assert.ok(has("v_channel_source := 'caller'"));
+  assert.ok(!/COALESCE\([^)]*p_lineage->>'channel'[^)]*\)/.test(SQL),
+    "an inline COALESCE would apply the default with no trace that it happened");
+});
+
+test("EXPAND: channel_source is constrained and NOT NULL", () => {
+  assert.ok(has("ADD COLUMN IF NOT EXISTS channel_source text"));
+  assert.ok(has("ALTER COLUMN channel_source SET NOT NULL"));
+  assert.ok(has("CHECK (channel_source IN ('caller', 'backfill', 'expand_default_sms'))"));
+});
+
+test("EXPAND: a coerced row can be found in one query", () => {
+  // The contract guard depends on this index existing; without it the check
+  // becomes a sequential scan of the whole communication ledger.
+  assert.ok(has("seller_logical_communications_channel_source_idx"));
+  assert.ok(has("WHERE channel_source = 'expand_default_sms'"));
 });
 
 test("channel joins the identity-conflict guard, in both halves", () => {
@@ -243,6 +267,78 @@ test("only indexes are dropped, never a table, column or constraint", () => {
   }
 });
 
+
+// ── the CONTRACT migration ──────────────────────────────────────────────────
+
+const CONTRACT_PATH = path.resolve(
+  __dirname,
+  "../../supabase/migrations/20260908140000_email_channel_contract_strict.sql"
+);
+const CONTRACT_SQL = stripSqlLineComments(fs.readFileSync(CONTRACT_PATH, "utf8"));
+const contractHas = (needle) => CONTRACT_SQL.includes(needle);
+
+test("CONTRACT: refuses to apply while the tolerance is still in use", () => {
+  // A contract step that proceeds over its own guard is a contract step nobody
+  // can trust: it would start refusing sends from callers that are mid-rollout.
+  assert.ok(contractHas("RAISE EXCEPTION"));
+  assert.ok(contractHas("refusing to contract"));
+  assert.ok(contractHas("channel_source = 'expand_default_sms'"));
+  assert.ok(contractHas("email.contract_quiet_minutes"),
+    "the quiet window must be operator-settable for a slow rollout");
+});
+
+test("CONTRACT: removes the coercion entirely", () => {
+  assert.ok(contractHas("'reason', 'missing_communication_channel'"));
+
+  // Scoped to the function body: the GUARD legitimately mentions
+  // expand_default_sms (it is what the guard counts), but the RPC that replaces
+  // the expand one must be unable to write a new coerced row.
+  const body = CONTRACT_SQL.match(/AS \$fn\$[\s\S]*?\$fn\$;/);
+  assert.ok(body, "the contracted function body was not found");
+  assert.ok(!body[0].includes("expand_default_sms"),
+    "the contracted RPC must not be able to produce a coerced row");
+  assert.ok(body[0].includes("'caller'"),
+    "every row the contracted RPC writes came from a caller that named its channel");
+});
+
+test("CONTRACT: refuses with a structured reason, not a raised exception", () => {
+  // The caller is the canonical dispatcher, which already knows how to turn a
+  // structured refusal into a denied send with a named cause. An exception would
+  // reach it as a generic store error and lose the reason.
+  const refusal = CONTRACT_SQL.match(/IF v_channel IS NULL THEN[\s\S]*?END IF;/);
+  assert.ok(refusal, "the strict channel check was not found");
+  assert.ok(/RETURN jsonb_build_object/.test(refusal[0]));
+  assert.ok(!/RAISE/.test(refusal[0]));
+});
+
+test("CONTRACT: does not invalidate historical expand rows", () => {
+  // Rows written during the expand window are real evidence. Narrowing the CHECK
+  // constraint would retroactively make them illegal.
+  assert.ok(!/DROP CONSTRAINT/i.test(CONTRACT_SQL));
+  assert.ok(!/channel_source IN \('caller', 'backfill'\)/.test(CONTRACT_SQL));
+});
+
+test("CONTRACT: is a single transaction and destroys nothing", () => {
+  assert.ok(CONTRACT_SQL.trimStart().startsWith("BEGIN;"));
+  assert.ok(CONTRACT_SQL.trimEnd().endsWith("COMMIT;"));
+  for (const forbidden of [/\bDROP\s+TABLE\b/i, /\bDROP\s+COLUMN\b/i, /\bTRUNCATE\b/i, /\bDELETE\s+FROM\b/i]) {
+    assert.ok(!forbidden.test(CONTRACT_SQL), `contract migration contains ${forbidden}`);
+  }
+});
+
+test("CONTRACT: keeps the SECURITY DEFINER posture and the grants", () => {
+  assert.ok(contractHas("SECURITY DEFINER"));
+  assert.ok(contractHas("SET search_path = public, extensions, pg_temp"));
+  assert.ok(contractHas("GRANT EXECUTE ON FUNCTION public.seller_logical_communication_get_or_create(text, text, text, jsonb, jsonb) TO service_role"));
+});
+
+test("CONTRACT: keeps channel in the identity-conflict guard", () => {
+  // Losing it here would reopen the collision the moment the expand RPC is
+  // replaced, which is the least visible possible place to lose it.
+  assert.ok(contractHas("public.seller_logical_communications.channel              IS NOT DISTINCT FROM EXCLUDED.channel"));
+  assert.ok(contractHas("array_append(v_conflict, 'channel')"));
+});
+
 // ── the whole thing applies or none of it does ──────────────────────────────
 
 test("the migration is a single transaction", () => {
@@ -271,9 +367,17 @@ test("the migration destroys nothing", () => {
   assert.ok(!/\bDELETE\s+FROM\b/i.test(SQL));
 });
 
-test("the only UPDATE is the channel backfill, and it touches nothing else", () => {
+test("the only UPDATEs are the two backfills, and they touch nothing else", () => {
   const updates = SQL.match(/UPDATE\s+public\.\w+[\s\S]*?;/g) || [];
-  assert.equal(updates.length, 1, "an unreviewed second UPDATE would be a data change nobody approved");
-  assert.ok(updates[0].includes("SET channel = 'sms'"));
+  assert.equal(updates.length, 2, "an unreviewed third UPDATE would be a data change nobody approved");
+
+  // Pre-lck_v2 rows: SMS by construction, and labelled as a backfill rather than
+  // as something a caller asserted.
+  assert.ok(/SET channel\s+= 'sms',[\s\S]*channel_source = 'backfill'/.test(updates[0]));
   assert.ok(updates[0].includes("WHERE channel IS NULL"));
+
+  // Rows that already had a channel before this migration ran had it written by
+  // a caller, so that is what they are labelled.
+  assert.ok(updates[1].includes("SET channel_source = 'caller'"));
+  assert.ok(updates[1].includes("WHERE channel_source IS NULL"));
 });

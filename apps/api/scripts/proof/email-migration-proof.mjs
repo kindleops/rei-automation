@@ -215,10 +215,20 @@ for (const index of [
 
 // ── the behaviour that matters most, end to end ────────────────────────────
 const TARGET = "11111111-1111-4111-8111-111111111111";
+
+// logical_key is constrained to ^lck_v[0-9]+:[a-z_]+:[0-9a-f]{64}$. A fixture
+// using a non-hex filler character is rejected by that CHECK rather than by the
+// thing under test, which reads as a failure of the migration. Assert the shape
+// here so the fixtures cannot lie about what they are proving.
+const keyOf = (filler) => {
+  const hash = String(filler).repeat(64);
+  if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`fixture key filler is not hex: ${filler}`);
+  return `lck_v2:campaign_touch:${hash}`;
+};
 const upsert = (key, lineage) =>
   query("emailproof",
     `select (public.seller_logical_communication_get_or_create(` +
-    `'lck_v2:campaign_touch:${key.repeat(64)}','lck_v2','campaign_touch',` +
+    `'${keyOf(key)}','lck_v2','campaign_touch',` +
     `'${JSON.stringify(lineage)}'::jsonb))->>'ok'`);
 
 check(
@@ -238,21 +248,37 @@ check(
 );
 
 // ── refusals ───────────────────────────────────────────────────────────────
-const noChannel = psql(["-d", "emailproof", "-tAc",
-  `select public.seller_logical_communication_get_or_create(` +
-  `'lck_v2:campaign_touch:${"c".repeat(64)}','lck_v2','campaign_touch',` +
-  `'{"campaign_target_id":"${TARGET}","touch_number":"9"}'::jsonb)`]);
+// ── EXPAND: an old SMS caller that names no channel still works ────────────
+//
+// This is the whole point of the expand step. A caller compiled before lck_v2
+// cannot name a channel, and refusing it would break the live SMS seam for the
+// duration of the deploy.
+const oldCaller = query("emailproof",
+  `select (public.seller_logical_communication_get_or_create(` +
+  `'${keyOf("c")}','lck_v2','campaign_touch',` +
+  `'{"to_phone_number":"+13125550111","campaign_target_id":"${TARGET}","touch_number":"9"}'::jsonb))->>'ok'`);
+check("EXPAND: a pre-deploy caller with no channel is accepted", oldCaller === "true");
+
 check(
-  "a channel-less caller is refused, not defaulted to sms",
-  noChannel.status !== 0 && /channel/.test(noChannel.stderr || ""),
-  (noChannel.stderr || "").split("\n")[0]
+  "EXPAND: the coercion is stamped, not silent",
+  query("emailproof",
+    `select channel || '/' || channel_source from public.seller_logical_communications ` +
+    `where touch_number = 9`) === "sms/expand_default_sms",
+  "an unstamped coercion is indistinguishable from a caller that said sms"
+);
+
+check(
+  "EXPAND: a caller that DOES name its channel is stamped as the source",
+  query("emailproof",
+    `select distinct channel_source from public.seller_logical_communications ` +
+    `where touch_number = 3`) === "caller"
 );
 
 check(
   "the same key with a different channel is an identity conflict",
   query("emailproof",
     `select (public.seller_logical_communication_get_or_create(` +
-    `'lck_v2:campaign_touch:${"a".repeat(64)}','lck_v2','campaign_touch',` +
+    `'${keyOf("a")}','lck_v2','campaign_touch',` +
     `'{"channel":"email","to_email":"x@y.com","campaign_target_id":"${TARGET}","touch_number":"3"}'::jsonb)` +
     `)->'conflicting_fields'`) === '["channel"]'
 );
@@ -260,7 +286,7 @@ check(
 const bothRecipients = psql(["-d", "emailproof", "-tAc",
   `insert into public.seller_logical_communications ` +
   `(logical_key, logical_key_version, communication_type, channel, to_phone_number, to_email, campaign_target_id, touch_number) ` +
-  `values ('lck_v2:campaign_touch:${"d".repeat(64)}','lck_v2','campaign_touch','email','+13125550100','x@y.com','${TARGET}',5)`]);
+  `values ('${keyOf("d")}','lck_v2','campaign_touch','email','+13125550100','x@y.com','${TARGET}',5)`]);
 check("a row cannot carry both a phone and an email recipient", bothRecipients.status !== 0);
 
 // ── suppression and queue ──────────────────────────────────────────────────
@@ -287,6 +313,68 @@ for (let i = 0; i < 2; i += 1) {
 check(
   "contact_outreach_state upserts by email into ONE row",
   query("emailproof", "select count(*) from public.contact_outreach_state where podio_master_owner_id='own-1'") === "1"
+);
+
+// ── CONTRACT: the guard refuses while the tolerance is still in use ────────
+//
+// The expand-default row written moments ago is inside any sane quiet window, so
+// contracting NOW must be refused. A contract step that proceeds over its own
+// guard would start refusing live sends from callers that are still deploying.
+const CONTRACT = path.join(MIGRATIONS, "20260908140000_email_channel_contract_strict.sql");
+
+const contractTooSoon = runFile("emailproof", CONTRACT);
+check(
+  "CONTRACT: refuses while a caller is still relying on the tolerance",
+  contractTooSoon.status !== 0 && /refusing to contract/i.test(contractTooSoon.stderr || ""),
+  (contractTooSoon.stderr || "").split("\n").find((line) => line.includes("ERROR")) || "no refusal"
+);
+
+check(
+  "CONTRACT: the refusal left the expand RPC in place",
+  query("emailproof",
+    `select (public.seller_logical_communication_get_or_create(` +
+    `'${keyOf("3")}','lck_v2','campaign_touch',` +
+    `'{"to_phone_number":"+13125550112","campaign_target_id":"${TARGET}","touch_number":"11"}'::jsonb))->>'ok'`) === "true",
+  "a failed contract must not half-apply"
+);
+
+// ── DEPLOY: every caller now names its channel. Age the evidence so the guard
+// sees a quiet window, exactly as real elapsed time would.
+psql(["-d", "emailproof", "-tAc",
+  "update public.seller_logical_communications set created_at = now() - interval '4 hours' " +
+  "where channel_source = 'expand_default_sms'"]);
+
+const contracted = runFile("emailproof", CONTRACT);
+check("CONTRACT: applies once the tolerance has gone quiet", contracted.status === 0,
+  (contracted.stderr || "").split("\n").filter(Boolean).slice(-1)[0]);
+
+check(
+  "CONTRACT: a channel-less caller is now REFUSED, with a named reason",
+  query("emailproof",
+    `select (public.seller_logical_communication_get_or_create(` +
+    `'${keyOf("1")}','lck_v2','campaign_touch',` +
+    `'{"to_phone_number":"+13125550113","campaign_target_id":"${TARGET}","touch_number":"12"}'::jsonb))->>'reason'`)
+    === "missing_communication_channel"
+);
+
+check(
+  "CONTRACT: a caller that names its channel still works",
+  query("emailproof",
+    `select (public.seller_logical_communication_get_or_create(` +
+    `'${keyOf("2")}','lck_v2','campaign_touch',` +
+    `'{"channel":"email","to_email":"post@contract.com","campaign_target_id":"${TARGET}","touch_number":"13"}'::jsonb))->>'ok'`)
+    === "true"
+);
+
+check(
+  "CONTRACT: historical expand_default_sms rows stay valid, not invalidated",
+  Number(query("emailproof",
+    "select count(*) from public.seller_logical_communications where channel_source = 'expand_default_sms'")) > 0
+);
+
+check(
+  "CONTRACT: is idempotent once the window is quiet",
+  runFile("emailproof", CONTRACT).status === 0
 );
 
 console.log(failures.length ? `\nFAILED (${failures.length})` : "\nPASS");

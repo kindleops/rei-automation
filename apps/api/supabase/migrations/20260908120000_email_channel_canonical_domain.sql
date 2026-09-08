@@ -38,6 +38,31 @@
 --   silent fallback: a future caller that forgot to name its channel would be
 --   quietly filed as SMS instead of failing loudly, which is exactly the class
 --   of bug lck_v2 exists to remove.
+--
+-- THIS IS THE **EXPAND** STEP OF EXPAND / DEPLOY / CONTRACT.
+--
+--   A migration and a deploy are not atomic. The strict form of this RPC --
+--   channel NOT NULL with no coercion -- makes the schema and the code a matched
+--   pair, so applying the migration before the deploy would make the LIVE SMS
+--   dispatch seam refuse every send, and deploying before the migration would
+--   make the new code write a column that does not exist. Either ordering has a
+--   window in which seller communication is broken.
+--
+--   So this step ACCEPTS a caller that does not name a channel and records it as
+--   'sms', while stamping channel_source = 'expand_default_sms' on the row so the
+--   coercion is never invisible. The strictness is restored by the contract
+--   migration, 20260908140000_email_channel_contract_strict.sql, which refuses to
+--   apply while any caller is still relying on the tolerance.
+--
+--   WHY THE COERCION IS PROVABLY CORRECT DURING THIS WINDOW, and not a guess:
+--   the only callers that can omit a channel are the ones compiled before
+--   lck_v2, and every one of them is SMS by construction -- there is no email
+--   send path in the deployed code at all. An email caller cannot reach this
+--   branch even by accident, because buildLogicalCommunicationKey() REFUSES to
+--   produce a key without a channel, so a channel-less email caller never gets
+--   as far as the RPC. The tolerance is therefore bounded by construction, not
+--   by hope, and channel_source makes any violation of that reasoning a query
+--   away rather than an invisible mislabel.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 BEGIN;
@@ -45,15 +70,27 @@ BEGIN;
 -- ── 1. seller_logical_communications becomes channel-aware ──────────────────
 
 ALTER TABLE public.seller_logical_communications
-  ADD COLUMN IF NOT EXISTS channel  text,
-  ADD COLUMN IF NOT EXISTS to_email text;
+  ADD COLUMN IF NOT EXISTS channel        text,
+  ADD COLUMN IF NOT EXISTS to_email       text,
+  -- WHERE a row's channel came from. Without this the expand-phase coercion
+  -- would be indistinguishable from a caller that genuinely said 'sms', and the
+  -- contract migration would have no way to prove the tolerance is unused.
+  ADD COLUMN IF NOT EXISTS channel_source text;
 
 UPDATE public.seller_logical_communications
-   SET channel = 'sms'
+   SET channel        = 'sms',
+       channel_source = 'backfill'
  WHERE channel IS NULL;
 
 ALTER TABLE public.seller_logical_communications
   ALTER COLUMN channel SET NOT NULL;
+
+UPDATE public.seller_logical_communications
+   SET channel_source = 'caller'
+ WHERE channel_source IS NULL;
+
+ALTER TABLE public.seller_logical_communications
+  ALTER COLUMN channel_source SET NOT NULL;
 
 -- Explicitly NO default. See the header: a default here would re-introduce the
 -- silent fallback that the required channel component removes.
@@ -69,6 +106,15 @@ BEGIN
     ALTER TABLE public.seller_logical_communications
       ADD CONSTRAINT seller_logical_communications_channel_valid
       CHECK (channel IN ('sms', 'email'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'seller_logical_communications_channel_source_valid'
+  ) THEN
+    ALTER TABLE public.seller_logical_communications
+      ADD CONSTRAINT seller_logical_communications_channel_source_valid
+      CHECK (channel_source IN ('caller', 'backfill', 'expand_default_sms'));
   END IF;
 END $$;
 
@@ -102,6 +148,13 @@ COMMENT ON COLUMN public.seller_logical_communications.channel IS
   'Transport this communication travels on. Part of the lck_v2 identity hash: the same domain action on two channels is two communications, never one.';
 COMMENT ON COLUMN public.seller_logical_communications.to_email IS
   'Recipient address for channel = email. Mutually exclusive with to_phone_number.';
+COMMENT ON COLUMN public.seller_logical_communications.channel_source IS
+  'Where channel came from: caller (named it), backfill (pre-lck_v2 row, SMS by construction), expand_default_sms (a pre-deploy caller omitted it during the expand window). The contract migration refuses to apply while fresh expand_default_sms rows exist.';
+
+-- Finding an expand-window coercion later must be one query, not an audit.
+CREATE INDEX IF NOT EXISTS seller_logical_communications_channel_source_idx
+  ON public.seller_logical_communications (channel_source, created_at DESC)
+  WHERE channel_source = 'expand_default_sms';
 
 -- ── 1b. the anchor uniqueness indexes must learn channel too ────────────────
 --
@@ -147,11 +200,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_seller_logical_communications_offer_action
 COMMENT ON INDEX public.uq_seller_logical_communications_campaign_touch IS
   'One communication per (campaign target, touch) PER CHANNEL. Without channel this index re-created the cross-channel collision that lck_v2 removed from the key.';
 
--- ── 2. the get-or-create RPC learns channel and to_email ────────────────────
+-- ── 2. the get-or-create RPC learns channel and to_email (EXPAND form) ──────
 --
--- Two changes, and nothing else:
+-- Three changes, and nothing else:
 --   * channel and to_email are written on INSERT.
 --   * channel joins the identity-conflict guard.
+--   * a caller that omits channel is accepted as 'sms' and STAMPED as such.
 --
 -- The conflict guard matters even though channel is already inside the hash.
 -- That guard exists precisely for the case where the hash is WRONG -- an lck
@@ -160,6 +214,10 @@ COMMENT ON INDEX public.uq_seller_logical_communications_campaign_touch IS
 -- omitted channel would let exactly one class of collision through: two
 -- channels' actions meeting on one key, which is the failure this release is
 -- about.
+--
+-- The coercion is the expand-phase tolerance described in the header. It is
+-- removed by 20260908140000_email_channel_contract_strict.sql. Read the two
+-- together: neither is the whole policy on its own.
 
 CREATE OR REPLACE FUNCTION public.seller_logical_communication_get_or_create(
   p_logical_key          text,
@@ -174,10 +232,25 @@ SECURITY DEFINER
 SET search_path = public, extensions, pg_temp
 AS $fn$
 DECLARE
-  v_row      public.seller_logical_communications;
-  v_existing public.seller_logical_communications;
-  v_conflict text[] := ARRAY[]::text[];
+  v_row            public.seller_logical_communications;
+  v_existing       public.seller_logical_communications;
+  v_conflict       text[] := ARRAY[]::text[];
+  v_channel        text;
+  v_channel_source text;
 BEGIN
+  -- EXPAND-PHASE TOLERANCE. A caller compiled before lck_v2 cannot name a
+  -- channel, and every such caller is SMS by construction. Accepting it keeps
+  -- the live SMS seam working across the deploy window; stamping the row makes
+  -- the assumption auditable rather than invisible. The contract migration
+  -- removes both the coercion and this comment's reason to exist.
+  v_channel := NULLIF(p_lineage->>'channel', '');
+  IF v_channel IS NULL THEN
+    v_channel        := 'sms';
+    v_channel_source := 'expand_default_sms';
+  ELSE
+    v_channel_source := 'caller';
+  END IF;
+
   -- ON CONFLICT DO UPDATE (not DO NOTHING) so the LOSER of a race also receives
   -- the canonical row in its own transaction. With DO NOTHING the loser gets
   -- zero rows and would have to re-SELECT, reintroducing the very race this
@@ -195,7 +268,7 @@ BEGIN
   -- construction ever has a bug or a genuine hash collision.
   INSERT INTO public.seller_logical_communications (
     logical_key, logical_key_version, communication_type,
-    channel, thread_key, to_phone_number, to_email,
+    channel, channel_source, thread_key, to_phone_number, to_email,
     property_id, opportunity_id, master_owner_id,
     decision_id, message_event_id, campaign_id, campaign_target_id, touch_number,
     follow_up_id, referral_id, source_event_id,
@@ -204,10 +277,10 @@ BEGIN
     logical_key_policy_version, retry_policy_version, outcome_policy_version
   ) VALUES (
     p_logical_key, p_logical_key_version, p_communication_type,
-    -- No COALESCE to 'sms'. An absent channel violates NOT NULL and the caller
-    -- hears about it, which is the correct outcome for a caller that cannot say
-    -- how its message travels.
-    NULLIF(p_lineage->>'channel','')             , NULLIF(p_lineage->>'thread_key',''),
+    -- Resolved above, with its provenance, rather than COALESCEd inline: an
+    -- inline COALESCE would leave no trace that a default had been applied.
+    v_channel                                    , v_channel_source,
+    NULLIF(p_lineage->>'thread_key',''),
     NULLIF(p_lineage->>'to_phone_number','')     , NULLIF(p_lineage->>'to_email',''),
     NULLIF(p_lineage->>'property_id','')         , (NULLIF(p_lineage->>'opportunity_id',''))::uuid,
     NULLIF(p_lineage->>'master_owner_id',''),
@@ -271,7 +344,7 @@ BEGIN
   END IF;
 
   IF v_existing.communication_type   IS DISTINCT FROM p_communication_type                                  THEN v_conflict := array_append(v_conflict, 'communication_type'); END IF;
-  IF v_existing.channel              IS DISTINCT FROM NULLIF(p_lineage->>'channel','')                      THEN v_conflict := array_append(v_conflict, 'channel'); END IF;
+  IF v_existing.channel              IS DISTINCT FROM v_channel                                             THEN v_conflict := array_append(v_conflict, 'channel'); END IF;
   IF v_existing.decision_id          IS DISTINCT FROM NULLIF(p_lineage->>'decision_id','')                  THEN v_conflict := array_append(v_conflict, 'decision_id'); END IF;
   IF v_existing.message_event_id     IS DISTINCT FROM NULLIF(p_lineage->>'message_event_id','')             THEN v_conflict := array_append(v_conflict, 'message_event_id'); END IF;
   IF v_existing.campaign_target_id   IS DISTINCT FROM (NULLIF(p_lineage->>'campaign_target_id',''))::uuid   THEN v_conflict := array_append(v_conflict, 'campaign_target_id'); END IF;
