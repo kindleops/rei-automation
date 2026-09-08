@@ -431,5 +431,175 @@ check(
   runFile("emailproof", CONTRACT).status === 0
 );
 
+// ── EMAIL-3: inbound replies and reply aliases ─────────────────────────────
+//
+// The same reason this file exists applies here. The EMAIL-1 static contract
+// passed against a migration that had never run, and executing it is what found
+// three channel-blind indexes nobody had noticed. Every claim below is one the
+// SQL makes; only Postgres can say whether it is true.
+
+const INBOUND = path.join(MIGRATIONS, "20260908160000_email_inbound_and_reply_aliases.sql");
+const inbound_first = runFile("emailproof", INBOUND);
+check("EMAIL-3: the inbound migration applies", inbound_first.status === 0, inbound_first.stderr?.trim());
+check("EMAIL-3: the inbound migration is idempotent", runFile("emailproof", INBOUND).status === 0);
+
+for (const table of [
+  "email_reply_aliases", "email_inbound_events", "email_inbound_messages", "email_inbound_attachments",
+]) {
+  check(
+    `EMAIL-3: ${table} exists`,
+    query("emailproof", `select to_regclass('public.${table}') is not null`) === "t"
+  );
+  // Every one of these tables holds seller correspondence. RLS off would make it
+  // readable by anon through PostgREST, which is the whole database's worth of
+  // seller replies behind one publishable key.
+  check(
+    `EMAIL-3: ${table} has row level security enabled`,
+    query("emailproof", `select relrowsecurity from pg_class where relname = '${table}'`) === "t"
+  );
+}
+
+// ── ONE ACTIVE ALIAS PER CONVERSATION ──────────────────────────────────────
+// This is the property that makes thread fragmentation impossible. It is
+// enforced by a partial unique index, and a partial unique index is exactly the
+// kind of thing that looks right in a diff and is wrong in the database.
+
+const alias_opp = "11111111-1111-4111-8111-111111111111";
+psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, opportunity_id, master_owner_id, property_id)
+   values ('r1.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'reply.example.net', null, 'owner-p1', 'prop-p1');`]);
+
+const second_active = psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, master_owner_id, property_id)
+   values ('r1.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'reply.example.net', 'owner-p1', 'prop-p1');`]);
+check(
+  "EMAIL-3: a conversation cannot hold TWO active aliases",
+  second_active.status !== 0,
+  "a second active alias for the same owner and property was accepted"
+);
+
+psql(["-d", "emailproof", "-c",
+  `update public.email_reply_aliases set is_active = false, revoked_at = now()
+   where token = 'r1.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';`]);
+const after_revoke = psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, master_owner_id, property_id)
+   values ('r1.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'reply.example.net', 'owner-p1', 'prop-p1');`]);
+check(
+  "EMAIL-3: a REVOKED alias frees the conversation for a new one",
+  after_revoke.status === 0,
+  after_revoke.stderr?.trim()
+);
+
+const duplicate_token = psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, master_owner_id, property_id)
+   values ('r1.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'reply.example.net', 'owner-other', 'prop-other');`]);
+check(
+  "EMAIL-3: a token is unique across ALL conversations, active or not",
+  duplicate_token.status !== 0,
+  "two conversations were allowed to share a reply token"
+);
+
+const bad_token_shape = psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, master_owner_id)
+   values ('not-a-token', 'reply.example.net', 'owner-shape');`]);
+check("EMAIL-3: a malformed token is refused by CHECK", bad_token_shape.status !== 0);
+
+const anchorless = psql(["-d", "emailproof", "-c",
+  `insert into public.email_reply_aliases (token, reply_domain, property_id)
+   values ('r1.cccccccccccccccccccccccccccccccc', 'reply.example.net', 'prop-only');`]);
+check(
+  "EMAIL-3: an alias with no conversation anchor is refused",
+  anchorless.status !== 0,
+  "an alias that could never be resolved was accepted"
+);
+
+// ── THE RECEIPT LEDGER: idempotency is an index, not a read-then-write ─────
+
+psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_events (event_key, provider, trust_class, received_at)
+   values ('brevo_in:proof-1', 'brevo', 'authenticated_provider_callback', now());`]);
+const replayed = psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_events (event_key, provider, trust_class, received_at)
+   values ('brevo_in:proof-1', 'brevo', 'authenticated_provider_callback', now());`]);
+check(
+  "EMAIL-3: the SAME provider callback cannot be received twice",
+  replayed.status !== 0,
+  "a replayed callback would have created a second seller message"
+);
+
+const other_event = psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_events (event_key, provider, trust_class, received_at)
+   values ('brevo_in:proof-2', 'brevo', 'authenticated_provider_callback', now());`]);
+check("EMAIL-3: a DIFFERENT callback is still accepted", other_event.status === 0,
+  other_event.stderr?.trim());
+
+// ── ATTACHMENTS: one file per message, and never called clean by default ───
+
+// The insert and the read are separate statements on purpose: psql prints the
+// command tag alongside a RETURNING value, and gluing them together produced an
+// id that looked valid and was not -- which then made the duplicate-attachment
+// check pass for the wrong reason. A proof that passes for the wrong reason is
+// worse than one that fails.
+const message_insert = psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_messages (inbound_event_id, from_email, received_at, message_class)
+   select id, 'seller@example.org', now(), 'human_reply'
+   from public.email_inbound_events where event_key = 'brevo_in:proof-1';`]);
+check("EMAIL-3: an inbound message can be recorded against its receipt",
+  message_insert.status === 0, message_insert.stderr?.trim());
+
+const message_id = query("emailproof",
+  "select id from public.email_inbound_messages where from_email = 'seller@example.org' limit 1");
+check("EMAIL-3: the recorded message has a readable id", /^[0-9a-f-]{36}$/.test(message_id), message_id);
+
+const DIGEST = "a".repeat(64);
+const attach = (digest) => psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_attachments
+     (inbound_message_id, inbound_event_id, content_sha256, byte_size, content_type, filename)
+   select '${message_id}', id, '${digest}', 1234, 'application/octet-stream', 'deed.pdf'
+   from public.email_inbound_events where event_key = 'brevo_in:proof-1';`]);
+
+const first_attach = attach(DIGEST);
+check("EMAIL-3: an attachment can be recorded", first_attach.status === 0, first_attach.stderr?.trim());
+check(
+  "EMAIL-3: the same file on the same message is stored ONCE",
+  attach(DIGEST).status !== 0,
+  "re-delivery of a callback would have duplicated its files"
+);
+check("EMAIL-3: a different file on the same message is accepted", attach("b".repeat(64)).status === 0);
+
+check(
+  "EMAIL-3: an attachment defaults to unscanned, never to clean",
+  query("emailproof",
+    `select bool_and(scan_status = 'unscanned') from public.email_inbound_attachments`) === "t"
+);
+check(
+  "EMAIL-3: an attachment defaults to pending storage, never to stored",
+  query("emailproof",
+    `select bool_and(storage_status = 'pending') from public.email_inbound_attachments`) === "t"
+);
+
+const bad_digest = psql(["-d", "emailproof", "-c",
+  `insert into public.email_inbound_attachments
+     (inbound_message_id, inbound_event_id, content_sha256, byte_size, content_type, filename)
+   select '${message_id}', id, 'not-a-digest', 1, 'application/octet-stream', 'x.pdf'
+   from public.email_inbound_events where event_key = 'brevo_in:proof-1';`]);
+check("EMAIL-3: a malformed content digest is refused by CHECK", bad_digest.status !== 0);
+
+const bad_scan = psql(["-d", "emailproof", "-c",
+  `update public.email_inbound_attachments set scan_status = 'definitely_fine';`]);
+check("EMAIL-3: an invented scan status is refused by CHECK", bad_scan.status !== 0);
+
+// ── THE RECEIPT OUTLIVES WHAT IT PRODUCED ─────────────────────────────────
+// A message may be deleted; the evidence that a callback arrived may not, or a
+// replay would be re-ingested as new.
+
+const drop_event = psql(["-d", "emailproof", "-c",
+  `delete from public.email_inbound_events where event_key = 'brevo_in:proof-1';`]);
+check(
+  "EMAIL-3: a receipt with attachments cannot be deleted out from under them",
+  drop_event.status !== 0,
+  "deleting a receipt would let its callback be re-ingested as new"
+);
+
 console.log(failures.length ? `\nFAILED (${failures.length})` : "\nPASS");
 process.exit(failures.length ? 1 : 0);
