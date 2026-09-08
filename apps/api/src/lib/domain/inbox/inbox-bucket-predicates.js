@@ -87,6 +87,41 @@ export function isTerminalNoContactThread(row = {}) {
   return isWrongNumberContact(row) || isSuppressedContact(row);
 }
 
+/**
+ * The seller has told us they are not selling.
+ *
+ * DELIBERATELY NOT part of isTerminalNoContactThread and NOT part of
+ * isSuppressedContact. Both of those mean CONTACT IS PROHIBITED -- wrong
+ * number, opt-out, legal. A decline is a commercial answer: the lead stays
+ * legally contactable and can reopen. Folding it into either would repeat the
+ * M2 regression documented above isSuppressedContact, where a sticky decline
+ * outranked a fresh inbound and hid a re-engaging seller entirely.
+ */
+export function isDeclinedNotSellingThread(row = {}) {
+  return lower(row.disposition) === "not_interested" || row.not_interested === true;
+}
+
+/**
+ * Closed for ATTENTION purposes: nothing for an operator to act on right now.
+ *
+ * The union of "cannot contact" and "has declined". This is what the actionable
+ * buckets exclude, and it is the smallest concept that fixes the derivation bug
+ * without giving a decline any compliance meaning.
+ *
+ * The bug: `case "dead"` already read disposition=not_interested, while
+ * Priority/Cold/Active excluded only isTerminalNoContactThread, which does not.
+ * So a canonically declined seller matched BOTH Dead and Priority at once --
+ * 18 of the 28 reconciled threads were in exactly that state.
+ *
+ * Reversible by construction: it reads the CURRENT canonical disposition, so
+ * when the live path reopens a seller (disposition -> none) the thread becomes
+ * actionable again on the next read. Inbox never derives permanent death from
+ * historical message text.
+ */
+export function isClosedAttentionThread(row = {}) {
+  return isTerminalNoContactThread(row) || isDeclinedNotSellingThread(row);
+}
+
 export function isCancelledDeliveryStatus(status = "") {
   const normalized = lower(status);
   return CANCELLED_DELIVERY_STATUSES.has(normalized) || normalized.includes("cancel");
@@ -205,19 +240,23 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
     case "all_messages":
       return threadMatchesAllMessagesFacts(thread, nowMs);
     case "priority":
-      if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
+      if (isArchivedThread(thread) || isClosedAttentionThread(thread)) return false;
       return bucket === "priority";
     case "new_replies":
+      // A processed decline is the seller's current answer, so the thread is
+      // not awaiting a reply. If they re-engage, the live path clears the
+      // disposition and this returns true again on the next read.
+      if (isDeclinedNotSellingThread(thread)) return false;
       return threadMatchesNewRepliesFacts(thread, nowMs);
     case "needs_review":
-      if (isArchivedThread(thread)) return false;
+      if (isArchivedThread(thread) || isClosedAttentionThread(thread)) return false;
       if (bucket === "needs_review") return true;
       return thread.needs_review === true;
     case "follow_up":
-      if (isArchivedThread(thread)) return false;
+      if (isArchivedThread(thread) || isClosedAttentionThread(thread)) return false;
       return bucket === "follow_up";
     case "cold":
-      if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
+      if (isArchivedThread(thread) || isClosedAttentionThread(thread)) return false;
       if (bucket === "cold" || lower(thread.automation_lane) === "cold_reactivation") return true;
       {
         const lastOut = thread.last_outbound_at || thread.lastOutboundAt;
@@ -232,7 +271,7 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
     case "suppressed":
       return bucket === "suppressed" || isSuppressedContact(thread);
     case "active":
-      if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
+      if (isArchivedThread(thread) || isClosedAttentionThread(thread)) return false;
       return ["priority", "new_replies", "needs_review", "follow_up"].includes(bucket);
     case "waiting":
       return threadMatchesWaitingFacts(thread, nowMs);
