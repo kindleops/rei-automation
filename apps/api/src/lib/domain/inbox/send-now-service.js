@@ -30,6 +30,7 @@ import {
   evaluateCanonicalContactability,
 } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
+import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -1910,6 +1911,33 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
         send_result,
         bookkeeping_deps
       );
+
+      // c. First-contact promotion. An operator texting a never-contacted seller
+      //    from the composer is a real first touch too; on an existing
+      //    conversation this is a state-conditional no-op. Non-fatal: the send is
+      //    already terminal and correct.
+      try {
+        const promote_first_contact =
+          deps.promoteFirstContactOnProviderAcceptance ?? promoteFirstContactOnProviderAcceptance;
+        const promotion = await promote_first_contact({
+          queue_row: finalized_row,
+          outbound_event,
+          supabase,
+          now,
+          deps: bookkeeping_deps,
+        });
+        if (promotion && !promotion.ok) {
+          logger.warn("inbox_send_now.first_contact_promotion_failed", {
+            queue_row_id: finalized_row?.id ?? null,
+            reason: promotion.reason || null,
+          });
+        }
+      } catch (promotion_error) {
+        logger.warn("inbox_send_now.first_contact_promotion_failed", {
+          queue_row_id: finalized_row?.id ?? null,
+          message: promotion_error?.message || null,
+        });
+      }
 
       bookkeeping_result = {
         sent: true,

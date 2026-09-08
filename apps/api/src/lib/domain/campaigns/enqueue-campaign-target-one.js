@@ -73,6 +73,9 @@ import { normalizeCampaignMode } from '@/lib/domain/queue/queue-control-safety.j
 import { getSystemValueFresh } from '@/lib/system-control.js'
 import { child } from '@/lib/logging/logger.js'
 import { isAmbiguousSendRow } from '@/lib/domain/messaging/ambiguous-send-evidence.js'
+import { computeNextValidSendInstant } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
+import { loadOwnershipTemplates, renderableRotationPool, MIN_ROTATION_VARIANTS, INSUFFICIENT_ROTATION_REASON } from '@/lib/domain/campaigns/campaign-target-template-assignment.js'
+import { governanceApplies as rotationGovernanceApplies } from '@/lib/domain/campaigns/template-governance.js'
 
 const logger = child({ module: 'domain.campaigns.enqueue_campaign_target_one' })
 
@@ -108,6 +111,63 @@ const SENDABLE_CAMPAIGN_MODES = new Set(['live_limited', 'live'])
 const WINDOW_START_HOUR = 8
 const WINDOW_END_HOUR = 21
 
+
+/**
+ * ROTATION FAIL-CLOSED (enqueue-side backstop). Assignment already refuses to
+ * hand out a template when a language's renderable pool is below
+ * MIN_ROTATION_VARIANTS, but a target assigned yesterday can be enqueued today
+ * after governance moved. Re-count here from the SAME pool computation, memoized
+ * briefly so a 150-target loop does not reload the template catalog per row.
+ */
+const ROTATION_POOL_TTL_MS = 60 * 1000
+const rotationPoolCache = new Map()
+const lc = (v) => String(v ?? '').trim().toLowerCase()
+async function renderableRotationPoolSize(supabase, { useCase, stageCode, language }) {
+  const key = `${lc(useCase)}|${lc(stageCode)}|${lc(language)}`
+  const hit = rotationPoolCache.get(key)
+  const now = Date.now()
+  if (hit && now - hit.at < ROTATION_POOL_TTL_MS) return hit.size
+  const catalog = await loadOwnershipTemplates(supabase, useCase, stageCode)
+  const size = renderableRotationPool(catalog.eligible || [], language).length
+  rotationPoolCache.set(key, { at: now, size })
+  return size
+}
+export function __resetRotationPoolCacheForTests() { rotationPoolCache.clear() }
+
+/**
+ * PER-SENDER SPREAD. The runner dispatches every due row each minute with no
+ * pacing of its own; on 2026-09-08 that let one number send 150 messages in
+ * five minutes. This path used to write scheduled_for = now on every row. Now a
+ * row is scheduled no earlier than the sender's latest scheduled send plus the
+ * campaign's EXISTING send_interval_seconds (the same value the legacy queue
+ * plan already spreads by). Nothing here invents a cap: with no interval
+ * configured the row stays due now. If the spread lands outside the contact
+ * window it defers to the next window open via computeNextValidSendInstant.
+ */
+export async function resolveSenderSpreadInstant(supabase, { campaign, senderPhone, nowIso, tz }) {
+  const interval = Number(campaign?.send_interval_seconds)
+  if (!Number.isFinite(interval) || interval <= 0 || !senderPhone) {
+    return { scheduled_for: nowIso, spread_applied: false, interval_seconds: null }
+  }
+  const { data: rows, error } = await supabase
+    .from('send_queue')
+    .select('scheduled_for')
+    .eq('from_phone_number', senderPhone)
+    .in('queue_status', [...LIVE_QUEUE_STATUSES, ...CONSUMED_QUEUE_STATUSES])
+    .not('scheduled_for', 'is', null)
+    .order('scheduled_for', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  const lastMs = Date.parse(rows?.[0]?.scheduled_for || '')
+  const nowMs = Date.parse(nowIso)
+  let candidate = new Date(Number.isFinite(lastMs) ? Math.max(nowMs, lastMs + interval * 1000) : nowMs)
+  if (tz && !isWithinContactWindow(candidate, tz, WINDOW_START_HOUR, WINDOW_END_HOUR).ok) {
+    const next = computeNextValidSendInstant(campaign, candidate)
+    if (next?.scheduled_for) candidate = new Date(next.scheduled_for)
+  }
+  return { scheduled_for: candidate.toISOString(), spread_applied: candidate.getTime() !== nowMs, interval_seconds: interval }
+}
+
 export const ENQUEUE_REASON = {
   TARGET_NOT_FOUND: 'target_not_found',
   CAMPAIGN_MISSING: 'campaign_row_missing',
@@ -133,6 +193,7 @@ export const ENQUEUE_REASON = {
   CAMPAIGN_MODE_UNRESOLVED: 'campaign_mode_unresolved',
   CAMPAIGN_MODE_NOT_SENDABLE: 'campaign_mode_not_sendable',
   INVARIANT_VIOLATION: 'campaign_target_id_invariant_violation',
+  INSUFFICIENT_ROTATION_POOL: INSUFFICIENT_ROTATION_REASON,
 }
 
 const fail = (reason, detail) => ({ created: false, reason, ...(detail ? { detail } : {}) })
@@ -377,7 +438,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     .from('campaigns')
     // status + metadata are required by the scoped canary-enqueue conditions
     // (internal_canary, do_not_activate, non-live).
-    .select('id, name, status, metadata')
+    .select('id, name, status, metadata, send_interval_seconds, contact_window_start, contact_window_end')
     .eq('id', target.campaign_id)
     .maybeSingle()
   if (campErr) throw campErr
@@ -496,11 +557,24 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   if (clean(template.language).toLowerCase() !== clean(target.language).toLowerCase()) {
     return fail(ENQUEUE_REASON.LANGUAGE_MISMATCH, `${template.language} vs ${target.language}`)
   }
+  // Rotation-controlled traffic never sends from a pool that cannot rotate.
+  if (rotationGovernanceApplies(useCase)) {
+    const poolSizeImpl = deps.renderableRotationPoolSize || renderableRotationPoolSize
+    const poolSize = await poolSizeImpl(supabase, {
+      useCase,
+      stageCode: clean(template.stage_code) || 'S1',
+      language: clean(target.language),
+    })
+    if (poolSize < MIN_ROTATION_VARIANTS) {
+      return fail(ENQUEUE_REASON.INSUFFICIENT_ROTATION_POOL, `${clean(target.language)}:${poolSize}<${MIN_ROTATION_VARIANTS}`)
+    }
+  }
+
 
   // ── 8. Contact window (reuses #91) ──────────────────────────────────────
   const { data: property, error: propErr } = await supabase
     .from('properties')
-    .select('property_id, property_address_state, property_address_zip')
+    .select('property_id, property_address_state, property_address_zip, property_address_city')
     .eq('property_id', target.property_id)
     .maybeSingle()
   if (propErr) throw propErr
@@ -564,7 +638,7 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
     .maybeSingle()
   if (ownerErr) throw ownerErr
 
-  const merge = buildOutboundMergeValues({ target, masterOwner: owner })
+  const merge = buildOutboundMergeValues({ target, masterOwner: owner, property })
   if (!merge.ok) return fail(ENQUEUE_REASON.IDENTITY_MISSING, merge.reason)
 
   const rendered = renderTemplateBody(template.template_body, merge.values)
@@ -577,6 +651,8 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   if (!sender) return fail(ENQUEUE_REASON.NO_SENDER, clean(target.market) || 'no_market')
   const senderPhone = clean(sender.phone_number)
   if (senderPhone === recipient) return fail(ENQUEUE_REASON.SENDER_IS_RECIPIENT)
+  const spreadImpl = deps.resolveSenderSpreadInstant || resolveSenderSpreadInstant
+  const spread = await spreadImpl(supabase, { campaign, senderPhone, nowIso, tz: tz.iana })
 
   // TOCTOU CLOSURE. The exemption was decided against a sender resolved at the
   // window gate, but sender selection is usage-ordered and could in principle
@@ -621,8 +697,8 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   const payload = {
     queue_key: queueKey,
     queue_status: 'queued',
-    scheduled_for: nowIso,
-    scheduled_for_utc: nowIso,
+    scheduled_for: spread.scheduled_for,
+    scheduled_for_utc: spread.scheduled_for,
     timezone: tz.timezone,
     message_body: rendered.body,
     message_text: rendered.body,

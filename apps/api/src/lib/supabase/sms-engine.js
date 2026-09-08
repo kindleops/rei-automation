@@ -1474,7 +1474,25 @@ export async function incrementTextgridNumberUsage(selection, deps = {}) {
 
   const supabase = getSupabase(deps);
 
-  const next_sent_today = asNumber(selected.messages_sent_today, 0) + 1;
+  // Read the LIVE counter before incrementing. The queue path reaches here via
+  // selectAvailableTextgridNumber's early return for rows that already carry a
+  // from_phone_number, which hands over `selected` WITHOUT messages_sent_today;
+  // `asNumber(undefined, 0) + 1` then wrote an absolute 1 on every send, so a
+  // number that had sent 150 messages today read as having sent 1, and the
+  // usage-ascending sender ordering could never rotate. Prod evidence
+  // 2026-09-08: ••2999 messages_sent_today = 1 after 150 sends.
+  let current_sent_today = asNumber(selected.messages_sent_today, NaN);
+  if (!Number.isFinite(current_sent_today)) {
+    const { data: live_row, error: live_error } = await supabase
+      .from(TEXTGRID_NUMBERS_TABLE)
+      .select("messages_sent_today")
+      .eq("id", selected.id)
+      .maybeSingle();
+    if (live_error) throw live_error;
+    current_sent_today = asNumber(live_row?.messages_sent_today, 0);
+  }
+
+  const next_sent_today = current_sent_today + 1;
   const payload = {
     messages_sent_today: next_sent_today,
     last_used_at: deps.now || nowIso(),

@@ -13,6 +13,9 @@ import {
   TEMPLATE_STATE,
   templateStatusForState,
 } from '@/lib/domain/campaigns/template-status-semantics.js'
+import { requiredMergeFields } from '@/lib/domain/campaigns/template-render-validation.js'
+import { OUTBOUND_MERGE_KEYS } from '@/lib/domain/campaigns/outbound-agent-identity.js'
+import { governanceApplies } from '@/lib/domain/campaigns/template-governance.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -38,11 +41,34 @@ function increment(bucket, key, amount = 1) {
  * 4,638 templates was silently cut to its first ~22% — and with no ORDER BY,
  * *which* 22% was left to the planner.
  */
-async function loadOwnershipTemplates(supabase, useCase, stageCode) {
+export async function loadOwnershipTemplates(supabase, useCase, stageCode) {
   const pool = await loadTemplatePool(supabase, useCase, stageCode)
   const governanceById = await loadGovernance(supabase)
   const { eligible, rejected, governed } = applyGovernance(pool, governanceById, useCase)
   return { pool, eligible, rejected, governed, governanceById }
+}
+
+/**
+ * Rotation is only real if there are variants to rotate. Fewer than this many
+ * governed AND statically-renderable templates for a language means the
+ * selector would hand every recipient identical copy -- exactly the 125x
+ * identical-message outcome of 2026-09-08. Rotation-controlled traffic refuses
+ * instead of collapsing. Non-rotation use cases (transactional / system
+ * messages) are untouched: see governanceApplies().
+ */
+export const MIN_ROTATION_VARIANTS = 2
+export const INSUFFICIENT_ROTATION_REASON = 'insufficient_template_rotation_pool'
+
+/** A template is statically renderable iff every {{token}} is one the outbound
+ *  merge builder can supply. Target-specific emptiness (e.g. a property with no
+ *  city) is still caught per-target at render time; this is the pool-level cut. */
+export function isStaticallyRenderable(template) {
+  const required = requiredMergeFields(template?.template_body || '')
+  return required.every((field) => OUTBOUND_MERGE_KEYS.includes(field))
+}
+
+export function renderableRotationPool(templates, language) {
+  return templatesForLanguage(templates, language).filter(isStaticallyRenderable)
 }
 
 function templatesForLanguage(templates, language) {
@@ -91,7 +117,7 @@ function pickDeterministicTemplate(candidates, seed) {
   return sorted[index]
 }
 
-function assignTemplateForTargetFast(target, campaign, templateCatalog, governedPool = false) {
+export function assignTemplateForTargetFast(target, campaign, templateCatalog, governedPool = false) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
@@ -124,7 +150,23 @@ function assignTemplateForTargetFast(target, campaign, templateCatalog, governed
     owner_type: snapshot.owner_type_guess || snapshot.phone_owner || null,
   })
 
-  const languageMatches = templatesForLanguage(templateCatalog, canonicalLanguage)
+  const languageMatches = renderableRotationPool(templateCatalog, canonicalLanguage)
+  if (governanceApplies(templateUseCase) && languageMatches.length < MIN_ROTATION_VARIANTS) {
+    return {
+      ok: false,
+      assigned: false,
+      excluded: false,
+      unsupported: false,
+      reason: INSUFFICIENT_ROTATION_REASON,
+      template_state: 'awaiting_template',
+      template_status: 'awaiting_template',
+      template_id: null,
+      language: canonicalLanguage,
+      renderable_pool_size: languageMatches.length,
+      min_required: MIN_ROTATION_VARIANTS,
+      block_reason: `${INSUFFICIENT_ROTATION_REASON}:${canonicalLanguage}:${languageMatches.length}<${MIN_ROTATION_VARIANTS}`,
+    }
+  }
   const scopedMatches = templatesForPropertyScopes(languageMatches, propertyScopes)
   const seed = [
     target.id,
@@ -275,6 +317,8 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
   let assigned = 0
   let awaitingTemplate = 0
   let unsupported = 0
+  let insufficientRotationPool = 0
+  const insufficientRotationPoolByLanguage = {}
   let skipped = 0
   const updates = []
 
@@ -353,6 +397,10 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     }
 
     awaitingTemplate += 1
+    if (result?.reason === INSUFFICIENT_ROTATION_REASON) {
+      insufficientRotationPool += 1
+      increment(insufficientRotationPoolByLanguage, result.language || 'unknown')
+    }
     updates.push({
       id: target.id,
       template_status: result.template_status,
@@ -386,6 +434,9 @@ export async function assignCampaignTargetTemplates(campaignId, deps = {}) {
     persisted_target_count: (targets || []).length,
     templates_assigned: assigned,
     awaiting_template: awaitingTemplate,
+    insufficient_rotation_pool: insufficientRotationPool,
+    insufficient_rotation_pool_by_language: insufficientRotationPoolByLanguage,
+    min_rotation_variants: MIN_ROTATION_VARIANTS,
     unsupported_language_exclusions: unsupported,
     skipped,
     assigned_by_language: assignedByLanguage,

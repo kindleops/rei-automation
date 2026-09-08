@@ -1893,6 +1893,10 @@ async function findActiveSmsSuppression({ supabase, phoneNumber = "" } = {}) {
   return { suppressed: false, reason: null };
 }
 
+/** Reasons outreach-service writes when WE sent something: a re-marketing
+ *  throttle, never a permission signal. See findActiveOutreachSuppression. */
+const OUTBOUND_CADENCE_SUPPRESSION_REASONS = new Set(["recent_outbound", "recent_contact"]);
+
 async function findActiveOutreachSuppression({
   supabase,
   ownerId = null,
@@ -1919,11 +1923,25 @@ async function findActiveOutreachSuppression({
     const row = Array.isArray(data) ? data[0] : null;
     const until = row?.suppression_until ? new Date(row.suppression_until) : null;
     if (until && !Number.isNaN(until.getTime()) && until > new Date()) {
-      return {
-        suppressed: true,
-        reason: clean(row.suppression_reason) || "contact_outreach_suppression",
-        row,
-      };
+      const reason = clean(row.suppression_reason) || "contact_outreach_suppression";
+      // OUTBOUND CADENCE IS NOT A REPLY BLOCK. outreach-service stamps every
+      // outbound we send with suppression_until = +45 days and
+      // suppression_reason = 'recent_outbound' (default label 'recent_contact').
+      // That throttles RE-MARKETING to a seller. It was being read here as a
+      // reason not to ANSWER the seller -- so every reply to a first touch was
+      // dispositioned no_reply_required for 45 days (2026-09-08: 4 of the first
+      // 7 replies, including an ownership confirmation; still firing 3 hours
+      // later). A seller who texts us has opted INTO a reply. Only a
+      // non-cadence outreach block (any other reason) still suppresses.
+      if (OUTBOUND_CADENCE_SUPPRESSION_REASONS.has(reason)) {
+        return {
+          suppressed: false,
+          reason: null,
+          cadence_suppression_ignored_for_reply: reason,
+          row,
+        };
+      }
+      return { suppressed: true, reason, row };
     }
   } catch (error) {
     return {

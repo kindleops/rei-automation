@@ -394,15 +394,21 @@ async function executeBackendRequest<T>(
 
   if (!response.ok) {
     if (response.status === 423) {
+      // 423 is how the API reports a REFUSAL: the runtime brake, a compliance
+      // block, an execution lock, a paused processor. This branch used to
+      // rewrite that refusal into { ok: true }, so a blocked send was painted
+      // as sent (and then "delivered") in the composer while nothing had left.
+      // The API's own body is authoritative: it says { ok: false, reason }.
+      // Keep the body reachable for the two lock-aware callers (they already
+      // test status === 423 explicitly) and surface the real reason.
       const b = (body as Record<string, unknown>) ?? {}
+      const reason = String(b.reason ?? b.error ?? 'locked')
       return {
-        ok: true,
+        ok: false,
         status: 423,
-        data: {
-          ...b,
-          coordination_state: true,
-          locked: true,
-        } as T,
+        error: reason,
+        message: String(b.message ?? `[423] ${reason}`),
+        upstream: { ...b, coordination_state: true, locked: true },
       }
     }
 

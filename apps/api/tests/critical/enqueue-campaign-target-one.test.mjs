@@ -9,6 +9,15 @@ import {
   previewCampaignTargetOne,
 } from "@/lib/domain/campaigns/enqueue-campaign-target-one.js";
 
+// Rotation depth and per-sender spread are pinned by their own suites
+// (template-rotation-fail-closed, sender-usage-and-spread). Here they are held
+// at "healthy" so each contract below isolates what it is actually about.
+const ROTATION_OK = {
+  renderableRotationPoolSize: async () => 2,
+  resolveSenderSpreadInstant: async (_supabase, { nowIso }) => ({ scheduled_for: nowIso, spread_applied: false, interval_seconds: null }),
+};
+
+
 const TARGET_ID = "0cc25ba6-353f-4fa8-beeb-d0471c324a79";
 
 // ── fixtures ──────────────────────────────────────────────────────────────
@@ -158,6 +167,7 @@ function runDeps(fixtures, over = {}) {
     inserted,
     supabase,
     deps: {
+      ...ROTATION_OK,
       supabase,
       now: NOON_PT,
       insertQueueImpl: async (payload) => {
@@ -192,6 +202,7 @@ test("an eligible target produces exactly one queue row", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase,
     now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
@@ -210,6 +221,7 @@ test("requested target always equals created row target", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -227,6 +239,7 @@ test("requested target always equals created row target", async () => {
 test("an idempotent replay is reported as already_queued, not created", async () => {
   const supabase = makeSupabase(okFixtures());
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async () => ({
       ok: true, idempotent_replay: true, reason: "idempotent_replay", queue_row_id: "pre-existing",
@@ -246,6 +259,7 @@ test("duplicate_blocked returned without throwing maps to already_queued", async
         : [],
   }));
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async () => ({ ok: false, reason: "duplicate_blocked", queue_row_id: null }),
   });
@@ -258,6 +272,7 @@ test("duplicate_blocked returned without throwing maps to already_queued", async
 test("a failed insert that still returns an id is not reported as created", async () => {
   const supabase = makeSupabase(okFixtures());
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async () => ({ ok: false, reason: "insert_rejected", queue_row_id: "half-written" }),
   });
@@ -281,6 +296,7 @@ test("an invariant violation is fatal and creates nothing usable", async () => {
   }));
 
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -325,6 +341,7 @@ test("a read-back failure neutralizes the row instead of throwing", async () => 
   };
 
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async () => ({ ok: true, queue_row_id: "qr-1" }),
   });
@@ -385,7 +402,8 @@ test("blank merge value is refused by render validation", async () => {
 test("outside the contact window nothing is created", async () => {
   // 13:00Z = 06:00 Pacific, before the 08:00 open.
   const { deps, inserted } = runDeps(okFixtures());
-  const result = await enqueueCampaignTargetOne(TARGET_ID, { ...deps, now: "2026-07-15T13:00:00Z" });
+  const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK, ...deps, now: "2026-07-15T13:00:00Z" });
 
   assert.equal(result.created, false);
   assert.equal(result.reason, ENQUEUE_REASON.OUTSIDE_WINDOW);
@@ -446,6 +464,7 @@ test("concurrent duplicate insert is stopped by the unique index, not by a pre-c
 
   let attempts = 0;
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase,
     now: NOON_PT,
     insertQueueImpl: async () => {
@@ -488,6 +507,7 @@ test("one request never produces more than one row", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -499,6 +519,7 @@ test("the legacy feeder view is never consulted", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -539,6 +560,7 @@ test("the created row satisfies every send_one_queue_row precondition", async ()
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -571,6 +593,7 @@ test("the rendered body carries no unresolved token", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -583,7 +606,7 @@ test("the rendered body carries no unresolved token", async () => {
 
 test("preview validates fully and inserts nothing", async () => {
   const supabase = makeSupabase(okFixtures());
-  const result = await previewCampaignTargetOne(TARGET_ID, { supabase, now: NOON_PT });
+  const result = await previewCampaignTargetOne(TARGET_ID, { ...ROTATION_OK, supabase, now: NOON_PT });
 
   assert.equal(result.dry_run, true);
   assert.equal(result.created, true, "would have been created");
@@ -598,7 +621,7 @@ test("preview surfaces the same rejection the real call would", async () => {
   const supabase = makeSupabase(okFixtures({
     ownership_template_rotation_control: [baseGov({ rotation_status: "pause", daily_cap: 0 })],
   }));
-  const result = await previewCampaignTargetOne(TARGET_ID, { supabase, now: NOON_PT });
+  const result = await previewCampaignTargetOne(TARGET_ID, { ...ROTATION_OK, supabase, now: NOON_PT });
 
   assert.equal(result.created, false);
   assert.equal(result.reason, ENQUEUE_REASON.TEMPLATE_UNGOVERNED);
@@ -614,6 +637,7 @@ test("the resolved campaign mode is stamped on the created row", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   const result = await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -631,6 +655,7 @@ test("the mode is resolved, not hardcoded", async () => {
     system_control: [{ key: "campaign_mode", value: "automatic" }],
   }));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -670,6 +695,7 @@ test("stamping the mode does not drop any other metadata key", async () => {
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -687,7 +713,7 @@ test("stamping the mode does not drop any other metadata key", async () => {
 
 test("dry-run previews the same campaign mode that would be persisted", async () => {
   const supabase = makeSupabase(okFixtures());
-  const preview = await previewCampaignTargetOne(TARGET_ID, { supabase, now: NOON_PT });
+  const preview = await previewCampaignTargetOne(TARGET_ID, { ...ROTATION_OK, supabase, now: NOON_PT });
 
   assert.equal(preview.created, true);
   assert.equal(preview.would_insert.metadata.campaign_mode, "live_limited");
@@ -703,6 +729,7 @@ test("the created row clears the entire send_one_queue_row admission chain", asy
   const inserted = [];
   const supabase = makeSupabase(fixturesWithReadback(inserted));
   await enqueueCampaignTargetOne(TARGET_ID, {
+    ...ROTATION_OK,
     supabase, now: NOON_PT,
     insertQueueImpl: async (p) => { inserted.push(p); return { queue_row_id: "qr-1" }; },
   });
@@ -765,4 +792,13 @@ test("a row missing campaign_mode would fail route gate 1 — the canary #1 defe
     normalizeCampaignMode(preFixRow.metadata.campaign_mode || preFixRow.campaign_mode || "paused"),
     "paused"
   );
+});
+
+test("rotation fail-closed: a language pool of ONE refuses the row (insufficient_template_rotation_pool)", async () => {
+  const { inserted, deps } = runDeps(okFixtures(), { renderableRotationPoolSize: async () => 1 });
+  const result = await enqueueCampaignTargetOne(TARGET_ID, deps);
+  assert.equal(result.created, false);
+  assert.equal(result.reason, "insufficient_template_rotation_pool");
+  assert.match(String(result.detail || ""), /1<2$/);
+  assert.equal(inserted.length, 0, "fail-closed means NO row, not a row with one template");
 });

@@ -109,9 +109,25 @@ export function resolveAgentIdentity(masterOwner) {
  * @param {object} input
  * @param {object} input.target       campaign_targets row
  * @param {object} input.masterOwner  master_owners row
+ * @param {object} [input.property]   properties row (property_address_city); the ONLY
+ *                                    source for `city`. market is a sender-routing
+ *                                    label, not the property's city (131/789 "Miami"
+ *                                    targets are actually in Miami), and parsing the
+ *                                    free-form address is inference. Absent => city
+ *                                    is empty and a {{city}} template fails render
+ *                                    for THIS target only, which is the truth.
  * @returns {{ok: boolean, values?: object, reason?: string}}
  */
-export function buildOutboundMergeValues({ target = {}, masterOwner = null } = {}) {
+/**
+ * The complete set of merge keys buildOutboundMergeValues can ever supply. The
+ * rotation-pool guards use this STATICALLY: a governed template whose
+ * {{tokens}} are not a subset of these keys can never render for any target, so
+ * it must not count toward a language's rotation pool (six templates referencing
+ * {{city}} silently collapsed English to ONE variant on 2026-09-08).
+ */
+export const OUTBOUND_MERGE_KEYS = Object.freeze(["agent_name", "seller_first_name", "property_address", "city"]);
+
+export function buildOutboundMergeValues({ target = {}, masterOwner = null, property = null } = {}) {
   const identity = resolveAgentIdentity(masterOwner);
   if (!identity.ok) {
     return { ok: false, reason: identity.reason, source: identity.source };
@@ -133,6 +149,7 @@ export function buildOutboundMergeValues({ target = {}, masterOwner = null } = {
       agent_name: identity.agent_name,
       seller_first_name: clean(snapshot.seller_first_name),
       property_address: clean(target.property_address),
+      city: clean(property?.property_address_city),
     },
     persona: identity.persona,
   };

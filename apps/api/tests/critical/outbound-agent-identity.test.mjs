@@ -84,6 +84,9 @@ test("merge values assemble from the target and its owner", () => {
     agent_name: "Carmen",
     seller_first_name: "Rodolfo",
     property_address: "618 Hoefner Ave, Los Angeles, Ca 90022",
+    // No properties row was passed, so city is empty -- never inferred from the
+    // address string or the market label.
+    city: "",
   });
 });
 

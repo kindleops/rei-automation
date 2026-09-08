@@ -63,6 +63,7 @@ import {
   resolveDeferredQueueMessage,
 } from "@/lib/domain/queue/resolve-deferred-queue-message.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
+import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 
 const QUEUE_TABLE = "send_queue";
 
@@ -2156,6 +2157,31 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         error_code: me_err_code,
         error_message: me_err_msg,
       });
+    }
+
+    // First-contact promotion -- non-blocking bookkeeping, deliberately AFTER
+    // writeOutboundSuccessMessageEvent (whose thread-state sync would clobber
+    // it) and BEFORE anything that could throw. State-conditional, so a
+    // re-finalized outbound is a no-op and a later-stage thread is untouched.
+    try {
+      const promote_first_contact =
+        deps.promoteFirstContactOnProviderAcceptance ?? promoteFirstContactOnProviderAcceptance;
+      const promotion = await promote_first_contact({
+        queue_row: finalized_row,
+        outbound_event,
+        supabase: deps.supabase ?? deps.supabaseClient ?? null,
+        now,
+        deps,
+      });
+      if (promotion && !promotion.ok) {
+        bookkeeping_errors.push(`first_contact_promotion_failed:${promotion.reason || "unknown"}`);
+        warn("queue.first_contact_promotion_failed", { queue_row_id, reason: promotion.reason || null });
+      } else if (promotion?.promoted) {
+        info("queue.first_contact_promoted", { queue_row_id, thread_key: promotion.thread_key });
+      }
+    } catch (promotion_error) {
+      bookkeeping_errors.push(`first_contact_promotion_failed:${promotion_error?.message || "unknown_error"}`);
+      warn("queue.first_contact_promotion_failed", { queue_row_id, message: promotion_error?.message || null });
     }
 
     try {
