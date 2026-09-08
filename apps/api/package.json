@@ -44,7 +44,9 @@
     "discord:register": "node scripts/register-discord-commands.mjs",
     "proof:master-filters": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs",
     "proof:master-filters:offline": "node --import ./tests/register-aliases.mjs scripts/proof/master-filters-pipeline-proof.mjs --offline",
-    "proof:email-migration": "node scripts/proof/email-migration-proof.mjs"
+    "proof:email-migration": "node scripts/proof/email-migration-proof.mjs",
+    "proof:email-dry-run": "node --import ./tests/register-aliases.mjs scripts/proof/email-dry-run-proof.mjs",
+    "proof:brevo-429-probe": "node --import ./tests/register-aliases.mjs scripts/proof/brevo-429-probe.mjs"
   },
   "dependencies": {
     "@mapbox/vector-tile": "^2.0.4",
