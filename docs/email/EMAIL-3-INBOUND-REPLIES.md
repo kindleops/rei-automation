@@ -205,11 +205,13 @@ traversal, control characters, and the right-to-left override that renders
 
 ## 7. What was found on the way
 
-**Eleven public entry points threw a `TypeError` on a `null` argument**, including
-`buildLogicalCommunicationKey`, which sits on the canonical send seam. The cause
-was `function f(input = {})`, which defaults `undefined` and does nothing for
-`null` — a defect that had already been fixed six separate times in this
-codebase by people who knew about it.
+**Nineteen public entry points threw a `TypeError` on a `null` argument** —
+eleven pure ones and eight async — including `buildLogicalCommunicationKey`,
+which sits on the canonical send seam, and `dispatchEmailQueueRow` itself. The
+cause was `function f(input = {})`, which defaults `undefined` and does nothing
+for `null` — a defect that had already been fixed six separate times in this
+codebase by people who knew about it, including twice in this phase before the
+sweep.
 
 Throwing is the wrong failure on these paths: a `TypeError` escaping one can be
 caught by a caller and read as a transport error, which is precisely the reading
@@ -248,6 +250,14 @@ direct table access, so that ownership is proven rather than asserted. Tier 4
 also now distinguishes "we looked and there is nothing" from "we could not
 look" — both are correctly unmatched, but reporting the second as the first
 hides a broken query behind a routine outcome nobody investigates.
+
+**Malformed payloads stored their attachment bytes.** A payload that cannot be
+read is kept as evidence, and it was kept verbatim — so a 25MB attachment landed
+base64-encoded inside a `jsonb` column, roughly 33MB of row, for bytes nobody
+reads as bytes. Anyone who could reach the endpoint could have bloated the
+database deliberately. The descriptors are kept and only the content is
+replaced, with the omitted byte count recorded so a stripped attachment is
+distinguishable from one that never had content.
 
 **The migration proof found a defect in itself.** `psql` prints the command tag
 alongside a `RETURNING` value, so an id came back with `INSERT 0 1` glued to it;
