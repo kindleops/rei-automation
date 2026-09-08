@@ -36,6 +36,11 @@ const logger = child({ module: "domain.email.inbound_store" });
  * before any of them happen.
  */
 export const MAX_HEADER_LOOKUPS = 25;
+/**
+ * Bounded for the same reason. It only ever risks UNDER-counting, which pushes
+ * the resolver towards ambiguity -- the safe direction.
+ */
+export const MAX_SENDER_CANDIDATES = 25;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
@@ -279,25 +284,34 @@ export function createInboundEmailStore(deps = {}) {
      * refuses when there is more than one, and that refusal is only correct if it
      * is given the full picture.
      */
-    async findConversationsForSender({ from_email } = {}) {
-      const email = clean(from_email).toLowerCase();
+    async findConversationsForSender(raw_input) {
+      const email = clean(asObject(raw_input).from_email).toLowerCase();
       if (!email) return [];
 
+      // COLUMNS THIS TABLE ACTUALLY HAS. An earlier version also selected
+      // `podio_prospect_id`, which exists nowhere in this schema -- and PostgREST
+      // rejects the WHOLE select for one unknown column, so every tier-4 lookup
+      // would have errored and returned nothing. The tier would have been inert
+      // while appearing to work, which is the same defect that had already made
+      // tier 2 unable to match.
       const { data, error } = await supabase
         .from("contact_outreach_state")
-        .select("podio_master_owner_id, podio_property_id, podio_prospect_id, to_email")
+        .select("podio_master_owner_id, podio_property_id, to_email")
         .eq("to_email", email)
-        .limit(25);
+        .limit(MAX_SENDER_CANDIDATES);
 
       if (error) {
+        // A lookup we could not perform is NOT an absence of candidates. Both end
+        // in review, so the seller's reply is safe either way -- but recording
+        // "no conversation for this sender" when the query failed would send
+        // whoever investigates looking in the wrong place.
         logger.error("inbound_email.sender_lookup_failed", { reason: clean(error.message) });
-        return [];
+        return { ok: false, reason: "sender_lookup_failed" };
       }
 
       return (Array.isArray(data) ? data : []).map((row) => ({
         master_owner_id: row.podio_master_owner_id,
         property_id: row.podio_property_id,
-        prospect_id: row.podio_prospect_id,
       }));
     },
 

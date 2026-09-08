@@ -178,3 +178,93 @@ test("a reply alias still beats RFC headers when both are present", () => {
   assert.equal(verdict.tier, RESOLUTION_TIER.REPLY_ALIAS);
   assert.equal(verdict.conversation.opportunity_id, "alias-opp");
 });
+
+// ── tier 4 must be able to match too ───────────────────────────────────────
+//
+// The same defect twice over: the sender lookup also selected a column that
+// does not exist in this schema (`podio_prospect_id`). PostgREST rejects the
+// WHOLE select for one unknown column, so every tier-4 lookup would have
+// errored and returned nothing -- inert, while appearing to work.
+
+import { createInboundEmailStore as makeStore, MAX_SENDER_CANDIDATES } from "../../src/lib/domain/email/inbound/inbound-email-store.js";
+
+/** A supabase stand-in that records the exact select it was given. */
+function selectSpy({ rows = [], error = null } = {}) {
+  const seen = { columns: null, filters: {}, limit: null, table: null };
+  return {
+    seen,
+    from(table) {
+      seen.table = table;
+      const chain = {
+        select(columns) { seen.columns = columns; return chain; },
+        eq(column, value) { seen.filters[column] = value; return chain; },
+        limit(n) { seen.limit = n; return Promise.resolve({ data: rows, error }); },
+      };
+      return chain;
+    },
+  };
+}
+
+test("the sender lookup selects only columns this schema actually has", async () => {
+  const supabase = selectSpy({ rows: [] });
+  await makeStore({ supabase }).findConversationsForSender({ from_email: "seller@example.org" });
+
+  assert.equal(supabase.seen.table, "contact_outreach_state");
+  // The specific column that made this inert. Named explicitly so a future
+  // reader sees WHY the assertion exists rather than a bare column list.
+  assert.equal(supabase.seen.columns.includes("podio_prospect_id"), false,
+    "podio_prospect_id does not exist and rejects the whole select");
+  assert.match(supabase.seen.columns, /podio_master_owner_id/);
+  assert.match(supabase.seen.columns, /podio_property_id/);
+});
+
+test("a matching sender yields a candidate conversation", async () => {
+  const supabase = selectSpy({
+    rows: [{ podio_master_owner_id: "own-1", podio_property_id: "prop-1", to_email: "seller@example.org" }],
+  });
+  const candidates = await makeStore({ supabase }).findConversationsForSender({ from_email: "Seller@Example.ORG" });
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].master_owner_id, "own-1");
+  assert.equal(candidates[0].property_id, "prop-1");
+  // Looked up case-insensitively: a mailbox is not case-sensitive to us.
+  assert.equal(supabase.seen.filters.to_email, "seller@example.org");
+});
+
+test("the candidate list is bounded, and only ever risks OVER-counting into review", async () => {
+  const supabase = selectSpy({ rows: [] });
+  await makeStore({ supabase }).findConversationsForSender({ from_email: "seller@example.org" });
+  assert.equal(supabase.seen.limit, MAX_SENDER_CANDIDATES);
+});
+
+test("a FAILED lookup is reported as a failure, not as an absence of candidates", async () => {
+  // Both end in review, so the seller's reply is safe either way. But recording
+  // "no conversation for this sender" when the query errored sends whoever
+  // investigates looking in the wrong place, and hides a schema fault behind a
+  // routine outcome nobody follows up.
+  const supabase = selectSpy({ error: { message: "column does not exist" } });
+  const result = await makeStore({ supabase }).findConversationsForSender({ from_email: "seller@example.org" });
+
+  assert.equal(Array.isArray(result), false, "a failure must not look like an empty list");
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "sender_lookup_failed");
+});
+
+test("the resolver tells a failed lookup apart from a genuinely unknown sender", () => {
+  const failed = resolveInboundThread({ from_email: "seller@example.org", sender_lookup_failed: true });
+  const genuinely_absent = resolveInboundThread({ from_email: "seller@example.org" });
+
+  assert.equal(failed.status, RESOLUTION_STATUS.UNMATCHED);
+  assert.equal(failed.reason, "sender_lookup_failed");
+  assert.equal(failed.lookup_failed, true);
+
+  assert.equal(genuinely_absent.status, RESOLUTION_STATUS.UNMATCHED);
+  assert.equal(genuinely_absent.reason, "no_conversation_for_sender");
+});
+
+test("an empty sender lookup never throws, whatever shape it arrives in", async () => {
+  const store = makeStore({ supabase: selectSpy({ rows: [] }) });
+  for (const input of [null, undefined, "", 0, [], { from_email: null }, { from_email: {} }]) {
+    await assert.doesNotReject(() => store.findConversationsForSender(input), String(input));
+  }
+});

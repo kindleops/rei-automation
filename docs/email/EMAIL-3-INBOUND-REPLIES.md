@@ -218,18 +218,36 @@ it can become a duplicate send or a seller reply that vanishes into a catch
 block. Fixed as a class — a shared `asObject` guard plus a contract test that
 calls every entry point with thirteen hostile shapes.
 
-**Tier 2 could never have matched anything.** The RFC-header lookup read
-`email_queue.rfc_message_id` — a column that does not exist and that nothing
-writes. Every query would have errored, been logged, and returned an empty list,
-so the tier would have failed to match forever while looking like a working
-control. A silently inert tier is worse than an absent one: an absent tier is a
-known gap, an inert one is a documented protection that is not there.
+**Two of the four resolution tiers could never have matched anything.**
+
+Tier 2 read `email_queue.rfc_message_id`. Nothing in the codebase writes that
+column — `email_queue`'s own `CREATE TABLE` is not in `supabase/migrations`, so
+whether it exists at all cannot be settled from the repository, but it is
+certainly never populated. Tier 4 selected `contact_outreach_state.podio_prospect_id`,
+which appears in no migration and nowhere else in the codebase.
+
+Either way the outcome is the same and it is the worst shape a defect can have.
+PostgREST rejects the **whole** select for one unknown column; the code then
+logs and returns an empty list, because that is the right thing to do with a
+failed lookup. So the tier does not crash, does not fail a test, and does not
+show up in review — it silently becomes a control that returns nothing, forever.
+An absent tier is a known gap; an inert one is a documented protection that is
+not there.
 
 This is the same defect EMAIL-0 found twice in the pre-existing code — a code
 path targeting a table shape nobody built — written fresh in this phase by
-someone who had just finished writing that finding up. It now resolves through
-the canonical attempt ledger, and the test's Supabase stand-in throws on any
-direct table access so the ownership is proven rather than asserted.
+someone who had just finished writing that finding up. Three instances was
+enough to stop fixing instances: `email-schema-column-contract.test.mjs` now
+reads column names out of the migration DDL and checks every literal `.select()`
+in the email domain against them, and is itself verified by reintroducing a
+phantom column and confirming it fails.
+
+Tier 2 now resolves through the canonical attempt ledger, where the provider
+message id is actually recorded; the test's Supabase stand-in throws on any
+direct table access, so that ownership is proven rather than asserted. Tier 4
+also now distinguishes "we looked and there is nothing" from "we could not
+look" — both are correctly unmatched, but reporting the second as the first
+hides a broken query behind a routine outcome nobody investigates.
 
 **The migration proof found a defect in itself.** `psql` prints the command tag
 alongside a `RETURNING` value, so an id came back with `INSERT 0 1` glued to it;

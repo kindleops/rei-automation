@@ -224,6 +224,19 @@ export function resolveInboundThread(raw_input) {
   // ── TIER 4: sender context, and only when it is unambiguous ──────────────
   const sender_candidates = Array.isArray(input.sender_candidates) ? input.sender_candidates : [];
   if (!sender_candidates.length) {
+    // "We looked and there is nothing" and "we could not look" both end here,
+    // and both are correctly UNMATCHED -- but they are different incidents, and
+    // reporting the second as the first hides a broken query behind a routine
+    // outcome that nobody investigates.
+    if (input.sender_lookup_failed === true) {
+      return verdict(
+        RESOLUTION_STATUS.UNMATCHED,
+        RESOLUTION_TIER.SENDER_CONTEXT,
+        "sender_lookup_failed",
+        null,
+        { lookup_failed: true }
+      );
+    }
     return verdict(
       RESOLUTION_STATUS.UNMATCHED,
       RESOLUTION_TIER.NONE,

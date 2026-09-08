@@ -203,15 +203,22 @@ export async function ingestInboundEmail(raw_input, deps = {}) {
     references: normalized.references,
   }) ?? [];
 
-  const sender_candidates = await deps.findConversationsForSender?.({
+  // A lookup that FAILED is not an absence of candidates. Both end in review, so
+  // the seller's reply is safe either way -- but recording "no conversation for
+  // this sender" when the query errored sends whoever investigates looking in
+  // the wrong place, and hides a schema fault behind a routine outcome.
+  const sender_lookup = await deps.findConversationsForSender?.({
     from_email: normalized.from?.email,
-  }) ?? [];
+  });
+  const sender_lookup_failed = Boolean(sender_lookup && !Array.isArray(sender_lookup));
+  const sender_candidates = Array.isArray(sender_lookup) ? sender_lookup : [];
 
   const resolution = resolveInboundThread({
     alias: alias ?? null,
     presented_token,
     header_matches,
     sender_candidates,
+    sender_lookup_failed,
     from_email: normalized.from?.email,
   });
 
