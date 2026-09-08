@@ -22,6 +22,7 @@ import {
   resolveAutoReplyScopeConfig,
 } from "@/lib/domain/seller-flow/auto-reply-mode.js";
 import { getSystemValue } from "@/lib/system-control.js";
+import { resolveIntentStatePromotion, DECLINE_INTENTS } from "@/lib/domain/lead-state/resolve-intent-state-promotion.js";
 import { ensureInboundCoverage } from "@/lib/domain/seller-flow/coverage-net/ensure-inbound-coverage.js";
 import {
   buildSafeFallback,
@@ -775,8 +776,84 @@ function applyOwnershipProbeOverlay(decision = {}, args = {}) {
   };
 }
 
+/**
+ * Apply the ontology's declared durable outcome for a decline.
+ *
+ * THE GAP THIS CLOSES
+ *   inbound-intent-ontology.js already declares, for not_interested,
+ *   disposition="not_interested" / operational_status="paused" /
+ *   automation="pause". Nothing consumed those hints, so a seller who said
+ *   "Not selling" kept disposition = null and read as a live lead everywhere
+ *   except the FUS2 send gate, which had to rediscover the refusal from raw
+ *   message text on every batch.
+ *
+ * WHERE THIS SITS AND WHY
+ *   Here, and not in the FUS2 gate. This runs AFTER classification and fact
+ *   extraction (both are already on `args`) and BEFORE the decision leaves for
+ *   decisionToUniversalLeadStatePatch -> patchUniversalLeadState, so every
+ *   downstream reader sees one canonical state and the single state-transition
+ *   authority still performs the only write.
+ *
+ * WHAT IT WILL NOT DO
+ *   It merges ONLY the three fields the resolver owns. Ownership, price,
+ *   property facts, agent assignment, sender data and follow-up timing are
+ *   left exactly as the decision computed them. It never strengthens or
+ *   weakens a compliance outcome: a decision already carrying suppression or a
+ *   blocked contactability is returned untouched, because a commercial refusal
+ *   must never be able to overwrite a legal one.
+ */
+function applyDeclinePromotionOverlay(decision = {}, args = {}) {
+  // Compliance outranks everything. Never downgrade an opt-out to a decline.
+  if (decision.should_suppress_contact === true) return decision;
+  const existingDisposition = clean(decision.disposition).toLowerCase();
+  if (["suppressed", "dnc", "opt_out", "do_not_contact"].includes(existingDisposition)) {
+    return decision;
+  }
+
+  const classification = args.classification || {};
+  const promotion = resolveIntentStatePromotion({
+    intent: classification.primary_intent || classification.detected_intent || null,
+    body: args.message?.message_body ?? args.message?.body ?? args.message ?? null,
+    currentDisposition: args.latestThreadContext?.summary?.disposition ?? null,
+  });
+
+  if (!promotion?.patch) return decision;
+
+  // NARROW BY DESIGN: this overlay promotes DECLINES and their reversal, and
+  // nothing else.
+  //
+  // The resolver can return ontology state for any intent, and an early build
+  // of this overlay applied all of them. Two things went wrong immediately:
+  // every ordinary inbound started rewriting durable state (far wider than
+  // this change is scoped to), and -- worse -- opt_out was promoted to
+  // disposition="not_interested", because the ontology gives a legal opt-out
+  // the SAME disposition as a commercial refusal. A STOP would have been
+  // recorded as "not interested". Restricting the overlay to declines keeps
+  // opt_out entirely on the compliance path, where it belongs.
+  const isDecline =
+    promotion.reason === "decline_detected_in_text" ||
+    promotion.reason === "compound_ownership_confirmed_with_sale_decline" ||
+    DECLINE_INTENTS.includes(promotion.facts?.canonical_intent);
+  const isReopening = promotion.reason === "reopened_by_seller_interest";
+  if (!isDecline && !isReopening) return decision;
+
+  const patch = promotion.patch;
+
+  const next = { ...decision };
+  // decisionToUniversalLeadStatePatch reads `temperature`, not
+  // `lead_temperature` -- mapping it wrong would silently drop the field.
+  if (patch.disposition) next.disposition = patch.disposition;
+  if (patch.operational_status) next.operational_status = patch.operational_status;
+  if (patch.lead_temperature) next.temperature = patch.lead_temperature;
+  next.decline_promotion_reason = promotion.reason;
+  return next;
+}
+
 export function applyInboundAutomationDecision(args = {}) {
-  const raw = applyOwnershipProbeOverlay(computeInboundAutomationDecisionRaw(args), args);
+  const raw = applyDeclinePromotionOverlay(
+    applyOwnershipProbeOverlay(computeInboundAutomationDecisionRaw(args), args),
+    args,
+  );
   const classification = args.classification || {};
   const stage =
     clean(classification.stage_hint) ||
