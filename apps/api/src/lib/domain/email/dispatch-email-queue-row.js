@@ -53,6 +53,7 @@ import { evaluateEmailSenderReadiness } from "@/lib/domain/email/email-sender-re
 import { createBrevoEmailTransport } from "@/lib/domain/email/transport/brevo-email-transport.js";
 import { classifyBrevoProviderError } from "@/lib/domain/email/transport/brevo-error-classifier.js";
 import { normalizeEmailAddress } from "@/lib/domain/email/normalize-email-address.js";
+import { resolveConversationReplyAddress } from "@/lib/domain/email/reply-alias-store.js";
 import { getSystemFlag } from "@/lib/system-control.js";
 
 const logger = child({ module: "domain.email.queue_dispatch" });
@@ -93,6 +94,7 @@ export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
   const getFlag = deps.getSystemFlag || getSystemFlag;
   const resolveEligibility = deps.resolveEligibility || resolveEmailOutreachEligibility;
   const loadSender = deps.loadSender;
+  const resolveReplyAddress = deps.resolveReplyAddress || resolveConversationReplyAddress;
 
   // ── 0. the kill switch, before anything else ─────────────────────────────
   // A disabled channel cannot be argued out of by any later check, so asking
@@ -164,11 +166,53 @@ export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
     });
   }
 
-  // ── 4. the message ───────────────────────────────────────────────────────
+  // ── 4. where the seller replies ──────────────────────────────────────────
+  //
+  // ONE ALIAS PER CONVERSATION, resolved here rather than at template render
+  // time, so EVERY message in a conversation carries the same Reply-To --
+  // including a transport retry, a second touch and a follow-up weeks later. A
+  // per-message address would have to be threaded correctly through each of
+  // those paths, and would fragment the thread the first time one forgot.
+  //
+  // Retries specifically: this runs on each attempt and is a get-or-create, so
+  // attempt 2 reads attempt 1's row rather than minting a rival. A conversation
+  // cannot end up with two live reply addresses.
+  //
+  // NEVER A GATE. Every failure here degrades to the sender's own configured
+  // reply mailbox, which is a real monitored address; the seller can always
+  // answer, and what is lost is automatic filing, not the reply. The result says
+  // which path was taken so nothing downstream has to assume.
+  const alias = await resolveReplyAddress(
+    {
+      opportunity_id: queue_row.opportunity_id || queue_row?.metadata?.opportunity_id || null,
+      master_owner_id: queue_row.master_owner_id || queue_row?.metadata?.master_owner_id || null,
+      property_id: queue_row.property_id || queue_row?.metadata?.property_id || null,
+      prospect_id: queue_row.prospect_id || queue_row?.metadata?.prospect_id || null,
+      thread_key: queue_row.thread_key || null,
+      expected_from_email: recipient.normalized,
+    },
+    {
+      supabase: deps.supabase,
+      getSystemFlag: getFlag,
+      // A dry run reads an existing alias but never mints one: a preview that
+      // leaves durable rows behind is not a preview.
+      allow_mint: deps.dry_run !== true,
+    }
+  );
+
+  const reply_to_email = alias.ok ? alias.address : clean(readiness.sender.reply_to_email);
+  const reply_path = alias.ok ? "conversation_alias" : "sender_default";
+  if (!alias.ok) {
+    logger.info("email_dispatch.reply_alias_degraded", {
+      queue_row_id, reason: alias.reason, has_sender_reply_to: Boolean(reply_to_email),
+    });
+  }
+
+  // ── 5. the message ───────────────────────────────────────────────────────
   const message = {
     to: recipient.normalized,
     from: { email: readiness.sender.from_email, name: readiness.sender.sender_name },
-    ...(readiness.sender.reply_to_email ? { reply_to: { email: readiness.sender.reply_to_email } } : {}),
+    ...(reply_to_email ? { reply_to: { email: reply_to_email } } : {}),
     subject: clean(queue_row.subject_rendered) || clean(queue_row.subject),
     html: clean(queue_row.email_body),
     text: clean(queue_row.text_body) || undefined,
@@ -185,7 +229,7 @@ export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
     });
   }
 
-  // ── 5. dry run stops HERE, before an attempt is ever allocated ───────────
+  // ── 6. dry run stops HERE, before an attempt is ever allocated ───────────
   if (deps.dry_run === true) {
     logger.info("email_dispatch.dry_run", {
       queue_row_id,
@@ -207,11 +251,14 @@ export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
         from: readiness.sender.from_email,
         subject: message.subject,
         sender_remaining_today: readiness.sender.remaining_today,
+        reply_to: reply_to_email || null,
+        reply_path,
+        reply_alias_reason: alias.ok ? null : alias.reason,
       },
     };
   }
 
-  // ── 6. into the seam ─────────────────────────────────────────────────────
+  // ── 7. into the seam ─────────────────────────────────────────────────────
   const dispatch_input = identity.bound
     ? {
         communication_type: identity.communication_type || null,
@@ -271,6 +318,11 @@ export async function dispatchEmailQueueRow(queue_row = {}, deps = {}) {
     policy_version: EMAIL_DISPATCH_POLICY_VERSION,
     channel: "email",
     sender: readiness.sender,
+    // Reported, never hidden. A caller reading `sender_default` knows this
+    // seller's reply will need an operator to file it.
+    reply_path,
+    reply_alias_id: alias.ok ? alias.alias_id : null,
+    reply_alias_reason: alias.ok ? null : alias.reason,
   };
 }
 
