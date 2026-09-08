@@ -272,21 +272,52 @@ async function runAttempt(comm, input, deps, emit) {
     logical_communication_id: comm.id, attempt_id: allocated.attempt_id,
   });
   try {
-    provider_result = await sendProvider({
-      to: input.message?.to,
-      from: input.message?.from,
-      body: input.message?.body,
-    });
+    // The WHOLE message, not three hand-picked fields. An SMS adapter reads
+    // to/from/body exactly as before; an email adapter also needs subject, html,
+    // text, reply_to, tags and the brand that selects its credential. Projecting
+    // to three fields here would have forced the email bridge to smuggle the
+    // rest past the seam in a closure, which is how a second send path starts.
+    provider_result = await sendProvider({ ...(input.message || {}) });
   } catch (error) {
     provider_error = error;
   }
 
   // ── 16. classify ─────────────────────────────────────────────────────────
-  const classified = provider_error
-    ? (typeof classifyProviderError === "function"
-        ? classifyProviderError(provider_error)
-        : { failure_class: "unknown_failure" })
-    : { ok: true, provider_message_id: clean(provider_result?.sid || provider_result?.provider_message_id) };
+  //
+  // THREE WAYS A PROVIDER CALL CAN END, and only one of them is a send.
+  //
+  //   it threw                  classify the exception
+  //   it RETURNED a failure     honour it; do not read it as success
+  //   it returned a message id  that, and only that, is a send
+  //
+  // The middle case is the one worth spelling out. An adapter that reports a
+  // failure instead of throwing is easier to test and harder to get wrong, but
+  // if this seam only understood exceptions, a reported failure would fall into
+  // the success branch, produce no message id, and be filed as an unexplained
+  // ambiguity. Safe, but it would throw away a precise classification the
+  // adapter had already made -- and "we do not know" is the one verdict that
+  // permanently strands a communication.
+  const classify = (subject) =>
+    typeof classifyProviderError === "function"
+      ? classifyProviderError(subject)
+      : { failure_class: "unknown_failure" };
+
+  let classified;
+  if (provider_error) {
+    classified = classify(provider_error);
+  } else if (provider_result && provider_result.ok === false) {
+    // An adapter that classified at the boundary has strictly better information
+    // than a re-classification here, which would see none of the HTTP status,
+    // body or network phase it was derived from and would degrade to ambiguous.
+    classified = clean(provider_result.failure_class)
+      ? provider_result
+      : classify(provider_result);
+  } else {
+    classified = {
+      ok: true,
+      provider_message_id: clean(provider_result?.sid || provider_result?.provider_message_id),
+    };
+  }
 
   const outcome = mapTransportOutcome(classified);
 
