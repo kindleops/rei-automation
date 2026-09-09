@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+// Compiled-in build identity vs the environment's claim. Stamped onto the
+// runner heartbeat so a stale container is visible without reading behaviour.
+import { BUILD_SHA } from "@/lib/domain/deploy/build-stamp.generated.js";
+import { resolveDeployGitSha } from "@/lib/domain/deploy/resolve-deploy-sha.js";
 import { info, warn, error } from "@/lib/logging/logger.js";
 import { getSystemFlag, getSystemValue, buildDisabledResponse, setSystemValues } from "@/lib/system-control.js";
 import {
@@ -457,6 +461,15 @@ export async function runSendQueue(
         queue_processor_last_claimed_at: rows.length > 0 ? heartbeatAt : await get_system_value("queue_processor_last_claimed_at"),
         queue_processor_last_sent_count: String(sent_count),
         queue_processor_last_claimed_count: String(rows.length),
+        // STALE-RUNNER DETECTION (2026-09-09). BUILD_SHA is a compiled-in
+        // constant, so it reports what THIS container is EXECUTING. The deploy
+        // SHA comes from process.env, i.e. what the Worker was TOLD to run. On
+        // 2026-09-09 those diverged for ~11 hours while /api/version showed
+        // only the second one, and 60 first-touch rows were refused by code the
+        // release had already deleted. Divergence between these two keys is the
+        // detection rule; equality is the healthy state.
+        queue_processor_last_build_sha: String(BUILD_SHA || "unknown"),
+        queue_processor_last_deploy_sha: String(resolveDeployGitSha() || "unknown"),
       }, { supabase });
     } catch (heartbeat_error) {
       log_warn("queue.heartbeat_write_failed", {

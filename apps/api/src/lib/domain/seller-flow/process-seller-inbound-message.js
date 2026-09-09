@@ -1621,6 +1621,11 @@ export async function processSellerInboundMessage({
     enableQueueInsert: v2_should_queue_live,
     applySuppression,
     dryRun: dryRun || !v2_should_queue_live,
+    // Compliance follows the caller's REAL write authority, not the reply
+    // decision. `dryRun || !v2_should_queue_live` is true for every opt-out
+    // (an opt-out never queues a reply), which silently disabled both the
+    // durable suppression write and the pending-outbound cancellation.
+    complianceDryRun: writes_suppressed,
     autoReplyMode: effective_auto_reply_mode,
     proofRun,
     scheduleDelaySeconds: inboundAutopilotDelaySeconds,

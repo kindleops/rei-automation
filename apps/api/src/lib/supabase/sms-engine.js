@@ -3605,6 +3605,11 @@ export async function logInboundMessageEvent(payload, options = {}) {
       existing_row = existing_query.data || null;
     }
   }
+  const is_inbound_opt_out_intent =
+    lower(
+      detected_intent || clean(payload?.metadata?.classification_result) || ""
+    ) === "opt_out";
+
   let event = {
     message_event_key:
       clean(existing_row?.message_event_key) ||
@@ -3626,6 +3631,18 @@ export async function logInboundMessageEvent(payload, options = {}) {
       clean(payload?.metadata?.classification_result) ||
       null,
     type: clean(payload?.type || payload?.metadata?.type) || "inbound",
+    // Durable opt-out flag (added 2026-09-09). These two columns were only ever
+    // written by the DEAD Podio event writer, so message_events.is_opt_out read
+    // false on real STOP replies. Derived from the CANONICAL classification
+    // rather than a second keyword scan: extractOptOutDetails() matches bare
+    // substrings ("end" inside "weekend", "cancel" inside "cancelled the
+    // listing"), acceptable for a Podio annotation but wrong for a compliance
+    // flag. detected_intent === "opt_out" is the same signal that drives
+    // suppression, so the column and the suppression can never disagree.
+    is_opt_out: is_inbound_opt_out_intent,
+    opt_out_keyword: is_inbound_opt_out_intent
+      ? clean(message_body).slice(0, 40).toUpperCase() || null
+      : null,
     safety_status: safety_status || "pending",
     auto_reply_status,
     auto_reply_queue_id,

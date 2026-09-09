@@ -428,6 +428,14 @@ const COMPLIANCE_PHRASES = [
   "take me off", "take me off your list", "take me off this list",
   "take my number off", "take my number off your list",
   "delete my number", "delete me from your list",
+  // "lose my number" family (added 2026-09-09). The rest of the cessation
+  // vocabulary was already complete -- "remove me", "remove me from your list",
+  // "take me off your list" and "stop texting me" all match today -- but this
+  // idiom had no entry. Deliberately narrow: three surface forms, no typo
+  // tolerance. The live miss that prompted this audit ("rwmove me from all you
+  // lists") was a MISSPELLING of a phrase already on the list; fuzzy matching
+  // would be a far wider semantic change than the problem warrants.
+  "lose my number", "loose my number", "forget my number",
   "do not text", "do not text me", "do not contact",
   "do not contact me", "do not message", "do not message me",
   "do not call", "do not call me", "do not reach out",

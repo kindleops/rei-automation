@@ -1781,12 +1781,39 @@ export async function applyInboundSuppression({
       const { error } = await query;
       if (error) throw error;
     } else {
-      const { error } = await supabase.from("sms_suppression_list").insert({
-        phone_number: normalized_phone,
-        suppression_reason: reason,
-        is_active: true,
-        suppressed_at: new Date().toISOString(),
-      });
+      // DURABLE COMPLIANCE WRITE (repaired 2026-09-09).
+      //
+      // The previous insert named four columns and omitted BOTH of the table's
+      // NOT NULL columns (phone_e164, suppression_type), so any call that
+      // reached it would have failed the not-null constraint -- and it was
+      // additionally unreachable, because the caller passed dryRun=true for any
+      // inbound that was not also queueing a live reply. Five live STOP replies
+      // on 2026-09-08/09 produced no durable record at all.
+      //
+      // Row shape mirrors the one writer proven in production
+      // (sms-engine.js persistProviderBlacklistSuppression). phone_e164 is what
+      // campaign eligibility actually reads (enqueue-campaign-target-one.js
+      // "Compliance" step filters .eq('phone_e164', recipient)), so omitting it
+      // means the block does not bind. sender_phone_e164 is NULL on purpose:
+      // this is a PHONE-scoped block covering every sender, not a pair block,
+      // and the unique index is NULLS NOT DISTINCT so the upsert is idempotent.
+      const { error } = await supabase.from("sms_suppression_list").upsert(
+        {
+          phone_e164: normalized_phone,
+          sender_phone_e164: null,
+          phone_number: normalized_phone,
+          suppression_type: reason,
+          suppression_reason: reason,
+          reason,
+          is_active: true,
+          suppressed_at: new Date().toISOString(),
+          source: "inbound_opt_out",
+        },
+        { onConflict: "phone_e164,sender_phone_e164", ignoreDuplicates: false }
+      );
+      // PostgREST reports failures by RETURN VALUE, not by throwing: without
+      // this check a constraint violation is swallowed and the caller is still
+      // told ok:true. That is how this stayed invisible.
       if (error) throw error;
     }
 
@@ -2032,6 +2059,15 @@ export async function executeInboundAutomationDecision({
   enableQueueInsert = false,
   applySuppression = true,
   dryRun = true,
+  // Compliance is NOT a reply decision. `dryRun` here means "do not queue an
+  // outbound", and the caller sets it true whenever no live reply is being
+  // queued -- which is ALWAYS the case for an opt-out, since an opt-out
+  // suppresses the reply by definition. Honouring it for the suppression write
+  // meant a seller could text STOP and nothing durable was ever recorded.
+  // complianceDryRun carries the caller's real "may I write to production"
+  // flag; when omitted it defaults to dryRun so every existing caller and test
+  // double keeps today's behaviour.
+  complianceDryRun = null,
   autoReplyMode = null,
   proofRun = false,
   scheduleDelaySeconds = 0,
@@ -2254,6 +2290,12 @@ export async function executeInboundAutomationDecision({
 
   if (base_decision.should_suppress_contact) {
     const suppression_reason = base_decision.suppression_reason || "opt_out";
+    // See complianceDryRun in the parameter list: suppressing a seller who
+    // asked us to stop, and cancelling anything already queued to them, are
+    // compliance actions. They must not be gated on whether we happen to be
+    // sending a reply on this turn.
+    const compliance_dry_run =
+      complianceDryRun == null ? dryRun : Boolean(complianceDryRun);
     const suppression_result = applySuppression
       ? await applyInboundSuppression({
           supabaseClient: supabase,
@@ -2261,12 +2303,12 @@ export async function executeInboundAutomationDecision({
           phoneId,
           reason: suppression_reason,
           threadKey,
-          dryRun,
+          dryRun: compliance_dry_run,
         })
       : { ok: false, skipped: true, reason: "suppression_disabled" };
 
     let queue_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
-    if (!dryRun && supabase) {
+    if (!compliance_dry_run && supabase) {
       queue_cancellation = await cancelSupabasePendingOutbound(
         {
           thread_key: threadKey || inboundFrom,
