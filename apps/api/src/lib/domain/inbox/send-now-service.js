@@ -31,6 +31,7 @@ import {
 } from "@/lib/domain/compliance/evaluate-canonical-contactability.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
+import { loadDispatchBlockedSets, isSenderDispatchBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -381,9 +382,12 @@ export async function resolveFromPhoneNumber({
         .eq("market", market)
         .eq("status", "active")
         .limit(5);
+      // Fallback pool only (Priorities 0-3 above preserve an established
+      // conversation's sender untouched): never pick a number dispatch will refuse.
+      const dispatchBlockedSets = await loadDispatchBlockedSets({});
 
       if (numbers && numbers.length > 0) {
-        const firstNumber = numbers[0];
+        const firstNumber = (Array.isArray(numbers) ? numbers : []).find((r) => !isSenderDispatchBlocked(r?.phone_number, dispatchBlockedSets)) || null;
         if (firstNumber?.phone_number) {
           const normalized = normalizePhone(firstNumber.phone_number);
           if (normalized && !isRecipientPhone(normalized)) return normalized;

@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
-import { evaluateSmsHealthGuard } from "../../apps/api/src/lib/domain/delivery/sms-health-guard.js";
+import { evaluateSmsHealthGuard, getDefaultSmsHealthGuardConfig } from "../../apps/api/src/lib/domain/delivery/sms-health-guard.js";
 
 let failures = 0;
+
+// Disposition 2026-09-09: the guard carries NO hardcoded blocklists. Blocks live in
+// system_control.sms_blocked_* (production) or SMS_BLOCKED_* env. Fixtures here use env.
+process.env.SMS_BLOCKED_SENDER_NUMBERS = "+14704920588";
+process.env.SMS_BLOCKED_TEMPLATE_IDS = "208481";
 
 function mark(label, condition, detail = "") {
   const line = `${condition ? "PASS" : "FAIL"} ${label}${detail ? ` ${detail}` : ""}`;
@@ -14,6 +19,13 @@ function mark(label, condition, detail = "") {
   }
 }
 
+const defaults = getDefaultSmsHealthGuardConfig({}, {});
+mark(
+  "hardcoded blocklists are empty (blocks live in system_control / env only)",
+  defaults.blocked_sender_numbers.length === 0 && defaults.blocked_template_ids.length === 0,
+  JSON.stringify(defaults)
+);
+
 const blockedSender = evaluateSmsHealthGuard({
   from_phone_number: "+14704920588",
   template_id: "900001",
@@ -22,7 +34,7 @@ const blockedSender = evaluateSmsHealthGuard({
   require_local_routing: true,
 });
 
-mark("blocked sender number is blocked", blockedSender.allowed === false && blockedSender.reason === "blocked_sender_number", JSON.stringify(blockedSender));
+mark("env-blocked sender number is blocked", blockedSender.allowed === false && blockedSender.reason === "blocked_sender_number", JSON.stringify(blockedSender));
 
 const blockedTemplate = evaluateSmsHealthGuard({
   from_phone_number: "+15551231234",
@@ -32,7 +44,7 @@ const blockedTemplate = evaluateSmsHealthGuard({
   require_local_routing: true,
 });
 
-mark("toxic template id is blocked", blockedTemplate.allowed === false && blockedTemplate.reason === "blocked_template_id", JSON.stringify(blockedTemplate));
+mark("env-blocked template id is blocked", blockedTemplate.allowed === false && blockedTemplate.reason === "blocked_template_id", JSON.stringify(blockedTemplate));
 
 const blockedRegional = evaluateSmsHealthGuard({
   from_phone_number: "+15551231234",

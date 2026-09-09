@@ -196,19 +196,35 @@ const blockedTemplates = [
   ...parseList(process.env.SMS_BLOCKED_TEMPLATE_IDS),
 ];
 
+// Disposition 2026-09-09: no template or sender may be blocked by a literal in code.
+// Blocks are operator-visible only (system_control.sms_blocked_* / SMS_BLOCKED_* env).
 addCheck(
   checks,
-  "emergency sender blocklist includes known bad senders",
-  ["+14704920588", "+14693131600"].every((phone) => blockedSenders.includes(phone)) ? "green" : "red",
-  blockedSenders.join(","),
+  "health guard carries no hardcoded blocklists",
+  DEFAULT_SMS_HEALTH_GUARD_BLOCKLISTS.blocked_sender_numbers.length === 0 &&
+    DEFAULT_SMS_HEALTH_GUARD_BLOCKLISTS.blocked_template_ids.length === 0
+    ? "green"
+    : "red",
+  JSON.stringify(DEFAULT_SMS_HEALTH_GUARD_BLOCKLISTS),
   "code"
 );
 addCheck(
   checks,
-  "emergency template blocklist includes known toxic templates",
-  ["208481", "204257", "204529", "204561", "204705", "204721", "207681"].every((id) => blockedTemplates.includes(id)) ? "green" : "red",
+  "managed sender blocklist carries the operator's pending-canary blocks (Atlanta ..0588, Dallas ..1600)",
+  ["+14704920588", "+14693131600"].every((phone) => parseList(values.sms_blocked_sender_numbers).includes(phone)) ? "green" : "red",
+  blockedSenders.join(","),
+  "control"
+);
+addCheck(
+  checks,
+  "managed template blocklist carries the paused / ungoverned templates (204529 and 208481 released to governance)",
+  ["204257", "204561", "204705", "204721", "207681"].every((id) => parseList(values.sms_blocked_template_ids).includes(id)) &&
+    !blockedTemplates.includes("204529") &&
+    !blockedTemplates.includes("208481")
+    ? "green"
+    : "red",
   blockedTemplates.join(","),
-  "code"
+  "control"
 );
 
 if (control.source !== "supabase") {

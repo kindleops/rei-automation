@@ -1,17 +1,26 @@
-const DEFAULT_BLOCKED_SENDER_NUMBERS = Object.freeze([
-  "+14704920588",
-  "+14693131600",
-]);
+// This module stays import-pure (proof scripts load it under plain `node`);
+// the system_control reader is imported lazily on the async path below.
 
-const DEFAULT_BLOCKED_TEMPLATE_IDS = Object.freeze([
-  "208481",
-  "204257",
-  "204529",
-  "204561",
-  "204705",
-  "204721",
-  "207681",
-]);
+// Hardcoded blocklists are deliberately EMPTY (disposition 2026-09-09).
+// The former literals entered via ff571386 ("WIP integration checkpoint",
+// 2026-06-03, unreviewed) with no recorded rationale; the file's own doc called
+// them "emergency defaults ... to be moved into managed system-control values".
+// Provenance + production-data review, per entry:
+//   templates 204529 / 208481 -> BLOCK_OBSOLETE. Governance had both `testing`
+//     since 2026-05-16 and they delivered at/above the fleet; the only
+//     reconstructable trigger (a >=20% all-time failure cut) was never recorded
+//     and never applied to open peers with worse numbers. Authority:
+//     ownership_template_rotation_control (rotation_status, min_delivery_rate).
+//   templates 204257 / 204561 / 204705 / 204721 / 207681 -> unchanged in effect:
+//     governance `pause` or no governance row, AND system_control.sms_blocked_template_ids.
+//   senders ••0588 (Atlanta) / ••1600 (Dallas) -> BLOCK PRESERVED as an operator
+//     decision pending a canary (re-affirmed in the SQL twin three days after the
+//     JS), carried by system_control.sms_blocked_sender_numbers -- not by code.
+// Rule: no template or sender may be blocked by a literal in this file. Blocks are
+// operator-visible only: system_control.sms_blocked_* or SMS_BLOCKED_* env.
+// Enforced by tests/critical/sms-health-guard-defaults-empty.test.mjs.
+const DEFAULT_BLOCKED_SENDER_NUMBERS = Object.freeze([]);
+const DEFAULT_BLOCKED_TEMPLATE_IDS = Object.freeze([]);
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -72,6 +81,61 @@ export function getDefaultSmsHealthGuardConfig(env = process.env, system_control
       false
     ),
   };
+}
+
+/**
+ * ONE ANSWER to "can this template / sender participate in production sending?"
+ *
+ * Dispatch refuses via evaluateSmsHealthGuard(). Until 2026-09-09 nothing
+ * upstream (template assignment, campaign enqueue, manual sender fallback)
+ * consulted the same lists, so assignment produced rows that dispatch then
+ * deterministically refused (24 blocked_template_id refusals on the first
+ * live day). These helpers expose the guard's OWN merged config so every
+ * selector sees exactly what dispatch will enforce. No new registry: the
+ * durable authority stays canonical governance (ownership_template_rotation_control)
+ * and the sender registry (textgrid_numbers); the guard remains a runtime layer
+ * for dynamic env / system_control lists.
+ */
+async function defaultSystemValueReader() {
+  const [{ hasSupabaseConfig }, { getSystemValue }] = await Promise.all([
+    import("../../supabase/client.js"),
+    import("../../system-control.js"),
+  ]);
+  return hasSupabaseConfig() ? getSystemValue : async () => null;
+}
+
+export async function loadSmsHealthGuardSystemControl(getSystemValueImpl = null) {
+  const read = typeof getSystemValueImpl === "function"
+    ? getSystemValueImpl
+    : await defaultSystemValueReader();
+  return {
+    sms_blocked_sender_numbers: await read("sms_blocked_sender_numbers"),
+    sms_blocked_template_ids: await read("sms_blocked_template_ids"),
+    require_local_routing: await read("require_local_routing"),
+    allow_regional_fallback_for_first_touch: await read("allow_regional_fallback_for_first_touch"),
+  };
+}
+
+export function getDispatchBlockedSets(env = process.env, system_control = {}) {
+  const config = getDefaultSmsHealthGuardConfig(env, system_control);
+  return {
+    template_ids: new Set(config.blocked_template_ids.map(clean)),
+    sender_numbers: new Set(config.blocked_sender_numbers.map(normalizePhone).filter(Boolean)),
+  };
+}
+
+export async function loadDispatchBlockedSets({ getSystemValue: getSystemValueImpl = null, env = process.env } = {}) {
+  const system_control = await loadSmsHealthGuardSystemControl(getSystemValueImpl);
+  return getDispatchBlockedSets(env, system_control);
+}
+
+export function isTemplateDispatchBlocked(templateId, sets) {
+  return Boolean(sets?.template_ids?.has(clean(templateId)));
+}
+
+export function isSenderDispatchBlocked(phoneNumber, sets) {
+  const normalized = normalizePhone(phoneNumber);
+  return Boolean(normalized && sets?.sender_numbers?.has(normalized));
 }
 
 export function evaluateSmsHealthGuard({

@@ -15,7 +15,7 @@ Verdict: `NOT_READY` until controlled system-control flags are intentionally ope
 | Retry engine | `apps/api/src/lib/domain/queue/retry-send-queue.js` | Yes | `retry_enabled` through route/runner | 21610, blacklist, opt-out, wrong number, invalid/deactivated, and carrier permanent failures are never retried. |
 | Reconcile route | `apps/api/src/app/api/internal/queue/reconcile/route.js` | Yes | `reconcile_enabled` and route auth | Reconciles queue lifecycle and delivery truth. |
 | Canonical delivery helper | `apps/api/src/lib/domain/delivery/canonical-delivery-state.js` | Yes | Pure helper | Centralizes delivered/failed/pending, retryable, terminal, suppression-required decisions. |
-| SMS health guard | `apps/api/src/lib/domain/delivery/sms-health-guard.js` | Yes | Env/system-control blocklists | Emergency-blocks `+14704920588`, `+14693131600`, templates `208481`, `204257`, `204529`, `204561`, `204705`, `204721`, `207681`. |
+| SMS health guard | `apps/api/src/lib/domain/delivery/sms-health-guard.js` | Yes | Env/system-control blocklists only (hardcoded defaults empty since 2026-09-09) | Blocks come from `system_control.sms_blocked_sender_numbers` / `sms_blocked_template_ids` and `SMS_BLOCKED_*` env; template assignment, campaign enqueue and the send-now sender fallback read the same lists, so nothing is selected that dispatch would refuse. |
 | Feeder route | `apps/api/src/app/api/internal/outbound/feed-master-owners/route.js` | Yes | `feeder_enabled`, `outbound_sms_enabled`, campaign/queue creation brakes | Uses sender routing; Supabase feeder now passes health guard before queue insert. |
 | Supabase feeder | `apps/api/src/lib/domain/outbound/supabase-candidate-feeder.js` | Yes | `campaign_mode`, `queue_auto_enqueue_enabled`, emergency stop, caps/filters | First-touch/local routing blocks non-exact sender fallback. |
 | Autopilot runner | `apps/api/src/app/api/internal/autopilot/run/route.js` | Present | Route/system controls | Needs controlled-mode proof before opening. |
@@ -44,7 +44,7 @@ Verdict: `NOT_READY` until controlled system-control flags are intentionally ope
 
 - Current production controls in the provided runtime state are still locked down: `auto_queue_enabled=false`, `queue_auto_enqueue_enabled=false`, `queue_auto_send_enabled=false`, `queue_processor_mode=off`, `campaign_mode=paused`, `retry_enabled=false`.
 - Retry should remain disabled until live proof confirms non-retryable failures are terminal and suppressed in production data.
-- Sender/template blocklists are emergency defaults; they should be moved into managed system-control values once stable.
+- Sender/template blocklists were moved into managed system-control values on 2026-09-09: senders `+14704920588` / `+14693131600` stay blocked as an operator decision pending a canary; templates `204257`, `204561`, `204705`, `204721`, `207681` stay blocked (governance `pause` / no governance row). Templates `204529` / `208481` were released to canonical governance (BLOCK_OBSOLETE: `testing` since 2026-05-16, delivery at/above fleet). No literal blocks remain in code.
 - No complete unanswered-text scheduler exists yet. See `apps/api/docs/unanswered-text-followup-plan.md`.
 - `podio_sync_enabled=false` in the provided state, so Podio backfill/sync assumptions must be checked before scale.
 - Existing caps and Houston/TX filters indicate a constrained test window, not scale readiness.

@@ -16,6 +16,7 @@ import {
 import { requiredMergeFields } from '@/lib/domain/campaigns/template-render-validation.js'
 import { OUTBOUND_MERGE_KEYS } from '@/lib/domain/campaigns/outbound-agent-identity.js'
 import { governanceApplies } from '@/lib/domain/campaigns/template-governance.js'
+import { loadDispatchBlockedSets, isTemplateDispatchBlocked } from '@/lib/domain/delivery/sms-health-guard.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -41,11 +42,17 @@ function increment(bucket, key, amount = 1) {
  * 4,638 templates was silently cut to its first ~22% — and with no ORDER BY,
  * *which* 22% was left to the planner.
  */
-export async function loadOwnershipTemplates(supabase, useCase, stageCode) {
+export async function loadOwnershipTemplates(supabase, useCase, stageCode, options = {}) {
   const pool = await loadTemplatePool(supabase, useCase, stageCode)
   const governanceById = await loadGovernance(supabase)
+  // Dispatch's own block lists (hardcoded + env + system_control) are subtracted
+  // HERE so assignment and the enqueue backstop share one pool and can never hand
+  // out a template that dispatch will deterministically refuse.
+  const blockedSets = options.dispatchBlockedSets || await loadDispatchBlockedSets({ getSystemValue: options.getSystemValue })
   const { eligible, rejected, governed } = applyGovernance(pool, governanceById, useCase)
-  return { pool, eligible, rejected, governed, governanceById }
+  const dispatch_blocked = eligible.filter((t) => isTemplateDispatchBlocked(t.template_id || t.id, blockedSets))
+  const sendable = eligible.filter((t) => !isTemplateDispatchBlocked(t.template_id || t.id, blockedSets))
+  return { pool, eligible: sendable, rejected, governed, governanceById, dispatch_blocked }
 }
 
 /**

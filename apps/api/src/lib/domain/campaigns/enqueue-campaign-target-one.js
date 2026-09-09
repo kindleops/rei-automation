@@ -76,6 +76,7 @@ import { isAmbiguousSendRow } from '@/lib/domain/messaging/ambiguous-send-eviden
 import { computeNextValidSendInstant } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
 import { loadOwnershipTemplates, renderableRotationPool, MIN_ROTATION_VARIANTS, INSUFFICIENT_ROTATION_REASON } from '@/lib/domain/campaigns/campaign-target-template-assignment.js'
 import { governanceApplies as rotationGovernanceApplies } from '@/lib/domain/campaigns/template-governance.js'
+import { loadDispatchBlockedSets, isTemplateDispatchBlocked, isSenderDispatchBlocked } from '@/lib/domain/delivery/sms-health-guard.js'
 
 const logger = child({ module: 'domain.campaigns.enqueue_campaign_target_one' })
 
@@ -194,6 +195,8 @@ export const ENQUEUE_REASON = {
   CAMPAIGN_MODE_NOT_SENDABLE: 'campaign_mode_not_sendable',
   INVARIANT_VIOLATION: 'campaign_target_id_invariant_violation',
   INSUFFICIENT_ROTATION_POOL: INSUFFICIENT_ROTATION_REASON,
+  TEMPLATE_DISPATCH_BLOCKED: 'template_dispatch_blocked',
+  SENDER_DISPATCH_BLOCKED: 'sender_dispatch_blocked',
 }
 
 const fail = (reason, detail) => ({ created: false, reason, ...(detail ? { detail } : {}) })
@@ -273,7 +276,9 @@ async function authorizeCanaryEnqueue(supabase, { target, campaign, recipient, d
 async function resolveCanaryWindowExemption(supabase, { target, campaign, recipient, deps, now }) {
   let sender = null
   try {
-    sender = await resolveSender(supabase, { market: clean(target.market), recipient })
+    const dispatchBlockedForRoute = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)({ getSystemValue: deps.getSystemValue })
+    sender = await resolveSender(supabase, { market: clean(target.market), recipient, dispatchBlockedSets: dispatchBlockedForRoute })
+    if (sender?.blocked_by_dispatch) sender = null
   } catch {
     return { allowed: false, reason: EXEMPTION_DENIED.ERROR, detail: 'sender_unreadable', sender: '' }
   }
@@ -384,7 +389,7 @@ async function neutralizeQueueRow(supabase, queueRowId, reason) {
  * Deliberately narrow: active, healthy, with remaining daily capacity, and
  * never equal to the recipient. Lowest usage first so canary traffic spreads.
  */
-async function resolveSender(supabase, { market, recipient }) {
+async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
   const { data, error } = await supabase
     .from('textgrid_numbers')
     .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score')
@@ -405,7 +410,15 @@ async function resolveSender(supabase, { market, recipient }) {
     return true
   })
 
-  return candidates[0] || null
+  const sendable = dispatchBlockedSets
+    ? candidates.filter((n) => !isSenderDispatchBlocked(n.phone_number, dispatchBlockedSets))
+    : candidates
+  if (!sendable.length && candidates.length) {
+    // Every eligible number in this market is one dispatch would refuse: say so
+    // explicitly instead of the generic no-sender, so the market gap is visible.
+    return { blocked_by_dispatch: true, blocked_count: candidates.length }
+  }
+  return sendable[0] || null
 }
 
 /**
@@ -557,6 +570,12 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   if (clean(template.language).toLowerCase() !== clean(target.language).toLowerCase()) {
     return fail(ENQUEUE_REASON.LANGUAGE_MISMATCH, `${template.language} vs ${target.language}`)
   }
+  // Dispatch parity: never create a row dispatch will deterministically refuse.
+  const dispatchBlocked = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)({ getSystemValue: deps.getSystemValue })
+  if (isTemplateDispatchBlocked(templateId, dispatchBlocked)) {
+    return fail(ENQUEUE_REASON.TEMPLATE_DISPATCH_BLOCKED, templateId)
+  }
+
   // Rotation-controlled traffic never sends from a pool that cannot rotate.
   if (rotationGovernanceApplies(useCase)) {
     const poolSizeImpl = deps.renderableRotationPoolSize || renderableRotationPoolSize
@@ -647,7 +666,8 @@ export async function enqueueCampaignTargetOne(campaignTargetId, deps = {}) {
   }
 
   // ── 10. Sender ──────────────────────────────────────────────────────────
-  const sender = await resolveSender(supabase, { market: clean(target.market), recipient })
+  const sender = await resolveSender(supabase, { market: clean(target.market), recipient, dispatchBlockedSets: dispatchBlocked })
+  if (sender?.blocked_by_dispatch) return fail(ENQUEUE_REASON.SENDER_DISPATCH_BLOCKED, `${clean(target.market) || 'no_market'}:${sender.blocked_count}`)
   if (!sender) return fail(ENQUEUE_REASON.NO_SENDER, clean(target.market) || 'no_market')
   const senderPhone = clean(sender.phone_number)
   if (senderPhone === recipient) return fail(ENQUEUE_REASON.SENDER_IS_RECIPIENT)
