@@ -12092,3 +12092,20 @@ Motion
 .nx-os:has(.nx-fullscreen-app-shell) .nx-room-label {
   display: none;
 }
+
+/* A backdrop must never outrank the sheet it backs.
+   The shared .nx-mobile-sheet-backdrop sits at z-index 148, which was chosen for
+   .nx-mobile-sheet (149) — that pairing is correct. But MobileBottomSheet renders the
+   SAME backdrop (with .is-bottom-sheet) in front of .nx-mobile-bottom-sheet, which is
+   z-index 140. So the 48%-black dim layer painted OVER the sheet: on the Queue, tapping
+   a row produced a popup where the whole screen — popup included — was washed out, and
+   taps on the sheet hit the dismiss layer instead of its controls. (The top command dock
+   is z-index 150, above the backdrop, which is why only it stayed bright.)
+   Verified live via elementFromPoint at 393px: the element over the sheet was the backdrop.
+
+   Pinning this variant below every bottom-sheet tier fixes it without touching the
+   .nx-mobile-sheet/148 pairing and without raising .nx-mobile-bottom-sheet (whose
+   z-index the queue/template sheets deliberately override upward to 220/225). */
+html.is-mobile-layout .nx-mobile-sheet-backdrop.is-bottom-sheet {
+  z-index: 139;
+}
