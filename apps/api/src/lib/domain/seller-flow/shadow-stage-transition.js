@@ -11,22 +11,52 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+// EVERY canonical LIFECYCLE_STAGE_CODES value maps explicitly. Anything absent
+// used to pass through unchanged, miss runStageEngine's switch, and hit a
+// default: that silently recursed into the ownership engine. That is how
+// 138/138 audited inbounds since 2026-07-13 recorded
+// stage_authority=stage1_ownership_engine and produced ZERO offer bands.
 const STAGE_ALIASES = Object.freeze({
   "ownership confirmation": "ownership_confirmation",
   ownership_check: "ownership_confirmation",
   ownership: "ownership_confirmation",
   "consider selling": "offer_interest",
   consider_selling: "offer_interest",
+  "offer interest confirmation": "offer_interest",
   "asking price": "asking_price",
   asking_price: "asking_price",
+  "seller price discovery": "asking_price",
   "condition probe": "condition_justification",
   condition_justification: "condition_justification",
+  // LIFECYCLE_STAGE_CODES that had no alias and therefore fell to ownership:
+  property_condition: "condition_justification",
+  "condition / timeline discovery": "condition_justification",
+  offer: "offer_negotiation",
+  "offer positioning": "offer_negotiation",
+  negotiation: "offer_negotiation",
+  formal_contract: "seller_contract",
+  under_contract: "seller_contract",
+  prepared_to_close: "seller_contract",
+  disposition: "seller_contract",
+  closed: "seller_contract",
+  "contract out": "seller_contract",
+  "verbal acceptance / lock": "seller_contract",
   offer_interest: "offer_interest",
   offer_negotiation: "offer_negotiation",
   seller_contract: "seller_contract",
 });
 
-const EVENT_TRANSITIONS = Object.freeze({
+/** The universal stages runStageEngine actually implements. */
+export const SUPPORTED_UNIVERSAL_STAGES = Object.freeze([
+  "ownership_confirmation",
+  "offer_interest",
+  "asking_price",
+  "condition_justification",
+  "offer_negotiation",
+  "seller_contract",
+]);
+
+export const EVENT_TRANSITIONS = Object.freeze({
   ownership_confirmed: {
     proposed_next_stage: "offer_interest",
     transition_reason: "ownership_confirmed_advance_offer_interest",

@@ -24,6 +24,8 @@ import { ADE_ACTIONS } from "@/lib/domain/seller-flow/resolve-seller-stage-trans
 import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { finalizeSellerAcceptance, isAcceptanceEdge } from "@/lib/domain/seller-flow/finalize-seller-acceptance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
+import { resolveValuationSpendability } from "@/lib/domain/seller-flow/valuation-offer-authority.js";
+import { evaluateAskingPrice, STAGE3_OFFER_BANDS } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
 import { info, warn } from "@/lib/logging/logger.js";
 
 const TABLE = "acquisition_opportunities";
@@ -508,6 +510,7 @@ export async function persistSellerTransitionArtifacts({
     negotiationState.thread_key = negotiationState.thread_key || threadKey;
 
     // ── Column-level facts + next action ────────────────────────────────
+    const askingPrice = num(transition.facts_patch?.asking_price?.value);
     const columnPatch = {
       next_action: transition.next_action || null,
       next_action_due: transition.next_action_due_at || null,
@@ -516,7 +519,6 @@ export async function persistSellerTransitionArtifacts({
       actor: "seller_inbound_orchestrator",
       reason: transition.reasoning_code || null,
     };
-    const askingPrice = num(transition.facts_patch?.asking_price?.value);
     if (askingPrice) {
       const atOffer = Number(transition.stage_after_number || 0) >= 5;
       if (atOffer && num(opportunity.asking_price) && askingPrice !== num(opportunity.asking_price)) {
@@ -525,8 +527,62 @@ export async function persistSellerTransitionArtifacts({
         columnPatch.asking_price = askingPrice;
       }
     }
-    if (transition.lead_temperature) columnPatch.temperature = transition.lead_temperature;
-    if (adeSnapshot?.recommended_cash_offer != null) {
+    // ── ECONOMIC DISPOSITION (operator items 11 and 12) ──────────────────
+    // temperature used to be written here from engagement alone, BEFORE the ADE
+    // was consulted, and any positive asking price forced the HOT floor
+    // regardless of magnitude. That printed "hot" on a seller demanding 2.97x
+    // our number on a property the underwriting had already returned as NURTURE,
+    // 0 comps, 25% confidence, unspendable. Engagement and economics are now
+    // separate truths; the column keeps the combined value the board reads, but
+    // it can no longer claim hot for a deal that cannot close.
+    const spendability = resolveValuationSpendability({
+      valuation: adeSnapshot || null,
+      v3_qualification: adeSnapshot?.v3_qualification || null,
+    });
+    const effectiveAsk = askingPrice || num(opportunity.asking_price);
+    // Reuses the existing stage-3 bands (MAO x 1.15 / x 1.40). No new threshold.
+    const economics =
+      effectiveAsk && adeSnapshot?.recommended_cash_offer != null
+        ? evaluateAskingPrice(effectiveAsk, {
+            recommended_cash_offer: adeSnapshot.recommended_cash_offer,
+            max_allowable_offer:
+              adeSnapshot.max_allowable_offer ?? adeSnapshot.investor_ceiling_mid ?? null,
+          })
+        : null;
+    const economic_fit = !economics
+      ? "unknown"
+      : economics.offer_band === STAGE3_OFFER_BANDS.VERY_WIDE_GAP
+        ? "out_of_band"
+        : economics.offer_band === STAGE3_OFFER_BANDS.WIDE_GAP
+          ? "stretch"
+          : "in_band";
+
+    if (transition.lead_temperature) {
+      let temp = transition.lead_temperature;
+      // A deal that cannot close is not hot, however engaged the seller is.
+      const economically_dead = economic_fit === "out_of_band" || spendability.spendable === false;
+      if (economically_dead && String(temp).toLowerCase() === "hot") {
+        temp = "warm";
+        // Not a column: updateOpportunity filters by an allowlist and an unknown
+        // key is silently dropped. The reason lives on the durable state.
+        negotiationState.temperature_downgrade_reason =
+          economic_fit === "out_of_band" ? "ask_out_of_band" : spendability.reason;
+      }
+      columnPatch.temperature = temp;
+    }
+    // Truthful components kept alongside the combined column.
+    negotiationState.economic_fit = economic_fit;
+    negotiationState.economic_offer_band = economics?.offer_band || null;
+    negotiationState.valuation_spendable = spendability.spendable === true;
+    negotiationState.valuation_non_spendable_reason = spendability.spendable
+      ? null
+      : spendability.reason;
+
+    // ITEM 12: an unsupported number must not be published as "our offer".
+    // The Stockton $219,200 was a pure AVM derivative at the hardcoded
+    // confidence floor with ZERO comp support, and it was written to the column
+    // the dashboard presents as authority. Same gate the send path already uses.
+    if (adeSnapshot?.recommended_cash_offer != null && spendability.spendable === true) {
       columnPatch.recommended_offer = num(adeSnapshot.recommended_cash_offer);
       if (columnPatch.asking_price || num(opportunity.asking_price)) {
         const ask = columnPatch.asking_price || num(opportunity.asking_price);
@@ -534,7 +590,14 @@ export async function persistSellerTransitionArtifacts({
           columnPatch.offer_to_ask_gap = ask - columnPatch.recommended_offer;
         }
       }
+    } else if (adeSnapshot?.recommended_cash_offer != null) {
+      negotiationState.recommended_offer_withheld_reason = spendability.reason;
     }
+
+    // ITEM 13: the pipeline board sorts on last_activity_at and the seller flow
+    // could never write it, so live conversations sorted as months dormant.
+    columnPatch.last_activity_at = nowIso;
+    columnPatch.last_contact_at = nowIso;
     if (num(adeSnapshot?.valuation_mid) != null) columnPatch.arv = num(adeSnapshot.valuation_mid);
     if (num(negotiationState.latest_offer) != null) {
       columnPatch.current_offer = num(negotiationState.latest_offer);

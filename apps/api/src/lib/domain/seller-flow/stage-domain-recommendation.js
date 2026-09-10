@@ -7,7 +7,10 @@ import { classifyStage6Contract } from "@/lib/domain/seller-flow/stage6-seller-c
 import { resolveDeterministicStageTransition } from "@/lib/domain/seller-flow/deterministic-stage-map.js";
 import { enforceRelationshipTemplatePolicy } from "@/lib/domain/seller-flow/relationship-template-policy.js";
 import { resolveLatentInterestPolicy } from "@/lib/domain/seller-flow/latent-interest-policy.js";
-import { normalizeStageLabel } from "@/lib/domain/seller-flow/shadow-stage-transition.js";
+import {
+  normalizeStageLabel,
+  SUPPORTED_UNIVERSAL_STAGES,
+} from "@/lib/domain/seller-flow/shadow-stage-transition.js";
 
 const STAGE_AUTHORITY = Object.freeze({
   ownership_confirmation: "stage1_ownership_engine",
@@ -28,6 +31,70 @@ function lower(value) {
 
 function normalizeUniversalStage(stage = null) {
   return normalizeStageLabel(stage) || "ownership_confirmation";
+}
+
+// WHICH ENGINE SHOULD EVALUATE WHAT THE SELLER JUST SAID.
+//
+// Dispatch used to key ONLY on the stage the conversation was RESTING in, and
+// unrecognised labels fell through a `default:` that silently recursed into the
+// ownership engine. Result: 138 of 138 audited inbounds since 2026-07-13
+// recorded stage_authority=stage1_ownership_engine and produced ZERO offer
+// bands. A seller stating "$650,000" was evaluated by the engine that asks
+// whether they own the property.
+//
+// The semantic event selects the engine, because the NEW information is what
+// needs evaluating this turn. The resting stage is the fallback.
+const EVENT_ENGINE_STAGE = Object.freeze({
+  asking_price_provided: "asking_price",
+  asks_offer: "asking_price",
+  // Operator flow: no price yet -> gather condition, then come back to price.
+  asking_price_absent: "condition_justification",
+  condition_disclosed: "condition_justification",
+  tenant_occupied: "condition_justification",
+  ownership_confirmed: "offer_interest",
+  seller_interested: "offer_interest",
+  latent_interest: "offer_interest",
+  going_to_market: "offer_interest",
+  asks_contract: "seller_contract",
+});
+
+/**
+ * Resolve which engine evaluates this turn, and say so out loud.
+ * @returns {{stage:string, source:string, resting_stage:string, event_stage:string|null, unmapped_stage:string|null}}
+ */
+export function resolveEngineStage({ resting_stage = null, semantic_intent = null } = {}) {
+  const resting_raw = normalizeUniversalStage(resting_stage);
+  const resting_supported = SUPPORTED_UNIVERSAL_STAGES.includes(resting_raw);
+  const event_stage = EVENT_ENGINE_STAGE[lower(semantic_intent)] || null;
+
+  if (event_stage) {
+    return {
+      stage: event_stage,
+      source: "semantic_event",
+      resting_stage: resting_raw,
+      event_stage,
+      unmapped_stage: resting_supported ? null : resting_raw,
+    };
+  }
+  if (resting_supported) {
+    return {
+      stage: resting_raw,
+      source: "resting_stage",
+      resting_stage: resting_raw,
+      event_stage: null,
+      unmapped_stage: null,
+    };
+  }
+  // Unknown vocabulary. Behaviour stays safe (the ownership engine asks a
+  // harmless question) but it is no longer SILENT: the offending label is
+  // returned so a new stage code cannot quietly inherit stage 1 again.
+  return {
+    stage: "ownership_confirmation",
+    source: "unmapped_stage_fallback",
+    resting_stage: resting_raw,
+    event_stage: null,
+    unmapped_stage: resting_raw,
+  };
 }
 
 function normalizeSafetyTier(tier = null, { suppressed = false } = {}) {
@@ -128,7 +195,21 @@ function runStageEngine(universal_stage, input) {
         stage_decision: classifyStage6Contract(input),
       };
     default:
-      return runStageEngine("ownership_confirmation", input);
+      // Reached only if SUPPORTED_UNIVERSAL_STAGES and this switch disagree.
+      // Visible, not silent: the caller records unmapped_stage and the shape
+      // still returns a safe ownership decision rather than throwing on a live
+      // seller message.
+      return {
+        engine: "unmapped_stage_fallback",
+        universal_stage,
+        unmapped_stage: universal_stage,
+        stage_decision: resolveDeterministicStageTransition({
+          current_stage: input.context?.summary?.conversation_stage || SELLER_FLOW_STAGES.OWNERSHIP_CHECK,
+          inbound_intent: input.semantic_intent,
+          should_queue_reply: true,
+          autopilot_enabled: false,
+        }),
+      };
   }
 }
 
@@ -231,12 +312,19 @@ export function resolveStageDomainRecommendation({
   underwriting = null,
   deal_state = null,
 } = {}) {
-  const invocation_stage = normalizeUniversalStage(
-    clean(context?.summary?.conversation_stage) ||
-      clean(route?.stage) ||
-      clean(classification?.stage_hint) ||
-      "ownership_confirmation"
-  );
+  const engine_stage = resolveEngineStage({
+    resting_stage:
+      clean(context?.summary?.conversation_stage) ||
+        clean(route?.stage) ||
+        clean(classification?.stage_hint) ||
+        "ownership_confirmation",
+    semantic_intent:
+      semantic_intent ||
+      classification?.primary_intent ||
+      classification?.detected_intent ||
+      null,
+  });
+  const invocation_stage = engine_stage.stage;
 
   const engine_result = runStageEngine(invocation_stage, {
     message,
@@ -260,6 +348,11 @@ export function resolveStageDomainRecommendation({
 
   return {
     invocation_stage,
+    // How this engine was chosen, and whether any vocabulary went unrecognised.
+    engine_stage_source: engine_stage.source,
+    resting_stage: engine_stage.resting_stage,
+    event_stage: engine_stage.event_stage,
+    unmapped_stage: engine_stage.unmapped_stage || engine_result.unmapped_stage || null,
     authority: engine_result.engine,
     stage_authority_by_universal_stage: STAGE_AUTHORITY,
     engine_result,

@@ -54,6 +54,19 @@ function lower(value) {
   return clean(value).toLowerCase();
 }
 
+// Reasons the operator has approved as a DELIBERATE decision not to reply.
+// Anything outside this set that reaches the catch-all is silence we did not
+// choose, and must be recoverable rather than presented as a settled outcome.
+export const INTENTIONAL_NO_REPLY_REASONS = new Set([
+  "duplicate_reply_prevented",
+  "duplicate_inbound",
+  "proof_internal_test_phone",
+  "internal_test_phone",
+  "no_reply_required_by_policy",
+  "terminal_decline_no_reply",
+  "outbound_echo",
+]);
+
 // Failure reasons that will not succeed on provider retry: re-delivery of the
 // same malformed payload can never progress, so it must not stay open.
 const TERMINAL_FAILURE_REASONS = new Set([
@@ -177,11 +190,31 @@ export function resolveInboundTerminalDisposition(result, context = {}) {
     return { disposition: TERMINAL_DISPOSITIONS.HUMAN_REVIEW_REQUIRED, detail };
   }
 
-  // Processed with an explicit no-reply decision (automation disabled, intent
-  // needs no answer, burst deferred to flush, etc.).
+  // THE SILENCE CATCH-ALL. Measured over the 7 days to 2026-09-10: 68 inbound
+  // seller messages, 41 with no reply ever, 33 excluding opt-outs, and only 16
+  // auto-reply queue rows created for the whole window. Most of that silence
+  // arrived here, where an unrecognised outcome was stamped
+  // `no_reply_required` -- a name that asserts intent this branch does not
+  // actually have.
+  //
+  // The disposition vocabulary is fixed by a CHECK constraint and the pending
+  // lane is hard-wired to burst semantics, so this does not invent a new state.
+  // It records WHETHER the silence was intended, which is the fact the
+  // completion contract needs and the fact nobody could previously establish.
+  // Rows with no_reply_intentional=false are silence we did not choose, and the
+  // seller-silence reconciler re-drives them through the canonical decision and
+  // send path.
+  const intentional = INTENTIONAL_NO_REPLY_REASONS.has(reply_reason);
   return {
     disposition: TERMINAL_DISPOSITIONS.NO_REPLY_REQUIRED,
-    detail,
+    detail: {
+      ...detail,
+      no_reply_intentional: intentional,
+      no_reply_reason_class: intentional ? reply_reason : "unclassified_no_reply",
+      // The seller is not suppressed and not a terminal decline: had we decided
+      // to stay silent on purpose, one of the branches above would have fired.
+      recovery_eligible: !intentional,
+    },
   };
 }
 

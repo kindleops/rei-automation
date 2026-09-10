@@ -476,7 +476,15 @@ const CUE_BOUNDARY_CACHE = new Map();
 function cueBoundaryRegex(cue) {
   let re = CUE_BOUNDARY_CACHE.get(cue);
   if (!re) {
-    const escaped = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Real SMS spacing is not single-spaced. The live message was
+    // "$4100.00  per  Month" with DOUBLE spaces, so the cue "per month" -- and
+    // every other multi-word cue in KIND_CUES / ASK_CUES / FIRM_CUES /
+    // APPROX_CUES -- failed to match at all and the seller's answer to our own
+    // rent question was read as an asking price. Collapse literal spaces in the
+    // cue into a flexible whitespace matcher.
+    const escaped = cue
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/ +/g, "\\s+");
     const left = /[a-z0-9\u00e0-\u00ff]/i.test(cue[0]) ? "(?<![a-z0-9\u00e0-\u00ff])" : "";
     const right = /[a-z0-9\u00e0-\u00ff]/i.test(cue[cue.length - 1])
       ? `${CUE_INFLECTION_SUFFIX}(?![a-z0-9\u00e0-\u00ff])`

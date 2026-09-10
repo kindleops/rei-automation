@@ -1705,6 +1705,15 @@ export async function processSellerInboundMessage({
             allowed_template_use_cases: negotiation.strategy_decision.allowed_template_use_cases,
             review_required: negotiation.strategy_decision.review_required,
             review_reason: negotiation.strategy_decision.review_reason,
+            // THE MACHINE COULD NOT SPEAK. The strategy decision carries its own
+            // next_action ("send_message_now" for EXPECTATION_RESET), and the
+            // executor at apply-inbound-automation-decision.js:2260 reads exactly
+            // this key with exactly this vocabulary -- but it was never copied
+            // out, so a resolved economic verdict could not authorize its own
+            // send. On the Stockton thread the engine computed expectation_reset
+            // with next_move=send_message_now and an expected spread of
+            // -269,100 and what went out was a generic break-up clarifier.
+            next_action: negotiation.strategy_decision.next_action,
             monetary_amount: authorized_amount,
           }
         : // Below the negotiation stage, a price wrapped in rejection language

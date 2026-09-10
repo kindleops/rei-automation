@@ -748,6 +748,10 @@ export async function updateOpportunity(id, patch = {}, deps = {}) {
     'assigned_operator', 'automation_state', 'next_action', 'next_action_due',
     'blocker', 'approval_state', 'latest_intent', 'workflow_state', 'acquisition_engine_run_id',
     'property_state', 'property_type',
+    // The seller flow could not write these: the allowlist silently dropped
+    // them, so a thread with five exchanges today sorted as dormant since April
+    // and was buried under 700 rows on the operator's default ordering.
+    'last_activity_at', 'last_contact_at',
   ];
 
   const updates = {};
