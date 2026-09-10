@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { InboxThread } from './inbox.adapter'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -204,7 +205,24 @@ export function InboxSchedulePanel({ open, onClose, thread, onSchedule }: Props)
 
   const bestOption = options[0]
 
-  return (
+  /**
+   * Portaled to document.body on purpose. Rendered inline, this overlay lives inside
+   * `main.nx-stage`, which is `position:relative; z-index:0` (index.css) and therefore a
+   * stacking context painting at level 0 — so the overlay's own z-index is scoped inside
+   * it and can never rise above the PinnedAppDock, which is portaled to document.body at
+   * z-index 160. That is why the Schedule panel rendered UNDERNEATH the dock on mobile and
+   * the dock swallowed its taps. Portaling lifts it into the same stacking root as the
+   * dock so its z-index token actually applies.
+   *
+   * Flattening .nx-stage's z-index:0 would "fix" this too, and must not be done: it would
+   * simultaneously promote the inbox header, composer, deal-intelligence pane and pipeline
+   * sheets into the root stacking context on every route.
+   *
+   * React synthetic events still bubble through a portal, so the backdrop onClick and the
+   * arrow/Enter/Escape key handling below are unaffected, and theming survives because
+   * data-nexus-theme is set on document.documentElement.
+   */
+  const panel = (
     <div className="nx-sp-overlay" onClick={onClose}>
       <div
         className="nx-sp"
@@ -274,4 +292,6 @@ export function InboxSchedulePanel({ open, onClose, thread, onSchedule }: Props)
       </div>
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(panel, document.body) : null
 }

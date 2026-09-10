@@ -6626,7 +6626,12 @@ non‑Home surfaces only ──────────────────�
 .nx-sp-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1001;
+  /* Was a bare 1001, which was inert while this overlay rendered inside the
+     z-index:0 .nx-stage stacking context. Now that the panel portals to
+     document.body it shares a stacking root with the PinnedAppDock (160), so use
+     the documented scale in styles/nexus-theme-contract.css rather than a magic
+     number — this is a modal surface and must outrank the dock. */
+  z-index: var(--nx-shell-z-popover, 13000);
   background: rgba(0, 0, 0, 0.52);
   display: flex;
   align-items: center;
