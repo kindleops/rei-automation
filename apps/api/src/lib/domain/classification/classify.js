@@ -2184,6 +2184,48 @@ const OBJECTION_MAP = [
   },
 ];
 
+// ── GOING TO MARKET (future) vs ALREADY LISTED (present) ────────────────────
+// Operator rule, 2026-09-10: "If they say coming on MLS or going on market or
+// listing with an agent, that's different than [already] listed."
+//
+// A seller who has not listed yet is the BEST lead we get: they have decided to
+// sell, named a timeline, and no agent is involved yet. Before this, "$399,000
+// coming on MLS spring 2027" matched the already_listed phrase "mls", scored as
+// a dead lead, and fell through to a break-up clarifier. That seller opted out
+// 96 seconds later.
+//
+// Present-tense listing (already on market, under contract, has an agent) is
+// unchanged and still routes to already_listed.
+const GOING_TO_MARKET_PATTERNS = [
+  /\b(coming|going)\s+(on|onto|to)\s+(the\s+)?(mls|market)\b/,
+  /\bcoming\s+soon\b[^.!?]{0,24}\b(mls|market)\b/,
+  /\b(mls|market)\b[^.!?]{0,24}\bcoming\s+soon\b/,
+  /\bwill\s+be\s+(listed|listing|going\s+on)\b/,
+  /\b(about|plan|planning|going|intend|intending|looking)\s+to\s+list\b/,
+  /\bgonna\s+list\b/,
+  /\b(we|i)(?:'re|'m| are| am)?\s+listing\s+(it|the|this)\b/,
+  /\blisting\s+it\s+(in|next|this|with|come|around)\b/,
+  /\b(putting|put|puttin)\s+it\s+on\s+the\s+market\b/,
+  /\blist(ing)?\s+it\s+(in|next|this)\s+(the\s+)?(spring|summer|fall|autumn|winter|month|year|week)\b/,
+];
+
+// Terminal states that outrank a future-listing signal: if it is already under
+// contract or sold, the sale is not ours to compete for.
+const MARKET_TERMINAL_PATTERNS = [
+  /\bunder\s+contract\b/,
+  /\bin\s+escrow\b/,
+  /\b(sale\s+pending|pending\s+sale)\b/,
+  /\boffer\s+accepted\b/,
+  /\balready\s+sold\b/,
+];
+
+export function matchesGoingToMarket(text = "") {
+  const t = lower(text);
+  if (!t) return false;
+  if (MARKET_TERMINAL_PATTERNS.some((re) => re.test(t))) return false;
+  return GOING_TO_MARKET_PATTERNS.some((re) => re.test(t));
+}
+
 function detectObjection(message) {
   const text = lower(message);
   if (matchesPropertyTypeCorrection(text)) return "property_correction";
@@ -2193,6 +2235,9 @@ function detectObjection(message) {
   if (matchesSoldTransfer(text) && !matchesTrueWrongNumber(text)) {
     return "already_sold";
   }
+  // Future listing beats the already_listed phrase fold, which contains bare
+  // "mls" and "on the market" and would otherwise swallow it.
+  if (matchesGoingToMarket(text)) return "going_to_market";
   for (const obj of OBJECTION_MAP) {
     if (obj.key === "property_correction") continue;
     if (includesAny(text, obj.phrases)) return obj.key;
@@ -3820,6 +3865,9 @@ export const INTENT_PRIORITY = Object.freeze([
   "who_is_this",
   "hostile_or_legal",
   "not_interested",
+  // A seller who has decided to sell but not listed yet outranks a bare wait:
+  // "going on the market next month" is a timeline, not a brush-off.
+  "going_to_market",
   "need_time",
   // Legal/authority tier: these outrank engagement and pricing because the
   // ontology routes them to a human lane BEFORE any offer conversation —
@@ -4725,6 +4773,15 @@ function resolveIntents(
     intents.push("need_time");
   }
 
+  // 5b. GOING TO MARKET (future listing). Placed AFTER need_time so it can
+  // supersede it in the precedence list: "going on the market next month"
+  // scored need_time before, which parked a decided seller in a wait lane
+  // instead of pitching an off-market close.
+  if (matchesGoingToMarket(text)) {
+    intents.push("going_to_market");
+    matched_rule_ids.push("going_to_market");
+  }
+
   // 6. SELLER INTERESTED (Explicit)
   // Use regex to ensure "not" or "no" doesn't precede the interest phrase
   if (
@@ -4787,6 +4844,16 @@ function resolveIntents(
   // pay|offer|give", or "you willing to pay") — so statements ABOUT price/pay/
   // offer ("the price is too high", "I already paid", "your offer was too low",
   // "what price did it sell for", "will you pay for repairs") do NOT match.
+  // TERSE OFFER REQUEST. A seller whose entire reply is "Offer" is asking for
+  // one. The verb-gated regex below requires a verb ("send me an offer"), so a
+  // one-word answer scored `unclear` at 0.6 and fell through to the coverage-net
+  // clarifier -- which, before 2026-09-10, answered it with a break-up line about
+  // an offer that had never been made. WHOLE-STRING match only, so statements
+  // ABOUT an offer ("your offer was too low", "no offer", "I already have an
+  // offer") cannot reach it.
+  const terse_offer_request =
+    /^(?:yes[\s,]+)?(?:ok(?:ay)?[\s,]+)?(?:please[\s,]+)?(?:just[\s,]+)?(?:(?:make|send|give|shoot)\s+(?:me\s+)?)?(?:an?\s+|the\s+|your\s+)?(?:cash\s+|best\s+|written\s+|firm\s+)?(?:offer|offers|proposal|oferta|ofertas)(?:\s+please)?[.!?\s]*$/i
+      .test(String(text).trim());
   const offer_price_solicitation =
     /\b(your|the)\s+best\s+(cash\s+)?(offer|price)\b/i.test(text) ||
     /\b(can|could|will|would)\s+you\s+offer\b/i.test(text) ||
@@ -4887,6 +4954,7 @@ function resolveIntents(
       "envíen el contrato",
       "envien el contrato",
     ]) ||
+      terse_offer_request ||
       offer_price_solicitation ||
       /\b(proposal|offer|numbers|terms)\b/i.test(text) &&
         /\b(send|put together|look at|want|need|see|give|mánd|mand|envi)/i.test(text))
@@ -5750,6 +5818,7 @@ function computeHeuristicConfidence({
     sold_property:      0.95,
     not_interested:     0.92,
     already_listed:     0.92,
+    going_to_market:    0.92,
     financial_distress: 0.91,
     divorce:            0.91,
     probate:            0.91,
@@ -6218,7 +6287,7 @@ function deriveAutomationDecision({
 // ══════════════════════════════════════════════════════════════════════════
 
 const VALID_LANGUAGES   = new Set(["English","Spanish","Portuguese","Italian","Hebrew","Mandarin","Korean","Vietnamese","Polish","Arabic","Hindi","French","Russian","Japanese","Farsi","German","Greek","Thai","Pashto"]);
-const VALID_OBJECTIONS  = new Set(["wrong_number","already_sold","who_is_this","not_interested","already_listed","need_more_money","need_time","need_family_ok","send_offer_first","tenant_issue","condition_bad","probate","divorce","financial_distress","has_other_buyer","wants_retail","needs_call","needs_email","wants_written_offer","wants_proof_of_funds","null",null]);
+const VALID_OBJECTIONS  = new Set(["wrong_number","already_sold","who_is_this","not_interested","already_listed","need_more_money","need_time","need_family_ok","send_offer_first","tenant_issue","condition_bad","probate","divorce","financial_distress","going_to_market","has_other_buyer","wants_retail","needs_call","needs_email","wants_written_offer","wants_proof_of_funds","null",null]);
 const VALID_EMOTIONS    = new Set(["calm","skeptical","guarded","frustrated","curious","motivated","tired_landlord","overwhelmed","grieving"]);
 const VALID_STAGES      = new Set(["Ownership","Offer","Q/A","Contract","Follow-Up"]);
 const VALID_COMPLIANCE  = new Set(["stop_texting","null",null]);

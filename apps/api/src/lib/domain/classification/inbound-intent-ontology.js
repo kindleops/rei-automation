@@ -310,6 +310,20 @@ const RAW = {
     classifier_aliases: ["already_listed", "listed_or_unavailable", "under_contract"],
     compliance: NO_COMPLIANCE,
   },
+  // FUTURE listing, distinct from already_listed. Operator rule 2026-09-10: a
+  // seller who says "coming on MLS" / "going on the market" / "listing it in the
+  // spring" has decided to sell, named a timeline, and has NO agent yet. That is
+  // the best moment to offer an off-market close, not a stand-down. already_listed
+  // pauses automation and goes cold; this one stays warm and keeps replying.
+  going_to_market: {
+    category: "engagement",
+    description: "Seller intends to list soon but has not listed yet ('coming on MLS spring 2027'). Not yet represented. Offer an off-market alternative before an agent is involved.",
+    terminal_hint: "reply_sent",
+    reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Offer an off-market alternative before the listing goes live." },
+    state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "warm", disposition: "none", automation: "continue" },
+    classifier_aliases: ["going_to_market", "listing_soon", "coming_to_market"],
+    compliance: NO_COMPLIANCE,
+  },
   agent_involved: {
     category: "engagement",
     description: "Seller directs us to their agent ('talk to my realtor'). Represented negotiation is a human lane.",

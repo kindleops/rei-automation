@@ -79,6 +79,22 @@ export const ROUTE_PROFILES = Object.freeze({
     template_use_case_candidates: ["seller_asking_price", "asking_price"],
     next_action: "queue_auto_reply",
   },
+  // GOING TO MARKET (future listing, not yet listed). Operator rule 2026-09-10:
+  // this is NOT already_listed. The seller has decided to sell, named a
+  // timeline, and has no agent yet, which is the best moment to offer an
+  // off-market close. already_listed routes to a passive "circle back if the
+  // listing doesn't work" message; that is the wrong reply for someone who has
+  // not listed. Falls back to the price ask if the off-market template is
+  // unavailable, so this can never dead-end.
+  going_to_market: {
+    route_hint: "off_market_alternative",
+    allowed_template_stages: ["going_to_market", "off_market_alternative"],
+    template_use_case_candidates: [
+      "going_to_market",
+      "seller_asking_price",
+    ],
+    next_action: "queue_auto_reply",
+  },
   asks_offer: {
     route_hint: "ask_seller_price_or_basic_condition",
     allowed_template_stages: ["seller_asking_price", "condition_probe", "price_discovery"],
@@ -779,10 +795,17 @@ function applyOwnershipProbeOverlay(decision = {}, args = {}) {
 export function applyInboundAutomationDecision(args = {}) {
   const raw = applyOwnershipProbeOverlay(computeInboundAutomationDecisionRaw(args), args);
   const classification = args.classification || {};
+  // REAL lifecycle stage first. classification.stage_hint is a legacy TOPIC
+  // label from detectStageHint(), which returns "Offer" for ANY message
+  // mentioning "offer", "price", "number" or "how much". It used to win here, so
+  // a seller asking us for a number was recorded as being AT the offer stage and
+  // received copy that assumed we had already made one. It is now the last
+  // resort, and resolveStageBucket() will not promote a topic label to a late
+  // bucket even when it does get used.
   const stage =
-    clean(classification.stage_hint) ||
     clean(args.latestThreadContext?.summary?.conversation_stage) ||
     clean(args.conversationBrain?.conversation_stage) ||
+    clean(classification.stage_hint) ||
     null;
   const contact_identity = resolveContactIdentityClass({
     detected_intent: classification.primary_intent || classification.detected_intent || null,
