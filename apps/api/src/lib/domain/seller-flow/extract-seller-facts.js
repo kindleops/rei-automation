@@ -302,6 +302,20 @@ function extractReportedUnitCount(message, base) {
 const RENT_TOTAL_RE =
   /(?:gross rents?|rent roll|total rents?|rents? total|bringing in|brings in|bring in|collect(?:ing|s)?|in total|total)[^\d$]{0,20}\$?\s*([\d,]{3,8})|\$?\s*([\d,]{3,8})\s*(?:a month |per month |monthly )?(?:total|in total|all together|altogether|combined)/i;
 
+// A BARE AMOUNT WITH A MONTHLY CADENCE IS A RENT. RENT_TOTAL_RE requires a
+// keyword ("gross rents", "bringing in", "total"), so the single most natural
+// answer to "what are the current monthly rents?" -- "$4100.00 per Month" --
+// matched nothing at all and the seller's answer to our own question was lost.
+// Live case 2026-09-10, +19549807015, 935 NW 20th St #1-2 Fort Lauderdale.
+// The amount is also allowed a cents suffix, which "$4100.00" has and the
+// keyword patterns silently truncated.
+const RENT_MONTHLY_CADENCE_RE =
+  /\$?\s*([\d,]{3,8})(?:\.\d{2})?\s*(?:\/\s*mo\b|per\s*mo\b|per\s+month|a\s+month|each\s+month|monthly|al\s+mes|por\s+mes)/i;
+
+// "monthly rent is 1450", "the rent is $1,450"
+const RENT_IS_RE =
+  /\b(?:monthly\s+)?rents?\s*(?:is|are|of|:|=|runs?|comes?\s+to)\s*\$?\s*([\d,]{3,8})(?:\.\d{2})?/i;
+
 const RENT_PER_UNIT_RE =
   /(?:each|apiece|a piece|per unit|a unit|per door|a door|each unit|every unit|por unidad|cada uno|cada una)[^\d$]{0,20}\$?\s*([\d,]{3,6})|\$?\s*([\d,]{3,6})\s*(?:a month |per month |monthly )?(?:each|apiece|a piece|per unit|a unit|per door|por unidad|cada uno)/i;
 
@@ -347,8 +361,16 @@ function extractRents(message, base) {
   const totalEvidence = findEvidence(message, RENT_TOTAL_RE);
   const perUnitEvidence = findEvidence(message, RENT_PER_UNIT_RE);
 
-  const monthly_gross_rent = firstNumberFromMatch(RENT_TOTAL_RE.exec(message));
+  // Per-unit phrasing wins over a bare monthly cadence: "1500 each per month"
+  // is a per-unit rent, not a gross. Checked first so the cadence pattern cannot
+  // claim the same number as a total.
   const average_monthly_unit_rent = firstNumberFromMatch(RENT_PER_UNIT_RE.exec(message));
+  let monthly_gross_rent = firstNumberFromMatch(RENT_TOTAL_RE.exec(message));
+  if (monthly_gross_rent === null && average_monthly_unit_rent === null) {
+    monthly_gross_rent =
+      firstNumberFromMatch(RENT_IS_RE.exec(message)) ??
+      firstNumberFromMatch(RENT_MONTHLY_CADENCE_RE.exec(message));
+  }
 
   // Enumerated per-unit rents, two shapes:
   //   (a) explicitly labelled -- "unit 1 is 1200, unit 2 is 1350"
@@ -369,7 +391,10 @@ function extractRents(message, base) {
 
   if (labelled.length >= 1) {
     reported_unit_rents = labelled;
-  } else if (/\brent|renting|tenant|lease|bring(?:s|ing)? in|collect/i.test(message)) {
+  } else if (
+    /\brent|renting|tenant|lease|bring(?:s|ing)? in|collect/i.test(message) ||
+    /\bper\s+month|a\s+month|monthly|\/\s*mo\b/i.test(message)
+  ) {
     const amounts = String(message).match(/\$?\s*\b\d{3,5}\b/g) || [];
     reported_unit_rents = amounts
       .map((a) => Number(a.replace(/[^\d]/g, "")))
@@ -963,6 +988,32 @@ export function extractionToResolverFacts(extraction = null) {
       out.reported_unit_rent_count = rentValue.reported_unit_rents.length;
     }
     out.rent_basis = rentValue.rent_basis || null;
+    // GROSS FROM COMPLETENESS. "3 units, 1500 each" states everything needed for
+    // a 4500 gross, and "2000 and 650" enumerates it outright, but neither
+    // produced a total, so downstream underwriting saw a per-unit figure with no
+    // gross and could not use either. Derived only when the inputs are actually
+    // present; never invented, and never overwrites a stated total.
+    if (out.monthly_gross_rent === undefined) {
+      const enumerated = Array.isArray(rentValue.reported_unit_rents)
+        ? rentValue.reported_unit_rents
+        : [];
+      if (enumerated.length >= 2) {
+        const sum = enumerated.reduce((a, b) => a + b, 0);
+        if (Number.isFinite(sum) && sum > 0 && sum <= 2000000) {
+          out.monthly_gross_rent = sum;
+          out.monthly_gross_rent_basis = "summed_enumerated_unit_rents";
+        }
+      } else if (
+        out.average_monthly_unit_rent !== undefined &&
+        out.reported_units_count !== undefined
+      ) {
+        const product = out.average_monthly_unit_rent * out.reported_units_count;
+        if (Number.isFinite(product) && product > 0 && product <= 2000000) {
+          out.monthly_gross_rent = product;
+          out.monthly_gross_rent_basis = "per_unit_times_unit_count";
+        }
+      }
+    }
     out.rents_summary = summarizeRentFacts(rentValue);
     out.rents_source = "seller_reported";
   }

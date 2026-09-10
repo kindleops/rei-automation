@@ -106,6 +106,19 @@ export const ROUTE_PROFILES = Object.freeze({
     ],
     next_action: "queue_auto_reply",
   },
+  // Operator flow: seller has no number -> "I can run some numbers. What
+  // condition is the property in?" Never a decline, never a 30 day deferral.
+  asking_price_absent: {
+    route_hint: "ask_seller_price_or_basic_condition",
+    allowed_template_stages: ["condition_probe", "price_high_condition_probe", "ask_condition_clarifier"],
+    template_use_case_candidates: [
+      "condition_probe",
+      "occupancy_probe",
+      "price_high_condition_probe",
+      "ask_condition_clarifier",
+    ],
+    next_action: "queue_auto_reply",
+  },
   asking_price_provided: {
     route_hint: "price_response",
     allowed_template_stages: [

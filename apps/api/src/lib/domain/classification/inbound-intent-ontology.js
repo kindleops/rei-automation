@@ -324,6 +324,18 @@ const RAW = {
     classifier_aliases: ["going_to_market", "listing_soon", "coming_to_market"],
     compliance: NO_COMPLIANCE,
   },
+  // The seller has no number YET. Answering "do you have an asking price in
+  // mind?" with "no I don't have one" is an ABSENT VALUE, not a decision about
+  // us. It used to classify not_interested@0.92 and defer the seller 30 days.
+  asking_price_absent: {
+    category: "engagement",
+    description: "Seller has no asking price in mind yet, answering our price question. Fully active; advance to condition and return to price with a real basis.",
+    terminal_hint: "reply_sent",
+    reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: false, objective: "Acknowledge, then gather condition so we can put a number together." },
+    state_hints: { lifecycle_stage: null, operational_status: "active_communication", lead_temperature: "warm", disposition: "none", automation: "continue" },
+    classifier_aliases: ["asking_price_absent", "no_price_in_mind", "price_undecided"],
+    compliance: NO_COMPLIANCE,
+  },
   agent_involved: {
     category: "engagement",
     description: "Seller directs us to their agent ('talk to my realtor'). Represented negotiation is a human lane.",

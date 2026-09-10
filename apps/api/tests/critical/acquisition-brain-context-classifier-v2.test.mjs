@@ -164,11 +164,32 @@ test("contextual yes/no across outbound questions", async () => {
   });
   assert.equal(noProp.primary_intent, "not_interested");
 
+  // CONTRACT CHANGED 2026-09-10 by operator decision. A negative answering our
+  // PRICE question is an ABSENT VALUE, not disinterest and not ambiguity: the
+  // seller is telling us they have no number yet and remains fully active. The
+  // old `unclear` verdict carried human_review, which in production meant
+  // silence. asking_price_absent routes to the condition probe so the flow
+  // advances and comes back to price with a real basis.
   const noPrice = await classify("no", null, {
     heuristicOnly: true,
     conversation_context: baseCtx("asking_price"),
   });
-  assert.equal(noPrice.primary_intent, "unclear");
+  assert.equal(noPrice.primary_intent, "asking_price_absent");
+  assert.ok(noPrice.matched_rule_ids.includes("ctx_no_after_asking_price"));
+
+  // The SAME phrase against an INTEREST question must still be a decline.
+  // Context is what separates them; neither reading may leak into the other.
+  const noProp2 = await classify("No I don't", null, {
+    heuristicOnly: true,
+    conversation_context: baseCtx("proposal_interest"),
+  });
+  assert.equal(noProp2.primary_intent, "not_interested");
+
+  const noValuePrice = await classify("No I don't have one", null, {
+    heuristicOnly: true,
+    conversation_context: baseCtx("asking_price"),
+  });
+  assert.equal(noValuePrice.primary_intent, "asking_price_absent");
 });
 
 test("short reply without context remains authority-ineligible and flagged", async () => {

@@ -3886,6 +3886,9 @@ export const INTENT_PRIORITY = Object.freeze([
   "llc_corporation",
   "seller_interested",
   "asking_price_provided",
+  // Absent value, seller still active. Ranked with the pricing tier because it
+  // IS a price answer, just an empty one.
+  "asking_price_absent",
   "asks_offer",
   "callback_requested",
   // Contact-modality tier: voicemail/email preferences route like callbacks
@@ -5870,6 +5873,7 @@ function computeHeuristicConfidence({
     // positive can no longer reopen automation regardless of confidence).
     latent_interest:    0.85,
     asking_price_provided: 0.88,
+    asking_price_absent:   0.86,
     asks_offer:         0.88,
     info_request:       0.86,
     who_is_this:        0.85,

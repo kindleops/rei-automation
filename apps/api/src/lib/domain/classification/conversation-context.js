@@ -24,11 +24,19 @@ export const APPROVED_OUTBOUND_USE_CASES = Object.freeze([
   'condition_check',
   'motivation_check',
   'timeline_check',
+  // Multifamily rent discovery. We ask "what are the current monthly rents?"
+  // constantly and had no use case for it, so the answer arrived with no
+  // context and a bare "$4100.00 per Month" could not be bound to the question
+  // that produced it.
+  'rent_check',
+  'occupancy_check',
   'general_followup',
 ]);
 
 export const APPROVED_QUESTION_TYPES = Object.freeze([
   'ownership',
+  'rent',
+  'occupancy',
   'proposal_interest',
   'proposal_request',
   'asking_price',
@@ -225,7 +233,24 @@ function inferQuestionType(useCase) {
 const AFFIRMATIVE_TOKENS =
   '(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅)';
 const NEGATIVE_TOKENS =
-  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|i do not|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌)';
+  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌)';
+
+// ABSENCE OF A VALUE IS NOT DISINTEREST. "No I don't have one" answering "do you
+// have an asking price in mind?" says the seller has no number yet -- they are
+// still fully in the conversation. Before this, it matched the generic bare-no
+// fallback, classified not_interested@0.92 and deferred the seller 30 days.
+// Live case 2026-09-10, +13058426269, where the operator had to drive the thread
+// by hand because the machine had written the seller off.
+//
+// Deliberately separate from NEGATIVE_TOKENS: these phrases answer a FACT
+// question. Nobody replies "I don't have one" to "are you interested in
+// selling?", so widening the disinterest tokens instead would have been wrong.
+const NO_VALUE_TOKENS =
+  "(?:no i do not have one|i do not have one|do not have one|no i do not have a number|" +
+  "i do not have a number|do not have a number|no number in mind|no price in mind|" +
+  "nothing in mind|no set price|no asking price|i do not have a price|do not have a price|" +
+  "no i have not|i have not thought about it|have not thought about it|" +
+  "i do not know yet|do not know yet|not yet|no idea|i have no idea|no not really)";
 
 /** Normalizes punctuation, contractions and spacing before token matching. */
 function normalizeShortReply(text) {
@@ -242,7 +267,10 @@ function normalizeShortReply(text) {
     .replace(/\bdidn't\b/g, 'did not')
     .replace(/\bit's\b/g, 'it is')
     .replace(/\bthat's\b/g, 'that is')
-    .replace(/[.!,]+$/g, '')
+    // Internal punctuation, not just trailing: "No, I don't" normalized to
+    // "no, i do not" and matched no token, so a comma was enough to make a
+    // seller's answer unreadable. No token contains punctuation.
+    .replace(/[.!?,;:]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -252,7 +280,8 @@ export function isShortContextualReply(text) {
   if (!t || t.length > 48) return false;
   return (
     new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t) ||
-    new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t)
+    new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t) ||
+    new RegExp(`^${NO_VALUE_TOKENS}$`, 'u').test(t)
   );
 }
 
@@ -271,7 +300,8 @@ export function applyContextualShortReply(messageText, validated) {
   const t = normalizeShortReply(messageText);
   const isYes = new RegExp(`^${AFFIRMATIVE_TOKENS}$`, 'u').test(t);
   const isNo = new RegExp(`^${NEGATIVE_TOKENS}$`, 'u').test(t);
-  if (!isYes && !isNo) return { applied: false };
+  const isNoValue = new RegExp(`^${NO_VALUE_TOKENS}$`, 'u').test(t);
+  if (!isYes && !isNo && !isNoValue) return { applied: false };
 
   const useCase = validated.context.last_outbound_use_case;
   const qType = validated.context.last_outbound_question_type;
@@ -364,16 +394,48 @@ export function applyContextualShortReply(messageText, validated) {
       };
     }
     if (useCase === 'asking_price' || qType === 'asking_price') {
+      // The seller has no number YET. That is a fact about the deal, not a
+      // decision about us: the flow should advance and come back to price with a
+      // real basis. This previously forced unclear + human_review, which in
+      // production meant silence.
+      return {
+        applied: true,
+        primary_intent: 'asking_price_absent',
+        labels: ['asking_price_absent'],
+        rule_id: 'ctx_no_after_asking_price',
+        confidence: 0.86,
+        rationale: 'no_price_in_mind_is_an_absent_value_not_disinterest',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    if (useCase === 'rent_check' || qType === 'rent') {
       return {
         applied: true,
         primary_intent: 'unclear',
-        labels: ['asking_price_refused'],
-        rule_id: 'ctx_no_after_asking_price',
+        labels: ['rent_unknown'],
+        rule_id: 'ctx_no_after_rent',
         force_unclear: true,
-        confidence: 0.7,
-        rationale: 'short_no_after_asking_price_treated_as_price_refusal_or_unclear',
+        confidence: 0.6,
+        rationale: 'no_after_rent_question_is_missing_rent_data_not_disinterest',
         evidence_span: String(messageText).trim(),
-        human_review: true,
+        ...base,
+      };
+    }
+    if (useCase === 'timeline_check' || qType === 'timeline' ||
+        useCase === 'motivation_check' || qType === 'motivation' ||
+        useCase === 'occupancy_check' || qType === 'occupancy') {
+      // Same class of error as condition: a negative answering a FACT question
+      // is information, never a decision to stop talking to us.
+      return {
+        applied: true,
+        primary_intent: 'unclear',
+        labels: ['fact_question_negative'],
+        rule_id: 'ctx_no_after_fact_question',
+        force_unclear: true,
+        confidence: 0.6,
+        rationale: 'negative_answer_to_a_fact_question_is_information_not_disinterest',
+        evidence_span: String(messageText).trim(),
         ...base,
       };
     }
@@ -396,6 +458,49 @@ export function applyContextualShortReply(messageText, validated) {
       };
     }
   }
+
+  // "I don't have one" / "no number in mind" -- an ABSENT VALUE. Bound strictly
+  // to the question that produced it. Never disinterest, and never reached for a
+  // proposal-interest question, where the phrasing would not occur anyway.
+  if (isNoValue) {
+    if (useCase === 'asking_price' || qType === 'asking_price') {
+      return {
+        applied: true,
+        primary_intent: 'asking_price_absent',
+        labels: ['asking_price_absent'],
+        rule_id: 'ctx_no_value_after_asking_price',
+        confidence: 0.88,
+        rationale: 'seller_has_no_price_in_mind_yet_and_remains_active',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    if (useCase === 'rent_check' || qType === 'rent') {
+      return {
+        applied: true,
+        primary_intent: 'unclear',
+        labels: ['rent_unknown'],
+        rule_id: 'ctx_no_value_after_rent',
+        force_unclear: true,
+        confidence: 0.6,
+        rationale: 'seller_does_not_know_the_rents_yet',
+        evidence_span: String(messageText).trim(),
+        ...base,
+      };
+    }
+    return {
+      applied: true,
+      primary_intent: 'unclear',
+      labels: ['value_absent'],
+      rule_id: 'ctx_no_value_generic',
+      force_unclear: true,
+      confidence: 0.6,
+      rationale: 'absent_value_answer_is_not_disinterest',
+      evidence_span: String(messageText).trim(),
+      ...base,
+    };
+  }
+
 
   return { applied: false };
 }

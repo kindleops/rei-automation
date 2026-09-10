@@ -58,8 +58,44 @@ const USE_CASE_QUESTION_TYPE = {
   condition_check: "condition",
   motivation_check: "motivation",
   timeline_check: "timeline",
+  rent_check: "rent",
+  occupancy_check: "occupancy",
   general_followup: "other",
 };
+
+// MANUAL SENDS HAD NO QUESTION TYPE AT ALL. Measured over the 7 days to
+// 2026-09-10, production outbound message_type was: ownership_check (337),
+// manual_scheduled_reply (19), manual_reply (17), Follow-Up (12). The two manual
+// types are unmapped, so mapMessageTypeToUseCase returned null, the whole
+// context returned null, and EVERY question an operator typed by hand was
+// invisible to the classifier -- including "Do you have an asking price in
+// mind?" and "Thanks, what are the current monthly rents?".
+//
+// The question we asked is right there in the body we sent. Read it. Ordered
+// most specific first; rent before price, because "what are the monthly rents"
+// contains neither the word price nor a dollar sign but IS a money question.
+const BODY_QUESTION_PATTERNS = [
+  [/\brents?\b[^.?!]{0,40}\?|what\s+(?:are|is)\s+the\s+(?:current\s+)?(?:monthly\s+)?rents?|how\s+much\s+(?:is|are|does)\s+(?:it|they|the\s+units?)\s+rent|bringing\s+in\s+per\s+month/i, "rent_check"],
+  [/\b(?:vacant|occupied|tenanted|occupancy)\b/i, "occupancy_check"],
+  [/asking\s+price|price\s+in\s+mind|number\s+in\s+mind|ballpark|what\s+(?:would|do)\s+you\s+want\s+for|how\s+much\s+are\s+you\s+(?:asking|looking)/i, "asking_price"],
+  [/\b(?:condition|repairs?|needs?\s+work|shape\s+is\s+it|roof|hvac)\b/i, "condition_check"],
+  [/\bhow\s+soon|timeline|when\s+(?:would|do)\s+you\s+want\s+to\s+close|closing\s+timeline/i, "timeline_check"],
+  [/\b(?:still\s+the\s+owner|are\s+you\s+the\s+owner|do\s+you\s+(?:still\s+)?own|is\s+.{0,60}\s+yours)\b/i, "ownership_check"],
+  [/\bopen\s+to\s+(?:a\s+)?(?:proposal|offer)|consider\s+(?:a\s+)?(?:proposal|offer)|would\s+you\s+consider\s+selling|interested\s+in\s+selling/i, "proposal_interest"],
+];
+
+/**
+ * Derive the outbound use case from the message we actually sent. Used when
+ * message_type does not map, which is every manual operator reply.
+ */
+export function deriveUseCaseFromBody(body) {
+  const text = String(body ?? "").trim();
+  if (!text) return null;
+  for (const [re, useCase] of BODY_QUESTION_PATTERNS) {
+    if (re.test(text)) return useCase;
+  }
+  return null;
+}
 
 /**
  * Loads the latest delivered/sent outbound on the thread and returns a
@@ -87,7 +123,7 @@ export async function buildConversationContext({
   try {
     const { data, error } = await supabase
       .from("send_queue")
-      .select("id,message_type,provider_message_id,sent_at,delivered_at,queue_status")
+      .select("id,message_type,message_body,provider_message_id,sent_at,delivered_at,queue_status")
       .eq("to_phone_number", thread_key)
       .in("queue_status", ["sent", "delivered"])
       .not("sent_at", "is", null)
@@ -103,7 +139,10 @@ export async function buildConversationContext({
   const last_outbound = Array.isArray(rows) ? rows[0] : null;
   if (!last_outbound) return null;
 
-  const use_case = mapMessageTypeToUseCase(last_outbound.message_type);
+  // message_type first (it is explicit), then the body we sent (it is truth).
+  const use_case =
+    mapMessageTypeToUseCase(last_outbound.message_type) ||
+    deriveUseCaseFromBody(last_outbound.message_body);
   if (!use_case) return null;
 
   const delivered_at = last_outbound.delivered_at || last_outbound.sent_at;
@@ -153,6 +192,9 @@ export async function buildConversationContext({
       last_outbound.provider_message_id || last_outbound.id
     ),
     last_outbound_use_case: use_case,
+    last_outbound_use_case_source: mapMessageTypeToUseCase(last_outbound.message_type)
+      ? "message_type"
+      : "derived_from_body",
     last_outbound_question_type: USE_CASE_QUESTION_TYPE[use_case] || "other",
     last_outbound_delivered_at: new Date(delivered_at).toISOString(),
     current_inbound_received_at: new Date(inbound_received_at).toISOString(),
