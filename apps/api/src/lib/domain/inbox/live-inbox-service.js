@@ -1988,6 +1988,21 @@ async function queryAuthoritativeInboxThreads(params = {}, {
     data: rows,
     count: rows.length,
     hasMore,
+    /**
+     * Keyset of the last row this source actually CONSUMED, so the caller can
+     * advance even when its own post-filters drop every survivor off the end of
+     * the page. Taken from `page` (what we return), never from `rawRows` — the
+     * +1 look-ahead row is not returned, and cursoring past it would silently
+     * skip a thread.
+     */
+    lastExaminedKeyset: page.length
+      ? {
+        latest_message_at: page[page.length - 1].latest_message_at
+          || page[page.length - 1].latest_activity_at
+          || null,
+        thread_key: page[page.length - 1].thread_key || null,
+      }
+      : null,
     error: null,
     sourceConfig: THREAD_SOURCE_CONFIGS[0],
   };
@@ -2537,7 +2552,16 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   }
 
   const threadQueryStartedAt = nowMs();
-  const { data: rawRows, count, sourceConfig } = await queryThreadSource(params, {
+  const {
+    data: rawRows,
+    count,
+    sourceConfig,
+    // The source already knows whether more rows exist — it computed it to decide
+    // where to slice. Dropping it here is what made pagination unreachable on every
+    // bucket tab; see the hasMore note further down.
+    hasMore: sourceHasMore,
+    lastExaminedKeyset,
+  } = await queryThreadSource(params, {
     supabase,
     limit,
     filter,
@@ -2607,8 +2631,26 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
 
-  const hasMore = postFiltered.length > limit;
-  let finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
+  /**
+   * `postFiltered.length > limit` alone can NEVER be true on the authoritative
+   * source path: queryAuthoritativeInboxThreads already sliced rawRows down to
+   * `limit` before returning, so post-filtering can only shrink it further. That
+   * made has_more false on every bucket-tab request regardless of how much data
+   * remained, and because the cursor below is gated on has_more, next_cursor was
+   * always null too — so Load More could never advance. Measured on production:
+   * the New Replies chip read 149 while the list returned 18 rows with
+   * has_more:false. This affected EVERY bucket tab, not just new_replies;
+   * filter=all escaped only because it routes to a different source that returns
+   * its rows untruncated.
+   *
+   * Prefer the source's own answer when it gave one. The local comparison is kept
+   * as the fallback for sources that do not report exhaustion (filter=all), which
+   * preserves today's behaviour there exactly.
+   */
+  const hasMore = sourceHasMore === undefined
+    ? postFiltered.length > limit
+    : (sourceHasMore || postFiltered.length > limit);
+  let finalRows = postFiltered.length > limit ? postFiltered.slice(0, limit) : postFiltered;
   let liveCounts = buildNullCounts();
   let countQueryMs = 0;
   let countsDegraded = false;
@@ -2717,12 +2759,26 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const lastRow = finalRows[finalRows.length - 1];
   let nextCursor = null;
-  if (hasMore && lastRow) {
-    const cursorObj = {
+  if (hasMore) {
+    /**
+     * Cursor from the last row the SOURCE examined, not the last row that survived
+     * post-filtering. Those differ whenever the tail of a page is filtered out: the
+     * New Replies bucket admits ~353 candidates to yield ~152 survivors, so a page
+     * can easily end on a run of non-survivors. Cursoring from the last survivor
+     * would re-read that discarded tail forever, and a page with zero survivors
+     * would have no cursor at all and dead-end the bucket.
+     * Falls back to the last surviving row for sources that report no keyset.
+     */
+    const cursorSource = lastExaminedKeyset || (lastRow && {
       latest_message_at: lastRow.latest_message_at || lastRow.latest_activity_at,
       thread_key: lastRow.thread_key,
-    };
-    nextCursor = Buffer.from(JSON.stringify(cursorObj)).toString("base64");
+    });
+    if (cursorSource && cursorSource.latest_message_at && cursorSource.thread_key) {
+      nextCursor = Buffer.from(JSON.stringify({
+        latest_message_at: cursorSource.latest_message_at,
+        thread_key: cursorSource.thread_key,
+      })).toString("base64");
+    }
   }
 
   const diagnostics = {
