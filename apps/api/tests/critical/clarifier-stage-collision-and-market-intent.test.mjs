@@ -156,3 +156,51 @@ test("going_to_market outranks a bare wait", () => {
   // seller in a wait lane instead of pitching an off-market close.
   assert.equal(detectInboundIntent("Going on the market next month")?.detected_intent, "going_to_market");
 });
+
+// ── THE ACTUAL DOMINANT CAUSE: the canonical lifecycle vocabulary ───────────
+// The audit proved the legacy topic label was NOT the main driver. The stage the
+// clarifier receives comes from transitionDirective?.stage_after ||
+// effectiveStageBefore, both emitted in LIFECYCLE_STAGE_CODES. The old resolver
+// guarded with s.includes("offer interest") -- a SPACE -- while the code is
+// `offer_interest` with an UNDERSCORE, so the guard missed its own case and fell
+// through to includes("offer") and the S5 break-up copy. 4 of the 5 break-up
+// messages ever delivered came from this, not from the topic label.
+
+test("offer_interest is S2, the stage where 79% of live threads sit", () => {
+  const fb = buildSafeFallback({ stage: "offer_interest", uncertainty_type: "intent" });
+  assert.equal(fb.stage_bucket, "consider_selling");
+  assert.equal(fb.presupposes_prior_offer, false);
+  assert.equal(fb.stage_bucket_source, "exact", "must be an EXACT entry, not a lucky substring");
+});
+
+test("every canonical LIFECYCLE_STAGE_CODES value maps exactly, never by guesswork", () => {
+  const expected = {
+    ownership_confirmation: ["ownership", false],
+    offer_interest: ["consider_selling", false],
+    asking_price: ["asking_price", false],
+    property_condition: ["condition", false],
+    // bare "offer" is ambiguous with the legacy topic label; safety wins
+    offer: ["consider_selling", false],
+    formal_contract: ["negotiation_close", true],
+    under_contract: ["negotiation_close", true],
+    disposition: ["negotiation_close", true],
+    prepared_to_close: ["negotiation_close", true],
+    closed: ["ownership", false],
+  };
+  for (const [code, [bucket, presupposes]] of Object.entries(expected)) {
+    const fb = buildSafeFallback({ stage: code, uncertainty_type: "intent" });
+    assert.equal(fb.stage_bucket, bucket, code);
+    assert.equal(fb.presupposes_prior_offer, presupposes, code);
+    if (code !== "offer") {
+      assert.equal(fb.stage_bucket_source, "exact", `${code} must be exact-mapped`);
+    }
+  }
+});
+
+test("an unregistered stage vocabulary is reported, not silently bucketed", () => {
+  // The next engine that invents a stage code must be visible rather than
+  // inheriting a bucket by substring luck, which is how this incident happened.
+  const fb = buildSafeFallback({ stage: "some_future_stage_code", uncertainty_type: "intent" });
+  assert.equal(fb.stage_bucket_source, "unmapped");
+  assert.equal(fb.presupposes_prior_offer, false);
+});

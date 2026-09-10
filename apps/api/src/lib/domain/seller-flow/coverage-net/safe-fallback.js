@@ -74,6 +74,34 @@ const LATE_BUCKETS = new Set([STAGE_BUCKETS.S5, STAGE_BUCKETS.S6]);
 // SELLER_FLOW_STAGES values and the CONVERSATION_STAGES display labels. A value
 // absent from this table is NOT trusted to be a lifecycle position.
 const EXACT_STAGE_BUCKETS = Object.freeze({
+  // ── LIFECYCLE_STAGE_CODES (universal-lead-state-registry.js) ──
+  // THIS is the vocabulary the clarifier actually receives. The clarifier's
+  // stage comes from transitionDirective?.stage_after || effectiveStageBefore,
+  // both of which are emitted in this vocabulary, NOT in SELLER_FLOW_STAGES.
+  //
+  // `offer_interest` is the S2 code, the stage right after a seller confirms
+  // ownership and before anyone mentions price. It is where 79% of staged
+  // threads sit. The old resolver had a guard for it -- s.includes("offer
+  // interest") -- written with a SPACE while the code uses an UNDERSCORE, so
+  // the guard missed its own case and the string fell through to the
+  // includes("offer") branch and the S5 break-up copy. That single separator
+  // mismatch caused 4 of the 5 break-up messages ever delivered.
+  ownership_confirmation: STAGE_BUCKETS.S1,
+  offer_interest: STAGE_BUCKETS.S2,
+  property_condition: STAGE_BUCKETS.S4,
+  // NOTE: the bare string "offer" is deliberately NOT mapped here. It is
+  // ambiguous: it is both the S5 LIFECYCLE code and the legacy TOPIC label that
+  // detectStageHint() emits for any message containing "offer", "price",
+  // "number" or "how much". Once lowercased the two are indistinguishable.
+  // It falls to TOPIC_LABEL_BUCKETS -> S2, because the false positive is common
+  // and catastrophic (it produced 4 of the 5 break-up messages) while the cost of
+  // being wrong the other way is one slightly early question. A genuine S5 thread
+  // still reaches late-stage copy via offer_reveal_* or "Offer Positioning".
+  formal_contract: STAGE_BUCKETS.S6,
+  under_contract: STAGE_BUCKETS.S6,
+  prepared_to_close: STAGE_BUCKETS.S6,
+  disposition: STAGE_BUCKETS.S6,
+  closed: STAGE_BUCKETS.S1,
   // ── SELLER_FLOW_STAGES ──
   ownership_check: STAGE_BUCKETS.S1,
   ownership_check_follow_up: STAGE_BUCKETS.S1,
@@ -149,15 +177,24 @@ const TOPIC_LABEL_BUCKETS = Object.freeze({
  * substring pass that can only ever return an EARLY bucket. Anything unknown
  * lands on ownership, the safest possible assumption.
  */
-function resolveStageBucket(stage = null) {
+function resolveStageBucketDetailed(stage = null) {
   const s = lower(stage);
-  if (!s) return STAGE_BUCKETS.S1;
+  if (!s) return { bucket: STAGE_BUCKETS.S1, source: "absent" };
 
   const exact = EXACT_STAGE_BUCKETS[s];
-  if (exact) return exact;
+  if (exact) return { bucket: exact, source: "exact" };
 
   const topic = TOPIC_LABEL_BUCKETS[s];
-  if (topic) return topic;
+  if (topic) return { bucket: topic, source: "topic_label" };
+
+  return { bucket: looseBucket(s), source: "unmapped" };
+}
+
+function resolveStageBucket(stage = null) {
+  return resolveStageBucketDetailed(stage).bucket;
+}
+
+function looseBucket(s) {
 
   // Conservative pass. Deliberately cannot return a LATE bucket: an unrecognised
   // string is not evidence that an offer was made or that terms are on the table.
@@ -255,7 +292,7 @@ const GENERIC_SAFE_FALLBACK =
  * }}
  */
 export function buildSafeFallback({ stage = null, uncertainty_type = "intent" } = {}) {
-  const bucket = resolveStageBucket(stage);
+  const { bucket, source: stage_bucket_source } = resolveStageBucketDetailed(stage);
   const type = UNCERTAINTY_TYPES.includes(lower(uncertainty_type))
     ? lower(uncertainty_type)
     : "intent";
@@ -266,6 +303,10 @@ export function buildSafeFallback({ stage = null, uncertainty_type = "intent" } 
   return {
     uncertainty_type: type,
     stage_bucket: bucket,
+    // "exact" | "topic_label" | "unmapped" | "absent". An "unmapped" value means
+    // a stage vocabulary reached this module that nobody registered; it is
+    // handled safely (early bucket) but should be added to EXACT_STAGE_BUCKETS.
+    stage_bucket_source,
     suggested_text,
     // True only when the copy may reference something already sent or agreed.
     // Callers can assert on this; reaching it requires an exact lifecycle match.
@@ -292,7 +333,7 @@ export function uncertaintyTypeForReason(reason = null, intent = null) {
   return "intent";
 }
 
-export { resolveStageBucket, STAGE_BUCKETS, LATE_BUCKETS };
+export { resolveStageBucket, resolveStageBucketDetailed, STAGE_BUCKETS, LATE_BUCKETS };
 
 export default {
   UNCERTAINTY_TYPES,
