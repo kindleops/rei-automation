@@ -67,7 +67,34 @@ const FORMER_OWNER_PHRASES = [
   "sold years ago",
   "former owner",
 ];
-const TENANT_PHRASES = ["tenant", "renter", "lease", "leasing", "occupied by tenant"];
+// A TENANT CLAIM IS FIRST-PERSON (2026-09-09).
+//
+// This list used to hold the bare words "tenant", "renter", "lease",
+// "leasing" and "occupied by tenant", so an OWNER describing their own rental
+// -- "Fully occupied with a active lease" -- was classified as the respondent
+// BEING a tenant, i.e. the wrong person. The thread then left the seller flow
+// and went silent on a live multifamily owner who had just answered our
+// occupancy question. Landlords talk about tenants and leases constantly;
+// that is asset description, not a relationship claim.
+//
+// Same shape PROPERTY_MANAGER_PHRASES already uses: the claim must be about
+// the SPEAKER. Owner-side occupancy language now routes to tenant_occupied
+// (a condition disclosure that keeps the conversation moving) via
+// detect-inbound-condition-intent.js.
+const TENANT_PHRASES = [
+  "i'm the tenant", "im the tenant", "i am the tenant",
+  "i'm a tenant", "im a tenant", "i am a tenant",
+  "just a tenant", "only a tenant", "just the tenant",
+  "i'm the renter", "im the renter", "i am the renter",
+  "i'm renting", "im renting", "i am renting",
+  "i just rent", "i only rent", "i rent here", "i rent this", "i rent the",
+  "we rent here", "we just rent", "we only rent",
+  "i'm leasing", "im leasing", "i am leasing", "i lease it", "we lease here",
+  "my landlord", "our landlord",
+  // Spanish
+  "soy el inquilino", "soy la inquilina", "soy inquilino", "soy inquilina",
+  "solo rento", "yo rento", "solo alquilo", "mi casero", "mi arrendador",
+];
 const PROPERTY_MANAGER_PHRASES = [
   "property manager",
   "manages the property",

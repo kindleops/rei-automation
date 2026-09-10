@@ -9,7 +9,12 @@ const CONDITION_SIGNALS = Object.freeze([
   { intent: "condition_disclosed", phrases: ["foundation", "structural", "settling", "cracked slab"] },
   { intent: "condition_disclosed", phrases: ["fire damage", "water damage", "flood damage", "mold", "smoke damage"] },
   { intent: "condition_disclosed", phrases: ["deferred maintenance", "needs work", "needs a lot of work", "fixer upper", "fixer-upper"] },
-  { intent: "tenant_respondent", phrases: ["tenant occupied", "tenants living", "occupied by tenant", "rented out"] },
+  // An owner saying the property has tenants is disclosing OCCUPANCY, not
+  // claiming to be a tenant. This used to emit tenant_respondent (a
+  // wrong-person relationship claim), which dropped a live multifamily owner
+  // out of the seller flow entirely. tenant_occupied has its own route profile
+  // and keeps the conversation moving toward an offer.
+  { intent: "tenant_occupied", phrases: ["tenant occupied", "tenants living", "occupied by tenant", "rented out", "active lease", "fully occupied", "currently occupied", "under lease"] },
   { intent: "condition_disclosed", phrases: ["vacant", "sitting empty", "boarded up", "unoccupied"] },
   { intent: "condition_disclosed", phrases: ["full rehab", "gut rehab", "complete renovation", "tear down"] },
   { intent: "condition_disclosed", phrases: ["cosmetic", "paint and carpet", "minor updates", "light repairs"] },
@@ -44,6 +49,9 @@ function normalizeUniversalStageForIntent(intent) {
       return "offer_interest";
     case "tenant_respondent":
       return "ownership_confirmation";
+    case "tenant_occupied":
+      // Occupancy is a Stage 4 condition fact, not an identity question.
+      return "condition_justification";
     default:
       return null;
   }

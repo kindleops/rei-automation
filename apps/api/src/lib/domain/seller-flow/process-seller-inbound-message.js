@@ -60,6 +60,7 @@ import { resolveValuationSpendability } from "@/lib/domain/seller-flow/valuation
 import { buildInboundSuppressionEvidence } from "@/lib/domain/lead-state/suppression-evidence.js";
 import {
   STATE_SOURCE_CODES,
+  LIFECYCLE_STAGE_CODES,
   normalizeLifecycleStage,
   lifecycleStageNumber,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
@@ -1304,6 +1305,29 @@ export async function processSellerInboundMessage({
       ? "tenant_occupied"
       : stage_engine_decision?.occupancy_status || extraction_facts.occupancy_status || null,
     timeline: extracted.timeline || extraction_facts.timeline || null,
+    // HAVE WE ALREADY ASKED THIS SELLER FOR A PRICE? (2026-09-09)
+    //
+    // evaluateUnderwritingSufficiency uses this to decide whether a seller who
+    // says "make me an offer" gets the ballpark question (first time) or moves
+    // on to condition (they have been asked and are still refusing). The key
+    // was READ there and written NOWHERE, so the escalation could never fire
+    // and the flow would ask for a price forever.
+    //
+    // Derived from the lifecycle stage rather than the conversation context:
+    // the live webhook pre-supplies `classification`, so the block that builds
+    // conversation_context is skipped in production. Reaching the asking-price
+    // stage IS the record that the question was asked, and the fact persists
+    // in metadata.seller_facts once true.
+    //
+    // `undefined` rather than `false` when we have not asked: mergeSellerFacts
+    // skips null/undefined/"" , so a later turn can never un-set a persisted
+    // true and re-open a question the seller already dodged.
+    asking_price_requested:
+      deal_state?.known_facts?.asking_price_requested === true ||
+      lifecycleStageNumber(stageBefore) >=
+        lifecycleStageNumber(LIFECYCLE_STAGE_CODES.ASKING_PRICE)
+        ? true
+        : undefined,
   };
 
   const canonical_contract_state =
