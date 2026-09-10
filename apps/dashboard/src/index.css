@@ -12114,3 +12114,82 @@ Motion
 html.is-mobile-layout .nx-mobile-sheet-backdrop.is-bottom-sheet {
   z-index: 139;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE AMBIENT ACCENT — liquid bloom at the top and bottom edges
+   Two fixed, pointer-events:none washes of the live accent that drift slowly, so
+   the shell reads as a lit surface rather than a flat sheet. Hung off body
+   pseudo-elements so no component has to render an extra node.
+
+   Layering: z-index 100 sits above ordinary route content but below every piece
+   of chrome (command dock 150, pinned dock 160, sheet backdrop 148/139, search
+   layers 145/146) — the bloom must never wash over the docks or a modal.
+
+   Colour comes from --nx-accent, which settings.ts rewrites on the accent
+   picker, so this follows the operator's chosen accent and both themes for free.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout body::before,
+html.is-mobile-layout body::after {
+  content: '';
+  position: fixed;
+  left: -20%;
+  right: -20%;
+  height: 42vh;
+  max-height: 340px;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.5;
+  will-change: transform, opacity;
+}
+
+html.is-mobile-layout body::before {
+  top: 0;
+  background: radial-gradient(
+    ellipse 70% 100% at 50% 0%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 26%, transparent),
+    transparent 72%
+  );
+  animation: nx-accent-bloom-top 19s ease-in-out infinite;
+}
+
+html.is-mobile-layout body::after {
+  bottom: 0;
+  background: radial-gradient(
+    ellipse 70% 100% at 50% 100%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 22%, transparent),
+    transparent 72%
+  );
+  animation: nx-accent-bloom-bottom 23s ease-in-out infinite;
+}
+
+/* Light mode carries far less ink, so the same alpha reads as a colour cast.
+   Halve it and let the wash sit closer to the edge. */
+html.is-mobile-layout[data-nexus-theme='light'] body::before,
+html.is-mobile-layout[data-nexus-theme='light'] body::after {
+  opacity: 0.28;
+}
+
+@keyframes nx-accent-bloom-top {
+  0%, 100% { transform: translate3d(-3%, -4%, 0) scale(1); opacity: 0.42; }
+  50%      { transform: translate3d(3%, 0%, 0) scale(1.12); opacity: 0.6; }
+}
+
+@keyframes nx-accent-bloom-bottom {
+  0%, 100% { transform: translate3d(3%, 4%, 0) scale(1.06); opacity: 0.38; }
+  50%      { transform: translate3d(-3%, 0%, 0) scale(1); opacity: 0.56; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout body::before,
+  html.is-mobile-layout body::after {
+    animation: none;
+  }
+}
+
+/* The map is a full-bleed canvas that supplies its own lighting — a violet wash
+   over satellite imagery reads as a rendering fault, not as design. */
+html.is-mobile-layout:has(.nx-icm.is-mobile-map) body::before,
+html.is-mobile-layout:has(.nx-icm.is-mobile-map) body::after {
+  display: none;
+}

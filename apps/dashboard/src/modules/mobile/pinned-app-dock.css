@@ -5,8 +5,13 @@
 :root {
   --nx-pinned-dock-height: 88px;
   /* Visible height of the collapsed command shelf. Content reserves this exact
-     amount, so no inbox row can hide underneath the dock. */
-  --nx-pinned-dock-collapsed: 26px;
+     amount, so no inbox row can hide underneath the dock.
+     Lowered 26px -> 16px: the shelf is a grab affordance, not a surface, and every
+     pixel here is taken straight off the conversation. Because the reservation is
+     driven by this one token, dropping it lowers the bar AND returns 10px to the
+     inbox in the same change. The drag handle keeps its own 44px hit area, so the
+     target does not shrink with the paint. */
+  --nx-pinned-dock-collapsed: 16px;
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 
