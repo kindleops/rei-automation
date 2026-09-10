@@ -225,11 +225,19 @@ export const ROUTE_PROFILES = Object.freeze({
     template_use_case_candidates: [],
     next_action: "queue_auto_reply",
   },
+  // A DECLINE DESERVES A COURTEOUS CLOSE, NOT SILENCE. This was the single
+  // largest silence category: 11 of the 25 unanswered-but-active inbounds in the
+  // 7 days to 2026-09-10 were not_interested. Two separate reasons, both here:
+  // next_action was "do_not_reply", and the only candidate use case
+  // "not_interested_soft_close" does not exist in the catalog -- the real one is
+  // "not_interested" (3 active EN templates, already safe_for_auto_reply).
+  // Ronald in Baltimore said "Not selling" in April, was silently deferred
+  // instead of closed, got re-opened today and opted out 24 seconds later.
   not_interested: {
     route_hint: "soft_close_or_suppress",
-    allowed_template_stages: ["not_interested_soft_close"],
-    template_use_case_candidates: ["not_interested_soft_close"],
-    next_action: "do_not_reply",
+    allowed_template_stages: ["not_interested", "not_interested_soft_close", "future_nurture"],
+    template_use_case_candidates: ["not_interested", "not_interested_soft_close", "future_nurture"],
+    next_action: "queue_auto_reply",
   },
 });
 
@@ -651,12 +659,18 @@ function computeInboundAutomationDecisionRaw({
         compound_opportunity: compound,
       });
     }
+    // Close the loop out loud. The seller hears one short, gracious message and
+    // the thread ends deliberately instead of decaying into a 30 day deferral
+    // that later re-opens and reads as harassment.
+    const decline_profile = ROUTE_PROFILES.not_interested;
     return buildDecisionResult({
-      route_hint,
+      should_queue_reply: true,
+      reply_mode: "auto",
+      route_hint: decline_profile.route_hint,
       stage_hint,
-      allowed_template_stages,
-      next_action: "do_not_reply",
-      audit_reason: "not_interested",
+      allowed_template_stages: decline_profile.allowed_template_stages,
+      next_action: "queue_auto_reply",
+      audit_reason: "not_interested_courteous_close",
       compound_opportunity: compound.is_compound_opportunity ? compound : null,
     });
   }
