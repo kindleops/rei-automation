@@ -1477,6 +1477,10 @@ const OBJECTION_MAP = [
     phrases: [
       // English
       "tenant", "tenants", "renter", "renters", "occupied",
+      // "tenanted" is standard landlord phrasing and was absent entirely:
+      // "Both units are occupied" classified tenant_occupied while "Both units
+      // are tenanted" fell to unclear. Live case 2026-09-10, +13058426269.
+      "tenanted", "tenented", "is tenanted", "are tenanted",
       "lease", "renting it out", "has tenants", "people living there",
       "someone living there", "can't kick them out",
       "eviction", "evicting", "need to evict",

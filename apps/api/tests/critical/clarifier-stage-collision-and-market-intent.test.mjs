@@ -238,3 +238,35 @@ test("declines and non-property solicitations are not leads", () => {
     assert.notEqual(detectInboundIntent(m)?.detected_intent, "seller_interested", m);
   }
 });
+
+// ── occupancy vocabulary + "both units" ─────────────────────────────────────
+// Live case 2026-09-10, +13058426269, 2005 NW 93rd Ter Miami. Asked "Is it
+// vacant or occupied, currently?" the seller answered "Both units are tenanted".
+// That produced NO intent, NO occupancy fact and NO unit count: "tenanted" was
+// absent from both vocabularies, and "both units" was never read as a count of 2.
+// A duplex owner answering the occupancy question could not advance to rents.
+import {
+  extractSellerFacts,
+  extractionToResolverFacts,
+} from "@/lib/domain/seller-flow/extract-seller-facts.js";
+
+const facts = (m) => extractionToResolverFacts(extractSellerFacts({ message: m }));
+
+test("'tenanted' is occupancy language in BOTH the classifier and the extractor", () => {
+  for (const m of ["Both units are tenanted", "It's tenanted", "all units are tenanted"]) {
+    assert.equal(detectInboundIntent(m)?.detected_intent, "tenant_occupied", `intent: ${m}`);
+    assert.equal(facts(m).occupancy_status, "tenant_occupied", `fact: ${m}`);
+  }
+});
+
+test("'both units' states a unit count of exactly 2", () => {
+  for (const m of ["Both units are tenanted", "Both units rented", "both units are vacant"]) {
+    assert.equal(facts(m).reported_units_count, 2, m);
+  }
+});
+
+test("vacancy is still read as vacancy, not occupancy", () => {
+  assert.equal(facts("It's vacant").occupancy_status, "vacant");
+  assert.equal(facts("both units are vacant").occupancy_status, "vacant");
+  assert.equal(facts("it is empty").occupancy_status, "vacant");
+});

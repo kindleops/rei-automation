@@ -176,7 +176,11 @@ function extractTimeline(message, base) {
 // ── Occupancy ────────────────────────────────────────────────────────────────
 
 const OCCUPANCY_RULES = [
-  { status: "tenant_occupied", re: /\btenants? (live|living|there|in it|occup)|renters? (live|living|in it)|it'?s rented|i rent it out|rented out|(?:fully|currently|all) occupied|occupied with|active lease|under lease|inquilinos?\b|est[aá] rentad|arrendatario/i },
+  // "tenanted" / "both units are occupied" were absent: the intent classifier
+  // read them but the FACT never got set, so the multifamily flow could not
+  // advance to rents. Live case 2026-09-10, +13058426269, "Both units are
+  // tenanted", which produced no occupancy fact at all.
+  { status: "tenant_occupied", re: /\btenants? (live|living|there|in it|occup)|renters? (live|living|in it)|it'?s rented|i rent it out|rented out|(?:fully|currently|all) occupied|occupied with|active lease|under lease|\btenant(?:ed|ted)\b|(?:both|all|the two|two|three|four)\s+(?:units?|sides?|apartments?|doors?)\s+(?:are|is)?\s*(?:currently\s+)?(?:occupied|rented|tenanted|leased)|inquilinos?\b|est[aá] rentad|arrendatario/i },
   { status: "vacant", re: /\bvacant|empty|no one (lives|living)|nobody (lives|living)|sitting empty|boarded( |-)?up|desocupad|vac[ií]a|nadie vive/i },
   { status: "owner_occupied", re: /\b(i|we) live (in|there|here)|my primary (home|residence)|owner[- ]occupied|vivo (aqu[ií]|ah[ií]|en la casa)|vivimos (aqu[ií]|ah[ií])/i },
 ];
@@ -257,6 +261,21 @@ function extractReportedUnitCount(message, base) {
         { ...base, confidence: 0.85, evidence: plexEvidence }
       );
     }
+  }
+
+  // "both units are tenanted" states a unit count of exactly 2. It was scoring
+  // no unit count at all, so a duplex owner answering the occupancy question
+  // never confirmed the unit count the underwriting needs.
+  // Live case 2026-09-10, +13058426269, 2005 NW 93rd Ter Miami.
+  const bothEvidence = findEvidence(
+    message,
+    /\b(?:both|the\s+two|los\s+dos|ambas?)\s+(?:units?|apartments?|apts?|doors?|sides?|unidades?)\b/i
+  );
+  if (bothEvidence) {
+    return fact(
+      { reported_units_count: 2 },
+      { ...base, confidence: 0.8, evidence: bothEvidence }
+    );
   }
 
   const countEvidence = findEvidence(
