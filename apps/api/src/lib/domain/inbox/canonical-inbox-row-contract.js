@@ -180,12 +180,18 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   "dnc_opt_out",
   "waiting_on_seller",
   "automated",
-  // Inbox Zero surface. Only snoozed is a THREAD-STATE count and can be
-  // derived here. "scheduled" is deliberately absent: scheduled follow-ups
-  // live in send_queue, not in thread state, so seeding the key would make
-  // buildEmptyCounts report a confident 0 while real scheduled rows existed.
-  // Left undefined, the chip renders "—" (unknown) instead of lying.
+  // Inbox Zero surface. snoozed and archived are both THREAD-STATE counts and are
+  // derived here. archived was missing entirely, which is why the chip read 0 while
+  // production held 36 archived threads — every other bucket is defined as NOT
+  // archived, but nothing ever counted the archived side of that predicate.
   "snoozed",
+  "archived",
+  // "scheduled" stays out of this list on purpose. Scheduled follow-ups live in
+  // send_queue, not in thread state, so seeding the key here would make
+  // buildEmptyCounts report a confident 0 whenever the send_queue count was
+  // unavailable — worse than admitting we do not know. fetchAuthoritativeInboxCounts
+  // sets it only when it has actually counted send_queue; otherwise it stays
+  // undefined and the chip renders "—".
 ];
 
 export function compactInboxThreadSummaryRow(row = {}) {

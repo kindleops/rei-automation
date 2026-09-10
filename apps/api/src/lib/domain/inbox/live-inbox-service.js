@@ -2406,8 +2406,46 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
 
   if (unlinkedError) throw unlinkedError;
 
+  /**
+   * ARCHIVED. Every other bucket here is defined as NOT archived
+   * (`is_archived.is.null,is_archived.eq.false`), and canonical_inbox_counts filters
+   * archived rows out of active_threads entirely — so archiving correctly decrements
+   * whichever bucket the thread came from, but the Archived chip itself had no count
+   * source anywhere in the stack and rendered 0 forever. Measured on production: 36
+   * archived threads, chip reading 0. It is the inverse of the same predicate.
+   */
+  const { count: archivedCount, error: archivedError } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key", { count: "exact", head: true })
+    .eq("is_archived", true);
+
+  if (archivedError) throw archivedError;
+
+  /**
+   * SCHEDULED. The note on CANONICAL_INBOX_COUNT_KEYS is right that scheduled
+   * follow-ups live in send_queue rather than in thread state, and that seeding the
+   * key with a default would make buildEmptyCounts report a confident 0 while real
+   * scheduled rows existed. The answer to that is to COUNT the send_queue rows, not
+   * to leave the operator staring at "—" after scheduling 19 messages. Counted here
+   * so it is a measured number or absent, never a fabricated zero.
+   */
+  let scheduledCount = null;
+  try {
+    const { count, error } = await supabase
+      .from("send_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("queue_status", "queued")
+      .gt("scheduled_for", new Date(nowMs).toISOString());
+    if (!error) scheduledCount = Number(count || 0);
+  } catch {
+    // Leave null. A failed count must render "—" (unknown), never 0 — a confident
+    // zero next to real scheduled sends is worse than admitting we do not know.
+  }
+
   counts.all = Number(allCount || 0);
   counts.unlinked = Number(unlinkedCount || 0);
+  counts.archived = Number(archivedCount || 0);
+  if (scheduledCount !== null) counts.scheduled = scheduledCount;
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
