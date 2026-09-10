@@ -270,3 +270,91 @@ test("vacancy is still read as vacancy, not occupancy", () => {
   assert.equal(facts("both units are vacant").occupancy_status, "vacant");
   assert.equal(facts("it is empty").occupancy_status, "vacant");
 });
+
+// ── operator item 18: contextual monetary parsing ───────────────────────────
+// Every case below is a real production message that parsed wrong.
+import { resolveStageDomainRecommendation } from "@/lib/domain/seller-flow/stage-domain-recommendation.js";
+
+test("a bare monthly cadence is a rent, including the live double-spaced form", () => {
+  // 2026-09-10, +19549807015: we asked "what are the current monthly rents?" and
+  // the answer scored no rent fact at all, then landed in asking_price.
+  assert.equal(facts("$4100.00 per Month").monthly_gross_rent, 4100);
+  assert.equal(facts("$4100.00  per  Month. The property is zone Business - B1").monthly_gross_rent, 4100);
+  assert.equal(facts("1450/mo").monthly_gross_rent, 1450);
+  assert.equal(facts("rent is 1450").monthly_gross_rent, 1450);
+});
+
+test("per-unit rent plus a unit count derives the gross, and never the reverse", () => {
+  const f = facts("3 units, 1500 each");
+  assert.equal(f.reported_units_count, 3);
+  assert.equal(f.average_monthly_unit_rent, 1500);
+  assert.equal(f.monthly_gross_rent, 4500);
+  assert.equal(f.monthly_gross_rent_basis, "per_unit_times_unit_count");
+  // Nothing is invented when the count is unknown.
+  const partial = facts("1500 each");
+  assert.equal(partial.average_monthly_unit_rent, 1500);
+  assert.equal(partial.monthly_gross_rent, undefined);
+});
+
+test("an offer request is never a literal monetary counter", () => {
+  const r = detectInboundIntent("Make me an offer I can't refuse");
+  assert.equal(r?.detected_intent, "asks_offer");
+  assert.equal(facts("Make me an offer I can't refuse").asking_price, undefined);
+});
+
+test("off-market plus an invitation to bid is interest, not a decline", () => {
+  // Theodore, +13058426269, 2026-09-10. This is the strongest buying signal a
+  // seller can send and it must stay in the acquisition flow.
+  for (const m of [
+    "The property is not on the market but you're welcome to make an offer.",
+    "Yes. The property is not on the market but you're welcome to make an offer.",
+  ]) {
+    assert.equal(detectInboundIntent(m)?.detected_intent, "asks_offer", m);
+  }
+});
+
+// ── operator item 8: the qualification engine must run on the same turn ─────
+test("a stated price is evaluated by the asking-price engine on the same turn", () => {
+  const r = resolveStageDomainRecommendation({
+    message: "$650,000",
+    classification: { primary_intent: "asking_price_provided", stage_hint: "Offer" },
+    context: { summary: { conversation_stage: "offer_interest" } },
+    semantic_intent: "asking_price_provided",
+    underwriting: { recommended_cash_offer: 219200, max_allowable_offer: 281400 },
+    deal_state: { negotiation_state: { current_asking_price: 650000 } },
+  });
+  assert.equal(r.authority, "stage3_asking_price_engine");
+  assert.equal(r.engine_stage_source, "semantic_event");
+  assert.equal(r.engine_result.stage_decision.offer_band, "very_wide_gap");
+  assert.equal(r.engine_result.stage_decision.recommended_strategy, "nurture_drip");
+  assert.equal(r.unmapped_stage, null);
+});
+
+test("every canonical lifecycle stage reaches a real engine, and unknowns are visible", () => {
+  const expected = {
+    ownership_confirmation: "stage1_ownership_engine",
+    offer_interest: "stage2_offer_interest_engine",
+    asking_price: "stage3_asking_price_engine",
+    property_condition: "stage4_condition_engine",
+    offer: "stage5_negotiation_engine",
+    formal_contract: "stage6_contract_engine",
+    under_contract: "stage6_contract_engine",
+    prepared_to_close: "stage6_contract_engine",
+    disposition: "stage6_contract_engine",
+    closed: "stage6_contract_engine",
+  };
+  for (const [stage, authority] of Object.entries(expected)) {
+    const r = resolveStageDomainRecommendation({
+      message: "hi", classification: {}, context: { summary: { conversation_stage: stage } },
+    });
+    assert.equal(r.authority, authority, stage);
+    assert.equal(r.unmapped_stage, null, stage);
+  }
+  // Unknown vocabulary is safe AND reported, never silently stage 1.
+  const unknown = resolveStageDomainRecommendation({
+    message: "hi", classification: {},
+    context: { summary: { conversation_stage: "a_stage_nobody_registered" } },
+  });
+  assert.equal(unknown.engine_stage_source, "unmapped_stage_fallback");
+  assert.equal(unknown.unmapped_stage, "a_stage_nobody_registered");
+});

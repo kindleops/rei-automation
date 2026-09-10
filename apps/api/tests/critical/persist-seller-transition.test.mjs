@@ -83,7 +83,12 @@ test("qualifying transition creates an opportunity with facts, stage, and negoti
     intent: "asking_price_provided",
     inboundEventId: "evt-1",
     supabaseClient: supabase,
-    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000, evidence: { offer_calculation: { valuation_based_ceiling: 80000, effective_authorized_ceiling: 80000 } } } }) },
+    // CONTRACT 2026-09-10 (operator item 12): recommended_offer is now written
+    // only for a SPENDABLE valuation, using the same resolveValuationSpendability
+    // authority the send path already applies. This fixture therefore states a
+    // genuinely authoritative valuation -- authoritative tier + enough comps for
+    // the MAD contamination defense. The unsupported case is asserted below.
+    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 71000, minimum_acceptable_offer: 65000, investor_ceiling_mid: 80000, decision_tier: "AUTO_HARD_OFFER", comp_count: 8, valuation_confidence: 82, evidence: { offer_calculation: { valuation_based_ceiling: 80000, effective_authorized_ceiling: 80000 } } } }) },
   });
 
   assert.equal(result.ok, true);
@@ -280,4 +285,32 @@ test("transitionQualifiesForOpportunity gates on engagement", () => {
   assert.equal(transitionQualifiesForOpportunity(priceTransition()), true);
   const hold = resolveSellerStageTransition({ stage_before: "ownership_confirmation", intent: "who_is_this", classification_confidence: 0.9, now: NOW });
   assert.equal(transitionQualifiesForOpportunity(hold), false);
+});
+
+
+// ── operator item 12: an unsupported number is never published as "our offer" ──
+// The Stockton $219,200 was a pure AVM derivative at the hardcoded confidence
+// floor with ZERO comp support, and it was written straight to the column the
+// dashboard presents as offer authority. Same gate as the send path now.
+test("an unspendable valuation does not publish a recommended_offer", async () => {
+  const supabase = makeFakeSupabase();
+  const result = await persistSellerTransitionArtifacts({
+    transition: priceTransition(),
+    threadKey: "+13125550199",
+    propertyId: "prop-unsupported",
+    ownerId: "owner-unsupported",
+    intent: "asking_price_provided",
+    inboundEventId: "evt-unsupported",
+    supabaseClient: supabase,
+    // No authoritative tier, no comps: exactly the Stockton shape.
+    deps: { scoreProperty: async () => ({ ok: true, score: { recommended_cash_offer: 219200, comp_count: 0, valuation_confidence: 25 } }) },
+  });
+  assert.equal(result.ok, true);
+  const opp = supabase._state.opportunities.find((o) => o.id === result.opportunity_id);
+  assert.equal(opp.recommended_offer, undefined, "an unsupported number must not be published");
+  assert.equal(opp.offer_to_ask_gap, undefined, "no gap can be derived from a number we will not spend");
+  // The asking price the seller actually stated is still recorded.
+  assert.equal(opp.asking_price, 95000);
+  // And activity timestamps are written (operator item 13).
+  assert.ok(opp.last_activity_at, "last_activity_at must be written by the seller flow");
 });

@@ -120,7 +120,7 @@ function build({
  * The acquisition ladder is ownership → interest → price → condition →
  * occupancy → timeline → motivation, matching the canonical S1–S4 milestones.
  */
-export function resolveSellerNextBestAction(conversationState = null) {
+export function resolveSellerNextBestAction(conversationState = null, economics = null) {
   const state = conversationState;
   if (!state || typeof state !== "object" || !state.safety) {
     return build({
@@ -278,6 +278,36 @@ export function resolveSellerNextBestAction(conversationState = null) {
       reason_code: state.acquisition.asking_price.reason || "ambiguous_monetary_statement",
       action_type: NBA_ACTION_TYPES.REQUEST_CLARIFICATION,
       requested_fact: "asking_price",
+      state,
+    });
+  }
+
+  // ── ECONOMIC VERDICT OUTRANKS FACT DISCOVERY (operator item 10) ─────────
+  // Response authority is: compliance/suppression -> canonical state -> new
+  // facts -> underwriting/qualification -> lifecycle missing-fact -> generation.
+  // The ladder below is the MISSING-FACT layer and it sat above the economics,
+  // so a resolved verdict was silently discarded in favour of the next
+  // unanswered question. That is how a seller asking 2.97x our number was sent
+  // "is it vacant or occupied?" instead of an expectation reset.
+  //
+  // Fires ONLY on a decided band from a spendable valuation. An unknown band, or
+  // one built on a valuation we may not spend against, falls through to
+  // discovery exactly as before -- a missing fact can still be asked when the
+  // higher-level decision genuinely needs it.
+  if (
+    economics &&
+    economics.spendable === true &&
+    economics.offer_band &&
+    economics.offer_band !== "unknown" &&
+    economics.next_action
+  ) {
+    return build({
+      objective: economics.objective || ACQUISITION_OBJECTIVES.HUMAN_REVIEW,
+      reason_code: `economic_${economics.offer_band}`,
+      action_type: NBA_ACTION_TYPES.SEND_TEMPLATE,
+      requested_fact: null,
+      economic_band: economics.offer_band,
+      economic_strategy: economics.strategy || null,
       state,
     });
   }
